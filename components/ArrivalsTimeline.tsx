@@ -221,7 +221,7 @@ export const ArrivalsTimeline: React.FC<ArrivalsTimelineProps> = ({
           <button
             type="button"
             onClick={onNavigateToReservations}
-            className="flex-shrink-0 inline-flex items-center gap-1.5 text-[14px] font-medium text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] rounded-full px-1"
+            className="flex-shrink-0 inline-flex items-center gap-1.5 text-[14px] font-medium text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] rounded-[var(--ds-radius-control)] px-1"
           >
             Vedi tutte <ArrowRight className="h-4 w-4" aria-hidden />
           </button>
@@ -283,7 +283,7 @@ export const ArrivalsTimeline: React.FC<ArrivalsTimelineProps> = ({
                     type="button"
                     disabled={busy || (action !== 'confirm' && action !== 'assign' && !onUpdateReservation)}
                     onClick={() => runAction(r, action)}
-                    className={`flex-shrink-0 h-9 px-3.5 rounded-full text-[14px] font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${ACTION_STYLE[action]}`}
+                    className={`flex-shrink-0 h-9 px-3.5 rounded-[var(--ds-radius-control)] text-[14px] font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${ACTION_STYLE[action]}`}
                   >
                     {busy ? '…' : ACTION_LABEL[action]}
                   </button>
@@ -310,7 +310,7 @@ export const ArrivalsTimeline: React.FC<ArrivalsTimelineProps> = ({
               <button
                 type="button"
                 onClick={() => setAssigning(null)}
-                className="flex-shrink-0 h-9 w-9 inline-flex items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)] transition-colors"
+                className="flex-shrink-0 h-9 w-9 inline-flex items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)] transition-colors"
                 aria-label="Chiudi"
               >
                 <X className="h-4 w-4" />

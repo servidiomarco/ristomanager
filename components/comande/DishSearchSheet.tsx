@@ -90,14 +90,14 @@ export const DishSearchSheet: React.FC<DishSearchSheetProps> = ({
             onChange={e => setQuery(e.target.value)}
             onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); onClose(); } }}
             placeholder="Cerca un piatto…"
-            className="h-12 w-full rounded-full bg-[var(--ds-surface)] pl-11 pr-11 text-[16px] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-raised)] outline-none placeholder:text-[var(--ds-text-muted)] focus-visible:outline-none sm:text-[15px]"
+            className="h-12 w-full rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] pl-11 pr-11 text-[16px] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-raised)] outline-none placeholder:text-[var(--ds-text-muted)] focus-visible:outline-none sm:text-[15px]"
           />
           {query && (
             <button
               type="button"
               onClick={() => setQuery('')}
               aria-label="Svuota ricerca"
-              className="absolute right-3 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              className="absolute right-3 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             >
               <X className="h-4 w-4" />
             </button>
@@ -137,7 +137,7 @@ export const DishSearchSheet: React.FC<DishSearchSheetProps> = ({
                       </div>
                     </div>
                     {qty > 0 && (
-                      <span className="inline-flex h-6 min-w-[24px] flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-action-bg)] px-1.5 text-[12px] font-semibold tabular-nums text-[var(--ds-action-fg)]">
+                      <span className="inline-flex h-6 min-w-[24px] flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-1.5 text-[12px] font-semibold tabular-nums text-[var(--ds-action-fg)]">
                         {qty}
                       </span>
                     )}

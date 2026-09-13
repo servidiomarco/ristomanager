@@ -36,7 +36,7 @@ export const SupplierPanel: React.FC<{
   const orphanCount = items.filter(i => !i.supplierId).length;
 
   const action =
-    'inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-full text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+    'inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-[var(--ds-radius-control)] text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
   return (
     <div className="flex flex-col gap-4">
@@ -126,7 +126,7 @@ export const SupplierPanel: React.FC<{
       <button
         type="button"
         onClick={onPrintAll}
-        className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-[var(--ds-action-bg)] text-[15px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+        className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[15px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
       >
         <Printer className="h-4 w-4" aria-hidden /> Stampa lista completa
       </button>

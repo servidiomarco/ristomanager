@@ -194,7 +194,7 @@ export const LinkDiPagamento: React.FC<{
             type="button"
             onClick={() => onStatusFilter(c.v)}
             aria-pressed={statusFilter === c.v}
-            className={`inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+            className={`inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3.5 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
               statusFilter === c.v
                 ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                 : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] hover:text-[var(--ds-text-primary)]'
@@ -263,7 +263,7 @@ export const LinkDiPagamento: React.FC<{
                         {billTotal > 0 && <>/ {formatEuro(billTotal)}</>}
                         {billTotal > 0 && (
                           <span className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-[var(--ds-border)]">
-                            <span className="block h-full rounded-full bg-[var(--ds-seated-solid)]" style={{ width: `${pct}%` }} />
+                            <span className="block h-full rounded-[var(--ds-radius-control)] bg-[var(--ds-seated-solid)]" style={{ width: `${pct}%` }} />
                           </span>
                         )}
                       </div>

@@ -48,7 +48,7 @@ export const AddItemBar: React.FC<{
   // h-10, not h-9: these sit under the thumb and the row is the one place on
   // the page where four controls compete for a phone's width.
   const control =
-    'h-10 rounded-full bg-[var(--ds-surface-row)] pl-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+    'h-10 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] pl-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
   // ds-select draws our own chevron and reserves room for it; without it the
   // browser's native arrow sits flush against the pill's right edge.
   const selectControl = `${control} pr-0 cursor-pointer ds-select ds-select-sm`;
@@ -81,7 +81,7 @@ export const AddItemBar: React.FC<{
           onClick={() => onAdd()}
           disabled={disabled || !name.trim() || adding}
           aria-label="Aggiungi"
-          className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
         >
           {adding ? <Loader2 className="h-5 w-5 animate-spin" /> : <Plus className="h-5 w-5" />}
         </button>

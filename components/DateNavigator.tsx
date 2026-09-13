@@ -63,7 +63,7 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
     <button
       type="button"
       onClick={goToToday}
-      className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-full ${surface} text-[13px] font-medium text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors flex-shrink-0`}
+      className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-[var(--ds-radius-control)] ${surface} text-[13px] font-medium text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors flex-shrink-0`}
     >
       <RotateCcw className="h-3 w-3" />
       Torna a oggi
@@ -77,7 +77,7 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
           type="button"
           onClick={() => navigate(-1)}
           aria-label="Giorno precedente"
-          className={`h-10 w-10 flex-shrink-0 rounded-full ${surface} text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] active:scale-[0.96] transition-all flex items-center justify-center`}
+          className={`h-10 w-10 flex-shrink-0 rounded-[var(--ds-radius-control)] ${surface} text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] active:scale-[0.96] transition-all flex items-center justify-center`}
         >
           <ChevronLeft className="h-4 w-4" />
         </button>
@@ -102,7 +102,7 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
           />
           <div
             aria-hidden="true"
-            className={`pointer-events-none w-full h-10 px-4 rounded-full transition-colors flex items-center justify-center gap-2 ${
+            className={`pointer-events-none w-full h-10 px-4 rounded-[var(--ds-radius-control)] transition-colors flex items-center justify-center gap-2 ${
               isToday
                 ? surface
                 : `${surface} ring-1 ring-inset ring-[var(--ds-border-strong)]`
@@ -130,7 +130,7 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
           type="button"
           onClick={() => navigate(1)}
           aria-label="Giorno successivo"
-          className={`h-10 w-10 flex-shrink-0 rounded-full ${surface} text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] active:scale-[0.96] transition-all flex items-center justify-center`}
+          className={`h-10 w-10 flex-shrink-0 rounded-[var(--ds-radius-control)] ${surface} text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] active:scale-[0.96] transition-all flex items-center justify-center`}
         >
           <ChevronRight className="h-4 w-4" />
         </button>

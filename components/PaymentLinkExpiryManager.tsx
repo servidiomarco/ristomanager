@@ -108,13 +108,13 @@ export const PaymentLinkExpiryManager: React.FC<Props> = ({ showToast }) => {
                     aria-label={effectiveEnabled ? 'Disattiva scadenza automatica' : 'Attiva scadenza automatica'}
                     onClick={() => canEdit && setDraftEnabled(!effectiveEnabled)}
                     disabled={!canEdit || saving}
-                    className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
+                    className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-[var(--ds-radius-control)] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
                         effectiveEnabled ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-surface-row)] border border-[var(--ds-border)]'
                     }`}
                 >
                     <span
                         aria-hidden="true"
-                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${
+                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-[var(--ds-radius-control)] bg-white shadow ring-0 transition-transform ${
                             effectiveEnabled ? 'translate-x-5' : 'translate-x-0.5'
                         } translate-y-0.5`}
                     />
@@ -165,7 +165,7 @@ export const PaymentLinkExpiryManager: React.FC<Props> = ({ showToast }) => {
                         type="button"
                         onClick={save}
                         disabled={!isDirty || saving}
-                        className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[13px] font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+                        className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[13px] font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                         {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                         Salva modifiche

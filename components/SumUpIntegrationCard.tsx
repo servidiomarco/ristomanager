@@ -71,7 +71,7 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
         if (!status) return null;
         if (!status.configured) {
             return (
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] border border-[var(--ds-border)]">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[var(--ds-radius-control)] text-[11px] font-medium bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] border border-[var(--ds-border)]">
                     <span className="w-1.5 h-1.5 rounded-full bg-[var(--ds-border-strong)]"></span>
                     Non configurato
                 </span>
@@ -81,7 +81,7 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
         // say so, otherwise "Attivo" would be a lie.
         if (!status.is_active_provider) {
             return (
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] border border-[var(--ds-border)]">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[var(--ds-radius-control)] text-[11px] font-medium bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] border border-[var(--ds-border)]">
                     <span className="w-1.5 h-1.5 rounded-full bg-[var(--ds-border-strong)]"></span>
                     Pronto (non attivo)
                 </span>
@@ -93,7 +93,7 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
             : 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] border-[var(--ds-pending-solid)]';
         const dot = status.environment === 'production' ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-pending-solid)]';
         return (
-            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border ${color}`}>
+            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[var(--ds-radius-control)] text-[11px] font-medium border ${color}`}>
                 <span className={`w-1.5 h-1.5 rounded-full ${dot}`}></span>
                 {label}
             </span>
@@ -362,12 +362,12 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                             onClick={() => canEdit && setDraftActive(!effectiveActive)}
                             disabled={!canEdit || saving || (!effectiveActive && !targetEnvReady)}
                             title={!effectiveActive && !targetEnvReady ? 'Completa le credenziali di questo ambiente' : undefined}
-                            className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                            className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-[var(--ds-radius-control)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                                 effectiveActive ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-surface-row)]'
                             }`}
                         >
                             <span
-                                className={`inline-block h-5 w-5 mt-0.5 rounded-full bg-white shadow transition-transform ${
+                                className={`inline-block h-5 w-5 mt-0.5 rounded-[var(--ds-radius-control)] bg-white shadow transition-transform ${
                                     effectiveActive ? 'translate-x-[22px]' : 'translate-x-0.5'
                                 }`}
                             />

@@ -168,7 +168,7 @@ export const MediaLibraryManager: React.FC<Props> = ({ showToast }) => {
                                             type="button"
                                             onClick={() => handleDelete(f)}
                                             aria-label={`Elimina ${f.title}`}
-                                            className="flex h-9 w-9 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-danger-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                                            className="flex h-9 w-9 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-danger-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                                         >
                                             <Trash2 className="h-4 w-4" />
                                         </button>

@@ -30,7 +30,7 @@ export const hasUnpaidDeposit = (res: Pick<Reservation, 'latest_payment_status'>
 export const PaymentBadge: React.FC<{ reservation: Reservation; size?: 'sm' | 'md' }> = ({ reservation: res, size = 'sm' }) => {
     const box = size === 'md' ? 'w-7 h-7' : 'w-6 h-6';
     const icon = size === 'md' ? 'h-4 w-4' : 'h-3.5 w-3.5';
-    const base = `inline-flex items-center justify-center ${box} rounded-full flex-shrink-0`;
+    const base = `inline-flex items-center justify-center ${box} rounded-[var(--ds-radius-control)] flex-shrink-0`;
     const linkStatus = res.latest_payment_status || null;
 
     if (linkStatus) {

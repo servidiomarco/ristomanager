@@ -145,7 +145,7 @@ const renderOperatorBadge = (res: Reservation): React.ReactNode => {
   if (res.source === ReservationSource.VOICE) {
     return (
       <span
-        className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]"
+        className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]"
         title="Presa dall'agente vocale"
         aria-label="Presa dall'agente vocale"
       >
@@ -156,7 +156,7 @@ const renderOperatorBadge = (res: Reservation): React.ReactNode => {
   if (res.created_by_user_name) {
     return (
       <span
-        className="inline-flex h-5 min-w-[20px] flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] px-1 text-[10px] font-semibold text-[var(--ds-text-secondary)]"
+        className="inline-flex h-5 min-w-[20px] flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-1 text-[10px] font-semibold text-[var(--ds-text-secondary)]"
         title={`Presa da ${toTitleCase(res.created_by_user_name)}`}
         aria-label={`Presa da ${toTitleCase(res.created_by_user_name)}`}
       >
@@ -174,7 +174,7 @@ const renderOperatorBadge = (res: Reservation): React.ReactNode => {
 // how a booking arrived is context, not a warning, and four tinted circles in
 // a row would each claim to be the important one.
 const ATTR_BADGE =
-  'inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]';
+  'inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]';
 
 const renderChannelIcon = (res: Reservation): React.ReactNode => {
   const source = res.source || ReservationSource.MANUAL;
@@ -365,7 +365,7 @@ const RoomOccupancyMeter: React.FC<{
       role="img"
       aria-label={`Occupazione ${pct}%${cap !== null ? `, limite ${cap}%` : ''}`}
     >
-      <span className={`block h-full rounded-full transition-[width] duration-300 ${fill}`} style={{ width: `${pct}%` }} />
+      <span className={`block h-full rounded-[var(--ds-radius-control)] transition-[width] duration-300 ${fill}`} style={{ width: `${pct}%` }} />
       {cap !== null && cap < 100 && (
         <span
           aria-hidden="true"
@@ -3237,13 +3237,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             </div>
 
             {isHidden && (
-                <div className="absolute bg-[var(--ds-text-muted)] text-[#ffffff] text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm flex items-center gap-0.5 border border-[#ffffff] pointer-events-none" style={{ top: -4, left: -4 }}>
+                <div className="absolute bg-[var(--ds-text-muted)] text-[#ffffff] text-[10px] font-bold px-1.5 py-0.5 rounded-[var(--ds-radius-control)] shadow-sm flex items-center gap-0.5 border border-[#ffffff] pointer-events-none" style={{ top: -4, left: -4 }}>
                     <EyeOff size={8} />
                 </div>
             )}
             {hasMultipleReservations && (
                 <div
-                    className="absolute bg-[var(--ds-arriving-solid)] text-[var(--ds-arriving-fg)] text-[13px] font-bold px-2 py-0.5 rounded-full shadow-sm border-2 border-[#ffffff] pointer-events-none tabular"
+                    className="absolute bg-[var(--ds-arriving-solid)] text-[var(--ds-arriving-fg)] text-[13px] font-bold px-2 py-0.5 rounded-[var(--ds-radius-control)] shadow-sm border-2 border-[#ffffff] pointer-events-none tabular"
                     style={{ top: -10, right: -10 }}
                     aria-label={`${allReservations.length} prenotazioni sullo stesso tavolo`}
                 >
@@ -3270,7 +3270,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         return (
                             <span
                                 key={r.id}
-                                className="text-[14px] font-semibold leading-tight px-2.5 py-1 rounded-full bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)] whitespace-nowrap shadow-[var(--ds-shadow-card)]"
+                                className="text-[14px] font-semibold leading-tight px-2.5 py-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)] whitespace-nowrap shadow-[var(--ds-shadow-card)]"
                             >
                                 <span className="opacity-70 tabular mr-1">{i + 1}°</span>
                                 {toTitleCase(r.customer_name).split(' ')[0]}
@@ -3288,7 +3288,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 const isMulti = hoverPillNames.length > 1;
                 return (
                     <div
-                        className={`absolute left-1/2 ${isMulti ? 'px-2 py-1 rounded-[var(--ds-radius)]' : 'px-2 py-0.5 rounded-full'} border text-[12px] font-semibold whitespace-nowrap pointer-events-none shadow-[var(--ds-shadow-card)]`}
+                        className={`absolute left-1/2 ${isMulti ? 'px-2 py-1 rounded-[var(--ds-radius)]' : 'px-2 py-0.5 rounded-[var(--ds-radius-control)]'} border text-[12px] font-semibold whitespace-nowrap pointer-events-none shadow-[var(--ds-shadow-card)]`}
                         style={{
                             top: -8,
                             background: accentVar || 'var(--ds-surface)',
@@ -3476,7 +3476,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 {formatTime(res.reservation_time)}
               </span>
               <span
-                className="inline-flex h-6 flex-shrink-0 items-center gap-1 rounded-full bg-[var(--ds-surface-row)] px-2 text-[12px] font-medium text-[var(--ds-text-secondary)]"
+                className="inline-flex h-6 flex-shrink-0 items-center gap-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-2 text-[12px] font-medium text-[var(--ds-text-secondary)]"
                 title={`${res.guests} coperti${res.children ? ` (${res.children} bambini)` : ''}`}
               >
                 <Users className="h-3.5 w-3.5" aria-hidden />
@@ -3539,7 +3539,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); handleConfirmTableSuggestion(tableSuggestion); }}
-                      className="flex h-5 w-5 items-center justify-center rounded-full hover:bg-black/10 dark:hover:bg-white/10"
+                      className="flex h-5 w-5 items-center justify-center rounded-[var(--ds-radius-control)] hover:bg-black/10 dark:hover:bg-white/10"
                       title="Conferma tavolo suggerito"
                       aria-label="Conferma tavolo suggerito"
                     >
@@ -3548,7 +3548,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); handleDismissTableSuggestion(tableSuggestion); }}
-                      className="flex h-5 w-5 items-center justify-center rounded-full hover:bg-black/10 dark:hover:bg-white/10"
+                      className="flex h-5 w-5 items-center justify-center rounded-[var(--ds-radius-control)] hover:bg-black/10 dark:hover:bg-white/10"
                       title="Ignora suggerimento"
                       aria-label="Ignora suggerimento"
                     >
@@ -3616,7 +3616,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); handleEditClick(res); }}
-              className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]"
+              className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]"
               aria-label="Modifica"
               title="Modifica"
             >
@@ -3625,7 +3625,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); handleDeleteClick(res.id, res.customer_name); }}
-              className="ml-auto inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)]"
+              className="ml-auto inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)]"
               aria-label="Annulla"
               title="Annulla"
             >
@@ -3676,7 +3676,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   if (!turno) return null;
                   return (
                     <span
-                      className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)] text-[10px] font-semibold"
+                      className="inline-flex items-center px-1.5 py-0.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)] text-[10px] font-semibold"
                       title={`Doppio turno sullo stesso tavolo (${turno.total} prenotazioni)`}
                     >
                       {turno.position}° turno
@@ -3690,7 +3690,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 {table && <span className="flex items-center gap-1"><MapPin className="h-3 w-3" /> T.{table.name}{tableRoomName ? ` · ${tableRoomName}` : ''}</span>}
               </div>
             </div>
-            <button type="button" onClick={closeDetailDrawer} className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]">
+            <button type="button" onClick={closeDetailDrawer} className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]">
               <X className="h-4 w-4" />
             </button>
           </div>
@@ -3698,24 +3698,24 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           {/* Info badges */}
           <div className="flex flex-wrap gap-1.5">
             {res.payment_status !== PaymentStatus.PENDING && (
-              <span className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[10px] font-medium border ${getStatusColor(res.payment_status)}`}>
+              <span className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-[var(--ds-radius-control)] text-[10px] font-medium border ${getStatusColor(res.payment_status)}`}>
                 <CreditCard className="h-2.5 w-2.5" />
                 {res.payment_status === PaymentStatus.PAID_FULL ? 'Saldato' : res.payment_status === PaymentStatus.PAID_DEPOSIT ? 'Acconto' : 'Rimborsato'}
               </span>
             )}
             {menu && (
-              <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)] text-[10px] font-medium">
+              <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)] text-[10px] font-medium">
                 <BookOpen className="h-2.5 w-2.5" /> {menu.name}
               </span>
             )}
             <DietaryChips notes={res.notes} presets={allergenPresets} size="sm" />
             {res.customer_preferred_table_id != null && res.customer_preferred_table_id === res.table_id && (
-              <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] text-[10px] font-medium" title={`Tavolo preferito: ${res.customer_preferred_table_name || ''}`}>
+              <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] text-[10px] font-medium" title={`Tavolo preferito: ${res.customer_preferred_table_name || ''}`}>
                 <Armchair className="h-2.5 w-2.5" /> Tavolo preferito
               </span>
             )}
             {res.customer_preferred_table_id != null && res.customer_preferred_table_id !== res.table_id && (
-              <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] text-[10px] font-medium" title={`Preferito: ${res.customer_preferred_table_name || ''}`}>
+              <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] text-[10px] font-medium" title={`Preferito: ${res.customer_preferred_table_name || ''}`}>
                 <Armchair className="h-2.5 w-2.5" /> Preferito non disponibile
               </span>
             )}
@@ -3724,7 +3724,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               return (
                 <span
                   key={m.label}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] text-[10px] font-medium"
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] text-[10px] font-medium"
                 >
                   <Icon className="h-2.5 w-2.5" /> {m.label}
                 </span>
@@ -3842,7 +3842,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         aria-label="Filtri"
         title="Filtri"
         className={activeFilterCount > 0
-          ? 'relative inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] shadow-[var(--ds-shadow-card)] transition-colors'
+          ? 'relative inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] shadow-[var(--ds-shadow-card)] transition-colors'
           : `relative ${dsIconButton}`}
       >
         <ListFilter className="h-4 w-4" />
@@ -4009,14 +4009,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">Sala</label>
                 <div className="flex flex-wrap gap-2">
                   <button type="button" onClick={() => setFilterRoomId('ALL')}
-                    className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${
+                    className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
                       filterRoomId === 'ALL'
                         ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
                         : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
                     }`}>Tutte</button>
                   {rooms.filter(rm => !rm.is_closed).map(rm => (
                     <button key={rm.id} type="button" onClick={() => setFilterRoomId(rm.id)}
-                      className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${
+                      className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
                         filterRoomId === rm.id
                           ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
                           : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
@@ -4034,7 +4034,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     { value: PaymentStatus.PAID_FULL, label: 'Saldato' },
                   ].map(opt => (
                     <button key={opt.value} type="button" onClick={() => setFilterStatus(opt.value)}
-                      className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${
+                      className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
                         filterStatus === opt.value
                           ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
                           : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
@@ -4053,7 +4053,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     { value: ReservationSource.WHATSAPP, label: 'WhatsApp' },
                   ].map(opt => (
                     <button key={opt.value} type="button" onClick={() => setFilterSource(opt.value)}
-                      className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${
+                      className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
                         filterSource === opt.value
                           ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
                           : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
@@ -4065,15 +4065,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">Altro</label>
                 <div className="flex flex-wrap gap-2">
                   <button type="button" onClick={() => setFilterHasAllergens(v => !v)}
-                    className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${filterHasAllergens ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
+                    className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${filterHasAllergens ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
                     Allergeni
                   </button>
                   <button type="button" onClick={() => setFilterHasNotes(v => !v)}
-                    className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${filterHasNotes ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
+                    className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${filterHasNotes ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
                     Con note
                   </button>
                   <button type="button" onClick={() => setFilterNoTable(v => !v)}
-                    className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${filterNoTable ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
+                    className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${filterNoTable ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
                     Senza tavolo
                   </button>
                 </div>
@@ -4246,7 +4246,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             active room takes the solid fill so "you are here" reads before the
             names do. */}
         <div className="flex flex-shrink-0 items-center gap-3">
-          <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto scrollbar-hide rounded-full bg-[var(--ds-surface)] p-1 shadow-[var(--ds-shadow-card)]">
+          <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto scrollbar-hide rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] p-1 shadow-[var(--ds-shadow-card)]">
             {/* Extended-closed rooms drop out entirely; rooms closed just for
                 this date+shift stay visible but greyed out (same treatment as
                 Sala & Tavoli), so the closure is obvious and the host can still
@@ -4264,7 +4264,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   type="button"
                   aria-pressed={isActive}
                   title={isClosedForShift ? `${room.name} (Chiusa per questo turno)` : fillTitle}
-                  className={`inline-flex h-9 flex-shrink-0 items-center gap-2 whitespace-nowrap rounded-full px-3.5 text-[14px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                  className={`inline-flex h-9 flex-shrink-0 items-center gap-2 whitespace-nowrap rounded-[var(--ds-radius-control)] px-3.5 text-[14px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                     isActive
                       ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                       : isClosedForShift
@@ -4305,7 +4305,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
           {hiddenTableIds.size > 0 && canEdit && (
             <button type="button" onClick={() => setUnhideAllConfirm(true)}
-              className="inline-flex h-11 flex-shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-[var(--ds-seated-tint)] px-4 text-[14px] font-medium text-[var(--ds-seated-text)] transition-opacity hover:opacity-80"
+              className="inline-flex h-11 flex-shrink-0 items-center gap-2 whitespace-nowrap rounded-[var(--ds-radius-control)] bg-[var(--ds-seated-tint)] px-4 text-[14px] font-medium text-[var(--ds-seated-text)] transition-opacity hover:opacity-80"
               title="Riattiva tutti i tavoli nascosti per questo turno">
               <RotateCcw size={16} aria-hidden />
               <span>Riattiva tutti</span>
@@ -4439,7 +4439,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                               <>
                                 <div className="flex items-center gap-2">
                                   <span className="font-medium text-[var(--ds-text-primary)] truncate">{toTitleCase(reservation.customer_name)}</span>
-                                  {isArrived && <span className="text-[10px] font-medium bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] px-1.5 py-0.5 rounded-full flex-shrink-0">Arrivato</span>}
+                                  {isArrived && <span className="text-[10px] font-medium bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] px-1.5 py-0.5 rounded-[var(--ds-radius-control)] flex-shrink-0">Arrivato</span>}
                                 </div>
                                 <div className="flex items-center gap-3 text-xs text-[var(--ds-text-muted)] mt-0.5">
                                   <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {formatTime(reservation.reservation_time)}</span>
@@ -4452,7 +4452,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 <div className="flex items-center gap-2">
                                   <BookOpen className="h-3.5 w-3.5 text-[var(--ds-arriving-solid)] flex-shrink-0" aria-hidden />
                                   <span className="font-medium text-[var(--ds-arriving-text)] truncate">{banquet.name}</span>
-                                  <span className="text-[10px] font-medium bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)] px-1.5 py-0.5 rounded-full flex-shrink-0">Banchetto</span>
+                                  <span className="text-[10px] font-medium bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)] px-1.5 py-0.5 rounded-[var(--ds-radius-control)] flex-shrink-0">Banchetto</span>
                                 </div>
                                 <div className="flex items-center gap-3 text-xs text-[var(--ds-text-muted)] mt-0.5">
                                   {typeof banquet.guests === 'number' && <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {banquet.guests}</span>}
@@ -4496,7 +4496,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 toggle sits on the floor too rather than in the header. */}
             <div className="absolute left-4 top-4 z-10 flex select-none items-center gap-2">
               <button type="button" onClick={() => setIsMapFullscreen(v => !v)}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 title={isMapFullscreen ? 'Riduci la mappa (Esc)' : 'Mappa a tutto schermo'}
                 aria-label={isMapFullscreen ? 'Riduci la mappa' : 'Mappa a tutto schermo'}>
                 {isMapFullscreen ? <Minimize2 size={16} aria-hidden /> : <Maximize2 size={16} aria-hidden />}
@@ -4504,7 +4504,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               {hiddenTableIds.size > 0 && (
                 <button type="button" onClick={() => setShowHidden(v => !v)}
                   aria-pressed={showHidden}
-                  className={`inline-flex h-9 items-center gap-2 rounded-full px-3.5 text-[13px] font-medium shadow-[var(--ds-shadow-card)] transition-colors ${
+                  className={`inline-flex h-9 items-center gap-2 rounded-[var(--ds-radius-control)] px-3.5 text-[13px] font-medium shadow-[var(--ds-shadow-card)] transition-colors ${
                     showHidden
                       ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                       : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
@@ -4541,7 +4541,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             {/* Legend */}
             <div className="absolute bottom-4 right-4 z-10 select-none">
               <button type="button" onClick={(e) => { e.stopPropagation(); setIsLegendOpen(o => !o); }}
-                className="inline-flex h-9 items-center gap-2 rounded-full bg-[var(--ds-surface)] px-3.5 text-[13px] font-medium text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:text-[var(--ds-text-primary)]"
+                className="inline-flex h-9 items-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-3.5 text-[13px] font-medium text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:text-[var(--ds-text-primary)]"
                 aria-expanded={isLegendOpen}>
                 <Info size={16} aria-hidden /> Legenda
               </button>
@@ -4607,7 +4607,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               className="min-w-0 flex-1"
               onCanvas
             />
-            <div className="flex h-11 flex-shrink-0 items-center gap-1 rounded-full bg-[var(--ds-surface)] p-1 shadow-[var(--ds-shadow-card)]">
+            <div className="flex h-11 flex-shrink-0 items-center gap-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] p-1 shadow-[var(--ds-shadow-card)]">
               {[
                 { shift: Shift.LUNCH, label: 'Pranzo', Icon: Sun },
                 { shift: Shift.DINNER, label: 'Cena', Icon: Sunset },
@@ -4619,7 +4619,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   aria-pressed={selectedShift === shift}
                   aria-label={label}
                   title={label}
-                  className={`inline-flex h-9 w-9 items-center justify-center rounded-full transition-colors ${
+                  className={`inline-flex h-9 w-9 items-center justify-center rounded-[var(--ds-radius-control)] transition-colors ${
                     selectedShift === shift
                       ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                       : 'text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]'
@@ -4723,14 +4723,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">Sala</label>
                     <div className="flex flex-wrap gap-2">
                       <button type="button" onClick={() => setFilterRoomId('ALL')}
-                        className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${
+                        className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
                           filterRoomId === 'ALL'
                             ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
                             : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
                         }`}>Tutte</button>
                       {rooms.filter(rm => !rm.is_closed).map(rm => (
                         <button key={rm.id} type="button" onClick={() => setFilterRoomId(rm.id)}
-                          className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${
+                          className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
                             filterRoomId === rm.id
                               ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
                               : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
@@ -4748,7 +4748,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         { value: PaymentStatus.PAID_FULL, label: 'Saldato' },
                       ].map(opt => (
                         <button key={opt.value} type="button" onClick={() => setFilterStatus(opt.value)}
-                          className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${
+                          className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
                             filterStatus === opt.value
                               ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
                               : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
@@ -4767,7 +4767,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         { value: ReservationSource.WHATSAPP, label: 'WhatsApp' },
                       ].map(opt => (
                         <button key={opt.value} type="button" onClick={() => setFilterSource(opt.value)}
-                          className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${
+                          className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
                             filterSource === opt.value
                               ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
                               : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
@@ -4779,15 +4779,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">Altro</label>
                     <div className="flex flex-wrap gap-2">
                       <button type="button" onClick={() => setFilterHasAllergens(v => !v)}
-                        className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${filterHasAllergens ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
+                        className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${filterHasAllergens ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
                         Allergeni
                       </button>
                       <button type="button" onClick={() => setFilterHasNotes(v => !v)}
-                        className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${filterHasNotes ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
+                        className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${filterHasNotes ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
                         Con note
                       </button>
                       <button type="button" onClick={() => setFilterNoTable(v => !v)}
-                        className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${filterNoTable ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
+                        className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${filterNoTable ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
                         Senza tavolo
                       </button>
                     </div>
@@ -4869,7 +4869,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           footer={
             <>
               {mergeMode && selectedTablesForMerge.length > 0 && (
-                <span className="rounded-full bg-[var(--ds-pending-tint)] px-3 py-1.5 text-center text-[13px] text-[var(--ds-pending-text)]">
+                <span className="rounded-[var(--ds-radius-control)] bg-[var(--ds-pending-tint)] px-3 py-1.5 text-center text-[13px] text-[var(--ds-pending-text)]">
                   Conferma l'unione tavoli prima di salvare
                 </span>
               )}
@@ -4945,14 +4945,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 <button
                                     type="button"
                                     onClick={handleRestoreDraft}
-                                    className="h-9 flex-shrink-0 rounded-full bg-[var(--ds-pending-solid)] px-3.5 text-[14px] font-semibold text-[var(--ds-pending-fg)] transition-all hover:brightness-95"
+                                    className="h-9 flex-shrink-0 rounded-[var(--ds-radius-control)] bg-[var(--ds-pending-solid)] px-3.5 text-[14px] font-semibold text-[var(--ds-pending-fg)] transition-all hover:brightness-95"
                                 >
                                     Riprendi
                                 </button>
                                 <button
                                     type="button"
                                     onClick={handleDiscardDraft}
-                                    className="h-9 flex-shrink-0 rounded-full bg-[var(--ds-surface)] px-3.5 text-[14px] font-semibold text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)]"
+                                    className="h-9 flex-shrink-0 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-3.5 text-[14px] font-semibold text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)]"
                                 >
                                     Scarta
                                 </button>
@@ -5171,13 +5171,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                             <div className="flex items-center gap-2">
                                                                 <span className="text-[15px] font-medium text-[var(--ds-text-primary)]">{c.name}</span>
                                                                 {(c.no_show_count || 0) > 0 && (
-                                                                    <span className="inline-flex items-center gap-1 rounded-full bg-[var(--ds-critical-tint)] px-2 py-0.5 text-[12px] font-semibold text-[var(--ds-critical-text)]">
+                                                                    <span className="inline-flex items-center gap-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-tint)] px-2 py-0.5 text-[12px] font-semibold text-[var(--ds-critical-text)]">
                                                                         <UserX className="h-2.5 w-2.5" />
                                                                         {c.no_show_count} no-show
                                                                     </span>
                                                                 )}
                                                                 {c.is_blacklisted && (
-                                                                    <span className="inline-flex items-center gap-1 rounded-full bg-[var(--ds-critical-tint)] px-2 py-0.5 text-[12px] font-semibold text-[var(--ds-critical-text)]">
+                                                                    <span className="inline-flex items-center gap-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-tint)] px-2 py-0.5 text-[12px] font-semibold text-[var(--ds-critical-text)]">
                                                                         <Ban className="h-2.5 w-2.5" />
                                                                         blacklist
                                                                     </span>
@@ -5196,7 +5196,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     <button
                                         type="button"
                                         onClick={() => setIsCustomerPickerOpen(true)}
-                                        className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                                        className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                                         title="Rubrica clienti"
                                     >
                                         <BookUser className="h-[18px] w-[18px]" />
@@ -5206,7 +5206,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                             type="button"
                                             onClick={handleVoiceInput}
                                             disabled={isListening}
-                                            className={`inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                                            className={`inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                                                 isListening
                                                     ? 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] animate-pulse motion-reduce:animate-none'
                                                     : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)]'
@@ -5272,13 +5272,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                             <div className="flex items-center gap-2">
                                                                 <span className="text-[15px] font-medium text-[var(--ds-text-primary)]">{c.name}</span>
                                                                 {(c.no_show_count || 0) > 0 && (
-                                                                    <span className="inline-flex items-center gap-1 rounded-full bg-[var(--ds-critical-tint)] px-2 py-0.5 text-[12px] font-semibold text-[var(--ds-critical-text)]">
+                                                                    <span className="inline-flex items-center gap-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-tint)] px-2 py-0.5 text-[12px] font-semibold text-[var(--ds-critical-text)]">
                                                                         <UserX className="h-2.5 w-2.5" />
                                                                         {c.no_show_count} no-show
                                                                     </span>
                                                                 )}
                                                                 {c.is_blacklisted && (
-                                                                    <span className="inline-flex items-center gap-1 rounded-full bg-[var(--ds-critical-tint)] px-2 py-0.5 text-[12px] font-semibold text-[var(--ds-critical-text)]">
+                                                                    <span className="inline-flex items-center gap-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-tint)] px-2 py-0.5 text-[12px] font-semibold text-[var(--ds-critical-text)]">
                                                                         <Ban className="h-2.5 w-2.5" />
                                                                         blacklist
                                                                     </span>
@@ -5371,13 +5371,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     {showAllergensSection && (
                                         <div className="p-3 pt-0 space-y-3 border-t border-[var(--ds-border)] bg-[var(--ds-surface)]">
                                             {/* Tab switcher */}
-                                            <div className="grid grid-cols-2 gap-0.5 p-1 mt-3 rounded-full bg-[var(--ds-surface-row)]">
+                                            <div className="grid grid-cols-2 gap-0.5 p-1 mt-3 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)]">
                                                 {([['allergie', 'Allergie', selectedAllergies.length], ['intolleranze', 'Intolleranze', selectedAllergens.length]] as const).map(([key, label, count]) => (
                                                     <button
                                                         key={key}
                                                         type="button"
                                                         onClick={() => setDietaryTab(key)}
-                                                        className={`inline-flex items-center justify-center gap-1.5 h-9 rounded-full text-[14px] font-semibold transition-colors ${
+                                                        className={`inline-flex items-center justify-center gap-1.5 h-9 rounded-[var(--ds-radius-control)] text-[14px] font-semibold transition-colors ${
                                                             dietaryTab === key
                                                                 ? (key === 'allergie' ? 'bg-[var(--ds-critical-solid)] text-white' : 'bg-[var(--ds-pending-solid)] text-white')
                                                                 : 'text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
@@ -5386,7 +5386,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                     >
                                                         {label}
                                                         {count > 0 && (
-                                                            <span className={`inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold ${
+                                                            <span className={`inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-[var(--ds-radius-control)] text-[10px] font-bold ${
                                                                 dietaryTab === key ? 'bg-white/25' : (key === 'allergie' ? 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] ' : 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] ')
                                                             }`}>{count}</span>
                                                         )}
@@ -5419,7 +5419,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                                     setSelectedAllergens(prev => prev.includes(item) ? prev.filter(a => a !== item) : [...prev, item]);
                                                                 }
                                                             }}
-                                                            className={`flex items-center gap-2 px-3.5 h-9 rounded-full transition-colors text-left ${
+                                                            className={`flex items-center gap-2 px-3.5 h-9 rounded-[var(--ds-radius-control)] transition-colors text-left ${
                                                                 inActive ? onCls : 'border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-surface-row)]'
                                                             }`}
                                                         >
@@ -5598,7 +5598,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                        "action" colour, and an assigned table is a state, not a
                                        button. White on this green measures 6.7:1; the secondary
                                        "posti" text at 80% still clears AA at 4.9:1. */
-                                    <div className="inline-flex flex-shrink-0 items-center gap-2 rounded-full bg-[var(--ds-seated-solid)] py-1.5 pl-4 pr-1.5">
+                                    <div className="inline-flex flex-shrink-0 items-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-seated-solid)] py-1.5 pl-4 pr-1.5">
                                         <span className="whitespace-nowrap text-[15px] font-semibold text-white">
                                             Tavolo {selectedTableObj.name}
                                         </span>
@@ -5611,7 +5611,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                 setFormData({...formData, table_id: undefined});
                                                 showToast('Tavolo scollegato dalla prenotazione', 'info');
                                             }}
-                                            className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-white/15 text-white transition-colors hover:bg-white/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+                                            className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-white/15 text-white transition-colors hover:bg-white/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
                                             title="Scollega il tavolo dalla prenotazione"
                                             aria-label="Scollega tavolo dalla prenotazione"
                                         >
@@ -5654,7 +5654,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 <div className="flex gap-2 items-center">
                                     {/* Show selected tables count and total capacity */}
                                     {selectedTablesForMerge.length >= 1 && (
-                                        <div className="text-xs text-[var(--ds-text-secondary)] bg-[var(--ds-surface-row)] border border-[var(--ds-border)] px-3 py-1.5 rounded-full font-medium">
+                                        <div className="text-xs text-[var(--ds-text-secondary)] bg-[var(--ds-surface-row)] border border-[var(--ds-border)] px-3 py-1.5 rounded-[var(--ds-radius-control)] font-medium">
                                             {selectedTablesForMerge.length} {selectedTablesForMerge.length === 1 ? 'tavolo' : 'tavoli'} = {tables.filter(t => selectedTablesForMerge.includes(t.id)).reduce((sum, t) => sum + t.seats, 0)} posti
                                         </div>
                                     )}
@@ -5681,7 +5681,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                     showToast('Errore durante l\'unione dei tavoli', 'error');
                                                 }
                                             }}
-                                            className="inline-flex items-center gap-1.5 rounded-full px-4 py-2 bg-[var(--ds-text-primary)] text-[var(--ds-action-fg)] text-sm font-medium hover:opacity-90 transition-opacity"
+                                            className="inline-flex items-center gap-1.5 rounded-[var(--ds-radius-control)] px-4 py-2 bg-[var(--ds-text-primary)] text-[var(--ds-action-fg)] text-sm font-medium hover:opacity-90 transition-opacity"
                                         >
                                             <Combine className="h-4 w-4" /> Conferma Unione
                                         </button>
@@ -5705,7 +5705,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                     showToast('Errore durante la divisione dei tavoli', 'error');
                                                 }
                                             }}
-                                            className="inline-flex items-center gap-1.5 rounded-full px-4 py-2 border border-[var(--ds-pending-tint)] bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] dark:text-sm font-medium transition-colors"
+                                            className="inline-flex items-center gap-1.5 rounded-[var(--ds-radius-control)] px-4 py-2 border border-[var(--ds-pending-tint)] bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] dark:text-sm font-medium transition-colors"
                                         >
                                             <Scissors className="h-4 w-4" /> Dividi
                                         </button>
@@ -5719,7 +5719,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                      <button
                                         type="button"
                                         onClick={() => setModalRoomFilter('ALL')}
-                                        className={`px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap transition-colors flex-shrink-0 border ${modalRoomFilter === 'ALL' ? 'bg-[var(--ds-text-primary)] text-[var(--ds-action-fg)] border-[var(--ds-text-primary)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)]'}`}
+                                        className={`px-4 py-1.5 text-sm font-medium rounded-[var(--ds-radius-control)] whitespace-nowrap transition-colors flex-shrink-0 border ${modalRoomFilter === 'ALL' ? 'bg-[var(--ds-text-primary)] text-[var(--ds-action-fg)] border-[var(--ds-text-primary)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)]'}`}
                                      >
                                          Tutte le sale
                                      </button>
@@ -5728,7 +5728,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                             key={room.id}
                                             type="button"
                                             onClick={() => setModalRoomFilter(room.id)}
-                                            className={`px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap transition-colors flex-shrink-0 border ${modalRoomFilter === room.id ? 'bg-[var(--ds-text-primary)] text-[var(--ds-action-fg)] border-[var(--ds-text-primary)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)]'}`}
+                                            className={`px-4 py-1.5 text-sm font-medium rounded-[var(--ds-radius-control)] whitespace-nowrap transition-colors flex-shrink-0 border ${modalRoomFilter === room.id ? 'bg-[var(--ds-text-primary)] text-[var(--ds-action-fg)] border-[var(--ds-text-primary)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)]'}`}
                                          >
                                              {room.name}
                                          </button>
@@ -5739,7 +5739,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                              <div className="flex-1 min-h-0 rounded-[var(--ds-radius)] overflow-y-auto relative max-h-[50vh] lg:max-h-none">
                                 {isLoadingMerges && (
                                     <div className="absolute inset-0 z-30 bg-[var(--ds-surface-row)]/70 backdrop-blur-[1px] flex items-center justify-center rounded-[var(--ds-radius)]">
-                                        <div className="flex items-center gap-2 rounded-full bg-[var(--ds-surface)] px-4 py-2 shadow-[var(--ds-shadow-card)]">
+                                        <div className="flex items-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-4 py-2 shadow-[var(--ds-shadow-card)]">
                                             <Loader label="Caricamento tavoli…" size={40} />
                                         </div>
                                     </div>
@@ -5797,7 +5797,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                 </span>
                                             </h4>
                                             <div className="ml-auto flex flex-shrink-0 items-center gap-2">
-                                                <span className={`inline-flex h-8 flex-shrink-0 items-baseline gap-1.5 rounded-full border px-3 leading-8 ${
+                                                <span className={`inline-flex h-8 flex-shrink-0 items-baseline gap-1.5 rounded-[var(--ds-radius-control)] border px-3 leading-8 ${
                                                     liberiCount > 0
                                                         ? 'border-[var(--ds-seated-solid)] bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'
                                                         : 'border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)]'
@@ -5806,7 +5806,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                     <span className="text-[13px] font-medium">{liberiCount === 1 ? 'libero' : 'liberi'}</span>
                                                 </span>
                                                 {occupatiCount > 0 && (
-                                                    <span className="inline-flex h-8 flex-shrink-0 items-baseline gap-1.5 rounded-full border border-[var(--ds-critical-solid)] bg-[var(--ds-critical-tint)] px-3 leading-8 text-[var(--ds-critical-text)]">
+                                                    <span className="inline-flex h-8 flex-shrink-0 items-baseline gap-1.5 rounded-[var(--ds-radius-control)] border border-[var(--ds-critical-solid)] bg-[var(--ds-critical-tint)] px-3 leading-8 text-[var(--ds-critical-text)]">
                                                         <span className="text-[17px] font-bold tabular-nums">{occupatiCount}</span>
                                                         <span className="text-[13px] font-medium">{occupatiCount === 1 ? 'occupato' : 'occupati'}</span>
                                                     </span>
@@ -5891,13 +5891,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                         }`}
                                                     >
                                                         {recommended && !isSelected && !isSelectedForMerge && (
-                                                            <span className="absolute -top-2 left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-full bg-[var(--ds-seated-solid)] px-2 py-0.5 text-[10px] font-semibold text-white">
+                                                            <span className="absolute -top-2 left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-[var(--ds-radius-control)] bg-[var(--ds-seated-solid)] px-2 py-0.5 text-[10px] font-semibold text-white">
                                                                 Consigliato
                                                             </span>
                                                         )}
 
                                                         {isMerged && !isSelectedForMerge && (
-                                                            <span className={`absolute -top-1.5 sm:-top-2 -left-1.5 sm:-left-2 z-20 flex items-center gap-0.5 rounded-full px-1 sm:px-1.5 py-0.5 text-[8px] sm:text-[10px] font-bold shadow-[var(--ds-shadow-card)] ${isSelected ? 'bg-[var(--ds-surface)] text-[var(--ds-seated-text)]' : 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'}`}>
+                                                            <span className={`absolute -top-1.5 sm:-top-2 -left-1.5 sm:-left-2 z-20 flex items-center gap-0.5 rounded-[var(--ds-radius-control)] px-1 sm:px-1.5 py-0.5 text-[8px] sm:text-[10px] font-bold shadow-[var(--ds-shadow-card)] ${isSelected ? 'bg-[var(--ds-surface)] text-[var(--ds-seated-text)]' : 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'}`}>
                                                                 <Combine size={8} />
                                                             </span>
                                                         )}
@@ -5931,7 +5931,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                             </span>
                                                         )}
                                                         {isSelectedForMerge && (
-                                                            <span className="absolute -top-2 -right-2 z-20 flex items-center justify-center rounded-full bg-[var(--ds-arriving-solid)] p-1 shadow-[var(--ds-shadow-card)]">
+                                                            <span className="absolute -top-2 -right-2 z-20 flex items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-solid)] p-1 shadow-[var(--ds-shadow-card)]">
                                                                 <Combine size={10} className="text-white" />
                                                             </span>
                                                         )}
@@ -5958,7 +5958,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                  <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[var(--ds-radius-sm)] bg-[var(--ds-arriving-tint)]"></span> Evento / Banchetto</div>
                              </div>
                              {mergeMode && (
-                                 <div className="mt-3 rounded-full bg-[var(--ds-surface-row)] px-3.5 py-2 text-[13px] font-medium text-[var(--ds-text-secondary)]">
+                                 <div className="mt-3 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3.5 py-2 text-[13px] font-medium text-[var(--ds-text-secondary)]">
                                      Modalità unione attiva: clicca sui tavoli da unire, poi premi "Conferma Unione"
                                  </div>
                              )}
@@ -6136,7 +6136,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                       type="button"
                                       onClick={() => setBillSheetOpen(true)}
                                       disabled={billActionLoading !== null}
-                                      className="inline-flex h-11 items-center justify-center gap-2 rounded-full bg-[var(--ds-seated-tint)] px-5 text-[15px] font-semibold text-[var(--ds-seated-text)] transition-colors hover:brightness-95 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                                      className="inline-flex h-11 items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-seated-tint)] px-5 text-[15px] font-semibold text-[var(--ds-seated-text)] transition-colors hover:brightness-95 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                                     >
                                       {billActionLoading === 'close' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Banknote className="h-4 w-4" />}
                                       Incassa e chiudi
@@ -6145,7 +6145,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                       type="button"
                                       onClick={handleVoidBill}
                                       disabled={billActionLoading !== null}
-                                      className="ml-auto inline-flex h-11 items-center justify-center gap-2 rounded-full px-4 text-[15px] font-medium text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                                      className="ml-auto inline-flex h-11 items-center justify-center gap-2 rounded-[var(--ds-radius-control)] px-4 text-[15px] font-medium text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                                     >
                                       {billActionLoading === 'void' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />}
                                       Annulla conto
@@ -6182,7 +6182,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                               onBlur={() => setRefundConfirmSplitId(prev => prev === s.id ? null : prev)}
                                               disabled={refundingSplitId !== null}
                                               title={refundConfirmSplitId === s.id ? 'Tocca di nuovo per confermare il rimborso' : 'Rimborsa quota'}
-                                              className={`inline-flex h-8 shrink-0 items-center gap-1 rounded-full px-2 text-[12px] font-semibold transition-colors disabled:opacity-50 ${
+                                              className={`inline-flex h-8 shrink-0 items-center gap-1 rounded-[var(--ds-radius-control)] px-2 text-[12px] font-semibold transition-colors disabled:opacity-50 ${
                                                 refundConfirmSplitId === s.id
                                                   ? 'bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] hover:brightness-95'
                                                   : 'text-[var(--ds-text-muted)] hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)]'
@@ -6437,13 +6437,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 <div className="p-4 border-t border-[var(--ds-border)] flex flex-col sm:flex-row justify-end gap-2">
                     <button
                         onClick={confirmModal.onCancel}
-                        className="w-full sm:w-auto px-4 py-2 rounded-full border border-[var(--ds-border)] text-[var(--ds-text-primary)] text-sm font-medium hover:bg-[var(--ds-surface-row)]"
+                        className="w-full sm:w-auto px-4 py-2 rounded-[var(--ds-radius-control)] border border-[var(--ds-border)] text-[var(--ds-text-primary)] text-sm font-medium hover:bg-[var(--ds-surface-row)]"
                     >
                         Annulla
                     </button>
                     <button
                         onClick={confirmModal.onConfirm}
-                        className="w-full sm:w-auto px-4 py-2 rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-sm font-medium hover:opacity-90"
+                        className="w-full sm:w-auto px-4 py-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-sm font-medium hover:opacity-90"
                     >
                         Procedi Comunque
                     </button>
@@ -6468,8 +6468,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         message={`Stai per riattivare ${hiddenTableIds.size} ${hiddenTableIds.size === 1 ? 'tavolo nascosto' : 'tavoli nascosti'} per questo turno.`}
         confirmLabel="Riattiva tutti"
         icon={<Eye className="h-5 w-5 text-[var(--ds-seated-text)]" />}
-        iconWrapperClassName="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[var(--ds-seated-tint)]"
-        confirmClassName="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-full bg-[var(--ds-seated-solid)] text-[var(--ds-seated-fg)] text-[15px] font-semibold hover:opacity-90 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+        iconWrapperClassName="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-seated-tint)]"
+        confirmClassName="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-[var(--ds-radius-control)] bg-[var(--ds-seated-solid)] text-[var(--ds-seated-fg)] text-[15px] font-semibold hover:opacity-90 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
         showIrreversibleWarning={false}
         onCancel={() => setUnhideAllConfirm(false)}
         onConfirm={async () => {
@@ -6510,7 +6510,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               </div>
               <div className="flex items-start justify-between p-4 border-b border-[var(--ds-border)]">
                 <div className="flex items-start gap-3 min-w-0">
-                  <span className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] flex-shrink-0">
+                  <span className="inline-flex items-center justify-center w-9 h-9 rounded-[var(--ds-radius-control)] bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] flex-shrink-0">
                     <AlertTriangle className="h-5 w-5" />
                   </span>
                   <div className="min-w-0">
@@ -6524,7 +6524,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 </div>
                 <button
                   onClick={() => { if (!isSavingReservation) setPreflightModal(null); }}
-                  className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -6600,7 +6600,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   type="button"
                   onClick={() => setPreflightModal(null)}
                   disabled={isSavingReservation}
-                  className="px-4 py-2 rounded-full text-sm font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-50"
+                  className="px-4 py-2 rounded-[var(--ds-radius-control)] text-sm font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-50"
                 >
                   Annulla
                 </button>
@@ -6608,7 +6608,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   type="button"
                   onClick={async () => { await performSave(preflightModal.payload); }}
                   disabled={isSavingReservation}
-                  className="px-4 py-2 rounded-full text-sm font-medium bg-[var(--ds-action-bg)] text-[var(--ds-surface)] hover:opacity-90 disabled:opacity-50 inline-flex items-center gap-2"
+                  className="px-4 py-2 rounded-[var(--ds-radius-control)] text-sm font-medium bg-[var(--ds-action-bg)] text-[var(--ds-surface)] hover:opacity-90 disabled:opacity-50 inline-flex items-center gap-2"
                 >
                   {isSavingReservation && <Loader2 className="h-4 w-4 animate-spin" />}
                   Conferma e salva
@@ -6717,7 +6717,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   type="button"
                   onClick={closePicker}
                   disabled={sendingConfirmation !== null}
-                  className="px-4 py-2 rounded-full text-sm font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-50"
+                  className="px-4 py-2 rounded-[var(--ds-radius-control)] text-sm font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-50"
                 >
                   {isPending ? 'Salva senza confermare' : 'Non ora'}
                 </button>
@@ -6803,7 +6803,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   type="button"
                   onClick={closeComposer}
                   disabled={customEmailSending}
-                  className="px-4 py-2 rounded-full text-sm font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-50"
+                  className="px-4 py-2 rounded-[var(--ds-radius-control)] text-sm font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-50"
                 >
                   Annulla
                 </button>
@@ -6811,7 +6811,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   type="button"
                   onClick={handleSendCustomEmail}
                   disabled={!canSend}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-sm font-medium hover:bg-[var(--ds-action-bg-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-sm font-medium hover:bg-[var(--ds-action-bg-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 >
                   {customEmailSending
                     ? <><Loader2 className="h-4 w-4 animate-spin" /> Invio…</>
@@ -6851,7 +6851,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   {selectedDate.split('T')[0]} · {selectedShift === Shift.LUNCH ? 'Pranzo' : 'Cena'}
                 </p>
               </div>
-              <button type="button" onClick={() => setShowChannelsSheet(false)} className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]" aria-label="Chiudi">
+              <button type="button" onClick={() => setShowChannelsSheet(false)} className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]" aria-label="Chiudi">
                 <X className="h-4 w-4" />
               </button>
             </div>
@@ -6901,7 +6901,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 </div>
                 <button onClick={() => snoozeOverduePrompt(res)}
                   aria-label="Chiudi questo avviso"
-                  className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]">
+                  className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]">
                   <X className="h-4 w-4" />
                 </button>
               </div>
@@ -6923,12 +6923,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                       onUpdateReservation({ ...res, duration_minutes: extendedDurationMin(res, nowTick) });
                       showToast(`${toTitleCase(res.customer_name)}: +${OVERDUE_EXTEND_MIN} minuti al tavolo`, 'success');
                     }}
-                    className="inline-flex w-full items-center justify-center gap-2 h-11 rounded-full text-[15px] font-semibold bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]">
+                    className="inline-flex w-full items-center justify-center gap-2 h-11 rounded-[var(--ds-radius-control)] text-[15px] font-semibold bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]">
                     <UserCheck className="h-4 w-4" aria-hidden /> Ancora qui · +{OVERDUE_EXTEND_MIN} min
                   </button>
                   <button type="button"
                     onClick={() => { snoozeOverduePrompt(res); handleSetReservationState(res, 'freed'); }}
-                    className="inline-flex w-full items-center justify-center gap-2 h-11 rounded-full text-[15px] font-medium bg-[var(--ds-surface)] text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] hover:bg-[var(--ds-surface-row)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]">
+                    className="inline-flex w-full items-center justify-center gap-2 h-11 rounded-[var(--ds-radius-control)] text-[15px] font-medium bg-[var(--ds-surface)] text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] hover:bg-[var(--ds-surface-row)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]">
                     <Armchair className="h-4 w-4" aria-hidden /> Libera il tavolo
                   </button>
                 </div>
@@ -6938,7 +6938,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 {overdueQueue.length > 1 && (
                   <button type="button" onClick={snoozeAllOverduePrompts}
                     title={`Rimanda tutti i ${overdueQueue.length} avvisi di ${OVERDUE_SNOOZE_MIN} minuti`}
-                    className="mt-4 inline-flex h-11 w-full items-center justify-center rounded-full text-[14px] font-medium text-[var(--ds-text-secondary)] underline underline-offset-2 transition-colors hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]">
+                    className="mt-4 inline-flex h-11 w-full items-center justify-center rounded-[var(--ds-radius-control)] text-[14px] font-medium text-[var(--ds-text-secondary)] underline underline-offset-2 transition-colors hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]">
                     Chiudi tutti · {overdueQueue.length}
                   </button>
                 )}
@@ -6978,7 +6978,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     </p>
                   </div>
                   <button onClick={() => setStateChangeReservation(null)}
-                    className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]">
+                    className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]">
                     <X className="h-4 w-4" />
                   </button>
               </div>
@@ -7043,7 +7043,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   </p>
                 </div>
                 <button onClick={() => setDeclineReservation(null)}
-                  className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]">
+                  className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]">
                   <X className="h-4 w-4" />
                 </button>
               </div>
@@ -7157,7 +7157,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   </div>
                   <button
                       onClick={() => setTableChooserModal(null)}
-                      className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                      className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
                     <X className="h-4 w-4" />
                   </button>
@@ -7181,7 +7181,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             }}
                             className="w-full text-left px-4 py-3 hover:bg-[var(--ds-surface-row)] transition-colors flex items-center gap-3"
                         >
-                          <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)] text-xs font-bold flex-shrink-0">
+                          <span className="inline-flex items-center justify-center w-8 h-8 rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)] text-xs font-bold flex-shrink-0">
                             {i + 1}°
                           </span>
                           <div className="flex-1 min-w-0">
@@ -7208,7 +7208,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                           setTableChooserModal(null);
                           setAssignTableModal(table);
                         }}
-                        className="w-full px-4 py-2 rounded-full border border-[var(--ds-border)] text-[var(--ds-text-primary)] text-sm font-medium hover:bg-[var(--ds-surface-row)]"
+                        className="w-full px-4 py-2 rounded-[var(--ds-radius-control)] border border-[var(--ds-border)] text-[var(--ds-text-primary)] text-sm font-medium hover:bg-[var(--ds-surface-row)]"
                     >
                       Aggiungi un altro turno
                     </button>
@@ -7296,7 +7296,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     )}
                     <button
                       onClick={() => setAssignTableModal(null)}
-                      className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                      className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     >
                       <X className="h-4 w-4" />
                     </button>
@@ -7402,7 +7402,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 <div className="p-4 border-t border-[var(--ds-border)]">
                   <button
                     onClick={() => setAssignTableModal(null)}
-                    className="w-full px-4 py-2 rounded-full border border-[var(--ds-border)] text-[var(--ds-text-primary)] text-sm font-medium hover:bg-[var(--ds-surface-row)]"
+                    className="w-full px-4 py-2 rounded-[var(--ds-radius-control)] border border-[var(--ds-border)] text-[var(--ds-text-primary)] text-sm font-medium hover:bg-[var(--ds-surface-row)]"
                   >
                     Annulla
                   </button>
@@ -7453,7 +7453,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 </span>
               </div>
               <button type="button" onClick={() => setTooltipReservation(null)}
-                className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]">
+                className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]">
                 <X className="h-4 w-4" />
               </button>
             </div>
@@ -7519,7 +7519,7 @@ const NoteChip: React.FC<NoteChipProps> = ({
                 ref={btnRef}
                 type="button"
                 onClick={onChipClick}
-                className={`w-full flex items-center gap-2 px-3.5 h-9 rounded-full transition-colors text-left ${
+                className={`w-full flex items-center gap-2 px-3.5 h-9 rounded-[var(--ds-radius-control)] transition-colors text-left ${
                     isSelected
                         ? 'border-[var(--ds-text-primary)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)]'
                         : 'border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-surface-row)]'
@@ -7644,7 +7644,7 @@ const NotePickerPopover: React.FC<NotePickerPopoverProps> = ({ preset, picks, an
                 <button
                     type="button"
                     onClick={onCancel}
-                    className={`rounded-full flex items-center justify-center hover:bg-[var(--ds-surface-row)] ${isWide ? 'w-7 h-7' : 'w-11 h-11'}`}
+                    className={`rounded-[var(--ds-radius-control)] flex items-center justify-center hover:bg-[var(--ds-surface-row)] ${isWide ? 'w-7 h-7' : 'w-11 h-11'}`}
                     aria-label="Chiudi"
                 >
                     <X className={`text-[var(--ds-text-muted)] ${isWide ? 'w-3.5 h-3.5' : 'w-5 h-5'}`} />
@@ -7688,7 +7688,7 @@ const NotePickerPopover: React.FC<NotePickerPopoverProps> = ({ preset, picks, an
                 <button
                     type="button"
                     onClick={commit}
-                    className={`rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] font-semibold hover:bg-[var(--ds-action-bg-hover)] ${
+                    className={`rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] font-semibold hover:bg-[var(--ds-action-bg-hover)] ${
                         isWide ? 'px-3 py-1.5 text-[12px]' : 'px-5 min-h-11 text-[15px]'
                     }`}
                 >
@@ -7754,7 +7754,7 @@ const QuantityStepper: React.FC<{
     const btn = large ? 'w-11 h-11 text-[18px]' : 'w-8 h-8';
     const input = large ? 'w-12 h-11 text-[16px]' : 'w-10 h-8 text-[13px]';
     return (
-        <div className="inline-flex items-center rounded-full border border-[var(--ds-border)] bg-[var(--ds-surface)]">
+        <div className="inline-flex items-center rounded-[var(--ds-radius-control)] border border-[var(--ds-border)] bg-[var(--ds-surface)]">
             <button
                 type="button"
                 onClick={onDecrement}

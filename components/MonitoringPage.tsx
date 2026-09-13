@@ -100,7 +100,7 @@ const SectionCard: React.FC<{
 }> = ({ icon, title, subtitle, children }) => (
   <section className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)] sm:p-5">
     <header className="mb-4 flex items-start gap-3">
-      <span className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]">
+      <span className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]">
         {icon}
       </span>
       <div className="min-w-0">
@@ -120,7 +120,7 @@ const StatTile: React.FC<{
 }> = ({ icon, label, value, hint }) => (
   <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3">
     <div className="mb-1 flex items-center gap-2 text-[13px] font-medium text-[var(--ds-text-secondary)]">
-      <span className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface)] text-[var(--ds-text-muted)]">
+      <span className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-text-muted)]">
         {icon}
       </span>
       <span className="truncate">{label}</span>
@@ -190,12 +190,12 @@ export const MonitoringPage: React.FC = () => {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <div className="inline-flex rounded-full bg-[var(--ds-surface-row)] p-1">
+              <div className="inline-flex rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] p-1">
                 {WINDOWS.map(w => (
                   <button
                     key={w}
                     onClick={() => setDays(w)}
-                    className={`rounded-full px-3 py-1.5 text-[13px] font-medium transition-colors ${
+                    className={`rounded-[var(--ds-radius-control)] px-3 py-1.5 text-[13px] font-medium transition-colors ${
                       days === w
                         ? 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]'
                         : 'text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
@@ -208,7 +208,7 @@ export const MonitoringPage: React.FC = () => {
               <button
                 onClick={() => load(days)}
                 disabled={loading}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:text-[var(--ds-text-primary)] disabled:opacity-50"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:text-[var(--ds-text-primary)] disabled:opacity-50"
                 aria-label="Aggiorna"
               >
                 <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
@@ -272,7 +272,7 @@ export const MonitoringPage: React.FC = () => {
                     </div>
                     <div className="h-2.5 w-full overflow-hidden rounded-full bg-[var(--ds-border)]">
                       <div
-                        className={`h-full rounded-full ${quotaPct >= 90 ? 'bg-[var(--ds-critical-solid)]' : quotaPct >= 70 ? 'bg-[var(--ds-pending-solid)]' : 'bg-[var(--ds-seated-solid)]'}`}
+                        className={`h-full rounded-[var(--ds-radius-control)] ${quotaPct >= 90 ? 'bg-[var(--ds-critical-solid)]' : quotaPct >= 70 ? 'bg-[var(--ds-pending-solid)]' : 'bg-[var(--ds-seated-solid)]'}`}
                         style={{ width: `${quotaPct}%` }}
                       />
                     </div>

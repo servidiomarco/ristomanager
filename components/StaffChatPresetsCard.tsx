@@ -105,7 +105,7 @@ export const StaffChatPresetsCard: React.FC<Props> = ({ showToast }) => {
                       onClick={() => setLabels(prev => prev.filter((_, j) => j !== i))}
                       disabled={saving}
                       aria-label={`Togli "${label}"`}
-                      className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] transition-colors hover:text-[var(--ds-text-primary)] disabled:opacity-50"
+                      className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] transition-colors hover:text-[var(--ds-text-primary)] disabled:opacity-50"
                     >
                       <XIcon className="h-4 w-4" />
                     </button>
@@ -119,7 +119,7 @@ export const StaffChatPresetsCard: React.FC<Props> = ({ showToast }) => {
                   type="button"
                   onClick={() => setLabels(prev => [...prev, ''])}
                   disabled={saving || labels.length >= MAX_PRESETS}
-                  className="inline-flex h-9 items-center gap-1.5 rounded-full border border-[var(--ds-border)] px-3 text-[13px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-50"
+                  className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] border border-[var(--ds-border)] px-3 text-[13px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-50"
                 >
                   <Plus className="h-4 w-4" /> Aggiungi
                 </button>
@@ -127,7 +127,7 @@ export const StaffChatPresetsCard: React.FC<Props> = ({ showToast }) => {
                   type="button"
                   onClick={handleSave}
                   disabled={saving}
-                  className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-50"
+                  className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-50"
                 >
                   {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Salva
                 </button>
@@ -137,7 +137,7 @@ export const StaffChatPresetsCard: React.FC<Props> = ({ showToast }) => {
                     onClick={() => save([])}
                     disabled={saving}
                     title={`Torna a: ${STAFF_MESSAGE_PRESETS.map(p => p.label).join(', ')}`}
-                    className="inline-flex h-9 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50"
+                    className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 text-[13px] font-medium text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50"
                   >
                     <RotateCcw className="h-4 w-4" /> Torna ai predefiniti
                   </button>

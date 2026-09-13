@@ -139,7 +139,7 @@ export const Piantina: React.FC<PiantinaProps> = ({ rows, room, billByTable, bus
         ] as [string, TableDisplayStatus][]).map(([label, status]) => (
           <span key={status} className="inline-flex items-center gap-1.5">
             <span
-              className="inline-block h-3 w-3 rounded-full ring-1 ring-inset ring-[var(--ds-border-strong)]"
+              className="inline-block h-3 w-3 rounded-[var(--ds-radius-control)] ring-1 ring-inset ring-[var(--ds-border-strong)]"
               style={{ background: `var(--tg-${status}-bg)` }}
               aria-hidden
             />

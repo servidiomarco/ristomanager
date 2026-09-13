@@ -98,7 +98,7 @@ export const ImpersonationBanner: React.FC = () => {
         <button
           type="button"
           onClick={backToPanel}
-          className="inline-flex h-8 flex-shrink-0 items-center rounded-full bg-[var(--ds-action-fg)] px-3 text-[12px] font-semibold text-[var(--ds-action-bg)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          className="inline-flex h-8 flex-shrink-0 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-fg)] px-3 text-[12px] font-semibold text-[var(--ds-action-bg)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
         >
           torna al pannello
         </button>
@@ -173,7 +173,7 @@ const SecretRow: React.FC<{ label: string; value: string; showToast: ShowToast }
         type="button"
         onClick={copy}
         aria-label={`Copia ${label}`}
-        className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+        className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
       >
         {copied ? <Check className="h-4 w-4 text-[var(--ds-seated-text)]" /> : <Copy className="h-4 w-4" />}
       </button>
@@ -389,7 +389,7 @@ const TenantCard: React.FC<{
               type="button"
               onClick={() => toggleFeature(feature)}
               aria-pressed={on}
-              className={`inline-flex h-11 items-center gap-1.5 rounded-full px-4 text-[14px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+              className={`inline-flex h-11 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-4 text-[14px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                 on
                   ? 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'
                   : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]'
@@ -443,7 +443,7 @@ const TenantCard: React.FC<{
                         type="button"
                         onClick={() => toggleLock(permission)}
                         aria-pressed={on}
-                        className={`inline-flex h-9 items-center gap-1.5 rounded-full px-3 font-mono text-[12px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                        className={`inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 font-mono text-[12px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                           on
                             ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                             : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
@@ -695,7 +695,7 @@ const NewTenantModal: React.FC<{
                   type="button"
                   onClick={() => setFeatures(prev => ({ ...prev, [feature]: !prev[feature] }))}
                   aria-pressed={on}
-                  className={`inline-flex h-11 items-center gap-1.5 rounded-full px-4 text-[14px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                  className={`inline-flex h-11 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-4 text-[14px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                     on
                       ? 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'
                       : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]'

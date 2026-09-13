@@ -23,7 +23,7 @@ export const DietaryChips: React.FC<DietaryChipsProps> = ({ notes, presets, size
     <div className={`flex flex-wrap items-center gap-1.5 ${className}`}>
       {allergies.length > 0 && (
         <span
-          className={`inline-flex items-center rounded-full font-medium bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] ${pad}`}
+          className={`inline-flex items-center rounded-[var(--ds-radius-control)] font-medium bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] ${pad}`}
           title={`Allergie: ${allergies.join(', ')}`}
         >
           <AlertTriangle className={`${icon} flex-shrink-0`} />
@@ -32,7 +32,7 @@ export const DietaryChips: React.FC<DietaryChipsProps> = ({ notes, presets, size
       )}
       {intolerances.length > 0 && (
         <span
-          className={`inline-flex items-center rounded-full font-medium bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] ${pad}`}
+          className={`inline-flex items-center rounded-[var(--ds-radius-control)] font-medium bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] ${pad}`}
           title={`Intolleranze: ${intolerances.join(', ')}`}
         >
           <Info className={`${icon} flex-shrink-0`} />

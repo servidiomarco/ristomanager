@@ -142,7 +142,7 @@ export const PeriodPicker: React.FC<{
             type="button"
             onClick={() => setDraft(s.value)}
             aria-pressed={isActive(s.value)}
-            className={`inline-flex h-11 items-center rounded-full px-4 text-[14px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+            className={`inline-flex h-11 items-center rounded-[var(--ds-radius-control)] px-4 text-[14px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
               isActive(s.value)
                 ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                 : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
@@ -158,7 +158,7 @@ export const PeriodPicker: React.FC<{
           // while already custom leaves a half-built range alone.
           onClick={() => { if (!isCustom) setDraft({ from: '', to: '' }); }}
           aria-pressed={isCustom}
-          className={`inline-flex h-11 items-center gap-2 rounded-full px-4 text-[14px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+          className={`inline-flex h-11 items-center gap-2 rounded-[var(--ds-radius-control)] px-4 text-[14px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
             isCustom
               ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
               : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
@@ -177,7 +177,7 @@ export const PeriodPicker: React.FC<{
           type="button"
           onClick={() => setDraft({ from: '', to: '' })}
           disabled={!draft.from && !draft.to}
-          className="inline-flex h-9 items-center rounded-full px-3 text-[13px] font-medium text-[var(--ds-text-muted)] transition-colors hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          className="inline-flex h-9 items-center rounded-[var(--ds-radius-control)] px-3 text-[13px] font-medium text-[var(--ds-text-muted)] transition-colors hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
         >
           Azzera
         </button>
@@ -189,7 +189,7 @@ export const PeriodPicker: React.FC<{
             type="button"
             onClick={() => setAnchor(a => new Date(a.getFullYear(), a.getMonth() - 1, 1))}
             aria-label="Mese precedente"
-            className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             ‹
           </button>
@@ -200,7 +200,7 @@ export const PeriodPicker: React.FC<{
             type="button"
             onClick={() => setAnchor(a => new Date(a.getFullYear(), a.getMonth() + 1, 1))}
             aria-label="Mese successivo"
-            className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             ›
           </button>
@@ -235,7 +235,7 @@ export const PeriodTrigger: React.FC<{
   <button
     type="button"
     onClick={onClick}
-    className="inline-flex h-9 flex-shrink-0 items-center gap-2 rounded-full bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+    className="inline-flex h-9 flex-shrink-0 items-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
   >
     <CalendarDays className="h-4 w-4" aria-hidden />
     {periodLabel(period, new Date(), span)}

@@ -236,7 +236,7 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
         <button
           type="button"
           onClick={openNew}
-          className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[12px] font-semibold hover:bg-[var(--ds-action-bg-hover)] shrink-0"
+          className="inline-flex items-center gap-1.5 h-8 px-3 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[12px] font-semibold hover:bg-[var(--ds-action-bg-hover)] shrink-0"
         >
           <Plus className="h-3.5 w-3.5" />
           Nuovo
@@ -267,11 +267,11 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-[14px] font-semibold text-[var(--ds-text-primary)] truncate">{r.title}</span>
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset shrink-0 ${badge.cls}`}>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-[var(--ds-radius-control)] font-medium ring-1 ring-inset shrink-0 ${badge.cls}`}>
                         {badge.label}
                       </span>
                       {!r.active && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] ring-[var(--ds-border)] shrink-0">
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-[var(--ds-radius-control)] font-medium ring-1 ring-inset bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] ring-[var(--ds-border)] shrink-0">
                           Disattivato
                         </span>
                       )}
@@ -299,7 +299,7 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
                     <button
                       type="button"
                       onClick={() => handleToggleActive(r)}
-                      className={`h-7 px-2.5 rounded-full text-[11px] font-medium border transition-colors ${
+                      className={`h-7 px-2.5 rounded-[var(--ds-radius-control)] text-[11px] font-medium border transition-colors ${
                         r.active
                           ? 'border-[var(--ds-seated-solid)] bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] hover:bg-[var(--ds-seated-tint)]'
                           : 'border-[var(--ds-border)] bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)]'
@@ -344,7 +344,7 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
                 type="button"
                 onClick={closeEditor}
                 disabled={saving}
-                className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -432,7 +432,7 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
                               ? editor.weekdays.filter(x => x !== w.code)
                               : [...editor.weekdays, w.code],
                           })}
-                          className={`h-8 px-3 rounded-full text-[12px] font-medium border transition-colors ${
+                          className={`h-8 px-3 rounded-[var(--ds-radius-control)] text-[12px] font-medium border transition-colors ${
                             on
                               ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-text-primary)]'
                               : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] border-[var(--ds-border)] hover:text-[var(--ds-text-primary)]'
@@ -500,7 +500,7 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
                             ? editor.target_roles.filter(x => x !== o.code)
                             : [...editor.target_roles, o.code],
                         })}
-                        className={`h-8 px-3 rounded-full text-[12px] font-medium border transition-colors ${
+                        className={`h-8 px-3 rounded-[var(--ds-radius-control)] text-[12px] font-medium border transition-colors ${
                           on
                             ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-text-primary)]'
                             : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] border-[var(--ds-border)] hover:text-[var(--ds-text-primary)]'
@@ -534,7 +534,7 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
                 type="button"
                 onClick={closeEditor}
                 disabled={saving}
-                className="px-4 py-2 rounded-full text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-50"
+                className="px-4 py-2 rounded-[var(--ds-radius-control)] text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-50"
               >
                 Annulla
               </button>
@@ -542,7 +542,7 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
                 type="button"
                 onClick={handleSave}
                 disabled={!canSave}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[13px] font-medium hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-50 disabled:cursor-not-allowed"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[13px] font-medium hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
                 {editor.id ? 'Salva' : 'Crea'}
@@ -565,14 +565,14 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
               <button
                 type="button"
                 onClick={() => setConfirmDeleteId(null)}
-                className="px-4 py-2 rounded-full text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)]"
+                className="px-4 py-2 rounded-[var(--ds-radius-control)] text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)]"
               >
                 Annulla
               </button>
               <button
                 type="button"
                 onClick={() => handleDelete(confirmDeleteId)}
-                className="px-4 py-2 rounded-full bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] text-[13px] font-medium hover:bg-[var(--ds-critical-solid)]"
+                className="px-4 py-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] text-[13px] font-medium hover:bg-[var(--ds-critical-solid)]"
               >
                 Elimina
               </button>

@@ -98,7 +98,7 @@ export const CourseChips: React.FC<{
           onClick={() => onCourse(n)}
           aria-pressed={active}
           aria-label={courseLabel(n)}
-          className={`inline-flex h-11 min-w-[64px] flex-shrink-0 items-center justify-center gap-1.5 rounded-full px-4 text-[16px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+          className={`inline-flex h-11 min-w-[64px] flex-shrink-0 items-center justify-center gap-1.5 rounded-[var(--ds-radius-control)] px-4 text-[16px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
             active
               ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
               : 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]'

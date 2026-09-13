@@ -442,7 +442,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
         <div className="h-3 w-24 rounded bg-[var(--ds-surface-row)]" />
       </div>
       <div className="h-11 w-14 flex-shrink-0 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)]" />
-      <div className="h-11 w-11 flex-shrink-0 rounded-full bg-[var(--ds-surface-row)] sm:w-28" />
+      <div className="h-11 w-11 flex-shrink-0 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] sm:w-28" />
     </div>
   );
 
@@ -521,7 +521,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
             </span>
             {r.customer_is_vip && (
               <span
-                className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]"
+                className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]"
                 title="Cliente VIP"
                 aria-label="Cliente VIP"
               >
@@ -530,7 +530,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
             )}
             {stripDietaryNote(r.notes) && (
               <span
-                className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]"
+                className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]"
                 title={stripDietaryNote(r.notes)}
                 aria-label="Ha una nota"
               >
@@ -587,7 +587,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
             onClick={(e) => { e.stopPropagation(); handleQuickArrive(r); }}
             aria-label={`Segna ${toTitleCase(r.customer_name) || 'prenotazione'} come arrivato`}
             title={minsLate > 0 ? `Atteso ${minsLate} minuti fa` : 'Segna come arrivato'}
-            className={`inline-flex h-11 flex-shrink-0 items-center justify-center gap-1.5 rounded-full text-[14px] font-semibold transition-opacity disabled:opacity-50 sm:px-4 ${
+            className={`inline-flex h-11 flex-shrink-0 items-center justify-center gap-1.5 rounded-[var(--ds-radius-control)] text-[14px] font-semibold transition-opacity disabled:opacity-50 sm:px-4 ${
               band === 'late'
                 ? 'w-11 bg-[var(--ds-seated-solid)] text-white hover:opacity-90 sm:w-auto'
                 : 'w-11 bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] hover:opacity-80 sm:w-auto'
@@ -598,7 +598,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
           </button>
         )}
         {(seated || noShow) && (
-          <StatusPill tone={noShow ? 'critical' : 'positive'} className="h-11 flex-shrink-0 rounded-full px-3">
+          <StatusPill tone={noShow ? 'critical' : 'positive'} className="h-11 flex-shrink-0 rounded-[var(--ds-radius-control)] px-3">
             {noShow ? 'No-show' : r.arrival_status === ArrivalStatus.DEPARTING ? 'In uscita' : 'Arrivato'}
           </StatusPill>
         )}
@@ -708,7 +708,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
                       onClick={() => handleQuickArrive(r)}
                       aria-label={`Segna ${toTitleCase(r.customer_name) || 'prenotazione'} come arrivato`}
                       title="Segna come arrivato"
-                      className={`inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full transition-opacity hover:opacity-85 disabled:opacity-50 ${
+                      className={`inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] transition-opacity hover:opacity-85 disabled:opacity-50 ${
                         late
                           ? 'bg-[var(--ds-seated-solid)] text-white'
                           : 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'
@@ -886,7 +886,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
             <div className="flex flex-1 items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
               <button
                 onClick={() => setSelectedReservationId(null)}
-                className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:text-[var(--ds-text-primary)]"
+                className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:text-[var(--ds-text-primary)]"
                 aria-label="Torna alla lista"
               >
                 <ChevronLeft className="h-4 w-4" />
@@ -1113,7 +1113,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
             type="button"
             onClick={onClose}
             aria-label="Chiudi dettaglio"
-            className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:text-[var(--ds-text-primary)]"
+            className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:text-[var(--ds-text-primary)]"
           >
             <XIcon className="h-4 w-4" />
           </button>
@@ -1147,7 +1147,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
             type="button"
             disabled={busy}
             onClick={onFreeTable}
-            className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-[var(--ds-seated-solid)] text-[16px] font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+            className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-seated-solid)] text-[16px] font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
           >
             <Armchair className="h-5 w-5" aria-hidden />
             Tavolo liberato
@@ -1157,7 +1157,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
             type="button"
             disabled={busy || noShow}
             onClick={onMarkArrived}
-            className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-[var(--ds-seated-solid)] text-[16px] font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+            className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-seated-solid)] text-[16px] font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
           >
             <Check className="h-5 w-5" aria-hidden />
             Arrivato
@@ -1247,7 +1247,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
           href={`tel:${reservation.phone}`}
           className="mt-3 flex items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3 lg:hidden"
         >
-          <span className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface)] text-[var(--ds-text-secondary)]">
+          <span className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)]">
             <Phone className="h-4 w-4" />
           </span>
           <span className="min-w-0">
@@ -1478,7 +1478,7 @@ const TablePicker: React.FC<TablePickerProps> = ({
             onClick={onCancel}
             disabled={busy}
             aria-label="Chiudi"
-            className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:text-[var(--ds-text-primary)] disabled:opacity-50"
+            className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:text-[var(--ds-text-primary)] disabled:opacity-50"
           >
             <XIcon className="h-4 w-4" />
           </button>
@@ -1489,13 +1489,13 @@ const TablePicker: React.FC<TablePickerProps> = ({
           the floor plan's, not the chrome's. */}
       <div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-3 px-4 pb-3 sm:px-6">
         {visibleRooms.length > 1 ? (
-          <div className="flex min-w-0 gap-1 overflow-x-auto scrollbar-hide rounded-full bg-[var(--ds-surface)] p-1 shadow-[var(--ds-shadow-card)]">
+          <div className="flex min-w-0 gap-1 overflow-x-auto scrollbar-hide rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] p-1 shadow-[var(--ds-shadow-card)]">
             {visibleRooms.map(room => (
               <button
                 key={room.id}
                 onClick={() => setActiveRoomId(room.id)}
                 aria-pressed={room.id === activeRoom?.id}
-                className={`inline-flex h-9 flex-shrink-0 items-center whitespace-nowrap rounded-full px-3.5 text-[14px] font-medium transition-colors ${
+                className={`inline-flex h-9 flex-shrink-0 items-center whitespace-nowrap rounded-[var(--ds-radius-control)] px-3.5 text-[14px] font-medium transition-colors ${
                   room.id === activeRoom?.id
                     ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                     : 'text-[var(--ds-text-secondary)] hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]'
@@ -1895,7 +1895,7 @@ const RoomMap: React.FC<RoomMapProps> = ({
           <button
             onClick={onClose}
             aria-label="Chiudi"
-            className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:text-[var(--ds-text-primary)]"
+            className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:text-[var(--ds-text-primary)]"
           >
             <XIcon className="h-4 w-4" />
           </button>
@@ -1905,13 +1905,13 @@ const RoomMap: React.FC<RoomMapProps> = ({
       {/* Room tabs and the live tally on one row */}
       <div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-3 px-4 pb-3 sm:px-6">
         {visibleRooms.length > 1 ? (
-          <div className="flex min-w-0 gap-1 overflow-x-auto scrollbar-hide rounded-full bg-[var(--ds-surface)] p-1 shadow-[var(--ds-shadow-card)]">
+          <div className="flex min-w-0 gap-1 overflow-x-auto scrollbar-hide rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] p-1 shadow-[var(--ds-shadow-card)]">
             {visibleRooms.map(room => (
               <button
                 key={room.id}
                 onClick={() => setActiveRoomId(room.id)}
                 aria-pressed={room.id === activeRoom?.id}
-                className={`inline-flex h-9 flex-shrink-0 items-center whitespace-nowrap rounded-full px-3.5 text-[14px] font-medium transition-colors ${
+                className={`inline-flex h-9 flex-shrink-0 items-center whitespace-nowrap rounded-[var(--ds-radius-control)] px-3.5 text-[14px] font-medium transition-colors ${
                   room.id === activeRoom?.id
                     ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                     : 'text-[var(--ds-text-secondary)] hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]'
@@ -2036,7 +2036,7 @@ const RoomMap: React.FC<RoomMapProps> = ({
                         conteggio completo è nel tooltip del tavolo). */}
                     {extraCount > 0 && (
                       <span
-                        className="absolute -right-1.5 -top-1.5 z-10 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--ds-arriving-solid)] px-1 text-[10px] font-bold text-white shadow-[var(--ds-shadow-card)]"
+                        className="absolute -right-1.5 -top-1.5 z-10 inline-flex h-5 min-w-5 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-solid)] px-1 text-[10px] font-bold text-white shadow-[var(--ds-shadow-card)]"
                         aria-label={`${extraCount + 1} prenotazioni su questo tavolo`}
                         title={titleText}
                       >
@@ -2045,7 +2045,7 @@ const RoomMap: React.FC<RoomMapProps> = ({
                     )}
                   </div>
                   {caption && (
-                    <span className="absolute -bottom-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-[var(--ds-surface)] px-2 py-0.5 text-[10px] font-semibold tabular-nums text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]">
+                    <span className="absolute -bottom-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-2 py-0.5 text-[10px] font-semibold tabular-nums text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]">
                       {caption}
                     </span>
                   )}

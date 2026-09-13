@@ -31,13 +31,13 @@ export const PadTabs: React.FC<PadTabsProps> = ({ onTables, onComanda, onMenu, c
   // sotto di sé (regola 10).
   <div className="-mx-4 flex flex-shrink-0 gap-2 border-t border-[var(--ds-border)] bg-[var(--ds-surface)] px-6 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-1.5">
     <button type="button" onClick={onTables} className={tabClass}>
-      <span className="flex h-8 w-14 items-center justify-center rounded-full text-[var(--ds-text-muted)]">
+      <span className="flex h-8 w-14 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)]">
         <LayoutGrid size={21} aria-hidden />
       </span>
       <span className="text-[12px] font-semibold text-[var(--ds-text-muted)]">Tavoli</span>
     </button>
     <button type="button" onClick={onComanda} className={tabClass}>
-      <span className="flex h-8 w-14 items-center justify-center rounded-full text-[var(--ds-text-muted)]">
+      <span className="flex h-8 w-14 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)]">
         <ClipboardList size={21} aria-hidden />
       </span>
       <span className="flex items-center gap-1 text-[12px] font-semibold text-[var(--ds-text-muted)]">
@@ -48,7 +48,7 @@ export const PadTabs: React.FC<PadTabsProps> = ({ onTables, onComanda, onMenu, c
       </span>
     </button>
     <button type="button" onClick={onMenu} aria-current="page" className={tabClass}>
-      <span className="flex h-8 w-14 items-center justify-center rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]">
+      <span className="flex h-8 w-14 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]">
         <BookOpen size={21} aria-hidden />
       </span>
       <span className="text-[12px] font-semibold text-[var(--ds-text-primary)]">Menu</span>

@@ -194,7 +194,7 @@ export const RoadmapPage: React.FC = () => {
                 type="button"
                 onClick={() => setError(null)}
                 aria-label="Chiudi l'errore"
-                className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--ds-critical-text)] transition-[filter] hover:brightness-90"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-critical-text)] transition-[filter] hover:brightness-90"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -226,7 +226,7 @@ export const RoadmapPage: React.FC = () => {
               <div className="flex items-center justify-between gap-2 px-4 pb-1 pt-4 sm:px-5">
                 <div className="flex min-w-0 items-center gap-2.5">
                   <span
-                    className={`flex h-6 w-6 flex-none items-center justify-center rounded-full text-[12px] font-bold ${
+                    className={`flex h-6 w-6 flex-none items-center justify-center rounded-[var(--ds-radius-control)] text-[12px] font-bold ${
                       complete
                         ? 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'
                         : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]'
@@ -251,7 +251,7 @@ export const RoadmapPage: React.FC = () => {
                     title={`Aggiungi task in ${phase.label}`}
                     aria-label={`Aggiungi task in ${phase.label}`}
                     onClick={() => setEditDraft({ id: null, title: '', description: '', phase_key: phase.key, claude_prompt: '', result_note: '' })}
-                    className="inline-flex h-9 w-9 flex-none items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    className="inline-flex h-9 w-9 flex-none items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
                     <Plus className="h-4 w-4" />
                   </button>
@@ -278,7 +278,7 @@ export const RoadmapPage: React.FC = () => {
                           aria-label={task.status === 'done' ? 'Riapri il task' : 'Segna come fatto'}
                           title={task.status === 'done' ? 'Riapri' : 'Segna fatto'}
                           onClick={() => setStatus(task, task.status === 'done' ? 'todo' : 'done')}
-                          className={`mt-0.5 flex h-5 w-5 flex-none items-center justify-center rounded-full border transition-colors ${
+                          className={`mt-0.5 flex h-5 w-5 flex-none items-center justify-center rounded-[var(--ds-radius-control)] border transition-colors ${
                             task.status === 'done'
                               ? 'border-transparent bg-[var(--ds-seated-solid)] text-white'
                               : 'border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-transparent hover:border-[var(--ds-text-muted)]'
@@ -305,12 +305,12 @@ export const RoadmapPage: React.FC = () => {
                               {task.title}
                             </p>
                             {isClaudeTask && (
-                              <span className="inline-flex items-center gap-1 rounded-full bg-[var(--ds-border)] px-2 py-0.5 text-[11px] font-semibold leading-none text-[var(--ds-text-secondary)]">
+                              <span className="inline-flex items-center gap-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-border)] px-2 py-0.5 text-[11px] font-semibold leading-none text-[var(--ds-text-secondary)]">
                                 <Bot className="h-3 w-3" aria-hidden /> Claude
                               </span>
                             )}
                             {task.status !== 'todo' && task.status !== 'done' && (
-                              <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold leading-none ${meta.chipClass}`}>
+                              <span className={`inline-flex items-center gap-1.5 rounded-[var(--ds-radius-control)] px-2 py-0.5 text-[11px] font-semibold leading-none ${meta.chipClass}`}>
                                 <span className={`h-1.5 w-1.5 rounded-full ${meta.dot} ${task.status === 'in_progress' ? 'animate-pulse' : ''}`} aria-hidden />
                                 {meta.label}
                               </span>
@@ -335,7 +335,7 @@ export const RoadmapPage: React.FC = () => {
                             type="button"
                             disabled={isBusy}
                             onClick={() => setStatus(task, 'queued')}
-                            className="inline-flex h-9 flex-none items-center gap-1.5 rounded-full bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
+                            className="inline-flex h-9 flex-none items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
                           >
                             {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Bot className="h-3.5 w-3.5" aria-hidden />}
                             Approva per Claude
@@ -347,7 +347,7 @@ export const RoadmapPage: React.FC = () => {
                             disabled={isBusy}
                             title="Ritira dalla coda"
                             onClick={() => setStatus(task, 'todo')}
-                            className="inline-flex h-9 flex-none items-center gap-1.5 rounded-full px-3 text-[13px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface)] disabled:opacity-40"
+                            className="inline-flex h-9 flex-none items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 text-[13px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface)] disabled:opacity-40"
                           >
                             <Undo2 className="h-3.5 w-3.5" aria-hidden /> Ritira
                           </button>
@@ -393,7 +393,7 @@ export const RoadmapPage: React.FC = () => {
             <button
               type="button"
               onClick={() => { const task = tasks.find(t => t.id === editDraft.id); if (task) setDeleteCandidate(task); }}
-              className="inline-flex h-11 items-center gap-1.5 rounded-full px-4 text-[15px] font-medium text-[var(--ds-critical-text)] transition-colors hover:bg-[var(--ds-critical-tint)]"
+              className="inline-flex h-11 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-4 text-[15px] font-medium text-[var(--ds-critical-text)] transition-colors hover:bg-[var(--ds-critical-tint)]"
             >
               <Trash2 className="h-4 w-4" aria-hidden /> Elimina
             </button>
@@ -442,7 +442,7 @@ export const RoadmapPage: React.FC = () => {
                       type="button"
                       onClick={() => setEditDraft(d => d ? { ...d, phase_key: p.key } : d)}
                       aria-pressed={active}
-                      className={`flex h-11 items-center justify-center rounded-full px-3 text-[14px] font-medium transition-colors ${
+                      className={`flex h-11 items-center justify-center rounded-[var(--ds-radius-control)] px-3 text-[14px] font-medium transition-colors ${
                         active
                           ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                           : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'
@@ -494,7 +494,7 @@ export const RoadmapPage: React.FC = () => {
           <button
             type="button"
             onClick={confirmDelete}
-            className="inline-flex h-11 items-center justify-center gap-2 rounded-full bg-[var(--ds-critical-solid)] px-5 text-[15px] font-semibold text-[var(--ds-critical-fg)] transition-[filter] hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-solid)] px-5 text-[15px] font-semibold text-[var(--ds-critical-fg)] transition-[filter] hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             <Trash2 className="h-4 w-4" aria-hidden /> Elimina
           </button>

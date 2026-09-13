@@ -141,13 +141,13 @@ const ShiftBar: React.FC<{ lunch: number; dinner: number; total: number; other?:
   return (
     <div className="flex h-2 w-full gap-0.5 overflow-hidden rounded-full bg-[var(--ds-surface-row)]" aria-hidden>
       {lunch > 0 && (
-        <div className="h-full rounded-full bg-[var(--ds-pending-solid)]" style={{ width: `${pct(lunch)}%` }} />
+        <div className="h-full rounded-[var(--ds-radius-control)] bg-[var(--ds-pending-solid)]" style={{ width: `${pct(lunch)}%` }} />
       )}
       {dinner > 0 && (
-        <div className="h-full rounded-full bg-[var(--ds-arriving-solid)]" style={{ width: `${pct(dinner)}%` }} />
+        <div className="h-full rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-solid)]" style={{ width: `${pct(dinner)}%` }} />
       )}
       {other > 0 && (
-        <div className="h-full rounded-full bg-[var(--ds-border-strong)]" style={{ width: `${pct(other)}%` }} />
+        <div className="h-full rounded-[var(--ds-radius-control)] bg-[var(--ds-border-strong)]" style={{ width: `${pct(other)}%` }} />
       )}
     </div>
   );
@@ -164,7 +164,7 @@ const ShiftRow: React.FC<{ shift: keyof typeof SHIFT_ROW_STYLES; children: React
   const s = SHIFT_ROW_STYLES[shift];
   return (
     <div className="flex items-center gap-2.5 min-w-0">
-      <span className={`inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full ${s.chip}`}>
+      <span className={`inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] ${s.chip}`}>
         {s.icon}
       </span>
       <span className="text-[13px] text-[var(--ds-text-secondary)] truncate">{children}</span>
@@ -1095,7 +1095,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               {todaysTodos.length > 0 && (
                 <button
                   onClick={() => onNavigateToAttivita?.()}
-                  className="inline-flex items-center gap-2 md:gap-2.5 pl-4 md:pl-5 pr-1.5 h-11 rounded-full bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] transition-colors flex-shrink-0 self-center"
+                  className="inline-flex items-center gap-2 md:gap-2.5 pl-4 md:pl-5 pr-1.5 h-11 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] transition-colors flex-shrink-0 self-center"
                   aria-label={`${todaysTodos.length} attività di oggi`}
                   title="Attività di oggi"
                 >
@@ -1106,7 +1106,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                       regular this is below WCAG's large-text threshold, so it does not meet
                       the 4.5:1 AA floor. Deliberate product decision. Switching the
                       foreground to var(--ds-pending-fg) would restore 5.80:1 at any size. */}
-                  <span className="inline-flex items-center justify-center min-w-[32px] h-8 px-2 rounded-full text-[16px] font-normal leading-none tabular-nums bg-[var(--ds-pending-solid)] text-[#ffffff]">
+                  <span className="inline-flex items-center justify-center min-w-[32px] h-8 px-2 rounded-[var(--ds-radius-control)] text-[16px] font-normal leading-none tabular-nums bg-[var(--ds-pending-solid)] text-[#ffffff]">
                     {todaysTodos.length}
                   </span>
                 </button>
@@ -1125,7 +1125,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               />
 
               {/* Separate time chip — always shows live current time */}
-              <div className="flex items-center gap-1.5 bg-[var(--ds-surface-row)] rounded-full px-4 h-10 flex-shrink-0">
+              <div className="flex items-center gap-1.5 bg-[var(--ds-surface-row)] rounded-[var(--ds-radius-control)] px-4 h-10 flex-shrink-0">
                 <Clock className="h-4 w-4 text-[var(--ds-text-secondary)] flex-shrink-0" />
                 <span className="tabular-nums font-semibold text-[15px] tracking-[-0.01em] text-[var(--ds-text-primary)] whitespace-nowrap">
                   {currentTime.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
@@ -1133,7 +1133,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               </div>
 
               {/* Global meal filter — drives KPI cards, Stato Tavoli, Affluenza, Note, Personale */}
-              <div className="basis-full md:basis-auto flex items-center justify-center bg-[var(--ds-surface-row)] rounded-full p-1 gap-0.5">
+              <div className="basis-full md:basis-auto flex items-center justify-center bg-[var(--ds-surface-row)] rounded-[var(--ds-radius-control)] p-1 gap-0.5">
                 {([
                   { key: 'LUNCH', label: 'Pranzo', icon: <Sun className="h-4 w-4" /> },
                   { key: 'DINNER', label: 'Cena', icon: <Sunset className="h-4 w-4" /> },
@@ -1142,7 +1142,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                   <button
                     key={opt.key}
                     onClick={() => setGlobalShiftFilter(opt.key)}
-                    className={`inline-flex items-center justify-center gap-1.5 px-3 h-9 rounded-full text-[15px] font-medium transition-colors flex-1 md:flex-none ${
+                    className={`inline-flex items-center justify-center gap-1.5 px-3 h-9 rounded-[var(--ds-radius-control)] text-[15px] font-medium transition-colors flex-1 md:flex-none ${
                       globalShiftFilter === opt.key
                         ? 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]'
                         : 'text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
@@ -1176,7 +1176,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               {/* Service hue follows the DS convention: pranzo amber, cena
                   indigo, fuori servizio neutral. */}
               <span
-                className={`inline-flex flex-shrink-0 items-center px-2.5 h-7 rounded-full text-[13px] font-medium whitespace-nowrap ${
+                className={`inline-flex flex-shrink-0 items-center px-2.5 h-7 rounded-[var(--ds-radius-control)] text-[13px] font-medium whitespace-nowrap ${
                   serviceState.kind === 'lunch'
                     ? 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]'
                     : serviceState.kind === 'dinner'
@@ -1386,7 +1386,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">Da confermare</h2>
           {pendingReservations.length > 0 && (
-            <span className="inline-flex items-center justify-center min-w-[28px] h-7 px-2 rounded-full text-[14px] font-semibold tabular-nums bg-[var(--ds-pending-solid)] text-[#ffffff]">
+            <span className="inline-flex items-center justify-center min-w-[28px] h-7 px-2 rounded-[var(--ds-radius-control)] text-[14px] font-semibold tabular-nums bg-[var(--ds-pending-solid)] text-[#ffffff]">
               {pendingReservations.length}
             </span>
           )}
@@ -1444,7 +1444,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                     type="button"
                     disabled={busy || !onUpdateReservation}
                     onClick={() => handleInlinePending(res, 'decline')}
-                    className="flex-shrink-0 h-9 w-9 inline-flex items-center justify-center rounded-full bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] hover:brightness-95 transition-all disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    className="flex-shrink-0 h-9 w-9 inline-flex items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] hover:brightness-95 transition-all disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     aria-label={`Rifiuta la prenotazione di ${toTitleCase(res.customer_name)}`}
                   >
                     <X className="h-4 w-4" aria-hidden />
@@ -1453,7 +1453,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                     type="button"
                     disabled={busy || !onUpdateReservation}
                     onClick={() => handleInlinePending(res, 'confirm')}
-                    className="flex-shrink-0 h-9 px-3.5 rounded-full text-[14px] font-semibold bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] transition-all disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    className="flex-shrink-0 h-9 px-3.5 rounded-[var(--ds-radius-control)] text-[14px] font-semibold bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] transition-all disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
                     {busy ? '…' : 'Conferma'}
                   </button>
@@ -1585,7 +1585,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             </span>
             <div className="flex-1 min-w-0 h-2 rounded-full bg-[var(--ds-surface)] overflow-hidden">
               <div
-                className={`h-full rounded-full ${shift === 'lunch' ? 'bg-[var(--ds-pending-solid)]' : 'bg-[var(--ds-arriving-solid)]'}`}
+                className={`h-full rounded-[var(--ds-radius-control)] ${shift === 'lunch' ? 'bg-[var(--ds-pending-solid)]' : 'bg-[var(--ds-arriving-solid)]'}`}
                 style={{ width: `${total > 0 ? Math.min(100, (value / total) * 100) : 0}%` }}
               />
             </div>
@@ -1613,13 +1613,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               </div>
               <div className="flex items-center gap-2 flex-wrap">
                 {showLunch && (
-                  <span className="inline-flex items-center gap-1.5 pl-2 pr-3 h-8 rounded-full text-[13px] font-medium bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]">
+                  <span className="inline-flex items-center gap-1.5 pl-2 pr-3 h-8 rounded-[var(--ds-radius-control)] text-[13px] font-medium bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]">
                     <Sun className="h-3.5 w-3.5 flex-shrink-0" aria-hidden />
                     Pranzo {lunchOccupancy}% · {lunchTableIds.size} tavoli
                   </span>
                 )}
                 {showDinner && (
-                  <span className="inline-flex items-center gap-1.5 pl-2 pr-3 h-8 rounded-full text-[13px] font-medium bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]">
+                  <span className="inline-flex items-center gap-1.5 pl-2 pr-3 h-8 rounded-[var(--ds-radius-control)] text-[13px] font-medium bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]">
                     <Sunset className="h-3.5 w-3.5 flex-shrink-0" aria-hidden />
                     Cena {dinnerOccupancy}% · {dinnerTableIds.size} tavoli
                   </span>
@@ -1647,7 +1647,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 const Icon = getRoomIcon(room.name);
                 return (
                   <div key={room.id} className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3 flex items-center gap-3 min-w-0">
-                    <span className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface)] text-[var(--ds-text-secondary)]">
+                    <span className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)]">
                       <Icon className="h-4 w-4" />
                     </span>
                     <span className="text-[15px] font-semibold text-[var(--ds-text-primary)] w-20 sm:w-24 flex-shrink-0 truncate">
@@ -1692,7 +1692,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               </p>
             </div>
           </div>
-          <div className="inline-flex p-1 rounded-full bg-[var(--ds-surface-row)] flex-shrink-0">
+          <div className="inline-flex p-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] flex-shrink-0">
             {([
               { key: 'ORARIO', label: 'Orario' },
               { key: 'SETTIMANA', label: 'Settimana' },
@@ -1700,7 +1700,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               <button
                 key={t.key}
                 onClick={() => setAffluenceTab(t.key)}
-                className={`px-3.5 h-8 text-[14px] font-medium rounded-full whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                className={`px-3.5 h-8 text-[14px] font-medium rounded-[var(--ds-radius-control)] whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                   affluenceTab === t.key
                     ? 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]'
                     : 'text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]'
@@ -1754,7 +1754,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             return (
               <div key={shift} className={`rounded-[var(--ds-radius)] p-4 sm:p-5 flex flex-col gap-4 min-w-0 ${tone.wash}`}>
                 <div className="flex items-center gap-2 flex-wrap min-w-0">
-                  <span className={`inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface)] ${tone.text}`}>
+                  <span className={`inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] ${tone.text}`}>
                     {tone.icon}
                   </span>
                   <h3 className="text-[15px] font-semibold text-[var(--ds-text-primary)]">{tone.label}</h3>
@@ -1783,7 +1783,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                       return (
                         <div key={room.roomId} className="flex gap-2 items-center">
                           <div className="w-[168px] flex-shrink-0 flex items-center gap-2 min-w-0">
-                            <span className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface)] text-[var(--ds-text-secondary)]">
+                            <span className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)]">
                               <Icon className="h-3.5 w-3.5" />
                             </span>
                             <div className="min-w-0">
@@ -1845,7 +1845,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 {showLunch && (
                   <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3 flex items-center justify-between gap-2 min-w-0">
                     <span className="inline-flex items-center gap-2 text-[14px] font-medium text-[var(--ds-text-primary)] min-w-0">
-                      <span className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]">
+                      <span className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]">
                         <Sun className="h-3.5 w-3.5" />
                       </span>
                       <span className="truncate">Totale pranzo</span>
@@ -1858,7 +1858,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 {showDinner && (
                   <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3 flex items-center justify-between gap-2 min-w-0">
                     <span className="inline-flex items-center gap-2 text-[14px] font-medium text-[var(--ds-text-primary)] min-w-0">
-                      <span className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]">
+                      <span className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]">
                         <Sunset className="h-3.5 w-3.5" />
                       </span>
                       <span className="truncate">Totale cena</span>
@@ -1915,7 +1915,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               {(globalShiftFilter === 'ALL' || globalShiftFilter === 'LUNCH') && (
                 <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3 flex items-center justify-between gap-2 min-w-0">
                   <span className="inline-flex items-center gap-2 text-[14px] font-medium text-[var(--ds-text-primary)] min-w-0">
-                    <span className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]">
+                    <span className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]">
                       <Sun className="h-3.5 w-3.5" />
                     </span>
                     <span className="truncate">Totale pranzo (settimana)</span>
@@ -1928,7 +1928,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               {(globalShiftFilter === 'ALL' || globalShiftFilter === 'DINNER') && (
                 <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3 flex items-center justify-between gap-2 min-w-0">
                   <span className="inline-flex items-center gap-2 text-[14px] font-medium text-[var(--ds-text-primary)] min-w-0">
-                    <span className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]">
+                    <span className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]">
                       <Sunset className="h-3.5 w-3.5" />
                     </span>
                     <span className="truncate">Totale cena (settimana)</span>
@@ -1964,7 +1964,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             {onNavigateToAttivita && (
               <button
                 onClick={onNavigateToAttivita}
-                className="flex-shrink-0 inline-flex items-center gap-1.5 text-[14px] font-medium text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] rounded-full px-1"
+                className="flex-shrink-0 inline-flex items-center gap-1.5 text-[14px] font-medium text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] rounded-[var(--ds-radius-control)] px-1"
               >
                 Apri <ArrowRight className="h-4 w-4" aria-hidden />
               </button>
@@ -1999,7 +1999,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                   <div key={todo.id} className="flex items-center gap-2.5 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3 py-2.5 min-w-0">
                     <button
                       onClick={() => handleToggleTodo(todo.id)}
-                      className="flex-shrink-0 w-5 h-5 rounded-full border-2 border-[var(--ds-border-strong)] hover:border-[var(--ds-text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                      className="flex-shrink-0 w-5 h-5 rounded-[var(--ds-radius-control)] border-2 border-[var(--ds-border-strong)] hover:border-[var(--ds-text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                       aria-label={`Completa: ${todo.title}`}
                     />
                     <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${CATEGORY_DOT_COLORS[todo.category]}`} aria-hidden />
@@ -2029,14 +2029,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               onChange={e => setNewTaskTitle(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddTask(); } }}
               placeholder="Nuova attività…"
-              className="flex-1 min-w-0 h-11 px-3 rounded-full bg-[var(--ds-surface-row)] text-[15px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              className="flex-1 min-w-0 h-11 px-3 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[15px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             />
             <button
               type="button"
               onClick={handleAddTask}
               disabled={!newTaskTitle.trim() || isAddingTask}
               aria-label="Aggiungi attività"
-              className="flex-shrink-0 inline-flex items-center justify-center w-11 h-11 rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              className="flex-shrink-0 inline-flex items-center justify-center w-11 h-11 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             >
               {isAddingTask ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-5 w-5" />}
             </button>
@@ -2053,7 +2053,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             {onNavigateToShoppingList && (
               <button
                 onClick={onNavigateToShoppingList}
-                className="flex-shrink-0 inline-flex items-center gap-1.5 text-[14px] font-medium text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] rounded-full px-1"
+                className="flex-shrink-0 inline-flex items-center gap-1.5 text-[14px] font-medium text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] rounded-[var(--ds-radius-control)] px-1"
               >
                 Apri <ArrowRight className="h-4 w-4" aria-hidden />
               </button>
@@ -2091,7 +2091,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                   const remaining = items.filter(i => !i.checked).length;
                   return (
                     <div key={cat} className="flex items-center gap-2 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3 py-2.5 min-w-0">
-                      <span className="inline-flex items-center gap-1.5 px-2.5 h-7 rounded-full text-[13px] font-medium bg-[var(--ds-surface)] text-[var(--ds-text-primary)] flex-shrink-0">
+                      <span className="inline-flex items-center gap-1.5 px-2.5 h-7 rounded-[var(--ds-radius-control)] text-[13px] font-medium bg-[var(--ds-surface)] text-[var(--ds-text-primary)] flex-shrink-0">
                         {SHOPPING_CATEGORY_LABELS[cat]}
                       </span>
                       <span className="text-[13px] tabular-nums text-[var(--ds-text-muted)] ml-auto flex-shrink-0">
@@ -2121,14 +2121,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               onChange={e => setNewItemName(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddShoppingItem(); } }}
               placeholder="Aggiungi prodotto…"
-              className="flex-1 min-w-0 h-11 px-3 rounded-full bg-[var(--ds-surface-row)] text-[15px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              className="flex-1 min-w-0 h-11 px-3 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[15px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             />
             <select
               value={newItemCategory}
               onChange={e => setNewItemCategory(e.target.value as ShoppingCategory)}
               // ds-select disegna la nostra freccia e le riserva lo spazio:
               // quella nativa restava incollata al bordo della pillola.
-              className="flex-shrink-0 h-11 pl-3 pr-0 rounded-full bg-[var(--ds-surface-row)] text-[14px] font-medium text-[var(--ds-text-secondary)] cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ds-select ds-select-sm"
+              className="flex-shrink-0 h-11 pl-3 pr-0 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[14px] font-medium text-[var(--ds-text-secondary)] cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ds-select ds-select-sm"
               aria-label="Categoria"
             >
               <option value="CUCINA">Cucina</option>
@@ -2140,7 +2140,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               onClick={handleAddShoppingItem}
               disabled={!newItemName.trim() || isAddingShoppingItem}
               aria-label="Aggiungi prodotto"
-              className="flex-shrink-0 inline-flex items-center justify-center w-11 h-11 rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              className="flex-shrink-0 inline-flex items-center justify-center w-11 h-11 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             >
               {isAddingShoppingItem ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-5 w-5" />}
             </button>
@@ -2167,7 +2167,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             <button
               type="button"
               onClick={onNavigateToInventario}
-              className="flex-shrink-0 inline-flex items-center gap-1.5 text-[14px] font-medium text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] rounded-full px-1"
+              className="flex-shrink-0 inline-flex items-center gap-1.5 text-[14px] font-medium text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] rounded-[var(--ds-radius-control)] px-1"
               title="Vai all'inventario"
             >
               Apri <ArrowRight className="h-4 w-4" aria-hidden />
@@ -2246,12 +2246,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           return (
             <div key={shiftKey} className={`rounded-[var(--ds-radius)] p-4 flex flex-col gap-3 min-w-0 ${tone.wash}`}>
               <div className="flex items-center gap-2 flex-wrap min-w-0">
-                <span className={`inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface)] ${tone.text}`}>
+                <span className={`inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] ${tone.text}`}>
                   {tone.icon}
                 </span>
                 <h3 className="text-[15px] font-semibold text-[var(--ds-text-primary)]">{tone.label}</h3>
                 {isLive && (
-                  <span className="inline-flex items-center gap-1.5 pl-1.5 pr-2.5 h-6 rounded-full bg-[var(--ds-surface)] text-[12px] font-medium text-[var(--ds-seated-text)]">
+                  <span className="inline-flex items-center gap-1.5 pl-1.5 pr-2.5 h-6 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[12px] font-medium text-[var(--ds-seated-text)]">
                     <PulseDot dotClass="bg-[var(--ds-seated-solid)]" pulse />
                     in corso
                   </span>
@@ -2282,10 +2282,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                           return (
                             <span
                               key={s.id}
-                              className="inline-flex items-center gap-2 pl-1.5 pr-3 h-9 rounded-full bg-[var(--ds-surface)] text-[14px] text-[var(--ds-text-primary)]"
+                              className="inline-flex items-center gap-2 pl-1.5 pr-3 h-9 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[14px] text-[var(--ds-text-primary)]"
                               title={s.role ? `${toTitleCase(s.name)} ${toTitleCase(s.surname)} · ${s.role}` : `${toTitleCase(s.name)} ${toTitleCase(s.surname)}`}
                             >
-                              <span className="flex-shrink-0 h-6 w-6 rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] flex items-center justify-center text-[11px] font-semibold">
+                              <span className="flex-shrink-0 h-6 w-6 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] flex items-center justify-center text-[11px] font-semibold">
                                 {initials}
                               </span>
                               <span className="truncate max-w-[10rem]">{toTitleCase(s.name)}</span>
@@ -2415,7 +2415,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                     type="button"
                     onClick={closeModal}
                     disabled={closeDisabled}
-                    className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
+                    className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
                     aria-label="Chiudi"
                   >
                     <X className="h-4 w-4" />

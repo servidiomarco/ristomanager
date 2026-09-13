@@ -155,7 +155,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
     <div
       role="group"
       aria-label={t('header.langGroupAria')}
-      className="inline-flex gap-0.5 rounded-full bg-[var(--ds-surface)] p-0.5 shadow-[var(--ds-shadow-card)]"
+      className="inline-flex gap-0.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] p-0.5 shadow-[var(--ds-shadow-card)]"
     >
       {SUPPORTED_LANGUAGES.map(code => (
         <button
@@ -163,7 +163,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
           type="button"
           aria-pressed={lang === code}
           onClick={() => i18n.changeLanguage(code)}
-          className={`min-h-[30px] rounded-full px-3 text-xs font-semibold tracking-wide transition ${
+          className={`min-h-[30px] rounded-[var(--ds-radius-control)] px-3 text-xs font-semibold tracking-wide transition ${
             lang === code ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]' : 'text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]'
           }`}
         >
@@ -379,7 +379,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
                 placeholder={t('items.namePlaceholder')}
                 value={claimantLabel}
                 onChange={e => setClaimantLabel(e.target.value.slice(0, 40))}
-                className="mt-1 w-full h-11 px-3 rounded-full bg-[var(--ds-surface-row)] text-[15px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                className="mt-1 w-full h-11 px-3 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[15px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               />
             </div>
             <button
@@ -423,7 +423,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
                     placeholder={t('amountForm.amountPlaceholder')}
                     value={fixedAmountInput}
                     onChange={e => setFixedAmountInput(e.target.value)}
-                    className="w-full h-12 pl-8 pr-3 text-lg rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] tabular-nums"
+                    className="w-full h-12 pl-8 pr-3 text-lg rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] tabular-nums"
                   />
                 </div>
                 <div className="mt-1 text-[11px] text-[var(--ds-text-muted)]">{t('amountForm.maxAvailable', { amount: residualEur })}</div>
@@ -437,7 +437,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
                 placeholder={t('amountForm.namePlaceholder')}
                 value={claimantLabel}
                 onChange={e => setClaimantLabel(e.target.value.slice(0, 40))}
-                className="mt-1 w-full h-11 px-3 rounded-full bg-[var(--ds-surface-row)] text-[15px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                className="mt-1 w-full h-11 px-3 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[15px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               />
               <p className="mt-1 text-[11px] text-[var(--ds-text-muted)]">{t('amountForm.visibleNote')}</p>
             </div>
@@ -481,7 +481,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
               type="button"
               onClick={handleRelease}
               disabled={submitting}
-              className="w-full h-11 rounded-full bg-[var(--ds-surface)] ring-1 ring-inset ring-[var(--ds-border-strong)] text-[var(--ds-text-primary)] text-[15px] font-medium hover:bg-[var(--ds-surface-row)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              className="w-full h-11 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] ring-1 ring-inset ring-[var(--ds-border-strong)] text-[var(--ds-text-primary)] text-[15px] font-medium hover:bg-[var(--ds-surface-row)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             >
               {submitting ? t('claimed.cancelling') : t('claimed.cancelShare')}
             </button>

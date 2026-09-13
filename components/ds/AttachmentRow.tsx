@@ -89,7 +89,7 @@ export const AttachmentRow: React.FC<{
         type="button"
         onClick={onRemove}
         aria-label={`Togli ${name}`}
-        className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] sm:h-9 sm:w-9"
+        className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] sm:h-9 sm:w-9"
       >
         <X className="h-4 w-4" />
       </button>

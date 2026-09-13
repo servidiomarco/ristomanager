@@ -223,7 +223,7 @@ const NotifichePage: React.FC = () => {
             aria-label="Filtri"
             title="Filtri"
             className={filtersOpen
-              ? 'relative inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] shadow-[var(--ds-shadow-card)] transition-colors'
+              ? 'relative inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] shadow-[var(--ds-shadow-card)] transition-colors'
               : `relative ${dsIconButton}`}
           >
             <ListFilter className="h-4 w-4" />
@@ -237,7 +237,7 @@ const NotifichePage: React.FC = () => {
               onClick={handleMarkAllRead}
               disabled={markingAll}
               title="Segna tutte come lette"
-              className="ml-auto hidden h-9 flex-shrink-0 items-center gap-1.5 rounded-full bg-[var(--ds-surface)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-50 sm:inline-flex"
+              className="ml-auto hidden h-9 flex-shrink-0 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-50 sm:inline-flex"
             >
               <CheckCheck className="h-4 w-4" aria-hidden />
               Tutte lette

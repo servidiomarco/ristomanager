@@ -53,7 +53,7 @@ export const AppVersionBanner: React.FC = () => {
                     onClick={handleReload}
                     disabled={isReloading}
                     aria-live="polite"
-                    className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-[var(--ds-surface)] text-[var(--ds-arriving-text)] text-[12px] font-semibold hover:bg-[var(--ds-arriving-tint)] disabled:opacity-80 disabled:cursor-progress transition-colors whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-surface)]"
+                    className="inline-flex items-center gap-1.5 h-8 px-3 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-arriving-text)] text-[12px] font-semibold hover:bg-[var(--ds-arriving-tint)] disabled:opacity-80 disabled:cursor-progress transition-colors whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-surface)]"
                 >
                     <RefreshCw className={`h-3.5 w-3.5 ${isReloading ? 'animate-spin' : ''}`} />
                     {isReloading ? 'Ricarico…' : 'Ricarica'}
@@ -63,7 +63,7 @@ export const AppVersionBanner: React.FC = () => {
                     onClick={dismiss}
                     disabled={isReloading}
                     aria-label="Chiudi banner"
-                    className="p-1 rounded-full text-[var(--ds-arriving-fg)] opacity-80 hover:opacity-100 hover:bg-[var(--ds-arriving-fg)]/10 disabled:opacity-50 transition-opacity flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-surface)]"
+                    className="p-1 rounded-[var(--ds-radius-control)] text-[var(--ds-arriving-fg)] opacity-80 hover:opacity-100 hover:bg-[var(--ds-arriving-fg)]/10 disabled:opacity-50 transition-opacity flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-surface)]"
                 >
                     <X className="h-4 w-4" />
                 </button>

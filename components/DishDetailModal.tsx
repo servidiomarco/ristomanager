@@ -40,7 +40,7 @@ export const DishDetailModal: React.FC<Props> = ({ dish, onClose }) => {
           <button
             type="button"
             onClick={onClose}
-            className="absolute top-3 right-3 inline-flex h-9 w-9 items-center justify-center rounded-full bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="absolute top-3 right-3 inline-flex h-9 w-9 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             title="Chiudi"
           >
             <X className="h-4 w-4" />
@@ -56,7 +56,7 @@ export const DishDetailModal: React.FC<Props> = ({ dish, onClose }) => {
           </div>
 
           {dish.category && (
-            <div className="inline-flex items-center gap-1.5 text-xs font-medium bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)] border border-[var(--ds-arriving-tint)] px-2.5 py-1 rounded-full mb-3">
+            <div className="inline-flex items-center gap-1.5 text-xs font-medium bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)] border border-[var(--ds-arriving-tint)] px-2.5 py-1 rounded-[var(--ds-radius-control)] mb-3">
               <Tag className="h-3 w-3" />
               {dish.category}
             </div>
@@ -76,7 +76,7 @@ export const DishDetailModal: React.FC<Props> = ({ dish, onClose }) => {
                 {dish.allergens.map(a => (
                   <span
                     key={a}
-                    className="px-2.5 py-1 rounded-full text-xs font-medium bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] border border-[var(--ds-critical-tint)]"
+                    className="px-2.5 py-1 rounded-[var(--ds-radius-control)] text-xs font-medium bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] border border-[var(--ds-critical-tint)]"
                   >
                     {a}
                   </span>
@@ -101,7 +101,7 @@ export const DishDetailModal: React.FC<Props> = ({ dish, onClose }) => {
           <button
             type="button"
             onClick={() => setPhotoFullscreen(false)}
-            className="absolute top-4 right-4 p-2 rounded-full bg-white/90 hover:bg-white text-[var(--ds-text-primary)] shadow-lg transition-colors"
+            className="absolute top-4 right-4 p-2 rounded-[var(--ds-radius-control)] bg-white/90 hover:bg-white text-[var(--ds-text-primary)] shadow-lg transition-colors"
             title="Chiudi"
           >
             <X className="h-6 w-6" />

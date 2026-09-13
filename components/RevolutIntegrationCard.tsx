@@ -68,7 +68,7 @@ export const RevolutIntegrationCard: React.FC<Props> = ({ showToast }) => {
         if (!status) return null;
         if (!status.has_api_key) {
             return (
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] border border-[var(--ds-border)]">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[var(--ds-radius-control)] text-[11px] font-medium bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] border border-[var(--ds-border)]">
                     <span className="w-1.5 h-1.5 rounded-full bg-[var(--ds-border-strong)]"></span>
                     Non configurato
                 </span>
@@ -80,7 +80,7 @@ export const RevolutIntegrationCard: React.FC<Props> = ({ showToast }) => {
             : 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] border-[var(--ds-pending-solid)]';
         const dot = status.environment === 'production' ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-pending-solid)]';
         return (
-            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border ${color}`}>
+            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[var(--ds-radius-control)] text-[11px] font-medium border ${color}`}>
                 <span className={`w-1.5 h-1.5 rounded-full ${dot}`}></span>
                 {label}
             </span>

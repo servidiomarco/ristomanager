@@ -437,7 +437,7 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
                   type="button"
                   onClick={markPhantomRecovered}
                   disabled={saving}
-                  className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-surface)] px-4 text-[14px] font-medium text-[var(--ds-critical-text)] transition-colors hover:brightness-95 disabled:opacity-50"
+                  className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-4 text-[14px] font-medium text-[var(--ds-critical-text)] transition-colors hover:brightness-95 disabled:opacity-50"
                 >
                   {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
                   Segna come recuperata
@@ -521,7 +521,7 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
                       status: detail.follow_up_status === 'CONTACTED' ? 'PENDING' : 'CONTACTED',
                     })}
                     disabled={saving}
-                    className="flex-shrink-0 rounded-full text-[14px] font-medium text-[var(--ds-text-primary)] underline underline-offset-4 transition-opacity hover:no-underline disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    className="flex-shrink-0 rounded-[var(--ds-radius-control)] text-[14px] font-medium text-[var(--ds-text-primary)] underline underline-offset-4 transition-opacity hover:no-underline disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
                     {detail.follow_up_status === 'CONTACTED' ? 'Da ricontattare' : 'Segna ricontattato'}
                   </button>
@@ -1035,7 +1035,7 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
                 aria-label="Filtri"
                 title="Filtri"
                 className={filtersOpen
-                  ? 'relative inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] shadow-[var(--ds-shadow-card)] transition-colors'
+                  ? 'relative inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] shadow-[var(--ds-shadow-card)] transition-colors'
                   : `relative ${dsIconButton}`}
               >
                 <ListFilter className="h-4 w-4" />
@@ -1079,7 +1079,7 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
                     value={from}
                     onChange={(e) => setFrom(e.target.value)}
                     aria-label="Da"
-                    className="h-10 min-w-0 flex-1 rounded-full bg-[var(--ds-surface-row)] px-4 text-[14px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    className="h-10 min-w-0 flex-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-4 text-[14px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   />
                   <span className="flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden>→</span>
                   <input
@@ -1087,7 +1087,7 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
                     value={to}
                     onChange={(e) => setTo(e.target.value)}
                     aria-label="A"
-                    className="h-10 min-w-0 flex-1 rounded-full bg-[var(--ds-surface-row)] px-4 text-[14px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    className="h-10 min-w-0 flex-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-4 text-[14px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   />
                 </div>
                 <div className="flex items-center justify-between gap-3 text-[13px] text-[var(--ds-text-muted)]">

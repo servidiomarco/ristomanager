@@ -67,7 +67,7 @@ const CategoryCheckboxes: React.FC<{
             disabled={disabled}
             onClick={() => toggle(c)}
             aria-pressed={on}
-            className={`inline-flex h-10 items-center gap-1.5 rounded-full px-4 text-[14px] font-medium transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+            className={`inline-flex h-10 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-4 text-[14px] font-medium transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
               on
                 ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                 : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
@@ -344,7 +344,7 @@ export const SupplierManagementModal: React.FC<SupplierManagementModalProps> = (
                     type="button"
                     onClick={() => startEdit(s)}
                     aria-label={`Modifica ${s.name}`}
-                    className="inline-flex h-10 w-10 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
                     <Edit2 className="h-4 w-4" />
                   </button>
@@ -352,7 +352,7 @@ export const SupplierManagementModal: React.FC<SupplierManagementModalProps> = (
                     type="button"
                     onClick={() => setPendingDeleteId(s.id)}
                     aria-label={`Elimina ${s.name}`}
-                    className="inline-flex h-10 w-10 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
                     <Trash2 className="h-4 w-4" />
                   </button>
@@ -369,7 +369,7 @@ export const SupplierManagementModal: React.FC<SupplierManagementModalProps> = (
                       type="button"
                       onClick={() => setPendingDeleteId(null)}
                       disabled={isDeleting}
-                      className="inline-flex h-10 items-center rounded-full px-4 text-[14px] font-medium text-[var(--ds-critical-text)] transition-opacity hover:opacity-80 disabled:opacity-50"
+                      className="inline-flex h-10 items-center rounded-[var(--ds-radius-control)] px-4 text-[14px] font-medium text-[var(--ds-critical-text)] transition-opacity hover:opacity-80 disabled:opacity-50"
                     >
                       Annulla
                     </button>
@@ -377,7 +377,7 @@ export const SupplierManagementModal: React.FC<SupplierManagementModalProps> = (
                       type="button"
                       onClick={() => handleDelete(s.id)}
                       disabled={isDeleting}
-                      className="inline-flex h-10 items-center gap-1.5 rounded-full bg-[var(--ds-critical-solid)] px-4 text-[14px] font-semibold text-[var(--ds-critical-fg)] transition-opacity hover:opacity-90 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                      className="inline-flex h-10 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-solid)] px-4 text-[14px] font-semibold text-[var(--ds-critical-fg)] transition-opacity hover:opacity-90 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     >
                       {isDeleting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                       Elimina

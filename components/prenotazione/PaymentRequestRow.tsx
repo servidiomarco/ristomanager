@@ -71,7 +71,7 @@ export const PaymentRequestRow: React.FC<{
             onBlur={() => setRevokeArmed(false)}
             disabled={revoking}
             title="Annulla il link al provider: il cliente non potrà più pagarlo"
-            className={`inline-flex h-8 items-center gap-1 rounded-full px-2.5 text-[13px] font-medium transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+            className={`inline-flex h-8 items-center gap-1 rounded-[var(--ds-radius-control)] px-2.5 text-[13px] font-medium transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
               revokeArmed
                 ? 'bg-[var(--ds-critical-solid)] text-[#ffffff]'
                 : 'text-[var(--ds-critical-text)] hover:bg-[var(--ds-critical-tint)]'
@@ -87,7 +87,7 @@ export const PaymentRequestRow: React.FC<{
               type="button"
               onClick={onCopy}
               title="Copia link"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             >
               {copied ? <Check className="h-3.5 w-3.5 text-[var(--ds-seated-text)]" /> : <Copy className="h-3.5 w-3.5" />}
             </button>

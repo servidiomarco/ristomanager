@@ -240,7 +240,7 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
                     type="button"
                     onClick={() => setVoidTarget(i)}
                     disabled={busy}
-                    className="flex-shrink-0 rounded-full bg-[var(--ds-surface)] px-3 py-1.5 text-[13px] font-medium text-[var(--ds-critical-text)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-critical-tint)] disabled:opacity-40"
+                    className="flex-shrink-0 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-3 py-1.5 text-[13px] font-medium text-[var(--ds-critical-text)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-critical-tint)] disabled:opacity-40"
                   >
                     Storna
                   </button>
@@ -255,7 +255,7 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
           <button
             type="button"
             onClick={() => setScreen('payment')}
-            className="inline-flex h-12 w-full items-center justify-center rounded-full bg-[var(--ds-action-bg)] text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)]"
+            className="inline-flex h-12 w-full items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)]"
           >
             Torna al pagamento
           </button>

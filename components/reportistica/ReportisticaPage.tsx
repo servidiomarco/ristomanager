@@ -114,7 +114,7 @@ export const ReportisticaPage: React.FC = () => {
               <button
                 onClick={stampa}
                 disabled={loading || nothingYet}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:text-[var(--ds-text-primary)] disabled:opacity-50"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:text-[var(--ds-text-primary)] disabled:opacity-50"
                 aria-label="Stampa il report"
               >
                 <Printer className="h-4 w-4" />
@@ -122,7 +122,7 @@ export const ReportisticaPage: React.FC = () => {
               <button
                 onClick={() => load(period)}
                 disabled={loading}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:text-[var(--ds-text-primary)] disabled:opacity-50"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:text-[var(--ds-text-primary)] disabled:opacity-50"
                 aria-label="Aggiorna"
               >
                 <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
@@ -153,7 +153,7 @@ export const ReportisticaPage: React.FC = () => {
               <section className="ds-ai-frame rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)] sm:p-5">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-start gap-3">
-                    <span className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]">
+                    <span className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]">
                       <Wand2 className="h-5 w-5" />
                     </span>
                     <div>

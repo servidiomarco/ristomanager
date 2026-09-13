@@ -86,13 +86,13 @@ export const PayAtTableSettingsManager: React.FC<Props> = ({ showToast }) => {
                         aria-label={`${enabled ? 'Disattiva' : 'Attiva'} conto al tavolo`}
                         onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggle(); }}
                         disabled={!canEdit || saving}
-                        className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
+                        className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-[var(--ds-radius-control)] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
                             enabled ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-surface-row)] border border-[var(--ds-border)]'
                         }`}
                     >
                         <span
                             aria-hidden="true"
-                            className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${
+                            className={`pointer-events-none inline-block h-5 w-5 transform rounded-[var(--ds-radius-control)] bg-white shadow ring-0 transition-transform ${
                                 enabled ? 'translate-x-5' : 'translate-x-0.5'
                             } translate-y-0.5`}
                         />

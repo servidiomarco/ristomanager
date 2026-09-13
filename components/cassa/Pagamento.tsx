@@ -143,7 +143,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
         type="button"
         onClick={onShowQr}
         disabled={busy || !bill.share_token}
-        className="mt-2 inline-flex h-11 items-center gap-2 rounded-full bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
+        className="mt-2 inline-flex h-11 items-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
       >
         <QrCode size={16} aria-hidden /> QR al tavolo
       </button>
@@ -199,7 +199,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
             type="button"
             onClick={onEdit}
             disabled={busy}
-            className="inline-flex h-12 flex-shrink-0 items-center rounded-full bg-[var(--ds-surface)] px-5 text-[15px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
+            className="inline-flex h-12 flex-shrink-0 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-5 text-[15px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
           >
             Correggi
           </button>
@@ -209,7 +209,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
             type="button"
             onClick={onDiscount}
             disabled={busy}
-            className="inline-flex h-12 flex-shrink-0 items-center rounded-full bg-[var(--ds-surface)] px-5 text-[15px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
+            className="inline-flex h-12 flex-shrink-0 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-5 text-[15px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
           >
             Sconto
           </button>
@@ -218,7 +218,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
           type="button"
           onClick={onSplit}
           disabled={busy || residual <= 0}
-          className="inline-flex h-12 flex-shrink-0 items-center rounded-full bg-[var(--ds-surface)] px-5 text-[15px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
+          className="inline-flex h-12 flex-shrink-0 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-5 text-[15px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
         >
           Dividi conto
         </button>
@@ -226,7 +226,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
           type="button"
           onClick={confirm}
           disabled={busy}
-          className="inline-flex h-12 flex-1 items-center justify-center gap-2 rounded-full bg-[var(--ds-action-bg)] text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
+          className="inline-flex h-12 flex-1 items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
         >
           {busy && <Loader2 size={16} className="animate-spin" />}
           Registra {euro(math.applied + math.recorded)} e chiudi
@@ -244,7 +244,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
             type="button"
             onClick={onBack}
             aria-label="Torna alla comanda"
-            className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)]"
+            className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)]"
           >
             <ArrowLeft className="h-4 w-4" />
           </button>
@@ -336,7 +336,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
                   onClick={() => setMethod(m.value)}
                   disabled={busy || blocked}
                   title={blocked ? 'Serve un cliente sulla visita' : undefined}
-                  className={`inline-flex h-11 items-center rounded-full px-3.5 text-[14px] font-medium transition-colors disabled:opacity-40 ${
+                  className={`inline-flex h-11 items-center rounded-[var(--ds-radius-control)] px-3.5 text-[14px] font-medium transition-colors disabled:opacity-40 ${
                     method === m.value
                       ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                       : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'
@@ -360,7 +360,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
                       aria-label="Togli movimento"
                       onClick={() => setMovements(prev => prev.filter((_, j) => j !== i))}
                       disabled={busy}
-                      className="rounded-full px-2 text-[var(--ds-text-muted)] hover:bg-[var(--ds-border)] disabled:opacity-40"
+                      className="rounded-[var(--ds-radius-control)] px-2 text-[var(--ds-text-muted)] hover:bg-[var(--ds-border)] disabled:opacity-40"
                     >
                       ×
                     </button>

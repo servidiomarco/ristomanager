@@ -174,7 +174,7 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             title="Chiudi"
           >
             <X className="h-4 w-4" />
@@ -201,7 +201,7 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
                     } catch { /* resta preventivo: nessun falso ok */ }
                     finally { setConfirmBusy(false); }
                   }}
-                  className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 >
                   {confirmBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
                   Conferma banchetto
@@ -209,7 +209,7 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
                 <button
                   type="button"
                   onClick={() => setSuggestConfirm(false)}
-                  className="inline-flex h-9 items-center rounded-full px-3 text-[13px] font-medium text-[var(--ds-text-muted)] transition-colors hover:text-[var(--ds-text-primary)]"
+                  className="inline-flex h-9 items-center rounded-[var(--ds-radius-control)] px-3 text-[13px] font-medium text-[var(--ds-text-muted)] transition-colors hover:text-[var(--ds-text-primary)]"
                 >
                   Resta preventivo
                 </button>
@@ -294,7 +294,7 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
                   const MethodIcon = METHOD_ICON[p.payment_method];
                   return (
                     <li key={p.id} className="flex items-center gap-3 p-3 bg-white">
-                      <div className="h-9 w-9 rounded-full bg-[var(--ds-surface-row)] flex items-center justify-center flex-shrink-0">
+                      <div className="h-9 w-9 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] flex items-center justify-center flex-shrink-0">
                         <MethodIcon className="h-4 w-4 text-[var(--ds-text-secondary)]" />
                       </div>
                       <div className="min-w-0 flex-1">
@@ -399,14 +399,14 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
                   type="button"
                   disabled={submitting}
                   onClick={() => { setShowForm(false); setFormError(null); }}
-                  className="rounded-full px-4 py-2 border border-[var(--ds-border-strong)] bg-white text-[var(--ds-text-primary)] text-sm font-medium hover:bg-[var(--ds-surface-row)]"
+                  className="rounded-[var(--ds-radius-control)] px-4 py-2 border border-[var(--ds-border-strong)] bg-white text-[var(--ds-text-primary)] text-sm font-medium hover:bg-[var(--ds-surface-row)]"
                 >
                   Annulla
                 </button>
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="rounded-full px-4 py-2 bg-[var(--ds-action-bg)] text-white dark:text-[var(--ds-action-fg)] text-sm font-medium hover:opacity-90 disabled:opacity-50 inline-flex items-center justify-center gap-1.5"
+                  className="rounded-[var(--ds-radius-control)] px-4 py-2 bg-[var(--ds-action-bg)] text-white dark:text-[var(--ds-action-fg)] text-sm font-medium hover:opacity-90 disabled:opacity-50 inline-flex items-center justify-center gap-1.5"
                 >
                   {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
                   Registra

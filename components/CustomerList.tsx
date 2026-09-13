@@ -626,7 +626,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
     return (
       <div className="relative flex-shrink-0">
         <div
-          className={`flex items-center justify-center rounded-full font-semibold ${
+          className={`flex items-center justify-center rounded-[var(--ds-radius-control)] font-semibold ${
             size === 'lg' ? 'h-12 w-12 text-[15px]' : 'h-10 w-10 text-[13px]'
           } ${
             vip
@@ -640,7 +640,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
           <span
             title="Cliente VIP"
             aria-label="Cliente VIP"
-            className="absolute -right-0.5 -top-0.5 inline-flex h-[18px] w-[18px] items-center justify-center rounded-full bg-[var(--ds-pending-solid)] ring-2 ring-[var(--ds-surface)]"
+            className="absolute -right-0.5 -top-0.5 inline-flex h-[18px] w-[18px] items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-pending-solid)] ring-2 ring-[var(--ds-surface)]"
           >
             <Star className="h-2.5 w-2.5 fill-[#ffffff] text-[#ffffff]" aria-hidden />
           </span>
@@ -695,7 +695,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
           href={telHref(c.phone)}
           title={`Chiama ${c.phone}`}
           aria-label={`Chiama ${toTitleCase(c.name)}`}
-          className="inline-flex aspect-square h-11 w-11 flex-none items-center justify-center rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          className="inline-flex aspect-square h-11 w-11 flex-none items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
         >
           <Phone className="h-4 w-4" aria-hidden />
         </a>
@@ -705,7 +705,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
           rel="noreferrer"
           title={`Scrivi su WhatsApp a ${c.phone}`}
           aria-label={`Scrivi su WhatsApp a ${toTitleCase(c.name)}`}
-          className="inline-flex aspect-square h-11 w-11 flex-none items-center justify-center rounded-full bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          className="inline-flex aspect-square h-11 w-11 flex-none items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
         >
           <MessageCircle className="h-4 w-4" aria-hidden />
         </a>
@@ -745,7 +745,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
           aria-expanded={cardMenuOpen}
           aria-label={`Altre azioni su ${toTitleCase(c.name)}`}
           title="Altre azioni"
-          className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          className="inline-flex h-10 w-10 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
         >
           <MoreVertical className="h-4 w-4" />
         </button>
@@ -843,7 +843,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
   /* Le pastiglie della barra: Duplicati, Marketing ed Esporta. h-9 come i
      segmenti del SegmentedControl — sono comandi di secondo piano sopra la
      lista, non le azioni della pagina. */
-  const chip = 'inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+  const chip = 'inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
   /* ── Riga della lista ───────────────────────────────────────────────────
      La scheda intera apre il dettaglio, e il numero è l'unica eccezione
@@ -1028,7 +1028,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
                     : `Filtra per lettera ${letter}`
                   : `Nessun cliente con lettera ${letter}`
               }
-              className={`flex h-[18px] w-[18px] items-center justify-center rounded-full text-[11px] font-semibold leading-none tabular-nums transition-colors ${
+              className={`flex h-[18px] w-[18px] items-center justify-center rounded-[var(--ds-radius-control)] text-[11px] font-semibold leading-none tabular-nums transition-colors ${
                 active
                   ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                   : has
@@ -1127,10 +1127,10 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
             <div className="space-y-2" aria-hidden>
               {Array.from({ length: 8 }).map((_, i) => (
                 <div key={i} className="flex items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)] motion-safe:animate-pulse">
-                  <div className="h-10 w-10 flex-shrink-0 rounded-full bg-[var(--ds-surface-row)]" />
+                  <div className="h-10 w-10 flex-shrink-0 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)]" />
                   <div className="min-w-0 flex-1 space-y-2">
                     <div className="h-3.5 w-2/5 rounded-full bg-[var(--ds-surface-row)]" />
-                    <div className="h-3 w-3/5 rounded-full bg-[var(--ds-surface-row)]" />
+                    <div className="h-3 w-3/5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)]" />
                   </div>
                 </div>
               ))}
@@ -1170,7 +1170,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
                       id={`cust-letter-${letter}`}
                       className="sticky top-0 z-[1] mb-2 flex items-center gap-2 bg-[var(--ds-canvas)] py-1.5"
                     >
-                      <span className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-action-bg)] text-[12px] font-semibold text-[var(--ds-action-fg)]">
+                      <span className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[12px] font-semibold text-[var(--ds-action-fg)]">
                         {letter}
                       </span>
                       <span className="text-[13px] text-[var(--ds-text-muted)]">
@@ -1222,7 +1222,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
                 type="button"
                 onClick={() => setDetailCustomer(null)}
                 aria-label="Torna all'elenco clienti"
-                className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] md:hidden"
+                className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] md:hidden"
               >
                 <ArrowLeft className="h-4 w-4" />
               </button>
@@ -1760,7 +1760,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
             <button
               type="button"
               onClick={() => confirmDeleteId !== null && handleDelete(confirmDeleteId)}
-              className="inline-flex h-11 items-center justify-center gap-2 rounded-full bg-[var(--ds-critical-solid)] px-5 text-[15px] font-semibold text-[var(--ds-critical-fg)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-solid)] px-5 text-[15px] font-semibold text-[var(--ds-critical-fg)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             >
               <Trash2 className="h-4 w-4" aria-hidden />
               Elimina

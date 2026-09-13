@@ -79,7 +79,7 @@ export const FondoEChiusura: React.FC<FondoEChiusuraProps> = ({
             type="button"
             onClick={onBack}
             aria-label="Torna alla coda"
-            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)]"
+            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)]"
           >
             <ArrowLeft className="h-4 w-4" />
           </button>
@@ -89,7 +89,7 @@ export const FondoEChiusura: React.FC<FondoEChiusuraProps> = ({
           <button
             type="button"
             onClick={onPrint}
-            className="inline-flex h-11 items-center gap-2 rounded-full bg-[var(--ds-surface)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)]"
+            className="inline-flex h-11 items-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)]"
           >
             <Printer size={16} aria-hidden /> Stampa riepilogo
           </button>
@@ -132,7 +132,7 @@ export const FondoEChiusura: React.FC<FondoEChiusuraProps> = ({
                   <button
                     type="button"
                     onClick={() => { setFloatText((session.opening_float_cents / 100).toFixed(2)); setEditingFloat(true); }}
-                    className="inline-flex h-11 items-center rounded-full bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]"
+                    className="inline-flex h-11 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]"
                   >
                     Modifica
                   </button>
@@ -331,7 +331,7 @@ export const FondoEChiusura: React.FC<FondoEChiusuraProps> = ({
                   type="button"
                   onClick={() => onClose(countedCents, note.trim())}
                   disabled={busy || counted.trim() === '' || (needsNote && note.trim().length === 0)}
-                  className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-[var(--ds-action-bg)] text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
+                  className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
                 >
                   {busy && <Loader2 size={16} className="animate-spin" />}
                   Chiudi la cassa del servizio

@@ -112,7 +112,7 @@ export const PublicQuotePage: React.FC = () => {
             />
           )}
           <p className="text-[15px] font-semibold text-[var(--ds-text-primary)]">{business.name}</p>
-          <span className={`mt-3 inline-flex h-7 items-center rounded-full px-3 text-[13px] font-medium ${
+          <span className={`mt-3 inline-flex h-7 items-center rounded-[var(--ds-radius-control)] px-3 text-[13px] font-medium ${
             isQuote
               ? 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]'
               : 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'

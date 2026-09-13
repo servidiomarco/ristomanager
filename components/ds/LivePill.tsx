@@ -34,7 +34,7 @@ export const LivePill: React.FC<LivePillProps> = ({ connected, time, variant = '
         title={label}
       >
         {connected && (
-          <span className="absolute inline-flex h-full w-full rounded-full bg-[var(--ds-seated-solid)] opacity-60 animate-ping motion-reduce:hidden" aria-hidden></span>
+          <span className="absolute inline-flex h-full w-full rounded-[var(--ds-radius-control)] bg-[var(--ds-seated-solid)] opacity-60 animate-ping motion-reduce:hidden" aria-hidden></span>
         )}
         <span
           className={`relative inline-flex h-2.5 w-2.5 rounded-full ${connected ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-critical-solid)]'}`}
@@ -46,7 +46,7 @@ export const LivePill: React.FC<LivePillProps> = ({ connected, time, variant = '
 
   return (
     <div
-      className={`inline-flex items-center gap-2 pl-2.5 pr-3 h-10 rounded-full text-[15px] font-medium ${
+      className={`inline-flex items-center gap-2 pl-2.5 pr-3 h-10 rounded-[var(--ds-radius-control)] text-[15px] font-medium ${
         connected
           ? 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'
           : 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)]'
@@ -57,7 +57,7 @@ export const LivePill: React.FC<LivePillProps> = ({ connected, time, variant = '
     >
       <span className="relative flex h-2 w-2" aria-hidden>
         {connected && (
-          <span className="absolute inline-flex h-full w-full rounded-full bg-[var(--ds-seated-solid)] opacity-60 animate-ping motion-reduce:hidden"></span>
+          <span className="absolute inline-flex h-full w-full rounded-[var(--ds-radius-control)] bg-[var(--ds-seated-solid)] opacity-60 animate-ping motion-reduce:hidden"></span>
         )}
         <span className={`relative inline-flex h-2 w-2 rounded-full ${connected ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-critical-solid)]'}`}></span>
       </span>

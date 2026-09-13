@@ -245,7 +245,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
               onChange={e => setQuery(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Cerca prenotazioni o clienti…"
-              className="h-12 w-full rounded-full bg-[var(--ds-surface-row)] pl-11 pr-11 text-[16px] text-[var(--ds-text-primary)] outline-none placeholder:text-[var(--ds-text-muted)] focus-visible:outline-none sm:bg-[var(--ds-surface)] sm:text-[15px] sm:shadow-[var(--ds-shadow-raised)]"
+              className="h-12 w-full rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] pl-11 pr-11 text-[16px] text-[var(--ds-text-primary)] outline-none placeholder:text-[var(--ds-text-muted)] focus-visible:outline-none sm:bg-[var(--ds-surface)] sm:text-[15px] sm:shadow-[var(--ds-shadow-raised)]"
             />
             {customersLoading && (
               <Loader2 className="pointer-events-none absolute right-11 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-[var(--ds-text-muted)]" />
@@ -257,7 +257,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                 type="button"
                 onClick={() => setQuery('')}
                 aria-label="Svuota ricerca"
-                className="absolute right-3 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                className="absolute right-3 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -301,7 +301,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                         isActive ? 'bg-[var(--ds-surface-row)]' : 'hover:bg-[var(--ds-surface-row)]'
                       }`}
                     >
-                      <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]">
+                      <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]">
                         <Calendar className="h-4 w-4" />
                       </div>
                       <div className="flex-1 min-w-0">
@@ -310,7 +310,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                             {toTitleCase(r.customer_name) || '—'}
                           </span>
                           {chip && (
-                            <span className={`flex-shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${chip.cls}`}>
+                            <span className={`flex-shrink-0 rounded-[var(--ds-radius-control)] px-2 py-0.5 text-[11px] font-medium ${chip.cls}`}>
                               {chip.label}
                             </span>
                           )}
@@ -346,13 +346,13 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                         isActive ? 'bg-[var(--ds-surface-row)]' : 'hover:bg-[var(--ds-surface-row)]'
                       }`}
                     >
-                      <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]">
+                      <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]">
                         <User className="h-4 w-4" />
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="text-[15px] sm:text-[14px] font-medium text-[var(--ds-text-primary)] truncate">
                           {toTitleCase(c.name)}
-                          {c.is_vip && <span className="ml-1.5 rounded-full bg-[var(--ds-pending-tint)] px-1.5 py-0.5 text-[11px] font-semibold text-[var(--ds-pending-text)]">VIP</span>}
+                          {c.is_vip && <span className="ml-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-pending-tint)] px-1.5 py-0.5 text-[11px] font-semibold text-[var(--ds-pending-text)]">VIP</span>}
                         </div>
                         <div className="text-[12px] text-[var(--ds-text-muted)] truncate flex items-center gap-2 tabular">
                           {c.phone && <span className="inline-flex items-center gap-1"><Phone className="h-3 w-3" />{c.phone}</span>}

@@ -133,7 +133,7 @@ export const PaneHeader: React.FC<{
           type="button"
           onClick={onBack}
           aria-label={backLabel}
-          className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] md:hidden"
+          className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] md:hidden"
         >
           <ArrowLeft className="h-4 w-4" />
         </button>
@@ -197,7 +197,7 @@ export const StatusPill: React.FC<{
 }> = ({ tone = 'neutral', title, className = '', children }) => (
   <span
     title={title}
-    className={`inline-flex h-6 flex-shrink-0 items-center gap-1 rounded-full px-2 text-[12px] font-medium ring-1 ring-inset ring-[var(--ds-border-strong)] ${PILL_TONE[tone]} ${className}`}
+    className={`inline-flex h-6 flex-shrink-0 items-center gap-1 rounded-[var(--ds-radius-control)] px-2 text-[12px] font-medium ring-1 ring-inset ring-[var(--ds-border-strong)] ${PILL_TONE[tone]} ${className}`}
   >
     {children}
   </span>
@@ -215,7 +215,7 @@ export const CountBadge: React.FC<{
   className?: string;
 }> = ({ count, tone = 'neutral', max = 99, className = '' }) => (
   <span
-    className={`inline-flex h-6 min-w-[24px] flex-shrink-0 items-center justify-center rounded-full px-1.5 text-[12px] font-semibold tabular-nums ${
+    className={`inline-flex h-6 min-w-[24px] flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] px-1.5 text-[12px] font-semibold tabular-nums ${
       tone === 'alert'
         ? 'bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)]'
         : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]'
@@ -230,7 +230,7 @@ export const CountBadge: React.FC<{
    the recessed grey: a level-2 surface on the canvas measures about 1.03:1 and
    effectively disappears, leaving a bare glyph with no hit area you can see. */
 export const dsIconButton =
-  'inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+  'inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
 /* ── SearchField ──────────────────────────────────────────────────────────
    Always visible, never behind a toggle: on a list you filter before you
@@ -268,7 +268,7 @@ export const SearchField: React.FC<{
       onKeyDown={onKeyDown}
       placeholder={placeholder}
       aria-label={ariaLabel}
-      className={`h-11 w-full rounded-full pl-11 pr-11 text-[15px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] transition-shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+      className={`h-11 w-full rounded-[var(--ds-radius-control)] pl-11 pr-11 text-[15px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] transition-shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
         recessed
           ? 'bg-[var(--ds-surface-row)]'
           : 'bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]'
@@ -284,7 +284,7 @@ export const SearchField: React.FC<{
         type="button"
         onClick={() => onChange('')}
         aria-label="Svuota ricerca"
-        className="absolute right-3 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]"
+        className="absolute right-3 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]"
       >
         <X className="h-4 w-4" />
       </button>
@@ -382,7 +382,7 @@ export const SectionHeader: React.FC<{
           chevron is what people aim at, and a 16px icon floating in space
           reads as decoration rather than a control. */}
       <span
-        className={`inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-transform ${
+        className={`inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-transform ${
           expanded ? '' : '-rotate-90'
         }`}
         aria-hidden
@@ -458,7 +458,7 @@ export const StatStrip: React.FC<{
   return (
     <div
       className={`flex items-stretch overflow-hidden bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] ${
-        stacked ? 'rounded-[var(--ds-radius)]' : 'rounded-full'
+        stacked ? 'rounded-[var(--ds-radius)]' : 'rounded-[var(--ds-radius-control)]'
       } ${className}`}
     >
       {stats.map((s, i) => {
@@ -525,6 +525,9 @@ export const Avatar: React.FC<{
     : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]';
   return (
     <div className={`relative flex-shrink-0 ${badge ? 'pb-1' : ''} ${className}`}>
+      {/* L'avatar resta un cerchio: un volto, o le iniziali di una persona, in
+          un quadrato smussato leggono come una tessera. È l'eccezione alla
+          regola dei controlli — e non è un controllo. */}
       <div className={`flex items-center justify-center rounded-full font-semibold ${shell} ${
         size === 'sm' ? 'h-6 w-6 text-[10px]' : 'h-10 w-10 text-[13px]'
       }`}>

@@ -93,7 +93,7 @@ const QueueRow: React.FC<{
           type="button"
           onClick={past ? onOpen : onCollect}
           disabled={busy}
-          className={`inline-flex h-11 min-w-[88px] items-center justify-center gap-2 rounded-full px-4 text-[15px] font-semibold transition-colors disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+          className={`inline-flex h-11 min-w-[88px] items-center justify-center gap-2 rounded-[var(--ds-radius-control)] px-4 text-[15px] font-semibold transition-colors disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
             past
               ? 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] hover:bg-[var(--ds-surface-row)]'
               : 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)]'
@@ -166,7 +166,7 @@ export const CodaServizio: React.FC<CodaServizioProps> = ({
           <button
             type="button"
             onClick={onSelectTable}
-            className="inline-flex h-12 flex-shrink-0 items-center justify-center gap-2 rounded-full bg-[var(--ds-action-bg)] px-6 text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="inline-flex h-12 flex-shrink-0 items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-6 text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             Seleziona tavolo
           </button>
@@ -189,7 +189,7 @@ export const CodaServizio: React.FC<CodaServizioProps> = ({
               <button
                 type="button"
                 onClick={onSelectTable}
-                className="inline-flex h-11 items-center rounded-full bg-[var(--ds-surface)] px-5 text-[15px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)]"
+                className="inline-flex h-11 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-5 text-[15px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)]"
               >
                 Vedi i tavoli in servizio
               </button>

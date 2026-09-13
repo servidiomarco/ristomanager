@@ -65,6 +65,7 @@
        Il tondo pieno (999px) e i cerchi (50%) restano quello che sono. */
     --ds-radius: 6px;
     --ds-radius-sm: 4px;
+    --ds-radius-control: 12px;   /* bottoni, campi, pastiglie */
 
     /* I quattro gradini storici puntano tutti al raggio unico: così i punti
        che li citano non vanno riscritti uno per uno. */
@@ -156,7 +157,7 @@ button:disabled { cursor: not-allowed; }
 .header__pill {
     display: inline-flex; align-items: center; gap: 7px;
     min-height: 36px; padding: 0 14px;
-    border-radius: 999px;
+    border-radius: var(--ds-radius-control);
     background: var(--ds-public-header-pill);
     border: 1px solid var(--ds-public-header-line);
     color: inherit; text-decoration: none;
@@ -168,13 +169,13 @@ button:disabled { cursor: not-allowed; }
 /* Card #32 — selettore lingua: solo la scelta, nessuna traduzione. */
 .lang-toggle {
     display: inline-flex; gap: 2px; padding: 2px;
-    border-radius: 999px;
+    border-radius: var(--ds-radius-control);
     background: var(--ds-public-header-pill);
     border: 1px solid var(--ds-public-header-line);
 }
 .lang-toggle__btn {
     min-height: 30px; padding: 0 12px;
-    border: 0; border-radius: 999px;
+    border: 0; border-radius: var(--ds-radius-control);
     background: transparent; color: inherit;
     font-size: 12px; font-weight: 600; letter-spacing: 0.02em;
     opacity: 0.64;
@@ -205,7 +206,7 @@ button:disabled { cursor: not-allowed; }
     display: flex; flex-direction: column; gap: 7px; text-align: left;
 }
 .stepnav__item:disabled { cursor: not-allowed; }
-.stepnav__rail { height: 2px; width: 100%; border-radius: 999px; background: var(--ds-border); }
+.stepnav__rail { height: 2px; width: 100%; border-radius: var(--ds-radius-control); background: var(--ds-border); }
 .stepnav__item--current .stepnav__rail { background: var(--ds-pending-solid); }
 .stepnav__item--done .stepnav__rail { background: var(--ds-action-bg); }
 .stepnav__row { display: flex; align-items: center; gap: 7px; min-width: 0; }
@@ -317,7 +318,7 @@ button:disabled { cursor: not-allowed; }
 .stepper__btn:disabled { opacity: 0.4; }
 .stepper__input {
     height: 44px; width: 58px; padding: 0 4px; border: none;
-    border-radius: 999px; background: var(--ds-surface-row);
+    border-radius: var(--ds-radius-control); background: var(--ds-surface-row);
     text-align: center; font-size: 17px; font-weight: 600;
     font-variant-numeric: tabular-nums; color: var(--ds-text-primary);
     -moz-appearance: textfield; appearance: textfield;
@@ -516,7 +517,7 @@ textarea.input { resize: vertical; min-height: 76px; line-height: 1.5; }
 
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip {
-    min-height: 44px; padding: 0 16px; border-radius: 999px;
+    min-height: 44px; padding: 0 16px; border-radius: var(--ds-radius-control);
     border: 1px solid var(--ds-border-strong); background: var(--ds-surface);
     font-size: 14px; font-weight: 500; color: var(--ds-text-secondary);
     display: inline-flex; align-items: center; gap: 6px;
@@ -542,7 +543,7 @@ textarea.input { resize: vertical; min-height: 76px; line-height: 1.5; }
 .recap__main { font-size: 15px; font-weight: 600; }
 .recap__sub { font-size: 13px; color: var(--ds-text-muted); margin-top: 1px; }
 .recap__edit {
-    min-height: 44px; padding: 0 20px; border-radius: 999px;
+    min-height: 44px; padding: 0 20px; border-radius: var(--ds-radius-control);
     background: none; color: var(--ds-text-secondary);
     border: 1px solid var(--ds-border-strong);
     font-size: 15px; font-weight: 600; flex-shrink: 0;
@@ -575,7 +576,7 @@ a { color: var(--ds-pending-text); }
 /* rounded.full: il design system riserva la pillola piena all'azione
    primaria (§7.1). */
 .btn {
-    min-height: 52px; padding: 0 28px; border-radius: 999px;
+    min-height: 52px; padding: 0 28px; border-radius: var(--ds-radius-control);
     background: var(--ds-action-bg); color: var(--ds-action-fg);
     font-size: 16px; font-weight: 600;
     transition: background 0.15s ease, opacity 0.15s ease;
@@ -648,7 +649,7 @@ a { color: var(--ds-pending-text); }
         animation: sheet-up 0.24s ease-out;
     }
     .sheet__grab {
-        width: 36px; height: 4px; border-radius: 999px;
+        width: 36px; height: 4px; border-radius: var(--ds-radius-control);
         background: var(--ds-border-strong); margin: 6px auto 14px;
     }
 }

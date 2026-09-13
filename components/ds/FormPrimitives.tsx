@@ -121,11 +121,11 @@ export const Field: React.FC<{
 /** Shared input styling — exported so native inputs, selects and textareas in
  *  callers all land on the same surface without copying class strings. */
 export const dsInput =
-  'w-full h-11 px-4 rounded-full bg-[var(--ds-surface-row)] text-[15px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] transition-shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+  'w-full h-11 px-4 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[15px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] transition-shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
 /** A select is dsInput plus our own chevron — see .ds-select in index.css. */
 export const dsSelect =
-  'w-full h-11 px-4 rounded-full bg-[var(--ds-surface-row)] text-[15px] text-[var(--ds-text-primary)] cursor-pointer transition-shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ds-select';
+  'w-full h-11 px-4 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[15px] text-[var(--ds-text-primary)] cursor-pointer transition-shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ds-select';
 
 export const dsTextarea =
   'w-full px-4 py-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] text-[15px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] transition-shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
@@ -155,7 +155,7 @@ export const Stepper: React.FC<{
   ariaLabel: string;
 }> = ({ value, onChange, min = 0, max = 999, required, ariaLabel }) => {
   const btn =
-    'inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-[20px] font-medium leading-none transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+    'inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[20px] font-medium leading-none transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
   const current = value ?? min;
   return (
     <div className="flex items-center gap-1.5" role="group" aria-label={ariaLabel}>
@@ -189,7 +189,7 @@ export const Stepper: React.FC<{
         // viewport, e.g. OPPO/Xiaomi at default display scale) flex squeezed
         // the field until the digit itself clipped. px-1 is enough — the
         // value is centered, the pill shape does the framing.
-        className="ds-stepper-input h-11 min-w-[40px] flex-1 rounded-full bg-[var(--ds-surface-row)] px-1 text-center text-[17px] font-semibold tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+        className="ds-stepper-input h-11 min-w-[40px] flex-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-1 text-center text-[17px] font-semibold tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
       />
       <button
         type="button"
@@ -285,7 +285,7 @@ export function SegmentedControl<T extends string>({
     <div
       ref={trackRef}
       onScroll={scroll ? syncEdges : undefined}
-      className={`flex gap-0.5 rounded-full bg-[var(--ds-surface-row)] p-1 ${
+      className={`flex gap-0.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] p-1 ${
         scroll ? `overflow-x-auto scrollbar-hide ${mask}` : ''
       }`}
       role="group"
@@ -302,7 +302,7 @@ export function SegmentedControl<T extends string>({
             title={iconOnly ? opt.label : undefined}
             className={`inline-flex ${size === 'sm' ? 'h-8 text-[13px]' : 'h-9 text-[15px]'} min-w-0 ${
               scroll ? 'flex-none whitespace-nowrap' : equalWidth ? 'flex-1' : 'flex-auto'
-            } items-center justify-center gap-1.5 rounded-full px-3 font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+            } items-center justify-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
               active
                 ? 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]'
                 : 'text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
@@ -317,7 +317,7 @@ export function SegmentedControl<T extends string>({
                 reason to switch channel. */}
             {opt.badge !== undefined && opt.badge > 0 && (
               <span
-                className={`inline-flex h-5 min-w-[20px] flex-shrink-0 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold leading-none tabular-nums ${
+                className={`inline-flex h-5 min-w-[20px] flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] px-1.5 text-[11px] font-semibold leading-none tabular-nums ${
                   opt.badgeTone === 'neutral'
                     ? 'bg-[var(--ds-border)] text-[var(--ds-text-secondary)]'
                     : 'bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)]'
@@ -348,20 +348,20 @@ export function SegmentedControl<T extends string>({
    the form, and in every stepped form here the steps do not gate each other —
    the stepper in the subheader is the navigation, these just nudge it. */
 export const dsStepArrow =
-  'inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+  'inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
 export const dsButton = {
   primary:
-    'inline-flex items-center justify-center gap-2 h-11 px-5 rounded-full text-[15px] font-semibold bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]',
+    'inline-flex items-center justify-center gap-2 h-11 px-5 rounded-[var(--ds-radius-control)] text-[15px] font-semibold bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]',
   secondary:
-    'inline-flex items-center justify-center gap-2 h-11 px-5 rounded-full text-[15px] font-medium bg-[var(--ds-surface)] text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] hover:bg-[var(--ds-surface-row)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]',
+    'inline-flex items-center justify-center gap-2 h-11 px-5 rounded-[var(--ds-radius-control)] text-[15px] font-medium bg-[var(--ds-surface)] text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] hover:bg-[var(--ds-surface-row)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]',
   quiet:
-    'inline-flex items-center justify-center gap-2 h-11 px-5 rounded-full text-[15px] font-medium bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]',
+    'inline-flex items-center justify-center gap-2 h-11 px-5 rounded-[var(--ds-radius-control)] text-[15px] font-medium bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]',
   /* The confirm button of a destructive dialog, and nowhere else. Everywhere
      else a destructive action stays quiet — a pale-tinted icon button beside a
      solid primary — because visual weight belongs to what someone wants, not to
      what they might regret. Here the intent is already committed to, which is
      the one place `critical` may carry full weight (§7.5, ConfirmDialog). */
   critical:
-    'inline-flex items-center justify-center gap-2 h-11 px-5 rounded-full text-[15px] font-semibold bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]',
+    'inline-flex items-center justify-center gap-2 h-11 px-5 rounded-[var(--ds-radius-control)] text-[15px] font-semibold bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]',
 } as const;

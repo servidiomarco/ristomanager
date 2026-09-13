@@ -106,7 +106,7 @@ export const DividiConto: React.FC<DividiContoProps> = ({
             type="button"
             onClick={onBack}
             aria-label="Torna al pagamento"
-            className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)]"
+            className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)]"
           >
             <ArrowLeft className="h-4 w-4" />
           </button>
@@ -178,13 +178,13 @@ export const DividiConto: React.FC<DividiContoProps> = ({
           {mode === 'equal' ? (
             <div className="flex items-center gap-3">
               <span className="text-[14px] text-[var(--ds-text-secondary)]">Persone</span>
-              <div className="flex items-center gap-1 rounded-full bg-[var(--ds-surface-row)] px-2 py-1">
+              <div className="flex items-center gap-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-2 py-1">
                 <button
                   type="button"
                   onClick={() => setParts(p => Math.max(2, p - 1))}
                   disabled={parts <= 2}
                   aria-label="Una persona in meno"
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
                 >
                   <Minus size={14} />
                 </button>
@@ -195,7 +195,7 @@ export const DividiConto: React.FC<DividiContoProps> = ({
                   type="button"
                   onClick={() => setParts(p => Math.min(20, p + 1))}
                   aria-label="Una persona in più"
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)]"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)]"
                 >
                   <Plus size={14} />
                 </button>
@@ -210,7 +210,7 @@ export const DividiConto: React.FC<DividiContoProps> = ({
                 if (remaining <= 0) {
                   return (
                     <div key={ix} className="flex min-h-[44px] items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3 py-1.5 opacity-60">
-                      <span className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-border-strong)] text-white">
+                      <span className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-border-strong)] text-white">
                         <Check size={12} />
                       </span>
                       <span className="min-w-0 flex-1">
@@ -238,7 +238,7 @@ export const DividiConto: React.FC<DividiContoProps> = ({
                       className="flex min-h-[44px] min-w-0 flex-1 items-center gap-3 text-left"
                     >
                       <span
-                        className={`inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full ${
+                        className={`inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] ${
                           units > 0
                             ? 'bg-[var(--ds-arriving-solid)] text-white'
                             : 'border border-[var(--ds-border-strong)]'
@@ -256,13 +256,13 @@ export const DividiConto: React.FC<DividiContoProps> = ({
                       </span>
                     </button>
                     {remaining > 1 && (
-                      <div className="flex flex-shrink-0 items-center gap-1 rounded-full bg-[var(--ds-surface)] px-1.5 py-1">
+                      <div className="flex flex-shrink-0 items-center gap-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-1.5 py-1">
                         <button
                           type="button"
                           onClick={() => bump(ix, -1)}
                           disabled={units <= 0}
                           aria-label={`Un ${it.name} in meno`}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
                         >
                           <Minus size={14} />
                         </button>
@@ -274,7 +274,7 @@ export const DividiConto: React.FC<DividiContoProps> = ({
                           onClick={() => bump(ix, 1)}
                           disabled={units >= remaining}
                           aria-label={`Un ${it.name} in più`}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
                         >
                           <Plus size={14} />
                         </button>
@@ -314,7 +314,7 @@ export const DividiConto: React.FC<DividiContoProps> = ({
               type="button"
               onClick={() => onUseAmount(chosen, mode === 'items' && pickedUnits.length > 0 ? pickedUnits : undefined)}
               disabled={chosen <= 0}
-              className="inline-flex h-11 flex-shrink-0 items-center rounded-full bg-[var(--ds-action-bg)] px-5 text-[15px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
+              className="inline-flex h-11 flex-shrink-0 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-5 text-[15px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
             >
               Scegli metodo
             </button>

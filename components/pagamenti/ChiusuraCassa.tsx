@@ -242,7 +242,7 @@ export const ChiusuraCassa: React.FC<{
                       key={f.value}
                       type="button"
                       onClick={() => setDocFilter(f.value)}
-                      className={`rounded-full px-3 py-1.5 text-[13px] font-medium transition-colors ${
+                      className={`rounded-[var(--ds-radius-control)] px-3 py-1.5 text-[13px] font-medium transition-colors ${
                         docFilter === f.value
                           ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                           : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'

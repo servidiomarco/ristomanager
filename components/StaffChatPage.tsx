@@ -435,7 +435,7 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
     >
       {t.kind === 'channel'
         ? (
-          <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]">
+          <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]">
             <Hash className="h-4 w-4" aria-hidden />
           </span>
         )
@@ -554,7 +554,7 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
                           type="button"
                           onClick={loadOlder}
                           disabled={loadingMore}
-                          className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-surface)] px-3.5 text-[13px] font-medium text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                          className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-3.5 text-[13px] font-medium text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                         >
                           {loadingMore ? <Loader2 className="h-4 w-4 animate-spin" /> : <ChevronUp className="h-4 w-4" />}
                           Messaggi precedenti
@@ -564,7 +564,7 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
                     {grouped.map(g => (
                       <div key={g.day} className="space-y-2">
                         <div className="flex justify-center">
-                          <span className="rounded-full bg-[var(--ds-surface)] px-2.5 py-1 text-[12px] text-[var(--ds-text-muted)] shadow-[var(--ds-shadow-card)]">
+                          <span className="rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-2.5 py-1 text-[12px] text-[var(--ds-text-muted)] shadow-[var(--ds-shadow-card)]">
                             {formatDayHeader(g.day)}
                           </span>
                         </div>
@@ -635,7 +635,7 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
                       type="button"
                       onClick={() => doSend(p.label, p.key)}
                       disabled={sending}
-                      className="inline-flex h-9 items-center rounded-full bg-[var(--ds-surface)] px-3 text-[13px] font-medium text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                      className="inline-flex h-9 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-3 text-[13px] font-medium text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     >
                       {p.label}
                     </button>
@@ -696,7 +696,7 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
                     disabled={uploading || sending || attachments.length >= STAFF_MAX_ATTACHMENTS}
                     aria-label="Allega una foto"
                     title="Allega una foto"
-                    className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
                     {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
                   </button>
@@ -713,7 +713,7 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
                     onClick={() => doSend(composerText)}
                     disabled={(!composerText.trim() && attachments.length === 0) || sending || uploading}
                     aria-label="Invia messaggio"
-                    className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] transition-all hover:bg-[var(--ds-action-bg-hover)] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:cursor-not-allowed disabled:bg-[var(--ds-surface-row)] disabled:text-[var(--ds-text-subtle)]"
+                    className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] transition-all hover:bg-[var(--ds-action-bg-hover)] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:cursor-not-allowed disabled:bg-[var(--ds-surface-row)] disabled:text-[var(--ds-text-subtle)]"
                   >
                     {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                   </button>

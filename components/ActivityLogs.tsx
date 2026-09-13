@@ -169,7 +169,7 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
               <button
                 type="button"
                 onClick={resetFilters}
-                className="ml-2 rounded-full text-[13px] text-[var(--ds-text-primary)] underline underline-offset-2 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                className="ml-2 rounded-[var(--ds-radius-control)] text-[13px] text-[var(--ds-text-primary)] underline underline-offset-2 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               >
                 Azzera filtri
               </button>
@@ -201,7 +201,7 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
               <button
                 type="button"
                 onClick={() => setSearch('')}
-                className="absolute right-3 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                className="absolute right-3 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 title="Cancella ricerca"
                 aria-label="Cancella ricerca"
               >
@@ -344,7 +344,7 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
                     {log.user_name || log.user_email || '-'}
                   </td>
                   <td className="px-4 py-3">
-                    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${ACTION_COLORS[log.action]}`}>
+                    <span className={`inline-flex items-center gap-1 rounded-[var(--ds-radius-control)] px-2 py-0.5 text-[11px] font-medium ${ACTION_COLORS[log.action]}`}>
                       <span className="h-1.5 w-1.5 rounded-full bg-current opacity-60" />
                       {ACTION_LABELS[log.action]}
                     </span>
@@ -359,7 +359,7 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
                     {formatDetails(log.details)}
                   </td>
                   <td className="px-4 py-3">
-                    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                    <span className={`inline-flex items-center gap-1 rounded-[var(--ds-radius-control)] px-2 py-0.5 text-[11px] font-medium ${
                       log.status === 'SUCCESS'
                         ? 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'
                         : 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)]'

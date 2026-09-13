@@ -204,14 +204,14 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
         <>
           {/* Role tabs — pill group on the canvas, so the strip reads as
               chrome rather than as one more card. */}
-          <div className="mb-6 inline-flex items-center gap-0.5 rounded-full bg-[var(--ds-surface)] p-1 shadow-[var(--ds-shadow-card)]">
+          <div className="mb-6 inline-flex items-center gap-0.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] p-1 shadow-[var(--ds-shadow-card)]">
             {roles.map(role => (
               <button
                 key={role}
                 type="button"
                 onClick={() => setSelectedRole(role)}
                 aria-pressed={selectedRole === role}
-                className={`rounded-full px-3 py-1.5 text-[14px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                className={`rounded-[var(--ds-radius-control)] px-3 py-1.5 text-[14px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                   selectedRole === role
                     ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                     : 'text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
@@ -244,7 +244,7 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
                         <label
                           key={permission}
                           title={isLocked ? 'Riservato alla piattaforma' : undefined}
-                          className={`flex min-h-11 cursor-pointer items-center gap-2 rounded-full px-3.5 text-[14px] font-medium transition-colors ${
+                          className={`flex min-h-11 cursor-pointer items-center gap-2 rounded-[var(--ds-radius-control)] px-3.5 text-[14px] font-medium transition-colors ${
                             hasPermission(permission)
                               ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                               : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'

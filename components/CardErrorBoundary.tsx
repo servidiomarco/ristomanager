@@ -39,7 +39,7 @@ export class CardErrorBoundary extends React.Component<Props, State> {
                             <button
                                 type="button"
                                 onClick={() => this.setState({ error: null })}
-                                className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-3 py-1.5 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                                className="mt-2 inline-flex items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3 py-1.5 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                             >
                                 Riprova
                             </button>

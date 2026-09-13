@@ -113,7 +113,7 @@ export const Transazioni: React.FC<TransazioniProps> = ({
             type="button"
             onClick={onBack}
             aria-label="Torna alla coda"
-            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)]"
+            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)]"
           >
             <ArrowLeft className="h-4 w-4" />
           </button>

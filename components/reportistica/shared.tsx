@@ -111,7 +111,7 @@ export const SectionCard: React.FC<{
 }> = ({ icon, title, subtitle, actions, children }) => (
   <section className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)] sm:p-5">
     <header className="mb-4 flex items-start gap-3">
-      <span className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]">
+      <span className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]">
         {icon}
       </span>
       <div className="min-w-0 flex-1">
@@ -133,7 +133,7 @@ export const StatTile: React.FC<{
 }> = ({ icon, label, value, hint, delta }) => (
   <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3">
     <div className="mb-1 flex items-center gap-2 text-[13px] font-medium text-[var(--ds-text-secondary)]">
-      <span className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface)] text-[var(--ds-text-muted)]">
+      <span className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-text-muted)]">
         {icon}
       </span>
       <span className="truncate">{label}</span>
@@ -167,7 +167,7 @@ export const ShareRow: React.FC<{
     <span className="min-w-0 flex-shrink truncate text-[13px] text-[var(--ds-text-primary)]">{label}</span>
     {hint && <span className="flex-shrink-0 text-[12px] text-[var(--ds-text-muted)]">{hint}</span>}
     <div className="h-1.5 min-w-6 flex-1 overflow-hidden rounded-full bg-[var(--ds-border)]">
-      <div className={`h-full rounded-full ${colorClass}`} style={{ width: `${Math.round(share * 100)}%` }} />
+      <div className={`h-full rounded-[var(--ds-radius-control)] ${colorClass}`} style={{ width: `${Math.round(share * 100)}%` }} />
     </div>
     <span className="tabular w-24 flex-shrink-0 text-right text-[13px] font-semibold text-[var(--ds-text-primary)]">{value}</span>
   </div>
@@ -177,7 +177,7 @@ export const CsvButton: React.FC<{ onClick: () => void; label?: string }> = ({ o
   <button
     type="button"
     onClick={onClick}
-    className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-3 text-[13px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+    className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3 text-[13px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
   >
     <Download className="h-3.5 w-3.5" aria-hidden />
     {label}

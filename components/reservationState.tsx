@@ -190,7 +190,7 @@ export const DsStatusChip: React.FC<{
       type={onClick ? 'button' : undefined}
       onClick={onClick}
       title={title}
-      className={`inline-flex h-8 items-center gap-2 whitespace-nowrap rounded-full px-3 text-[13px] font-medium ${
+      className={`inline-flex h-8 items-center gap-2 whitespace-nowrap rounded-[var(--ds-radius-control)] px-3 text-[13px] font-medium ${
         solid ? 'bg-[var(--ds-arriving-solid)] text-[var(--ds-arriving-fg)]' : `${ds.tint} ${ds.text}`
       } ${
         onClick ? 'transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]' : ''
@@ -229,9 +229,9 @@ export const reservationStatePatch = (state: Exclude<ReservationStateKey, 'arriv
 export const PulseDot: React.FC<{ dotClass: string; pulse?: boolean; sizeClass?: string }> = ({ dotClass, pulse, sizeClass = 'h-1.5 w-1.5' }) => (
   <span className={`relative flex flex-none ${sizeClass}`}>
     {pulse && (
-      <span className={`motion-safe:animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${dotClass}`} />
+      <span className={`motion-safe:animate-ping absolute inline-flex h-full w-full rounded-[var(--ds-radius-control)] opacity-75 ${dotClass}`} />
     )}
-    <span className={`relative inline-flex rounded-full ${sizeClass} ${dotClass}`} />
+    <span className={`relative inline-flex rounded-[var(--ds-radius-control)] ${sizeClass} ${dotClass}`} />
   </span>
 );
 

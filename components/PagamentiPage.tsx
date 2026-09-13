@@ -286,7 +286,7 @@ const PagamentiPage: React.FC<{
       <div className="flex flex-shrink-0 flex-col gap-3 pb-3 pl-4 pr-4 pt-4 sm:pr-6 lg:flex-row lg:items-center lg:justify-between lg:gap-4 lg:pb-0 lg:pr-8">
         <h1 className="flex items-center gap-2.5 text-[22px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)] sm:text-[26px]">
           <span className="relative flex h-2.5 w-2.5 flex-shrink-0" aria-hidden>
-            <span className="ds-live-dot absolute inset-0 rounded-full bg-[var(--ds-seated-solid)]" />
+            <span className="ds-live-dot absolute inset-0 rounded-[var(--ds-radius-control)] bg-[var(--ds-seated-solid)]" />
             <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[var(--ds-seated-solid)]" />
           </span>
           {/* Shortened below sm: the full sentence wraps to two lines on a

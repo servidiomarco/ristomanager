@@ -147,7 +147,7 @@ const BANQUET_STEPS = [
 // grid, not in a primary action position, and at 44px they outweighed the
 // cards they filter.
 const DISH_FILTER_BASE =
-  'inline-flex h-8 flex-shrink-0 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+  'inline-flex h-8 flex-shrink-0 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 const DISH_FILTER_ON = 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]';
 const DISH_FILTER_OFF =
   'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] hover:text-[var(--ds-text-primary)]';
@@ -1583,7 +1583,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
             <button
               type="button"
               onClick={activeTab === 'BANQUETS' ? handleOpenNewBanquet : handleOpenNewDish}
-              className="inline-flex h-9 items-center justify-center gap-1.5 rounded-full bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] md:hidden"
+              className="inline-flex h-9 items-center justify-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] md:hidden"
             >
               <Plus className="h-4 w-4" aria-hidden />
               {activeTab === 'BANQUETS' ? 'Nuovo banchetto' : 'Nuovo piatto'}
@@ -1614,7 +1614,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               type="button"
               onClick={() => setQrOpen(true)}
               title="QR e traduzioni del menu per gli ospiti"
-              className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             >
               <QrCode className="h-4 w-4" aria-hidden />
               Menu digitale
@@ -1625,7 +1625,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 onClick={handleImportCassa}
                 disabled={importing}
                 title="Allinea i piatti al catalogo della cassa Passepartout"
-                className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               >
                 {importing ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
                 Importa da cassa
@@ -1640,7 +1640,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
             />
             {/* Icon-only: the two modes are self-evident from the glyphs, and
                 the labels were competing with the search beside them. */}
-            <div className="flex flex-shrink-0 items-center gap-1 rounded-full bg-[var(--ds-surface-row)] p-1">
+            <div className="flex flex-shrink-0 items-center gap-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] p-1">
               {([
                 { value: 'GRID' as const, label: 'Griglia', Icon: LayoutGrid },
                 { value: 'LIST' as const, label: 'Elenco', Icon: ListIcon },
@@ -1652,7 +1652,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   aria-pressed={dishViewMode === value}
                   title={label}
                   aria-label={label}
-                  className={`inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                  className={`inline-flex h-8 w-8 items-center justify-center rounded-[var(--ds-radius-control)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                     dishViewMode === value
                       ? 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]'
                       : 'text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]'
@@ -1712,7 +1712,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   type="button"
                   onClick={() => setCatsOpen(true)}
                   title="Ordina e accendi/spegni le categorie"
-                  className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 self-start rounded-full bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] md:self-center"
+                  className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 self-start rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] md:self-center"
                 >
                   <SlidersHorizontal className="h-4 w-4" aria-hidden />
                   Categorie
@@ -1723,7 +1723,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   type="button"
                   onClick={() => setVariantsOpen(true)}
                   title="Gruppi di varianti: cotture, aggiunte, sovrapprezzi"
-                  className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 self-start rounded-full bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] md:self-center"
+                  className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 self-start rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] md:self-center"
                 >
                   <Layers className="h-4 w-4" aria-hidden />
                   Varianti
@@ -1762,12 +1762,12 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                               {(dish.is_active === false || dish.crm_enabled === false) && (
                                 <span className="absolute bottom-2 left-2 z-10 flex gap-1">
                                   {dish.is_active === false && (
-                                    <span className="rounded-full bg-[var(--ds-surface)] px-2 py-0.5 text-[11px] font-medium text-[var(--ds-critical-text)]">
+                                    <span className="rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-2 py-0.5 text-[11px] font-medium text-[var(--ds-critical-text)]">
                                       spento in cassa
                                     </span>
                                   )}
                                   {dish.crm_enabled === false && (
-                                    <span className="rounded-full bg-[var(--ds-surface)] px-2 py-0.5 text-[11px] font-medium text-[var(--ds-text-secondary)]">
+                                    <span className="rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-2 py-0.5 text-[11px] font-medium text-[var(--ds-text-secondary)]">
                                       spento
                                     </span>
                                   )}
@@ -1785,12 +1785,12 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                   <ImageIcon className="h-6 w-6 text-[var(--ds-text-subtle)]" aria-hidden />
                                 </div>
                               )}
-                              <span className="absolute left-2 top-2 rounded-full bg-[var(--ds-surface)] px-2 py-0.5 text-[11px] font-medium text-[var(--ds-text-secondary)]">
+                              <span className="absolute left-2 top-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-2 py-0.5 text-[11px] font-medium text-[var(--ds-text-secondary)]">
                                 {dish.category}
                               </span>
                               {dish.allergens.length > 0 && (
                                 <span
-                                  className="absolute right-2 top-2 inline-flex items-center gap-1 rounded-full bg-[var(--ds-critical-solid)] px-2 py-0.5 text-[11px] font-semibold text-[#ffffff]"
+                                  className="absolute right-2 top-2 inline-flex items-center gap-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-solid)] px-2 py-0.5 text-[11px] font-semibold text-[#ffffff]"
                                   title={`${dish.allergens.length} allergeni: ${dish.allergens.join(', ')}`}
                                 >
                                   <Info className="h-3 w-3" aria-hidden />
@@ -1816,12 +1816,12 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                       aria-label={`${dish.crm_enabled !== false ? 'Spegni' : 'Accendi'} ${dish.name} nel menu`}
                                       onClick={e => { e.stopPropagation(); if (togglingDishId !== dish.id) handleToggleDish(dish); }}
                                       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); if (togglingDishId !== dish.id) handleToggleDish(dish); } }}
-                                      className={`relative mr-1 inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                                      className={`relative mr-1 inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-[var(--ds-radius-control)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                                         dish.crm_enabled !== false ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-surface-row)] border border-[var(--ds-border)]'
                                       } ${togglingDishId === dish.id ? 'opacity-50' : ''}`}
                                     >
                                       <span aria-hidden="true"
-                                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${dish.crm_enabled !== false ? 'translate-x-5' : 'translate-x-0.5'} translate-y-0.5`} />
+                                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-[var(--ds-radius-control)] bg-white shadow ring-0 transition-transform ${dish.crm_enabled !== false ? 'translate-x-5' : 'translate-x-0.5'} translate-y-0.5`} />
                                     </span>
                                     <span
                                       role="button"
@@ -1936,12 +1936,12 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                   aria-label={`${dish.crm_enabled !== false ? 'Spegni' : 'Accendi'} ${dish.name} nel menu`}
                                   onClick={e => { e.stopPropagation(); if (togglingDishId !== dish.id) handleToggleDish(dish); }}
                                   onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); if (togglingDishId !== dish.id) handleToggleDish(dish); } }}
-                                  className={`relative mx-1 inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                                  className={`relative mx-1 inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-[var(--ds-radius-control)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                                     dish.crm_enabled !== false ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-surface-row)] border border-[var(--ds-border)]'
                                   } ${togglingDishId === dish.id ? 'opacity-50' : ''}`}
                                 >
                                   <span aria-hidden="true"
-                                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${dish.crm_enabled !== false ? 'translate-x-5' : 'translate-x-0.5'} translate-y-0.5`} />
+                                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-[var(--ds-radius-control)] bg-white shadow ring-0 transition-transform ${dish.crm_enabled !== false ? 'translate-x-5' : 'translate-x-0.5'} translate-y-0.5`} />
                                 </span>
                                 <span
                                   role="button"
@@ -2462,7 +2462,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             </div>
                             <div className="mt-2.5 h-1 w-full overflow-hidden rounded-full bg-[var(--ds-surface-row)]">
                                 <div
-                                  className={`h-full rounded-full ${outstanding <= 0 ? 'bg-[var(--ds-seated-solid)]' : urgent ? 'bg-[var(--ds-critical-solid)]' : 'bg-[var(--ds-pending-solid)]'}`}
+                                  className={`h-full rounded-[var(--ds-radius-control)] ${outstanding <= 0 ? 'bg-[var(--ds-seated-solid)]' : urgent ? 'bg-[var(--ds-critical-solid)]' : 'bg-[var(--ds-pending-solid)]'}`}
                                   style={{ width: `${Math.round(paidRatio * 100)}%` }}
                                 />
                             </div>
@@ -2710,7 +2710,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       type="button"
                       onClick={() => toggleDishMenu(m.id)}
                       aria-pressed={isSelected}
-                      className={`inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                      className={`inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3.5 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                         isSelected
                           ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                           : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
@@ -2754,7 +2754,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             prev.includes(g.id) ? prev.filter(x => x !== g.id) : [...prev, g.id])}
                           aria-pressed={isSelected}
                           title={pp ? 'Gruppo della cassa: le opzioni si aggiornano a ogni import' : undefined}
-                          className={`inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                          className={`inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3.5 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                             isSelected
                               ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                               : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
@@ -2789,7 +2789,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       onClick={() => setWineSearch(prev => prev == null ? '' : null)}
                       aria-label={wineSearch == null ? 'Cerca un vino' : 'Chiudi la ricerca'}
                       aria-expanded={wineSearch != null}
-                      className={`inline-flex h-9 w-9 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                      className={`inline-flex h-9 w-9 items-center justify-center rounded-[var(--ds-radius-control)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                         wineSearch != null
                           ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                           : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
@@ -2815,7 +2815,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           type="button"
                           onClick={() => setDishWineIds(prev => prev.filter(x => x !== w.id))}
                           aria-label={`Togli ${w.name}`}
-                          className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-medium text-[var(--ds-action-fg)] transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                          className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-medium text-[var(--ds-action-fg)] transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                         >
                           <Wine size={13} aria-hidden />
                           {w.name}
@@ -2878,7 +2878,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                 onClick={() => setDishWineIds(prev =>
                                   prev.includes(w.id) ? prev.filter(x => x !== w.id) : [...prev, w.id])}
                                 aria-pressed={isSelected}
-                                className={`inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                                className={`inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3.5 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                                   isSelected
                                     ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                                     : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
@@ -2903,7 +2903,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       type="button"
                       onClick={handleSuggestWines}
                       disabled={suggestingWines}
-                      className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-arriving-tint)] px-3.5 text-[13px] font-semibold text-[var(--ds-arriving-text)] transition-opacity hover:opacity-80 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                      className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-tint)] px-3.5 text-[13px] font-semibold text-[var(--ds-arriving-text)] transition-opacity hover:opacity-80 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     >
                       {suggestingWines ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
                       {suggestingWines ? 'Ci penso…' : 'Suggerisci'}
@@ -2925,14 +2925,14 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 : undefined}
             >
               <div className="space-y-3">
-                <div className="flex items-center rounded-full bg-[var(--ds-surface-row)] p-1">
+                <div className="flex items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] p-1">
                   {([['SIMPLE', 'Semplice'], ['COMPOSED', 'Composto']] as const).map(([value, label]) => (
                     <button
                       key={value}
                       type="button"
                       onClick={() => setNewDish({ ...newDish, dish_type: value })}
                       aria-pressed={(newDish.dish_type ?? 'SIMPLE') === value}
-                      className={`inline-flex h-9 flex-1 items-center justify-center rounded-full text-[13px] font-medium transition-colors ${
+                      className={`inline-flex h-9 flex-1 items-center justify-center rounded-[var(--ds-radius-control)] text-[13px] font-medium transition-colors ${
                         (newDish.dish_type ?? 'SIMPLE') === value
                           ? 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]'
                           : 'text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
@@ -2953,11 +2953,11 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 >
                   <span
                     aria-hidden
-                    className={`relative inline-flex h-6 w-10 flex-shrink-0 items-center rounded-full transition-colors ${
+                    className={`relative inline-flex h-6 w-10 flex-shrink-0 items-center rounded-[var(--ds-radius-control)] transition-colors ${
                       newDish.sold_by_weight ? 'bg-[var(--ds-action-bg)]' : 'bg-[var(--ds-border-strong)]'
                     }`}
                   >
-                    <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${newDish.sold_by_weight ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
+                    <span className={`inline-block h-5 w-5 transform rounded-[var(--ds-radius-control)] bg-white shadow transition-transform ${newDish.sold_by_weight ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
                   </span>
                   <span className="min-w-0">
                     <span className="block text-[14px] font-medium text-[var(--ds-text-primary)]">Vendita al peso</span>
@@ -3093,7 +3093,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       <button
                         type="button"
                         onClick={() => setNewDish({ ...newDish, photo_url: '' })}
-                        className="inline-flex h-9 items-center gap-1 rounded-full px-3 text-[13px] text-[var(--ds-text-muted)] transition-colors hover:text-[var(--ds-text-primary)]"
+                        className="inline-flex h-9 items-center gap-1 rounded-[var(--ds-radius-control)] px-3 text-[13px] text-[var(--ds-text-muted)] transition-colors hover:text-[var(--ds-text-primary)]"
                       >
                         <X className="h-3.5 w-3.5" />
                         Rimuovi
@@ -3127,7 +3127,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       type="button"
                       onClick={() => toggleAllergen(allergen)}
                       aria-pressed={isSelected}
-                      className={`inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                      className={`inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3.5 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                         isSelected
                           ? 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)]'
                           : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
@@ -3232,14 +3232,14 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     // Era bianco su gold: 3.25:1, sotto AA (§3.3), con l'esadecimale
                     // scritto a mano invece del token. Stesso primary del gemello in
                     // ReservationList.
-                    className="inline-flex h-9 items-center rounded-full bg-[var(--ds-action-bg)] px-4 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    className="inline-flex h-9 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-4 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
                     Riprendi
                   </button>
                   <button
                     type="button"
                     onClick={handleDiscardBanquetDraft}
-                    className="inline-flex h-9 items-center rounded-full bg-[var(--ds-surface)] px-4 text-[13px] font-semibold text-[var(--ds-pending-text)] transition-opacity hover:opacity-90"
+                    className="inline-flex h-9 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-4 text-[13px] font-semibold text-[var(--ds-pending-text)] transition-opacity hover:opacity-90"
                   >
                     Scarta
                   </button>
@@ -3759,7 +3759,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             <button
                               type="button"
                               onClick={() => setTablePickerRoomFilter('ALL')}
-                              className={`px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap transition-colors flex-shrink-0 border ${tablePickerRoomFilter === 'ALL' ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-text-primary)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)]'}`}
+                              className={`px-4 py-1.5 text-sm font-medium rounded-[var(--ds-radius-control)] whitespace-nowrap transition-colors flex-shrink-0 border ${tablePickerRoomFilter === 'ALL' ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-text-primary)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)]'}`}
                             >
                               Tutte le sale
                             </button>
@@ -3768,7 +3768,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                 key={room.id}
                                 type="button"
                                 onClick={() => setTablePickerRoomFilter(room.id)}
-                                className={`px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap transition-colors flex-shrink-0 border ${tablePickerRoomFilter === room.id ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-text-primary)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)]'}`}
+                                className={`px-4 py-1.5 text-sm font-medium rounded-[var(--ds-radius-control)] whitespace-nowrap transition-colors flex-shrink-0 border ${tablePickerRoomFilter === room.id ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-text-primary)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)]'}`}
                               >
                                 {room.name}
                               </button>
@@ -3832,12 +3832,12 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                         {t.seats}
                                       </div>
                                       {isOccupied && occ && (
-                                        <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-[var(--ds-critical-solid)] text-[#ffffff] text-[10px] font-medium px-2 py-0.5 rounded-full whitespace-nowrap shadow-[var(--shadow-xs)] max-w-[140px] truncate z-10" title={occ.label}>
+                                        <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-[var(--ds-critical-solid)] text-[#ffffff] text-[10px] font-medium px-2 py-0.5 rounded-[var(--ds-radius-control)] whitespace-nowrap shadow-[var(--shadow-xs)] max-w-[140px] truncate z-10" title={occ.label}>
                                           {occ.label}
                                         </div>
                                       )}
                                       {isSelected && (
-                                        <div className="absolute -top-2 -right-2 bg-[var(--ds-action-bg)] rounded-full p-0.5 shadow-[var(--shadow-xs)] z-20">
+                                        <div className="absolute -top-2 -right-2 bg-[var(--ds-action-bg)] rounded-[var(--ds-radius-control)] p-0.5 shadow-[var(--shadow-xs)] z-20">
                                           <div className="w-1.5 h-1.5 bg-[var(--ds-action-fg)] rounded-full m-1" />
                                         </div>
                                       )}
@@ -3907,7 +3907,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               type="button"
               onClick={toggleMenuDigitale}
               disabled={menuFlagBusy || menuAttivo == null}
-              className={`inline-flex h-9 items-center rounded-full px-4 text-[13px] font-semibold transition-colors disabled:opacity-40 ${
+              className={`inline-flex h-9 items-center rounded-[var(--ds-radius-control)] px-4 text-[13px] font-semibold transition-colors disabled:opacity-40 ${
                 menuAttivo
                   ? 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]'
                   : 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
@@ -3926,7 +3926,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               <button
                 type="button"
                 onClick={copiaLinkMenu}
-                className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]"
+                className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]"
               >
                 {linkCopiato ? <><Check className="h-4 w-4" /> Copiato</> : <><Copy className="h-4 w-4" /> Copia link</>}
               </button>
@@ -3934,7 +3934,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 href={menuUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]"
+                className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]"
               >
                 Apri la pagina
               </a>
@@ -3947,7 +3947,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 type="button"
                 onClick={handleTranslate}
                 disabled={translating}
-                className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)] disabled:opacity-40"
+                className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)] disabled:opacity-40"
               >
                 {translating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Languages className="h-4 w-4" />}
                 Traduci le voci nuove
@@ -3971,7 +3971,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   type="button"
                   onClick={toggleWineAi}
                   disabled={wineAiBusy || wineAiAttivo == null}
-                  className={`inline-flex h-9 items-center rounded-full px-4 text-[13px] font-semibold transition-colors disabled:opacity-40 ${
+                  className={`inline-flex h-9 items-center rounded-[var(--ds-radius-control)] px-4 text-[13px] font-semibold transition-colors disabled:opacity-40 ${
                     wineAiAttivo
                       ? 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]'
                       : 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
@@ -3984,7 +3984,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 type="button"
                 onClick={handlePairWines}
                 disabled={pairingWines || wineAiAttivo !== true}
-                className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-arriving-tint)] px-3.5 text-[13px] font-semibold text-[var(--ds-arriving-text)] transition-opacity hover:opacity-80 disabled:opacity-40"
+                className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-tint)] px-3.5 text-[13px] font-semibold text-[var(--ds-arriving-text)] transition-opacity hover:opacity-80 disabled:opacity-40"
               >
                 {pairingWines ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
                 {pairingWines ? 'Ci penso…' : 'Abbina i vini'}
@@ -4266,7 +4266,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           title={full
                             ? `Tutti i piatti di ${cat.name} sono in ${m.name} — togli tutti`
                             : `Metti tutti i piatti di ${cat.name} in ${m.name}`}
-                          className={`inline-flex h-7 items-center gap-1 rounded-full px-2.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                          className={`inline-flex h-7 items-center gap-1 rounded-[var(--ds-radius-control)] px-2.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                             full
                               ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                               : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
@@ -4288,7 +4288,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       title={cat.bar
                         ? `${cat.name} esce al Bar — togli la spunta`
                         : `In comanda ${cat.name} va dritta nell'uscita Bar`}
-                      className={`inline-flex h-7 items-center gap-1 rounded-full px-2.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                      className={`inline-flex h-7 items-center gap-1 rounded-[var(--ds-radius-control)] px-2.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                         cat.bar
                           ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                           : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
@@ -4307,7 +4307,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       title={cat.dessert
                         ? `${cat.name} esce nell'uscita Dolci — togli la spunta`
                         : `In comanda ${cat.name} va dritta nell'uscita Dolci`}
-                      className={`inline-flex h-7 items-center gap-1 rounded-full px-2.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                      className={`inline-flex h-7 items-center gap-1 rounded-[var(--ds-radius-control)] px-2.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                         cat.dessert
                           ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                           : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
@@ -4326,7 +4326,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       title={cat.wine
                         ? `${cat.name} è carta dei vini — togli la spunta`
                         : `${cat.name} entra nella carta dei vini per gli abbinamenti`}
-                      className={`inline-flex h-7 items-center gap-1 rounded-full px-2.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                      className={`inline-flex h-7 items-center gap-1 rounded-[var(--ds-radius-control)] px-2.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                         cat.wine
                           ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                           : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
@@ -4345,12 +4345,12 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     const next = menuCats.map((c, j) => j === i ? { ...c, enabled: !c.enabled } : c);
                     applyMenuCats(next);
                   }}
-                  className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50 ${
+                  className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-[var(--ds-radius-control)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50 ${
                     cat.enabled ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-surface-row)] border border-[var(--ds-border)]'
                   }`}
                 >
                   <span aria-hidden="true"
-                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${cat.enabled ? 'translate-x-5' : 'translate-x-0.5'} translate-y-0.5`} />
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-[var(--ds-radius-control)] bg-white shadow ring-0 transition-transform ${cat.enabled ? 'translate-x-5' : 'translate-x-0.5'} translate-y-0.5`} />
                 </button>
                 <button
                   type="button"
@@ -4687,7 +4687,7 @@ const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelec
                   className="cursor-pointer rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3 transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 >
                   <div className="flex items-start gap-2.5">
-                    <div className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full ${
+                    <div className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] ${
                       !menu.shift
                         ? 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)]'
                         : isLunch

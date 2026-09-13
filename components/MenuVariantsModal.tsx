@@ -132,7 +132,7 @@ export const MenuVariantsModal: React.FC<{
                     schiacciato a una lettera. */}
                 <div className="flex flex-wrap items-center gap-x-1.5 text-[12px] tabular-nums text-[var(--ds-text-muted)]">
                   {isPP(g) && (
-                    <span className="rounded-full bg-[var(--ds-surface-row)] px-1.5 py-0.5 text-[11px] font-medium">
+                    <span className="rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-1.5 py-0.5 text-[11px] font-medium">
                       dalla cassa
                     </span>
                   )}
@@ -147,12 +147,12 @@ export const MenuVariantsModal: React.FC<{
                 aria-label={`${g.is_active ? 'Spegni' : 'Accendi'} ${g.name}`}
                 disabled={busy}
                 onClick={() => run(() => updateModifierGroup(g.id, { is_active: !g.is_active }))}
-                className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50 ${
+                className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-[var(--ds-radius-control)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50 ${
                   g.is_active ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-surface-row)] border border-[var(--ds-border)]'
                 }`}
               >
                 <span aria-hidden="true"
-                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${g.is_active ? 'translate-x-5' : 'translate-x-0.5'} translate-y-0.5`} />
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-[var(--ds-radius-control)] bg-white shadow ring-0 transition-transform ${g.is_active ? 'translate-x-5' : 'translate-x-0.5'} translate-y-0.5`} />
               </button>
               <button
                 type="button"
@@ -445,7 +445,7 @@ const GroupEditor: React.FC<{
                   aria-pressed={full}
                   onClick={() => run(() => setCategoryModifierGroup(c.name, group.id, !full))}
                   title={partial ? `La spunta completa la categoria` : undefined}
-                  className={`inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50 ${
+                  className={`inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3.5 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50 ${
                     full
                       ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                       : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'

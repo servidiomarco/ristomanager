@@ -293,7 +293,7 @@ const SettingsDisclosure: React.FC<{
         </span>
       </span>
       <span
-        className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-transform group-open:rotate-180"
+        className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-transform group-open:rotate-180"
         aria-hidden
       >
         <ChevronDown className="h-4 w-4" />
@@ -827,7 +827,7 @@ const App: React.FC = () => {
         aria-controls="sidebar-nav"
         title="Apri menu"
         aria-label="Apri menu"
-        className="pressable inline-flex h-11 w-8 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+        className="pressable inline-flex h-11 w-8 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
       >
         <ChevronDown size={16} />
       </button>
@@ -2260,10 +2260,10 @@ const App: React.FC = () => {
                         </span>
                         <span
                           aria-hidden
-                          className={`relative inline-flex h-[26px] w-11 shrink-0 items-center rounded-full transition-colors ${theme === 'dark' ? 'bg-[var(--ds-action-bg)]' : 'bg-[var(--ds-border-strong)]'}`}
+                          className={`relative inline-flex h-[26px] w-11 shrink-0 items-center rounded-[var(--ds-radius-control)] transition-colors ${theme === 'dark' ? 'bg-[var(--ds-action-bg)]' : 'bg-[var(--ds-border-strong)]'}`}
                         >
                           <span
-                            className={`inline-block h-[22px] w-[22px] transform rounded-full bg-[var(--ds-surface)] shadow transition-transform ${theme === 'dark' ? 'translate-x-[20px]' : 'translate-x-0.5'}`}
+                            className={`inline-block h-[22px] w-[22px] transform rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] shadow transition-transform ${theme === 'dark' ? 'translate-x-[20px]' : 'translate-x-0.5'}`}
                           />
                         </span>
                       </button>
@@ -2301,7 +2301,7 @@ const App: React.FC = () => {
                   quando la sidebar è chiusa. */}
               <button
                 onClick={() => setShowProfilo(true)}
-                className="w-10 h-10 rounded-full bg-[var(--ds-action-bg)] flex items-center justify-center text-[var(--ds-action-fg)] font-medium text-[13px] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                className="w-10 h-10 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] flex items-center justify-center text-[var(--ds-action-fg)] font-medium text-[13px] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 title="Il tuo account"
                 aria-label="Il tuo account"
               >
@@ -2440,7 +2440,7 @@ const App: React.FC = () => {
 
              {/* Shift filter — "Tutti" only on Dashboard. Segmented control:
                  track at surface-row, active segment raised on surface. */}
-             <div className="flex items-center bg-[var(--ds-surface-row)] rounded-full p-1 gap-0.5 flex-shrink-0">
+             <div className="flex items-center bg-[var(--ds-surface-row)] rounded-[var(--ds-radius-control)] p-1 gap-0.5 flex-shrink-0">
                {([
                  { key: 'LUNCH', label: 'Pranzo', icon: <Sun className="h-3.5 w-3.5" /> },
                  { key: 'DINNER', label: 'Cena', icon: <Sunset className="h-3.5 w-3.5" /> },
@@ -2449,7 +2449,7 @@ const App: React.FC = () => {
                  <button
                    key={opt.key}
                    onClick={() => setGlobalShiftFilter(opt.key)}
-                   className={`inline-flex items-center gap-1.5 px-4 h-9 rounded-full text-[15px] font-medium transition-colors ${
+                   className={`inline-flex items-center gap-1.5 px-4 h-9 rounded-[var(--ds-radius-control)] text-[15px] font-medium transition-colors ${
                      globalShiftFilter === opt.key
                        ? 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]'
                        : 'text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
@@ -2494,7 +2494,7 @@ const App: React.FC = () => {
                   as the bell so it stays reachable on mobile, where ⌘K does not apply. */}
               <button
                  onClick={() => setPaletteOpen(true)}
-                 className="h-11 w-11 inline-flex items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors"
+                 className="h-11 w-11 inline-flex items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors"
                  aria-label="Cerca (⌘K)"
                  title="Cerca prenotazioni o clienti (⌘K)"
               >
@@ -2514,7 +2514,7 @@ const App: React.FC = () => {
                   }}
                   aria-haspopup={bellOpensPanel ? 'dialog' : undefined}
                   aria-expanded={bellOpensPanel ? notificationsPanelOpen : undefined}
-                  className={`relative h-11 w-11 inline-flex items-center justify-center rounded-full transition-colors ${
+                  className={`relative h-11 w-11 inline-flex items-center justify-center rounded-[var(--ds-radius-control)] transition-colors ${
                     notificationsPanelOpen
                       ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                       : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
@@ -2524,7 +2524,7 @@ const App: React.FC = () => {
                 >
                   <Bell className="h-[18px] w-[18px]" />
                   {notificationsUnreadCount > 0 && (
-                    <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 inline-flex items-center justify-center rounded-full bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] text-[11px] font-semibold leading-none tabular-nums ring-2 ring-[var(--ds-surface)]">
+                    <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 inline-flex items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] text-[11px] font-semibold leading-none tabular-nums ring-2 ring-[var(--ds-surface)]">
                       {notificationsUnreadCount > 99 ? '99+' : notificationsUnreadCount}
                     </span>
                   )}
@@ -2553,7 +2553,7 @@ const App: React.FC = () => {
                     aria-haspopup="menu"
                     aria-expanded={showCreateMenu}
                     aria-label="Crea nuovo"
-                    className="inline-flex items-center justify-center h-11 w-11 rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] transition-colors"
+                    className="inline-flex items-center justify-center h-11 w-11 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] transition-colors"
                   >
                     <Plus className="h-5 w-5 transition-transform duration-200" style={{ transform: showCreateMenu ? 'rotate(45deg)' : 'none' }} />
                   </button>
@@ -2609,7 +2609,7 @@ const App: React.FC = () => {
           // scroll region underneath now paints an opaque sticky toolbar. With
           // no gap the shadow gets sliced by a hard horizontal edge.
           <div className="flex-shrink-0 px-4 pb-4 pt-4 lg:hidden">
-            <div className="rounded-full bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)]">
+            <div className="rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)]">
               {/* Con quattro canali le etichette si troncano a "Chiam…": qui
                   parlano le icone, le label restano per gli screen reader. */}
               <SegmentedControl
@@ -2987,7 +2987,7 @@ const App: React.FC = () => {
                   key={g.id}
                   type="button"
                   onClick={() => document.getElementById(g.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-                  className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-full bg-[var(--ds-surface)] px-3.5 text-[13px] font-medium text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-3.5 text-[13px] font-medium text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 >
                   <g.Icon size={14} className="flex-shrink-0" />
                   {g.label}
@@ -3382,7 +3382,7 @@ const App: React.FC = () => {
                 type="button"
                 onClick={() => setShowCreateSheet(v => !v)}
                 aria-label="Crea nuovo"
-                className="h-14 w-14 -translate-y-4 rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] shadow-[var(--ds-shadow-raised)] flex items-center justify-center active:scale-95 transition-all ring-4 ring-[var(--ds-canvas)]"
+                className="h-14 w-14 -translate-y-4 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] shadow-[var(--ds-shadow-raised)] flex items-center justify-center active:scale-95 transition-all ring-4 ring-[var(--ds-canvas)]"
               >
                 <Plus className="h-6 w-6 transition-transform duration-200" style={{ transform: showCreateSheet ? 'rotate(45deg)' : 'rotate(0deg)' }} />
               </button>
@@ -3463,7 +3463,7 @@ const App: React.FC = () => {
                 </div>
                 <div className="px-4 pb-2 pt-1 flex items-center justify-between">
                   <h3 className="text-[20px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)]">Altro</h3>
-                  <button onClick={() => setShowMoreMenu(false)} className="h-9 w-9 inline-flex items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors" aria-label="Chiudi">
+                  <button onClick={() => setShowMoreMenu(false)} className="h-9 w-9 inline-flex items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors" aria-label="Chiudi">
                     <X className="h-[18px] w-[18px]" />
                   </button>
                 </div>
@@ -3510,7 +3510,7 @@ const App: React.FC = () => {
                           <item.Icon className="h-5 w-5 text-[var(--ds-text-secondary)]" />
                           <span className="text-[15px] font-medium tracking-[-0.01em] text-[var(--ds-text-primary)]">{item.label}</span>
                           {badge > 0 && (
-                            <span className="ml-auto min-w-[20px] h-5 px-1.5 rounded-full bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] text-[11px] font-semibold tabular-nums flex items-center justify-center">
+                            <span className="ml-auto min-w-[20px] h-5 px-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] text-[11px] font-semibold tabular-nums flex items-center justify-center">
                               {badge > 99 ? '99+' : badge}
                             </span>
                           )}
@@ -3544,10 +3544,10 @@ const App: React.FC = () => {
                   <span className="text-[15px] font-medium tracking-[-0.01em] text-[var(--ds-text-primary)]">Modalità scura</span>
                   <span
                     aria-hidden
-                    className={`ml-auto relative inline-flex h-[26px] w-11 shrink-0 items-center rounded-full transition-colors ${theme === 'dark' ? 'bg-[var(--ds-action-bg)]' : 'bg-[var(--ds-border-strong)]'}`}
+                    className={`ml-auto relative inline-flex h-[26px] w-11 shrink-0 items-center rounded-[var(--ds-radius-control)] transition-colors ${theme === 'dark' ? 'bg-[var(--ds-action-bg)]' : 'bg-[var(--ds-border-strong)]'}`}
                   >
                     <span
-                      className={`inline-block h-[22px] w-[22px] transform rounded-full bg-[var(--ds-surface)] shadow transition-transform ${theme === 'dark' ? 'translate-x-[20px]' : 'translate-x-0.5'}`}
+                      className={`inline-block h-[22px] w-[22px] transform rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] shadow transition-transform ${theme === 'dark' ? 'translate-x-[20px]' : 'translate-x-0.5'}`}
                     />
                   </span>
                 </button>
@@ -3621,7 +3621,7 @@ const SidebarItem = ({ icon, label, active, onClick, collapsed = false, badge }:
     <span className={`relative ${active ? 'text-[var(--ds-action-fg)]' : 'text-[var(--ds-text-secondary)]'}`}>
       {icon}
       {collapsed && badge != null && badge > 0 && (
-        <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 inline-flex items-center justify-center rounded-full bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] text-[10px] font-semibold leading-none tabular-nums ring-2 ring-[var(--ds-surface)]">
+        <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 inline-flex items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] text-[10px] font-semibold leading-none tabular-nums ring-2 ring-[var(--ds-surface)]">
           {badge > 99 ? '99+' : badge}
         </span>
       )}
@@ -3630,7 +3630,7 @@ const SidebarItem = ({ icon, label, active, onClick, collapsed = false, badge }:
       <>
         <span className="font-medium text-[15px] tracking-[-0.01em]">{label}</span>
         {badge != null && badge > 0 && (
-          <span className="ml-auto min-w-[20px] h-5 px-1.5 inline-flex items-center justify-center rounded-full bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] text-[11px] font-semibold leading-none tabular-nums">
+          <span className="ml-auto min-w-[20px] h-5 px-1.5 inline-flex items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] text-[11px] font-semibold leading-none tabular-nums">
             {badge > 99 ? '99+' : badge}
           </span>
         )}
@@ -3655,7 +3655,7 @@ const BottomNavItem = ({ icon, label, active, onClick, badge }: { icon: React.Re
     <span className="relative max-[420px]:[&>svg]:size-6">
       {icon}
       {badge !== undefined && badge > 0 && (
-        <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 rounded-full bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] text-[9px] font-semibold tabular-nums flex items-center justify-center ring-2 ring-[var(--ds-surface)]">
+        <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] text-[9px] font-semibold tabular-nums flex items-center justify-center ring-2 ring-[var(--ds-surface)]">
           {badge > 99 ? '99+' : badge}
         </span>
       )}

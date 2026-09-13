@@ -1734,7 +1734,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
             <div className="flex flex-col gap-2">
               {notices}
               {serviceBills.size > 0 && (
-                <span className="inline-flex h-8 w-fit items-baseline gap-1.5 rounded-full border border-[var(--ds-pending-solid)] bg-[var(--ds-pending-tint)] px-3 leading-8 text-[var(--ds-pending-text)]">
+                <span className="inline-flex h-8 w-fit items-baseline gap-1.5 rounded-[var(--ds-radius-control)] border border-[var(--ds-pending-solid)] bg-[var(--ds-pending-tint)] px-3 leading-8 text-[var(--ds-pending-text)]">
                   <span className="text-[15px] font-bold tabular-nums">{serviceBills.size}</span>
                   <span className="text-[13px] font-medium">{serviceBills.size === 1 ? 'conto da incassare' : 'conti da incassare'}</span>
                 </span>
@@ -2167,7 +2167,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
               type="button"
               onClick={leaveTable}
               aria-label="Torna alla scelta del tavolo"
-              className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             >
               <ArrowLeft size={20} aria-hidden />
             </button>
@@ -2238,7 +2238,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
           <button
             type="button"
             onClick={() => setCoursePickOpen(true)}
-            className="inline-flex h-11 flex-shrink-0 items-center gap-1.5 rounded-full bg-[var(--ds-action-bg)] px-4 text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="inline-flex h-11 flex-shrink-0 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-4 text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             {courseLabel(course)}
             {courseFilled && <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--ds-action-fg)]" aria-hidden />}
@@ -2248,7 +2248,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
             type="button"
             onClick={() => { if (segueTarget != null) setCourse(segueTarget); }}
             disabled={segueTarget == null}
-            className="inline-flex h-11 flex-shrink-0 items-center gap-2 rounded-full bg-[var(--ds-surface)] px-[18px] text-[16px] font-semibold text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="inline-flex h-11 flex-shrink-0 items-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-[18px] text-[16px] font-semibold text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             Segue
             <ArrowRight size={16} aria-hidden />
@@ -2391,7 +2391,7 @@ const ErrorBar: React.FC<{ message: string; onDismiss: () => void }> = ({ messag
         type="button"
         onClick={onDismiss}
         aria-label="Chiudi l'errore"
-        className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--ds-critical-text)] transition-[filter] hover:brightness-90"
+        className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-critical-text)] transition-[filter] hover:brightness-90"
       >
         <X size={16} />
       </button>

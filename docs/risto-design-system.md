@@ -225,13 +225,21 @@ spacing:
 # stessa domanda ("quanto e' tondo questo angolo?") si sceglievano a occhio, e
 # a fine giro l'app aveva schede a 16, 20 e 24px una accanto all'altra.
 rounded:
-  box:   "6px"    # var(--ds-radius) — schede, pannelli, tessere, campi, fogli, righe
-  inner: "4px"    # var(--ds-radius-sm) — cio' che sta DENTRO una scatola:
-                  # pastiglia della quantita', quadratini di legenda, checkbox.
-                  # Un angolo interno allo stesso raggio del suo contenitore
-                  # legge piatto; un filo piu' stretto e i due si distinguono.
-  full:  "999px"  # pills, badges, avatars, progress bars, bottoni circolari —
-                  # NON passa dal token: e' una forma, non un raggio.
+  box:     "6px"   # var(--ds-radius) — schede, pannelli, tessere, fogli, righe
+  inner:   "4px"   # var(--ds-radius-sm) — cio' che sta DENTRO una scatola:
+                   # pastiglia della quantita', quadratini di legenda, checkbox.
+                   # Un angolo interno allo stesso raggio del suo contenitore
+                   # legge piatto; un filo piu' stretto e i due si distinguono.
+  control: "12px"  # var(--ds-radius-control) — bottoni, campi, pastiglie, chip,
+                   # segmenti, bottoni icona. Piu' tondo della scatola di
+                   # proposito: un controllo si tocca, e l'angolo morbido lo
+                   # stacca dal contenitore invece di fonderlo con lui.
+  full:    "999px" # SOLO cio' che e' un cerchio e non un controllo: avatar,
+                   # pallini di stato, barre di avanzamento, maniglie dei fogli.
+                   # Non passa dal token: e' una forma, non un raggio. Sui
+                   # pezzi minuscoli il CSS limita comunque il raggio a meta'
+                   # del lato, quindi un pallino resterebbe tondo comunque —
+                   # ma scriverlo `full` dice perche'.
 
 # ---------------------------------------------------------------------------
 # ELEVATION

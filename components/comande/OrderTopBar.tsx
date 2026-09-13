@@ -65,7 +65,7 @@ interface OrderTopBarProps {
 }
 
 const stepper =
-  'inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+  'inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
 export const OrderTopBar: React.FC<OrderTopBarProps> = ({
   tableName, guestName, totalCents, rows, covers, busy,
@@ -161,7 +161,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
       // larghezze perché a entrambe il bottone sta DENTRO la scheda di testata:
       // un livello 2 appoggiato sulla tela misura 1,03:1 e sparisce (§8.8), ed
       // è il motivo per cui anche sul telefono la testata è una scheda.
-      className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+      className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
     >
       <MoreVertical size={20} aria-hidden />
     </button>
@@ -202,7 +202,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
       onClick={onBill}
       disabled={busy || billDisabled}
       title="Chiudi la comanda e apri il conto"
-      className={`inline-flex h-11 items-center justify-center gap-2 rounded-full px-5 text-[15px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+      className={`inline-flex h-11 items-center justify-center gap-2 rounded-[var(--ds-radius-control)] px-5 text-[15px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
         billDisabled
           ? 'bg-[var(--ds-surface-row)] text-[var(--ds-text-subtle)]'
           : 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)]'
@@ -297,7 +297,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
             Tav. {tableName}
           </h2>
           <div
-            className="flex flex-shrink-0 items-center gap-1 rounded-full bg-[var(--ds-surface-row)] p-1"
+            className="flex flex-shrink-0 items-center gap-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] p-1"
             title={`${covers} coperti`}
           >
             <button
@@ -305,7 +305,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
               onClick={() => onCovers(-1)}
               disabled={busy || covers <= 1}
               aria-label="Un coperto in meno"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             >
               <Minus size={15} aria-hidden />
             </button>
@@ -317,7 +317,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
               onClick={() => onCovers(+1)}
               disabled={busy}
               aria-label="Un coperto in più"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             >
               <Plus size={15} aria-hidden />
             </button>
@@ -337,7 +337,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
               onClick={onBill}
               disabled={busy || billDisabled}
               title="Chiudi la comanda e apri il conto"
-              className={`inline-flex h-11 items-center justify-center rounded-full px-5 text-[15px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+              className={`inline-flex h-11 items-center justify-center rounded-[var(--ds-radius-control)] px-5 text-[15px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                 billDisabled
                   ? 'bg-[var(--ds-surface-row)] text-[var(--ds-text-subtle)]'
                   : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
@@ -366,7 +366,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
                 type="button"
                 onClick={onBack}
                 aria-label="Torna alla scelta del tavolo"
-                className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               >
                 <ArrowLeft size={20} />
               </button>
@@ -380,7 +380,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
                 larghezza al nome dell'ospite qui sotto. Resta nel title e
                 nelle aria-label, per chi legge con lo screen reader. */}
             <div
-              className="flex flex-shrink-0 items-center gap-1 rounded-full bg-[var(--ds-surface-row)] p-1"
+              className="flex flex-shrink-0 items-center gap-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] p-1"
               title={`${covers} coperti`}
             >
               <button
@@ -388,7 +388,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
                 onClick={() => onCovers(-1)}
                 disabled={busy || covers <= 1}
                 aria-label="Un coperto in meno"
-                className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               >
                 <Minus size={16} aria-hidden />
               </button>
@@ -400,7 +400,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
                 onClick={() => onCovers(+1)}
                 disabled={busy}
                 aria-label="Un coperto in più"
-                className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               >
                 <Plus size={16} aria-hidden />
               </button>
@@ -413,7 +413,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
                 onClick={onBill}
                 disabled={busy || billDisabled}
                 title="Chiudi la comanda e apri il conto"
-                className={`inline-flex h-11 items-center justify-center rounded-full px-5 text-[15px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                className={`inline-flex h-11 items-center justify-center rounded-[var(--ds-radius-control)] px-5 text-[15px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                   billDisabled
                     ? 'bg-[var(--ds-surface-row)] text-[var(--ds-text-subtle)]'
                     : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
@@ -463,7 +463,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
                 type="button"
                 onClick={onSearch}
                 aria-label="Cerca un piatto"
-                className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               >
                 <Search size={20} aria-hidden />
               </button>
@@ -494,7 +494,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
             type="button"
             onClick={onBack}
             aria-label="Torna alla scelta del tavolo"
-            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             <ArrowLeft size={20} />
           </button>
@@ -515,7 +515,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
               type="button"
               onClick={onSearch}
               aria-label="Cerca un piatto"
-              className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             >
               <Search size={20} aria-hidden />
             </button>

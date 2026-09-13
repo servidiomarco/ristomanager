@@ -724,9 +724,9 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
               {new Date(now).toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short' })
                 .split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
             </span>
-            <span className="inline-flex h-10 items-center gap-2 rounded-full bg-[var(--ds-seated-tint)] pl-2.5 pr-3 text-[15px] font-medium tabular-nums text-[var(--ds-seated-text)]">
+            <span className="inline-flex h-10 items-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-seated-tint)] pl-2.5 pr-3 text-[15px] font-medium tabular-nums text-[var(--ds-seated-text)]">
               <span className="relative flex h-2 w-2" aria-hidden>
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--ds-seated-solid)] opacity-60 motion-reduce:hidden" />
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-[var(--ds-radius-control)] bg-[var(--ds-seated-solid)] opacity-60 motion-reduce:hidden" />
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-[var(--ds-seated-solid)]" />
               </span>
               {new Date(now).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
@@ -740,7 +740,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
             onClick={() => setSearchOpen(o => { if (o) setSearch(''); return !o; })}
             aria-pressed={searchOpen}
             aria-label={searchOpen ? 'Chiudi la ricerca' : 'Cerca una comanda'}
-            className={`inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+            className={`inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
               searchOpen
                 ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)]'
                 : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
@@ -755,7 +755,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
             onClick={toggleSound}
             aria-pressed={sound}
             aria-label={sound ? 'Disattiva l\'avviso sonoro' : 'Attiva l\'avviso sonoro'}
-            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             {sound ? <Bell size={17} aria-hidden /> : <BellOff size={17} className="text-[var(--ds-text-muted)]" aria-hidden />}
           </button>
@@ -800,7 +800,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
             <button
               type="button"
               onClick={dismissChatStrip}
-              className="inline-flex h-11 flex-shrink-0 items-center rounded-full bg-[var(--ds-surface-row)] px-5 text-[15px] font-semibold text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              className="inline-flex h-11 flex-shrink-0 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-5 text-[15px] font-semibold text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             >
               Ok
             </button>
@@ -870,10 +870,10 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                 <button
                   type="button"
                   onClick={() => setSummaryOpen(true)}
-                  className="inline-flex h-9 items-center gap-2 rounded-full pl-2.5 pr-1 text-[14px] font-semibold text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  className="inline-flex h-9 items-center gap-2 rounded-[var(--ds-radius-control)] pl-2.5 pr-1 text-[14px] font-semibold text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 >
                   Note
-                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-[var(--ds-pending-solid)] text-[13px] font-semibold tabular-nums text-[var(--ds-pending-fg)]">
+                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-pending-solid)] text-[13px] font-semibold tabular-nums text-[var(--ds-pending-fg)]">
                     {summary.dietary.length + summary.dietary_lines.length}
                   </span>
                 </button>
@@ -1071,7 +1071,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                     <button
                       type="button"
                       onClick={() => col.items.forEach(i => advance(i, 'PREPARING'))}
-                      className="inline-flex h-11 items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-3.5 text-[14px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)]"
+                      className="inline-flex h-11 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3.5 text-[14px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)]"
                     >
                       <Play size={13} aria-hidden /> inizia ora
                     </button>
@@ -1120,7 +1120,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
           const Section = ({ label, dot, courseTone, pulseCalled, list }: { label: string; dot: string; courseTone: string; pulseCalled?: boolean; list: { table: string; course: number; qty: number; called: boolean }[] }) => (
             <div>
               <div className="mb-3 flex items-center gap-3 text-[18px] font-semibold text-[var(--ds-text-muted)]">
-                <span aria-hidden className={`h-3.5 w-3.5 flex-shrink-0 rounded-full ${dot}`} />
+                <span aria-hidden className={`h-3.5 w-3.5 flex-shrink-0 rounded-[var(--ds-radius-control)] ${dot}`} />
                 {label}
               </div>
               {list.length === 0 ? (
@@ -1479,7 +1479,7 @@ const OrderCard: React.FC<{
               const wait = minutesUntil(soon.items[0]?.station_start_at ?? null, now);
               return (
                 <div key={no} className="relative">
-                  <span aria-hidden className="absolute -left-[28px] top-2.5 h-5 w-5 rounded-full bg-[var(--ds-border-strong)] ring-4 ring-[var(--ds-canvas)]" />
+                  <span aria-hidden className="absolute -left-[28px] top-2.5 h-5 w-5 rounded-[var(--ds-radius-control)] bg-[var(--ds-border-strong)] ring-4 ring-[var(--ds-canvas)]" />
                   <div className="rounded-[var(--ds-radius)] border-2 border-dashed border-[var(--ds-border-strong)] px-2.5 py-2">
                     <div className="flex items-baseline gap-2 text-[13px]">
                       <span className="font-semibold text-[var(--ds-text-primary)]">
@@ -1496,7 +1496,7 @@ const OrderCard: React.FC<{
                     <button
                       type="button"
                       onClick={() => soon.items.forEach(i => onAdvance(i, 'PREPARING'))}
-                      className="mt-1.5 inline-flex h-11 items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-3.5 text-[14px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)]"
+                      className="mt-1.5 inline-flex h-11 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3.5 text-[14px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)]"
                     >
                       <Play size={13} aria-hidden /> inizia ora
                     </button>
@@ -1583,7 +1583,7 @@ const CourseSection: React.FC<{
           binario. Fermo e verde quando tutto è pronto. */}
       <span
         aria-hidden
-        className={`absolute -left-[28px] top-2.5 h-5 w-5 rounded-full ring-4 ring-[var(--ds-canvas)] ${
+        className={`absolute -left-[28px] top-2.5 h-5 w-5 rounded-[var(--ds-radius-control)] ring-4 ring-[var(--ds-canvas)] ${
           allReady ? 'bg-[var(--ds-seated-solid)]' : 'animate-pulse bg-[var(--ds-pending-solid)]'
         }`}
       />
@@ -1639,7 +1639,7 @@ const CourseSection: React.FC<{
                     onPointerDown={e => e.stopPropagation()}
                     onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onEditWeight(i); } }}
                     aria-label={`Correggi il peso di ${i.name_snapshot} (ora ${weightLabel(i.weight_grams)})`}
-                    className="mt-0.5 inline-flex flex-shrink-0 cursor-pointer items-center rounded-full bg-[var(--ds-pending-tint)] px-2 py-0.5 text-[12px] font-semibold tabular-nums text-[var(--ds-pending-text)] transition-colors hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    className="mt-0.5 inline-flex flex-shrink-0 cursor-pointer items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-pending-tint)] px-2 py-0.5 text-[12px] font-semibold tabular-nums text-[var(--ds-pending-text)] transition-colors hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
                     {weightLabel(i.weight_grams)}
                   </span>
@@ -1772,7 +1772,7 @@ const CourseSection: React.FC<{
             disabled={called}
             title={called ? 'Sala avvisata' : "Avvisa la sala: l'uscita è pronta al ritiro"}
             aria-label={called ? 'Sala avvisata' : "Avvisa la sala: l'uscita è pronta al ritiro"}
-            className={`inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+            className={`inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
               called
                 ? 'bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)]'
                 : 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)]'
@@ -1787,7 +1787,7 @@ const CourseSection: React.FC<{
             onClick={() => onServeCourse(col)}
             title="Segna l'uscita servita"
             aria-label="Segna l'uscita servita"
-            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-seated-solid)] text-white transition-colors hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-seated-solid)] text-white transition-colors hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             <Check size={18} aria-hidden />
           </button>
@@ -1841,7 +1841,7 @@ const PassiveSection: React.FC<{
     <div className="relative">
       <span
         aria-hidden
-        className={`absolute -left-[28px] top-2.5 h-5 w-5 rounded-full ring-4 ring-[var(--ds-canvas)] ${
+        className={`absolute -left-[28px] top-2.5 h-5 w-5 rounded-[var(--ds-radius-control)] ring-4 ring-[var(--ds-canvas)] ${
           served ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-border-strong)]'
         }`}
       />
@@ -1946,7 +1946,7 @@ const WeightEditModal: React.FC<{
       <div className="flex items-center justify-center gap-2">
         {[-50, -10].map(d => (
           <button key={d} type="button" onClick={() => step(d)}
-            className="inline-flex h-11 min-w-14 items-center justify-center rounded-full bg-[var(--ds-surface-row)] px-3 text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)]">
+            className="inline-flex h-11 min-w-14 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3 text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)]">
             {d}
           </button>
         ))}
@@ -1955,7 +1955,7 @@ const WeightEditModal: React.FC<{
         </span>
         {[10, 50].map(d => (
           <button key={d} type="button" onClick={() => step(d)}
-            className="inline-flex h-11 min-w-14 items-center justify-center rounded-full bg-[var(--ds-surface-row)] px-3 text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)]">
+            className="inline-flex h-11 min-w-14 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3 text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)]">
             +{d}
           </button>
         ))}
@@ -2005,7 +2005,7 @@ const ServiceSummaryDetail: React.FC<{ summary: KitchenServiceSummary }> = ({ su
                     {d.tables.map((t, i) => (
                       <span
                         key={t.table ?? `c-${i}`}
-                        className="inline-flex items-center gap-1 rounded-full bg-[var(--ds-surface-row)] px-3 py-1.5 text-[14px] font-semibold text-[var(--ds-text-primary)]"
+                        className="inline-flex items-center gap-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3 py-1.5 text-[14px] font-semibold text-[var(--ds-text-primary)]"
                       >
                         <span className="tabular-nums">{t.quantity}×</span>
                         <span>{t.table ? `T${t.table}` : t.customer || '—'}</span>
@@ -2098,7 +2098,7 @@ const TimelinePane: React.FC<{
           type="button"
           onClick={onClose}
           aria-label="Chiudi la storia"
-          className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
         >
           <X size={16} aria-hidden />
         </button>
@@ -2121,7 +2121,7 @@ const TimelinePane: React.FC<{
               style={{ animation: 'tileIn 260ms ease-out both', animationDelay: `${Math.min(i * 45, 450)}ms` }}
             >
               <span
-                className={`absolute -left-7 top-1/2 h-[11px] w-[11px] -translate-y-1/2 rounded-full ring-4 ring-[var(--ds-surface)] ${dot(e)}`}
+                className={`absolute -left-7 top-1/2 h-[11px] w-[11px] -translate-y-1/2 rounded-[var(--ds-radius-control)] ring-4 ring-[var(--ds-surface)] ${dot(e)}`}
                 aria-hidden
               />
               <div className="flex items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3.5 py-2.5">

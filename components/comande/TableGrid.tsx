@@ -152,7 +152,7 @@ export const TableGrid: React.FC<TableGridProps> = ({
                     aria-haspopup="dialog"
                     aria-expanded={funnelOpen}
                     aria-label="Filtra per stato"
-                    className="relative inline-flex h-11 w-11 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    className="relative inline-flex h-11 w-11 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
                     <SlidersHorizontal size={18} aria-hidden />
                     {filter !== 'ALL' && (
@@ -200,7 +200,7 @@ export const TableGrid: React.FC<TableGridProps> = ({
                               type="button"
                               onClick={() => onFilter(opt.value)}
                               aria-pressed={filter === opt.value}
-                              className={`inline-flex items-center gap-1.5 rounded-full border px-3.5 py-2 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                              className={`inline-flex items-center gap-1.5 rounded-[var(--ds-radius-control)] border px-3.5 py-2 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                                 filter === opt.value
                                   ? 'border-[var(--ds-action-bg)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                                   : 'border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]'
@@ -331,7 +331,7 @@ export const TableGrid: React.FC<TableGridProps> = ({
                   type="button"
                   onClick={() => onRoom?.(rm.id)}
                   aria-pressed={active}
-                  className={`inline-flex h-11 flex-shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-4 text-[15px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                  className={`inline-flex h-11 flex-shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[var(--ds-radius-control)] px-4 text-[15px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                     active
                       ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                       : 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]'

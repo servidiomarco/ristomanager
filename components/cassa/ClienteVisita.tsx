@@ -82,7 +82,7 @@ export const ClienteVisita: React.FC<ClienteVisitaProps> = ({
               type="button"
               onClick={onAssociate}
               disabled={busy}
-              className="inline-flex h-11 items-center rounded-full bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
+              className="inline-flex h-11 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
             >
               Cambia cliente
             </button>
@@ -90,7 +90,7 @@ export const ClienteVisita: React.FC<ClienteVisitaProps> = ({
               type="button"
               onClick={onRemove}
               disabled={busy}
-              className="inline-flex h-11 items-center rounded-full bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
+              className="inline-flex h-11 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
             >
               {busy ? <Loader2 size={14} className="mr-1.5 animate-spin" /> : null}
               Rimuovi
@@ -98,7 +98,7 @@ export const ClienteVisita: React.FC<ClienteVisitaProps> = ({
             <button
               type="button"
               onClick={() => onOpenProfile(null)}
-              className="inline-flex h-11 items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)]"
+              className="inline-flex h-11 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)]"
             >
               Apri profilo <ExternalLink size={14} aria-hidden />
             </button>
@@ -115,7 +115,7 @@ export const ClienteVisita: React.FC<ClienteVisitaProps> = ({
             type="button"
             onClick={onAssociate}
             disabled={busy}
-            className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-[var(--ds-action-bg)] text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
+            className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
           >
             {busy ? <Loader2 size={16} className="animate-spin" /> : <UserPlus size={16} aria-hidden />}
             Associa un cliente
@@ -129,7 +129,7 @@ export const ClienteVisita: React.FC<ClienteVisitaProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex h-11 w-full items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[14px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)]"
+            className="inline-flex h-11 w-full items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[14px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)]"
           >
             Prosegui anonimo
           </button>

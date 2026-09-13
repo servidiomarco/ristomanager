@@ -75,7 +75,7 @@ export const CallRecordingPlayer: React.FC<{
         onClick={toggle}
         disabled={loading}
         aria-label={playing ? 'Metti in pausa' : 'Riproduci'}
-        className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+        className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
       >
         {loading ? <Loader2 className="h-4 w-4 animate-spin" />
           : playing ? <Pause className="h-4 w-4" />
@@ -89,7 +89,7 @@ export const CallRecordingPlayer: React.FC<{
           {BAR_HEIGHTS.map((h, i) => (
             <span
               key={i}
-              className={`w-full flex-1 rounded-full transition-colors ${
+              className={`w-full flex-1 rounded-[var(--ds-radius-control)] transition-colors ${
                 i / BAR_COUNT <= progress
                   ? 'bg-[var(--ds-action-bg)]'
                   : 'bg-[var(--ds-border-strong)]'

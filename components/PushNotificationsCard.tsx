@@ -86,7 +86,7 @@ export const PushNotificationsCard: React.FC = () => {
                         type="button"
                         onClick={handleToggle}
                         disabled={!supported || busy || permission === 'denied'}
-                        className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition flex-shrink-0 ${
+                        className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-[var(--ds-radius-control)] text-xs font-medium border transition flex-shrink-0 ${
                             enabled
                                 ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-text-primary)]'
                                 : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]'

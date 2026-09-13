@@ -188,7 +188,7 @@ export const SettleDialog: React.FC<{
                       aria-label="Togli movimento"
                       onClick={() => setMovements(prev => prev.filter((_, j) => j !== i))}
                       disabled={busy}
-                      className="rounded-full p-1 text-[var(--ds-text-muted)] hover:bg-[var(--ds-border)] disabled:opacity-40"
+                      className="rounded-[var(--ds-radius-control)] p-1 text-[var(--ds-text-muted)] hover:bg-[var(--ds-border)] disabled:opacity-40"
                     >
                       <X className="h-3.5 w-3.5" />
                     </button>
@@ -207,7 +207,7 @@ export const SettleDialog: React.FC<{
                     type="button"
                     onClick={() => setMethod(m.value)}
                     disabled={busy}
-                    className={`inline-flex h-11 items-center rounded-full px-4 text-[15px] font-medium transition-colors disabled:opacity-40 ${
+                    className={`inline-flex h-11 items-center rounded-[var(--ds-radius-control)] px-4 text-[15px] font-medium transition-colors disabled:opacity-40 ${
                       method === m.value
                         ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                         : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'
@@ -251,7 +251,7 @@ export const SettleDialog: React.FC<{
                     type="button"
                     onClick={() => setPpDoc(d)}
                     disabled={busy}
-                    className={`inline-flex h-11 items-center rounded-full px-4 text-[15px] font-medium transition-colors disabled:opacity-40 ${
+                    className={`inline-flex h-11 items-center rounded-[var(--ds-radius-control)] px-4 text-[15px] font-medium transition-colors disabled:opacity-40 ${
                       ppDoc === d
                         ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                         : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'
@@ -330,12 +330,12 @@ export const SettleDialog: React.FC<{
           </p>
         </div>
         <div className="flex items-center justify-end gap-2 border-t border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-4 py-3">
-          <button type="button" onClick={onCancel} disabled={busy} className="inline-flex h-11 items-center rounded-full px-4 text-[15px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-hover)] disabled:opacity-40">Annulla</button>
+          <button type="button" onClick={onCancel} disabled={busy} className="inline-flex h-11 items-center rounded-[var(--ds-radius-control)] px-4 text-[15px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-hover)] disabled:opacity-40">Annulla</button>
           <button
             type="button"
             onClick={confirm}
             disabled={busy || !lotteryValid}
-            className="inline-flex h-11 items-center gap-2 rounded-full bg-[var(--ds-action-bg)] px-6 text-[15px] font-semibold text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
+            className="inline-flex h-11 items-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-6 text-[15px] font-semibold text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
           >
             {busy && <Loader2 className="h-4 w-4 animate-spin" />}
             Chiudi conto
@@ -360,7 +360,7 @@ const SettleButton: React.FC<{
         type="button"
         onClick={() => setOpen(true)}
         disabled={busy}
-        className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-[var(--ds-action-bg)] text-[15px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+        className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[15px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
       >
         {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Banknote className="h-4 w-4" />}
         Chiudi conto
@@ -411,7 +411,7 @@ const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
   };
 
   const quiet =
-    'inline-flex h-11 flex-1 items-center justify-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+    'inline-flex h-11 flex-1 items-center justify-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
   return (
     <>
@@ -762,12 +762,12 @@ export const InvoiceDialog: React.FC<{
           {error && <p className="text-[13px] text-[var(--ds-critical-text)]">{error}</p>}
         </div>
         <div className="flex items-center justify-end gap-2 border-t border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-4 py-3">
-          <button type="button" onClick={onCancel} disabled={busy} className="inline-flex h-11 items-center rounded-full px-4 text-[15px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-hover)] disabled:opacity-40">Annulla</button>
+          <button type="button" onClick={onCancel} disabled={busy} className="inline-flex h-11 items-center rounded-[var(--ds-radius-control)] px-4 text-[15px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-hover)] disabled:opacity-40">Annulla</button>
           <button
             type="button"
             onClick={submit}
             disabled={busy || !buyer.name.trim()}
-            className="inline-flex h-11 items-center gap-2 rounded-full bg-[var(--ds-action-bg)] px-6 text-[15px] font-semibold text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
+            className="inline-flex h-11 items-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-6 text-[15px] font-semibold text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
           >
             {busy && <Loader2 className="h-4 w-4 animate-spin" />}
             Invia a SDI
@@ -855,7 +855,7 @@ export const FiscalCard: React.FC<{
   };
 
   const quiet =
-    'inline-flex h-10 items-center justify-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-4 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+    'inline-flex h-10 items-center justify-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-4 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
   return (
     <FormCard title="Scontrino" aside={<StatusPill tone={pill.tone}>{pill.label}</StatusPill>}>
@@ -1012,7 +1012,7 @@ export const FiscalCard: React.FC<{
                   value={rtNumber}
                   onChange={e => setRtNumber(e.target.value)}
                   disabled={busy}
-                  className="h-10 w-44 rounded-full border border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-3.5 text-[13px] text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]"
+                  className="h-10 w-44 rounded-[var(--ds-radius-control)] border border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-3.5 text-[13px] text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]"
                 />
                 <button
                   type="button"
@@ -1040,7 +1040,7 @@ export const FiscalCard: React.FC<{
                   type="button"
                   disabled={busy}
                   onClick={() => run(() => billsApiService.voidFiscalDoc(bill.id, bill.fiscal_doc_id!))}
-                  className="inline-flex h-10 items-center justify-center gap-1.5 rounded-full bg-[var(--ds-critical-solid)] px-4 text-[13px] font-semibold text-white transition-colors disabled:opacity-40"
+                  className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-solid)] px-4 text-[13px] font-semibold text-white transition-colors disabled:opacity-40"
                 >
                   {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
                   Confermo l'annullo
@@ -1065,7 +1065,7 @@ export const FiscalCard: React.FC<{
                   type="button"
                   disabled={busy}
                   onClick={() => run(() => billsApiService.issueCreditNote(bill.id, bill.fiscal_doc_id!))}
-                  className="inline-flex h-10 items-center justify-center gap-1.5 rounded-full bg-[var(--ds-critical-solid)] px-4 text-[13px] font-semibold text-white transition-colors disabled:opacity-40"
+                  className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-solid)] px-4 text-[13px] font-semibold text-white transition-colors disabled:opacity-40"
                 >
                   {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
                   Confermo lo storno

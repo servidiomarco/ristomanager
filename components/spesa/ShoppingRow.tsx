@@ -62,7 +62,7 @@ export const ShoppingRow: React.FC<{
       >
         <span className="flex flex-wrap items-baseline gap-x-2">
           {qty && (
-            <span className="inline-flex flex-shrink-0 items-center rounded-full bg-[var(--ds-pending-tint)] px-2 py-0.5 text-[13px] font-semibold tabular-nums text-[var(--ds-pending-text)]">
+            <span className="inline-flex flex-shrink-0 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-pending-tint)] px-2 py-0.5 text-[13px] font-semibold tabular-nums text-[var(--ds-pending-text)]">
               {qty}
             </span>
           )}
@@ -99,7 +99,7 @@ export const ShoppingRow: React.FC<{
             type="button"
             onClick={onEdit}
             aria-label={`Modifica ${item.name}`}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             <Edit2 className="h-4 w-4" />
           </button>
@@ -107,7 +107,7 @@ export const ShoppingRow: React.FC<{
             type="button"
             onClick={onDelete}
             aria-label={`Elimina ${item.name}`}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             <Trash2 className="h-4 w-4" />
           </button>

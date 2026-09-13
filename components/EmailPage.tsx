@@ -783,14 +783,14 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
                             <button
                               type="button"
                               onClick={handleCreateFromSuggestion}
-                              className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                              className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                             >
                               <CalendarPlus className="h-4 w-4" /> Crea prenotazione
                             </button>
                             <button
                               type="button"
                               onClick={() => setBookingSuggestion(null)}
-                              className="inline-flex h-9 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]"
+                              className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 text-[13px] font-medium text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]"
                             >
                               <XIcon className="h-4 w-4" /> Scarta
                             </button>
@@ -814,7 +814,7 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
                   grouped.map(group => (
                     <div key={group.day} className="space-y-2">
                       <div className="flex justify-center">
-                        <span className="rounded-full bg-[var(--ds-surface)] px-2.5 py-1 text-[12px] text-[var(--ds-text-muted)]">{group.day}</span>
+                        <span className="rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-2.5 py-1 text-[12px] text-[var(--ds-text-muted)]">{group.day}</span>
                       </div>
                       {group.items.map(m => {
                         const isOut = m.direction === 'outbound';
@@ -854,7 +854,7 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
                                       href={publicMediaUrl(att.token)}
                                       target="_blank"
                                       rel="noreferrer"
-                                      className={`inline-flex max-w-[240px] items-center gap-1.5 rounded-full px-3 py-1 text-[13px] underline-offset-2 hover:underline ${
+                                      className={`inline-flex max-w-[240px] items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 py-1 text-[13px] underline-offset-2 hover:underline ${
                                         isOut ? 'bg-white/15 text-white' : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)]'
                                       }`}
                                     >
@@ -889,7 +889,7 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
                   onChange={e => setSubject(e.target.value.slice(0, 200))}
                   placeholder="Oggetto"
                   aria-label="Oggetto"
-                  className="h-11 w-full rounded-full bg-[var(--ds-surface)] px-4 text-[15px] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] placeholder:text-[var(--ds-text-muted)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  className="h-11 w-full rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-4 text-[15px] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] placeholder:text-[var(--ds-text-muted)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 />
                 <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-shadow focus-within:ring-2 focus-within:ring-[var(--ds-border-focus)]">
                   {attachments.length > 0 && (
@@ -902,7 +902,7 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
                     disabled={uploading || sending}
                     aria-label="Allega un file"
                     title="Allega foto, PDF o audio"
-                    className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
                     {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
                   </button>
@@ -912,7 +912,7 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
                     disabled={uploading || sending}
                     aria-label="Allega un file dalla libreria"
                     title="Allega un file già caricato (menù, piantina…)"
-                    className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
                     <FolderOpen className="h-4 w-4" />
                   </button>
@@ -930,7 +930,7 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
                     onClick={handleSendReply}
                     disabled={!subject.trim() || !bodyText.trim() || sending}
                     aria-label="Invia risposta"
-                    className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-arriving-solid)] text-[var(--ds-arriving-fg)] transition-all hover:brightness-95 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:cursor-not-allowed disabled:bg-[var(--ds-surface-row)] disabled:text-[var(--ds-text-subtle)]"
+                    className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-solid)] text-[var(--ds-arriving-fg)] transition-all hover:brightness-95 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:cursor-not-allowed disabled:bg-[var(--ds-surface-row)] disabled:text-[var(--ds-text-subtle)]"
                   >
                     {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                   </button>

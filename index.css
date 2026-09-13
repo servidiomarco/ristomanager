@@ -769,6 +769,17 @@ body {
   --ds-radius: 6px;
   --ds-radius-sm: 4px;
 
+  /* Il raggio dei CONTROLLI: bottoni, campi, pastiglie, chip, segmenti.
+     Più tondo delle scatole di proposito — un controllo si tocca, e l'angolo
+     più morbido lo separa dal contenitore che lo ospita invece di fonderlo
+     con lui.
+
+     Resta `rounded-full` solo ciò che è davvero un cerchio e non un controllo:
+     avatar, pallini di stato, barre di avanzamento. Su quelli il CSS limita
+     comunque il raggio a metà del lato, quindi un pallino da 6px resterebbe
+     tondo in ogni caso — ma scriverlo `full` dice perché. */
+  --ds-radius-control: 12px;
+
   /* Surface depth — canvas is DARKER than cards in light mode */
   --ds-canvas: #ededf1;
   --ds-surface: #ffffff;

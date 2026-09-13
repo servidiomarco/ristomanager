@@ -475,7 +475,7 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
                           type="button"
                           onClick={() => logoInputRef.current?.click()}
                           disabled={logoBusy}
-                          className="inline-flex h-9 items-center gap-1.5 rounded-full border border-[var(--ds-border)] px-3 text-[13px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50"
+                          className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] border border-[var(--ds-border)] px-3 text-[13px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50"
                         >
                           {logoBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
                           {data.logo_url ? 'Sostituisci' : 'Carica logo'}
@@ -485,7 +485,7 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
                             type="button"
                             onClick={() => handleLogoRemove('light')}
                             disabled={logoBusy}
-                            className="inline-flex h-9 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50"
+                            className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 text-[13px] font-medium text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50"
                           >
                             <X className="h-4 w-4" /> Rimuovi
                           </button>
@@ -528,7 +528,7 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
                           type="button"
                           onClick={() => logoDarkInputRef.current?.click()}
                           disabled={logoBusy}
-                          className="inline-flex h-9 items-center gap-1.5 rounded-full border border-[var(--ds-border)] px-3 text-[13px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50"
+                          className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] border border-[var(--ds-border)] px-3 text-[13px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50"
                         >
                           {logoBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
                           {data.logo_dark_url ? 'Sostituisci' : 'Carica variante'}
@@ -538,7 +538,7 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
                             type="button"
                             onClick={() => handleLogoRemove('dark')}
                             disabled={logoBusy}
-                            className="inline-flex h-9 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50"
+                            className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 text-[13px] font-medium text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50"
                           >
                             <X className="h-4 w-4" /> Rimuovi
                           </button>
@@ -623,7 +623,7 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
                   const active = currentDoc.key === key;
                   return (
                     <button key={key} onClick={() => setActiveDoc(key)}
-                      className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-medium border transition-colors whitespace-nowrap ${
+                      className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--ds-radius-control)] text-[12px] font-medium border transition-colors whitespace-nowrap ${
                         active ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-text-primary)]'
                                : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)] hover:text-[var(--ds-text-primary)]'}`}>
                       <Icon className="h-3.5 w-3.5" />

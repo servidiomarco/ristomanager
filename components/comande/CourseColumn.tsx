@@ -211,7 +211,7 @@ export const CourseList: React.FC<CourseListProps> = ({
                 aria-label={`Sposta la ${courseLabel(n)} su un'altra uscita`}
                 title="Tocca per scegliere l'uscita, trascina per spostare l'uscita intera"
                 {...grip({ kind: 'course', from: n, count: draftRows.length + serverRows.filter(i => i.status === 'DRAFT').length })}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] ring-1 ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] ring-1 ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               >
                 <ChevronsUpDown size={15} />
               </button>
@@ -220,7 +220,7 @@ export const CourseList: React.FC<CourseListProps> = ({
               type="button"
               onClick={() => onCourse(n)}
               aria-pressed={current}
-              className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3.5 py-1.5 text-[14px] font-semibold ring-1 ring-inset transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+              className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-[var(--ds-radius-control)] px-3.5 py-1.5 text-[14px] font-semibold ring-1 ring-inset transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                 current
                   ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] ring-transparent'
                   : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] ring-[var(--ds-border-strong)]'
@@ -263,7 +263,7 @@ export const CourseList: React.FC<CourseListProps> = ({
                 onClick={() => onFire(n)}
                 disabled={busy}
                 title="Lancia in cucina le righe rimaste in coda su questa uscita"
-                className="flex-shrink-0 rounded-full bg-[var(--ds-action-bg)] px-3.5 py-1.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
+                className="flex-shrink-0 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-3.5 py-1.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
               >
                 Chiama
               </button>
@@ -276,7 +276,7 @@ export const CourseList: React.FC<CourseListProps> = ({
                     onClick={() => onFire(n)}
                     disabled={busy}
                     title="Lancia l'uscita in cucina adesso"
-                    className="flex-shrink-0 rounded-full bg-[var(--ds-action-bg)] px-3.5 py-1.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
+                    className="flex-shrink-0 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-3.5 py-1.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
                   >
                     Chiama
                   </button>
@@ -348,7 +348,7 @@ export const CourseList: React.FC<CourseListProps> = ({
                       onClick={() => onVoid(i)}
                       aria-label={`Storna ${i.name_snapshot}`}
                       title="Storna"
-                      className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-critical-text)] transition-colors hover:bg-[var(--ds-critical-tint)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                      className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-critical-text)] transition-colors hover:bg-[var(--ds-critical-tint)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     >
                       <Ban size={15} />
                     </button>
@@ -457,7 +457,7 @@ export const SendFooter: React.FC<SendFooterProps> = ({
       type="button"
       onClick={onSend}
       disabled={busy || courseCount === 0}
-      className="inline-flex h-14 w-full items-center justify-center gap-2 rounded-full bg-[var(--ds-action-bg)] px-6 text-[17px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+      className="inline-flex h-14 w-full items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-6 text-[17px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
     >
       {busy ? <Loader2 size={18} className="animate-spin" aria-hidden /> : <Send size={18} aria-hidden />}
       {courseCount === 0 ? `Invia ${courseLabel(course)}` : `Invia ${courseLabel(course)} · ${euro(courseTotal)}`}
@@ -470,7 +470,7 @@ export const SendFooter: React.FC<SendFooterProps> = ({
         type="button"
         onClick={onSendAll}
         disabled={busy}
-        className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-full bg-[var(--ds-surface)] text-[15px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+        className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[15px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
       >
         <SendHorizontal size={16} aria-hidden />
         Invia tutto · {euro(allTotal)}
@@ -488,7 +488,7 @@ export const SendFooter: React.FC<SendFooterProps> = ({
         type="button"
         onClick={onExpand}
         aria-label="Apri la comanda"
-        className="-mt-1.5 flex justify-center rounded-full py-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+        className="-mt-1.5 flex justify-center rounded-[var(--ds-radius-control)] py-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
       >
         <span className="h-1 w-9 rounded-full bg-[var(--ds-border-strong)]" aria-hidden />
       </button>
@@ -524,7 +524,7 @@ export const SendFooter: React.FC<SendFooterProps> = ({
         type="button"
         onClick={onSend}
         disabled={busy || courseCount === 0}
-        className="inline-flex h-12 flex-shrink-0 items-center gap-2 rounded-full bg-[var(--ds-surface)] px-6 text-[17px] font-semibold text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+        className="inline-flex h-12 flex-shrink-0 items-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-6 text-[17px] font-semibold text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
       >
         {busy ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
         Invia
@@ -535,7 +535,7 @@ export const SendFooter: React.FC<SendFooterProps> = ({
         type="button"
         onClick={onSendAll}
         disabled={busy}
-        className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-full bg-[var(--ds-action-bg)] text-[15px] font-medium text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+        className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[15px] font-medium text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
       >
         <SendHorizontal size={16} aria-hidden />
         Invia tutto · {euro(allTotal)}

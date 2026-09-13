@@ -43,13 +43,13 @@ export const StepNav: React.FC<{
         >
           {/* The rail, not a number, is what carries progress at a glance —
               filled behind you, empty ahead. */}
-          <span className={`h-[3px] w-full rounded-full ${
+          <span className={`h-[3px] w-full rounded-[var(--ds-radius-control)] ${
             step.disabled ? 'bg-[var(--ds-border)]'
             : isCurrent || isDone ? 'bg-[var(--ds-action-bg)]'
             : 'bg-[var(--ds-border)]'
           }`} />
           <span className="flex items-center gap-2">
-            <span className={`flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-[12px] font-semibold tabular-nums ${
+            <span className={`flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[12px] font-semibold tabular-nums ${
               step.disabled
                 ? 'bg-[var(--ds-surface)] text-[var(--ds-text-subtle)]'
                 : isDone

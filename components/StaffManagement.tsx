@@ -111,10 +111,10 @@ type SlotState = 'present' | 'absent' | 'off' | 'rest' | 'implicit' | 'none';
 
 
 const rowIconButton =
-  'inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+  'inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
 const rowIconButtonDanger =
-  'inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+  'inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
 /** The filter chip inside the sheet. Outlined when off, solid when on — the
  *  same pair Prenotazioni uses, so a filter panel reads the same wherever it
@@ -128,7 +128,7 @@ const Chip: React.FC<{
     type="button"
     onClick={onClick}
     aria-pressed={active}
-    className={`inline-flex h-11 max-w-full items-center gap-1.5 rounded-full px-4 text-[14px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+    className={`inline-flex h-11 max-w-full items-center gap-1.5 rounded-[var(--ds-radius-control)] px-4 text-[14px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
       active
         ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
         : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] ring-1 ring-inset ring-[var(--ds-border-strong)] hover:bg-[var(--ds-surface-row)]'
@@ -1059,7 +1059,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
           aria-label="Filtri"
           title="Filtri"
           className={activeFilterCount > 0 || filtersOpen
-            ? 'relative inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] shadow-[var(--ds-shadow-card)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]'
+            ? 'relative inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] shadow-[var(--ds-shadow-card)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]'
             : `relative ${dsIconButton}`}
         >
           <ListFilter className="h-4 w-4" />
@@ -1200,7 +1200,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                       active ? 'ring-2 ring-inset ring-[var(--ds-action-bg)]' : ''
                     } ${staff.isActive ? '' : 'opacity-60'}`}
                   >
-                    <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[13px] font-semibold text-[var(--ds-text-secondary)]">
+                    <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[13px] font-semibold text-[var(--ds-text-secondary)]">
                       {initials(staff)}
                     </span>
                     <span className="min-w-0 flex-1">
@@ -1263,7 +1263,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
         return (
           <span
             key={label}
-            className={`block truncate rounded-full px-2 py-1 text-center text-[11px] font-medium ${TIME_OFF_CHIP[dayTimeOff.type]}`}
+            className={`block truncate rounded-[var(--ds-radius-control)] px-2 py-1 text-center text-[11px] font-medium ${TIME_OFF_CHIP[dayTimeOff.type]}`}
             title={`${TIME_OFF_LABELS[dayTimeOff.type]} — ${label.toLowerCase()}`}
           >
             {TIME_OFF_LABELS[dayTimeOff.type]}
@@ -1282,7 +1282,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
       return (
         <span
           key={label}
-          className={`block truncate rounded-full text-center text-[11px] font-semibold ${tone}`}
+          className={`block truncate rounded-[var(--ds-radius-control)] text-center text-[11px] font-semibold ${tone}`}
           title={implicit ? `${label} dal contratto (${STAFF_TYPE_LABELS[selectedStaff.staffType]})` : label}
         >
           {label}
@@ -1295,13 +1295,13 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
     let rows: React.ReactNode;
     if (fullDayOff) {
       rows = (
-        <span className={`block truncate rounded-full px-2 py-1 text-center text-[12px] font-medium ${TIME_OFF_CHIP[dayTimeOff!.type]}`}>
+        <span className={`block truncate rounded-[var(--ds-radius-control)] px-2 py-1 text-center text-[12px] font-medium ${TIME_OFF_CHIP[dayTimeOff!.type]}`}>
           {TIME_OFF_LABELS[dayTimeOff!.type]}
         </span>
       );
     } else if (lunch === 'rest' && dinner === 'rest') {
       rows = (
-        <span className="block truncate rounded-full bg-[var(--ds-surface)] px-2 py-1 text-center text-[12px] font-medium text-[var(--ds-text-muted)]">
+        <span className="block truncate rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-2 py-1 text-center text-[12px] font-medium text-[var(--ds-text-muted)]">
           Riposo
         </span>
       );
@@ -1370,7 +1370,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                 aria-expanded={personMenuOpen}
                 aria-label="Altre azioni"
                 title="Altre azioni"
-                className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               >
                 <MoreVertical className="h-4 w-4" />
               </button>
@@ -1480,7 +1480,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
               <button
                 type="button"
                 onClick={goToCurrentMonth}
-                className="inline-flex h-9 items-center rounded-full bg-[var(--ds-surface-row)] px-3 text-[14px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)]"
+                className="inline-flex h-9 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3 text-[14px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)]"
               >
                 Oggi
               </button>
@@ -1518,19 +1518,19 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                 the automatic one means nothing for an Extra. */}
             <div className="mt-4 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-[13px] text-[var(--ds-text-muted)]">
               <span className="flex items-center gap-1.5">
-                <span className="rounded-full bg-[var(--ds-pending-tint)] px-2 py-0.5 text-[11px] font-semibold text-[var(--ds-pending-text)]">Pranzo</span>
-                <span className="rounded-full bg-[var(--ds-arriving-tint)] px-2 py-0.5 text-[11px] font-semibold text-[var(--ds-arriving-text)]">Cena</span>
+                <span className="rounded-[var(--ds-radius-control)] bg-[var(--ds-pending-tint)] px-2 py-0.5 text-[11px] font-semibold text-[var(--ds-pending-text)]">Pranzo</span>
+                <span className="rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-tint)] px-2 py-0.5 text-[11px] font-semibold text-[var(--ds-arriving-text)]">Cena</span>
                 turno assegnato
               </span>
               {hasAutoShifts(selectedStaff) && (
                 <span className="flex items-center gap-1.5">
-                  <span className="rounded-full border border-dashed border-[var(--ds-pending-text)] px-[7px] py-[1px] text-[11px] font-semibold text-[var(--ds-pending-text)] opacity-75">Pranzo</span>
+                  <span className="rounded-[var(--ds-radius-control)] border border-dashed border-[var(--ds-pending-text)] px-[7px] py-[1px] text-[11px] font-semibold text-[var(--ds-pending-text)] opacity-75">Pranzo</span>
                   dal contratto
                 </span>
               )}
               {(Object.keys(TIME_OFF_LABELS) as TimeOffType[]).map(type => (
                 <span key={type} className="flex items-center gap-1.5">
-                  <span className={`h-3 w-3 rounded-full ${TIME_OFF_CHIP[type]}`} aria-hidden />
+                  <span className={`h-3 w-3 rounded-[var(--ds-radius-control)] ${TIME_OFF_CHIP[type]}`} aria-hidden />
                   {TIME_OFF_LABELS[type].toLowerCase()}
                 </span>
               ))}
@@ -2157,7 +2157,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                     type="button"
                     onClick={() => setTimeOffForm({ ...timeOffForm, type })}
                     aria-pressed={active}
-                    className={`inline-flex h-11 items-center rounded-full px-4 text-[15px] font-medium transition-colors ${
+                    className={`inline-flex h-11 items-center rounded-[var(--ds-radius-control)] px-4 text-[15px] font-medium transition-colors ${
                       active
                         ? `${TIME_OFF_CHIP[type]} ring-2 ring-inset ring-current`
                         : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'

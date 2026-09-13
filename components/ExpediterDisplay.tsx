@@ -34,7 +34,7 @@ const mmss = (seconds: number): string => {
 /* I bersagli del passe restano a 44px: si preme in piedi, di fretta, guardando
    il piano e non lo schermo. */
 const passeAction =
-  'inline-flex h-11 flex-shrink-0 items-center gap-1.5 rounded-full px-4 text-[14px] font-semibold transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+  'inline-flex h-11 flex-shrink-0 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-4 text-[14px] font-semibold transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
 export const ExpediterDisplay: React.FC = () => {
   const now = useNow(10_000);
@@ -148,7 +148,7 @@ export const ExpediterDisplay: React.FC = () => {
             onClick={toggleSound}
             aria-pressed={sound}
             aria-label={sound ? 'Disattiva l\'avviso sonoro' : 'Attiva l\'avviso sonoro'}
-            className="ml-auto inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="ml-auto inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             {sound ? <Bell size={17} aria-hidden /> : <BellOff size={17} className="text-[var(--ds-text-muted)]" aria-hidden />}
           </button>
