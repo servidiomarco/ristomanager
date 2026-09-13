@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  ArrowLeft, ArrowRightLeft, Ban, Check, Grid3x3, LayoutGrid, MoreVertical, Minus, Percent, Plus, Receipt, Rows3, Search, Trash2, Users,
+  ArrowLeft, ArrowRightLeft, Ban, Check, Grid3x3, LayoutGrid, MoreVertical, Minus, Percent, Plus, Receipt, Rows3, Search, Trash2, Users, Volume2,
 } from 'lucide-react';
 import { Sheet } from '../ds';
 import { euro, rowCountLabel } from './orderView';
@@ -38,6 +38,11 @@ interface OrderTopBarProps {
    *  Impostazioni. Solo palmare: la griglia larga non ha densità. */
   densityCompact?: boolean;
   onToggleDensity?: () => void;
+  /** Avviso sonoro su uscita pronta e chiamata del passe — preferenza
+   *  personale come la densità, salvata per dispositivo. Il toggle sta qui
+   *  anche perché il gesto sblocca l'AudioContext per i chime futuri. */
+  soundOn?: boolean;
+  onToggleSound?: () => void;
   onBack: () => void;
   onCovers: (delta: number) => void;
   onBill: () => void;
@@ -65,7 +70,7 @@ const stepper =
 export const OrderTopBar: React.FC<OrderTopBarProps> = ({
   tableName, guestName, totalCents, rows, covers, busy,
   billDisabled, clearDisabled, wide,
-  onSearch, densityCompact, onToggleDensity,
+  onSearch, densityCompact, onToggleDensity, soundOn, onToggleSound,
   onBack, onCovers, onBill, onDiscount, onTransfer, onClearDrafts, onDeleteOrder,
   paged, catView = 'list', onCatView, showBack = true, inBar = false,
 }) => {
@@ -112,6 +117,10 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
     ...(onToggleDensity ? [{
       icon: Rows3, label: 'Vista compatta', onClick: onToggleDensity,
       disabled: false, critical: false, active: densityCompact === true,
+    }] : []),
+    ...(onToggleSound ? [{
+      icon: Volume2, label: 'Avvisi sonori', onClick: onToggleSound,
+      disabled: false, critical: false, active: soundOn === true,
     }] : []),
     // Le tre viste della pagina categorie (variante a pagine): interruttori a
     // spunta, uno solo attivo — stesso posto della Vista compatta, stessa

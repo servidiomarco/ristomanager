@@ -69,6 +69,7 @@ import {
 // Stessa famiglia di chiavi del tema (ristocrm_theme): preferenza personale,
 // per dispositivo.
 const DENSITY_KEY = 'ristocrm_orderpad_density';
+const SOUND_KEY = 'orderpad.sound';
 // La veste della pagina categorie nella variante a pagine (lista, bottoni 3
 // o 4 per riga): stessa natura della densità, per operatore e dispositivo.
 const CATVIEW_KEY = 'ristocrm_orderpad_catview';
@@ -177,6 +178,21 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   const toggleDensity = () => setDensity(prev => {
     const next = prev === 'compact' ? 'comfortable' : 'compact';
     try { localStorage.setItem(DENSITY_KEY, next); } catch { /* la scelta vale comunque per la sessione */ }
+    return next;
+  });
+  // Avviso sonoro sull'uscita pronta (e sulla chiamata del passe): stesso
+  // schema del passe — ref oltre allo stato così il listener socket legge il
+  // valore corrente senza risottoscriversi, e il chime all'accensione sblocca
+  // l'AudioContext dentro un gesto dell'utente.
+  const [sound, setSound] = useState(() => {
+    try { return localStorage.getItem(SOUND_KEY) !== 'off'; } catch { return true; }
+  });
+  const soundRef = useRef(sound);
+  soundRef.current = sound;
+  const toggleSound = () => setSound(prev => {
+    const next = !prev;
+    try { localStorage.setItem(SOUND_KEY, next ? 'on' : 'off'); } catch { /* vale per la sessione */ }
+    if (next) chime();
     return next;
   });
   const [catView, setCatView] = useState<CatView>(() => {
@@ -1425,6 +1441,28 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     };
   }, [openOrderId]);
 
+  // La campanella della sala: uscita pronta in cucina o chiamata dal passe →
+  // suono e vibrazione sul palmare, qualunque schermata sia aperta. Senza
+  // questo il cameriere sulla griglia tavoli (o su un altro tavolo) non
+  // sentiva niente: l'effetto qui sopra aggiorna solo il badge della comanda
+  // aperta. Nessun filtro sul tavolo: come la voce del passe, vale per tutta
+  // la sala — chi è in pausa lo spegne dal menu ⋮.
+  useEffect(() => {
+    const socket = socketClient.getSocket();
+    if (!socket) return;
+    const ring = () => {
+      if (!soundRef.current) return;
+      chime();
+      if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(30);
+    };
+    socket.on('course:ready', ring);
+    socket.on('course:called', ring);
+    return () => {
+      socket.off('course:ready', ring);
+      socket.off('course:called', ring);
+    };
+  }, []);
+
   const notices = (
     <>
       {error && <ErrorBar message={error} onDismiss={() => setError(null)} />}
@@ -1813,6 +1851,8 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       paged={pagedPad}
       catView={catView}
       onCatView={pagedPad ? pickCatView : undefined}
+      soundOn={sound}
+      onToggleSound={toggleSound}
       onBack={leaveTable}
       onCovers={changeCovers}
       onBill={() => setClosing(true)}
