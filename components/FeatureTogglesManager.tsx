@@ -541,13 +541,13 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                     aria-label={`${enabled ? 'Disattiva' : 'Attiva'} ${meta.title}`}
                                     onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggle(meta.key); }}
                                     disabled={!canEdit || isSaving}
-                                    className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-[var(--ds-radius-control)] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
+                                    className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
                                         enabled ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-surface-row)] border border-[var(--ds-border)]'
                                     }`}
                                 >
                                     <span
                                         aria-hidden="true"
-                                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-[var(--ds-radius-control)] bg-white shadow ring-0 transition-transform ${
+                                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${
                                             enabled ? 'translate-x-5' : 'translate-x-0.5'
                                         } translate-y-0.5`}
                                     />
@@ -642,13 +642,13 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                                 aria-label={doubleSeating ? 'Disattiva doppio turno' : 'Attiva doppio turno'}
                                                 onClick={() => toggle('voice_double_seating_enabled')}
                                                 disabled={!canEdit || doubleSeatingSaving}
-                                                className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-[var(--ds-radius-control)] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
+                                                className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
                                                     doubleSeating ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-surface-row)] border border-[var(--ds-border)]'
                                                 }`}
                                             >
                                                 <span
                                                     aria-hidden="true"
-                                                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-[var(--ds-radius-control)] bg-white shadow ring-0 transition-transform ${
+                                                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${
                                                         doubleSeating ? 'translate-x-5' : 'translate-x-0.5'
                                                     } translate-y-0.5`}
                                                 />
@@ -678,13 +678,13 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                                 aria-label={suspended ? 'Riattiva prenotazioni' : 'Sospendi prenotazioni'}
                                                 onClick={() => toggle('voice_bookings_suspended')}
                                                 disabled={!canEdit || suspensionSaving}
-                                                className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-[var(--ds-radius-control)] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
+                                                className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
                                                     suspended ? 'bg-[var(--ds-pending-solid)]' : 'bg-[var(--ds-surface-row)] border border-[var(--ds-border)]'
                                                 }`}
                                             >
                                                 <span
                                                     aria-hidden="true"
-                                                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-[var(--ds-radius-control)] bg-white shadow ring-0 transition-transform ${
+                                                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${
                                                         suspended ? 'translate-x-5' : 'translate-x-0.5'
                                                     } translate-y-0.5`}
                                                 />
@@ -1095,13 +1095,13 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                                 aria-label={`${cap ? 'Disattiva' : 'Attiva'} limite per ${room.room_name}`}
                                                 onClick={() => toggleCap(room.room_id)}
                                                 disabled={!canEdit || savingCaps}
-                                                className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-[var(--ds-radius-control)] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
+                                                className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
                                                     cap ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-surface-row)] border border-[var(--ds-border)]'
                                                 }`}
                                             >
                                                 <span
                                                     aria-hidden="true"
-                                                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-[var(--ds-radius-control)] bg-white shadow ring-0 transition-transform ${
+                                                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${
                                                         cap ? 'translate-x-5' : 'translate-x-0.5'
                                                     } translate-y-0.5`}
                                                 />

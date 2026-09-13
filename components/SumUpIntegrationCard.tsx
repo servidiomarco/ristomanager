@@ -362,7 +362,7 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                             onClick={() => canEdit && setDraftActive(!effectiveActive)}
                             disabled={!canEdit || saving || (!effectiveActive && !targetEnvReady)}
                             title={!effectiveActive && !targetEnvReady ? 'Completa le credenziali di questo ambiente' : undefined}
-                            className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-[var(--ds-radius-control)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                            className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                                 effectiveActive ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-surface-row)]'
                             }`}
                         >

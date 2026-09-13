@@ -675,7 +675,7 @@ floor, but expect to refine them against real screens during the revamp.
 
 | Variant | Appearance | Use |
 |---|---|---|
-| `primary` | `action-bg` fill, `action-fg` text, `rounded.full` | Main action (Conferma, Arrivato, +) |
+| `primary` | `action-bg` fill, `action-fg` text, `rounded.control` | Main action (Conferma, Arrivato, +) |
 | `secondary` | `surface` fill, `border` hairline, `text-primary` | Alternative (In uscita) |
 | `state-solid` | `states.X.solid` fill, `solid-fg` text | Coloured action (Ordina, Assegna) |
 | `state-tint` | `states.X.tint` fill, `states.X.text` | Lower-emphasis coloured action |
@@ -692,7 +692,7 @@ button resize mid-action.
 beside a solid primary — never a loud red block. Visual weight belongs to the action someone
 wants, not the one they might regret.
 
-**IconButton** [obs] — `rounded.md` or `rounded.full`, icon at `icons.md`, 44px hit area
+**IconButton** [obs] — `rounded.control`, icon at `icons.md`, 44px hit area
 regardless of visual size. Requires `aria-label`. Two fills: **bare** (transparent, tinting
 on hover) for controls inside a row or card, and **filled** (`surface-row`) for standalone
 controls in chrome, where a visible target matters more than restraint. Filled icon buttons
@@ -724,9 +724,9 @@ wrong".
 **Textarea** [der] — as Input, `rounded.lg`, min-height 96px, vertical resize only.
 
 **Select** [der/obs] — as Input plus trailing chevron. An observed **pill variant** exists
-for inline filters (`Cucina ⌄` in Spesa): `surface-row` fill, `rounded.full`, `label` type.
+for inline filters (`Cucina ⌄` in Spesa): `surface-row` fill, `rounded.control`, `label` type.
 
-**SearchInput** [der] — as Input, `rounded.full`, leading search icon at `text-muted`,
+**SearchInput** [der] — as Input, `rounded.control`, leading search icon at `text-muted`,
 optional trailing clear button. Debounce ≥200ms before firing.
 
 **Checkbox** [obs] — 20px, `rounded.sm`, `border-strong` outline, 44px hit area. Checked
@@ -735,7 +735,9 @@ fills `action-bg` with a white glyph. A circular variant is used in task lists.
 **Radio** [der] — 20px circle, `border-strong` outline. Checked shows an `action-bg` dot at
 8px. Always inside a `RadioGroup` with `role="radiogroup"` and arrow-key navigation.
 
-**Switch** [der] — 44×26 track at `rounded.full`, 22px knob. Off: `neutral.solid` track. On:
+**Switch** [der] — 44×26 track at `rounded.full`, 22px knob — track and knob stay FULL,
+not `rounded.control`: the shape is the gesture, and a squircle sliding inside a squircle
+reads as two boxes rather than as something you drag. Off: `neutral.solid` track. On:
 `action-bg` track. Transition at `motion.fast`. For immediate-effect settings only — never as
 a form field requiring a save.
 
@@ -776,7 +778,7 @@ there is no separate dropdown repeating the same values. A saved time that has s
 the grid is appended rather than dropped, or opening an old booking would silently blank
 its hour.
 
-**SearchField** [obs] — pill at `rounded.full`, 44px, leading search glyph, trailing clear
+**SearchField** [obs] — `rounded.control`, 44px, leading search glyph, trailing clear
 button once there is a value. **Always visible, never behind a toggle:** on a list you filter
 before you scroll, and a hidden search costs a tap plus remembering it exists.
 
@@ -787,7 +789,7 @@ shadow: the canvas treatment there draws a white box on a white box, shadow and 
 an optional passive hint parked inside the field (what Enter will do to the last remaining
 match), which never covers the clear button.
 
-**IconButton** [obs] — circle at 44px, one linear icon, always an `aria-label`. On the canvas
+**IconButton** [obs] — `rounded.control` at 44px, one linear icon, always an `aria-label`. On the canvas
 it is `surface` with `elevation.card`; inside a card it is `surface-row`. When it toggles
 something on it takes `action-bg`; when it carries a count the badge overlaps the top-right
 corner with a ring in the colour behind it.
@@ -809,7 +811,7 @@ action button all take the same family. The most repeated pattern in the product
 **IconChip** [obs] — rounded square at `rounded.md`, 32 or 36px, `surface-row` fill (or
 `states.X.tint` when marking a service), containing one linear icon.
 
-**EntityChip** [obs] — pill at `rounded.full`, `surface-row` fill, circular initials avatar
+**EntityChip** [obs] — `rounded.control`, `surface-row` fill, circular initials avatar
 plus name at `label`. Wraps freely in a flow row. Used for staff on shift.
 
 **Avatar** [obs] — circle at 24/32/40px. Initials at `label`, `surface-row` fill,
@@ -831,7 +833,8 @@ Two variants carry meaning beyond identity:
   `3 posti`) whenever `seats < guests`. This is the error worth catching while the host is
   still at the pass rather than walking a party of six to a table for three.
 
-**CountBadge** [obs] — pill at `rounded.full`, minimum 20px wide so two digits and `99+` fit,
+**CountBadge** [obs] — `rounded.control`, minimum 20px wide so two digits and `99+` fit; under
+20px tall the browser clamps the radius to half the side, so it still draws as a stadium,
 `states.X.solid` fill with `solid-fg` numeral at `tabular-nums`. Where it overlaps another
 surface (an icon button, a collapsed nav icon) it takes a 2px ring in the colour of the
 surface behind it.
@@ -852,7 +855,7 @@ for a reader who discriminates colour poorly the row flattens into one grey band
 clears 5.9:1 in every tone, so the hairline is not a WCAG requirement: it is definition, not
 compliance.
 
-Pill at `rounded.full`, 24px tall, `states.X.tint` fill with the
+`rounded.control`, 24px tall, `states.X.tint` fill with the
 family's `text` colour. Carries a state as words. Where the state can be changed it gains a
 leading dot and a trailing chevron and becomes a button; where it is read-only it stays a
 `<span>`. **The dot is what makes it survive a colour-blind reader**, per §4.3.
@@ -861,7 +864,7 @@ leading dot and a trailing chevron and becomes a button; where it is read-only i
 rather than in separate boxes. They are one reading of the same thing, and four cards claim
 they are four unrelated things.
 
-Two layouts: `inline` (value and label on one line, `rounded.full`) for a strip sitting among
+Two layouts: `inline` (value and label on one line, `rounded.control`) for a strip sitting among
 other controls, and `stacked` (value over label, `rounded.2xl`) where the strip is the page's
 headline. A segment takes a family only when it is **actionable** — the tinted background plus
 a chevron mark the one figure that is a task rather than a fact, and that segment is a button.
@@ -1155,7 +1158,7 @@ the `critical` family with a `motion.pulse` ring. Requires a visible text label 
    depth.
 9. **The redundancy rule.** State is never colour alone. See §4.3.
 
-The four rules below are about layout rather than taste. Each of them shipped as a visible
+The rules below are about layout rather than taste. Each of them shipped as a visible
 defect at least once, and each is invisible in review until it renders.
 
 10. **A fixed element owns the gap beneath it.** Where an opaque scrolling region sits below
@@ -1198,6 +1201,18 @@ defect at least once, and each is invisible in review until it renders.
     `min-h-0 flex-1 overflow-y-auto`. The header then stays put as a bonus, which is the tell
     that a screen has it: if the title scrolls away on a phone, the bar is overlapping something
     further down. Six screens shipped without it.
+
+15. **A primitive that bakes in a display utility cannot be hidden from outside.** `hidden`
+    passed as a className does not beat an `inline-flex` (or `flex`, or `grid`) written into a
+    component's own base class: they are both plain utilities, so the winner is whichever
+    Tailwind emits later in the sheet — not whichever is written later in the string. The
+    caller needs a utility WITH A VARIANT, `max-md:hidden` rather than `hidden`, because
+    variants are emitted after the plain utilities and so win where they apply. This shipped
+    the day `LivePill` was lifted out of the top bar: the connection pill and the phone-only
+    dot were both on screen below `md`, two readouts of the same state. It had worked for
+    months as one string, `hidden md:inline-flex`, with nothing unconditional to fight.
+    Either keep display out of the primitive's base class, or document at the top of the file
+    that hiding it takes a variant.
 
 ---
 

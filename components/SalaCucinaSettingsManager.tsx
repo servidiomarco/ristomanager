@@ -132,12 +132,12 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
             aria-label={`${enabled ? 'Disattiva' : 'Attiva'} gestione sala`}
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleModule(); }}
             disabled={!canEdit || saving}
-            className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-[var(--ds-radius-control)] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
+            className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
               enabled ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-surface-row)] border border-[var(--ds-border)]'
             }`}
           >
             <span aria-hidden="true"
-                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-[var(--ds-radius-control)] bg-white shadow ring-0 transition-transform ${enabled ? 'translate-x-5' : 'translate-x-0.5'} translate-y-0.5`} />
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${enabled ? 'translate-x-5' : 'translate-x-0.5'} translate-y-0.5`} />
           </button>
           <ChevronDown className="w-4 h-4 text-[var(--ds-text-muted)] flex-shrink-0 transition-transform group-open:rotate-180" />
         </div>
@@ -245,12 +245,12 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
                 `Passe: ${flags.passe_enabled === false ? 'attivo' : 'disattivato — i tempi alla sala, avviso e servito al monitor cucina'}`
               )}
               disabled={!canEdit || saving}
-              className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-[var(--ds-radius-control)] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50 ${
+              className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50 ${
                 flags.passe_enabled !== false ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-surface-row)] border border-[var(--ds-border)]'
               }`}
             >
               <span aria-hidden="true"
-                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-[var(--ds-radius-control)] bg-white shadow ring-0 transition-transform ${flags.passe_enabled !== false ? 'translate-x-5' : 'translate-x-0.5'} translate-y-0.5`} />
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${flags.passe_enabled !== false ? 'translate-x-5' : 'translate-x-0.5'} translate-y-0.5`} />
             </button>
           </div>
         </section>

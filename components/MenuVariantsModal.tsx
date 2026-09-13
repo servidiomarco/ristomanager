@@ -147,12 +147,12 @@ export const MenuVariantsModal: React.FC<{
                 aria-label={`${g.is_active ? 'Spegni' : 'Accendi'} ${g.name}`}
                 disabled={busy}
                 onClick={() => run(() => updateModifierGroup(g.id, { is_active: !g.is_active }))}
-                className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-[var(--ds-radius-control)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50 ${
+                className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50 ${
                   g.is_active ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-surface-row)] border border-[var(--ds-border)]'
                 }`}
               >
                 <span aria-hidden="true"
-                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-[var(--ds-radius-control)] bg-white shadow ring-0 transition-transform ${g.is_active ? 'translate-x-5' : 'translate-x-0.5'} translate-y-0.5`} />
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${g.is_active ? 'translate-x-5' : 'translate-x-0.5'} translate-y-0.5`} />
               </button>
               <button
                 type="button"

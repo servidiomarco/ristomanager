@@ -196,7 +196,7 @@ export const BookingChannelsManager: React.FC<Props> = ({ showToast }) => {
                                                         aria-label={`${CHANNEL_LABEL[channel]} ${on ? 'attivo' : 'spento'}`}
                                                         onClick={() => toggle(source, channel)}
                                                         disabled={on && activeCount === 1}
-                                                        className={`relative h-6 w-11 flex-shrink-0 rounded-[var(--ds-radius-control)] transition-colors disabled:cursor-not-allowed ${on ? 'bg-[var(--ds-action-bg)]' : 'bg-[var(--ds-border)]'}`}
+                                                        className={`relative h-6 w-11 flex-shrink-0 rounded-full transition-colors disabled:cursor-not-allowed ${on ? 'bg-[var(--ds-action-bg)]' : 'bg-[var(--ds-border)]'}`}
                                                     >
                                                         <span className={`absolute top-0.5 h-5 w-5 rounded-[var(--ds-radius-control)] bg-[#ffffff] shadow transition-[left] ${on ? 'left-[22px]' : 'left-0.5'}`} aria-hidden />
                                                     </button>

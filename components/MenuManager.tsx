@@ -1816,12 +1816,12 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                       aria-label={`${dish.crm_enabled !== false ? 'Spegni' : 'Accendi'} ${dish.name} nel menu`}
                                       onClick={e => { e.stopPropagation(); if (togglingDishId !== dish.id) handleToggleDish(dish); }}
                                       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); if (togglingDishId !== dish.id) handleToggleDish(dish); } }}
-                                      className={`relative mr-1 inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-[var(--ds-radius-control)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                                      className={`relative mr-1 inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                                         dish.crm_enabled !== false ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-surface-row)] border border-[var(--ds-border)]'
                                       } ${togglingDishId === dish.id ? 'opacity-50' : ''}`}
                                     >
                                       <span aria-hidden="true"
-                                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-[var(--ds-radius-control)] bg-white shadow ring-0 transition-transform ${dish.crm_enabled !== false ? 'translate-x-5' : 'translate-x-0.5'} translate-y-0.5`} />
+                                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${dish.crm_enabled !== false ? 'translate-x-5' : 'translate-x-0.5'} translate-y-0.5`} />
                                     </span>
                                     <span
                                       role="button"
@@ -1936,12 +1936,12 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                   aria-label={`${dish.crm_enabled !== false ? 'Spegni' : 'Accendi'} ${dish.name} nel menu`}
                                   onClick={e => { e.stopPropagation(); if (togglingDishId !== dish.id) handleToggleDish(dish); }}
                                   onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); if (togglingDishId !== dish.id) handleToggleDish(dish); } }}
-                                  className={`relative mx-1 inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-[var(--ds-radius-control)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                                  className={`relative mx-1 inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                                     dish.crm_enabled !== false ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-surface-row)] border border-[var(--ds-border)]'
                                   } ${togglingDishId === dish.id ? 'opacity-50' : ''}`}
                                 >
                                   <span aria-hidden="true"
-                                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-[var(--ds-radius-control)] bg-white shadow ring-0 transition-transform ${dish.crm_enabled !== false ? 'translate-x-5' : 'translate-x-0.5'} translate-y-0.5`} />
+                                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${dish.crm_enabled !== false ? 'translate-x-5' : 'translate-x-0.5'} translate-y-0.5`} />
                                 </span>
                                 <span
                                   role="button"
@@ -2957,7 +2957,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       newDish.sold_by_weight ? 'bg-[var(--ds-action-bg)]' : 'bg-[var(--ds-border-strong)]'
                     }`}
                   >
-                    <span className={`inline-block h-5 w-5 transform rounded-[var(--ds-radius-control)] bg-white shadow transition-transform ${newDish.sold_by_weight ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
+                    <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${newDish.sold_by_weight ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
                   </span>
                   <span className="min-w-0">
                     <span className="block text-[14px] font-medium text-[var(--ds-text-primary)]">Vendita al peso</span>
@@ -4345,12 +4345,12 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     const next = menuCats.map((c, j) => j === i ? { ...c, enabled: !c.enabled } : c);
                     applyMenuCats(next);
                   }}
-                  className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-[var(--ds-radius-control)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50 ${
+                  className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50 ${
                     cat.enabled ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-surface-row)] border border-[var(--ds-border)]'
                   }`}
                 >
                   <span aria-hidden="true"
-                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-[var(--ds-radius-control)] bg-white shadow ring-0 transition-transform ${cat.enabled ? 'translate-x-5' : 'translate-x-0.5'} translate-y-0.5`} />
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${cat.enabled ? 'translate-x-5' : 'translate-x-0.5'} translate-y-0.5`} />
                 </button>
                 <button
                   type="button"
