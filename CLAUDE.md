@@ -47,6 +47,8 @@ There is no `.env` in the repo (gitignored). Both `services/apiService.ts` and `
 
 They are deployed separately and communicate cross-origin over HTTP + Socket.IO. The Dockerfile copies only `server.ts`, `db.ts`, `types.ts`, `auth/`, `services/`, `activityLogs/`, `utils/` and `public/` — a new backend directory must be added there or it will not ship.
 
+**Deployed separately means there is always a window where the new frontend talks to the old backend** — and `npm run dev` is that window permanently, since it points at production. So a field you add to a route today can be absent from the response the client actually receives. Read new fields defensively (`typeof x === 'number'`, not `x != null` on something you then do arithmetic with): the first version of the orders grid rendered `NaN €` on every tile against the deployed server, and would have done the same in production for the minutes between the two deploys.
+
 **Server-side relative imports need a `.js` extension** (`import pool from './db.js'` for `db.ts`), because `tsconfig.server.json` emits real ES modules that Node resolves at runtime. Frontend imports must not have it. Files in `services/` and `utils/` that both sides import (`socketService.ts`, `text.ts`, `types.ts`) follow the server rule.
 
 ### The socket layer is the spine, not an add-on
