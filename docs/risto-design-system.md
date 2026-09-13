@@ -230,7 +230,7 @@ rounded:
                    # pastiglia della quantita', quadratini di legenda, checkbox.
                    # Un angolo interno allo stesso raggio del suo contenitore
                    # legge piatto; un filo piu' stretto e i due si distinguono.
-  control: "12px"  # var(--ds-radius-control) — bottoni, campi, pastiglie, chip,
+  control: "8px"   # var(--ds-radius-control) — bottoni, campi, pastiglie, chip,
                    # segmenti, bottoni icona. Piu' tondo della scatola di
                    # proposito: un controllo si tocca, e l'angolo morbido lo
                    # stacca dal contenitore invece di fonderlo con lui.

@@ -778,7 +778,7 @@ body {
      avatar, pallini di stato, barre di avanzamento. Su quelli il CSS limita
      comunque il raggio a metà del lato, quindi un pallino da 6px resterebbe
      tondo in ogni caso — ma scriverlo `full` dice perché. */
-  --ds-radius-control: 12px;
+  --ds-radius-control: 8px;
 
   /* Surface depth — canvas is DARKER than cards in light mode */
   --ds-canvas: #ededf1;
