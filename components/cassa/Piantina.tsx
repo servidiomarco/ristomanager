@@ -1,7 +1,8 @@
-import React, { useMemo, useRef, useState, useEffect } from 'react';
-import type { Room } from '../../types';
+import React, { useMemo } from 'react';
+import type { Room, Table } from '../../types';
 import type { ServiceBill } from '../../services/ordersApiService';
-import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from '../TableGlyph';
+import { type TableDisplayStatus } from '../TableGlyph';
+import { RoomCanvas } from '../floor/RoomCanvas';
 import { StatusPill } from '../ds';
 import type { TableRow, TableState } from '../comande/tablesView';
 import { euro } from './cassaView';
@@ -21,7 +22,11 @@ import { euro } from './cassaView';
    rappresentare «da incassare». La tinta NON è l'ambra che usa la griglia: la
    famiglia dei glifi ha una scala sua, e allinearle vorrebbe dire aggiungere
    token nuovi per una schermata sola. Quanto deve il tavolo lo dice il numero
-   sotto al glifo, che è l'informazione che il cassiere cerca davvero. */
+   sotto al glifo, che è l'informazione che il cassiere cerca davvero.
+
+   Il render è il RoomCanvas condiviso: nelle sale con pianta disegnata i
+   tavoli stanno in scala reale dentro i muri veri, nelle altre tutto resta
+   com'era. */
 
 const GLYPH_STATUS: Record<TableState, TableDisplayStatus> = {
   bill: 'uscita',     // sta per liberarsi: manca solo il pagamento
@@ -39,92 +44,45 @@ interface PiantinaProps {
 }
 
 export const Piantina: React.FC<PiantinaProps> = ({ rows, room, billByTable, busy, onPick }) => {
-  const boxRef = useRef<HTMLDivElement | null>(null);
-  const [scale, setScale] = useState(1);
-
-  // La sala ha dimensioni sue in pixel: si riscala per stare nel contenitore,
-  // senza mai ingrandire oltre l'originale — un tavolo gigante su un monitor
-  // grande non aiuta nessuno.
-  useEffect(() => {
-    if (!room) return;
-    const el = boxRef.current;
-    if (!el) return;
-    const fit = () => {
-      const w = el.clientWidth;
-      setScale(Math.min(1, w / Math.max(1, room.width)));
-    };
-    fit();
-    const ro = new ResizeObserver(fit);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [room]);
-
   const inRoom = useMemo(
     () => (room ? rows.filter(r => r.table.room_id === room.id) : []),
     [rows, room]
   );
-
-  if (!room) {
-    return (
-      <div className="flex h-full items-center justify-center px-6 text-center text-[14px] text-[var(--ds-text-muted)]">
-        Scegli una sala per vederne la piantina.
-      </div>
-    );
-  }
+  const rowByTable = useMemo(
+    () => new Map(inRoom.map(r => [r.table.id, r])),
+    [inRoom]
+  );
+  const tables = useMemo(() => inRoom.map(r => r.table), [inRoom]);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div ref={boxRef} className="min-h-0 flex-1 overflow-auto">
-        <div
-          className="relative mx-auto rounded-[20px] bg-[var(--ds-surface-row)]"
-          style={{
-            width: room.width * scale,
-            height: room.height * scale,
+      <div className="min-h-0 flex-1">
+        <RoomCanvas
+          room={room}
+          tables={tables}
+          statusFor={(t: Table) => GLYPH_STATUS[rowByTable.get(t.id)?.state ?? 'free']}
+          partyFor={(t: Table) => rowByTable.get(t.id)?.reservation?.guests}
+          disabled={busy}
+          onSelectTable={t => onPick(t.id)}
+          renderTableExtras={(t: Table) => {
+            const bill = billByTable.get(t.id);
+            if (!bill || bill.residual_cents <= 0) return null;
+            const partial = bill.paid_cents > 0 && bill.residual_cents > 0;
+            return (
+              /* Quanto deve il tavolo: è il numero che il cassiere cerca,
+                 e il colore del glifo da solo non lo direbbe mai. */
+              <span className="mt-0.5 flex flex-col items-center gap-0.5">
+                <span className="text-[13px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
+                  {euro(bill.residual_cents)}
+                </span>
+                {/* Il pagamento parziale è una pill, non un quinto colore:
+                    cinque tinte adiacenti non si distinguono di sbieco, con
+                    poca luce, a metà servizio. */}
+                {partial && <StatusPill tone="pending">parziale</StatusPill>}
+              </span>
+            );
           }}
-        >
-          <div
-            className="absolute left-0 top-0 origin-top-left"
-            style={{ width: room.width, height: room.height, transform: `scale(${scale})` }}
-          >
-            {inRoom.map(({ table, state, reservation }) => {
-              const dims = getGlyphDimensions(table.shape, table.seats);
-              const bill = billByTable.get(table.id);
-              const partial = bill != null && bill.paid_cents > 0 && bill.residual_cents > 0;
-              return (
-                <button
-                  key={table.id}
-                  type="button"
-                  onClick={() => onPick(table.id)}
-                  disabled={busy}
-                  aria-label={`Tavolo ${table.name}`}
-                  className="absolute flex flex-col items-center rounded-[16px] transition-opacity disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                  style={{ left: table.x, top: table.y, width: dims.width }}
-                >
-                  <TableGlyph
-                    name={table.name}
-                    seats={table.seats}
-                    shape={table.shape}
-                    status={GLYPH_STATUS[state]}
-                    party={reservation?.guests}
-                  />
-                  {/* Quanto deve il tavolo: è il numero che il cassiere cerca,
-                      e il colore del glifo da solo non lo direbbe mai. */}
-                  {bill && bill.residual_cents > 0 && (
-                    <span className="mt-0.5 flex flex-col items-center gap-0.5">
-                      <span className="text-[13px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
-                        {euro(bill.residual_cents)}
-                      </span>
-                      {/* Il pagamento parziale è una pill, non un quinto
-                          colore: cinque tinte adiacenti non si distinguono di
-                          sbieco, con poca luce, a metà servizio. */}
-                      {partial && <StatusPill tone="pending">parziale</StatusPill>}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </div>
+        />
       </div>
 
       {/* Legenda. «In arrivo», non «Prenotato»: è il nome che lo stato ha in
