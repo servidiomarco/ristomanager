@@ -1,5 +1,6 @@
 import React from 'react';
 import { TableShape } from '../types';
+import type { TableDimensionsCm } from '../utils/tableDimensions';
 
 // The six service states a table can display, as a narrative progression:
 // libera (silence) → attesa/Prenotato (promise) → inarrivo (gentle urgency,
@@ -16,26 +17,54 @@ const GAP = 4;
 const BODY_H = 66;
 const BODY_R = 15;
 const NAME_FONT_SIZE = 22;
+// On real-dimension glyphs the body can be smaller than the legacy minimum
+// (a 60×60 two-top): below this body size the name drops to a smaller font
+// instead of overflowing the table.
+const SMALL_BODY_CM = 70;
+const SMALL_NAME_FONT_SIZE = 16;
 
 // Opacity applied to the empty chairs of an occupied table (capacity − party).
 // Lit chairs render at full weight; tune this single value to taste.
 const DIMMED_CHAIR_OPACITY = 0.25;
 
-export function getGlyphDimensions(shape: TableShape, seats: number) {
+// Geometry is shared between getGlyphDimensions (footprints, layout, label
+// placement) and the render paths below so the two can never disagree.
+// `real` carries the measured table in cm (1px = 1cm on the plan canvas):
+// present only in rooms with a drawn plan — without it every formula is
+// byte-identical to the historical seats-driven sizing.
+function circleGeometry(seats: number, real?: TableDimensionsCm | null) {
+  const diameter = real ? real.w_cm : Math.max(74, 34 + seats * 10);
+  const r = diameter / 2;
+  const chairDist = r + GAP + CHAIR_H / 2;
+  const totalR = chairDist + CHAIR_H / 2 + 2;
+  const size = Math.ceil(totalR * 2);
+  return { diameter, r, chairDist, size };
+}
+
+function rectGeometry(seats: number, real?: TableDimensionsCm | null) {
+  const topChairs = Math.ceil(seats / 2);
+  const botChairs = Math.floor(seats / 2);
+  const maxChairs = Math.max(topChairs, botChairs);
+  const bodyW = real ? Math.max(real.w_cm, real.l_cm) : Math.max(64, maxChairs * PITCH + 16);
+  const bodyH = real ? Math.min(real.w_cm, real.l_cm) : BODY_H;
+  // On a real-size body the chairs compress to fit the true edge instead of
+  // dictating it; they never go below CHAIR_W + 2 (they'd merge visually).
+  const pitch = real
+    ? Math.max(CHAIR_W + 2, Math.min(PITCH, (bodyW - 16) / Math.max(1, maxChairs)))
+    : PITCH;
+  const bodyX = 12;
+  const bodyY = CHAIR_H + GAP + 2;
+  const svgW = bodyW + 24;
+  const svgH = bodyY + bodyH + GAP + CHAIR_H + 2;
+  return { topChairs, botChairs, bodyW, bodyH, pitch, bodyX, bodyY, svgW, svgH };
+}
+
+export function getGlyphDimensions(shape: TableShape, seats: number, real?: TableDimensionsCm | null) {
   if (shape === TableShape.CIRCLE) {
-    const diameter = Math.max(74, 34 + seats * 10);
-    const r = diameter / 2;
-    const chairDist = r + GAP + CHAIR_H / 2;
-    const totalR = chairDist + CHAIR_H / 2 + 2;
-    const size = Math.ceil(totalR * 2);
+    const { size } = circleGeometry(seats, real);
     return { width: size, height: size };
   }
-  const topChairs = Math.ceil(seats / 2);
-  const maxChairs = Math.max(topChairs, Math.floor(seats / 2));
-  const bodyW = Math.max(64, maxChairs * PITCH + 16);
-  const svgW = bodyW + 24;
-  const bodyY = CHAIR_H + GAP + 2;
-  const svgH = bodyY + BODY_H + GAP + CHAIR_H + 2;
+  const { svgW, svgH } = rectGeometry(seats, real);
   return { width: svgW, height: svgH };
 }
 
@@ -54,16 +83,22 @@ interface TableGlyphProps {
   // Override the chair colour (keeps body/name from `status`). Used by the
   // wrapped reservation card: white body + status-coloured chairs.
   chairColor?: string;
+  // Real measured size in cm, for rooms with a drawn plan (1px = 1cm). Two
+  // scalars and not an object so React.memo's shallow compare keeps working.
+  widthCm?: number | null;
+  lengthCm?: number | null;
 }
 
 // Memoized: all props are scalars, and dozens of glyphs re-render on every
 // hover/keystroke — and now on every useNow() minute tick — so unchanged
 // tables should bail out instead of rebuilding their SVG tree.
-export const TableGlyph: React.FC<TableGlyphProps> = React.memo(({ name, seats, shape, status, isSelected, party, fit, chairColor }) => {
+export const TableGlyph: React.FC<TableGlyphProps> = React.memo(({ name, seats, shape, status, isSelected, party, fit, chairColor, widthCm, lengthCm }) => {
   const bg = `var(--tg-${status}-bg)`;
   const st = `var(--tg-${status}-stroke)`;
   const ch = chairColor ?? `var(--tg-${status}-chair)`;
   const nm = `var(--tg-${status}-name)`;
+
+  const real: TableDimensionsCm | null = widthCm && lengthCm ? { w_cm: widthCm, l_cm: lengthCm } : null;
 
   // How many chairs render lit. A free table (or one with no party data) keeps
   // every chair at full weight; otherwise only `party` chairs (capped at the
@@ -72,13 +107,10 @@ export const TableGlyph: React.FC<TableGlyphProps> = React.memo(({ name, seats, 
   const chairOpacity = (index: number) => (index < litCount ? 1 : DIMMED_CHAIR_OPACITY);
 
   if (shape === TableShape.CIRCLE) {
-    const diameter = Math.max(74, 34 + seats * 10);
-    const r = diameter / 2;
-    const chairDist = r + GAP + CHAIR_H / 2;
-    const totalR = chairDist + CHAIR_H / 2 + 2;
-    const size = Math.ceil(totalR * 2);
+    const { diameter, r, chairDist, size } = circleGeometry(seats, real);
     const cx = size / 2;
     const cy = size / 2;
+    const nameFont = diameter < SMALL_BODY_CM ? SMALL_NAME_FONT_SIZE : NAME_FONT_SIZE;
 
     return (
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="block"
@@ -109,20 +141,14 @@ export const TableGlyph: React.FC<TableGlyphProps> = React.memo(({ name, seats, 
           );
         })}
         <text className="tg-name" x={cx} y={cy + 5.5} textAnchor="middle"
-          style={{ fill: nm, fontSize: NAME_FONT_SIZE, fontWeight: 500, fontFamily: 'var(--font-sans)' }}>{name}</text>
+          style={{ fill: nm, fontSize: nameFont, fontWeight: 500, fontFamily: 'var(--font-sans)' }}>{name}</text>
       </svg>
     );
   }
 
   // Rectangle / Square
-  const topChairs = Math.ceil(seats / 2);
-  const botChairs = Math.floor(seats / 2);
-  const maxChairs = Math.max(topChairs, botChairs);
-  const bodyW = Math.max(64, maxChairs * PITCH + 16);
-  const bodyX = 12;
-  const bodyY = CHAIR_H + GAP + 2;
-  const svgW = bodyW + 24;
-  const svgH = bodyY + BODY_H + GAP + CHAIR_H + 2;
+  const { topChairs, botChairs, bodyW, bodyH, pitch, bodyX, bodyY, svgW, svgH } = rectGeometry(seats, real);
+  const nameFont = Math.min(bodyW, bodyH) < SMALL_BODY_CM ? SMALL_NAME_FONT_SIZE : NAME_FONT_SIZE;
 
   // Spread the lit chairs balanced across the two edges (top gets the spare on
   // odd counts), each edge filling left-to-right.
@@ -133,34 +159,34 @@ export const TableGlyph: React.FC<TableGlyphProps> = React.memo(({ name, seats, 
     <svg width={svgW} height={svgH} viewBox={`0 0 ${svgW} ${svgH}`} className="block"
       style={fit ? { width: '100%', height: 'auto', maxWidth: svgW, margin: '0 auto' } : undefined}>
       {isSelected && (
-        <rect x={bodyX - 3} y={bodyY - 3} width={bodyW + 6} height={BODY_H + 6} rx={BODY_R + 3}
+        <rect x={bodyX - 3} y={bodyY - 3} width={bodyW + 6} height={bodyH + 6} rx={BODY_R + 3}
           fill="none" style={{ stroke: 'var(--ds-text-primary)' }} strokeWidth={2} />
       )}
       {status === 'inarrivo' && (
-        <rect className="tg-pulse" x={bodyX - 5} y={bodyY - 5} width={bodyW + 10} height={BODY_H + 10} rx={BODY_R + 5}
+        <rect className="tg-pulse" x={bodyX - 5} y={bodyY - 5} width={bodyW + 10} height={bodyH + 10} rx={BODY_R + 5}
           fill="none" style={{ stroke: 'var(--tg-inarrivo-accent)' }} strokeWidth={2.5} />
       )}
-      <rect className="dark:hidden" x={bodyX} y={bodyY + 2.5} width={bodyW} height={BODY_H} rx={BODY_R} fill="#000" opacity={0.08} />
-      <rect className="tg-body" x={bodyX} y={bodyY} width={bodyW} height={BODY_H} rx={BODY_R}
+      <rect className="dark:hidden" x={bodyX} y={bodyY + 2.5} width={bodyW} height={bodyH} rx={BODY_R} fill="#000" opacity={0.08} />
+      <rect className="tg-body" x={bodyX} y={bodyY} width={bodyW} height={bodyH} rx={BODY_R}
         style={{ fill: bg, stroke: st }} strokeWidth={1} />
       {Array.from({ length: topChairs }, (_, i) => {
-        const span = (topChairs - 1) * PITCH;
-        const sx = bodyX + bodyW / 2 - span / 2 + i * PITCH;
+        const span = (topChairs - 1) * pitch;
+        const sx = bodyX + bodyW / 2 - span / 2 + i * pitch;
         return (
           <rect key={`t${i}`} className="tg-chair" x={sx - CHAIR_W / 2} y={bodyY - GAP - CHAIR_H}
             width={CHAIR_W} height={CHAIR_H} rx={CHAIR_R} style={{ fill: ch }} opacity={i < litTop ? 1 : DIMMED_CHAIR_OPACITY} />
         );
       })}
       {Array.from({ length: botChairs }, (_, i) => {
-        const span = (botChairs - 1) * PITCH;
-        const sx = bodyX + bodyW / 2 - span / 2 + i * PITCH;
+        const span = (botChairs - 1) * pitch;
+        const sx = bodyX + bodyW / 2 - span / 2 + i * pitch;
         return (
-          <rect key={`b${i}`} className="tg-chair" x={sx - CHAIR_W / 2} y={bodyY + BODY_H + GAP}
+          <rect key={`b${i}`} className="tg-chair" x={sx - CHAIR_W / 2} y={bodyY + bodyH + GAP}
             width={CHAIR_W} height={CHAIR_H} rx={CHAIR_R} style={{ fill: ch }} opacity={i < litBot ? 1 : DIMMED_CHAIR_OPACITY} />
         );
       })}
-      <text className="tg-name" x={bodyX + bodyW / 2} y={bodyY + BODY_H / 2 + 5.5} textAnchor="middle"
-        style={{ fill: nm, fontSize: NAME_FONT_SIZE, fontWeight: 500, fontFamily: 'var(--font-sans)' }}>{name}</text>
+      <text className="tg-name" x={bodyX + bodyW / 2} y={bodyY + bodyH / 2 + 5.5} textAnchor="middle"
+        style={{ fill: nm, fontSize: nameFont, fontWeight: 500, fontFamily: 'var(--font-sans)' }}>{name}</text>
     </svg>
   );
 });

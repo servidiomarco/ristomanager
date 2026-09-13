@@ -1,5 +1,6 @@
 import { Table } from '../types';
 import { getGlyphDimensions } from '../components/TableGlyph';
+import type { TableDimensionsCm } from './tableDimensions';
 
 // Floor-editor grid. Tables snap to this on drag, and the overlap clearance is
 // half a cell — enough to keep adjacent tables from visually touching.
@@ -26,6 +27,10 @@ export function snapToGrid(v: number, grid = FLOOR_GRID): number {
  * overhang, from getGlyphDimensions) expanded to account for the table's
  * rotation, then inflated by `clearance` on every side. Rotation is about the
  * glyph box centre — matching how the glyph is rendered in FloorPlan.
+ *
+ * `real` (misure in cm, 1px = 1cm) arriva solo nelle sale con pianta: lì il
+ * chiamante passa anche clearance/labelBand a 0, perché i tavoli veri possono
+ * toccarsi e 78cm di corridoio riservato renderebbero impossibili i layout.
  */
 export function getTableFootprint(
   table: Pick<Table, 'shape' | 'seats' | 'rotation'>,
@@ -33,8 +38,9 @@ export function getTableFootprint(
   y: number,
   clearance = FLOOR_CLEARANCE,
   labelBand = FLOOR_LABEL_BAND,
+  real?: TableDimensionsCm | null,
 ): Box {
-  const { width: w, height: h } = getGlyphDimensions(table.shape, table.seats);
+  const { width: w, height: h } = getGlyphDimensions(table.shape, table.seats, real);
   const cx = x + w / 2;
   const cy = y + h / 2;
   const rad = ((table.rotation || 0) * Math.PI) / 180;
@@ -70,12 +76,14 @@ export function collidesWithOthers(
   y: number,
   others: Table[],
   clearance = FLOOR_CLEARANCE,
+  opts?: { labelBand?: number; realFor?: (t: Table) => TableDimensionsCm | null },
 ): Table[] {
-  const a = getTableFootprint(table, x, y, clearance);
+  const labelBand = opts?.labelBand ?? FLOOR_LABEL_BAND;
+  const a = getTableFootprint(table, x, y, clearance, labelBand, opts?.realFor?.(table));
   const hits: Table[] = [];
   for (const o of others) {
     if (o.id === table.id) continue;
-    const b = getTableFootprint(o, o.x, o.y, clearance);
+    const b = getTableFootprint(o, o.x, o.y, clearance, labelBand, opts?.realFor?.(o));
     if (boxesOverlap(a, b)) hits.push(o);
   }
   return hits;
@@ -88,8 +96,10 @@ export function collidesWithOthers(
 export function findOverlappingPairs(
   tables: Table[],
   clearance = FLOOR_CLEARANCE,
+  opts?: { labelBand?: number; realFor?: (t: Table) => TableDimensionsCm | null },
 ): Array<[Table, Table]> {
-  const boxes = tables.map(t => ({ t, box: getTableFootprint(t, t.x, t.y, clearance) }));
+  const labelBand = opts?.labelBand ?? FLOOR_LABEL_BAND;
+  const boxes = tables.map(t => ({ t, box: getTableFootprint(t, t.x, t.y, clearance, labelBand, opts?.realFor?.(t)) }));
   const pairs: Array<[Table, Table]> = [];
   for (let i = 0; i < boxes.length; i++) {
     for (let j = i + 1; j < boxes.length; j++) {

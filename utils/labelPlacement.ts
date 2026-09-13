@@ -5,6 +5,7 @@
 
 import { TableShape } from '../types';
 import { getGlyphDimensions } from '../components/TableGlyph';
+import type { TableDimensionsCm } from './tableDimensions';
 
 export interface Box { x: number; y: number; w: number; h: number; }
 
@@ -15,6 +16,9 @@ export interface FloorTable {
   rotation?: number | null;
   x: number;
   y: number;
+  // Misure reali in cm (1px = 1cm), presenti solo nelle sale con pianta:
+  // il chiamante le risolve (getEffectiveDimensionsCm) o le lascia assenti.
+  real?: TableDimensionsCm | null;
 }
 
 export interface BanquetGroup {
@@ -67,7 +71,7 @@ export function boxesOverlap(a: Box, b: Box, pad = 0): boolean {
 }
 
 function rotatedGlyphBox(t: FloorTable): Box {
-  const { width: w, height: h } = getGlyphDimensions(t.shape, t.seats);
+  const { width: w, height: h } = getGlyphDimensions(t.shape, t.seats, t.real);
   const cx = t.x + w / 2;
   const cy = t.y + h / 2;
   const rad = ((t.rotation || 0) * Math.PI) / 180;
@@ -253,7 +257,7 @@ export function buildFloorLabels(opts: {
   for (const tid of opts.reservationTableIds) {
     const t = byId.get(tid);
     if (!t) continue;
-    const { width: gw } = getGlyphDimensions(t.shape, t.seats);
+    const { width: gw } = getGlyphDimensions(t.shape, t.seats, t.real);
     const phys = tablePhysicalBox(t);
     resSpecs.push({
       key: `t${tid}`,
