@@ -65,7 +65,11 @@ type BillLike =
   Pick<OpenBillRow, 'id' | 'table_name' | 'total_cents' | 'covers' | 'share_token' | 'items'>
   & Partial<Pick<OpenBillRow, 'paid_cents' | 'residual_cents' | 'open_orders' | 'deposit_credit_cents' | 'deposit_paid_cents' | 'refund_due_cents' | 'cash_settled_cents' | 'status' | 'fiscal_status' | 'fiscal_doc_id' | 'fiscal_error' | 'fiscal_provider' | 'fiscal_ref' | 'fiscal_doc_type' | 'fiscal_doc_number' | 'fiscal_public_token' | 'fiscal_related_doc_id' | 'external_ref' | 'payments' | 'splits'>>;
 
-const isSettled = (bill: BillLike) => bill.residual_cents === 0;
+/* «Saldato» sono soldi arrivati. Il residuo di /bills/open sconta anche i
+   CLAIMED (l'ospite al checkout): residuo 0 con paid sotto il totale è un
+   conto in bilico, non un conto saldato — i claim possono ancora scadere. */
+const isSettled = (bill: BillLike) =>
+  bill.residual_cents === 0 && (bill.paid_cents == null || bill.paid_cents >= bill.total_cents);
 
 const billTitle = (bill: BillLike) => euro(bill.total_cents);
 const billSubtitle = (bill: BillLike) =>
@@ -76,9 +80,11 @@ const billSubtitle = (bill: BillLike) =>
 const BillMeta: React.FC<{ bill: BillLike }> = ({ bill }) => (
   <>
     {bill.residual_cents != null && (
-      <StatusPill tone={isSettled(bill) ? 'positive' : 'critical'}>
-        {isSettled(bill) ? 'saldato' : `residuo ${euro(bill.residual_cents)}`}
-      </StatusPill>
+      isSettled(bill)
+        ? <StatusPill tone="positive">saldato</StatusPill>
+        : bill.residual_cents === 0
+          ? <StatusPill tone="pending" title="Il resto è coperto da quote in checkout: possono ancora scadere">quote in pagamento</StatusPill>
+          : <StatusPill tone="critical">{`residuo ${euro(bill.residual_cents)}`}</StatusPill>
     )}
     {bill.open_orders != null && bill.open_orders > 0 && (
       <StatusPill tone="pending" title="Il totale può ancora cambiare">
@@ -378,18 +384,20 @@ const SettleButton: React.FC<{
 };
 
 /* L'avanzamento dei pagamenti, nella stessa lingua della pagina ospite:
-   barra verde, «Pagato», percentuale. Il pagato è derivato dal residuo —
-   include quote QR, acconti e incassi manuali, qualunque sia la superficie
-   che li ha registrati. La larghezza è in transizione: quando una quota
-   arriva via socket il riempimento cammina da solo, ed è quel movimento a
-   dire "sta succedendo" prima ancora del numero. `live` accende la lama di
-   luce sul tratto scoperto (QR attivo, si aspettano pagamenti). */
+   barra verde, «Pagato», percentuale. Il pagato viene da paid_cents dove il
+   server lo manda — il residuo di /bills/open sconta anche i CLAIMED, e
+   total − residuo direbbe «Saldato» per soldi che sono solo al checkout e
+   possono ancora scadere. La quota in claim resta nella lista Quote come
+   «sta pagando», mai nella barra. La larghezza è in transizione: quando una
+   quota arriva via socket il riempimento cammina da solo, ed è quel
+   movimento a dire "sta succedendo" prima ancora del numero. `live` accende
+   la lama di luce sul tratto scoperto (QR attivo, si aspettano pagamenti). */
 const PaymentProgress: React.FC<{ bill: BillLike; live: boolean }> = ({ bill, live }) => {
   if (bill.residual_cents == null || bill.total_cents <= 0) return null;
-  const paid = Math.max(0, bill.total_cents - bill.residual_cents);
+  const paid = Math.max(0, Math.min(bill.total_cents, bill.paid_cents ?? (bill.total_cents - bill.residual_cents)));
   if (paid === 0 && !live) return null;
   const pct = Math.max(0, Math.min(100, Math.round((paid / bill.total_cents) * 100)));
-  const settled = bill.residual_cents === 0;
+  const settled = paid >= bill.total_cents;
   return (
     <div className="w-full">
       <div className="flex items-baseline justify-between text-[13px]">
