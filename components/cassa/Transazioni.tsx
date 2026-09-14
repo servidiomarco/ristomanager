@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { ArrowLeft, Loader2, Receipt } from 'lucide-react';
+import { ArrowLeft, ChevronDown, Loader2, Receipt } from 'lucide-react';
 import type { CashMovement, CashTransactionsView } from '../../types';
 import { getRomeTimePart } from '../../utils/reservationTime';
 import { Callout, EmptyState, SearchField, SegmentedControl, StatusPill } from '../ds';
@@ -95,6 +95,14 @@ export const Transazioni: React.FC<TransazioniProps> = ({
 }) => {
   const [filter, setFilter] = useState<Filter>('all');
   const [query, setQuery] = useState('');
+  // Le card partono chiuse: la lista dice tavolo, totale e documento a colpo
+  // d'occhio, i singoli movimenti si aprono col tocco sull'intestazione.
+  const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
+  const toggleGroup = (k: string) => setOpenGroups(prev => {
+    const next = new Set(prev);
+    if (next.has(k)) next.delete(k); else next.add(k);
+    return next;
+  });
 
   const movements = data?.movements ?? [];
 
@@ -211,14 +219,19 @@ export const Transazioni: React.FC<TransazioniProps> = ({
               const collected = groupCollected(g);
               const billOpen = head.bill_status === 'OPEN' || head.bill_status === 'LOCKED';
               const doc = groupDoc(g);
+              const key = head.bill_id != null ? `b${head.bill_id}` : `m${head.id}`;
+              const expanded = openGroups.has(key);
               return (
                 <div
-                  key={head.bill_id != null ? `b${head.bill_id}` : `m${head.id}`}
+                  key={key}
                   className="overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]"
                 >
+                  {/* L'intestazione apre/chiude la card; il conto si apre
+                      dalle righe dentro. */}
                   <button
                     type="button"
-                    onClick={() => onOpenBill(head.bill_id)}
+                    onClick={() => toggleGroup(key)}
+                    aria-expanded={expanded}
                     className="flex w-full items-center gap-3 px-3 pb-2 pt-3 text-left transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)]"
                   >
                     <span className="min-w-0 flex-1">
@@ -226,14 +239,20 @@ export const Transazioni: React.FC<TransazioniProps> = ({
                         Tavolo {head.table_name ?? '—'}
                       </span>
                       <span className="block truncate text-[12px] text-[var(--ds-text-muted)]">
-                        {head.customer_name ?? 'Walk-in'}
+                        {head.customer_name ?? 'Walk-in'} · {g.length} moviment{g.length === 1 ? 'o' : 'i'}
                       </span>
                     </span>
                     {billOpen && <StatusPill tone="neutral">conto aperto</StatusPill>}
                     <span className="w-24 flex-shrink-0 text-right text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
                       {euro(collected)}
                     </span>
+                    <ChevronDown
+                      size={16}
+                      aria-hidden
+                      className={`flex-shrink-0 text-[var(--ds-text-muted)] transition-transform ${expanded ? 'rotate-180' : ''}`}
+                    />
                   </button>
+                  {expanded && (
                   <div className="border-t border-[var(--ds-border)]">
                     {g.map(m => {
                       const p = pill(m);
@@ -272,10 +291,11 @@ export const Transazioni: React.FC<TransazioniProps> = ({
                       );
                     })}
                   </div>
+                  )}
                   {/* Il documento con cui il conto è stato chiuso: fatto del
-                      conto, quindi una volta sola, in piede. Col token c'è
-                      la copia digitale — si apre in un'altra scheda, la
-                      lista resta dov'è. */}
+                      conto, quindi una volta sola, in piede — visibile anche
+                      a card chiusa. Col token c'è la copia digitale — si
+                      apre in un'altra scheda, la lista resta dov'è. */}
                   {doc && (
                     doc.token ? (
                       <a

@@ -16,6 +16,8 @@ interface ReceiptView {
   business: { name: string; address: string | null; vat_number: string | null };
   receipt: {
     status: 'CONFIRMED' | 'VOIDED';
+    /** PROFORMA = copia non fiscale: la pagina lo dice in testa e in piede. */
+    doc_type?: 'RECEIPT' | 'PROFORMA';
     doc_number: string | null;
     document_date: string | null;
     voided_at: string | null;
@@ -57,7 +59,9 @@ export const PublicReceiptPage: React.FC = () => {
     fetch(`${API_URL}/scontrino/${encodeURIComponent(token)}`)
       .then(async r => {
         if (!r.ok) throw new Error(String(r.status));
-        setView(await r.json());
+        const v: ReceiptView = await r.json();
+        if (v.receipt?.doc_type === 'PROFORMA') document.title = 'Proforma';
+        setView(v);
       })
       .catch(() => setNotFound(true));
   }, []);
@@ -94,7 +98,9 @@ export const PublicReceiptPage: React.FC = () => {
           {business.address && <p className="mt-0.5 text-[13px] text-[var(--ds-text-muted)]">{business.address}</p>}
           {business.vat_number && <p className="text-[13px] text-[var(--ds-text-muted)]">P.IVA {business.vat_number}</p>}
           <p className="mt-3 text-[13px] font-medium text-[var(--ds-text-secondary)]">
-            Copia del documento commerciale di vendita o prestazione
+            {receipt.doc_type === 'PROFORMA'
+              ? 'Proforma — non è un documento fiscale'
+              : 'Copia del documento commerciale di vendita o prestazione'}
           </p>
           {receipt.status === 'VOIDED' && (
             <p className="mt-2 inline-block rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-tint)] px-3 py-1 text-[13px] font-semibold text-[var(--ds-critical-text)]">
@@ -137,7 +143,9 @@ export const PublicReceiptPage: React.FC = () => {
           {receipt.document_date && <p>del {dateLabel(receipt.document_date)}</p>}
           {receipt.table_name && <p>Tavolo {receipt.table_name}</p>}
           <p className="mt-2">
-            Copia informativa: il documento fiscale è il corrispettivo trasmesso telematicamente all'Agenzia delle Entrate.
+            {receipt.doc_type === 'PROFORMA'
+              ? 'Proforma: non sostituisce lo scontrino o la fattura.'
+              : "Copia informativa: il documento fiscale è il corrispettivo trasmesso telematicamente all'Agenzia delle Entrate."}
           </p>
         </div>
 
