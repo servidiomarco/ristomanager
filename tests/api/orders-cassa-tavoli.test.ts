@@ -75,6 +75,27 @@ describe('cassa — tavoli con comanda aperta', () => {
         expect(res.body.table_ids).toEqual([]);
     });
 
+    // La comanda APERTA di un servizio passato non sparisce guardando un
+    // servizio successivo: torna marcata `stale` — un tavolo con una comanda
+    // aperta non è libero in nessun servizio (Tav. 0, 14/09). Il giorno
+    // futuro qui fa da «domani» rispetto al servizio della comanda; +2 giorni
+    // per non incrociare il confine di mezzanotte fra UTC e Roma.
+    it('la comanda resta visibile nei servizi successivi, come appesa', async () => {
+        const future = new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10);
+        const res = await api().get(`/orders/open?date=${future}`).set(bearer(token));
+        expect(res.status).toBe(200);
+        expect(res.body.table_ids).toContain(tableId);
+        const mine = res.body.orders.find((o: any) => o.id === orderId);
+        expect(mine).toBeTruthy();
+        expect(mine.stale).toBe(true);
+        expect(mine.service_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+
+        // Nel suo servizio, la stessa comanda NON è appesa.
+        const now = await api().get('/orders/open').set(bearer(token));
+        const fresh = now.body.orders.find((o: any) => o.id === orderId);
+        expect(fresh?.stale).toBe(false);
+    });
+
     it('chiusa la comanda il tavolo sparisce', async () => {
         const closed = await api().post(`/orders/${orderId}/close`).set(bearer(token)).send({});
         expect([200, 201]).toContain(closed.status);

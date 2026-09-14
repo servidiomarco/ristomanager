@@ -115,6 +115,20 @@ export const TABLE_CAPTION: Record<TableState, string> = {
 export const tableNameLine = (row: TableRow): string =>
   row.reservation?.customer_name?.trim() || '—';
 
+/** L'etichetta di una comanda appesa (aperta in un servizio passato).
+ *  Relativa a OGGI, non al servizio guardato: «da ieri» è come lo dice la
+ *  sala, e non chiede di sapere che giorno la griglia sta mostrando. */
+export const staleOrderLabel = (order: OpenOrderSummary): string => {
+  if (!order.service_date) return 'appesa';
+  const today = getRomeDatePart(new Date());
+  if (order.service_date === today) return order.shift === 'DINNER' ? 'appesa da stasera' : 'appesa da pranzo';
+  const y = new Date(`${today}T12:00:00Z`);
+  y.setUTCDate(y.getUTCDate() - 1);
+  if (order.service_date === y.toISOString().slice(0, 10)) return 'appesa da ieri';
+  const [, m, d] = order.service_date.split('-');
+  return `appesa dal ${d}/${m}`;
+};
+
 /** «134,00 € · 2ª in cucina», «62,00 € · da incassare», «21:30», «libero». */
 export const tableStatusLine = (row: TableRow): string => {
   if (row.state === 'bill') {
@@ -125,6 +139,12 @@ export const tableStatusLine = (row: TableRow): string => {
     // fra i due c'è sempre una finestra in cui il nuovo parla col vecchio.
     // Senza questa guardia la tessera scriveva «NaN €».
     const money = typeof row.order?.total_cents === 'number' ? euro(row.order.total_cents) : null;
+    // L'appesa dice DA QUANDO pende, non a che punto è l'uscita: lo stato di
+    // cucina di ieri sera è storia, il conto da chiudere è la notizia.
+    if (row.order?.stale) {
+      const label = staleOrderLabel(row.order);
+      return money ? `${money} · ${label}` : label;
+    }
     // Comanda aperta e ancora intonsa: nessuna uscita di cui dire lo stato.
     const course = row.order?.course;
     const what = course ? `${ordinal(course.course_no)} ${COURSE_BADGE[course.status].text}` : 'comanda aperta';

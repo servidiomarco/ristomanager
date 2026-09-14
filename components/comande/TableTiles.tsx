@@ -3,7 +3,7 @@ import { getRomeTimePart } from '../../utils/reservationTime';
 import { SectionHeader } from '../ds';
 import {
   TABLE_CAPTION, TABLE_GROUPS, TABLE_TILE, TABLE_TILE_WIDE, TABLE_DOT,
-  tableNameLine, tableStatusLine, type TableRow,
+  staleOrderLabel, tableNameLine, tableStatusLine, type TableRow,
 } from './tablesView';
 
 /* ── I tavoli raggruppati per stato ───────────────────────────────────────
@@ -41,7 +41,11 @@ interface TableTilesProps {
 /** Il meta di Comande: quanti coperti, in che stato, e per chi è tenuto. */
 export const defaultTableMeta = (row: TableRow): React.ReactNode => {
   const { table, state, reservation } = row;
-  const caption = TABLE_GROUPS.find(g => g.state === state)?.caption;
+  // La comanda appesa di un servizio passato si presenta per quello che è:
+  // «appesa da ieri», non «comanda aperta» come se fosse servizio vivo.
+  const caption = state === 'order' && row.order?.stale
+    ? staleOrderLabel(row.order)
+    : TABLE_GROUPS.find(g => g.state === state)?.caption;
   return (
     <>
       <span className="text-[12px] tabular-nums text-[var(--ds-text-muted)]">

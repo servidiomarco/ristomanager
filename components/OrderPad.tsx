@@ -442,6 +442,16 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     setBusy(true); setError(null);
     try {
       let view = await ordersApiService.getOrderByTable(id, serviceQuery);
+      // La comanda appesa di un servizio passato: la griglia la mostra come
+      // tale, e toccarla la RIPRENDE dal suo servizio vero — senza questo
+      // secondo tentativo il tocco apriva una comanda nuova nel servizio
+      // guardato, e l'appesa restava lì con il suo conto.
+      if (!view) {
+        const hung = openOrders.get(id);
+        if (hung?.stale && hung.service_date) {
+          view = await ordersApiService.getOrderByTable(id, { date: hung.service_date, shift: hung.shift });
+        }
+      }
       if (!view) {
         // Tavolo con conto da incassare: si apre IL CONTO, con lo stato dei
         // pagamenti. La comanda nuova solo da lì, su azione esplicita —
@@ -499,7 +509,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     } finally {
       setBusy(false);
     }
-  }, [reservationForTable, tables, serviceQuery, isTodayRome, serviceBills, dishes]);
+  }, [reservationForTable, tables, serviceQuery, isTodayRome, serviceBills, dishes, openOrders]);
 
   // Segna quali tavoli hanno già una comanda aperta NEL SERVIZIO SELEZIONATO,
   // così il cameriere sceglie consapevolmente invece di scoprirlo dopo — e

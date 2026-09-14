@@ -27298,14 +27298,27 @@ app.get('/orders/open', authenticate, requirePermission('orders:view'), async (r
         const now = resolveService();
         const service = { service_date: filterDate ?? now.service_date, shift: filterShift ?? now.shift };
 
+        // Oltre al servizio guardato entrano anche le comande APERTE dei
+        // servizi precedenti (le appese): un tavolo con una comanda aperta
+        // non è libero in nessun servizio, e su un palmare acceso la mattina
+        // dopo la tessera diceva «libero» mentre il conto di ieri sera era
+        // ancora da chiudere (Tav. 0, 14/09). `stale` le distingue: la
+        // griglia le racconta come appese, non come servizio vivo. I servizi
+        // FUTURI restano fuori: guardando ieri non si anticipa oggi.
         const rows = await queryWithRetry(
-            `SELECT o.id, o.table_id, o.discount_type, o.discount_value
+            `SELECT o.id, o.table_id, o.discount_type, o.discount_value,
+                    o.service_date, o.shift,
+                    NOT (o.service_date = $2::date
+                         AND ($3::varchar IS NULL OR o.shift = $3::varchar)) AS stale
                FROM orders o
               WHERE o.tenant_id = $1 AND o.status = 'OPEN'
-                AND o.service_date = $2::date
-                AND ($3::varchar IS NULL OR o.shift = $3::varchar)
                 AND o.table_id IS NOT NULL
-              ORDER BY o.id`,
+                AND (
+                     (o.service_date = $2::date AND ($3::varchar IS NULL OR o.shift = $3::varchar))
+                  OR o.service_date < $2::date
+                  OR (o.service_date = $2::date AND o.shift = 'LUNCH' AND $3::varchar = 'DINNER')
+                )
+              ORDER BY stale DESC, o.id`,
             [req.tenantId!, filterDate ?? now.service_date, filterShift]
         );
 
@@ -27357,6 +27370,14 @@ app.get('/orders/open', authenticate, requirePermission('orders:view'), async (r
                     table_id: Number(r.table_id),
                     total_cents: applyDiscount(subtotal, r.discount_type, r.discount_value),
                     course: topCourse(list),
+                    // Il servizio della comanda, per riprendere un'appesa dal
+                    // suo servizio vero e per l'etichetta «appesa da ieri».
+                    // L'ordinamento mette le appese PRIMA: sul tavolo che ha
+                    // sia un'appesa sia la comanda del servizio guardato, la
+                    // mappa per tavolo del client tiene quella viva.
+                    service_date: r.service_date,
+                    shift: r.shift,
+                    stale: r.stale === true,
                 };
             }),
         });
