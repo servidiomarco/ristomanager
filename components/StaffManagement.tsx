@@ -1716,8 +1716,12 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
     return (
       <div className="flex h-full min-h-0 flex-col">
         {/* Stessa larghezza del toggle in colonna Personale: compresso in un
-            flex centrato tronca «Compensi» a metà parola. */}
-        <div className="mx-auto w-full max-w-3xl px-4 pt-3 sm:px-6">{areaToggle}</div>
+            flex centrato tronca «Compensi» a metà parola. Lo sfondo canvas
+            c'è perché il riepilogo scorre SOTTO questa barra: senza, i
+            chevron del mese spuntano tagliati dietro il toggle. */}
+        <div className="bg-[var(--ds-canvas)] pb-2">
+          <div className="mx-auto w-full max-w-3xl px-4 pt-3 sm:px-6">{areaToggle}</div>
+        </div>
         <div className="min-h-0 flex-1 overflow-y-auto">
           <StaffCompensation staffMembers={staffMembers} showToast={showToast} />
         </div>
