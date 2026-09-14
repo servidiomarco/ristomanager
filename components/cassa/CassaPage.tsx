@@ -287,7 +287,21 @@ export const CassaPage: React.FC<CassaPageProps> = ({
     };
     socket?.on('bill:split-paid', onPaid);
     socket?.on('bill:settled', onPaid);
-    return () => { socket?.off('bill:split-paid', onPaid); socket?.off('bill:settled', onPaid); };
+    // Il claim (l'ospite apre il checkout) e il rilascio muovono il residuo
+    // della cassa senza essere un incasso: si rilegge, ma senza pulse — il
+    // suono è dei soldi arrivati, non delle intenzioni.
+    const onClaim = (payload: any) => {
+      if (payload?.bill_id !== id) return;
+      getOpenBills(serviceFilter, { status: 'open' })
+        .then(r => { const row = r.bills.find(b => b.id === id); if (row) setPayingBill(row); })
+        .catch(() => {});
+    };
+    socket?.on('bill:split-claimed', onClaim);
+    socket?.on('bill:split-released', onClaim);
+    return () => {
+      socket?.off('bill:split-paid', onPaid); socket?.off('bill:settled', onPaid);
+      socket?.off('bill:split-claimed', onClaim); socket?.off('bill:split-released', onClaim);
+    };
   }, [payingBill?.id, serviceFilter]);
 
   // Stesso destino per il cassetto del conto (BillSheet): è un altro
@@ -296,12 +310,15 @@ export const CassaPage: React.FC<CassaPageProps> = ({
   // transizione di larghezza. (Niente decremento ottimistico qui: il residuo
   // di /bills/open sconta già i CLAIMED, sottrarre l'importo del pagamento
   // di un claim lo conterebbe due volte.)
+  //
+  // Ascolta anche claim e rilascio — «sta pagando» deve comparire nelle
+  // Quote mentre succede — e un poll di cortesia fa sparire i claim
+  // scaduti, che non emettono nessun evento (TTL 5′ lato server).
   useEffect(() => {
     const id = openBill?.id;
     if (id == null) return;
     const socket = socketClient.getSocket();
-    const onPaid = (payload: any) => {
-      if (payload?.bill_id !== id) return;
+    const refetch = () => {
       getOpenBills(serviceFilter, { status: 'open' })
         .then(r => {
           const row = r.bills.find(b => b.id === id);
@@ -309,9 +326,17 @@ export const CassaPage: React.FC<CassaPageProps> = ({
         })
         .catch(() => {});
     };
+    const onPaid = (payload: any) => { if (payload?.bill_id === id) refetch(); };
     socket?.on('bill:split-paid', onPaid);
     socket?.on('bill:settled', onPaid);
-    return () => { socket?.off('bill:split-paid', onPaid); socket?.off('bill:settled', onPaid); };
+    socket?.on('bill:split-claimed', onPaid);
+    socket?.on('bill:split-released', onPaid);
+    const poll = setInterval(refetch, 15_000);
+    return () => {
+      socket?.off('bill:split-paid', onPaid); socket?.off('bill:settled', onPaid);
+      socket?.off('bill:split-claimed', onPaid); socket?.off('bill:split-released', onPaid);
+      clearInterval(poll);
+    };
   }, [openBill?.id, serviceFilter]);
 
   /* ── Stato dei tavoli ────────────────────────────────────────────────── */
