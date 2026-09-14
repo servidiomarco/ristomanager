@@ -30796,6 +30796,19 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
                               ) ORDER BY p.recorded_at)
                               FROM table_bill_payments p
                               WHERE p.table_bill_id = b.id AND p.voided_at IS NULL), '[]'::jsonb) AS payments,
+                    -- Le quote ospite del QR con l'etichetta del pagante, per
+                    -- la sezione Quote del foglio conto: PAID sempre, CLAIMED
+                    -- solo se il claim è ancora vivo (l'ospite è al checkout
+                    -- in questo momento). Gli acconti (kind='deposit') hanno
+                    -- già la loro riga nei totali e restano fuori.
+                    COALESCE((SELECT jsonb_agg(jsonb_build_object(
+                                  'id', s2.id, 'amount_cents', s2.amount_cents,
+                                  'claimant_label', s2.claimant_label,
+                                  'status', s2.status, 'paid_at', s2.paid_at
+                              ) ORDER BY s2.claimed_at)
+                              FROM table_bill_splits s2
+                              WHERE s2.table_bill_id = b.id AND s2.kind <> 'deposit'
+                                AND (s2.status = 'PAID' OR (s2.status = 'CLAIMED' AND s2.expires_at > NOW()))), '[]'::jsonb) AS splits,
                     (SELECT COUNT(*) FROM orders o WHERE o.table_bill_id = b.id AND o.status = 'OPEN')::int AS open_orders
              FROM table_bills b
              LEFT JOIN tables t ON t.id = b.table_id AND t.tenant_id = b.tenant_id

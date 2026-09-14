@@ -352,11 +352,24 @@ export interface OpenBillRow {
   discount_reason?: string | null;
   /** Movimenti vivi del libro cassa: come è stato pagato il conto. */
   payments?: BillPaymentRow[];
+  /** Le quote ospite del QR (etichetta, importo, stato): PAID, più i claim
+   *  ancora vivi (l'ospite è al checkout adesso). Acconti esclusi. */
+  splits?: BillSplitRow[];
   /** Comande ancora aperte su questo conto: il tavolo sta ancora ordinando. */
   open_orders: number;
   service_date: string;
   shift: 'LUNCH' | 'DINNER';
   is_current_service: boolean;
+}
+
+/** Una quota ospite del QR: chi (etichetta libera), quanto, e se ha già
+ *  pagato o è al checkout in questo momento (CLAIMED, claim ancora vivo). */
+export interface BillSplitRow {
+  id: number;
+  amount_cents: number;
+  claimant_label: string | null;
+  status: 'PAID' | 'CLAIMED';
+  paid_at: string | null;
 }
 
 /** Un movimento del libro cassa sul conto: incasso staff o specchio di una

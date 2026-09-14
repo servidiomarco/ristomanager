@@ -290,6 +290,30 @@ export const CassaPage: React.FC<CassaPageProps> = ({
     return () => { socket?.off('bill:split-paid', onPaid); socket?.off('bill:settled', onPaid); };
   }, [payingBill?.id, serviceFilter]);
 
+  // Stesso destino per il cassetto del conto (BillSheet): è un altro
+  // snapshot, e al collaudo la quota pagata muoveva il pannello ma non lui —
+  // barra e totali fermi. Si rilegge la riga e la barra anima da sola per
+  // transizione di larghezza. (Niente decremento ottimistico qui: il residuo
+  // di /bills/open sconta già i CLAIMED, sottrarre l'importo del pagamento
+  // di un claim lo conterebbe due volte.)
+  useEffect(() => {
+    const id = openBill?.id;
+    if (id == null) return;
+    const socket = socketClient.getSocket();
+    const onPaid = (payload: any) => {
+      if (payload?.bill_id !== id) return;
+      getOpenBills(serviceFilter, { status: 'open' })
+        .then(r => {
+          const row = r.bills.find(b => b.id === id);
+          if (row) setOpenBill(cur => (cur && cur.id === id ? row : cur));
+        })
+        .catch(() => {});
+    };
+    socket?.on('bill:split-paid', onPaid);
+    socket?.on('bill:settled', onPaid);
+    return () => { socket?.off('bill:split-paid', onPaid); socket?.off('bill:settled', onPaid); };
+  }, [openBill?.id, serviceFilter]);
+
   /* ── Stato dei tavoli ────────────────────────────────────────────────── */
 
   useEffect(() => {

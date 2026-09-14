@@ -63,7 +63,7 @@ const euro = (cents: number) => formatEuro(cents);
 
 type BillLike =
   Pick<OpenBillRow, 'id' | 'table_name' | 'total_cents' | 'covers' | 'share_token' | 'items'>
-  & Partial<Pick<OpenBillRow, 'paid_cents' | 'residual_cents' | 'open_orders' | 'deposit_credit_cents' | 'deposit_paid_cents' | 'refund_due_cents' | 'cash_settled_cents' | 'status' | 'fiscal_status' | 'fiscal_doc_id' | 'fiscal_error' | 'fiscal_provider' | 'fiscal_ref' | 'fiscal_doc_type' | 'fiscal_doc_number' | 'fiscal_public_token' | 'fiscal_related_doc_id' | 'external_ref' | 'payments'>>;
+  & Partial<Pick<OpenBillRow, 'paid_cents' | 'residual_cents' | 'open_orders' | 'deposit_credit_cents' | 'deposit_paid_cents' | 'refund_due_cents' | 'cash_settled_cents' | 'status' | 'fiscal_status' | 'fiscal_doc_id' | 'fiscal_error' | 'fiscal_provider' | 'fiscal_ref' | 'fiscal_doc_type' | 'fiscal_doc_number' | 'fiscal_public_token' | 'fiscal_related_doc_id' | 'external_ref' | 'payments' | 'splits'>>;
 
 const isSettled = (bill: BillLike) => bill.residual_cents === 0;
 
@@ -498,6 +498,37 @@ const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
           </div>
         )}
       </FormCard>
+
+      {/* Le quote del QR, come le vede l'ospite: chi ha pagato cosa, e chi
+          è al checkout in questo momento. Solo dove il server le manda
+          (bills/open); acconti e incassi staff hanno già le loro righe. */}
+      {bill.splits && bill.splits.length > 0 && (
+        <FormCard title="Quote">
+          <ul>
+            {bill.splits.map((s) => (
+              <li
+                key={s.id}
+                className="flex items-center justify-between gap-3 py-2.5 text-[14px] [&+li]:border-t [&+li]:border-[var(--ds-border)]"
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  {s.status === 'PAID'
+                    ? <Check className="h-4 w-4 flex-shrink-0 text-[var(--ds-seated-text)]" aria-hidden />
+                    : <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin text-[var(--ds-pending-text)]" aria-hidden />}
+                  <span className="truncate text-[var(--ds-text-primary)]">{s.claimant_label || 'Ospite'}</span>
+                </span>
+                <span className="flex flex-shrink-0 items-baseline gap-3">
+                  {s.status === 'CLAIMED'
+                    ? <span className="text-[13px] text-[var(--ds-pending-text)]">sta pagando</span>
+                    : s.paid_at && <span className="text-[13px] text-[var(--ds-text-muted)]">{getRomeTimePart(s.paid_at)}</span>}
+                  <span className={`tabular-nums ${s.status === 'PAID' ? 'text-[var(--ds-text-secondary)]' : 'text-[var(--ds-text-muted)]'}`}>
+                    {euro(s.amount_cents)}
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </FormCard>
+      )}
 
       {bill.items && bill.items.length > 0 && (
         <FormCard title="Dettaglio">

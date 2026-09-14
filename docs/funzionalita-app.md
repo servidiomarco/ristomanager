@@ -604,6 +604,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-14 | Pagamenti, conto al tavolo e cassa | Il foglio del conto aperto dalla Cassa segue i pagamenti in tempo reale (prima restava lo snapshot del tocco: barra e totali fermi); nuova sezione «Quote» nel foglio — chi ha pagato cosa, con etichetta, ora e importo, e «sta pagando» per l’ospite al checkout in quel momento. |
 | 2026-09-14 | Pagamenti, conto al tavolo e cassa | La barra pagamenti si muove all’istante sull’evento della quota (senza aspettare il ricarico dei conti) e compare anche nel foglio mostrato appena chiusa la comanda; quando l’ultima quota salda tutto, il foglio mostra prima barra piena e «Saldato» e si congeda da solo dopo un paio di secondi, invece di sparire di colpo. |
 | 2026-09-14 | Pagamenti, conto al tavolo e cassa | Barra di avanzamento pagamenti nel foglio del conto: pagato, percentuale e riempimento animato in tempo reale sulle quote del QR; una luce scorre sul tratto scoperto finché il link è attivo, «Saldato» a barra piena. |
 | 2026-09-14 | Comande, Cucina e Passe | La griglia tavoli in carico mostra tessere scheletro (stesse misure delle vere, shimmer discreto) invece del vuoto «Nessun tavolo»: solo al primo carico — gli aggiornamenti in sottofondo non lampeggiano sopra i dati. |
