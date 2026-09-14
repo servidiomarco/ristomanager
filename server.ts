@@ -59,7 +59,7 @@ import { isWinePairingConfigured, suggestWinePairings } from './services/aiWineP
 import { Shift, PaymentStatus, UserRole } from './types.js';
 import authRoutes from './auth/authRoutes.js';
 import logRoutes from './activityLogs/logRoutes.js';
-import { authenticate, authorize, requirePermission, requireAnyPermission } from './auth/authMiddleware.js';
+import { authenticate, authorize, requirePermission, requireAnyPermission, requireStepUp } from './auth/authMiddleware.js';
 import { AuthService } from './auth/authService.js';
 import { RolePermissionService, isReportsAdmin, ALL_PERMISSIONS, ALL_PERMISSION_KEYS, type Permission } from './auth/permissionService.js';
 import { canAssignToRole } from './auth/permissions.js';
@@ -17575,6 +17575,397 @@ app.get('/staff/presence', authenticate, async (req, res) => {
         }
 
         res.json(staffByShift);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ============================================
+// STAFF COMPENSATION ROUTES (Compensi)
+// IMPORTANT: specific paths BEFORE /staff/:id, come per shifts/time-off.
+// Ogni route esige staff:payments (matrice, default solo OWNER) E lo
+// sblocco step-up con la password (header X-Step-Up-Token, 15 min).
+// NIENTE broadcast socket, di proposito: broadcastToAll arriverebbe a
+// tutti i client del tenant, camerieri compresi — i compensi restano nel
+// recinto della sessione sbloccata. Concorrenza nulla (li tocca il
+// titolare): il client rilegge dopo ogni scrittura.
+// ============================================
+
+const COMPENSATION_STEP_UP_SCOPE = 'staff_compensation';
+
+const mapCompensationProfile = (row: any) => ({
+    staffId: row.staff_id,
+    monthlyCents: row.monthly_cents,
+    singleServiceCents: row.single_service_cents,
+    doubleServiceCents: row.double_service_cents,
+    notes: row.notes,
+    updatedAt: row.updated_at
+});
+
+const mapCompensationPayment = (row: any) => ({
+    id: row.id,
+    staffId: row.staff_id,
+    periodMonth: typeof row.period_month === 'string' ? row.period_month.slice(0, 7) : row.period_month,
+    kind: row.kind,
+    amountCents: row.amount_cents,
+    paidOn: row.paid_on,
+    method: row.method,
+    note: row.note,
+    createdAt: row.created_at
+});
+
+// month arriva come YYYY-MM; in tabella i movimenti sono ancorati al primo
+// del mese (CHECK in migration), quindi il confronto è un'uguaglianza secca.
+const parseCompensationMonth = (raw: unknown): string | null => {
+    if (typeof raw !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(raw)) return null;
+    return `${raw}-01`;
+};
+
+const parseCentsAmount = (raw: unknown): number | null =>
+    typeof raw === 'number' && Number.isInteger(raw) && raw >= 0 ? raw : null;
+
+// Get compensation profiles (tariffe correnti, tutte)
+app.get('/staff/compensation/profiles', authenticate, requirePermission('staff:payments'), requireStepUp(COMPENSATION_STEP_UP_SCOPE), async (req, res) => {
+    try {
+        const result = await queryWithRetry(
+            'SELECT * FROM staff_compensation_profiles WHERE tenant_id = $1',
+            [req.tenantId!]
+        );
+        res.json(result.rows.map(mapCompensationProfile));
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Upsert compensation profile (tariffe di un dipendente)
+app.put('/staff/compensation/profiles/:staffId', authenticate, requirePermission('staff:payments'), requireStepUp(COMPENSATION_STEP_UP_SCOPE), async (req, res) => {
+    try {
+        const { staffId } = req.params;
+        const { monthlyCents, singleServiceCents, doubleServiceCents, notes } = req.body ?? {};
+
+        const monthly = monthlyCents == null ? null : parseCentsAmount(monthlyCents);
+        const single = singleServiceCents == null ? null : parseCentsAmount(singleServiceCents);
+        const double = doubleServiceCents == null ? null : parseCentsAmount(doubleServiceCents);
+        if ((monthlyCents != null && monthly === null)
+            || (singleServiceCents != null && single === null)
+            || (doubleServiceCents != null && double === null)) {
+            return res.status(400).json({ error: 'Gli importi devono essere cents interi non negativi' });
+        }
+
+        // La FK su staff_members è globale: senza questo controllo un id di
+        // un altro tenant passerebbe il WITH CHECK della policy (che guarda
+        // solo il tenant_id della riga nuova).
+        const staffCheck = await queryWithRetry(
+            'SELECT id FROM staff_members WHERE id = $1 AND tenant_id = $2',
+            [staffId, req.tenantId!]
+        );
+        if (staffCheck.rows.length === 0) {
+            return res.status(404).json({ error: 'Staff member not found' });
+        }
+
+        const result = await queryWithRetry(
+            `INSERT INTO staff_compensation_profiles (tenant_id, staff_id, monthly_cents, single_service_cents, double_service_cents, notes)
+             VALUES ($1, $2, $3, $4, $5, $6)
+             ON CONFLICT (tenant_id, staff_id) DO UPDATE SET
+                monthly_cents = EXCLUDED.monthly_cents,
+                single_service_cents = EXCLUDED.single_service_cents,
+                double_service_cents = EXCLUDED.double_service_cents,
+                notes = EXCLUDED.notes,
+                updated_at = now()
+             RETURNING *`,
+            [req.tenantId!, staffId, monthly, single, double, typeof notes === 'string' && notes.trim() ? notes.trim() : null]
+        );
+
+        LogService.logActivity(
+            req.tenantId!, req.user!.userId, req.user!.email, req.user!.email,
+            ActivityAction.UPDATE, ResourceType.STAFF, undefined, undefined,
+            { event: 'compensation_profile', staffId }
+        );
+
+        res.json(mapCompensationProfile(result.rows[0]));
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Monthly summary: dovuto (auto dai turni per gli EXTRA, mensile per
+// FISSO/STAGIONALE, override quando presente), pagato, residuo.
+app.get('/staff/compensation/summary', authenticate, requirePermission('staff:payments'), requireStepUp(COMPENSATION_STEP_UP_SCOPE), async (req, res) => {
+    try {
+        const monthStart = parseCompensationMonth(req.query.month);
+        if (!monthStart) {
+            return res.status(400).json({ error: 'month deve essere YYYY-MM' });
+        }
+        const [y, m] = monthStart.slice(0, 7).split('-').map(Number);
+        const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+        const monthEnd = `${monthStart.slice(0, 7)}-${String(lastDay).padStart(2, '0')}`;
+
+        const [members, profiles, overrides, payments, serviceDays] = await Promise.all([
+            queryWithRetry(
+                'SELECT id, staff_type, hire_date, contract_end_date, is_active FROM staff_members WHERE tenant_id = $1',
+                [req.tenantId!]
+            ),
+            queryWithRetry('SELECT * FROM staff_compensation_profiles WHERE tenant_id = $1', [req.tenantId!]),
+            queryWithRetry(
+                'SELECT staff_id, override_cents, note FROM staff_compensation_overrides WHERE tenant_id = $1 AND period_month = $2',
+                [req.tenantId!, monthStart]
+            ),
+            queryWithRetry(
+                `SELECT staff_id, SUM(amount_cents)::int AS paid_cents
+                   FROM staff_compensation_payments
+                  WHERE tenant_id = $1 AND period_month = $2
+                  GROUP BY staff_id`,
+                [req.tenantId!, monthStart]
+            ),
+            // Giorni a servizio singolo/doppio dai turni con presenza: la
+            // base del dovuto degli EXTRA. COUNT(DISTINCT shift) regge anche
+            // il giorno con turni duplicati o non-standard.
+            queryWithRetry(
+                `SELECT d.staff_id,
+                        COUNT(*) FILTER (WHERE d.services = 1)::int AS single_days,
+                        COUNT(*) FILTER (WHERE d.services >= 2)::int AS double_days
+                   FROM (
+                       SELECT staff_id, date, COUNT(DISTINCT shift) AS services
+                         FROM staff_shifts
+                        WHERE tenant_id = $1
+                          AND present = TRUE
+                          AND date >= $2::date
+                          AND date < ($2::date + INTERVAL '1 month')
+                        GROUP BY staff_id, date
+                   ) d
+                  GROUP BY d.staff_id`,
+                [req.tenantId!, monthStart]
+            )
+        ]);
+
+        const profileByStaff = new Map(profiles.rows.map(r => [r.staff_id, r]));
+        const overrideByStaff = new Map(overrides.rows.map(r => [r.staff_id, r]));
+        const paidByStaff = new Map(payments.rows.map(r => [r.staff_id, r.paid_cents]));
+        const daysByStaff = new Map(serviceDays.rows.map(r => [r.staff_id, r]));
+
+        const rows = members.rows.map(member => {
+            const profile = profileByStaff.get(member.id);
+            const override = overrideByStaff.get(member.id);
+            const days = daysByStaff.get(member.id);
+            const singleDays = days?.single_days ?? 0;
+            const doubleDays = days?.double_days ?? 0;
+            const paidCents = paidByStaff.get(member.id) ?? 0;
+
+            let dueCents: number | null = null;
+            let dueSource: 'AUTO' | 'OVERRIDE' | 'PROFILE' = member.staff_type === 'EXTRA' ? 'AUTO' : 'PROFILE';
+            let missingRate = false;
+
+            if (override) {
+                dueCents = override.override_cents;
+                dueSource = 'OVERRIDE';
+            } else if (member.staff_type === 'EXTRA') {
+                const single = profile?.single_service_cents;
+                const double = profile?.double_service_cents;
+                if ((singleDays > 0 && single == null) || (doubleDays > 0 && double == null)) {
+                    missingRate = true;
+                } else {
+                    dueCents = singleDays * (single ?? 0) + doubleDays * (double ?? 0);
+                }
+            } else {
+                // FISSO: il mensile pieno. STAGIONALE: pieno solo nei mesi
+                // che intersecano il contratto — i mezzi mesi si correggono
+                // con l'override, niente pro-rata (una regola sola).
+                const monthly = profile?.monthly_cents;
+                if (monthly == null) {
+                    missingRate = true;
+                } else if (member.staff_type === 'STAGIONALE') {
+                    const inSeason = (member.hire_date == null || member.hire_date <= monthEnd)
+                        && (member.contract_end_date == null || member.contract_end_date >= monthStart);
+                    dueCents = inSeason ? monthly : 0;
+                } else {
+                    dueCents = monthly;
+                }
+            }
+
+            return {
+                staffId: member.id,
+                isActive: member.is_active,
+                dueCents,
+                dueSource,
+                missingRate,
+                overrideNote: override?.note ?? null,
+                singleDays,
+                doubleDays,
+                paidCents,
+                residualCents: dueCents == null ? null : dueCents - paidCents
+            };
+        });
+
+        const totals = rows.reduce((acc, r) => ({
+            dueCents: acc.dueCents + (r.dueCents ?? 0),
+            paidCents: acc.paidCents + r.paidCents,
+            residualCents: acc.residualCents + (r.residualCents ?? 0)
+        }), { dueCents: 0, paidCents: 0, residualCents: 0 });
+
+        res.json({ month: monthStart.slice(0, 7), rows, totals });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Payments register (movimenti del mese, opzionalmente di un dipendente)
+app.get('/staff/compensation/payments', authenticate, requirePermission('staff:payments'), requireStepUp(COMPENSATION_STEP_UP_SCOPE), async (req, res) => {
+    try {
+        const monthStart = parseCompensationMonth(req.query.month);
+        if (!monthStart) {
+            return res.status(400).json({ error: 'month deve essere YYYY-MM' });
+        }
+        let query = 'SELECT * FROM staff_compensation_payments WHERE tenant_id = $1 AND period_month = $2';
+        const params: any[] = [req.tenantId!, monthStart];
+        if (typeof req.query.staffId === 'string' && req.query.staffId) {
+            query += ' AND staff_id = $3';
+            params.push(req.query.staffId);
+        }
+        query += ' ORDER BY paid_on DESC, created_at DESC';
+        const result = await queryWithRetry(query, params);
+        res.json(result.rows.map(mapCompensationPayment));
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Register a payment (acconto o saldo)
+app.post('/staff/compensation/payments', authenticate, requirePermission('staff:payments'), requireStepUp(COMPENSATION_STEP_UP_SCOPE), async (req, res) => {
+    try {
+        const { staffId, periodMonth, kind, amountCents, paidOn, method, note } = req.body ?? {};
+
+        const monthStart = parseCompensationMonth(periodMonth);
+        const amount = parseCentsAmount(amountCents);
+        if (typeof staffId !== 'string' || !staffId || !monthStart) {
+            return res.status(400).json({ error: 'staffId e periodMonth (YYYY-MM) sono obbligatori' });
+        }
+        if (amount === null || amount <= 0) {
+            return res.status(400).json({ error: 'amountCents deve essere un intero positivo' });
+        }
+        if (kind !== 'ACCONTO' && kind !== 'SALDO') {
+            return res.status(400).json({ error: 'kind deve essere ACCONTO o SALDO' });
+        }
+        if (method != null && !['CONTANTI', 'BONIFICO', 'ALTRO'].includes(method)) {
+            return res.status(400).json({ error: 'method non valido' });
+        }
+        if (paidOn != null && (typeof paidOn !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(paidOn))) {
+            return res.status(400).json({ error: 'paidOn deve essere YYYY-MM-DD' });
+        }
+
+        const staffCheck = await queryWithRetry(
+            'SELECT id FROM staff_members WHERE id = $1 AND tenant_id = $2',
+            [staffId, req.tenantId!]
+        );
+        if (staffCheck.rows.length === 0) {
+            return res.status(404).json({ error: 'Staff member not found' });
+        }
+
+        const result = await queryWithRetry(
+            `INSERT INTO staff_compensation_payments (tenant_id, staff_id, period_month, kind, amount_cents, paid_on, method, note, created_by)
+             VALUES ($1, $2, $3, $4, $5, COALESCE($6, CURRENT_DATE), $7, $8, $9)
+             RETURNING *`,
+            [req.tenantId!, staffId, monthStart, kind, amount, paidOn ?? null, method ?? null,
+             typeof note === 'string' && note.trim() ? note.trim() : null, req.user!.userId]
+        );
+
+        // Niente importi nei dettagli: il log attività è leggibile da
+        // logs:view, il registro vero sta nella tabella protetta.
+        LogService.logActivity(
+            req.tenantId!, req.user!.userId, req.user!.email, req.user!.email,
+            ActivityAction.CREATE, ResourceType.STAFF, undefined, undefined,
+            { event: 'compensation_payment', staffId, kind }
+        );
+
+        res.status(201).json(mapCompensationPayment(result.rows[0]));
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Delete a payment (correzione di un errore di battitura)
+app.delete('/staff/compensation/payments/:id', authenticate, requirePermission('staff:payments'), requireStepUp(COMPENSATION_STEP_UP_SCOPE), async (req, res) => {
+    try {
+        const result = await queryWithRetry(
+            'DELETE FROM staff_compensation_payments WHERE id = $1 AND tenant_id = $2 RETURNING staff_id',
+            [req.params.id, req.tenantId!]
+        );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Payment not found' });
+        }
+        LogService.logActivity(
+            req.tenantId!, req.user!.userId, req.user!.email, req.user!.email,
+            ActivityAction.DELETE, ResourceType.STAFF, undefined, undefined,
+            { event: 'compensation_payment_delete', staffId: result.rows[0].staff_id }
+        );
+        res.json({ ok: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Upsert override del dovuto (correzione manuale del mese)
+app.put('/staff/compensation/overrides/:staffId', authenticate, requirePermission('staff:payments'), requireStepUp(COMPENSATION_STEP_UP_SCOPE), async (req, res) => {
+    try {
+        const { staffId } = req.params;
+        const { periodMonth, overrideCents, note } = req.body ?? {};
+        const monthStart = parseCompensationMonth(periodMonth);
+        const amount = parseCentsAmount(overrideCents);
+        if (!monthStart || amount === null) {
+            return res.status(400).json({ error: 'periodMonth (YYYY-MM) e overrideCents (intero >= 0) sono obbligatori' });
+        }
+
+        const staffCheck = await queryWithRetry(
+            'SELECT id FROM staff_members WHERE id = $1 AND tenant_id = $2',
+            [staffId, req.tenantId!]
+        );
+        if (staffCheck.rows.length === 0) {
+            return res.status(404).json({ error: 'Staff member not found' });
+        }
+
+        await queryWithRetry(
+            `INSERT INTO staff_compensation_overrides (tenant_id, staff_id, period_month, override_cents, note, created_by)
+             VALUES ($1, $2, $3, $4, $5, $6)
+             ON CONFLICT (tenant_id, staff_id, period_month) DO UPDATE SET
+                override_cents = EXCLUDED.override_cents,
+                note = EXCLUDED.note,
+                created_by = EXCLUDED.created_by,
+                updated_at = now()`,
+            [req.tenantId!, staffId, monthStart, amount,
+             typeof note === 'string' && note.trim() ? note.trim() : null, req.user!.userId]
+        );
+
+        LogService.logActivity(
+            req.tenantId!, req.user!.userId, req.user!.email, req.user!.email,
+            ActivityAction.UPDATE, ResourceType.STAFF, undefined, undefined,
+            { event: 'compensation_override', staffId, month: monthStart.slice(0, 7) }
+        );
+
+        res.json({ ok: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Delete override (torna al calcolo automatico)
+app.delete('/staff/compensation/overrides/:staffId', authenticate, requirePermission('staff:payments'), requireStepUp(COMPENSATION_STEP_UP_SCOPE), async (req, res) => {
+    try {
+        const monthStart = parseCompensationMonth(req.query.month);
+        if (!monthStart) {
+            return res.status(400).json({ error: 'month deve essere YYYY-MM' });
+        }
+        await queryWithRetry(
+            'DELETE FROM staff_compensation_overrides WHERE tenant_id = $1 AND staff_id = $2 AND period_month = $3',
+            [req.tenantId!, req.params.staffId, monthStart]
+        );
+        res.json({ ok: true });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Internal server error' });

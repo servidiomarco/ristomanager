@@ -102,6 +102,29 @@ export const requirePermission = (permission: Permission) => {
   };
 };
 
+// Step-up: la sezione riservata (es. Compensi) esige, OLTRE alla sessione e
+// al permesso, un token di sblocco fresco ottenuto ridigitando la password
+// (POST /auth/step-up). Viaggia nell'header X-Step-Up-Token e deve
+// appartenere allo stesso utente e tenant della sessione: un token raccolto
+// altrove non apre niente. Il 401 con error dedicato è il segnale al client
+// di rimostrare il prompt password — da distinguere sul BODY, perché
+// fetchWithAuth su un 401 prova prima il refresh dell'access token.
+export const requireStepUp = (scope: string) => {
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Not authenticated' });
+    }
+
+    const token = req.headers['x-step-up-token'];
+    const payload = typeof token === 'string' ? AuthService.verifyStepUpToken(token, scope) : null;
+    if (!payload || payload.userId !== req.user.userId || payload.tenantId !== req.user.tenantId) {
+      return res.status(401).json({ error: 'step_up_required' });
+    }
+
+    next();
+  };
+};
+
 // Come requirePermission, ma basta uno dei permessi elencati. Serve alle
 // azioni condivise fra sala e passe (es. segnare servita un'uscita): WAITER
 // ha orders:take senza expedite, KITCHEN l'inverso, e un permesso nuovo solo

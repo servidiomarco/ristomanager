@@ -13,6 +13,10 @@ export type Permission =
   | 'reservations:full'
   | 'staff:view'
   | 'staff:full'
+  // Compensi del personale (tariffe, acconti, residui): permesso a parte da
+  // staff:full perché sono dati economici riservati — di default solo
+  // OWNER, e le route esigono anche lo sblocco step-up con la password.
+  | 'staff:payments'
   | 'settings:view'
   | 'settings:full'
   | 'users:view'
@@ -73,6 +77,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'reservations:full',
     'staff:view',
     'staff:full',
+    'staff:payments',
     'settings:view',
     'settings:full',
     'users:view',
@@ -115,6 +120,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'reservations:full',
     'staff:view',
     'staff:full',
+    'staff:payments',
     'settings:view',
     'settings:full',
     'users:view',

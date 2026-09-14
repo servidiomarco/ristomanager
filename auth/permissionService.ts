@@ -11,7 +11,7 @@ export const ALL_PERMISSIONS: { feature: string; permissions: Permission[] }[] =
   { feature: 'Menu e Banchetti', permissions: ['menu:view', 'menu:full', 'banquet:view_price'] },
   { feature: 'Prenotazioni', permissions: ['reservations:view', 'reservations:full'] },
   { feature: 'Reception', permissions: ['reception:view'] },
-  { feature: 'Personale', permissions: ['staff:view', 'staff:full'] },
+  { feature: 'Personale', permissions: ['staff:view', 'staff:full', 'staff:payments'] },
   { feature: 'Clienti', permissions: ['customers:view', 'customers:full'] },
   { feature: 'Inventario', permissions: ['inventory:view', 'inventory:full'] },
   { feature: 'Impostazioni', permissions: ['settings:view', 'settings:full'] },

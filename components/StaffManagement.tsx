@@ -5,6 +5,8 @@ import {
   Shift, TimeOffType
 } from '../types';
 import { staffApiService, CreateStaffInput, CreateTimeOffInput } from '../services/staffApiService';
+import { StaffCompensation } from './StaffCompensation';
+import { useAuth } from '../contexts/AuthContext';
 import { toTitleCase } from '../utils/text';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { SkeletonStaffColumn } from './SkeletonCards';
@@ -153,6 +155,13 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
   const [shifts, setShifts] = useState<StaffShift[]>([]);
   const [timeOffs, setTimeOffs] = useState<StaffTimeOff[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // L'area Compensi esiste solo per chi ha staff:payments (default: il
+  // titolare). Passare a COMPENSI monta StaffCompensation, che chiede la
+  // password; tornare a PERSONALE lo smonta e butta via lo sblocco.
+  const { hasPermission } = useAuth();
+  const canSeeCompensation = hasPermission('staff:payments');
+  const [area, setArea] = useState<'PERSONALE' | 'COMPENSI'>('PERSONALE');
 
   // Filters
   const [categoryFilter, setCategoryFilter] = useState<StaffCategory | 'ALL'>('ALL');
@@ -1027,8 +1036,22 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
     toTitleCase(s.role) || (s.category === StaffCategory.SALA ? 'Cameriere' : 'Cuoco');
 
   /* ── Toolbar ─────────────────────────────────────────────────────────── */
+  // Il toggle Personale | Compensi, condiviso dalle due aree.
+  const areaToggle = canSeeCompensation ? (
+    <SegmentedControl<'PERSONALE' | 'COMPENSI'>
+      value={area}
+      onChange={setArea}
+      ariaLabel="Area del personale"
+      options={[
+        { value: 'PERSONALE', label: 'Personale' },
+        { value: 'COMPENSI', label: 'Compensi' },
+      ]}
+    />
+  ) : null;
+
   const toolbar = (
     <div ref={toolbarRef} className="space-y-3">
+      {areaToggle}
       {/* On a pointer the top bar's + is the one way in, as everywhere else.
           On touch it leads the column: the top bar is a thumb-stretch away
           from the list you are actually working in. */}
@@ -1688,6 +1711,17 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
     setDayMenu(null);
     run(d);
   };
+
+  if (area === 'COMPENSI' && canSeeCompensation) {
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        <div className="flex justify-center px-4 pt-3">{areaToggle}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <StaffCompensation staffMembers={staffMembers} showToast={showToast} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>

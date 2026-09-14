@@ -22,7 +22,8 @@ export enum ResourceType {
   INVENTORY_PRODUCT = 'INVENTORY_PRODUCT',
   INVENTORY_MOVEMENT = 'INVENTORY_MOVEMENT',
   ORDER = 'ORDER',
-  SETTINGS = 'SETTINGS'
+  SETTINGS = 'SETTINGS',
+  STAFF = 'STAFF'
 }
 
 export interface ActivityLog {
