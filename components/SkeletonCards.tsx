@@ -472,3 +472,37 @@ export const SkeletonEmailThread: React.FC<{ count?: number; className?: string 
         ))}
     </div>
 );
+
+// La griglia tavoli di Comande mentre arriva lo stato del servizio. Tessere
+// della stessa taglia delle vere (aspect-square sul palmare, min-h-[132px]
+// sulla larga) così i tavoli atterrano senza reflow; il blocco del numero
+// varia di larghezza per non sembrare una griglia stampata. Le classi della
+// griglia sono le stesse di TableTiles: se cambiano lì, cambiano qui.
+export const SkeletonTableTiles: React.FC<{ variant?: 'square' | 'wide'; count?: number; className?: string }> = ({
+    variant = 'square',
+    count = 12,
+    className,
+}) => {
+    const widths = ['w-8', 'w-12', 'w-7', 'w-10'];
+    const grid = variant === 'wide'
+        ? 'grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7'
+        : 'grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-7 xl:grid-cols-9';
+    return (
+        <div aria-hidden="true" className={`${grid} motion-safe:animate-pulse ${className ?? ''}`}>
+            {Array.from({ length: count }).map((_, i) => (
+                variant === 'wide' ? (
+                    <div key={i} className={`flex min-h-[132px] flex-col items-start gap-2 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-3 py-2.5 shadow-[var(--ds-shadow-card)]`}>
+                        <div className={`h-7 ${widths[i % widths.length]} rounded ${BLOCK}`} />
+                        <div className={`h-3 w-12 rounded ${BLOCK}`} />
+                        <div className={`mt-auto h-3 w-3/5 rounded ${BLOCK}`} />
+                    </div>
+                ) : (
+                    <div key={i} className="flex aspect-square flex-col items-center justify-center gap-1.5 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-1 shadow-[var(--ds-shadow-card)]">
+                        <div className={`h-6 ${widths[i % widths.length]} rounded ${BLOCK}`} />
+                        <div className={`h-3 w-10 rounded ${BLOCK}`} />
+                    </div>
+                )
+            ))}
+        </div>
+    );
+};

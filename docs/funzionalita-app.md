@@ -603,6 +603,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-14 | Comande, Cucina e Passe | La griglia tavoli in carico mostra tessere scheletro (stesse misure delle vere, shimmer discreto) invece del vuoto «Nessun tavolo»: solo al primo carico — gli aggiornamenti in sottofondo non lampeggiano sopra i dati. |
 | 2026-09-14 | Comande, Cucina e Passe | Coperto e servizio non compaiono più dentro le uscite dei monitor (coda, card a binario, Consegnate) né nei loro conteggi: non sono piatti da cucinare. I coperti restano nell'intestazione della comanda, accanto al tavolo. |
 | 2026-09-14 | Comande, Cucina e Passe | Le comande rimaste aperte da un servizio passato (appese) restano visibili sulla griglia tavoli in ogni servizio: tessera in verde con «appesa da ieri» (o da pranzo, o dalla data), e il tocco riprende la comanda dal suo servizio invece di aprirne una nuova. |
 | 2026-09-14 | Funzionalità trasversali | La barra globale segue il cambio di servizio: al passaggio pranzo→cena e al mattino il giorno e il turno avanzano da soli (solo se non si era scelto altro a mano), e un dispositivo aperto dopo mezzanotte parte dalla cena in corso, non dal pranzo del giorno dopo. |
