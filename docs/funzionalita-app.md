@@ -463,7 +463,7 @@ Per i ristoranti con cassa **Passepartout Menù** (modulo dedicato):
 - **Griglia turni settimanale** Lun–Dom: Pranzo, Cena, Pranzo e cena, Tutto il giorno, Riposo; inserimento massivo della settimana.
 - **Assenze**: malattia, permesso, riposo, per giornata intera o singolo turno.
 - **Chi è presente oggi** per turno (incrocio automatico di turni e assenze), mostrato anche in Dashboard.
-- **Compensi** (area riservata dentro Personale): tariffe per dipendente — mensile per fissi e stagionali, a servizio per gli extra con prezzo distinto per il giorno singolo e il doppio (pranzo+cena) — acconti e saldi con residuo del mese. Per gli extra il dovuto si calcola da solo dai turni con presenza, correggibile a mano mese per mese. Visibile solo a chi ha il permesso «Compensi e acconti» (di default il titolare) e protetta da un secondo sblocco: si ridigita la password dell'account, lo sblocco dura 15 minuti e scade uscendo dalla sezione.
+- **Compensi** (area riservata dentro Personale): tariffe per dipendente — mensile per fissi e stagionali, a servizio per gli extra con prezzo distinto per il giorno singolo e il doppio (pranzo+cena) — acconti e saldi con residuo del mese. Per gli extra il dovuto si calcola da solo dai turni con presenza, correggibile a mano mese per mese. Visibile solo a chi ha il permesso «Compensi e acconti» (di default il titolare) e protetta da un secondo sblocco: si ridigita la password dell'account, lo sblocco dura 15 minuti e scade uscendo dalla sezione. Come tutto il gestionale, la sezione segue il tema chiaro/scuro: importi, avvisi «tariffa mancante» e fogli restano leggibili anche in modalità scura.
 
 ---
 
