@@ -129,6 +129,39 @@ export class AuthService {
     );
   }
 
+  // Step-up (sblocco con password di una sezione riservata, es. Compensi):
+  // un token corto che ACCOMPAGNA la sessione, non la sostituisce. Il claim
+  // purpose è il punto di sicurezza — un access token normale (stesso
+  // secret) non passa da requireStepUp, e questo payload senza role/email
+  // non passa da authenticate. Legato a userId+tenantId così non è cedibile
+  // fra utenti o tenant; scope distinto per sezione, se un domani ce ne
+  // sarà più d'una. Niente refresh, di proposito: scaduti i 15 minuti si
+  // ridigita la password.
+  static readonly STEP_UP_TTL_SECONDS = 15 * 60;
+
+  static generateStepUpToken(userId: number, tenantId: number, scope: string): string {
+    return jwt.sign(
+      { purpose: 'step_up', scope, userId, tenantId },
+      JWT_SECRET,
+      { expiresIn: AuthService.STEP_UP_TTL_SECONDS, jwtid: randomUUID() }
+    );
+  }
+
+  static verifyStepUpToken(token: string, scope: string): { userId: number; tenantId: number } | null {
+    try {
+      const payload = jwt.verify(token, JWT_SECRET) as { purpose?: string; scope?: string; userId?: number; tenantId?: number };
+      if (payload.purpose !== 'step_up' || payload.scope !== scope) {
+        return null;
+      }
+      if (!Number.isInteger(payload.userId) || !Number.isInteger(payload.tenantId)) {
+        return null;
+      }
+      return { userId: payload.userId as number, tenantId: payload.tenantId as number };
+    } catch {
+      return null;
+    }
+  }
+
   // Sessione di piattaforma scopata su un tenant: a differenza
   // dell'impersonation è una sessione PIENA (access + refresh, riga in
   // user_sessions) con l'identità dell'admin — è lo strumento di lavoro

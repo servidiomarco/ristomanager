@@ -400,6 +400,85 @@ router.post('/me/email', authenticate, async (req: Request, res: Response) => {
 });
 
 // ============================================
+// STEP-UP (sblocco sezioni riservate)
+// ============================================
+
+// Cap sui tentativi di sblocco: l'utente è già autenticato (niente
+// enumeration da nascondere), il limiter serve solo contro il brute-force
+// della password da una sessione lasciata aperta.
+const stepUpLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'rate_limited', message: 'Troppi tentativi, riprova tra qualche minuto.' },
+});
+
+// Gli scope sblocabili: uno per sezione riservata. Whitelist esplicita,
+// così un client non conia sblocchi per scope che non esistono ancora.
+const STEP_UP_SCOPES: Record<string, Permission> = {
+  staff_compensation: 'staff:payments',
+};
+
+// POST /auth/step-up - Ridigita la password e ottieni il token di sblocco
+// (15 min) per una sezione riservata. Il token vive solo nella memoria del
+// componente client: uscire dalla sezione lo butta via.
+router.post('/step-up', authenticate, stepUpLimiter, async (req: Request, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Not authenticated' });
+    }
+
+    const { password, scope } = req.body as { password?: unknown; scope?: unknown };
+    if (typeof password !== 'string' || !password || typeof scope !== 'string') {
+      return res.status(400).json({ error: 'password e scope sono obbligatori' });
+    }
+
+    const requiredPermission = STEP_UP_SCOPES[scope];
+    if (!requiredPermission) {
+      return res.status(400).json({ error: 'invalid_scope' });
+    }
+
+    // Nessuno sblocco per chi non vede la sezione: il permesso prima della
+    // password, così un account senza staff:payments non può nemmeno
+    // saggiare la propria password contro questa route.
+    if (!isPlatformScopedSession(req.user)) {
+      const allowed = await RolePermissionService.hasPermission(req.user.tenantId, req.user.role, requiredPermission);
+      if (!allowed) {
+        return res.status(403).json({ error: 'Insufficient permissions' });
+      }
+    }
+
+    const result = await queryWithRetry('SELECT password_hash FROM users WHERE id = $1', [req.user.userId]);
+    const hash = result.rows[0]?.password_hash;
+    if (!hash || !(await AuthService.verifyPassword(password, hash))) {
+      return res.status(401).json({ error: 'wrong_password', message: 'La password non è corretta.' });
+    }
+
+    const stepUpToken = AuthService.generateStepUpToken(req.user.userId, req.user.tenantId, scope);
+
+    // Niente importi né dettagli nel log: basta sapere CHI ha sbloccato
+    // la sezione e quando.
+    LogService.logActivity(
+      req.user.tenantId,
+      req.user.userId,
+      req.user.email,
+      req.user.email,
+      ActivityAction.UPDATE,
+      ResourceType.AUTH,
+      req.user.userId,
+      req.user.email,
+      { event: 'step_up_unlock', scope }
+    );
+
+    res.json({ stepUpToken, expiresIn: AuthService.STEP_UP_TTL_SECONDS });
+  } catch (error) {
+    console.error('Step-up error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ============================================
 // PASSWORD RESET (unauthenticated)
 // ============================================
 

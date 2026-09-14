@@ -463,6 +463,7 @@ Per i ristoranti con cassa **Passepartout Menù** (modulo dedicato):
 - **Griglia turni settimanale** Lun–Dom: Pranzo, Cena, Pranzo e cena, Tutto il giorno, Riposo; inserimento massivo della settimana.
 - **Assenze**: malattia, permesso, riposo, per giornata intera o singolo turno.
 - **Chi è presente oggi** per turno (incrocio automatico di turni e assenze), mostrato anche in Dashboard.
+- **Compensi** (area riservata dentro Personale): tariffe per dipendente — mensile per fissi e stagionali, a servizio per gli extra con prezzo distinto per il giorno singolo e il doppio (pranzo+cena) — acconti e saldi con residuo del mese. Per gli extra il dovuto si calcola da solo dai turni con presenza, correggibile a mano mese per mese. Visibile solo a chi ha il permesso «Compensi e acconti» (di default il titolare) e protetta da un secondo sblocco: si ridigita la password dell'account, lo sblocco dura 15 minuti e scade uscendo dalla sezione.
 
 ---
 
@@ -604,6 +605,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-14 | Personale (turni e presenze) | Nuova area «Compensi»: tariffe per dipendente (mensile, o a servizio singolo/doppio per gli extra), acconti e saldi con residuo del mese, dovuto degli extra calcolato dai turni e correggibile a mano; riservata al permesso «Compensi e acconti» (default solo titolare) con secondo sblocco a password che scade in 15 minuti o uscendo dalla sezione. |
 | 2026-09-14 | Pagamenti, conto al tavolo e cassa | Nel foglio conto le card Quote e Pagamenti diventano una sola «Pagamenti quote»: ogni quota porta il riferimento del pagamento (provider e id ordine) e il bottone che apre la pagina esito del checkout — ricevuta del riuscito e del non riuscito; compaiono anche i tentativi falliti (carta rifiutata), in rosso; sotto, gli incassi battuti dallo staff. |
 | 2026-09-14 | Pagamenti, conto al tavolo e cassa | Anche la proforma ha la sua pagina: /scontrino/<token> la mostra (etichettata «non è un documento fiscale», righe dallo snapshot del conto) e il piede in Transazioni dice «Proforma · apri»; le card dei tavoli in Transazioni partono chiuse — tavolo, cliente, n. movimenti, totale e documento a colpo d’occhio, il tocco sull’intestazione apre le righe. |
 | 2026-09-14 | Pagamenti, conto al tavolo e cassa | Il piede del gruppo in Transazioni parla sempre: documento del conto se c’è (preferito a quelli per-quota), altrimenti «chiusa senza documento fiscale» sui conti chiusi e «saldato · conto da chiudere in cassa» su quelli pagati dal QR ma mai chiusi. |

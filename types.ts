@@ -1240,3 +1240,48 @@ export interface StaffTimeOff {
   approved: boolean;
   createdAt?: string;
 }
+
+// ── Compensi del personale ─────────────────────────────────────────────
+// Dati economici riservati (permesso staff:payments + sblocco step-up):
+// viaggiano su route dedicate, mai dentro StaffMember. Importi sempre in
+// cents interi, stessa convenzione della cassa.
+
+export interface StaffCompensationProfile {
+  staffId: string;
+  monthlyCents: number | null;       // FISSO/STAGIONALE: il mensile
+  singleServiceCents: number | null; // EXTRA: giorno a 1 servizio
+  doubleServiceCents: number | null; // EXTRA: giorno pranzo+cena (totale)
+  notes?: string | null;
+  updatedAt?: string;
+}
+
+export interface StaffCompensationPayment {
+  id: string;
+  staffId: string;
+  periodMonth: string; // YYYY-MM, mese di competenza
+  kind: 'ACCONTO' | 'SALDO';
+  amountCents: number;
+  paidOn: string; // YYYY-MM-DD
+  method?: 'CONTANTI' | 'BONIFICO' | 'ALTRO' | null;
+  note?: string | null;
+  createdAt?: string;
+}
+
+export interface StaffCompensationSummaryRow {
+  staffId: string;
+  isActive: boolean;
+  dueCents: number | null; // null = tariffa mancante
+  dueSource: 'AUTO' | 'OVERRIDE' | 'PROFILE';
+  missingRate: boolean;
+  overrideNote: string | null;
+  singleDays: number;
+  doubleDays: number;
+  paidCents: number;
+  residualCents: number | null;
+}
+
+export interface StaffCompensationSummary {
+  month: string; // YYYY-MM
+  rows: StaffCompensationSummaryRow[];
+  totals: { dueCents: number; paidCents: number; residualCents: number };
+}
