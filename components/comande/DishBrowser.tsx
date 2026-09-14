@@ -656,24 +656,46 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
               let tileNo = 0;
               // `dimSelf` false dentro le sezioni: lì attenua la sezione
               // intera, e un secondo velo sulla tessera farebbe il doppio.
-              const catTile = (c: string, dimSelf = true) => (
-                <button
-                  key={c}
-                  type="button"
-                  onClick={() => { onQuery(''); onCategory(c); }}
-                  style={{ animation: 'tileIn 260ms ease-out both', animationDelay: `${Math.min(tileNo++ * 45, 450)}ms` }}
-                  className={`flex min-h-[76px] select-none flex-col items-center justify-center gap-1 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-2 text-center shadow-[var(--ds-shadow-card)] transition-[transform,opacity] hover:bg-[var(--ds-surface-row)] active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
-                    dimSelf && mutedCat(c) ? 'opacity-45' : ''
-                  }`}
-                >
-                  <span className={`${catView === 'grid4' ? 'text-[13px]' : 'text-[15px]'} font-semibold leading-tight text-[var(--ds-text-primary)] [overflow-wrap:anywhere]`}>
-                    {c}
-                  </span>
-                  {markedCategories.has(c) && (
-                    <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--ds-text-muted)]" aria-hidden />
-                  )}
-                </button>
-              );
+              //
+              // La tessera veste come le schede categoria di Comande sullo
+              // schermo largo: tinta della categoria, icona riconosciuta dal
+              // nome e conteggio dei piatti. La tinta segue l'INDICE nella
+              // lista intera (l'ordine della pagina Menu), non quello dentro
+              // la sezione: così Antipasti è dello stesso colore qui e sul
+              // desktop, e il colore diventa un nome. Il pallino «roba
+              // nell'uscita» sale accanto all'icona — sotto il nome c'è già
+              // il conteggio, e due righe di coda si leggono come rumore.
+              const catTile = (c: string, dimSelf = true) => {
+                const n = Math.max(0, categories.indexOf(c)) % 6;
+                const count = countByCategory?.get(c);
+                const Icon = categoryIcon(c);
+                return (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => { onQuery(''); onCategory(c); }}
+                    style={{ animation: 'tileIn 260ms ease-out both', animationDelay: `${Math.min(tileNo++ * 45, 450)}ms` }}
+                    className={`flex min-h-[76px] select-none flex-col items-start justify-center gap-1 rounded-[var(--ds-radius)] ${CAT_CARD[n]} ${
+                      catView === 'grid4' ? 'px-2.5 py-2' : 'px-3 py-2.5'
+                    } text-left shadow-[var(--ds-shadow-card)] transition-[transform,opacity] active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                      dimSelf && mutedCat(c) ? 'opacity-45' : ''
+                    }`}
+                  >
+                    <span className="flex w-full items-center justify-between">
+                      <Icon size={catView === 'grid4' ? 16 : 18} className={CAT_TEXT[n]} aria-hidden />
+                      {markedCategories.has(c) && (
+                        <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--ds-text-muted)]" aria-hidden />
+                      )}
+                    </span>
+                    <span className={`${catView === 'grid4' ? 'text-[13px]' : 'text-[15px]'} w-full font-semibold leading-tight text-[var(--ds-text-primary)] [overflow-wrap:anywhere]`}>
+                      {c}
+                    </span>
+                    <span className="text-[12px] tabular-nums leading-none text-[var(--ds-text-muted)]">
+                      {count != null ? `${count} ${count === 1 ? 'piatto' : 'piatti'}` : '\u00a0'}
+                    </span>
+                  </button>
+                );
+              };
               const gridClass = `grid gap-3 ${catView === 'grid4' ? 'grid-cols-4' : 'grid-cols-3'}`;
               // Una sezione sola (catalogo senza spunte bar/dolci): niente
               // intestazione — un titolo su tutto non divide niente.
