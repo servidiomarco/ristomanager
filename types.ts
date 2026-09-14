@@ -562,8 +562,16 @@ export interface CashMovement {
   bill_status: string;
   table_name: string | null;
   customer_name: string | null;
+  /** L'etichetta scelta dall'ospite sulla quota QR («Marco», «iPhone»). */
+  claimant_label: string | null;
   fiscal_status: FiscalDocumentStatus | null;
   fiscal_doc_type: 'RECEIPT' | 'PROFORMA' | 'INVOICE' | 'CREDIT_NOTE' | null;
+  /** Numero del documento (fattura nostra o documento commerciale Openapi). */
+  fiscal_doc_number: string | null;
+  /** provider_ref: numero scontrino RT o id del provider — fallback del numero. */
+  fiscal_ref: string | null;
+  /** /scontrino/<token>: la copia digitale pubblica del documento. */
+  fiscal_public_token: string | null;
   meta: Record<string, unknown> | null;
 }
 

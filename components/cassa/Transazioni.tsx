@@ -15,24 +15,41 @@ import { euro } from './cassaView';
 
 type Filter = 'all' | 'CONTANTI' | 'POS_FISICO' | 'online' | 'voided' | 'CAPARRA';
 
-const label = (m: CashMovement): string =>
-  m.source === 'deposit' ? 'Caparra online'
-  : m.online ? 'QR al tavolo'
-  : methodLabel(m.method);
+const label = (m: CashMovement): string => {
+  const base =
+    m.source === 'deposit' ? 'Caparra online'
+    : m.online ? 'QR al tavolo'
+    : methodLabel(m.method);
+  // Il nome che l'ospite ha scritto pagando la sua quota: «QR al tavolo ·
+  // Marco» dice subito chi era, senza aprire il conto.
+  return m.claimant_label ? `${base} · ${m.claimant_label}` : base;
+};
 
-/** Cosa dire dello stato di una riga. Il documento fiscale è un binario a
- *  parte: se è fallito lo dice, e non chiama «fallito» il pagamento.
- *  «Conto aperto» non sta qui: è un fatto del conto, e vive sull'intestazione
- *  del gruppo. */
+/** Cosa dire dello stato di una riga. «Conto aperto» e il documento fiscale
+ *  non stanno qui: sono fatti del CONTO, e vivono sull'intestazione e sul
+ *  piede del gruppo — ripeterli su ogni riga era rumore. */
 const pill = (m: CashMovement): { label: string; tone: 'positive' | 'pending' | 'critical' | 'neutral' } | null => {
   if (m.voided) return { label: 'stornata', tone: 'critical' };
   if (m.source === 'deposit') return { label: 'caparra', tone: 'neutral' };
-  if (m.fiscal_status === 'FAILED') return { label: 'da verificare fiscale', tone: 'pending' };
-  if (m.fiscal_status === 'CONFIRMED' && m.fiscal_doc_type === 'RECEIPT') {
-    return { label: 'scontrino emesso', tone: 'positive' };
-  }
   if (m.online) return { label: 'online', tone: 'positive' };
   return null;
+};
+
+/** Il documento con cui il conto è stato chiuso, per il piede del gruppo.
+ *  `token` presente = c'è la copia digitale su /scontrino/<token>. */
+const groupDoc = (ms: CashMovement[]): { label: string; tone: 'positive' | 'pending' | 'critical'; token: string | null } | null => {
+  const m = ms.find(x => x.fiscal_doc_type != null || x.fiscal_status != null);
+  if (!m || !m.fiscal_doc_type) return null;
+  const n = m.fiscal_doc_number ?? m.fiscal_ref;
+  const name =
+    m.fiscal_doc_type === 'RECEIPT' ? `Scontrino${n ? ` n. ${n}` : ''}`
+    : m.fiscal_doc_type === 'PROFORMA' ? 'Proforma'
+    : m.fiscal_doc_type === 'INVOICE' ? `Fattura${n ? ` n. ${n}` : ''}`
+    : `Nota di credito${n ? ` n. ${n}` : ''}`;
+  if (m.fiscal_status === 'FAILED') return { label: `${name} · emissione fallita`, tone: 'critical', token: null };
+  if (m.fiscal_status === 'PENDING') return { label: `${name} · in emissione`, tone: 'pending', token: null };
+  if (m.fiscal_status === 'VOIDED') return { label: `${name} · annullato`, tone: 'pending', token: null };
+  return { label: name, tone: 'positive', token: m.fiscal_public_token ?? null };
 };
 
 /* Il cliente sta sull'intestazione del gruppo, non sulla riga: qui restano
@@ -93,6 +110,7 @@ export const Transazioni: React.FC<TransazioniProps> = ({
       return (
         (m.table_name ?? '').toLowerCase().includes(q)
         || (m.customer_name ?? '').toLowerCase().includes(q)
+        || (m.claimant_label ?? '').toLowerCase().includes(q)
         || (m.amount_cents / 100).toFixed(2).includes(q)
       );
     });
@@ -179,6 +197,7 @@ export const Transazioni: React.FC<TransazioniProps> = ({
               const head = g[0];
               const collected = groupCollected(g);
               const billOpen = head.bill_status === 'OPEN' || head.bill_status === 'LOCKED';
+              const doc = groupDoc(g);
               return (
                 <div
                   key={head.bill_id != null ? `b${head.bill_id}` : `m${head.id}`}
@@ -240,6 +259,30 @@ export const Transazioni: React.FC<TransazioniProps> = ({
                       );
                     })}
                   </div>
+                  {/* Il documento con cui il conto è stato chiuso: fatto del
+                      conto, quindi una volta sola, in piede. Col token c'è
+                      la copia digitale — si apre in un'altra scheda, la
+                      lista resta dov'è. */}
+                  {doc && (
+                    doc.token ? (
+                      <a
+                        href={`/scontrino/${doc.token}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center gap-2 border-t border-[var(--ds-border)] px-3 py-2 text-[13px] font-medium text-[var(--ds-seated-text)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)]"
+                      >
+                        <Receipt size={14} aria-hidden /> {doc.label} · apri
+                      </a>
+                    ) : (
+                      <span className={`flex items-center gap-2 border-t border-[var(--ds-border)] px-3 py-2 text-[13px] ${
+                        doc.tone === 'critical' ? 'text-[var(--ds-critical-text)]'
+                        : doc.tone === 'pending' ? 'text-[var(--ds-pending-text)]'
+                        : 'text-[var(--ds-text-muted)]'
+                      }`}>
+                        <Receipt size={14} aria-hidden /> {doc.label}
+                      </span>
+                    )
+                  )}
                 </div>
               );
             })}

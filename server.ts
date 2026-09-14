@@ -31249,15 +31249,21 @@ app.get('/cash/transactions', authenticate, requirePermission('cash:operate'), a
                     vu.full_name AS voided_by_name,
                     b.id AS bill_id, b.status AS bill_status,
                     t.name AS table_name, r.customer_name,
-                    fd.status AS fiscal_status, fd.doc_type AS fiscal_doc_type
+                    -- Chi ha pagato la quota dal QR: l'etichetta scelta
+                    -- dall'ospite, per la riga in Transazioni.
+                    sp.claimant_label,
+                    fd.status AS fiscal_status, fd.doc_type AS fiscal_doc_type,
+                    fd.doc_number AS fiscal_doc_number, fd.provider_ref AS fiscal_ref,
+                    fd.public_token AS fiscal_public_token
                FROM table_bill_payments p
                JOIN table_bills b ON b.id = p.table_bill_id AND b.tenant_id = p.tenant_id
                LEFT JOIN tables t ON t.id = b.table_id AND t.tenant_id = b.tenant_id
                LEFT JOIN reservations r ON r.id = b.reservation_id AND r.tenant_id = b.tenant_id
                LEFT JOIN users u ON u.id = p.recorded_by_user_id
                LEFT JOIN users vu ON vu.id = p.voided_by_user_id
+               LEFT JOIN table_bill_splits sp ON sp.id = p.table_bill_split_id
                LEFT JOIN LATERAL (
-                   SELECT status, doc_type FROM fiscal_documents
+                   SELECT status, doc_type, doc_number, provider_ref, public_token FROM fiscal_documents
                     WHERE table_bill_id = b.id ORDER BY created_at DESC LIMIT 1
                ) fd ON TRUE
               WHERE p.tenant_id = $1
@@ -31302,8 +31308,12 @@ app.get('/cash/transactions', authenticate, requirePermission('cash:operate'), a
                 bill_status: m.bill_status as string,
                 table_name: m.table_name ?? null,
                 customer_name: m.customer_name ?? null,
+                claimant_label: m.claimant_label ?? null,
                 fiscal_status: m.fiscal_status ?? null,
                 fiscal_doc_type: m.fiscal_doc_type ?? null,
+                fiscal_doc_number: m.fiscal_doc_number ?? null,
+                fiscal_ref: m.fiscal_ref ?? null,
+                fiscal_public_token: m.fiscal_public_token ?? null,
                 meta: m.meta ?? null,
             })),
             ...depositsRs.rows.map((d: any) => ({
@@ -31321,8 +31331,12 @@ app.get('/cash/transactions', authenticate, requirePermission('cash:operate'), a
                 bill_status: 'CLOSED',
                 table_name: d.table_name ?? null,
                 customer_name: d.customer_name ?? null,
+                claimant_label: null,
                 fiscal_status: null,
                 fiscal_doc_type: null,
+                fiscal_doc_number: null,
+                fiscal_ref: null,
+                fiscal_public_token: null,
                 meta: null,
             })),
         ].sort((a, b) => String(b.at).localeCompare(String(a.at)));
