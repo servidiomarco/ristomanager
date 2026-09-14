@@ -30810,18 +30810,32 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
                               FROM table_bill_payments p
                               WHERE p.table_bill_id = b.id AND p.voided_at IS NULL), '[]'::jsonb) AS payments,
                     -- Le quote ospite del QR con l'etichetta del pagante, per
-                    -- la sezione Quote del foglio conto: PAID sempre, CLAIMED
-                    -- solo se il claim è ancora vivo (l'ospite è al checkout
-                    -- in questo momento). Gli acconti (kind='deposit') hanno
-                    -- già la loro riga nei totali e restano fuori.
+                    -- la card «Pagamenti quote» del foglio conto: PAID sempre,
+                    -- CLAIMED solo se il claim è ancora vivo (l'ospite è al
+                    -- checkout in questo momento), più i tentativi FALLITI
+                    -- (ABANDONED con pagamento FAILED: carta rifiutata) — chi
+                    -- guarda il conto deve vedere anche il pagamento che non
+                    -- è andato. Il riferimento del pagamento (provider, id
+                    -- ordine, url della pagina esito) viaggia con la quota.
+                    -- Gli acconti (kind='deposit') hanno già la loro riga.
                     COALESCE((SELECT jsonb_agg(jsonb_build_object(
                                   'id', s2.id, 'amount_cents', s2.amount_cents,
                                   'claimant_label', s2.claimant_label,
-                                  'status', s2.status, 'paid_at', s2.paid_at
+                                  'status', s2.status, 'paid_at', s2.paid_at,
+                                  'payment', CASE WHEN pr2.id IS NULL THEN NULL ELSE jsonb_build_object(
+                                      'provider', pr2.provider,
+                                      'order_id', pr2.provider_order_id,
+                                      'status', UPPER(pr2.status),
+                                      'url', pr2.checkout_url,
+                                      'completed_at', pr2.completed_at
+                                  ) END
                               ) ORDER BY s2.claimed_at)
                               FROM table_bill_splits s2
+                              LEFT JOIN payment_requests pr2 ON pr2.id = s2.payment_request_id
                               WHERE s2.table_bill_id = b.id AND s2.kind <> 'deposit'
-                                AND (s2.status = 'PAID' OR (s2.status = 'CLAIMED' AND s2.expires_at > NOW()))), '[]'::jsonb) AS splits,
+                                AND (s2.status = 'PAID'
+                                     OR (s2.status = 'CLAIMED' AND s2.expires_at > NOW())
+                                     OR (s2.status = 'ABANDONED' AND UPPER(COALESCE(pr2.status, '')) = 'FAILED'))), '[]'::jsonb) AS splits,
                     (SELECT COUNT(*) FROM orders o WHERE o.table_bill_id = b.id AND o.status = 'OPEN')::int AS open_orders
              FROM table_bills b
              LEFT JOIN tables t ON t.id = b.table_id AND t.tenant_id = b.tenant_id
