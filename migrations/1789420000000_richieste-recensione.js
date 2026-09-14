@@ -4,8 +4,9 @@
  * - `review_request_*` su reservations: il registro della richiesta di
  *   recensione post-visita, specchio della famiglia `confirmation_*`.
  *   `status` NULL = prenotazione mai valutata dallo sweep; non-NULL = mai
- *   più rivalutare (sent | skipped_consent | skipped_no_contact | failed) —
- *   è l'idempotenza del tick, un ospite non deve ricevere due richieste.
+ *   più rivalutare (sent | skipped_consent | skipped_no_contact |
+ *   skipped_recent | failed) — è l'idempotenza del tick, un ospite non
+ *   deve ricevere due richieste.
  *   L'indice parziale tiene lo sweep O(righe nuove), non O(storico).
  * - `google_place_id` su integration_settings (riga provider
  *   'google_business'): basta da solo per il link «scrivi una recensione»
