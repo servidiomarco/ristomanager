@@ -2935,6 +2935,7 @@ const App: React.FC = () => {
         {view === ViewState.COMANDE && (
           <CardErrorBoundary label="Comande">
             <OrderPad
+              isInitialLoading={isInitialDataLoading}
               dishes={dishes}
               menus={menus}
               tables={tables}
