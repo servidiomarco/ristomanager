@@ -31263,8 +31263,12 @@ app.get('/cash/transactions', authenticate, requirePermission('cash:operate'), a
                LEFT JOIN users vu ON vu.id = p.voided_by_user_id
                LEFT JOIN table_bill_splits sp ON sp.id = p.table_bill_split_id
                LEFT JOIN LATERAL (
+                   -- Prima il documento del CONTO, poi gli eventuali per-quota
+                   -- (fattura su singola quota): il piede di Transazioni dice
+                   -- come si è chiuso il tavolo, non una quota.
                    SELECT status, doc_type, doc_number, provider_ref, public_token FROM fiscal_documents
-                    WHERE table_bill_id = b.id ORDER BY created_at DESC LIMIT 1
+                    WHERE table_bill_id = b.id
+                    ORDER BY (table_bill_split_id IS NULL) DESC, created_at DESC LIMIT 1
                ) fd ON TRUE
               WHERE p.tenant_id = $1
                 AND ${SERVICE_OF('COALESCE(p.voided_at, p.recorded_at)')} = $2::date
