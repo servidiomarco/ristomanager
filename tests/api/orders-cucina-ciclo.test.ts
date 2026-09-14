@@ -1057,3 +1057,77 @@ describe('ciclo cucina (stati linee, fuoco, passe)', () => {
         expect(queue.body.coming.some((c: any) => c.course_no === BAR || c.course_no === DOLCI)).toBe(false);
     });
 });
+
+// Coperto e servizio non sono piatti. Le righe di sistema nascono SERVED
+// sulla 1ª uscita, e finivano nella card a binario, nei conteggi dell'uscita
+// e nelle Consegnate: «3× Coperto» letto come tre piatti (Tav. 0, 14/09).
+// Sui monitor i coperti vivono solo nell'intestazione della comanda.
+describe('cucina — il coperto non è un piatto', () => {
+    let token: string;
+    let orderId = 0;
+
+    beforeAll(async () => {
+        token = await ownerToken();
+        await api().put('/sala/fire-mode').set(bearer(token)).send({ mode: 'AUTO_ALL' });
+        const charges = await api().put('/settings/charges').set(bearer(token)).send({
+            cover_charge_cents: 250, service_charge_percent: 0,
+        });
+        expect(charges.status).toBe(200);
+
+        const room = await api().post('/rooms').set(bearer(token)).send({
+            name: 'Sala Coperto KDS', width: 800, height: 600,
+        });
+        const table = await api().post('/tables').set(bearer(token)).send({
+            name: 'CKDS1', shape: 'SQUARE', seats: 4, x: 500, y: 500,
+            room_id: room.body.id, status: 'FREE',
+        });
+        const dish = await api().post('/dishes').set(bearer(token)).send({
+            name: 'Piatto Coperto KDS', description: null, price: 10, category: 'NEUTRA COPERTO', allergens: null,
+        });
+        const order = await api().post('/orders').set(bearer(token)).send({
+            table_id: table.body.id, covers: 3,
+        });
+        expect(order.status).toBe(201);
+        orderId = order.body.order.id;
+        expect(dish.status).toBe(201);
+        const battuta = await api().post(`/orders/${orderId}/items`).set(bearer(token)).send({
+            items: [{ dish_id: dish.body.id, qty: 1, course_no: 1 }],
+        });
+        expect(battuta.status).toBe(201);
+        const invio = await api().post(`/orders/${orderId}/send`).set(bearer(token)).send({});
+        expect(invio.status).toBe(200);
+    });
+
+    it('coda, binario e conteggi non contengono il coperto', async () => {
+        const queue = await api().get('/kds/queue').set(bearer(token));
+        expect(queue.status).toBe(200);
+        expect(queue.body.items.some((i: any) => i.order_id === orderId && i.name_snapshot === 'Coperto')).toBe(false);
+        const fullRows = queue.body.full.filter((r: any) => r.order_id === orderId);
+        expect(fullRows.some((r: any) => r.name_snapshot === 'Coperto')).toBe(false);
+        // E il conteggio dell'uscita conta i piatti: prima diceva 4 (1 piatto
+        // + 3 coperti), di cui 3 «già pronti» che pronti non erano mai stati.
+        const course = queue.body.courses.find((c: any) => c.order_id === orderId && c.course_no === 1);
+        expect(course?.total_items).toBe(1);
+    });
+
+    it('nemmeno nelle Consegnate, una volta servita', async () => {
+        const view = await api().get(`/orders/${orderId}`).set(bearer(token));
+        for (const i of view.body.items.filter((x: any) => x.line_kind === 'DISH' || x.dish_id != null)) {
+            await api().post(`/kds/items/${i.id}/status`).set(bearer(token)).send({ status: 'READY' });
+        }
+        const servita = await api().post(`/orders/${orderId}/courses/1/serve`).set(bearer(token)).send({});
+        expect(servita.status).toBe(200);
+
+        const served = await api().get('/kds/served').set(bearer(token));
+        expect(served.status).toBe(200);
+        const row = served.body.courses.find((c: any) => c.order_id === orderId);
+        expect(row).toBeTruthy();
+        expect(row.items.some((x: any) => x.name === 'Coperto')).toBe(false);
+
+        // Coperto di nuovo a zero: lo stato è condiviso coi file successivi.
+        const reset = await api().put('/settings/charges').set(bearer(token)).send({
+            cover_charge_cents: 0, service_charge_percent: 0,
+        });
+        expect(reset.status).toBe(200);
+    });
+});

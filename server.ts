@@ -28338,6 +28338,10 @@ app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req,
                AND o.service_date = $2 AND o.shift = $3
                AND ($1::int IS NULL OR oi.station_id = $1)
                AND ($1::int IS NOT NULL OR oi.station_id IS NULL)
+               -- Coperto e servizio non sono piatti: la cucina non li lavora.
+               -- Sui monitor vivono solo nell'intestazione della comanda
+               -- (i coperti accanto al tavolo), mai dentro le uscite.
+               AND COALESCE(oi.line_kind, 'DISH') = 'DISH'
                -- Bar e Dolci non passano dai monitor di cucina: le lavora il
                -- banco (stampa + passe). Restano solo dove sono lavoro
                -- assegnato a una partita (es. un monitor Bar); il monitor
@@ -28357,6 +28361,9 @@ app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req,
                 `SELECT id, order_id, course_no, status, ready_at, station_id, name_snapshot, qty
                  FROM order_items
                  WHERE status <> 'VOIDED'
+                   -- Senza le righe di sistema: 3 coperti SERVED contavano
+                   -- come 3 piatti già pronti nella 1ª uscita.
+                   AND COALESCE(line_kind, 'DISH') = 'DISH'
                    AND tenant_id = $2
                    AND (order_id, course_no) IN (
                        SELECT (split_part(k, ':', 1))::int, (split_part(k, ':', 2))::int
@@ -28415,6 +28422,9 @@ app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req,
                  FROM order_items
                  WHERE tenant_id = $2 AND order_id = ANY($1::int[])
                    AND status NOT IN ('DRAFT','VOIDED')
+                   -- Il binario racconta la cucina del tavolo: il coperto non
+                   -- ne fa parte («3× Coperto» leggeva come tre piatti).
+                   AND COALESCE(line_kind, 'DISH') = 'DISH'
                    AND (course_no NOT IN ($3, $4) OR ($5::int IS NOT NULL AND station_id = $5))
                  ORDER BY course_no, id`,
                 [orderIds, req.tenantId!, BAR_COURSE_NO, DESSERT_COURSE_NO, stationId]
@@ -28441,6 +28451,7 @@ app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req,
              WHERE o.tenant_id = $4 AND o.status = 'OPEN'
                AND o.service_date = $2 AND o.shift = $3
                AND oi.status IN ('QUEUED','SENT','PREPARING')
+               AND COALESCE(oi.line_kind, 'DISH') = 'DISH'
                AND ($1::int IS NULL OR oi.station_id = $1)
                AND ($1::int IS NOT NULL OR oi.station_id IS NULL)
                AND NOT ($1::int IS NULL AND oi.course_no IN ($5, $6))`,
@@ -28480,6 +28491,7 @@ app.get('/kds/served', authenticate, requirePermission('orders:kds'), async (req
                 WHERE oi.status = 'SERVED' AND oi.served_at IS NOT NULL
                   AND o.tenant_id = $4
                   AND o.service_date = $2 AND o.shift = $3
+                  AND COALESCE(oi.line_kind, 'DISH') = 'DISH'
                   AND ($1::int IS NULL OR oi.station_id = $1)
                   AND ($1::int IS NOT NULL OR oi.station_id IS NULL)
                   -- Come la coda: Bar e Dolci mai sul monitor senza partita.
@@ -28494,6 +28506,9 @@ app.get('/kds/served', authenticate, requirePermission('orders:kds'), async (req
              LEFT JOIN tables t ON t.id = o.table_id AND t.tenant_id = o.tenant_id
              LEFT JOIN reservations r ON r.id = o.reservation_id AND r.tenant_id = o.tenant_id
              WHERE oi.status = 'SERVED' AND oi.served_at IS NOT NULL
+               -- L'uscita servita si rilegge come il ticket: piatti, non
+               -- righe di sistema — «3× Coperto» qui leggeva come tre piatti.
+               AND COALESCE(oi.line_kind, 'DISH') = 'DISH'
              GROUP BY oi.order_id, oi.course_no, t.name, r.customer_name
              ORDER BY MAX(oi.served_at) DESC
              LIMIT 100`,
@@ -28787,6 +28802,7 @@ app.get('/kds/expediter', authenticate, requirePermission('orders:expedite'), as
                AND o.tenant_id = $3
                AND o.service_date = $1 AND o.shift = $2
                AND oi.status IN ('QUEUED','SENT','PREPARING','READY')
+               AND COALESCE(oi.line_kind, 'DISH') = 'DISH'
              ORDER BY oi.course_no, oi.id`,
             [service.service_date, service.shift, req.tenantId!]
         );
