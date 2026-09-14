@@ -86,6 +86,11 @@ const presenceLabel = (mates: { name: string; since: number }[]): string => {
 };
 
 interface OrderPadProps {
+  /** true finché App sta ancora caricando i dati iniziali (tavoli compresi).
+   *  Senza, lo scheletro della griglia si spegneva appena /orders/open
+   *  rispondeva ma con `tables` ancora vuoto: un flash di «Nessun tavolo in
+   *  questo stato» prima dei tavoli veri (visto da telefono, 14/09). */
+  isInitialLoading?: boolean;
   /** Tavolo da aprire subito (arrivando da Cassa · «Apri in Comande»). */
   initialTableId?: number | null;
   onInitialTableConsumed?: () => void;
@@ -111,7 +116,7 @@ interface OrderPadProps {
   brand?: React.ReactNode;
 }
 
-export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, tables, rooms = [], reservations, globalDate, globalShiftFilter, onImmersive, initialTableId, onInitialTableConsumed, brand: padBrand }) => {
+export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, dishes: allDishes, menus, tables, rooms = [], reservations, globalDate, globalShiftFilter, onImmersive, initialTableId, onInitialTableConsumed, brand: padBrand }) => {
   const { isConnected } = useSocket();
   // L'orologio della pastiglia Live. Un tick al minuto: l'ora al minuto non
   // ha bisogno di più, e un secondo di intervallo ridisegnerebbe la griglia
@@ -1738,7 +1743,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
           query={gridQuery}
           onQuery={setGridQuery}
           busy={busy}
-          loading={!gridReady}
+          loading={!gridReady || isInitialLoading}
           onPick={loadTable}
           paged={pagedPad}
           rooms={rooms}
