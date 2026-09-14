@@ -17041,11 +17041,19 @@ app.post('/staff', authenticate, requirePermission('staff:full'), async (req, re
             return res.status(400).json({ error: 'Name, surname, category, and staffType are required' });
         }
 
+        // Nome, cognome e ruolo nascono già in Title Case (stessa forma
+        // della migration nomi-personale-title-case): le superfici che
+        // mostrano l'anagrafica cruda — Compensi in testa — non devono
+        // dipendere da come il dato è stato digitato.
+        const cleanName = toTitleCase(String(name).trim());
+        const cleanSurname = toTitleCase(String(surname).trim());
+        const cleanRole = typeof role === 'string' && role.trim() ? toTitleCase(role.trim()) : null;
+
         const result = await queryWithRetry(
             `INSERT INTO staff_members (tenant_id, name, surname, category, staff_type, phone, email, role, hire_date, contract_end_date, weekly_rest_day, notes)
              VALUES ($12, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
              RETURNING *`,
-            [name, surname, category, staffType, phone || null, email || null, role || null, hireDate || null, contractEndDate || null, weeklyRestDay ?? null, notes || null, req.tenantId!]
+            [cleanName, cleanSurname, category, staffType, phone || null, email || null, cleanRole, hireDate || null, contractEndDate || null, weeklyRestDay ?? null, notes || null, req.tenantId!]
         );
 
         const row = result.rows[0];
@@ -18018,6 +18026,12 @@ app.put('/staff/:id', authenticate, requirePermission('staff:full'), async (req,
         const { id } = req.params;
         const { name, surname, category, staffType, phone, email, role, hireDate, contractEndDate, weeklyRestDay, notes, isActive } = req.body;
 
+        // Stessa forma del POST: quello che arriva scritto si titola, quello
+        // che non arriva (undefined/null) passa alla COALESCE com'è.
+        const cleanName = typeof name === 'string' && name.trim() ? toTitleCase(name.trim()) : name;
+        const cleanSurname = typeof surname === 'string' && surname.trim() ? toTitleCase(surname.trim()) : surname;
+        const cleanRole = typeof role === 'string' && role.trim() ? toTitleCase(role.trim()) : role;
+
         // weeklyRestDay needs explicit handling so the client can clear it (null clears, undefined keeps)
         const result = await queryWithRetry(
             `UPDATE staff_members SET
@@ -18037,7 +18051,7 @@ app.put('/staff/:id', authenticate, requirePermission('staff:full'), async (req,
              WHERE id = $14 AND tenant_id = $15
              RETURNING *`,
             [
-                name, surname, category, staffType, phone, email, role, hireDate, contractEndDate,
+                cleanName, cleanSurname, category, staffType, phone, email, cleanRole, hireDate, contractEndDate,
                 weeklyRestDay === undefined ? 'KEEP' : 'SET',
                 weeklyRestDay === undefined ? null : weeklyRestDay,
                 notes, isActive, id, req.tenantId!

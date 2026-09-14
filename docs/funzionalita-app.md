@@ -459,7 +459,7 @@ Per i ristoranti con cassa **Passepartout Menù** (modulo dedicato):
 
 ## Personale (turni e presenze)
 
-- Anagrafica dipendenti: reparto (Sala/Cucina), ruolo, contratto, Fisso/Extra, attivo/disattivo.
+- Anagrafica dipendenti: reparto (Sala/Cucina), ruolo, contratto, Fisso/Extra, attivo/disattivo. Nome, cognome e ruolo si salvano sempre con le iniziali maiuscole, comunque vengano digitati — apostrofi e doppi nomi compresi («d'angelo» → «D'Angelo»).
 - **Griglia turni settimanale** Lun–Dom: Pranzo, Cena, Pranzo e cena, Tutto il giorno, Riposo; inserimento massivo della settimana.
 - **Assenze**: malattia, permesso, riposo, per giornata intera o singolo turno.
 - **Chi è presente oggi** per turno (incrocio automatico di turni e assenze), mostrato anche in Dashboard.
@@ -605,6 +605,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-14 | Personale (turni e presenze) | I nomi dei dipendenti (nome, cognome, ruolo) si salvano sempre con le iniziali maiuscole, comunque vengano digitati; le anagrafiche già inserite sono state riallineate. |
 | 2026-09-14 | Personale (turni e presenze) | Nuova area «Compensi»: tariffe per dipendente (mensile, o a servizio singolo/doppio per gli extra), acconti e saldi con residuo del mese, dovuto degli extra calcolato dai turni e correggibile a mano; riservata al permesso «Compensi e acconti» (default solo titolare) con secondo sblocco a password che scade in 15 minuti o uscendo dalla sezione. |
 | 2026-09-14 | Pagamenti, conto al tavolo e cassa | Nel foglio conto le card Quote e Pagamenti diventano una sola «Pagamenti quote»: ogni quota porta il riferimento del pagamento (provider e id ordine) e il bottone che apre la pagina esito del checkout — ricevuta del riuscito e del non riuscito; compaiono anche i tentativi falliti (carta rifiutata), in rosso; sotto, gli incassi battuti dallo staff. |
 | 2026-09-14 | Pagamenti, conto al tavolo e cassa | Anche la proforma ha la sua pagina: /scontrino/<token> la mostra (etichettata «non è un documento fiscale», righe dallo snapshot del conto) e il piede in Transazioni dice «Proforma · apri»; le card dei tavoli in Transazioni partono chiuse — tavolo, cliente, n. movimenti, totale e documento a colpo d’occhio, il tocco sull’intestazione apre le righe. |
