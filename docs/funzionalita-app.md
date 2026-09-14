@@ -604,6 +604,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-14 | Pagamenti, conto al tavolo e cassa | Nel foglio conto le card Quote e Pagamenti diventano una sola «Pagamenti quote»: ogni quota porta il riferimento del pagamento (provider e id ordine) e il bottone che apre la pagina esito del checkout — ricevuta del riuscito e del non riuscito; compaiono anche i tentativi falliti (carta rifiutata), in rosso; sotto, gli incassi battuti dallo staff. |
 | 2026-09-14 | Pagamenti, conto al tavolo e cassa | Anche la proforma ha la sua pagina: /scontrino/<token> la mostra (etichettata «non è un documento fiscale», righe dallo snapshot del conto) e il piede in Transazioni dice «Proforma · apri»; le card dei tavoli in Transazioni partono chiuse — tavolo, cliente, n. movimenti, totale e documento a colpo d’occhio, il tocco sull’intestazione apre le righe. |
 | 2026-09-14 | Pagamenti, conto al tavolo e cassa | Il piede del gruppo in Transazioni parla sempre: documento del conto se c’è (preferito a quelli per-quota), altrimenti «chiusa senza documento fiscale» sui conti chiusi e «saldato · conto da chiudere in cassa» su quelli pagati dal QR ma mai chiusi. |
 | 2026-09-14 | Pagamenti, conto al tavolo e cassa | Transazioni: le quote QR portano il nome scritto dall’ospite («QR al tavolo · Marco», cercabile), e in piede a ogni gruppo compare il documento di chiusura (scontrino/proforma/fattura col numero) con il link «apri» alla copia digitale quando esiste. |

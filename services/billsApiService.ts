@@ -362,14 +362,24 @@ export interface OpenBillRow {
   is_current_service: boolean;
 }
 
-/** Una quota ospite del QR: chi (etichetta libera), quanto, e se ha già
- *  pagato o è al checkout in questo momento (CLAIMED, claim ancora vivo). */
+/** Una quota ospite del QR: chi (etichetta libera), quanto, e com'è andata —
+ *  pagata, al checkout adesso (CLAIMED, claim vivo) o tentativo fallito
+ *  (ABANDONED con pagamento FAILED: carta rifiutata). `payment` è il
+ *  riferimento del pagamento: provider, id ordine e la pagina esito del
+ *  checkout, che fa da ricevuta per il riuscito e per il non riuscito. */
 export interface BillSplitRow {
   id: number;
   amount_cents: number;
   claimant_label: string | null;
-  status: 'PAID' | 'CLAIMED';
+  status: 'PAID' | 'CLAIMED' | 'ABANDONED';
   paid_at: string | null;
+  payment?: {
+    provider: string;
+    order_id: string | null;
+    status: string;
+    url: string | null;
+    completed_at: string | null;
+  } | null;
 }
 
 /** Un movimento del libro cassa sul conto: incasso staff o specchio di una

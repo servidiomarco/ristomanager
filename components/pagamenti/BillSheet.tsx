@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { QRCodeSVG } from 'qrcode.react';
-import { Check, Copy, FileText, Loader2, Printer, QrCode, Search, X, Banknote } from 'lucide-react';
+import { Check, Copy, ExternalLink, FileText, Loader2, Printer, QrCode, Search, X, Banknote } from 'lucide-react';
 import { billsApiService, printBill, type BillPaymentInput, type OpenBillRow } from '../../services/billsApiService';
 import { getCustomers } from '../../services/apiService';
 import type { Customer } from '../../types';
@@ -507,36 +507,87 @@ const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
         )}
       </FormCard>
 
-      {/* Le quote del QR, come le vede l'ospite: chi ha pagato cosa, e chi
-          è al checkout in questo momento. Solo dove il server le manda
-          (bills/open); acconti e incassi staff hanno già le loro righe. */}
-      {bill.splits && bill.splits.length > 0 && (
-        <FormCard title="Quote">
-          <ul>
-            {bill.splits.map((s) => (
-              <li
-                key={s.id}
-                className="flex items-center justify-between gap-3 py-2.5 text-[14px] [&+li]:border-t [&+li]:border-[var(--ds-border)]"
-              >
-                <span className="flex min-w-0 items-center gap-2">
-                  {s.status === 'PAID'
-                    ? <Check className="h-4 w-4 flex-shrink-0 text-[var(--ds-seated-text)]" aria-hidden />
-                    : <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin text-[var(--ds-pending-text)]" aria-hidden />}
-                  <span className="truncate text-[var(--ds-text-primary)]">{s.claimant_label || 'Ospite'}</span>
-                </span>
-                <span className="flex flex-shrink-0 items-baseline gap-3">
-                  {s.status === 'CLAIMED'
-                    ? <span className="text-[13px] text-[var(--ds-pending-text)]">sta pagando</span>
-                    : s.paid_at && <span className="text-[13px] text-[var(--ds-text-muted)]">{getRomeTimePart(s.paid_at)}</span>}
-                  <span className={`tabular-nums ${s.status === 'PAID' ? 'text-[var(--ds-text-secondary)]' : 'text-[var(--ds-text-muted)]'}`}>
-                    {euro(s.amount_cents)}
+      {/* Una card sola per come sta entrando il denaro: le quote del QR —
+          pagate, in corso, e i tentativi FALLITI (carta rifiutata) — con il
+          riferimento del pagamento e il bottone che apre la pagina esito del
+          provider (fa da ricevuta, per il riuscito e per il non riuscito), e
+          sotto gli incassi battuti dallo staff. Gli specchi LINK_ONLINE del
+          libro cassa non si ripetono: sono le stesse quote. */}
+      {(() => {
+        const splits = bill.splits ?? [];
+        const staffPayments = (bill.payments ?? []).filter((p) => !p.online);
+        if (splits.length === 0 && staffPayments.length === 0) return null;
+        return (
+          <FormCard title="Pagamenti quote">
+            <ul>
+              {splits.map((s) => {
+                const failed = s.status === 'ABANDONED';
+                const provider = s.payment?.provider === 'sumup' ? 'SumUp'
+                  : s.payment?.provider === 'revolut' ? 'Revolut'
+                  : s.payment?.provider ?? null;
+                return (
+                  <li
+                    key={`s${s.id}`}
+                    className="flex items-center justify-between gap-3 py-2.5 text-[14px] [&+li]:border-t [&+li]:border-[var(--ds-border)]"
+                  >
+                    <span className="flex min-w-0 items-center gap-2">
+                      {s.status === 'PAID'
+                        ? <Check className="h-4 w-4 flex-shrink-0 text-[var(--ds-seated-text)]" aria-hidden />
+                        : failed
+                          ? <X className="h-4 w-4 flex-shrink-0 text-[var(--ds-critical-text)]" aria-hidden />
+                          : <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin text-[var(--ds-pending-text)]" aria-hidden />}
+                      <span className="min-w-0">
+                        <span className={`block truncate ${failed ? 'text-[var(--ds-text-muted)]' : 'text-[var(--ds-text-primary)]'}`}>
+                          {s.claimant_label || 'Ospite'}
+                        </span>
+                        {s.payment && (
+                          <span className="block truncate text-[12px] text-[var(--ds-text-muted)]">
+                            {provider}{s.payment.order_id ? ` · ${s.payment.order_id}` : ''}
+                          </span>
+                        )}
+                      </span>
+                    </span>
+                    <span className="flex flex-shrink-0 items-center gap-3">
+                      {failed
+                        ? <span className="text-[13px] text-[var(--ds-critical-text)]">non riuscito</span>
+                        : s.status === 'CLAIMED'
+                          ? <span className="text-[13px] text-[var(--ds-pending-text)]">sta pagando</span>
+                          : s.paid_at && <span className="text-[13px] text-[var(--ds-text-muted)]">{getRomeTimePart(s.paid_at)}</span>}
+                      <span className={`tabular-nums ${s.status === 'PAID' ? 'text-[var(--ds-text-secondary)]' : 'text-[var(--ds-text-muted)]'}`}>
+                        {euro(s.amount_cents)}
+                      </span>
+                      {s.payment?.url && (
+                        <a
+                          href={s.payment.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          aria-label="Ricevuta del pagamento"
+                          title="Ricevuta del pagamento"
+                          className="-my-2 inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                        >
+                          <ExternalLink className="h-4 w-4" aria-hidden />
+                        </a>
+                      )}
+                    </span>
+                  </li>
+                );
+              })}
+              {staffPayments.map((p) => (
+                <li
+                  key={`p${p.id}`}
+                  className="flex items-center justify-between gap-3 py-2.5 text-[14px] [&+li]:border-t [&+li]:border-[var(--ds-border)]"
+                >
+                  <span className="min-w-0 truncate text-[var(--ds-text-primary)]">{methodLabel(p.method)}</span>
+                  <span className="flex flex-shrink-0 items-baseline gap-3">
+                    <span className="text-[13px] text-[var(--ds-text-muted)]">{getRomeTimePart(p.recorded_at)}</span>
+                    <span className="tabular-nums text-[var(--ds-text-secondary)]">{euro(p.amount_cents)}</span>
                   </span>
-                </span>
-              </li>
-            ))}
-          </ul>
-        </FormCard>
-      )}
+                </li>
+              ))}
+            </ul>
+          </FormCard>
+        );
+      })()}
 
       {bill.items && bill.items.length > 0 && (
         <FormCard title="Dettaglio">
@@ -610,26 +661,6 @@ const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
         )}
       </FormCard>
 
-      {/* Come è stato pagato: i movimenti del libro cassa, ora e importo.
-          "Online" è lo specchio di una quota pagata dal QR/link. */}
-      {bill.payments && bill.payments.length > 0 && (
-        <FormCard title="Pagamenti">
-          <ul>
-            {bill.payments.map((p) => (
-              <li
-                key={p.id}
-                className="flex items-center justify-between gap-3 py-2.5 text-[14px] [&+li]:border-t [&+li]:border-[var(--ds-border)]"
-              >
-                <span className="min-w-0 truncate text-[var(--ds-text-primary)]">{methodLabel(p.method)}</span>
-                <span className="flex flex-shrink-0 items-baseline gap-3">
-                  <span className="text-[13px] text-[var(--ds-text-muted)]">{getRomeTimePart(p.recorded_at)}</span>
-                  <span className="tabular-nums text-[var(--ds-text-secondary)]">{euro(p.amount_cents)}</span>
-                </span>
-              </li>
-            ))}
-          </ul>
-        </FormCard>
-      )}
     </>
   );
 };
