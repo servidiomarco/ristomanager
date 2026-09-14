@@ -334,8 +334,16 @@ export const StaffCompensation: React.FC<StaffCompensationProps> = ({ staffMembe
 
                   {expanded && (
                     <div className="space-y-3 bg-[var(--ds-canvas)] px-4 py-3">
+                      {/* Con la tariffa mancante il primo gesto sensato è
+                          impostarla: il bottone pieno segue il lavoro, non
+                          l'ordine fisso delle azioni. */}
                       <div className="flex flex-wrap gap-2">
-                        <button type="button" onClick={() => setPaymentModal({ staffId: row.staffId, kind: 'ACCONTO' })} className={dsButton.primary}>
+                        {row.missingRate && (
+                          <button type="button" onClick={() => setRatesModal(row.staffId)} className={dsButton.primary}>
+                            Tariffe
+                          </button>
+                        )}
+                        <button type="button" onClick={() => setPaymentModal({ staffId: row.staffId, kind: 'ACCONTO' })} className={row.missingRate ? dsButton.secondary : dsButton.primary}>
                           Acconto
                         </button>
                         <button type="button" onClick={() => setPaymentModal({ staffId: row.staffId, kind: 'SALDO' })} className={dsButton.secondary}>
@@ -344,9 +352,11 @@ export const StaffCompensation: React.FC<StaffCompensationProps> = ({ staffMembe
                         <button type="button" onClick={() => setOverrideModal(row.staffId)} className={dsButton.secondary}>
                           Correggi dovuto
                         </button>
-                        <button type="button" onClick={() => setRatesModal(row.staffId)} className={dsButton.secondary}>
-                          Tariffe
-                        </button>
+                        {!row.missingRate && (
+                          <button type="button" onClick={() => setRatesModal(row.staffId)} className={dsButton.secondary}>
+                            Tariffe
+                          </button>
+                        )}
                       </div>
 
                       {staffPayments.length > 0 && (
@@ -484,6 +494,7 @@ const PaymentSheet: React.FC<{
       onClose={onClose}
       title={kind === 'ACCONTO' ? 'Acconto' : 'Saldo'}
       subtitle={`${member.surname} ${member.name} · ${monthLabel(month)}`}
+      bodyClassName="px-5 pb-5 pt-4 sm:px-6"
       footer={
         <button
           type="button"
@@ -503,7 +514,7 @@ const PaymentSheet: React.FC<{
     >
       <div className="space-y-4">
         <Field label="Importo" htmlFor="comp-amount" required>
-          <input id="comp-amount" inputMode="decimal" placeholder="0,00" autoFocus value={amount}
+          <input id="comp-amount" inputMode="decimal" placeholder="0,00 €" autoFocus value={amount}
             onChange={e => setAmount(e.target.value)} className={dsInput} />
         </Field>
         <div className="grid grid-cols-2 gap-3">
@@ -545,6 +556,7 @@ const OverrideSheet: React.FC<{
       onClose={onClose}
       title="Correggi dovuto"
       subtitle={`${member.surname} ${member.name} · ${monthLabel(month)}`}
+      bodyClassName="px-5 pb-5 pt-4 sm:px-6"
       footer={
         <button
           type="button"
@@ -560,7 +572,7 @@ const OverrideSheet: React.FC<{
       <div className="space-y-4">
         <Field label="Dovuto del mese" htmlFor="ovr-amount" required
           hint="Sostituisce il calcolo automatico solo per questo mese.">
-          <input id="ovr-amount" inputMode="decimal" placeholder="0,00" autoFocus value={amount}
+          <input id="ovr-amount" inputMode="decimal" placeholder="0,00 €" autoFocus value={amount}
             onChange={e => setAmount(e.target.value)} className={dsInput} />
         </Field>
         <Field label="Nota" htmlFor="ovr-note">
@@ -597,6 +609,7 @@ const RatesSheet: React.FC<{
       onClose={onClose}
       title="Tariffe"
       subtitle={`${member.surname} ${member.name}`}
+      bodyClassName="px-5 pb-5 pt-4 sm:px-6"
       footer={
         <button
           type="button"
@@ -620,18 +633,18 @@ const RatesSheet: React.FC<{
         {isExtra ? (
           <div className="grid grid-cols-2 gap-3">
             <Field label="Servizio singolo" htmlFor="rate-single" hint="giorno con un servizio">
-              <input id="rate-single" inputMode="decimal" placeholder="0,00" value={single}
+              <input id="rate-single" inputMode="decimal" placeholder="0,00 €" value={single}
                 onChange={e => setSingle(e.target.value)} className={dsInput} />
             </Field>
             <Field label="Servizio doppio" htmlFor="rate-double" hint="pranzo e cena, totale giorno">
-              <input id="rate-double" inputMode="decimal" placeholder="0,00" value={double}
+              <input id="rate-double" inputMode="decimal" placeholder="0,00 €" value={double}
                 onChange={e => setDouble(e.target.value)} className={dsInput} />
             </Field>
           </div>
         ) : (
           <Field label="Mensile" htmlFor="rate-monthly"
             hint={member.staffType === StaffType.STAGIONALE ? 'pieno nei mesi di contratto' : undefined}>
-            <input id="rate-monthly" inputMode="decimal" placeholder="0,00" value={monthly}
+            <input id="rate-monthly" inputMode="decimal" placeholder="0,00 €" value={monthly}
               onChange={e => setMonthly(e.target.value)} className={dsInput} />
           </Field>
         )}
