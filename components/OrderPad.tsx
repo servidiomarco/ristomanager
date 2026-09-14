@@ -237,6 +237,10 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   // mentre il tavolo aspetta.
   const [justClosed, setJustClosed] = useState<CloseOrderResult['bill'] | null>(null);
   const [openTables, setOpenTables] = useState<Set<number>>(new Set());
+  // false finché /orders/open non ha risposto la prima volta: la griglia
+  // mostra le tessere scheletro invece dei tavoli tutti «liberi» (o del
+  // vuoto «Nessun tavolo») per poi cambiare colore un attimo dopo.
+  const [gridReady, setGridReady] = useState(false);
   // Il totale e l'uscita di ogni comanda aperta, per la riga di stato della
   // tessera. Arrivano dalla stessa chiamata di `openTables`: la griglia non
   // paga una richiesta in più per dire quanto sta spendendo il tavolo.
@@ -531,6 +535,10 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
           setOpenOrders(new Map(res.orders.map(o => [o.table_id, o])));
         }
       } catch { /* ignora: la griglia resta senza l'evidenza comande */ }
+      // Anche sull'errore: meglio la griglia senza evidenza che lo scheletro
+      // per sempre. `gridReady` non torna mai indietro — lo scheletro è del
+      // primo carico, i refetch non lampeggiano sopra i dati veri.
+      if (!cancelled) setGridReady(true);
     })();
     (async () => {
       try {
@@ -1730,6 +1738,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
           query={gridQuery}
           onQuery={setGridQuery}
           busy={busy}
+          loading={!gridReady}
           onPick={loadTable}
           paged={pagedPad}
           rooms={rooms}

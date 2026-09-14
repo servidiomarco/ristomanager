@@ -7,6 +7,7 @@ import {
   type TableFilter, type TableRow,
 } from './tablesView';
 import { TableTiles } from './TableTiles';
+import { SkeletonTableTiles } from '../SkeletonCards';
 
 interface TableGridProps {
   rows: TableRow[];
@@ -15,6 +16,11 @@ interface TableGridProps {
   query: string;
   onQuery: (next: string) => void;
   busy: boolean;
+  /** true finché lo stato del servizio non è mai arrivato: la griglia mostra
+   *  le tessere scheletro invece di «Nessun tavolo» — un vuoto che, durante
+   *  il carico, mente. Solo il PRIMO carico: i refetch in sottofondo non
+   *  fanno mai lampeggiare lo scheletro sopra i dati veri. */
+  loading?: boolean;
   onPick: (tableId: number) => void;
   /** Errori, conferme e fogli conto: la griglia li mostra, non li possiede. */
   notice?: React.ReactNode;
@@ -41,6 +47,7 @@ interface TableGridProps {
 
 export const TableGrid: React.FC<TableGridProps> = ({
   rows, filter, onFilter, query, onQuery, busy, onPick, notice,
+  loading = false,
   paged = false, rooms = [], room = null, onRoom,
   wide = false, brand, live,
 }) => {
@@ -291,7 +298,9 @@ export const TableGrid: React.FC<TableGridProps> = ({
       <div className="mx-auto w-full min-h-0 max-w-[1400px] flex-1 overflow-y-auto px-4 pb-6 pt-2 lg:px-8">
       {notice && <div className="mb-4">{notice}</div>}
 
-      {visible.length === 0 ? (
+      {loading && visible.length === 0 ? (
+        <SkeletonTableTiles variant={wide ? 'wide' : 'square'} className="mt-2" />
+      ) : visible.length === 0 ? (
         <div className="mt-2">
           <EmptyState icon={UtensilsCrossed}>
             {query.trim() ? 'Nessun tavolo con questo nome.' : 'Nessun tavolo in questo stato.'}
