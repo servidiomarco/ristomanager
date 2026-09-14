@@ -47,7 +47,10 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fiscalReady, setFiscalReady] = useState(false);
-  const [qrBill, setQrBill] = useState<OpenBillRow | null>(null);
+  // Un flag, non una copia del conto: il foglio QR deve leggere `bill`, che
+  // reloadBill tiene fresco sugli eventi — la copia restava allo snapshot
+  // del tocco e barra/totali non si muovevano più (visto al collaudo).
+  const [qrOpen, setQrOpen] = useState(false);
   const [closed, setClosed] = useState(false);
   // Correzione del conto: la comanda dietro (con gli id delle righe) e la
   // riga in storno. Il totale si riallinea dal server, non si tocca a mano.
@@ -278,7 +281,7 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
           onBack={onClose}
           onSettle={settle}
           onSplit={() => setScreen('split')}
-          onShowQr={() => setQrBill(bill)}
+          onShowQr={() => setQrOpen(true)}
           onEdit={openCorreggi}
           onDiscount={() => setDiscountOpen(true)}
           embedded
@@ -322,8 +325,8 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
         />
       )}
 
-      {qrBill && !closed && (
-        <BillSheet bill={qrBill} busy={busy} onClose={() => setQrBill(null)} />
+      {qrOpen && bill && !closed && (
+        <BillSheet bill={bill} busy={busy} onClose={() => setQrOpen(false)} />
       )}
     </ModalShell>
   );
