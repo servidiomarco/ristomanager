@@ -1359,8 +1359,19 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
           if (!prev) return prev;
           const fresh = res.bills.find(b => b.id === prev.id);
           if (fresh) return fresh;
-          setFlash('Conto saldato · tavolo libero');
-          return null;
+          // L'ultima quota ha saldato il conto: il server lo marca SETTLED e
+          // bills-status non lo riporta più. Chiudere il foglio sull'istante
+          // mangiava il finale — la barra non arrivava mai al 100% davanti
+          // agli occhi. Prima il finale (barra piena, «Saldato»), poi il
+          // foglio si congeda da solo.
+          window.setTimeout(() => {
+            setViewBill(cur => {
+              if (!cur || cur.id !== prev.id) return cur;
+              setFlash('Conto saldato · tavolo libero');
+              return null;
+            });
+          }, 2600);
+          return { ...prev, residual_cents: 0, paid_cents: prev.total_cents };
         });
       } catch { /* al prossimo evento o rescan */ }
     };
@@ -1372,6 +1383,20 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
     // è sul conto aperto lo si annuncia — suono, vibrazione, riga di stato —
     // così l'operatore se ne accorge senza fissare il numero.
     const onPaid = (p: any) => {
+      // Prima l'evento, poi la verità: l'importo è già nel payload, e la
+      // barra del foglio aperto si muove subito — il refresh qui sotto
+      // riallinea i numeri del server (e resta l'unica fonte se il payload
+      // fosse monco). Vale per entrambi i fogli: quello aperto dal tavolo e
+      // quello mostrato appena chiusa la comanda.
+      const amtPaid = Number(p?.amount_cents);
+      if (p?.bill_id != null && Number.isFinite(amtPaid) && amtPaid > 0) {
+        setViewBill(cur => (cur && cur.id === p.bill_id && cur.residual_cents != null)
+          ? { ...cur, residual_cents: Math.max(0, cur.residual_cents - amtPaid), paid_cents: (cur.paid_cents ?? 0) + amtPaid }
+          : cur);
+        setJustClosed(cur => (cur && cur.id === p.bill_id)
+          ? { ...cur, residual_cents: Math.max(0, (cur.residual_cents ?? cur.total_cents) - amtPaid), paid_cents: (cur.paid_cents ?? 0) + amtPaid }
+          : cur);
+      }
       refresh();
       if (p?.bill_id != null && p.bill_id === viewBillIdRef.current) {
         chime();
@@ -1646,6 +1671,11 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
             covers: justClosed.covers,
             share_token: justClosed.share_token,
             items: justClosed.items,
+            // Senza residuo la barra pagamenti non esiste: il conto è appena
+            // nato, quindi il residuo è il totale meno l'eventuale acconto
+            // già assorbito — e da qui in poi la muove onPaid.
+            paid_cents: justClosed.paid_cents ?? 0,
+            residual_cents: justClosed.residual_cents ?? justClosed.total_cents,
           }}
           busy={busy}
           onClose={() => setJustClosed(null)}
