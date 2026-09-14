@@ -62,6 +62,9 @@ function priceToFeature(): Map<string, TenantFeature> {
         pay_at_table: process.env.STRIPE_PRICE_PAY_AT_TABLE,
         // Integrazione cassa: per ora non è a listino Stripe (accesa a mano).
         passepartout: process.env.STRIPE_PRICE_PASSEPARTOUT,
+        // Recensioni: idem, si accende dal pannello piattaforma finché non
+        // entra a listino.
+        reviews: process.env.STRIPE_PRICE_REVIEWS,
     };
     const map = new Map<string, TenantFeature>();
     for (const feature of TENANT_FEATURES) {
