@@ -36,10 +36,23 @@ const pill = (m: CashMovement): { label: string; tone: 'positive' | 'pending' | 
 };
 
 /** Il documento con cui il conto è stato chiuso, per il piede del gruppo.
- *  `token` presente = c'è la copia digitale su /scontrino/<token>. */
-const groupDoc = (ms: CashMovement[]): { label: string; tone: 'positive' | 'pending' | 'critical'; token: string | null } | null => {
-  const m = ms.find(x => x.fiscal_doc_type != null || x.fiscal_status != null);
-  if (!m || !m.fiscal_doc_type) return null;
+ *  `token` presente = c'è la copia digitale su /scontrino/<token> (solo gli
+ *  scontrini cloud ce l'hanno: la proforma non ha una pagina da aprire).
+ *  Il piede parla anche quando il documento NON c'è: un conto chiuso senza
+ *  riga fiscale lo dice, e un conto saldato dal QR ma mai chiuso pure —
+ *  visto al collaudo: piede muto e nessuno sa se il fiscale è a posto. */
+const groupDoc = (ms: CashMovement[]): { label: string; tone: 'positive' | 'pending' | 'critical' | 'neutral'; token: string | null } | null => {
+  // Solo le righe del conto portano i campi fiscali: un gruppo di sole
+  // caparre non può dire niente sul documento, e sta zitto.
+  const billRows = ms.filter(x => x.source === 'bill');
+  if (billRows.length === 0) return null;
+  const m = billRows.find(x => x.fiscal_doc_type != null) ?? billRows[0];
+  if (!m.fiscal_doc_type) {
+    const st = m.bill_status;
+    if (st === 'CLOSED' || st === 'SETTLED_PARTIAL') return { label: 'chiusa senza documento fiscale', tone: 'neutral', token: null };
+    if (st === 'SETTLED') return { label: 'saldato · conto da chiudere in cassa', tone: 'pending', token: null };
+    return null;
+  }
   const n = m.fiscal_doc_number ?? m.fiscal_ref;
   const name =
     m.fiscal_doc_type === 'RECEIPT' ? `Scontrino${n ? ` n. ${n}` : ''}`
@@ -277,6 +290,7 @@ export const Transazioni: React.FC<TransazioniProps> = ({
                       <span className={`flex items-center gap-2 border-t border-[var(--ds-border)] px-3 py-2 text-[13px] ${
                         doc.tone === 'critical' ? 'text-[var(--ds-critical-text)]'
                         : doc.tone === 'pending' ? 'text-[var(--ds-pending-text)]'
+                        : doc.tone === 'positive' ? 'font-medium text-[var(--ds-seated-text)]'
                         : 'text-[var(--ds-text-muted)]'
                       }`}>
                         <Receipt size={14} aria-hidden /> {doc.label}

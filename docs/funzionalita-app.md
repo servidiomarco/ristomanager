@@ -604,6 +604,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-14 | Pagamenti, conto al tavolo e cassa | Il piede del gruppo in Transazioni parla sempre: documento del conto se c’è (preferito a quelli per-quota), altrimenti «chiusa senza documento fiscale» sui conti chiusi e «saldato · conto da chiudere in cassa» su quelli pagati dal QR ma mai chiusi. |
 | 2026-09-14 | Pagamenti, conto al tavolo e cassa | Transazioni: le quote QR portano il nome scritto dall’ospite («QR al tavolo · Marco», cercabile), e in piede a ogni gruppo compare il documento di chiusura (scontrino/proforma/fattura col numero) con il link «apri» alla copia digitale quando esiste. |
 | 2026-09-14 | Pagamenti, conto al tavolo e cassa | Transazioni della Cassa raggruppate per tavolo: una card per conto con cliente, subtotale incassato e «conto aperto» in testa, e dentro le righe dei movimenti (ora, metodo, stato); il riepilogo in fondo conta anche i tavoli. |
 | 2026-09-14 | Pagamenti, conto al tavolo e cassa | Le Quote del foglio conto mostrano anche chi sta pagando in quel momento (il claim arriva via evento, come sul telefono dell’ospite, e sparisce da solo se scade); barra e «Saldato» contano solo i soldi arrivati — il resto coperto da quote in checkout diventa la pastiglia «quote in pagamento». |
