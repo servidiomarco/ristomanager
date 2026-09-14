@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChevronUp, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, AlertTriangle, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator, BarChart3 } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChevronUp, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, AlertTriangle, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator, BarChart3, Star } from 'lucide-react';
 import { ViewState, Room, Table, Dish, RestaurantMenu, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, UserRole, ReservationSource, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -56,6 +56,7 @@ import { PayAtTableSettingsManager } from './components/PayAtTableSettingsManage
 import { FiscalSettingsManager } from './components/FiscalSettingsManager';
 import { SalaCucinaSettingsManager } from './components/SalaCucinaSettingsManager';
 import { AiMessagesSettingsManager } from './components/AiMessagesSettingsManager';
+import { ReviewSettingsCard } from './components/ReviewSettingsCard';
 import { MediaLibraryManager } from './components/MediaLibraryManager';
 import { RevolutIntegrationCard } from './components/RevolutIntegrationCard';
 import { SumUpIntegrationCard } from './components/SumUpIntegrationCard';
@@ -242,7 +243,7 @@ const SETTINGS_GROUPS: {
   id: string;
   label: string;
   Icon: React.ComponentType<{ size?: number; className?: string }>;
-  guard?: 'admin' | 'pay_at_table';
+  guard?: 'admin' | 'pay_at_table' | 'reviews';
 }[] = [
   { id: 'imp-profilo', label: 'Profilo', Icon: UserCheck },
   { id: 'imp-ristorante', label: 'Ristorante', Icon: Clock },
@@ -250,6 +251,7 @@ const SETTINGS_GROUPS: {
   { id: 'imp-pagamenti', label: 'Pagamenti', Icon: CreditCard },
   { id: 'imp-fiscalita', label: 'Fiscalità', Icon: Landmark, guard: 'pay_at_table' },
   { id: 'imp-comunicazioni', label: 'Comunicazioni', Icon: MessagesSquare },
+  { id: 'imp-recensioni', label: 'Recensioni', Icon: Star, guard: 'reviews' },
   { id: 'imp-ai', label: 'AI', Icon: Sparkles },
   { id: 'imp-amministrazione', label: 'Amministrazione', Icon: Users, guard: 'admin' },
 ];
@@ -2048,6 +2050,7 @@ const App: React.FC = () => {
   const visibleSettingsGroups = SETTINGS_GROUPS.filter(g =>
     g.guard === 'admin' ? (canManageUsers() || canViewLogs())
     : g.guard === 'pay_at_table' ? hasFeature('pay_at_table')
+    : g.guard === 'reviews' ? hasFeature('reviews')
     : true
   );
 
@@ -3360,6 +3363,17 @@ const App: React.FC = () => {
                 </CardErrorBoundary>
               </div>
             </SettingsSection>
+
+            {/* La reputazione su Google: richiesta di recensione dopo la
+                visita e — col profilo collegato — risposte dalla pagina
+                Recensioni. Visibile solo col modulo venduto. */}
+            {hasFeature('reviews') && (
+              <SettingsSection id="imp-recensioni" label="Recensioni">
+                <CardErrorBoundary label="Richiesta di recensione">
+                  <ReviewSettingsCard showToast={addToast} />
+                </CardErrorBoundary>
+              </SettingsSection>
+            )}
 
             {/* Tutto ciò che è guidato dall'AI in un posto solo: Sofia al
                 telefono (con le sue regolazioni), le risposte AI ai messaggi

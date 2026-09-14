@@ -13454,6 +13454,13 @@ const REVIEW_REQUEST_WINDOW_END_MIN = 21 * 60;
 const REVIEW_REQUEST_NEXT_MORNING_MIN = 10 * 60 + 30;
 // Cooldown per telefono: un habitué non riceve la richiesta a ogni visita.
 const REVIEW_REQUEST_COOLDOWN_DAYS = 60;
+// Risposte alle recensioni (operative dalla Fase B, col profilo Google
+// collegato): il livello si sceglie già da Impostazioni, il default è la
+// bozza con approvazione — l'AI non pubblica mai da sola senza opt-in.
+type ReviewReplyAutomation = 'off' | 'draft' | 'auto_positive' | 'auto_all';
+const REVIEW_REPLY_AUTOMATION_KEY = 'review_reply_automation';
+const REVIEW_REPLY_AUTOMATION_DEFAULT: ReviewReplyAutomation = 'draft';
+const REVIEW_REPLY_AUTOMATION_VALUES: ReviewReplyAutomation[] = ['off', 'draft', 'auto_positive', 'auto_all'];
 
 async function getReviewRequestSettings(tenantId: number): Promise<ReviewRequestSettings> {
     try {
@@ -23926,6 +23933,124 @@ app.put('/settings/features', authenticate, requirePermission('settings:full'), 
     } catch (err) {
         console.error('Error updating feature flags:', err);
         res.status(500).json({ error: 'Failed to update feature flags' });
+    }
+});
+
+// ============================================
+// IMPOSTAZIONI RECENSIONI (piano recensioni)
+// ============================================
+// La sezione Impostazioni → Recensioni: interruttore della richiesta
+// post-visita, timing, destinatari, livello di automazione delle risposte e
+// Place ID del profilo Google. Lettura aperta a ogni utente col modulo
+// (la card si mostra anche in sola lettura), modifica a reviews:manage.
+
+async function buildReviewSettingsPayload(tenantId: number) {
+    const settings = await getReviewRequestSettings(tenantId);
+    let replyAutomation: ReviewReplyAutomation = REVIEW_REPLY_AUTOMATION_DEFAULT;
+    try {
+        const r = await queryWithRetry(
+            'SELECT text_value FROM app_settings WHERE tenant_id = $1 AND key = $2',
+            [tenantId, REVIEW_REPLY_AUTOMATION_KEY]
+        );
+        const raw = r.rows[0]?.text_value;
+        if (REVIEW_REPLY_AUTOMATION_VALUES.includes(raw)) replyAutomation = raw;
+    } catch (_) { /* default */ }
+    return {
+        review_requests_enabled: await getFeatureFlag(tenantId, 'review_requests_enabled', false),
+        timing: settings.timing,
+        delay_hours: settings.delayHours,
+        audience: settings.audience,
+        reply_automation: replyAutomation,
+        google_place_id: await getGooglePlaceId(tenantId),
+    };
+}
+
+app.get('/review-settings', authenticate, requireFeature('reviews'), async (req, res) => {
+    try {
+        res.json(await buildReviewSettingsPayload(req.tenantId!));
+    } catch (err) {
+        console.error('GET /review-settings error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/review-settings', authenticate, requireFeature('reviews'), requirePermission('reviews:manage'), async (req, res) => {
+    const body = req.body ?? {};
+    try {
+        const upsertBool = (key: string, value: boolean) => queryWithRetry(
+            `INSERT INTO app_settings (tenant_id, key, value, updated_at)
+             VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+             ON CONFLICT (tenant_id, key) DO UPDATE
+               SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP`,
+            [req.tenantId!, key, value]
+        );
+        const upsertText = (key: string, value: string) => queryWithRetry(
+            `INSERT INTO app_settings (tenant_id, key, text_value, updated_at)
+             VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+             ON CONFLICT (tenant_id, key) DO UPDATE
+               SET text_value = EXCLUDED.text_value, updated_at = CURRENT_TIMESTAMP`,
+            [req.tenantId!, key, value]
+        );
+        const upsertInt = (key: string, value: number) => queryWithRetry(
+            `INSERT INTO app_settings (tenant_id, key, int_value, updated_at)
+             VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+             ON CONFLICT (tenant_id, key) DO UPDATE
+               SET int_value = EXCLUDED.int_value, updated_at = CURRENT_TIMESTAMP`,
+            [req.tenantId!, key, value]
+        );
+
+        if ('review_requests_enabled' in body) {
+            if (typeof body.review_requests_enabled !== 'boolean') {
+                return res.status(400).json({ error: 'invalid_value', message: 'review_requests_enabled must be boolean' });
+            }
+            await upsertBool('review_requests_enabled', body.review_requests_enabled);
+        }
+        if ('timing' in body) {
+            if (!['immediate', 'delay', 'next_morning'].includes(body.timing)) {
+                return res.status(400).json({ error: 'invalid_value', message: 'timing must be immediate | delay | next_morning' });
+            }
+            await upsertText(REVIEW_REQUEST_TIMING_KEY, body.timing);
+        }
+        if ('delay_hours' in body) {
+            const n = Math.trunc(Number(body.delay_hours));
+            if (!Number.isFinite(n) || n < 1 || n > 24) {
+                return res.status(400).json({ error: 'invalid_value', message: 'delay_hours must be an integer between 1 and 24' });
+            }
+            await upsertInt(REVIEW_REQUEST_DELAY_HOURS_KEY, n);
+        }
+        if ('audience' in body) {
+            if (!['consent', 'all'].includes(body.audience)) {
+                return res.status(400).json({ error: 'invalid_value', message: 'audience must be consent | all' });
+            }
+            await upsertText(REVIEW_REQUEST_AUDIENCE_KEY, body.audience);
+        }
+        if ('reply_automation' in body) {
+            if (!REVIEW_REPLY_AUTOMATION_VALUES.includes(body.reply_automation)) {
+                return res.status(400).json({ error: 'invalid_value', message: 'reply_automation must be off | draft | auto_positive | auto_all' });
+            }
+            await upsertText(REVIEW_REPLY_AUTOMATION_KEY, body.reply_automation);
+        }
+        if ('google_place_id' in body) {
+            const raw = body.google_place_id;
+            if (raw !== null && typeof raw !== 'string') {
+                return res.status(400).json({ error: 'invalid_value', message: 'google_place_id must be a string or null' });
+            }
+            const placeId = typeof raw === 'string' ? raw.trim().slice(0, 200) : '';
+            await queryWithRetry(
+                `INSERT INTO integration_settings (tenant_id, provider, google_place_id, updated_at, updated_by_user_id)
+                 VALUES ($1, 'google_business', $2, CURRENT_TIMESTAMP, $3)
+                 ON CONFLICT (tenant_id, provider) DO UPDATE
+                   SET google_place_id = EXCLUDED.google_place_id,
+                       updated_at = CURRENT_TIMESTAMP,
+                       updated_by_user_id = EXCLUDED.updated_by_user_id`,
+                [req.tenantId!, placeId || null, req.user?.userId ?? null]
+            );
+        }
+
+        res.json(await buildReviewSettingsPayload(req.tenantId!));
+    } catch (err) {
+        console.error('PUT /review-settings error:', err);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
