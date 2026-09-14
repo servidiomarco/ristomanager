@@ -111,10 +111,10 @@ type SlotState = 'present' | 'absent' | 'off' | 'rest' | 'implicit' | 'none';
 
 
 const rowIconButton =
-  'inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+  'inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
 const rowIconButtonDanger =
-  'inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+  'inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
 /** The filter chip inside the sheet. Outlined when off, solid when on — the
  *  same pair Prenotazioni uses, so a filter panel reads the same wherever it
@@ -128,7 +128,7 @@ const Chip: React.FC<{
     type="button"
     onClick={onClick}
     aria-pressed={active}
-    className={`inline-flex h-11 max-w-full items-center gap-1.5 rounded-full px-4 text-[14px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+    className={`inline-flex h-11 max-w-full items-center gap-1.5 rounded-[var(--ds-radius-control)] px-4 text-[14px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
       active
         ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
         : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] ring-1 ring-inset ring-[var(--ds-border-strong)] hover:bg-[var(--ds-surface-row)]'
@@ -1006,7 +1006,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
             <SkeletonStaffColumn label="Sala" />
             <SkeletonStaffColumn label="Cucina" />
           </div>
-          <div className="hidden rounded-[20px] bg-[var(--ds-surface)] p-8 shadow-[var(--ds-shadow-card)] lg:col-span-2 lg:block">
+          <div className="hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-8 shadow-[var(--ds-shadow-card)] lg:col-span-2 lg:block">
             <div className="space-y-4 motion-safe:animate-pulse" aria-hidden="true">
               <div className="h-6 w-1/3 rounded bg-[var(--ds-surface-row)]" />
               <div className="h-4 w-2/3 rounded bg-[var(--ds-surface-row)]" />
@@ -1059,7 +1059,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
           aria-label="Filtri"
           title="Filtri"
           className={activeFilterCount > 0 || filtersOpen
-            ? 'relative inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] shadow-[var(--ds-shadow-card)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]'
+            ? 'relative inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] shadow-[var(--ds-shadow-card)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]'
             : `relative ${dsIconButton}`}
         >
           <ListFilter className="h-4 w-4" />
@@ -1103,7 +1103,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
       <div
         onClick={e => e.stopPropagation()}
         style={{ animation: 'slideUpSheet 260ms cubic-bezier(0.32, 0.72, 0, 1) both' }}
-        className="relative max-h-full w-full overflow-y-auto rounded-t-[24px] bg-[var(--ds-surface)] pb-[max(1.5rem,env(safe-area-inset-bottom))] shadow-[var(--ds-shadow-raised)]"
+        className="relative max-h-full w-full overflow-y-auto rounded-t-[var(--ds-radius)] bg-[var(--ds-surface)] pb-[max(1.5rem,env(safe-area-inset-bottom))] shadow-[var(--ds-shadow-raised)]"
       >
         <div className="flex justify-center pb-2 pt-3" aria-hidden>
           <span className="h-1 w-9 rounded-full bg-[var(--ds-border-strong)]" />
@@ -1196,11 +1196,11 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                     // The selected ring is inset. Drawn outside the box it sits
                     // in the scroll container's gutter and gets clipped at both
                     // edges, so the card reads as cut off rather than picked.
-                    className={`flex w-full items-center gap-3 rounded-[16px] bg-[var(--ds-surface)] p-3 text-left shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)] ${
+                    className={`flex w-full items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-3 text-left shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)] ${
                       active ? 'ring-2 ring-inset ring-[var(--ds-action-bg)]' : ''
                     } ${staff.isActive ? '' : 'opacity-60'}`}
                   >
-                    <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[13px] font-semibold text-[var(--ds-text-secondary)]">
+                    <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[13px] font-semibold text-[var(--ds-text-secondary)]">
                       {initials(staff)}
                     </span>
                     <span className="min-w-0 flex-1">
@@ -1263,7 +1263,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
         return (
           <span
             key={label}
-            className={`block truncate rounded-full px-2 py-1 text-center text-[11px] font-medium ${TIME_OFF_CHIP[dayTimeOff.type]}`}
+            className={`block truncate rounded-[var(--ds-radius-control)] px-2 py-1 text-center text-[11px] font-medium ${TIME_OFF_CHIP[dayTimeOff.type]}`}
             title={`${TIME_OFF_LABELS[dayTimeOff.type]} — ${label.toLowerCase()}`}
           >
             {TIME_OFF_LABELS[dayTimeOff.type]}
@@ -1282,7 +1282,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
       return (
         <span
           key={label}
-          className={`block truncate rounded-full text-center text-[11px] font-semibold ${tone}`}
+          className={`block truncate rounded-[var(--ds-radius-control)] text-center text-[11px] font-semibold ${tone}`}
           title={implicit ? `${label} dal contratto (${STAFF_TYPE_LABELS[selectedStaff.staffType]})` : label}
         >
           {label}
@@ -1295,13 +1295,13 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
     let rows: React.ReactNode;
     if (fullDayOff) {
       rows = (
-        <span className={`block truncate rounded-full px-2 py-1 text-center text-[12px] font-medium ${TIME_OFF_CHIP[dayTimeOff!.type]}`}>
+        <span className={`block truncate rounded-[var(--ds-radius-control)] px-2 py-1 text-center text-[12px] font-medium ${TIME_OFF_CHIP[dayTimeOff!.type]}`}>
           {TIME_OFF_LABELS[dayTimeOff!.type]}
         </span>
       );
     } else if (lunch === 'rest' && dinner === 'rest') {
       rows = (
-        <span className="block truncate rounded-full bg-[var(--ds-surface)] px-2 py-1 text-center text-[12px] font-medium text-[var(--ds-text-muted)]">
+        <span className="block truncate rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-2 py-1 text-center text-[12px] font-medium text-[var(--ds-text-muted)]">
           Riposo
         </span>
       );
@@ -1322,7 +1322,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
         aria-label={`${day.getDate()} ${calendarDate.toLocaleDateString('it-IT', { month: 'long' })} — modifica`}
         // Taller than the merged cell was: two rows need the room, and a grid
         // whose cells resize as shifts change would jump under the cursor.
-        className={`flex min-h-[92px] flex-col gap-1 rounded-[14px] p-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+        className={`flex min-h-[92px] flex-col gap-1 rounded-[var(--ds-radius)] p-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
           !isCurrentMonth
             ? 'opacity-40'
             : fullDayOff
@@ -1370,7 +1370,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                 aria-expanded={personMenuOpen}
                 aria-label="Altre azioni"
                 title="Altre azioni"
-                className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               >
                 <MoreVertical className="h-4 w-4" />
               </button>
@@ -1378,7 +1378,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                 <div
                   ref={personMenuRef}
                   role="menu"
-                  className="absolute right-0 top-full z-30 mt-2 w-[240px] overflow-hidden rounded-[20px] bg-[var(--ds-surface)] py-1.5 shadow-[var(--ds-shadow-raised)]"
+                  className="absolute right-0 top-full z-30 mt-2 w-[240px] overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] py-1.5 shadow-[var(--ds-shadow-raised)]"
                 >
                   <button
                     type="button"
@@ -1466,7 +1466,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
         />
 
         {detailTab === 'TURNI' ? (
-          <div className="rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)] sm:p-5">
+          <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)] sm:p-5">
             <div className="mb-4 flex flex-wrap items-center gap-2">
               <button type="button" onClick={goToPreviousMonth} className={rowIconButton} aria-label="Mese precedente">
                 <ChevronLeft className="h-4 w-4" />
@@ -1480,7 +1480,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
               <button
                 type="button"
                 onClick={goToCurrentMonth}
-                className="inline-flex h-9 items-center rounded-full bg-[var(--ds-surface-row)] px-3 text-[14px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)]"
+                className="inline-flex h-9 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3 text-[14px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)]"
               >
                 Oggi
               </button>
@@ -1518,19 +1518,19 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                 the automatic one means nothing for an Extra. */}
             <div className="mt-4 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-[13px] text-[var(--ds-text-muted)]">
               <span className="flex items-center gap-1.5">
-                <span className="rounded-full bg-[var(--ds-pending-tint)] px-2 py-0.5 text-[11px] font-semibold text-[var(--ds-pending-text)]">Pranzo</span>
-                <span className="rounded-full bg-[var(--ds-arriving-tint)] px-2 py-0.5 text-[11px] font-semibold text-[var(--ds-arriving-text)]">Cena</span>
+                <span className="rounded-[var(--ds-radius-control)] bg-[var(--ds-pending-tint)] px-2 py-0.5 text-[11px] font-semibold text-[var(--ds-pending-text)]">Pranzo</span>
+                <span className="rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-tint)] px-2 py-0.5 text-[11px] font-semibold text-[var(--ds-arriving-text)]">Cena</span>
                 turno assegnato
               </span>
               {hasAutoShifts(selectedStaff) && (
                 <span className="flex items-center gap-1.5">
-                  <span className="rounded-full border border-dashed border-[var(--ds-pending-text)] px-[7px] py-[1px] text-[11px] font-semibold text-[var(--ds-pending-text)] opacity-75">Pranzo</span>
+                  <span className="rounded-[var(--ds-radius-control)] border border-dashed border-[var(--ds-pending-text)] px-[7px] py-[1px] text-[11px] font-semibold text-[var(--ds-pending-text)] opacity-75">Pranzo</span>
                   dal contratto
                 </span>
               )}
               {(Object.keys(TIME_OFF_LABELS) as TimeOffType[]).map(type => (
                 <span key={type} className="flex items-center gap-1.5">
-                  <span className={`h-3 w-3 rounded-full ${TIME_OFF_CHIP[type]}`} aria-hidden />
+                  <span className={`h-3 w-3 rounded-[var(--ds-radius-control)] ${TIME_OFF_CHIP[type]}`} aria-hidden />
                   {TIME_OFF_LABELS[type].toLowerCase()}
                 </span>
               ))}
@@ -1560,7 +1560,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                     {group.items.map(timeOff => (
                       <div
                         key={timeOff.id}
-                        className="flex items-center gap-2 rounded-[16px] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]"
+                        className="flex items-center gap-2 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]"
                       >
                         <StatusPill tone={TIME_OFF_PILL_TONE[timeOff.type]}>
                           {TIME_OFF_LABELS[timeOff.type]}
@@ -1706,7 +1706,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
           ref={dayMenuRef}
           role="menu"
           style={{ top: dayMenu.top, left: dayMenu.left, width: DAY_MENU_WIDTH }}
-          className="fixed z-[60] overflow-hidden rounded-[20px] bg-[var(--ds-surface)] py-1.5 shadow-[var(--ds-shadow-raised)]"
+          className="fixed z-[60] overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] py-1.5 shadow-[var(--ds-shadow-raised)]"
         >
           <div className="px-4 pb-1.5 pt-1 text-[13px] capitalize text-[var(--ds-text-muted)]">
             {dayMenuTitle}
@@ -1748,7 +1748,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
             aria-label={dayMenuTitle}
             onClick={e => e.stopPropagation()}
             style={{ animation: 'slideUpSheet 260ms cubic-bezier(0.32, 0.72, 0, 1) both' }}
-            className="relative max-h-full w-full overflow-y-auto rounded-t-[24px] bg-[var(--ds-surface)] pb-[max(1rem,env(safe-area-inset-bottom))] shadow-[var(--ds-shadow-raised)]"
+            className="relative max-h-full w-full overflow-y-auto rounded-t-[var(--ds-radius)] bg-[var(--ds-surface)] pb-[max(1rem,env(safe-area-inset-bottom))] shadow-[var(--ds-shadow-raised)]"
           >
             <div className="flex justify-center pb-2 pt-3" aria-hidden>
               <span className="h-1 w-9 rounded-full bg-[var(--ds-border-strong)]" />
@@ -1757,7 +1757,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
               {dayMenuTitle}
             </h3>
             <div className="px-4">
-              <div className="overflow-hidden rounded-[20px] bg-[var(--ds-canvas)]">
+              <div className="overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-canvas)]">
                 {dayActions.map(a =>
                   'separator' in a ? null : (
                     <button
@@ -1931,7 +1931,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                         type="button"
                         onClick={() => setStaffForm({ ...staffForm, staffType: type })}
                         aria-pressed={active}
-                        className={`rounded-[16px] px-4 py-3 text-left transition-colors ${
+                        className={`rounded-[var(--ds-radius)] px-4 py-3 text-left transition-colors ${
                           active
                             ? 'bg-[var(--ds-pending-tint)] ring-2 ring-inset ring-[var(--ds-pending-solid)]'
                             : 'bg-[var(--ds-surface-row)] hover:bg-[var(--ds-border)]'
@@ -2077,7 +2077,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                 type="button"
                 onClick={() => setShiftForm({ ...shiftForm, lunch: !shiftForm.lunch })}
                 aria-pressed={shiftForm.lunch}
-                className={`flex min-h-[64px] flex-col items-center justify-center gap-1 rounded-[16px] text-[15px] font-semibold transition-colors ${
+                className={`flex min-h-[64px] flex-col items-center justify-center gap-1 rounded-[var(--ds-radius)] text-[15px] font-semibold transition-colors ${
                   shiftForm.lunch
                     ? 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] ring-2 ring-inset ring-[var(--ds-pending-solid)]'
                     : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'
@@ -2090,7 +2090,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                 type="button"
                 onClick={() => setShiftForm({ ...shiftForm, dinner: !shiftForm.dinner })}
                 aria-pressed={shiftForm.dinner}
-                className={`flex min-h-[64px] flex-col items-center justify-center gap-1 rounded-[16px] text-[15px] font-semibold transition-colors ${
+                className={`flex min-h-[64px] flex-col items-center justify-center gap-1 rounded-[var(--ds-radius)] text-[15px] font-semibold transition-colors ${
                   shiftForm.dinner
                     ? 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)] ring-2 ring-inset ring-[var(--ds-arriving-solid)]'
                     : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'
@@ -2157,7 +2157,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                     type="button"
                     onClick={() => setTimeOffForm({ ...timeOffForm, type })}
                     aria-pressed={active}
-                    className={`inline-flex h-11 items-center rounded-full px-4 text-[15px] font-medium transition-colors ${
+                    className={`inline-flex h-11 items-center rounded-[var(--ds-radius-control)] px-4 text-[15px] font-medium transition-colors ${
                       active
                         ? `${TIME_OFF_CHIP[type]} ring-2 ring-inset ring-current`
                         : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'

@@ -14,6 +14,11 @@ import React from 'react';
 
 interface LivePillProps {
   connected: boolean;
+  /* NOTA per chi la monta: la pastiglia porta `inline-flex` (e il pallino
+     `flex`) nella propria classe base. Per nasconderla serve una utility CON
+     VARIANTE — `max-md:hidden`, non `hidden` — perche' fra due utility di
+     display semplici vince quella che Tailwind emette dopo, non quella scritta
+     dopo nella stringa. Con `hidden` la pastiglia resta visibile. */
   /** L'ora da mostrare. Chi possiede la pastiglia possiede anche il suo tick. */
   time: Date;
   /** 'pill' è la testata (fondo tinto); 'dot' è il solo pallino del telefono. */
@@ -34,7 +39,7 @@ export const LivePill: React.FC<LivePillProps> = ({ connected, time, variant = '
         title={label}
       >
         {connected && (
-          <span className="absolute inline-flex h-full w-full rounded-full bg-[var(--ds-seated-solid)] opacity-60 animate-ping motion-reduce:hidden" aria-hidden></span>
+          <span className="absolute inline-flex h-full w-full rounded-[var(--ds-radius-control)] bg-[var(--ds-seated-solid)] opacity-60 animate-ping motion-reduce:hidden" aria-hidden></span>
         )}
         <span
           className={`relative inline-flex h-2.5 w-2.5 rounded-full ${connected ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-critical-solid)]'}`}
@@ -46,7 +51,7 @@ export const LivePill: React.FC<LivePillProps> = ({ connected, time, variant = '
 
   return (
     <div
-      className={`inline-flex items-center gap-2 pl-2.5 pr-3 h-10 rounded-full text-[15px] font-medium ${
+      className={`inline-flex items-center gap-2 pl-2.5 pr-3 h-10 rounded-[var(--ds-radius-control)] text-[15px] font-medium ${
         connected
           ? 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'
           : 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)]'
@@ -57,7 +62,7 @@ export const LivePill: React.FC<LivePillProps> = ({ connected, time, variant = '
     >
       <span className="relative flex h-2 w-2" aria-hidden>
         {connected && (
-          <span className="absolute inline-flex h-full w-full rounded-full bg-[var(--ds-seated-solid)] opacity-60 animate-ping motion-reduce:hidden"></span>
+          <span className="absolute inline-flex h-full w-full rounded-[var(--ds-radius-control)] bg-[var(--ds-seated-solid)] opacity-60 animate-ping motion-reduce:hidden"></span>
         )}
         <span className={`relative inline-flex h-2 w-2 rounded-full ${connected ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-critical-solid)]'}`}></span>
       </span>

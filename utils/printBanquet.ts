@@ -206,7 +206,7 @@ ${PRINT_TOKENS_CSS}
     align-items: center;
     justify-content: center;
     padding: 14px 22px;
-    border-radius: 12px;
+    border-radius: var(--ds-print-radius);
     background: #eef2ff;
     border: 2px solid #4f46e5;
     min-width: 130px;
@@ -264,7 +264,7 @@ ${PRINT_TOKENS_CSS}
     padding: 10px 14px;
     background: #fffbeb;
     border-left: 3px solid #f59e0b;
-    border-radius: 4px;
+    border-radius: var(--ds-print-radius-sm);
     page-break-inside: avoid;
   }
   .note-block h3 {

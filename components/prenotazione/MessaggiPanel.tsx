@@ -85,7 +85,7 @@ export const MessaggiPanel: React.FC<{
             type="button"
             onClick={() => setFilter(c.v)}
             aria-pressed={filter === c.v}
-            className={`inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+            className={`inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3.5 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
               filter === c.v
                 ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                 : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] hover:text-[var(--ds-text-primary)]'
@@ -103,7 +103,7 @@ export const MessaggiPanel: React.FC<{
                 type="button"
                 onClick={onNewEmail}
                 title="Componi un'email libera al cliente"
-                className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-surface)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               >
                 <Mail className="h-3.5 w-3.5" aria-hidden /> Nuova email
               </button>
@@ -116,7 +116,7 @@ export const MessaggiPanel: React.FC<{
                 title={reminderSent
                   ? 'Reminder già inviato — un nuovo invio lo ripete'
                   : 'Ricorda la prenotazione al cliente (WhatsApp, o SMS finché il template non è approvato)'}
-                className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-surface)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               >
                 {reminderSending
                   ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
@@ -128,7 +128,7 @@ export const MessaggiPanel: React.FC<{
               type="button"
               onClick={onSendConfirmation}
               title="Invia una conferma prenotazione al cliente"
-              className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             >
               <Send className="h-3.5 w-3.5" aria-hidden /> Invia conferma
             </button>
@@ -156,7 +156,7 @@ export const MessaggiPanel: React.FC<{
             return (
               <article
                 key={msg.id}
-                className={`rounded-[16px] p-4 ${
+                className={`rounded-[var(--ds-radius)] p-4 ${
                   failed ? 'bg-[var(--ds-critical-tint)]' : 'bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]'
                 }`}
               >

@@ -64,7 +64,7 @@ const Row: React.FC<{
   action?: React.ReactNode;
 }> = ({ label, sub, amount, tone = 'normal', action }) => (
   <div
-    className={`flex items-center gap-2 rounded-[14px] px-3 py-2 ${
+    className={`flex items-center gap-2 rounded-[var(--ds-radius)] px-3 py-2 ${
       tone === 'voided' ? 'bg-[var(--ds-critical-tint)]'
       : tone === 'draft' ? 'bg-[var(--ds-arriving-tint)]'
       : 'bg-[var(--ds-surface-row)]'
@@ -135,7 +135,7 @@ export const TavoloAttivo: React.FC<TavoloAttivoProps> = ({
 
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto">
         {isEmpty && (
-          <div className="rounded-[14px] bg-[var(--ds-surface-row)] px-3 py-6 text-center text-[13px] text-[var(--ds-text-muted)]">
+          <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3 py-6 text-center text-[13px] text-[var(--ds-text-muted)]">
             Ancora niente su questo tavolo. Scegli dal menu: le righe restano in
             bozza finché non le invii.
           </div>
@@ -158,7 +158,7 @@ export const TavoloAttivo: React.FC<TavoloAttivoProps> = ({
                       type="button"
                       onClick={() => onVoidItem(item)}
                       disabled={busy}
-                      className="flex-shrink-0 rounded-full px-2.5 py-1 text-[12px] font-medium text-[var(--ds-critical-text)] transition-colors hover:bg-[var(--ds-critical-tint)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                      className="flex-shrink-0 rounded-[var(--ds-radius-control)] px-2.5 py-1 text-[12px] font-medium text-[var(--ds-critical-text)] transition-colors hover:bg-[var(--ds-critical-tint)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     >
                       Storna
                     </button>
@@ -188,7 +188,7 @@ export const TavoloAttivo: React.FC<TavoloAttivoProps> = ({
                       onClick={() => onCartQty(line.key, -1)}
                       disabled={busy}
                       aria-label={line.qty === 1 ? 'Togli la riga' : 'Una in meno'}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
                     >
                       <Minus size={14} />
                     </button>
@@ -200,7 +200,7 @@ export const TavoloAttivo: React.FC<TavoloAttivoProps> = ({
                       onClick={() => onCartQty(line.key, 1)}
                       disabled={busy}
                       aria-label="Una in più"
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
                     >
                       <Plus size={14} />
                     </button>
@@ -255,7 +255,7 @@ export const TavoloAttivo: React.FC<TavoloAttivoProps> = ({
           type="button"
           onClick={onDiscount}
           disabled={busy}
-          className="inline-flex h-9 items-center rounded-full bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
+          className="inline-flex h-9 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
         >
           Sconto conto
         </button>
@@ -265,7 +265,7 @@ export const TavoloAttivo: React.FC<TavoloAttivoProps> = ({
             type="button"
             onClick={onOpenInComande}
             disabled={busy}
-            className="inline-flex h-9 items-center rounded-full bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
+            className="inline-flex h-9 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
           >
             Apri in Comande
           </button>
@@ -277,7 +277,7 @@ export const TavoloAttivo: React.FC<TavoloAttivoProps> = ({
           type="button"
           onClick={onGoToPayment}
           disabled={busy || isEmpty}
-          className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-[var(--ds-action-bg)] text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
         >
           {busy && <Loader2 size={16} className="animate-spin" />}
           {hasDrafts ? 'Invia e vai al pagamento' : 'Vai al pagamento'}
@@ -297,12 +297,12 @@ export const TavoloAttivo: React.FC<TavoloAttivoProps> = ({
       {/* Sotto lg la testata dell'app è nascosta (immersive): questa scheda è
           la prima in cima e il padding rispetta il notch dove c'è. */}
       <div className="mx-auto w-full max-w-[1600px] flex-shrink-0 px-4 pb-3 pt-[max(1rem,env(safe-area-inset-top))] lg:px-8">
-        <div className="flex items-center gap-3 rounded-[20px] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
+        <div className="flex items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
           <button
             type="button"
             onClick={onBack}
             aria-label="Torna indietro"
-            className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)]"
+            className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)]"
           >
             <ArrowLeft className="h-4 w-4" />
           </button>
@@ -317,7 +317,7 @@ export const TavoloAttivo: React.FC<TavoloAttivoProps> = ({
           <button
             type="button"
             onClick={onCustomer}
-            className="hidden max-w-[220px] flex-shrink-0 items-center gap-2 rounded-full bg-[var(--ds-arriving-tint)] px-3 py-1.5 text-[13px] font-medium text-[var(--ds-arriving-text)] transition-colors hover:brightness-95 sm:inline-flex"
+            className="hidden max-w-[220px] flex-shrink-0 items-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-tint)] px-3 py-1.5 text-[13px] font-medium text-[var(--ds-arriving-text)] transition-colors hover:brightness-95 sm:inline-flex"
           >
             <span className="truncate">
               {reservation?.customer_name ?? 'Associa cliente'}
@@ -326,14 +326,14 @@ export const TavoloAttivo: React.FC<TavoloAttivoProps> = ({
 
           {/* Neutro, non ambra: i coperti sono un fatto, e l'ambra nel design
               system vuol dire «chiede un'azione». */}
-          <div className="flex flex-shrink-0 items-center gap-1 rounded-full bg-[var(--ds-surface-row)] px-2 py-1">
+          <div className="flex flex-shrink-0 items-center gap-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-2 py-1">
             <Users size={14} className="text-[var(--ds-text-muted)]" aria-hidden />
             <button
               type="button"
               onClick={() => onCovers(-1)}
               disabled={busy || order.order.covers <= 1}
               aria-label="Un coperto in meno"
-              className="inline-flex h-7 w-7 items-center justify-center rounded-full text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
             >
               <Minus size={13} />
             </button>
@@ -345,7 +345,7 @@ export const TavoloAttivo: React.FC<TavoloAttivoProps> = ({
               onClick={() => onCovers(1)}
               disabled={busy}
               aria-label="Un coperto in più"
-              className="inline-flex h-7 w-7 items-center justify-center rounded-full text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
             >
               <Plus size={13} />
             </button>
@@ -376,7 +376,7 @@ export const TavoloAttivo: React.FC<TavoloAttivoProps> = ({
         </div>
 
         {isWide && (
-          <aside className="flex w-[380px] flex-shrink-0 flex-col rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)] xl:w-[420px]">
+          <aside className="flex w-[380px] flex-shrink-0 flex-col rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)] xl:w-[420px]">
             {comanda}
           </aside>
         )}
@@ -405,11 +405,11 @@ export const TavoloAttivo: React.FC<TavoloAttivoProps> = ({
               <button
                 type="button"
                 onClick={() => setComandaOpen(false)}
-                className="mb-3 self-start rounded-full bg-[var(--ds-surface-row)] px-4 py-2 text-[14px] font-medium text-[var(--ds-text-primary)]"
+                className="mb-3 self-start rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-4 py-2 text-[14px] font-medium text-[var(--ds-text-primary)]"
               >
                 Chiudi
               </button>
-              <div className="min-h-0 flex-1 rounded-[20px] bg-[var(--ds-surface)] p-4">{comanda}</div>
+              <div className="min-h-0 flex-1 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4">{comanda}</div>
             </div>
           )}
         </>

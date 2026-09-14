@@ -505,7 +505,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
     return (
         <div className="space-y-3">
             {visibleChannels.length === 0 && !only && (
-                <p className="rounded-[16px] bg-[var(--ds-surface)] px-4 py-3 text-[14px] text-[var(--ds-text-muted)] shadow-[var(--ds-shadow-card)]">
+                <p className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-4 py-3 text-[14px] text-[var(--ds-text-muted)] shadow-[var(--ds-shadow-card)]">
                     Nessun canale incluso nel piano attuale.
                 </p>
             )}
@@ -517,11 +517,11 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                 return (
                     <details
                         key={meta.key}
-                        className="group bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] overflow-hidden"
+                        className="group bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] overflow-hidden"
                     >
                         <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--ds-surface-row)] transition-colors">
                             <div className="flex items-center gap-3 min-w-0">
-                                <div className="w-10 h-10 rounded-md bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-text-primary)] flex-shrink-0">
+                                <div className="w-10 h-10 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-text-primary)] flex-shrink-0">
                                     {meta.icon}
                                 </div>
                                 <div className="min-w-0">
@@ -560,7 +560,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
 
                             {isVoice && (
                                 <>
-                                    <div className="rounded-md bg-[var(--ds-surface-row)] border border-[var(--ds-border)] p-3">
+                                    <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] border border-[var(--ds-border)] p-3">
                                         <label className="flex items-start gap-2 text-[13px] text-[var(--ds-text-primary)] font-medium">
                                             <MessageSquare className="h-4 w-4 mt-0.5 text-[var(--ds-text-muted)] flex-shrink-0" />
                                             <span>Messaggio iniziale di Sofia</span>
@@ -575,7 +575,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                             onChange={(e) => setVoiceFirstMessageDraft(e.target.value)}
                                             disabled={!canEdit || savingVoiceFirstMessage}
                                             placeholder="Es. Ciao {nome}, sono Sofia del ristorante, come posso aiutarti?"
-                                            className="w-full px-2.5 py-2 rounded-md border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[13px] text-[var(--ds-text-primary)] leading-relaxed resize-y focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
+                                            className="w-full px-2.5 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[13px] text-[var(--ds-text-primary)] leading-relaxed resize-y focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
                                         />
                                         <div className="flex items-center gap-2 mt-2">
                                             <span className="text-[12px] text-[var(--ds-text-muted)] tabular">{voiceFirstMessageDraft.trim().length}/500</span>
@@ -583,7 +583,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                                 type="button"
                                                 onClick={saveVoiceFirstMessage}
                                                 disabled={!canEdit || savingVoiceFirstMessage || !voiceFirstMessageDirty}
-                                                className="ml-auto inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[13px] font-medium bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+                                                className="ml-auto inline-flex items-center gap-1.5 h-9 px-3 rounded-[var(--ds-radius)] text-[13px] font-medium bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
                                             >
                                                 {savingVoiceFirstMessage && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                                                 Salva
@@ -591,7 +591,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                         </div>
                                     </div>
 
-                                    <div className="rounded-md bg-[var(--ds-surface-row)] border border-[var(--ds-border)] p-3">
+                                    <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] border border-[var(--ds-border)] p-3">
                                         <label className="flex items-start gap-2 text-[13px] text-[var(--ds-text-primary)] font-medium">
                                             <Users className="h-4 w-4 mt-0.5 text-[var(--ds-text-muted)] flex-shrink-0" />
                                             <span>Soglia handoff gruppi grandi</span>
@@ -607,7 +607,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                                 value={voiceThresholdDraft}
                                                 onChange={(e) => setVoiceThresholdDraft(e.target.value)}
                                                 disabled={!canEdit || savingVoiceThreshold}
-                                                className="w-20 h-9 px-2 rounded-md border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] tabular focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
+                                                className="w-20 h-9 px-2 rounded-[var(--ds-radius)] border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] tabular focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
                                             />
                                             <span className="text-[12px] text-[var(--ds-text-muted)]">
                                                 Attualmente: prenotazioni fino a <strong className="text-[var(--ds-text-primary)]">{channels.voice_large_group_threshold}</strong> ospiti gestite dall'agent.
@@ -616,7 +616,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                                 type="button"
                                                 onClick={saveVoiceThreshold}
                                                 disabled={!canEdit || savingVoiceThreshold || !voiceThresholdDirty}
-                                                className="ml-auto inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[13px] font-medium bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+                                                className="ml-auto inline-flex items-center gap-1.5 h-9 px-3 rounded-[var(--ds-radius)] text-[13px] font-medium bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
                                             >
                                                 {savingVoiceThreshold && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                                                 Salva
@@ -624,7 +624,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                         </div>
                                     </div>
 
-                                    <div className="rounded-md bg-[var(--ds-surface-row)] border border-[var(--ds-border)] p-3">
+                                    <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] border border-[var(--ds-border)] p-3">
                                         <div className="flex items-start justify-between gap-3">
                                             <div className="min-w-0">
                                                 <label className="flex items-start gap-2 text-[13px] text-[var(--ds-text-primary)] font-medium">
@@ -656,7 +656,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                         </div>
                                     </div>
 
-                                    <div className={`rounded-md border p-3 transition-colors ${
+                                    <div className={`rounded-[var(--ds-radius)] border p-3 transition-colors ${
                                         suspended
                                             ? 'bg-[var(--ds-pending-tint)] border-[var(--ds-pending-solid)]'
                                             : 'bg-[var(--ds-surface-row)] border-[var(--ds-border)]'
@@ -698,13 +698,13 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                                 value={suspensionCallbackDraft}
                                                 onChange={(e) => setSuspensionCallbackDraft(e.target.value)}
                                                 disabled={!canEdit || savingSuspensionCallback}
-                                                className="w-28 h-9 px-2 rounded-md border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] tabular focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
+                                                className="w-28 h-9 px-2 rounded-[var(--ds-radius)] border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] tabular focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
                                             />
                                             <button
                                                 type="button"
                                                 onClick={saveSuspensionCallback}
                                                 disabled={!canEdit || savingSuspensionCallback || !suspensionCallbackDirty}
-                                                className="ml-auto inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[13px] font-medium bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+                                                className="ml-auto inline-flex items-center gap-1.5 h-9 px-3 rounded-[var(--ds-radius)] text-[13px] font-medium bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
                                             >
                                                 {savingSuspensionCallback && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                                                 Salva
@@ -712,7 +712,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                         </div>
                                     </div>
 
-                                    <div className="rounded-md bg-[var(--ds-surface-row)] border border-[var(--ds-border)] p-3">
+                                    <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] border border-[var(--ds-border)] p-3">
                                         <label className="flex items-start gap-2 text-[13px] text-[var(--ds-text-primary)] font-medium">
                                             <CalendarClock className="h-4 w-4 mt-0.5 text-[var(--ds-text-muted)] flex-shrink-0" />
                                             <span>Sospensioni programmate</span>
@@ -728,20 +728,20 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                                     const isPast = row.date < todayKey;
                                                     const rowShift = suspensionShiftOf(row);
                                                     return (
-                                                        <div key={idx} className={`flex flex-wrap items-center gap-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] p-2 ${isPast ? 'opacity-60' : ''}`}>
+                                                        <div key={idx} className={`flex flex-wrap items-center gap-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] p-2 ${isPast ? 'opacity-60' : ''}`}>
                                                             <input
                                                                 type="date"
                                                                 value={row.date}
                                                                 onChange={(e) => updateScheduleRow(idx, { date: e.target.value })}
                                                                 disabled={!canEdit || savingSchedule}
-                                                                className="h-9 px-2 rounded-md border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] tabular focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
+                                                                className="h-9 px-2 rounded-[var(--ds-radius)] border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] tabular focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
                                                             />
                                                             <select
                                                                 value={rowShift}
                                                                 onChange={(e) => setScheduleRowShift(idx, e.target.value as SuspensionShift)}
                                                                 disabled={!canEdit || savingSchedule}
                                                                 aria-label="Turno della sospensione"
-                                                                className="h-9 px-2 rounded-md border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
+                                                                className="h-9 px-2 rounded-[var(--ds-radius)] border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
                                                             >
                                                                 <option value="LUNCH">Pranzo</option>
                                                                 <option value="DINNER">Cena</option>
@@ -755,7 +755,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                                                         value={row.start_time}
                                                                         onChange={(e) => updateScheduleRow(idx, { start_time: e.target.value })}
                                                                         disabled={!canEdit || savingSchedule}
-                                                                        className="w-24 h-9 px-2 rounded-md border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] tabular focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
+                                                                        className="w-24 h-9 px-2 rounded-[var(--ds-radius)] border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] tabular focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
                                                                     />
                                                                     <span className="text-[12px] text-[var(--ds-text-muted)]">alle</span>
                                                                     <input
@@ -763,7 +763,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                                                         value={row.end_time}
                                                                         onChange={(e) => updateScheduleRow(idx, { end_time: e.target.value })}
                                                                         disabled={!canEdit || savingSchedule}
-                                                                        className="w-24 h-9 px-2 rounded-md border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] tabular focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
+                                                                        className="w-24 h-9 px-2 rounded-[var(--ds-radius)] border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] tabular focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
                                                                     />
                                                                 </>
                                                             ) : (
@@ -777,7 +777,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                                                 value={row.callback_time ?? row.end_time}
                                                                 onChange={(e) => updateScheduleRow(idx, { callback_time: e.target.value })}
                                                                 disabled={!canEdit || savingSchedule}
-                                                                className="w-24 h-9 px-2 rounded-md border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] tabular focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
+                                                                className="w-24 h-9 px-2 rounded-[var(--ds-radius)] border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] tabular focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
                                                             />
                                                             {isPast && (
                                                                 <span className="text-[11px] text-[var(--ds-text-subtle)] italic">passata</span>
@@ -787,7 +787,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                                                 onClick={() => removeScheduleRow(idx)}
                                                                 disabled={!canEdit || savingSchedule}
                                                                 aria-label="Rimuovi sospensione programmata"
-                                                                className="ml-auto inline-flex items-center justify-center h-9 w-9 rounded-md text-[var(--ds-text-muted)] hover:text-[var(--ds-critical-text)] hover:bg-[var(--ds-critical-tint)] dark:hover:bg-[var(--ds-critical-tint)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                                                className="ml-auto inline-flex items-center justify-center h-9 w-9 rounded-[var(--ds-radius)] text-[var(--ds-text-muted)] hover:text-[var(--ds-critical-text)] hover:bg-[var(--ds-critical-tint)] dark:hover:bg-[var(--ds-critical-tint)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                                                             >
                                                                 <Trash2 className="h-4 w-4" />
                                                             </button>
@@ -801,7 +801,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                                 type="button"
                                                 onClick={addScheduleRow}
                                                 disabled={!canEdit || savingSchedule}
-                                                className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[13px] font-medium border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                                className="inline-flex items-center gap-1.5 h-9 px-3 rounded-[var(--ds-radius)] text-[13px] font-medium border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                                             >
                                                 <Plus className="h-3.5 w-3.5" />
                                                 Aggiungi
@@ -810,7 +810,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                                 type="button"
                                                 onClick={saveSchedule}
                                                 disabled={!canEdit || savingSchedule || !scheduleDirty}
-                                                className="ml-auto inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[13px] font-medium bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+                                                className="ml-auto inline-flex items-center gap-1.5 h-9 px-3 rounded-[var(--ds-radius)] text-[13px] font-medium bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
                                             >
                                                 {savingSchedule && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                                                 Salva programma
@@ -818,7 +818,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                         </div>
                                     </div>
 
-                                    <div className="rounded-md bg-[var(--ds-surface-row)] border border-[var(--ds-border)] p-3">
+                                    <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] border border-[var(--ds-border)] p-3">
                                         <div className="flex items-start justify-between gap-2">
                                             <div>
                                                 <div className="flex items-center gap-2 text-[13px] text-[var(--ds-text-primary)] font-medium">
@@ -833,7 +833,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                                 type="button"
                                                 onClick={addVoiceBlockRow}
                                                 disabled={!canEdit || savingVoiceBlocks}
-                                                className="inline-flex items-center gap-1 h-8 px-2.5 rounded-md text-[12px] font-medium border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
+                                                className="inline-flex items-center gap-1 h-8 px-2.5 rounded-[var(--ds-radius)] text-[12px] font-medium border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
                                             >
                                                 <Plus className="h-3.5 w-3.5" />
                                                 Aggiungi
@@ -849,7 +849,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                                 voiceBlocksDraft.map((row, idx) => {
                                                     const inPast = row.date && row.date < todayKey;
                                                     return (
-                                                        <div key={idx} className={`flex flex-wrap items-center gap-2 rounded-md border p-2 ${inPast ? 'border-[var(--ds-pending-solid)] bg-[var(--ds-pending-tint)]' : 'border-[var(--ds-border)] bg-[var(--ds-surface)]'}`}>
+                                                        <div key={idx} className={`flex flex-wrap items-center gap-2 rounded-[var(--ds-radius)] border p-2 ${inPast ? 'border-[var(--ds-pending-solid)] bg-[var(--ds-pending-tint)]' : 'border-[var(--ds-border)] bg-[var(--ds-surface)]'}`}>
                                                             <input
                                                                 type="date"
                                                                 value={row.date}
@@ -885,7 +885,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                                                 type="button"
                                                                 onClick={() => removeVoiceBlockRow(idx)}
                                                                 disabled={!canEdit || savingVoiceBlocks}
-                                                                className="ml-auto inline-flex items-center justify-center h-7 w-7 rounded-md text-[var(--ds-text-muted)] hover:text-[var(--ds-critical-text)] hover:bg-[var(--ds-critical-tint)] dark:hover:bg-[var(--ds-critical-tint)] disabled:opacity-50 transition-colors"
+                                                                className="ml-auto inline-flex items-center justify-center h-7 w-7 rounded-[var(--ds-radius)] text-[var(--ds-text-muted)] hover:text-[var(--ds-critical-text)] hover:bg-[var(--ds-critical-tint)] dark:hover:bg-[var(--ds-critical-tint)] disabled:opacity-50 transition-colors"
                                                                 aria-label="Rimuovi giorno bloccato"
                                                                 title="Rimuovi"
                                                             >
@@ -902,7 +902,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                                 type="button"
                                                 onClick={saveVoiceBlocks}
                                                 disabled={!canEdit || savingVoiceBlocks || !voiceBlocksDirty}
-                                                className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[13px] font-medium bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+                                                className="inline-flex items-center gap-1.5 h-9 px-3 rounded-[var(--ds-radius)] text-[13px] font-medium bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
                                             >
                                                 {savingVoiceBlocks && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                                                 Salva blocchi
@@ -913,7 +913,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                             )}
 
                             {isWeb && (
-                                <div className="rounded-md bg-[var(--ds-surface-row)] border border-[var(--ds-border)] p-3">
+                                <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] border border-[var(--ds-border)] p-3">
                                     <div className="flex items-start justify-between gap-2">
                                         <div>
                                             <div className="flex items-center gap-2 text-[13px] text-[var(--ds-text-primary)] font-medium">
@@ -928,7 +928,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                             type="button"
                                             onClick={addBlockRow}
                                             disabled={!canEdit || savingBlocks}
-                                            className="inline-flex items-center gap-1 h-8 px-2.5 rounded-md text-[12px] font-medium border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
+                                            className="inline-flex items-center gap-1 h-8 px-2.5 rounded-[var(--ds-radius)] text-[12px] font-medium border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
                                         >
                                             <Plus className="h-3.5 w-3.5" />
                                             Aggiungi
@@ -944,7 +944,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                             blocksDraft.map((row, idx) => {
                                                 const inPast = row.date && row.date < todayKey;
                                                 return (
-                                                    <div key={idx} className={`flex flex-wrap items-center gap-2 rounded-md border p-2 ${inPast ? 'border-[var(--ds-pending-solid)] bg-[var(--ds-pending-tint)]' : 'border-[var(--ds-border)] bg-[var(--ds-surface)]'}`}>
+                                                    <div key={idx} className={`flex flex-wrap items-center gap-2 rounded-[var(--ds-radius)] border p-2 ${inPast ? 'border-[var(--ds-pending-solid)] bg-[var(--ds-pending-tint)]' : 'border-[var(--ds-border)] bg-[var(--ds-surface)]'}`}>
                                                         <input
                                                             type="date"
                                                             value={row.date}
@@ -970,7 +970,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                                             type="button"
                                                             onClick={() => removeBlockRow(idx)}
                                                             disabled={!canEdit || savingBlocks}
-                                                            className="ml-auto inline-flex items-center justify-center h-7 w-7 rounded-md text-[var(--ds-text-muted)] hover:text-[var(--ds-critical-text)] hover:bg-[var(--ds-critical-tint)] dark:hover:bg-[var(--ds-critical-tint)] disabled:opacity-50 transition-colors"
+                                                            className="ml-auto inline-flex items-center justify-center h-7 w-7 rounded-[var(--ds-radius)] text-[var(--ds-text-muted)] hover:text-[var(--ds-critical-text)] hover:bg-[var(--ds-critical-tint)] dark:hover:bg-[var(--ds-critical-tint)] disabled:opacity-50 transition-colors"
                                                             aria-label="Rimuovi blocco"
                                                             title="Rimuovi"
                                                         >
@@ -987,7 +987,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                             type="button"
                                             onClick={saveBlocks}
                                             disabled={!canEdit || savingBlocks || !blocksDirty}
-                                            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[13px] font-medium bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+                                            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-[var(--ds-radius)] text-[13px] font-medium bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
                                         >
                                             {savingBlocks && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                                             Salva blocchi
@@ -1011,10 +1011,10 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                 split della pagina Impostazioni la card resta sull'istanza
                 web/Prenotazioni per non comparire due volte. */}
             {only !== 'voice' && (
-            <details className="group bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] overflow-hidden">
+            <details className="group bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] overflow-hidden">
                 <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--ds-surface-row)] transition-colors">
                     <div className="flex items-center gap-3 min-w-0">
-                        <div className="w-10 h-10 rounded-md bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-text-primary)] flex-shrink-0">
+                        <div className="w-10 h-10 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-text-primary)] flex-shrink-0">
                             <Percent className="w-5 h-5" />
                         </div>
                         <div className="min-w-0">
@@ -1063,7 +1063,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                 return (
                                     <div
                                         key={room.room_id}
-                                        className={`rounded-md border p-3 ${cap ? 'border-[var(--ds-border-strong)] bg-[var(--ds-surface-row)]' : 'border-[var(--ds-border)] bg-[var(--ds-surface)]'}`}
+                                        className={`rounded-[var(--ds-radius)] border p-3 ${cap ? 'border-[var(--ds-border-strong)] bg-[var(--ds-surface-row)]' : 'border-[var(--ds-border)] bg-[var(--ds-surface)]'}`}
                                     >
                                         <div className="flex items-start justify-between gap-3">
                                             <div className="min-w-0">
@@ -1122,7 +1122,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                                     }}
                                                     disabled={!canEdit || savingCaps}
                                                     aria-label={`Percentuale massima per ${room.room_name}`}
-                                                    className="w-20 h-9 px-2 rounded-md border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] tabular focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
+                                                    className="w-20 h-9 px-2 rounded-[var(--ds-radius)] border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] tabular focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
                                                 />
                                                 <span className="text-[12px] text-[var(--ds-text-muted)]">% dei</span>
                                                 <select
@@ -1130,7 +1130,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                                     onChange={(e) => updateCap(room.room_id, { basis: e.target.value as RoomOccupancyCap['basis'] })}
                                                     disabled={!canEdit || savingCaps}
                                                     aria-label={`Base di calcolo per ${room.room_name}`}
-                                                    className="h-9 px-2 rounded-md border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] text-[13px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
+                                                    className="h-9 px-2 rounded-[var(--ds-radius)] border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] text-[13px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
                                                 >
                                                     <option value="TABLES">tavoli</option>
                                                     <option value="SEATS">coperti</option>
@@ -1148,7 +1148,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                             type="button"
                             onClick={saveCaps}
                             disabled={!canEdit || savingCaps || !capsDirty}
-                            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[13px] font-medium bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+                            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-[var(--ds-radius)] text-[13px] font-medium bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
                         >
                             {savingCaps && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                             Salva limiti

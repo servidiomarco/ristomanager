@@ -242,7 +242,7 @@ export const VariantSheet: React.FC<{
                 onClick={onDelete}
                 aria-label="Elimina riga"
                 title="Elimina riga"
-                className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               >
                 <Trash2 size={16} />
               </button>
@@ -275,7 +275,7 @@ export const VariantSheet: React.FC<{
             onClick={onCourseTap}
             disabled={!onCourseTap}
             aria-label={`Sposta in un'altra uscita (ora ${courseName})`}
-            className="ml-auto inline-flex h-11 items-center gap-1.5 rounded-full bg-[var(--ds-arriving-tint)] px-4 text-[15px] font-semibold text-[var(--ds-arriving-text)] transition-opacity hover:opacity-80 disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="ml-auto inline-flex h-11 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-tint)] px-4 text-[15px] font-semibold text-[var(--ds-arriving-text)] transition-opacity hover:opacity-80 disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             <CornerDownRight size={15} aria-hidden />
             {courseName}
@@ -291,7 +291,7 @@ export const VariantSheet: React.FC<{
               onClick={() => setQty(v => Math.max(1, v - 1))}
               disabled={qty <= 1}
               aria-label="Uno in meno"
-              className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
             >
               <Minus size={16} aria-hidden />
             </button>
@@ -302,7 +302,7 @@ export const VariantSheet: React.FC<{
               type="button"
               onClick={() => setQty(v => Math.min(99, v + 1))}
               aria-label="Uno in più"
-              className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)]"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)]"
             >
               <Plus size={16} aria-hidden />
             </button>
@@ -321,7 +321,7 @@ export const VariantSheet: React.FC<{
                 type="button"
                 onClick={() => setGrams(g)}
                 aria-pressed={grams === g}
-                className={`inline-flex h-11 items-center rounded-full px-4 text-[15px] font-semibold tabular-nums transition-colors ${
+                className={`inline-flex h-11 items-center rounded-[var(--ds-radius-control)] px-4 text-[15px] font-semibold tabular-nums transition-colors ${
                   grams === g
                     ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                     : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
@@ -337,7 +337,7 @@ export const VariantSheet: React.FC<{
               type="button"
               onClick={() => setGrams(v => Math.max(wMin, v - 10))}
               aria-label="Riduci di 10 grammi"
-              className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)]"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)]"
             >
               <Minus size={16} aria-hidden />
             </button>
@@ -348,7 +348,7 @@ export const VariantSheet: React.FC<{
               type="button"
               onClick={() => setGrams(v => Math.min(wMax, v + 10))}
               aria-label="Aumenta di 10 grammi"
-              className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)]"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)]"
             >
               <Plus size={16} aria-hidden />
             </button>
@@ -373,7 +373,7 @@ export const VariantSheet: React.FC<{
                   type="button"
                   onClick={() => toggleRemoved(c.id)}
                   aria-pressed={out}
-                  className={`inline-flex h-11 items-center rounded-full px-4 text-[15px] font-medium transition-colors ${
+                  className={`inline-flex h-11 items-center rounded-[var(--ds-radius-control)] px-4 text-[15px] font-medium transition-colors ${
                     out
                       ? 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] line-through'
                       : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
@@ -403,7 +403,7 @@ export const VariantSheet: React.FC<{
             })}
             aria-expanded={openNotes.has(g.id)}
             aria-label={`Note su ${g.name}`}
-            className="inline-flex h-6 w-6 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]"
+            className="inline-flex h-6 w-6 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]"
           >
             <Info size={14} aria-hidden />
           </button>
@@ -427,7 +427,7 @@ export const VariantSheet: React.FC<{
                       type="button"
                       onClick={() => toggleSingle(g.id, m.id)}
                       aria-pressed={active}
-                      className={`inline-flex h-11 items-center rounded-full px-4 text-[15px] font-medium transition-colors ${
+                      className={`inline-flex h-11 items-center rounded-[var(--ds-radius-control)] px-4 text-[15px] font-medium transition-colors ${
                         active
                           ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                           : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
@@ -495,7 +495,7 @@ export const VariantSheet: React.FC<{
                         onClick={() => setN(g, m.id, n - 1)}
                         aria-label={`Togli ${m.name}`}
                         disabled={n <= MODIFIER_N_MIN}
-                        className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full transition-colors disabled:opacity-35 ${
+                        className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] transition-colors disabled:opacity-35 ${
                           n !== 0 ? 'bg-white/15 hover:bg-white/25' : 'bg-[var(--ds-surface-row)] hover:bg-[var(--ds-border)]'
                         }`}
                       >
@@ -506,7 +506,7 @@ export const VariantSheet: React.FC<{
                         onClick={() => setN(g, m.id, n + 1)}
                         aria-label={`Aggiungi ${m.name}`}
                         disabled={capped || n >= MODIFIER_N_MAX}
-                        className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full transition-colors disabled:opacity-35 ${
+                        className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] transition-colors disabled:opacity-35 ${
                           n !== 0 ? 'bg-white/15 hover:bg-white/25' : 'bg-[var(--ds-surface-row)] hover:bg-[var(--ds-border)]'
                         }`}
                       >
@@ -547,7 +547,7 @@ export const VariantSheet: React.FC<{
                 // legge senza riaprire niente. Per i multipli il conteggio.
                 const singlePick = single ? g.modifiers.find(m => (selected.get(m.id) ?? 0) > 0) : undefined;
                 return (
-                  <div key={g.id} className="overflow-hidden rounded-[16px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+                  <div key={g.id} className="overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
                     {required ? (
                       <div className="flex min-h-[52px] items-center gap-1.5 px-4">
                         <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">
@@ -617,7 +617,7 @@ export const VariantSheet: React.FC<{
         const open = openGroupId === 'vino';
         const calici = pairedWines.reduce((s, w) => s + (wineQty?.(w.id) ?? 0), 0);
         return (
-          <div className="overflow-hidden rounded-[16px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+          <div className="overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
             <button
               type="button"
               onClick={() => setOpenGroupId(prev => prev === 'vino' ? null : 'vino')}
@@ -654,7 +654,7 @@ export const VariantSheet: React.FC<{
                           type="button"
                           onClick={() => onRemoveWine(w)}
                           aria-label={`Togli ${w.name}`}
-                          className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                          className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                         >
                           <Minus size={16} />
                         </button>
@@ -666,7 +666,7 @@ export const VariantSheet: React.FC<{
                         type="button"
                         onClick={() => onAddWine(w)}
                         aria-label={`Aggiungi ${w.name}`}
-                        className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                        className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                       >
                         <Plus size={16} />
                       </button>

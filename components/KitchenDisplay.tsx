@@ -89,7 +89,7 @@ const timerTone = (min: number): string =>
 /* La scelta della partita: una riga per postazione, alta abbastanza da
    prenderla con il pollice. Il bordo pieno segna quella attiva. */
 const stationOption = (active: boolean): string =>
-  `flex min-h-[56px] w-full items-center gap-3 rounded-[16px] px-4 py-3 text-left transition-colors ${
+  `flex min-h-[56px] w-full items-center gap-3 rounded-[var(--ds-radius)] px-4 py-3 text-left transition-colors ${
     active
       ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
       : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
@@ -686,7 +686,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
       {/* Una card che galleggia sulla tela, come le altre intestazioni di
           pagina — non una barra a filo con una linea sotto. */}
       <div className="flex-shrink-0 px-4 pb-3 pt-4">
-        <div className="flex items-center gap-3 rounded-[20px] bg-[var(--ds-surface)] p-3 pl-4 shadow-[var(--ds-shadow-card)]">
+        <div className="flex items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-3 pl-4 shadow-[var(--ds-shadow-card)]">
           {/* Il nome della partita per primo, in tondo, non in maiuscolo: a
               un metro di distanza conta il corpo, e le maiuscole cancellano
               la forma della parola invece di renderla più leggibile (§5.2). */}
@@ -724,9 +724,9 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
               {new Date(now).toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short' })
                 .split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
             </span>
-            <span className="inline-flex h-10 items-center gap-2 rounded-full bg-[var(--ds-seated-tint)] pl-2.5 pr-3 text-[15px] font-medium tabular-nums text-[var(--ds-seated-text)]">
+            <span className="inline-flex h-10 items-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-seated-tint)] pl-2.5 pr-3 text-[15px] font-medium tabular-nums text-[var(--ds-seated-text)]">
               <span className="relative flex h-2 w-2" aria-hidden>
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--ds-seated-solid)] opacity-60 motion-reduce:hidden" />
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-[var(--ds-radius-control)] bg-[var(--ds-seated-solid)] opacity-60 motion-reduce:hidden" />
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-[var(--ds-seated-solid)]" />
               </span>
               {new Date(now).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
@@ -740,7 +740,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
             onClick={() => setSearchOpen(o => { if (o) setSearch(''); return !o; })}
             aria-pressed={searchOpen}
             aria-label={searchOpen ? 'Chiudi la ricerca' : 'Cerca una comanda'}
-            className={`inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+            className={`inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
               searchOpen
                 ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)]'
                 : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
@@ -755,7 +755,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
             onClick={toggleSound}
             aria-pressed={sound}
             aria-label={sound ? 'Disattiva l\'avviso sonoro' : 'Attiva l\'avviso sonoro'}
-            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             {sound ? <Bell size={17} aria-hidden /> : <BellOff size={17} className="text-[var(--ds-text-muted)]" aria-hidden />}
           </button>
@@ -786,7 +786,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
           {/* Corpi grandi come il resto del monitor: si legge da un metro.
               Il bordo nella famiglia arriving segnala "qualcuno ti parla"
               senza gridare critico. */}
-          <div className="flex items-center gap-3 rounded-[20px] border-l-4 border-[var(--ds-arriving-solid)] bg-[var(--ds-surface)] p-3 pl-4 shadow-[var(--ds-shadow-card)]">
+          <div className="flex items-center gap-3 rounded-[var(--ds-radius)] border-l-4 border-[var(--ds-arriving-solid)] bg-[var(--ds-surface)] p-3 pl-4 shadow-[var(--ds-shadow-card)]">
             <MessagesSquare size={18} className="flex-shrink-0 text-[var(--ds-text-secondary)]" aria-hidden />
             <p className="min-w-0 flex-1 text-[16px] text-[var(--ds-text-primary)]">
               <span className="font-semibold">{chatStrip.message.sender_name}</span>
@@ -800,7 +800,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
             <button
               type="button"
               onClick={dismissChatStrip}
-              className="inline-flex h-11 flex-shrink-0 items-center rounded-full bg-[var(--ds-surface-row)] px-5 text-[15px] font-semibold text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              className="inline-flex h-11 flex-shrink-0 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-5 text-[15px] font-semibold text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             >
               Ok
             </button>
@@ -814,7 +814,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
           cose da dire; a zero note e coda vuota, zero pixel. */}
       {(allDay.length > 0 || (summary && (summary.dietary.length > 0 || summary.dietary_lines.length > 0))) && (
         <div className="flex-shrink-0 px-4 pb-3">
-          <div className="flex items-center rounded-[20px] bg-[var(--ds-surface)] px-3 py-2 shadow-[var(--ds-shadow-card)]">
+          <div className="flex items-center rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-3 py-2 shadow-[var(--ds-shadow-card)]">
             {/* Solo i chip scorrono: la pill delle note sta FUORI dall'area a
                 scorrimento, sempre visibile a destra qualunque sia la coda. */}
             <div ref={barRef} className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
@@ -828,7 +828,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                   data-chip={key}
                   onClick={() => setChipDetail(key)}
                   aria-label={`Dove va ${key}`}
-                  className={`inline-flex min-h-[48px] flex-shrink-0 items-stretch overflow-hidden rounded-[14px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                  className={`inline-flex min-h-[48px] flex-shrink-0 items-stretch overflow-hidden rounded-[var(--ds-radius)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                     litChip === key
                       ? 'bg-[var(--ds-border)] ring-2 ring-[var(--ds-action-bg)]'
                       : 'bg-[var(--ds-surface-row)] hover:bg-[var(--ds-border)]'
@@ -870,10 +870,10 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                 <button
                   type="button"
                   onClick={() => setSummaryOpen(true)}
-                  className="inline-flex h-9 items-center gap-2 rounded-full pl-2.5 pr-1 text-[14px] font-semibold text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  className="inline-flex h-9 items-center gap-2 rounded-[var(--ds-radius-control)] pl-2.5 pr-1 text-[14px] font-semibold text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 >
                   Note
-                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-[var(--ds-pending-solid)] text-[13px] font-semibold tabular-nums text-[var(--ds-pending-fg)]">
+                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-pending-solid)] text-[13px] font-semibold tabular-nums text-[var(--ds-pending-fg)]">
                     {summary.dietary.length + summary.dietary_lines.length}
                   </span>
                 </button>
@@ -931,7 +931,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                         : { orderId: head.order_id, tableName: head.table_name, customerName: head.customer_name })}
                       aria-pressed={timelineFor?.orderId === head.order_id}
                       aria-label={`Storia della comanda del tavolo ${head.table_name ?? head.order_id}`}
-                      className={`block w-full rounded-[16px] bg-[var(--ds-surface)] px-4 py-3 text-left shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                      className={`block w-full rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-4 py-3 text-left shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                         timelineFor?.orderId === head.order_id ? 'ring-2 ring-[var(--ds-action-bg)]' : ''
                       }`}
                     >
@@ -1055,7 +1055,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                 // si legge da lontano.
                 <div
                   key={col.key}
-                  className="flex-shrink-0 rounded-[16px] border-2 border-dashed border-[var(--ds-border-strong)] px-3 py-2"
+                  className="flex-shrink-0 rounded-[var(--ds-radius)] border-2 border-dashed border-[var(--ds-border-strong)] px-3 py-2"
                 >
                   <div className="text-[15px] font-semibold text-[var(--ds-text-primary)]">
                     T{col.table_name} · {courseShort(col.course_no)}
@@ -1071,7 +1071,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                     <button
                       type="button"
                       onClick={() => col.items.forEach(i => advance(i, 'PREPARING'))}
-                      className="inline-flex h-11 items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-3.5 text-[14px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)]"
+                      className="inline-flex h-11 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3.5 text-[14px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)]"
                     >
                       <Play size={13} aria-hidden /> inizia ora
                     </button>
@@ -1120,7 +1120,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
           const Section = ({ label, dot, courseTone, pulseCalled, list }: { label: string; dot: string; courseTone: string; pulseCalled?: boolean; list: { table: string; course: number; qty: number; called: boolean }[] }) => (
             <div>
               <div className="mb-3 flex items-center gap-3 text-[18px] font-semibold text-[var(--ds-text-muted)]">
-                <span aria-hidden className={`h-3.5 w-3.5 flex-shrink-0 rounded-full ${dot}`} />
+                <span aria-hidden className={`h-3.5 w-3.5 flex-shrink-0 rounded-[var(--ds-radius-control)] ${dot}`} />
                 {label}
               </div>
               {list.length === 0 ? (
@@ -1139,7 +1139,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                     // Uscita chiamata ma non ancora sul fuoco qui: pulsa la
                     // card intera — «sta per toccare a te», un gradino sotto
                     // l'oro della colonna in lavorazione.
-                    <span key={`${e.table}-${e.course}`} className={`flex min-h-[48px] items-stretch overflow-hidden rounded-[14px] bg-[var(--ds-surface-row)] ${pulseCalled && e.called ? 'animate-pulse' : ''}`}>
+                    <span key={`${e.table}-${e.course}`} className={`flex min-h-[48px] items-stretch overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] ${pulseCalled && e.called ? 'animate-pulse' : ''}`}>
                       <span className="flex w-[48px] flex-shrink-0 items-center justify-center bg-[var(--ds-action-bg)] px-2 text-[18px] font-bold tabular-nums text-[var(--ds-action-fg)]">
                         {e.qty}
                       </span>
@@ -1197,7 +1197,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
         {detailGroup && (
           <div className="space-y-4">
             {detailGroup.allergens && (
-              <div className="flex items-start gap-1.5 rounded-[12px] bg-[var(--ds-critical-tint)] px-3 py-2 text-[14px] font-medium text-[var(--ds-critical-text)]">
+              <div className="flex items-start gap-1.5 rounded-[var(--ds-radius)] bg-[var(--ds-critical-tint)] px-3 py-2 text-[14px] font-medium text-[var(--ds-critical-text)]">
                 <TriangleAlert size={15} className="mt-0.5 flex-shrink-0" aria-hidden />
                 <span>{detailGroup.allergens}</span>
               </div>
@@ -1280,7 +1280,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
       >
         <div className="space-y-3">
           {(revisionsByOrder.get(revisionsFor ?? -1) ?? []).map(r => (
-            <div key={r.id} className="rounded-[14px] bg-[var(--ds-surface-row)] px-3.5 py-3">
+            <div key={r.id} className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3.5 py-3">
               <p className="text-[16px] font-semibold text-[var(--ds-text-primary)]">{r.summary}</p>
               {(r.details ?? []).filter(d => d.note).map((d, i) => (
                 <p key={i} className="mt-1 text-[14px] text-[var(--ds-text-secondary)]">{d.label} — {d.note}</p>
@@ -1384,7 +1384,7 @@ const OrderCard: React.FC<{
     // itinerario scelto da Marco (2/09). Lo stato (anello verde, lampeggio
     // lampada) vive sulla card della SUA uscita, non sull'insieme.
     <div className="flex max-h-full w-72 flex-shrink-0 flex-col">
-      <div className="overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+      <div className="overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
       <div className="px-1 py-1">
         {/* La testata si tocca: apre la comanda per intero in un modal.
             Stesso patto delle sezioni compresse — riassunto sempre,
@@ -1393,7 +1393,7 @@ const OrderCard: React.FC<{
           type="button"
           onClick={onShowOrder}
           aria-label={`Comanda intera del tavolo ${g.table_name ?? '—'}`}
-          className="block w-full rounded-[16px] px-2 py-1.5 text-left transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          className="block w-full rounded-[var(--ds-radius)] px-2 py-1.5 text-left transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
         >
           <div className="flex items-baseline gap-2">
             <span className="text-[20px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)]">
@@ -1432,7 +1432,7 @@ const OrderCard: React.FC<{
           <button
             type="button"
             onClick={onShowRevisions}
-            className="mb-1 mt-1.5 flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-[12px] bg-[var(--ds-critical-solid)] px-3 text-[14px] font-semibold text-[var(--ds-critical-fg)] transition-colors hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="mb-1 mt-1.5 flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-[var(--ds-radius)] bg-[var(--ds-critical-solid)] px-3 text-[14px] font-semibold text-[var(--ds-critical-fg)] transition-colors hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             <Pencil size={14} aria-hidden />
             modificata{revisions.length > 1 ? ` · ${revisions.length}` : ''}
@@ -1479,8 +1479,8 @@ const OrderCard: React.FC<{
               const wait = minutesUntil(soon.items[0]?.station_start_at ?? null, now);
               return (
                 <div key={no} className="relative">
-                  <span aria-hidden className="absolute -left-[28px] top-2.5 h-5 w-5 rounded-full bg-[var(--ds-border-strong)] ring-4 ring-[var(--ds-canvas)]" />
-                  <div className="rounded-[16px] border-2 border-dashed border-[var(--ds-border-strong)] px-2.5 py-2">
+                  <span aria-hidden className="absolute -left-[28px] top-2.5 h-5 w-5 rounded-[var(--ds-radius-control)] bg-[var(--ds-border-strong)] ring-4 ring-[var(--ds-canvas)]" />
+                  <div className="rounded-[var(--ds-radius)] border-2 border-dashed border-[var(--ds-border-strong)] px-2.5 py-2">
                     <div className="flex items-baseline gap-2 text-[13px]">
                       <span className="font-semibold text-[var(--ds-text-primary)]">
                         {courseName(no)}
@@ -1496,7 +1496,7 @@ const OrderCard: React.FC<{
                     <button
                       type="button"
                       onClick={() => soon.items.forEach(i => onAdvance(i, 'PREPARING'))}
-                      className="mt-1.5 inline-flex h-11 items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-3.5 text-[14px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)]"
+                      className="mt-1.5 inline-flex h-11 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3.5 text-[14px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)]"
                     >
                       <Play size={13} aria-hidden /> inizia ora
                     </button>
@@ -1583,12 +1583,12 @@ const CourseSection: React.FC<{
           binario. Fermo e verde quando tutto è pronto. */}
       <span
         aria-hidden
-        className={`absolute -left-[28px] top-2.5 h-5 w-5 rounded-full ring-4 ring-[var(--ds-canvas)] ${
+        className={`absolute -left-[28px] top-2.5 h-5 w-5 rounded-[var(--ds-radius-control)] ring-4 ring-[var(--ds-canvas)] ${
           allReady ? 'bg-[var(--ds-seated-solid)]' : 'animate-pulse bg-[var(--ds-pending-solid)]'
         }`}
       />
       <div
-        className={`rounded-[16px] bg-[var(--ds-surface)] px-2.5 py-2 shadow-[var(--ds-shadow-card)] ${
+        className={`rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-2.5 py-2 shadow-[var(--ds-shadow-card)] ${
           lampAlert
             ? 'animate-pulse ring-2 ring-[var(--ds-critical-solid)]'
             : allReady
@@ -1639,7 +1639,7 @@ const CourseSection: React.FC<{
                     onPointerDown={e => e.stopPropagation()}
                     onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onEditWeight(i); } }}
                     aria-label={`Correggi il peso di ${i.name_snapshot} (ora ${weightLabel(i.weight_grams)})`}
-                    className="mt-0.5 inline-flex flex-shrink-0 cursor-pointer items-center rounded-full bg-[var(--ds-pending-tint)] px-2 py-0.5 text-[12px] font-semibold tabular-nums text-[var(--ds-pending-text)] transition-colors hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    className="mt-0.5 inline-flex flex-shrink-0 cursor-pointer items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-pending-tint)] px-2 py-0.5 text-[12px] font-semibold tabular-nums text-[var(--ds-pending-text)] transition-colors hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
                     {weightLabel(i.weight_grams)}
                   </span>
@@ -1682,7 +1682,7 @@ const CourseSection: React.FC<{
               aria-label={ready
                 ? `Annulla pronto: ${i.qty} ${i.name_snapshot}`
                 : `Segna pronto: ${i.qty} ${i.name_snapshot}`}
-              className="block min-h-11 w-full select-none rounded-[12px] px-1.5 py-1.5 text-left transition-colors hover:bg-[var(--ds-surface-row)] active:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              className="block min-h-11 w-full select-none rounded-[var(--ds-radius)] px-1.5 py-1.5 text-left transition-colors hover:bg-[var(--ds-surface-row)] active:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               style={{ WebkitTouchCallout: 'none' } as React.CSSProperties}
             >
               {body}
@@ -1753,7 +1753,7 @@ const CourseSection: React.FC<{
           <button
             type="button"
             onClick={() => col.items.filter(i => i.status !== 'READY').forEach(i => onAdvance(i, 'READY'))}
-            className="min-w-0 flex-1 rounded-[16px] bg-[var(--ds-action-bg)] py-3 text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="min-w-0 flex-1 rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] py-3 text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             Tutto pronto
           </button>
@@ -1772,7 +1772,7 @@ const CourseSection: React.FC<{
             disabled={called}
             title={called ? 'Sala avvisata' : "Avvisa la sala: l'uscita è pronta al ritiro"}
             aria-label={called ? 'Sala avvisata' : "Avvisa la sala: l'uscita è pronta al ritiro"}
-            className={`inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+            className={`inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
               called
                 ? 'bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)]'
                 : 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)]'
@@ -1787,7 +1787,7 @@ const CourseSection: React.FC<{
             onClick={() => onServeCourse(col)}
             title="Segna l'uscita servita"
             aria-label="Segna l'uscita servita"
-            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-seated-solid)] text-white transition-colors hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-seated-solid)] text-white transition-colors hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             <Check size={18} aria-hidden />
           </button>
@@ -1841,7 +1841,7 @@ const PassiveSection: React.FC<{
     <div className="relative">
       <span
         aria-hidden
-        className={`absolute -left-[28px] top-2.5 h-5 w-5 rounded-full ring-4 ring-[var(--ds-canvas)] ${
+        className={`absolute -left-[28px] top-2.5 h-5 w-5 rounded-[var(--ds-radius-control)] ring-4 ring-[var(--ds-canvas)] ${
           served ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-border-strong)]'
         }`}
       />
@@ -1850,7 +1850,7 @@ const PassiveSection: React.FC<{
         onClick={() => setOpen(o => !o)}
         aria-expanded={open}
         aria-label={`${courseName(courseNo)}: mostra i piatti`}
-        className="block w-full rounded-[16px] bg-[var(--ds-surface)] px-2.5 py-2 text-left shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+        className="block w-full rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-2.5 py-2 text-left shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
       >
         <div className="flex items-baseline gap-2 pr-1 text-[13px]">
           <span className="font-medium text-[var(--ds-text-muted)]">
@@ -1946,7 +1946,7 @@ const WeightEditModal: React.FC<{
       <div className="flex items-center justify-center gap-2">
         {[-50, -10].map(d => (
           <button key={d} type="button" onClick={() => step(d)}
-            className="inline-flex h-11 min-w-14 items-center justify-center rounded-full bg-[var(--ds-surface-row)] px-3 text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)]">
+            className="inline-flex h-11 min-w-14 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3 text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)]">
             {d}
           </button>
         ))}
@@ -1955,7 +1955,7 @@ const WeightEditModal: React.FC<{
         </span>
         {[10, 50].map(d => (
           <button key={d} type="button" onClick={() => step(d)}
-            className="inline-flex h-11 min-w-14 items-center justify-center rounded-full bg-[var(--ds-surface-row)] px-3 text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)]">
+            className="inline-flex h-11 min-w-14 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3 text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)]">
             +{d}
           </button>
         ))}
@@ -2005,7 +2005,7 @@ const ServiceSummaryDetail: React.FC<{ summary: KitchenServiceSummary }> = ({ su
                     {d.tables.map((t, i) => (
                       <span
                         key={t.table ?? `c-${i}`}
-                        className="inline-flex items-center gap-1 rounded-full bg-[var(--ds-surface-row)] px-3 py-1.5 text-[14px] font-semibold text-[var(--ds-text-primary)]"
+                        className="inline-flex items-center gap-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3 py-1.5 text-[14px] font-semibold text-[var(--ds-text-primary)]"
                       >
                         <span className="tabular-nums">{t.quantity}×</span>
                         <span>{t.table ? `T${t.table}` : t.customer || '—'}</span>
@@ -2084,7 +2084,7 @@ const TimelinePane: React.FC<{
   };
 
   return (
-    <div className="rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
+    <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <h2 className="text-[18px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)]">
@@ -2098,7 +2098,7 @@ const TimelinePane: React.FC<{
           type="button"
           onClick={onClose}
           aria-label="Chiudi la storia"
-          className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
         >
           <X size={16} aria-hidden />
         </button>
@@ -2121,10 +2121,10 @@ const TimelinePane: React.FC<{
               style={{ animation: 'tileIn 260ms ease-out both', animationDelay: `${Math.min(i * 45, 450)}ms` }}
             >
               <span
-                className={`absolute -left-7 top-1/2 h-[11px] w-[11px] -translate-y-1/2 rounded-full ring-4 ring-[var(--ds-surface)] ${dot(e)}`}
+                className={`absolute -left-7 top-1/2 h-[11px] w-[11px] -translate-y-1/2 rounded-[var(--ds-radius-control)] ring-4 ring-[var(--ds-surface)] ${dot(e)}`}
                 aria-hidden
               />
-              <div className="flex items-center gap-3 rounded-[14px] bg-[var(--ds-surface-row)] px-3.5 py-2.5">
+              <div className="flex items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3.5 py-2.5">
                 <span className="min-w-0 flex-1 text-[14px] leading-snug text-[var(--ds-text-primary)]">{label(e)}</span>
                 <span className="flex-shrink-0 text-[16px] font-semibold tabular-nums tracking-[-0.01em] text-[var(--ds-text-primary)]">
                   {getRomeTimePart(e.at)}

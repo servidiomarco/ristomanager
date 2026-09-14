@@ -115,7 +115,7 @@ export const ModalShell: React.FC<ModalShellProps> = ({
         onClick={e => e.stopPropagation()}
         // Full-height on mobile either way — a phone sheet already fills the
         // screen, so only the desktop panel has a choice to make here.
-        className={`flex w-full flex-col overflow-hidden bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] h-full rounded-none sm:max-h-[92vh] sm:rounded-[24px] ${fixedHeight ? 'sm:h-[90vh]' : 'sm:h-auto'} ${SIZE[size]}`}
+        className={`flex w-full flex-col overflow-hidden bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] h-full rounded-none sm:max-h-[92vh] sm:rounded-[var(--ds-radius)] ${fixedHeight ? 'sm:h-[90vh]' : 'sm:h-auto'} ${SIZE[size]}`}
       >
         <header className="flex flex-shrink-0 items-start justify-between gap-4 px-5 py-5 sm:px-6 sm:py-6">
           <div className="min-w-0">
@@ -130,7 +130,7 @@ export const ModalShell: React.FC<ModalShellProps> = ({
             type="button"
             onClick={onClose}
             aria-label="Chiudi"
-            className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             <X className="h-4 w-4" />
           </button>

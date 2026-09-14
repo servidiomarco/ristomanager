@@ -76,7 +76,7 @@ export const Piantina: React.FC<PiantinaProps> = ({ rows, room, billByTable, bus
     <div className="flex h-full min-h-0 flex-col">
       <div ref={boxRef} className="min-h-0 flex-1 overflow-auto">
         <div
-          className="relative mx-auto rounded-[20px] bg-[var(--ds-surface-row)]"
+          className="relative mx-auto rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)]"
           style={{
             width: room.width * scale,
             height: room.height * scale,
@@ -97,7 +97,7 @@ export const Piantina: React.FC<PiantinaProps> = ({ rows, room, billByTable, bus
                   onClick={() => onPick(table.id)}
                   disabled={busy}
                   aria-label={`Tavolo ${table.name}`}
-                  className="absolute flex flex-col items-center rounded-[16px] transition-opacity disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  className="absolute flex flex-col items-center rounded-[var(--ds-radius)] transition-opacity disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   style={{ left: table.x, top: table.y, width: dims.width }}
                 >
                   <TableGlyph
@@ -139,7 +139,7 @@ export const Piantina: React.FC<PiantinaProps> = ({ rows, room, billByTable, bus
         ] as [string, TableDisplayStatus][]).map(([label, status]) => (
           <span key={status} className="inline-flex items-center gap-1.5">
             <span
-              className="inline-block h-3 w-3 rounded-full ring-1 ring-inset ring-[var(--ds-border-strong)]"
+              className="inline-block h-3 w-3 rounded-[var(--ds-radius-control)] ring-1 ring-inset ring-[var(--ds-border-strong)]"
               style={{ background: `var(--tg-${status}-bg)` }}
               aria-hidden
             />

@@ -68,7 +68,7 @@ export const RevolutIntegrationCard: React.FC<Props> = ({ showToast }) => {
         if (!status) return null;
         if (!status.has_api_key) {
             return (
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] border border-[var(--ds-border)]">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[var(--ds-radius-control)] text-[11px] font-medium bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] border border-[var(--ds-border)]">
                     <span className="w-1.5 h-1.5 rounded-full bg-[var(--ds-border-strong)]"></span>
                     Non configurato
                 </span>
@@ -80,7 +80,7 @@ export const RevolutIntegrationCard: React.FC<Props> = ({ showToast }) => {
             : 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] border-[var(--ds-pending-solid)]';
         const dot = status.environment === 'production' ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-pending-solid)]';
         return (
-            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border ${color}`}>
+            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[var(--ds-radius-control)] text-[11px] font-medium border ${color}`}>
                 <span className={`w-1.5 h-1.5 rounded-full ${dot}`}></span>
                 {label}
             </span>
@@ -120,7 +120,7 @@ export const RevolutIntegrationCard: React.FC<Props> = ({ showToast }) => {
 
     if (loading) {
         return (
-            <div className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] p-4 flex items-center gap-2 text-[13px] text-[var(--ds-text-muted)]">
+            <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] p-4 flex items-center gap-2 text-[13px] text-[var(--ds-text-muted)]">
                 <Loader label="Caricamento…" size={40} />
             </div>
         );
@@ -128,7 +128,7 @@ export const RevolutIntegrationCard: React.FC<Props> = ({ showToast }) => {
     if (!status) return null;
 
     return (
-        <div className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] overflow-hidden">
+        <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] overflow-hidden">
             <button
                 type="button"
                 onClick={() => setExpanded((v) => !v)}
@@ -136,7 +136,7 @@ export const RevolutIntegrationCard: React.FC<Props> = ({ showToast }) => {
                 className="w-full flex items-center justify-between gap-3 p-4 text-left hover:bg-[var(--ds-surface-row)] transition-colors"
             >
                 <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-10 h-10 rounded-md bg-[var(--ds-surface-row)] flex items-center justify-center flex-shrink-0">
+                    <div className="w-10 h-10 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] flex items-center justify-center flex-shrink-0">
                         <CreditCard className="w-5 h-5 text-[var(--ds-text-primary)]" />
                     </div>
                     <div className="min-w-0">
@@ -164,7 +164,7 @@ export const RevolutIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                     : 'Test in sandbox. Nessun addebito reale.'}
                             </p>
                         </div>
-                        <div className="inline-flex rounded-md border border-[var(--ds-border)] overflow-hidden text-[12px] font-medium">
+                        <div className="inline-flex rounded-[var(--ds-radius)] border border-[var(--ds-border)] overflow-hidden text-[12px] font-medium">
                             <button
                                 type="button"
                                 onClick={() => canEdit && setDraftEnv('sandbox')}
@@ -214,7 +214,7 @@ export const RevolutIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                 disabled={!canEdit || saving}
                                 autoComplete="off"
                                 spellCheck={false}
-                                className="w-full pr-10 px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
+                                className="w-full pr-10 px-3 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                             />
                             <button
                                 type="button"
@@ -245,7 +245,7 @@ export const RevolutIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                 disabled={!canEdit || saving}
                                 autoComplete="off"
                                 spellCheck={false}
-                                className="w-full pr-10 px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
+                                className="w-full pr-10 px-3 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                             />
                             <button
                                 type="button"
@@ -273,7 +273,7 @@ export const RevolutIntegrationCard: React.FC<Props> = ({ showToast }) => {
                             onChange={(e) => setApiVersionInput(e.target.value)}
                             placeholder="2024-09-01"
                             disabled={!canEdit || saving}
-                            className="w-full px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
+                            className="w-full px-3 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                         />
                     </div>
 
@@ -289,7 +289,7 @@ export const RevolutIntegrationCard: React.FC<Props> = ({ showToast }) => {
                             type="button"
                             onClick={handleSave}
                             disabled={!canEdit || saving || !hasChanges}
-                            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[13px] font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[13px] font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                             Salva

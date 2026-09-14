@@ -88,7 +88,7 @@ export const PublicReceiptPage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[var(--ds-canvas)] px-4 py-6 print:bg-white print:p-0">
-      <div className="mx-auto w-full max-w-[420px] rounded-[20px] bg-[var(--ds-surface)] p-6 shadow-[var(--ds-shadow-card)] print:max-w-none print:rounded-none print:shadow-none">
+      <div className="mx-auto w-full max-w-[420px] rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-6 shadow-[var(--ds-shadow-card)] print:max-w-none print:rounded-none print:shadow-none">
         <div className="text-center">
           <h1 className="text-[18px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">{business.name}</h1>
           {business.address && <p className="mt-0.5 text-[13px] text-[var(--ds-text-muted)]">{business.address}</p>}
@@ -97,7 +97,7 @@ export const PublicReceiptPage: React.FC = () => {
             Copia del documento commerciale di vendita o prestazione
           </p>
           {receipt.status === 'VOIDED' && (
-            <p className="mt-2 inline-block rounded-full bg-[var(--ds-critical-tint)] px-3 py-1 text-[13px] font-semibold text-[var(--ds-critical-text)]">
+            <p className="mt-2 inline-block rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-tint)] px-3 py-1 text-[13px] font-semibold text-[var(--ds-critical-text)]">
               documento annullato{receipt.voided_at ? ` il ${dateLabel(receipt.voided_at)}` : ''}
             </p>
           )}
@@ -144,7 +144,7 @@ export const PublicReceiptPage: React.FC = () => {
         <button
           type="button"
           onClick={() => window.print()}
-          className="mt-5 inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-[var(--ds-action-bg)] text-[15px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] print:hidden"
+          className="mt-5 inline-flex h-12 w-full items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[15px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] print:hidden"
         >
           <Printer size={16} aria-hidden /> Stampa o salva
         </button>

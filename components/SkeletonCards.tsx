@@ -27,11 +27,11 @@ export const SkeletonReservationCard: React.FC<{ variant?: 'wide' | 'narrow'; cl
 }) => (
     <div
         aria-hidden="true"
-        className={`w-full rounded-2xl border border-[var(--ds-border)] bg-[var(--ds-surface)] p-3 min-h-[88px] motion-safe:animate-pulse ${className ?? ''}`}
+        className={`w-full rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] p-3 min-h-[88px] motion-safe:animate-pulse ${className ?? ''}`}
     >
         <div className="flex items-center justify-between gap-2 mb-2">
             <div className="h-5 w-14 rounded bg-[var(--ds-surface-row)]" />
-            <div className="h-4 w-16 rounded-full bg-[var(--ds-surface-row)]" />
+            <div className="h-4 w-16 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)]" />
         </div>
         <div className={`h-4 rounded bg-[var(--ds-surface-row)] mb-2 ${variant === 'wide' ? 'w-3/5' : 'w-2/5'}`} />
         <div className="flex items-center gap-3">
@@ -91,7 +91,7 @@ export const SkeletonInboxRow: React.FC<{ withBadge?: boolean; className?: strin
         aria-hidden="true"
         className={`w-full flex items-start gap-3 px-4 py-3 border-b border-[var(--ds-border)] motion-safe:animate-pulse ${className ?? ''}`}
     >
-        <div className="flex-shrink-0 w-9 h-9 rounded-full bg-[var(--ds-surface-row)]" />
+        <div className="flex-shrink-0 w-9 h-9 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)]" />
         <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-2">
                 <div className="h-4 w-28 rounded bg-[var(--ds-surface-row)]" />
@@ -101,7 +101,7 @@ export const SkeletonInboxRow: React.FC<{ withBadge?: boolean; className?: strin
         </div>
         <div className="flex flex-col items-end gap-1 flex-shrink-0">
             <div className="h-3 w-12 rounded bg-[var(--ds-surface-row)]" />
-            {withBadge && <div className="h-4 w-4 rounded-full bg-[var(--ds-surface-row)]" />}
+            {withBadge && <div className="h-4 w-4 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)]" />}
         </div>
     </div>
 );
@@ -125,11 +125,11 @@ export const SkeletonInboxList: React.FC<{ count?: number; className?: string }>
 export const SkeletonPaymentRow: React.FC<{ className?: string }> = ({ className }) => (
     <div
         aria-hidden="true"
-        className={`w-full rounded-xl border border-[var(--ds-border)] bg-[var(--ds-surface)] p-3 motion-safe:animate-pulse ${className ?? ''}`}
+        className={`w-full rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] p-3 motion-safe:animate-pulse ${className ?? ''}`}
     >
         <div className="flex items-center justify-between gap-3 mb-2">
             <div className="h-5 w-24 rounded bg-[var(--ds-surface-row)]" />
-            <div className="h-4 w-16 rounded-full bg-[var(--ds-surface-row)]" />
+            <div className="h-4 w-16 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)]" />
         </div>
         <div className="flex items-center gap-3">
             <div className="h-3 w-32 rounded bg-[var(--ds-surface-row)]" />
@@ -158,7 +158,7 @@ export const SkeletonCustomerCard: React.FC<{ variant?: 'compact' | 'full'; clas
 }) => (
     <div
         aria-hidden="true"
-        className={`bg-[var(--ds-surface)] rounded-2xl border border-[var(--ds-border)] shadow-sm p-4 flex flex-col gap-2 motion-safe:animate-pulse ${className ?? ''}`}
+        className={`bg-[var(--ds-surface)] rounded-[var(--ds-radius)] border border-[var(--ds-border)] shadow-sm p-4 flex flex-col gap-2 motion-safe:animate-pulse ${className ?? ''}`}
     >
         <div className="flex items-start justify-between gap-2">
             <div className="flex-1 min-w-0">
@@ -166,8 +166,8 @@ export const SkeletonCustomerCard: React.FC<{ variant?: 'compact' | 'full'; clas
                 <div className="h-3 w-1/3 rounded bg-[var(--ds-surface-row)]" />
             </div>
             <div className="flex items-center gap-1 flex-shrink-0">
-                <div className="h-6 w-6 rounded-lg bg-[var(--ds-surface-row)]" />
-                <div className="h-6 w-6 rounded-lg bg-[var(--ds-surface-row)]" />
+                <div className="h-6 w-6 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)]" />
+                <div className="h-6 w-6 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)]" />
             </div>
         </div>
         <div className="space-y-1.5">
@@ -184,8 +184,8 @@ export const SkeletonCustomerCard: React.FC<{ variant?: 'compact' | 'full'; clas
         </div>
         {variant === 'full' && (
             <div className="flex flex-wrap gap-1.5 mt-1">
-                <div className="h-5 w-16 rounded-full bg-[var(--ds-surface-row)]" />
-                <div className="h-5 w-20 rounded-full bg-[var(--ds-surface-row)]" />
+                <div className="h-5 w-16 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)]" />
+                <div className="h-5 w-20 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)]" />
             </div>
         )}
     </div>
@@ -218,14 +218,14 @@ export const SkeletonNotificationRow: React.FC<{ withBody?: boolean; unread?: bo
     return (
     <div
         aria-hidden="true"
-        className={`rounded-xl border p-3 md:p-4 motion-safe:animate-pulse ${
+        className={`rounded-[var(--ds-radius)] border p-3 md:p-4 motion-safe:animate-pulse ${
             unread
                 ? 'bg-[var(--ds-arriving-tint)] border-[var(--ds-arriving-tint)]'
                 : 'bg-[var(--ds-surface)] border-[var(--ds-border)]'
         } ${className ?? ''}`}
     >
         <div className="flex items-start gap-3">
-            <div className={`flex-shrink-0 h-8 w-8 rounded-full ${block}`} />
+            <div className={`flex-shrink-0 h-8 w-8 rounded-[var(--ds-radius-control)] ${block}`} />
             <div className="flex-1 min-w-0">
                 <div className="flex items-start justify-between gap-2 mb-2">
                     <div className={`h-4 w-3/5 rounded ${block}`} />
@@ -263,14 +263,14 @@ export const SkeletonNotificationList: React.FC<{ count?: number; className?: st
 export const SkeletonTaskRow: React.FC<{ className?: string }> = ({ className }) => (
     <div
         aria-hidden="true"
-        className={`p-3 rounded-lg border bg-[var(--ds-surface)] border-[var(--ds-border)] motion-safe:animate-pulse ${className ?? ''}`}
+        className={`p-3 rounded-[var(--ds-radius)] border bg-[var(--ds-surface)] border-[var(--ds-border)] motion-safe:animate-pulse ${className ?? ''}`}
     >
         <div className="flex items-start gap-3">
             <div className="flex-shrink-0 h-5 w-5 rounded bg-[var(--ds-surface-row)]" />
             <div className="flex-1 min-w-0">
                 <div className="h-4 w-3/4 rounded bg-[var(--ds-surface-row)] mb-2" />
                 <div className="flex items-center gap-2">
-                    <div className="h-4 w-16 rounded-full bg-[var(--ds-surface-row)]" />
+                    <div className="h-4 w-16 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)]" />
                     <div className="h-3 w-20 rounded bg-[var(--ds-surface-row)]" />
                 </div>
             </div>
@@ -304,9 +304,9 @@ export const SkeletonProductRow: React.FC<{ isFirst?: boolean; className?: strin
             <div className="h-3 w-1/4 rounded bg-[var(--ds-surface-row)]" />
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
-            <div className="h-8 w-8 rounded-full bg-[var(--ds-surface-row)]" />
+            <div className="h-8 w-8 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)]" />
             <div className="h-6 w-12 rounded bg-[var(--ds-surface-row)]" />
-            <div className="h-8 w-8 rounded-full bg-[var(--ds-surface-row)]" />
+            <div className="h-8 w-8 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)]" />
         </div>
     </div>
 );
@@ -316,7 +316,7 @@ export const SkeletonProductList: React.FC<{ count?: number; className?: string 
     className,
 }) => (
     <div
-        className={`bg-[var(--ds-surface)] rounded-lg border border-[var(--ds-border)] overflow-hidden ${className ?? ''}`}
+        className={`bg-[var(--ds-surface)] rounded-[var(--ds-radius)] border border-[var(--ds-border)] overflow-hidden ${className ?? ''}`}
         aria-hidden="true"
     >
         {Array.from({ length: count }).map((_, i) => (
@@ -336,18 +336,18 @@ export const SkeletonHaccpSection: React.FC<{ rows?: number; className?: string 
     // forma quando arrivano i dati.
     <div
         aria-hidden="true"
-        className={`rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)] motion-safe:animate-pulse sm:p-5 ${className ?? ''}`}
+        className={`rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)] motion-safe:animate-pulse sm:p-5 ${className ?? ''}`}
     >
         <div className="mb-3 flex items-center gap-2.5">
-            <div className="h-8 w-8 rounded-full bg-[var(--ds-surface-row)]" />
-            <div className="h-4 w-40 rounded-full bg-[var(--ds-surface-row)]" />
-            <div className="ml-auto h-6 w-24 rounded-full bg-[var(--ds-surface-row)]" />
+            <div className="h-8 w-8 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)]" />
+            <div className="h-4 w-40 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)]" />
+            <div className="ml-auto h-6 w-24 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)]" />
         </div>
         <div className="space-y-2.5">
             {Array.from({ length: rows }).map((_, i) => (
                 <div key={i} className="flex items-center gap-3">
                     <div className="h-3 w-1/3 rounded-full bg-[var(--ds-surface-row)]" />
-                    <div className="ml-auto h-11 w-24 rounded-full bg-[var(--ds-surface-row)]" />
+                    <div className="ml-auto h-11 w-24 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)]" />
                 </div>
             ))}
         </div>
@@ -367,7 +367,7 @@ export const SkeletonHaccpSections: React.FC<{ className?: string }> = ({ classN
 export const SkeletonStaffColumn: React.FC<{ label?: 'Sala' | 'Cucina'; className?: string }> = ({ label, className }) => (
     <div
         aria-hidden="true"
-        className={`bg-[var(--ds-surface)] rounded-lg border border-[var(--ds-border)] overflow-hidden motion-safe:animate-pulse ${className ?? ''}`}
+        className={`bg-[var(--ds-surface)] rounded-[var(--ds-radius)] border border-[var(--ds-border)] overflow-hidden motion-safe:animate-pulse ${className ?? ''}`}
     >
         <div className="flex items-center gap-2 px-4 py-3 border-b border-[var(--ds-border)]">
             <div className="h-4 w-4 rounded bg-[var(--ds-surface-row)]" />
@@ -378,13 +378,13 @@ export const SkeletonStaffColumn: React.FC<{ label?: 'Sala' | 'Cucina'; classNam
             {[0, 1].map(group => (
                 <div key={group} className="mb-3 last:mb-0">
                     <div className="flex items-center gap-2 px-2 py-1.5 mb-1">
-                        <div className="h-4 w-20 rounded-full bg-[var(--ds-surface-row)]" />
+                        <div className="h-4 w-20 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)]" />
                         <div className="h-3 w-6 rounded bg-[var(--ds-surface-row)]" />
                         <div className="flex-1 h-px bg-[var(--ds-border)]" />
                     </div>
                     {[0, 1, 2].map(row => (
-                        <div key={row} className="flex items-center gap-3 p-2.5 rounded-md mb-1">
-                            <div className="w-9 h-9 rounded-full bg-[var(--ds-surface-row)] flex-shrink-0" />
+                        <div key={row} className="flex items-center gap-3 p-2.5 rounded-[var(--ds-radius)] mb-1">
+                            <div className="w-9 h-9 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] flex-shrink-0" />
                             <div className="flex-1 min-w-0">
                                 <div className="h-4 w-3/4 rounded bg-[var(--ds-surface-row)] mb-1.5" />
                                 <div className="h-3 w-1/3 rounded bg-[var(--ds-surface-row)]" />
@@ -403,10 +403,10 @@ export const SkeletonStaffColumn: React.FC<{ label?: 'Sala' | 'Cucina'; classNam
 export const SkeletonKpiCard: React.FC<{ className?: string }> = ({ className }) => (
     <div
         aria-hidden="true"
-        className={`bg-[var(--ds-surface)] p-4 rounded-xl border border-[var(--ds-border)] shadow-[var(--ds-shadow-card)] motion-safe:animate-pulse ${className ?? ''}`}
+        className={`bg-[var(--ds-surface)] p-4 rounded-[var(--ds-radius)] border border-[var(--ds-border)] shadow-[var(--ds-shadow-card)] motion-safe:animate-pulse ${className ?? ''}`}
     >
         <div className="h-4 w-20 rounded bg-[var(--ds-surface-row)] mb-4" />
-        <div className="h-9 w-9 rounded-full bg-[var(--ds-surface-row)] mb-3" />
+        <div className="h-9 w-9 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] mb-3" />
         <div className="flex items-baseline gap-3">
             <div>
                 <div className="h-2.5 w-10 rounded bg-[var(--ds-surface-row)] mb-1.5" />
@@ -446,7 +446,7 @@ export const SkeletonEmailBubble: React.FC<{ side: 'in' | 'out'; className?: str
         className={`w-full flex ${side === 'in' ? 'justify-start' : 'justify-end'} ${className ?? ''}`}
     >
         <div
-            className={`max-w-[75%] rounded-2xl p-3 motion-safe:animate-pulse ${
+            className={`max-w-[75%] rounded-[var(--ds-radius)] p-3 motion-safe:animate-pulse ${
                 side === 'in'
                     ? 'bg-[var(--ds-arriving-tint)]'
                     : 'bg-[var(--ds-surface-row)]'

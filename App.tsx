@@ -263,7 +263,7 @@ const SettingsIcon: React.FC<{
   tone?: 'neutral' | 'pending' | 'positive';
 }> = ({ icon: Icon, tone = 'neutral' }) => (
   <span
-    className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[12px] ${
+    className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius)] ${
       tone === 'pending' ? 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]'
       : tone === 'positive' ? 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'
       : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)]'
@@ -282,7 +282,7 @@ const SettingsDisclosure: React.FC<{
   description: string;
   children: React.ReactNode;
 }> = ({ icon, iconTone, title, description, children }) => (
-  <details className="group overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+  <details className="group overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
     {/* min-h 44px e nessun marcatore nativo: la riga intera è il bersaglio. */}
     <summary className="flex min-h-[64px] cursor-pointer select-none list-none items-center justify-between gap-3 p-3 transition-colors hover:bg-[var(--ds-surface-row)] [&::-webkit-details-marker]:hidden">
       <span className="flex min-w-0 items-center gap-3">
@@ -293,7 +293,7 @@ const SettingsDisclosure: React.FC<{
         </span>
       </span>
       <span
-        className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-transform group-open:rotate-180"
+        className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-transform group-open:rotate-180"
         aria-hidden
       >
         <ChevronDown className="h-4 w-4" />
@@ -313,7 +313,7 @@ const SettingsNavCard: React.FC<{
   <button
     type="button"
     onClick={onClick}
-    className="flex min-h-[64px] items-center gap-3 rounded-[20px] bg-[var(--ds-surface)] p-3 text-left shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+    className="flex min-h-[64px] items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-3 text-left shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
   >
     <SettingsIcon icon={icon} />
     <span className="min-w-0 flex-1">
@@ -816,8 +816,8 @@ const App: React.FC = () => {
   // da sole, senza numeri magici da tenere allineati a mano. Impilato il bollo
   // era più alto della barra e le sporgeva sotto.
   const comandeBrand = (
-    <div className="animate-view-in flex flex-shrink-0 items-center gap-1 rounded-[28px] bg-[var(--ds-surface)] px-3 py-2.5 shadow-[var(--ds-shadow-card)]">
-      <div className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[14px] bg-[var(--ds-action-bg)]">
+    <div className="animate-view-in flex flex-shrink-0 items-center gap-1 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-3 py-2.5 shadow-[var(--ds-shadow-card)]">
+      <div className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)]">
         <ChefHat className="h-5 w-5 text-[var(--ds-action-fg)]" />
       </div>
       <button
@@ -827,7 +827,7 @@ const App: React.FC = () => {
         aria-controls="sidebar-nav"
         title="Apri menu"
         aria-label="Apri menu"
-        className="pressable inline-flex h-11 w-8 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+        className="pressable inline-flex h-11 w-8 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
       >
         <ChevronDown size={16} />
       </button>
@@ -855,6 +855,17 @@ const App: React.FC = () => {
     localStorage.setItem('ristocrm_theme', theme);
   }, [theme]);
   const toggleTheme = () => setTheme(t => (t === 'dark' ? 'light' : 'dark'));
+
+  // Stile dell'interfaccia (classico / squadrato): i token dei raggi in
+  // index.css leggono data-design sul root. A differenza del tema la scelta
+  // vive su users (preferred_design_style) e segue l'operatore su ogni
+  // dispositivo; al logout user torna null e l'attributo cade, così la
+  // pagina di login è sempre nello stile classico.
+  useEffect(() => {
+    const root = document.documentElement;
+    if (user?.preferred_design_style === 'squadrato') root.dataset.design = 'squadrato';
+    else delete root.dataset.design;
+  }, [user?.preferred_design_style]);
 
   // Redirect to first accessible view when user changes or doesn't have access to current view.
   // Also honors a ?view= query param so a notification click that opens a fresh tab lands on
@@ -2099,7 +2110,7 @@ const App: React.FC = () => {
           comandeNavStubbed
             ? 'w-0 m-0 opacity-0 invisible pointer-events-none'
             : `${sidebarCollapsed ? 'w-[76px]' : 'w-[250px]'} m-4 mr-0 opacity-100`
-        } overflow-hidden rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] flex-col transition-[width,margin,opacity] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none z-20 relative`}
+        } overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] flex-col transition-[width,margin,opacity] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none z-20 relative`}
         aria-hidden={comandeNavStubbed}
         aria-label="Navigazione principale"
       >
@@ -2116,7 +2127,7 @@ const App: React.FC = () => {
             {/* Wordmark Sympotia a sidebar aperta; chiusa non ci sta, resta il
                 quadrato. Due img nero/bianco: il tema le scambia via CSS. */}
             {sidebarCollapsed ? (
-              <div className="bg-[var(--ds-action-bg)] h-10 w-10 rounded-[14px] inline-flex items-center justify-center flex-shrink-0">
+              <div className="bg-[var(--ds-action-bg)] h-10 w-10 rounded-[var(--ds-radius)] inline-flex items-center justify-center flex-shrink-0">
                 <ChefHat className="text-[var(--ds-action-fg)] h-5 w-5" />
               </div>
             ) : (
@@ -2144,7 +2155,7 @@ const App: React.FC = () => {
                     className={
                       darkLogoUsable
                         ? `h-16 w-auto dark:hidden ${tenantLogoReady && !tenantLogoFailed ? '' : 'hidden'}`
-                        : `h-16 w-auto dark:rounded-[12px] dark:bg-white dark:p-1.5 ${tenantLogoReady && !tenantLogoFailed ? '' : 'hidden'}`
+                        : `h-16 w-auto dark:rounded-[var(--ds-radius)] dark:bg-white dark:p-1.5 ${tenantLogoReady && !tenantLogoFailed ? '' : 'hidden'}`
                     }
                   />
                   {darkLogoUsable && (
@@ -2183,7 +2194,7 @@ const App: React.FC = () => {
             aria-controls="sidebar-nav"
             title={view === ViewState.COMANDE ? 'Nascondi menu' : sidebarCollapsed ? 'Apri menu' : 'Chiudi menu'}
             aria-label={view === ViewState.COMANDE ? 'Nascondi menu' : sidebarCollapsed ? 'Apri menu' : 'Chiudi menu'}
-            className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[12px] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${sidebarCollapsed ? '' : 'ml-auto'}`}
+            className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${sidebarCollapsed ? '' : 'ml-auto'}`}
           >
             {/* In Comande il verso conta: il chevron su rimette via il menu da
                 dove il chevron giù l'ha tirato fuori. Altrove resta il
@@ -2235,7 +2246,7 @@ const App: React.FC = () => {
                         onClick={toggleTheme}
                         title={theme === 'dark' ? 'Tema chiaro' : 'Tema scuro'}
                         aria-label={theme === 'dark' ? 'Passa a tema chiaro' : 'Passa a tema scuro'}
-                        className="group w-full flex items-center justify-center px-3 h-10 rounded-[12px] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] transition-colors"
+                        className="group w-full flex items-center justify-center px-3 h-10 rounded-[var(--ds-radius)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] transition-colors"
                       >
                         {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
                       </button>
@@ -2246,7 +2257,7 @@ const App: React.FC = () => {
                         onClick={toggleTheme}
                         aria-label={theme === 'dark' ? 'Passa a tema chiaro' : 'Passa a tema scuro'}
                         aria-pressed={theme === 'dark'}
-                        className="group w-full flex items-center justify-between gap-3 px-3 h-10 rounded-[12px] text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] transition-colors"
+                        className="group w-full flex items-center justify-between gap-3 px-3 h-10 rounded-[var(--ds-radius)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] transition-colors"
                       >
                         <span className="flex items-center gap-3">
                           <span className="text-[var(--ds-text-secondary)]">
@@ -2260,10 +2271,10 @@ const App: React.FC = () => {
                         </span>
                         <span
                           aria-hidden
-                          className={`relative inline-flex h-[26px] w-11 shrink-0 items-center rounded-full transition-colors ${theme === 'dark' ? 'bg-[var(--ds-action-bg)]' : 'bg-[var(--ds-border-strong)]'}`}
+                          className={`relative inline-flex h-[26px] w-11 shrink-0 items-center rounded-[var(--ds-radius-control)] transition-colors ${theme === 'dark' ? 'bg-[var(--ds-action-bg)]' : 'bg-[var(--ds-border-strong)]'}`}
                         >
                           <span
-                            className={`inline-block h-[22px] w-[22px] transform rounded-full bg-[var(--ds-surface)] shadow transition-transform ${theme === 'dark' ? 'translate-x-[20px]' : 'translate-x-0.5'}`}
+                            className={`inline-block h-[22px] w-[22px] transform rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] shadow transition-transform ${theme === 'dark' ? 'translate-x-[20px]' : 'translate-x-0.5'}`}
                           />
                         </span>
                       </button>
@@ -2296,12 +2307,12 @@ const App: React.FC = () => {
         <div className="p-3">
           {/* User Info — level-2 row inside the level-1 sidebar card */}
           {sidebarCollapsed ? (
-            <div className="flex flex-col items-center gap-2 py-2 rounded-[16px] bg-[var(--ds-surface-row)]">
+            <div className="flex flex-col items-center gap-2 py-2 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)]">
               {/* L'avatar apre il profilo self-service — è l'unico appiglio
                   quando la sidebar è chiusa. */}
               <button
                 onClick={() => setShowProfilo(true)}
-                className="w-10 h-10 rounded-full bg-[var(--ds-action-bg)] flex items-center justify-center text-[var(--ds-action-fg)] font-medium text-[13px] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                className="w-10 h-10 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] flex items-center justify-center text-[var(--ds-action-fg)] font-medium text-[13px] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 title="Il tuo account"
                 aria-label="Il tuo account"
               >
@@ -2309,7 +2320,7 @@ const App: React.FC = () => {
               </button>
               <button
                 onClick={logout}
-                className="p-2 text-[var(--ds-text-muted)] hover:text-[var(--ds-critical-solid)] rounded-[12px] transition-colors"
+                className="p-2 text-[var(--ds-text-muted)] hover:text-[var(--ds-critical-solid)] rounded-[var(--ds-radius)] transition-colors"
                 title="Esci"
                 aria-label="Esci"
               >
@@ -2317,12 +2328,12 @@ const App: React.FC = () => {
               </button>
             </div>
           ) : (
-            <div className="flex items-center gap-3 p-3 rounded-[16px] bg-[var(--ds-surface-row)]">
+            <div className="flex items-center gap-3 p-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)]">
               {/* Avatar + nome sono un bottone: aprono il profilo. Esci resta
                   un controllo separato — logout e profilo non si somigliano. */}
               <button
                 onClick={() => setShowProfilo(true)}
-                className="flex flex-1 min-w-0 items-center gap-3 text-left rounded-[12px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                className="flex flex-1 min-w-0 items-center gap-3 text-left rounded-[var(--ds-radius)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 title="Il tuo account"
                 aria-label="Il tuo account"
               >
@@ -2336,7 +2347,7 @@ const App: React.FC = () => {
               </button>
               <button
                 onClick={logout}
-                className="p-1.5 text-[var(--ds-text-muted)] hover:text-[var(--ds-critical-solid)] rounded-[10px] transition-colors"
+                className="p-1.5 text-[var(--ds-text-muted)] hover:text-[var(--ds-critical-solid)] rounded-[var(--ds-radius)] transition-colors"
                 title="Esci"
                 aria-label="Esci"
               >
@@ -2383,7 +2394,7 @@ const App: React.FC = () => {
             In Cucina sparisce del tutto: data-picker, turno, ricerca globale
             e «+» lì non servono, e lo spazio è delle comande — la topbar del
             monitor porta da sola data, orologio e i suoi controlli. */}
-        <header className={`flex-shrink-0 h-16 md:h-[72px] m-4 rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] z-10 md:z-30 items-center justify-between px-3 md:px-4 ${
+        <header className={`flex-shrink-0 h-16 md:h-[72px] m-4 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] z-10 md:z-30 items-center justify-between px-3 md:px-4 ${
           view === ViewState.CUCINA ? 'hidden'
           // Comande sullo schermo largo si prende la pagina: la sua testata è
           // dentro la pagina (ricerca, imbuto, Live) e questa sopra sarebbe
@@ -2409,7 +2420,7 @@ const App: React.FC = () => {
                   <img
                     src={tenantLogo}
                     alt={tenantName || PLATFORM_NAME}
-                    className="h-11 w-auto dark:rounded-[10px] dark:bg-white dark:p-1"
+                    className="h-11 w-auto dark:rounded-[var(--ds-radius)] dark:bg-white dark:p-1"
                   />
                 )
               ) : (
@@ -2440,7 +2451,7 @@ const App: React.FC = () => {
 
              {/* Shift filter — "Tutti" only on Dashboard. Segmented control:
                  track at surface-row, active segment raised on surface. */}
-             <div className="flex items-center bg-[var(--ds-surface-row)] rounded-full p-1 gap-0.5 flex-shrink-0">
+             <div className="flex items-center bg-[var(--ds-surface-row)] rounded-[var(--ds-radius-control)] p-1 gap-0.5 flex-shrink-0">
                {([
                  { key: 'LUNCH', label: 'Pranzo', icon: <Sun className="h-3.5 w-3.5" /> },
                  { key: 'DINNER', label: 'Cena', icon: <Sunset className="h-3.5 w-3.5" /> },
@@ -2449,7 +2460,7 @@ const App: React.FC = () => {
                  <button
                    key={opt.key}
                    onClick={() => setGlobalShiftFilter(opt.key)}
-                   className={`inline-flex items-center gap-1.5 px-4 h-9 rounded-full text-[15px] font-medium transition-colors ${
+                   className={`inline-flex items-center gap-1.5 px-4 h-9 rounded-[var(--ds-radius-control)] text-[15px] font-medium transition-colors ${
                      globalShiftFilter === opt.key
                        ? 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]'
                        : 'text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
@@ -2485,7 +2496,14 @@ const App: React.FC = () => {
                   Connected uses the `seated` family; offline uses `critical`.
                   Comande a schermo pieno mostra la stessa pastiglia nella sua
                   chrome, quindi vive in ds/ e non più inline qui. */}
-              <LivePill connected={isConnected} time={currentTime} className="hidden md:inline-flex" />
+              {/* `max-md:hidden` e NON `hidden md:inline-flex`: la pastiglia
+                  porta `inline-flex` nella sua classe base, e fra due utility
+                  di display senza variante vince quella che Tailwind emette
+                  dopo — non quella scritta dopo qui. Con `hidden` la pastiglia
+                  restava visibile anche sul telefono, insieme al pallino.
+                  La variante invece esce dopo le utility semplici, quindi
+                  batte la base sotto md. */}
+              <LivePill connected={isConnected} time={currentTime} className="max-md:hidden" />
 
               {/* Mobile-only status dot */}
               <LivePill connected={isConnected} time={currentTime} variant="dot" className="md:hidden mx-1" />
@@ -2494,7 +2512,7 @@ const App: React.FC = () => {
                   as the bell so it stays reachable on mobile, where ⌘K does not apply. */}
               <button
                  onClick={() => setPaletteOpen(true)}
-                 className="h-11 w-11 inline-flex items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors"
+                 className="h-11 w-11 inline-flex items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors"
                  aria-label="Cerca (⌘K)"
                  title="Cerca prenotazioni o clienti (⌘K)"
               >
@@ -2514,7 +2532,7 @@ const App: React.FC = () => {
                   }}
                   aria-haspopup={bellOpensPanel ? 'dialog' : undefined}
                   aria-expanded={bellOpensPanel ? notificationsPanelOpen : undefined}
-                  className={`relative h-11 w-11 inline-flex items-center justify-center rounded-full transition-colors ${
+                  className={`relative h-11 w-11 inline-flex items-center justify-center rounded-[var(--ds-radius-control)] transition-colors ${
                     notificationsPanelOpen
                       ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                       : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
@@ -2524,7 +2542,7 @@ const App: React.FC = () => {
                 >
                   <Bell className="h-[18px] w-[18px]" />
                   {notificationsUnreadCount > 0 && (
-                    <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 inline-flex items-center justify-center rounded-full bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] text-[11px] font-semibold leading-none tabular-nums ring-2 ring-[var(--ds-surface)]">
+                    <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 inline-flex items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] text-[11px] font-semibold leading-none tabular-nums ring-2 ring-[var(--ds-surface)]">
                       {notificationsUnreadCount > 99 ? '99+' : notificationsUnreadCount}
                     </span>
                   )}
@@ -2553,7 +2571,7 @@ const App: React.FC = () => {
                     aria-haspopup="menu"
                     aria-expanded={showCreateMenu}
                     aria-label="Crea nuovo"
-                    className="inline-flex items-center justify-center h-11 w-11 rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] transition-colors"
+                    className="inline-flex items-center justify-center h-11 w-11 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] transition-colors"
                   >
                     <Plus className="h-5 w-5 transition-transform duration-200" style={{ transform: showCreateMenu ? 'rotate(45deg)' : 'none' }} />
                   </button>
@@ -2562,7 +2580,7 @@ const App: React.FC = () => {
                     <div
                       role="menu"
                       aria-label="Crea nuovo"
- className="absolute right-0 top-full mt-2 w-60 p-1.5 rounded-[18px] border border-[var(--ds-border)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] z-30"
+ className="absolute right-0 top-full mt-2 w-60 p-1.5 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] z-30"
                     >
                       {visibleCreateClusters.map((cluster, ci) => (
                         <React.Fragment key={ci}>
@@ -2573,7 +2591,7 @@ const App: React.FC = () => {
                               type="button"
                               role="menuitem"
                               onClick={() => runCreateAction(item.run)}
-                              className="w-full flex items-center gap-3 px-3 h-11 rounded-xl text-sm font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] transition-colors text-left"
+                              className="w-full flex items-center gap-3 px-3 h-11 rounded-[var(--ds-radius)] text-sm font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] transition-colors text-left"
                             >
                               <item.Icon className="h-[18px] w-[18px] text-[var(--ds-text-muted)]" />
                               <span>{item.label}</span>
@@ -2609,7 +2627,7 @@ const App: React.FC = () => {
           // scroll region underneath now paints an opaque sticky toolbar. With
           // no gap the shadow gets sliced by a hard horizontal edge.
           <div className="flex-shrink-0 px-4 pb-4 pt-4 lg:hidden">
-            <div className="rounded-full bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)]">
+            <div className="rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)]">
               {/* Con quattro canali le etichette si troncano a "Chiam…": qui
                   parlano le icone, le label restano per gli screen reader. */}
               <SegmentedControl
@@ -2987,7 +3005,7 @@ const App: React.FC = () => {
                   key={g.id}
                   type="button"
                   onClick={() => document.getElementById(g.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-                  className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-full bg-[var(--ds-surface)] px-3.5 text-[13px] font-medium text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-3.5 text-[13px] font-medium text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 >
                   <g.Icon size={14} className="flex-shrink-0" />
                   {g.label}
@@ -2999,7 +3017,7 @@ const App: React.FC = () => {
                 dispositivo, nel caso delle push), non per il ristorante. */}
             <SettingsSection id="imp-profilo" label="Profilo">
               <div className="space-y-3">
-              <div className="rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
+              <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
                 <label htmlFor="preferred-landing" className="mb-1 block text-[15px] font-semibold text-[var(--ds-text-primary)]">
                   Pagina di partenza
                 </label>
@@ -3064,7 +3082,7 @@ const App: React.FC = () => {
                   stile cassa, per chi arriva dall'app di Passepartout e
                   naviga il menu a memoria muscolare. Per account, non per
                   dispositivo: la scelta segue l'operatore su ogni palmare. */}
-              <div className="rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
+              <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
                 <label htmlFor="preferred-orderpad-layout" className="mb-1 block text-[15px] font-semibold text-[var(--ds-text-primary)]">
                   Comande sul palmare
                 </label>
@@ -3087,6 +3105,36 @@ const App: React.FC = () => {
                 >
                   <option value="">Classico</option>
                   <option value="pages">A pagine, come la cassa</option>
+                </select>
+              </div>
+              {/* Stile dell'interfaccia: 'squadrato' è il redesign dei raggi
+                  (angoli netti, un raggio solo), null il look di sempre.
+                  Cambia solo i tre token in index.css via data-design sul
+                  root — colori e spaziature restano gli stessi. Per account,
+                  come il layout comande: segue l'operatore ovunque. */}
+              <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
+                <label htmlFor="preferred-design-style" className="mb-1 block text-[15px] font-semibold text-[var(--ds-text-primary)]">
+                  Stile dell'interfaccia
+                </label>
+                <p className="mb-3 text-[13px] text-[var(--ds-text-muted)]">
+                  La forma di scatole e bottoni, su tutte le pagine.
+                </p>
+                <select
+                  id="preferred-design-style"
+                  value={user?.preferred_design_style ?? ''}
+                  onChange={async (e) => {
+                    const v = e.target.value || null;
+                    try {
+                      await updatePreferences({ preferred_design_style: v });
+                      addToast('Stile aggiornato', 'success');
+                    } catch (err: any) {
+                      addToast(err?.message || 'Errore aggiornamento preferenze', 'error');
+                    }
+                  }}
+                  className={`${dsSelect} sm:max-w-sm`}
+                >
+                  <option value="">Classico, angoli morbidi</option>
+                  <option value="squadrato">Squadrato, angoli netti</option>
                 </select>
               </div>
                 <PushNotificationsCard />
@@ -3182,7 +3230,7 @@ const App: React.FC = () => {
             {/* Gateway e regole dei pagamenti. */}
             <SettingsSection id="imp-pagamenti" label="Pagamenti">
               <div className="space-y-3">
-                <div className="rounded-[20px] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
+                <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
                   <div className="flex min-h-[40px] items-center justify-between gap-3">
                     <div className="flex min-w-0 items-center gap-3">
                       <SettingsIcon icon={CreditCard} />
@@ -3342,7 +3390,11 @@ const App: React.FC = () => {
             navigazione sotto sarebbe solo un bersaglio per uscire per sbaglio
             dal tavolo aperto. Si torna indietro con la freccia in testata. */}
         <nav
-          className={`fixed left-4 right-4 rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] lg:hidden z-30 ${
+          // Stadio pieno, non il raggio delle scatole: questa barra GALLEGGIA
+          // sopra il contenuto invece di appoggiarsi a un bordo, e una forma
+          // chiusa si stacca da ciò che le scorre sotto. A sei pixel sembrava
+          // una scheda ritagliata male.
+          className={`fixed left-4 right-4 rounded-full bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] lg:hidden z-30 ${
             immersive ? 'hidden' : ''
           }`}
           style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)' }}
@@ -3421,7 +3473,7 @@ const App: React.FC = () => {
                 it — anchored to the same --ds-bottom-nav-clear the scroll
                 region uses, so it always clears the bar and the raised "+". */}
             <div
-              className="fixed left-4 right-4 z-[29] lg:hidden bg-[var(--ds-surface)] rounded-[28px] shadow-[var(--ds-shadow-raised)]"
+              className="fixed left-4 right-4 z-[29] lg:hidden bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-raised)]"
               style={{ bottom: 'var(--ds-bottom-nav-clear)', animation: 'slideUpBehindNav 280ms ease-out both' }}
             >
               <div className="p-5 grid grid-cols-2 gap-4 justify-items-center">
@@ -3438,7 +3490,7 @@ const App: React.FC = () => {
                     className="flex flex-col items-center gap-2 focus:outline-none active:scale-95 transition-transform"
                     style={{ animation: `tileIn 150ms ease-out ${i * 40}ms both` }}
                   >
-                    <div className="w-20 h-20 rounded-[20px] bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-text-primary)]">
+                    <div className="w-20 h-20 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-text-primary)]">
                       {tile.icon}
                     </div>
                     <span className="text-[13px] font-semibold text-[var(--ds-text-primary)]">{tile.label}</span>
@@ -3456,14 +3508,14 @@ const App: React.FC = () => {
               className="absolute inset-0 bg-[var(--ds-backdrop)]"
               onClick={() => setShowMoreMenu(false)}
             />
- <div className="absolute bottom-0 left-0 right-0 max-h-[calc(100dvh-env(safe-area-inset-top)-1rem)] flex flex-col bg-[var(--ds-surface)] rounded-t-[28px] shadow-[var(--ds-shadow-raised)] duration-200">
-              <div className="flex-shrink-0 bg-[var(--ds-surface)] rounded-t-[28px]">
+ <div className="absolute bottom-0 left-0 right-0 max-h-[calc(100dvh-env(safe-area-inset-top)-1rem)] flex flex-col bg-[var(--ds-surface)] rounded-t-[var(--ds-radius)] shadow-[var(--ds-shadow-raised)] duration-200">
+              <div className="flex-shrink-0 bg-[var(--ds-surface)] rounded-t-[var(--ds-radius)]">
                 <div className="flex justify-center pt-3 pb-1">
                   <div className="w-10 h-1 rounded-full bg-[var(--ds-border-strong)]" />
                 </div>
                 <div className="px-4 pb-2 pt-1 flex items-center justify-between">
                   <h3 className="text-[20px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)]">Altro</h3>
-                  <button onClick={() => setShowMoreMenu(false)} className="h-9 w-9 inline-flex items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors" aria-label="Chiudi">
+                  <button onClick={() => setShowMoreMenu(false)} className="h-9 w-9 inline-flex items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors" aria-label="Chiudi">
                     <X className="h-[18px] w-[18px]" />
                   </button>
                 </div>
@@ -3472,7 +3524,7 @@ const App: React.FC = () => {
               {/* User identity card — tocco: apre il profilo self-service */}
               <button
                 onClick={() => { setShowMoreMenu(false); setShowProfilo(true); }}
-                className="mx-4 mb-2 p-3 rounded-[16px] bg-[var(--ds-surface-row)] flex items-center gap-3 w-[calc(100%-2rem)] text-left"
+                className="mx-4 mb-2 p-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] flex items-center gap-3 w-[calc(100%-2rem)] text-left"
               >
                 <div className="w-10 h-10 rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] flex items-center justify-center text-[13px] font-medium shrink-0">
                   {user?.full_name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || 'U'}
@@ -3505,12 +3557,12 @@ const App: React.FC = () => {
                         <button
                           key={item.label}
                           onClick={() => { setShowMoreMenu(false); if (item.view !== undefined) setView(item.view); }}
-                          className={`w-full flex items-center gap-3 px-3 h-12 rounded-[14px] transition-colors ${item.view !== undefined && view === item.view ? 'bg-[var(--ds-surface-row)]' : ''}`}
+                          className={`w-full flex items-center gap-3 px-3 h-12 rounded-[var(--ds-radius)] transition-colors ${item.view !== undefined && view === item.view ? 'bg-[var(--ds-surface-row)]' : ''}`}
                         >
                           <item.Icon className="h-5 w-5 text-[var(--ds-text-secondary)]" />
                           <span className="text-[15px] font-medium tracking-[-0.01em] text-[var(--ds-text-primary)]">{item.label}</span>
                           {badge > 0 && (
-                            <span className="ml-auto min-w-[20px] h-5 px-1.5 rounded-full bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] text-[11px] font-semibold tabular-nums flex items-center justify-center">
+                            <span className="ml-auto min-w-[20px] h-5 px-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] text-[11px] font-semibold tabular-nums flex items-center justify-center">
                               {badge > 99 ? '99+' : badge}
                             </span>
                           )}
@@ -3527,7 +3579,7 @@ const App: React.FC = () => {
                   <button
                     key={item.label}
                     onClick={() => { setShowMoreMenu(false); if (item.view !== undefined) setView(item.view); }}
-                    className={`w-full flex items-center gap-3 px-3 h-12 rounded-[14px] transition-colors ${item.view !== undefined && view === item.view ? 'bg-[var(--ds-surface-row)]' : ''}`}
+                    className={`w-full flex items-center gap-3 px-3 h-12 rounded-[var(--ds-radius)] transition-colors ${item.view !== undefined && view === item.view ? 'bg-[var(--ds-surface-row)]' : ''}`}
                   >
                     <item.Icon className="h-5 w-5 text-[var(--ds-text-secondary)]" />
                     <span className="text-[15px] font-medium tracking-[-0.01em] text-[var(--ds-text-primary)]">{item.label}</span>
@@ -3538,22 +3590,22 @@ const App: React.FC = () => {
                   type="button"
                   onClick={toggleTheme}
                   aria-pressed={theme === 'dark'}
-                  className="w-full flex items-center gap-3 px-3 h-12 rounded-[14px] transition-colors"
+                  className="w-full flex items-center gap-3 px-3 h-12 rounded-[var(--ds-radius)] transition-colors"
                 >
                   {theme === 'dark' ? <Sun className="h-5 w-5 text-[var(--ds-text-secondary)]" /> : <Moon className="h-5 w-5 text-[var(--ds-text-secondary)]" />}
                   <span className="text-[15px] font-medium tracking-[-0.01em] text-[var(--ds-text-primary)]">Modalità scura</span>
                   <span
                     aria-hidden
-                    className={`ml-auto relative inline-flex h-[26px] w-11 shrink-0 items-center rounded-full transition-colors ${theme === 'dark' ? 'bg-[var(--ds-action-bg)]' : 'bg-[var(--ds-border-strong)]'}`}
+                    className={`ml-auto relative inline-flex h-[26px] w-11 shrink-0 items-center rounded-[var(--ds-radius-control)] transition-colors ${theme === 'dark' ? 'bg-[var(--ds-action-bg)]' : 'bg-[var(--ds-border-strong)]'}`}
                   >
                     <span
-                      className={`inline-block h-[22px] w-[22px] transform rounded-full bg-[var(--ds-surface)] shadow transition-transform ${theme === 'dark' ? 'translate-x-[20px]' : 'translate-x-0.5'}`}
+                      className={`inline-block h-[22px] w-[22px] transform rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] shadow transition-transform ${theme === 'dark' ? 'translate-x-[20px]' : 'translate-x-0.5'}`}
                     />
                   </span>
                 </button>
                 <button
                   onClick={() => { setShowMoreMenu(false); logout(); }}
-                  className="w-full flex items-center gap-3 px-3 h-12 rounded-[14px] text-[var(--ds-critical-text)] transition-colors"
+                  className="w-full flex items-center gap-3 px-3 h-12 rounded-[var(--ds-radius)] text-[var(--ds-critical-text)] transition-colors"
                 >
                   <LogOut className="h-5 w-5" />
                   <span className="text-[15px] font-medium tracking-[-0.01em]">Esci</span>
@@ -3612,7 +3664,7 @@ const SidebarItem = ({ icon, label, active, onClick, collapsed = false, badge }:
     onClick={onClick}
     title={collapsed ? label : undefined}
     aria-current={active ? 'page' : undefined}
-    className={`w-full flex items-center ${collapsed ? 'justify-center' : 'gap-3'} px-3 h-10 rounded-[12px] transition-colors duration-150 group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] ${
+    className={`w-full flex items-center ${collapsed ? 'justify-center' : 'gap-3'} px-3 h-10 rounded-[var(--ds-radius)] transition-colors duration-150 group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] ${
       active
         ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
         : 'text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)]'
@@ -3621,7 +3673,7 @@ const SidebarItem = ({ icon, label, active, onClick, collapsed = false, badge }:
     <span className={`relative ${active ? 'text-[var(--ds-action-fg)]' : 'text-[var(--ds-text-secondary)]'}`}>
       {icon}
       {collapsed && badge != null && badge > 0 && (
-        <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 inline-flex items-center justify-center rounded-full bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] text-[10px] font-semibold leading-none tabular-nums ring-2 ring-[var(--ds-surface)]">
+        <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 inline-flex items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] text-[10px] font-semibold leading-none tabular-nums ring-2 ring-[var(--ds-surface)]">
           {badge > 99 ? '99+' : badge}
         </span>
       )}
@@ -3630,7 +3682,7 @@ const SidebarItem = ({ icon, label, active, onClick, collapsed = false, badge }:
       <>
         <span className="font-medium text-[15px] tracking-[-0.01em]">{label}</span>
         {badge != null && badge > 0 && (
-          <span className="ml-auto min-w-[20px] h-5 px-1.5 inline-flex items-center justify-center rounded-full bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] text-[11px] font-semibold leading-none tabular-nums">
+          <span className="ml-auto min-w-[20px] h-5 px-1.5 inline-flex items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] text-[11px] font-semibold leading-none tabular-nums">
             {badge > 99 ? '99+' : badge}
           </span>
         )}
@@ -3645,7 +3697,10 @@ const BottomNavItem = ({ icon, label, active, onClick, badge }: { icon: React.Re
     onClick={onClick}
     aria-current={active ? 'page' : undefined}
     aria-label={label}
-    className={`pressable flex flex-1 flex-col items-center justify-center gap-1 px-1 py-1.5 max-[420px]:py-[13px] rounded-[14px] transition-colors ${
+    // Pastiglia dentro lo stadio: la barra è tonda piena, e un rettangolo
+    // smussato appoggiato alla sua curva litiga col bordo. Gli angoli
+    // concentrici si seguono — tondo dentro tondo.
+    className={`pressable flex flex-1 flex-col items-center justify-center gap-1 px-1 py-1.5 max-[420px]:py-[13px] rounded-full transition-colors ${
       active
         ? 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)]'
         : 'text-[var(--ds-text-muted)]'
@@ -3655,7 +3710,7 @@ const BottomNavItem = ({ icon, label, active, onClick, badge }: { icon: React.Re
     <span className="relative max-[420px]:[&>svg]:size-6">
       {icon}
       {badge !== undefined && badge > 0 && (
-        <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 rounded-full bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] text-[9px] font-semibold tabular-nums flex items-center justify-center ring-2 ring-[var(--ds-surface)]">
+        <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] text-[9px] font-semibold tabular-nums flex items-center justify-center ring-2 ring-[var(--ds-surface)]">
           {badge > 99 ? '99+' : badge}
         </span>
       )}

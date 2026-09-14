@@ -131,7 +131,7 @@ export const BookingChannelsBar: React.FC<Props> = ({ date, shift, showToast }) 
     // interactivity and applies a muted look — l'unico modo di riabilitare
     // è cambiare il flag globale da Impostazioni.
     const iconClass = (open: boolean, globallyOff: boolean, saving: boolean) =>
-        `inline-flex items-center justify-center h-9 w-9 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+        `inline-flex items-center justify-center h-9 w-9 rounded-[var(--ds-radius-control)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
             globallyOff
                 ? 'bg-[var(--ds-surface-row)] text-[var(--ds-text-subtle)] opacity-60'
                 : open

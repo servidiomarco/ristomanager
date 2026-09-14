@@ -80,7 +80,7 @@ export const BloccoComunicazioni: React.FC<{ data: CommunicationsReport }> = ({ 
         <div className="mb-4"><EmptyChart message="Nessuna chiamata nel periodo scelto." /></div>
       )}
 
-      <div className="rounded-[16px] bg-[var(--ds-surface-row)] p-3">
+      <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3">
         <div className="mb-1 text-[13px] font-medium text-[var(--ds-text-secondary)]">Messaggi in uscita</div>
         {data.messaggi.length > 0 ? (
           <table className="w-full text-[13px]">

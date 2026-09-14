@@ -188,7 +188,7 @@ const DOC_TABS: { key: DocKey; label: string; Icon: React.ComponentType<{ classN
 // UI
 // ---------------------------------------------------------------------------
 const inputCls =
-  'w-full rounded-lg border border-[var(--ds-border)] bg-[var(--ds-surface)] px-3 py-2 text-[14px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60';
+  'w-full rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-3 py-2 text-[14px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60';
 
 const Field: React.FC<{
   label: string; value: string; onChange: (v: string) => void; placeholder?: string;
@@ -355,11 +355,11 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
   };
 
   return (
-    <details className="group bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] overflow-hidden"
+    <details className="group bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] overflow-hidden"
       open={expanded} onToggle={e => setExpanded((e.target as HTMLDetailsElement).open)}>
       <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--ds-surface-row)] transition-colors">
         <div className="flex items-center gap-3 min-w-0">
-          <div className="w-10 h-10 rounded-md bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-text-primary)] flex-shrink-0">
+          <div className="w-10 h-10 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-text-primary)] flex-shrink-0">
             <Scale className="w-5 h-5" />
           </div>
           <div className="min-w-0">
@@ -376,7 +376,7 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
         ) : (
           <>
             {!canEdit && (
-              <div className="mb-4 text-[13px] text-[var(--ds-text-muted)] bg-[var(--ds-surface-row)] rounded-lg p-3">
+              <div className="mb-4 text-[13px] text-[var(--ds-text-muted)] bg-[var(--ds-surface-row)] rounded-[var(--ds-radius)] p-3">
                 Solo in lettura: la modifica richiede il permesso di gestione impostazioni.
               </div>
             )}
@@ -389,7 +389,7 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
                   type="button"
                   disabled={!canEdit}
                   onClick={() => setMode('simple')}
-                  className={`text-left rounded-xl border p-3 transition-colors disabled:opacity-60 ${
+                  className={`text-left rounded-[var(--ds-radius)] border p-3 transition-colors disabled:opacity-60 ${
                     !isAdvanced ? 'border-[var(--ds-text-primary)] bg-[var(--ds-surface-row)]' : 'border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)]'
                   }`}
                 >
@@ -403,7 +403,7 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
                   type="button"
                   disabled={!canEdit}
                   onClick={() => setMode('advanced')}
-                  className={`text-left rounded-xl border p-3 transition-colors disabled:opacity-60 ${
+                  className={`text-left rounded-[var(--ds-radius)] border p-3 transition-colors disabled:opacity-60 ${
                     isAdvanced ? 'border-[var(--ds-text-primary)] bg-[var(--ds-surface-row)]' : 'border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)]'
                   }`}
                 >
@@ -417,7 +417,7 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
             </div>
 
             {/* ---------- Consenso allergie in prenotazione ---------- */}
-            <div className="mt-4 rounded-xl border border-[var(--ds-border)] bg-[var(--ds-surface-row)] p-3">
+            <div className="mt-4 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface-row)] p-3">
               <label className="flex items-start gap-2.5 text-[14px] text-[var(--ds-text-primary)] cursor-pointer">
                 <input type="checkbox" checked={data.ask_health_consent} disabled={!canEdit}
                   onChange={e => setBool('ask_health_consent')(e.target.checked)} className="mt-0.5 h-4 w-4 rounded flex-shrink-0" />
@@ -455,10 +455,10 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
                       <img
                         src={tenantLogoSrc(data.logo_url)}
                         alt="Logo del ristorante"
-                        className="h-12 w-auto max-w-[220px] rounded-[8px] bg-[var(--ds-surface-row)] object-contain p-1.5"
+                        className="h-12 w-auto max-w-[220px] rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] object-contain p-1.5"
                       />
                     ) : (
-                      <span className="flex h-12 items-center rounded-[8px] bg-[var(--ds-surface-row)] px-3 text-[13px] text-[var(--ds-text-muted)]">
+                      <span className="flex h-12 items-center rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3 text-[13px] text-[var(--ds-text-muted)]">
                         Nessun logo
                       </span>
                     )}
@@ -475,7 +475,7 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
                           type="button"
                           onClick={() => logoInputRef.current?.click()}
                           disabled={logoBusy}
-                          className="inline-flex h-9 items-center gap-1.5 rounded-full border border-[var(--ds-border)] px-3 text-[13px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50"
+                          className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] border border-[var(--ds-border)] px-3 text-[13px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50"
                         >
                           {logoBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
                           {data.logo_url ? 'Sostituisci' : 'Carica logo'}
@@ -485,7 +485,7 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
                             type="button"
                             onClick={() => handleLogoRemove('light')}
                             disabled={logoBusy}
-                            className="inline-flex h-9 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50"
+                            className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 text-[13px] font-medium text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50"
                           >
                             <X className="h-4 w-4" /> Rimuovi
                           </button>
@@ -508,10 +508,10 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
                       <img
                         src={tenantLogoSrc(data.logo_dark_url)}
                         alt="Logo per tema scuro"
-                        className="h-12 w-auto max-w-[220px] rounded-[8px] bg-[var(--ds-action-bg)] object-contain p-1.5"
+                        className="h-12 w-auto max-w-[220px] rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] object-contain p-1.5"
                       />
                     ) : (
-                      <span className="flex h-12 items-center rounded-[8px] bg-[var(--ds-action-bg)] px-3 text-[13px] text-[var(--ds-action-fg)] opacity-80">
+                      <span className="flex h-12 items-center rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] px-3 text-[13px] text-[var(--ds-action-fg)] opacity-80">
                         Nessuna variante
                       </span>
                     )}
@@ -528,7 +528,7 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
                           type="button"
                           onClick={() => logoDarkInputRef.current?.click()}
                           disabled={logoBusy}
-                          className="inline-flex h-9 items-center gap-1.5 rounded-full border border-[var(--ds-border)] px-3 text-[13px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50"
+                          className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] border border-[var(--ds-border)] px-3 text-[13px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50"
                         >
                           {logoBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
                           {data.logo_dark_url ? 'Sostituisci' : 'Carica variante'}
@@ -538,7 +538,7 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
                             type="button"
                             onClick={() => handleLogoRemove('dark')}
                             disabled={logoBusy}
-                            className="inline-flex h-9 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50"
+                            className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 text-[13px] font-medium text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50"
                           >
                             <X className="h-4 w-4" /> Rimuovi
                           </button>
@@ -606,7 +606,7 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
               {canEdit && (
                 <div className="flex items-center gap-2">
                   <button onClick={handleSave} disabled={saving}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[14px] font-medium hover:opacity-90 disabled:opacity-50">
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[14px] font-medium hover:opacity-90 disabled:opacity-50">
                     {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                     {saving ? 'Salvataggio…' : 'Salva'}
                   </button>
@@ -623,7 +623,7 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
                   const active = currentDoc.key === key;
                   return (
                     <button key={key} onClick={() => setActiveDoc(key)}
-                      className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-medium border transition-colors whitespace-nowrap ${
+                      className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--ds-radius-control)] text-[12px] font-medium border transition-colors whitespace-nowrap ${
                         active ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-text-primary)]'
                                : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)] hover:text-[var(--ds-text-primary)]'}`}>
                       <Icon className="h-3.5 w-3.5" />
@@ -634,17 +634,17 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
               </div>
 
               <div className="flex items-center justify-end gap-2 mb-2">
-                <button onClick={copy} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-[var(--ds-border)] text-[13px] text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)]">
+                <button onClick={copy} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-[var(--ds-radius)] border border-[var(--ds-border)] text-[13px] text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)]">
                   {copied ? <Check className="h-3.5 w-3.5 text-[var(--ds-seated-text)]" /> : <Copy className="h-3.5 w-3.5" />}
                   {copied ? 'Copiato' : 'Copia'}
                 </button>
-                <button onClick={download} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-[var(--ds-border)] text-[13px] text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)]">
+                <button onClick={download} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-[var(--ds-radius)] border border-[var(--ds-border)] text-[13px] text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)]">
                   <Download className="h-3.5 w-3.5" />
                   Scarica
                 </button>
               </div>
 
-              <pre className="whitespace-pre-wrap break-words text-[12.5px] leading-relaxed text-[var(--ds-text-primary)] bg-[var(--ds-surface-row)] border border-[var(--ds-border)] rounded-lg p-4 max-h-[420px] overflow-y-auto font-[inherit]">
+              <pre className="whitespace-pre-wrap break-words text-[12.5px] leading-relaxed text-[var(--ds-text-primary)] bg-[var(--ds-surface-row)] border border-[var(--ds-border)] rounded-[var(--ds-radius)] p-4 max-h-[420px] overflow-y-auto font-[inherit]">
 {generatedText}
               </pre>
               <p className="text-[12px] text-[var(--ds-text-muted)] mt-2">

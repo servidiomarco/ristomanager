@@ -306,7 +306,7 @@ export function useCourseDrag({ disabled, canDropOn, onDrop, onHoldTap }: UseCou
         <div ref={ghostRef} className="pointer-events-none fixed left-0 top-0 z-50">
           <div
             style={{ animation: 'tileIn 160ms ease-out both' }}
-            className="select-none whitespace-nowrap rounded-[16px] bg-[var(--ds-surface)] px-4 py-2.5 text-[14px] font-semibold text-[var(--ds-text-primary)] opacity-95 shadow-[var(--ds-shadow-raised)]"
+            className="select-none whitespace-nowrap rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-4 py-2.5 text-[14px] font-semibold text-[var(--ds-text-primary)] opacity-95 shadow-[var(--ds-shadow-raised)]"
           >
             {dragGhostLabel(drag)}
           </div>

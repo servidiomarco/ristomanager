@@ -48,7 +48,7 @@ export const PaymentRequestRow: React.FC<{
   })();
 
   return (
-    <li className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-[14px] bg-[var(--ds-surface-row)] px-3.5 py-2.5">
+    <li className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3.5 py-2.5">
       <StatusPill tone={state.tone}>{state.label}</StatusPill>
       <span className="text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
         {euro(request.amount_cents)}
@@ -71,7 +71,7 @@ export const PaymentRequestRow: React.FC<{
             onBlur={() => setRevokeArmed(false)}
             disabled={revoking}
             title="Annulla il link al provider: il cliente non potrà più pagarlo"
-            className={`inline-flex h-8 items-center gap-1 rounded-full px-2.5 text-[13px] font-medium transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+            className={`inline-flex h-8 items-center gap-1 rounded-[var(--ds-radius-control)] px-2.5 text-[13px] font-medium transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
               revokeArmed
                 ? 'bg-[var(--ds-critical-solid)] text-[#ffffff]'
                 : 'text-[var(--ds-critical-text)] hover:bg-[var(--ds-critical-tint)]'
@@ -87,7 +87,7 @@ export const PaymentRequestRow: React.FC<{
               type="button"
               onClick={onCopy}
               title="Copia link"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             >
               {copied ? <Check className="h-3.5 w-3.5 text-[var(--ds-seated-text)]" /> : <Copy className="h-3.5 w-3.5" />}
             </button>

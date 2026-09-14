@@ -322,7 +322,7 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
   };
 
   const topAction =
-    'inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-surface)] px-3.5 text-[13px] font-medium text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+    'inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-3.5 text-[13px] font-medium text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
   const categoryChips: { v: ShoppingCategory | 'ALL'; l: string; n: number }[] = [
     { v: 'ALL', l: 'Tutte', n: filteredItems.length },
@@ -352,7 +352,7 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
                   type="button"
                   onClick={() => (selectionMode ? exitSelectionMode() : setSelectionMode(true))}
                   aria-pressed={selectionMode}
-                  className={`inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                  className={`inline-flex h-8 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                     selectionMode
                       ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                       : 'text-[var(--ds-text-secondary)] hover:bg-[var(--ds-surface)] hover:text-[var(--ds-text-primary)]'
@@ -485,7 +485,7 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
                 onClick={printAll}
                 aria-label="Stampa la lista"
                 title="Stampa la lista"
-                className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               >
                 <Printer className="h-4 w-4" />
               </button>
@@ -500,7 +500,7 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
                 type="button"
                 onClick={() => setCategoryFilter(c.v)}
                 aria-pressed={categoryFilter === c.v}
-                className={`inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                className={`inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3.5 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                   categoryFilter === c.v
                     ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                     : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] hover:text-[var(--ds-text-primary)]'
@@ -578,7 +578,7 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
           that appear and disappear inside the rows. */}
       {selectionMode && (
         <div
-          className="fixed inset-x-4 z-40 flex items-center gap-2 rounded-full bg-[var(--ds-action-bg)] py-2 pl-4 pr-2 shadow-[var(--ds-shadow-raised)] lg:inset-x-auto lg:right-8"
+          className="fixed inset-x-4 z-40 flex items-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] py-2 pl-4 pr-2 shadow-[var(--ds-shadow-raised)] lg:inset-x-auto lg:right-8"
           style={{ bottom: 'var(--ds-bottom-nav-clear)' }}
         >
           <span className="min-w-0 flex-1 truncate text-[14px] text-[var(--ds-action-fg)]">
@@ -589,7 +589,7 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
             onClick={printSelected}
             disabled={selected.size === 0}
             aria-label="Stampa selezione"
-            className="inline-flex h-10 w-10 items-center justify-center rounded-full text-[var(--ds-action-fg)] transition-colors hover:bg-white/10 disabled:opacity-40"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-action-fg)] transition-colors hover:bg-white/10 disabled:opacity-40"
           >
             <Printer className="h-4 w-4" />
           </button>
@@ -598,7 +598,7 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
             onClick={shareSelected}
             disabled={selected.size === 0}
             aria-label="Condividi selezione"
-            className="inline-flex h-10 w-10 items-center justify-center rounded-full text-[var(--ds-action-fg)] transition-colors hover:bg-white/10 disabled:opacity-40"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-action-fg)] transition-colors hover:bg-white/10 disabled:opacity-40"
           >
             <Share2 className="h-4 w-4" />
           </button>
@@ -607,7 +607,7 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
             onClick={bulkDelete}
             disabled={selected.size === 0}
             aria-label="Elimina selezione"
-            className="inline-flex h-10 w-10 items-center justify-center rounded-full text-[var(--ds-critical-fg)] transition-colors hover:bg-white/10 disabled:opacity-40"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-critical-fg)] transition-colors hover:bg-white/10 disabled:opacity-40"
           >
             <Trash2 className="h-4 w-4" />
           </button>
@@ -615,7 +615,7 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
             type="button"
             onClick={exitSelectionMode}
             aria-label="Esci dalla selezione"
-            className="inline-flex h-10 w-10 items-center justify-center rounded-full text-[var(--ds-action-fg)] transition-colors hover:bg-white/10"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-action-fg)] transition-colors hover:bg-white/10"
           >
             <X className="h-4 w-4" />
           </button>

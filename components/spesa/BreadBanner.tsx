@@ -11,7 +11,7 @@ export const BreadBanner: React.FC<{
   bread: { coperti: number; kg: number };
   className?: string;
 }> = ({ bread, className = '' }) => (
-  <div className={`flex items-start gap-3 rounded-[20px] bg-[var(--ds-pending-tint)] p-4 ${className}`}>
+  <div className={`flex items-start gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-pending-tint)] p-4 ${className}`}>
     <Wheat className="mt-0.5 h-5 w-5 flex-shrink-0 text-[var(--ds-pending-text)]" aria-hidden />
     <div className="min-w-0">
       <p className="text-[15px] font-semibold text-[var(--ds-pending-text)]">

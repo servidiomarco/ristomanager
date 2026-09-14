@@ -84,7 +84,7 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
 
   if (loading || !flags || !config) {
     return (
-      <div className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] px-4 py-3 flex items-center gap-2 text-[13px] text-[var(--ds-text-muted)]">
+      <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] px-4 py-3 flex items-center gap-2 text-[13px] text-[var(--ds-text-muted)]">
         <Loader2 className="h-4 w-4 animate-spin" /> Caricamento…
       </div>
     );
@@ -111,11 +111,11 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
   );
 
   return (
-    <details className="group bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] overflow-hidden"
+    <details className="group bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] overflow-hidden"
              onToggle={e => setOpen((e.target as HTMLDetailsElement).open)}>
       <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--ds-surface-row)] transition-colors">
         <div className="flex items-center gap-3 min-w-0">
-          <div className="w-10 h-10 rounded-md bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-pending-text)] flex-shrink-0">
+          <div className="w-10 h-10 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-pending-text)] flex-shrink-0">
             <CookingPot className="w-5 h-5" />
           </div>
           <div className="min-w-0">
@@ -149,7 +149,7 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
           <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-2">
             Profilo di configurazione
           </h5>
-          <div className="rounded-md border border-[var(--ds-border)] divide-y divide-[var(--ds-border)]">
+          <div className="rounded-[var(--ds-radius)] border border-[var(--ds-border)] divide-y divide-[var(--ds-border)]">
             {profiles.map(pr => {
               const isActive = activeProfile === pr.name;
               return (
@@ -161,13 +161,13 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
                   {isActive ? (
                     <button type="button" disabled={!canEdit || saving}
                       onClick={() => act(() => detachSalaProfile(), `Profilo "${pr.name}" scollegato — la configurazione resta`)}
-                      className="text-[12px] px-2 py-1 rounded-md border border-[var(--ds-border)] disabled:opacity-50">
+                      className="text-[12px] px-2 py-1 rounded-[var(--ds-radius)] border border-[var(--ds-border)] disabled:opacity-50">
                       scollega
                     </button>
                   ) : (
                     <button type="button" disabled={!canEdit || saving}
                       onClick={() => act(() => activateSalaProfile(pr.id), `Profilo "${pr.name}" applicato`)}
-                      className="text-[12px] px-2.5 py-1 rounded-md bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] disabled:opacity-50">
+                      className="text-[12px] px-2.5 py-1 rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] disabled:opacity-50">
                       attiva
                     </button>
                   )}
@@ -186,10 +186,10 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
               <div className="flex items-center gap-2 px-3 py-2">
                 <input value={newProfile} onChange={e => setNewProfile(e.target.value)}
                   placeholder="Salva il setup corrente come…"
-                  className="flex-1 text-[13px] rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5" />
+                  className="flex-1 text-[13px] rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5" />
                 <button type="button" disabled={!newProfile.trim() || saving}
                   onClick={() => act(() => createSalaProfile(newProfile.trim()), 'Profilo salvato').then(() => setNewProfile(''))}
-                  className="text-[13px] px-2.5 py-1.5 rounded-md border border-[var(--ds-border)] flex items-center gap-1 disabled:opacity-50">
+                  className="text-[13px] px-2.5 py-1.5 rounded-[var(--ds-radius)] border border-[var(--ds-border)] flex items-center gap-1 disabled:opacity-50">
                   <Plus size={13} /> Salva
                 </button>
               </div>
@@ -210,7 +210,7 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
             {FIRE_MODE_LABELS.map(m => (
               <button key={m.value} type="button" disabled={!canEdit || saving}
                 onClick={() => act(() => setFireMode(m.value), `Lancio uscite: ${m.title.toLowerCase()}`)}
-                className={`text-left px-3 py-2.5 rounded-md border text-[13px] transition-colors disabled:opacity-60 ${
+                className={`text-left px-3 py-2.5 rounded-[var(--ds-radius)] border text-[13px] transition-colors disabled:opacity-60 ${
                   config.fire_mode === m.value
                     ? 'border-[var(--ds-text-primary)]/50 bg-[var(--ds-surface-row)]'
                     : 'border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)]'
@@ -227,7 +227,7 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
           <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-2">
             Passe
           </h5>
-          <div className="flex items-start justify-between gap-3 rounded-md border border-[var(--ds-border)] px-3 py-2.5">
+          <div className="flex items-start justify-between gap-3 rounded-[var(--ds-radius)] border border-[var(--ds-border)] px-3 py-2.5">
             <div className="min-w-0">
               <div className="text-[13px] font-medium text-[var(--ds-text-primary)]">Postazione passe</div>
               <p className="text-[12px] text-[var(--ds-text-muted)] leading-snug mt-0.5">
@@ -260,7 +260,7 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
           <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-2">
             Centri di produzione (partite)
           </h5>
-          <div className="rounded-md border border-[var(--ds-border)] divide-y divide-[var(--ds-border)]">
+          <div className="rounded-[var(--ds-radius)] border border-[var(--ds-border)] divide-y divide-[var(--ds-border)]">
             {config.stations.map(s => (
               <div key={s.id} className={`flex items-center gap-3 px-3 py-2 ${s.is_active ? '' : 'opacity-50'}`}>
                 <span className="flex-1 min-w-0 text-[13px] font-medium text-[var(--ds-text-primary)] truncate">{s.name}</span>
@@ -273,7 +273,7 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
                       () => updateStation(s.id, { printer: e.target.value || null }),
                       e.target.value ? `${s.name} → stampante "${e.target.value}"` : `${s.name}: solo schermo`
                     )}
-                    className="text-[13px] rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1 disabled:opacity-60">
+                    className="text-[13px] rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1 disabled:opacity-60">
                     <option value="">Solo schermo</option>
                     {thermal.filter(p => p.is_active).map(p => (
                       <option key={p.id} value={p.name}>schermo + {p.name}</option>
@@ -291,7 +291,7 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
                     () => updateStation(s.id, { auto_ready: !s.auto_ready }),
                     s.auto_ready ? `${s.name}: pronto dal monitor` : `${s.name}: pronto automatico al lancio`
                   )}
-                  className={`text-[12px] px-2 py-0.5 rounded-full border transition-colors disabled:opacity-50 ${
+                  className={`text-[12px] px-2 py-0.5 rounded-[var(--ds-radius-control)] border transition-colors disabled:opacity-50 ${
                     s.auto_ready
                       ? 'border-transparent bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'
                       : 'border-[var(--ds-border)] text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]'
@@ -309,7 +309,7 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
                       () => updateStation(s.id, { full_course: !s.full_course }),
                       s.full_course ? `${s.name}: in comanda solo i propri piatti` : `${s.name}: in comanda anche il resto dell'uscita`
                     )}
-                    className={`text-[12px] px-2 py-0.5 rounded-full border transition-colors disabled:opacity-50 ${
+                    className={`text-[12px] px-2 py-0.5 rounded-[var(--ds-radius-control)] border transition-colors disabled:opacity-50 ${
                       s.full_course
                         ? 'border-transparent bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'
                         : 'border-[var(--ds-border)] text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]'
@@ -328,10 +328,10 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
               <div className="flex items-center gap-2 px-3 py-2">
                 <input value={newStation} onChange={e => setNewStation(e.target.value)}
                   placeholder="Nuova partita (es. Pizzeria)"
-                  className="flex-1 text-[13px] rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5" />
+                  className="flex-1 text-[13px] rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5" />
                 <button type="button" disabled={!newStation.trim() || saving}
                   onClick={() => act(() => createStation({ name: newStation.trim() }), 'Partita creata').then(() => setNewStation(''))}
-                  className="text-[13px] px-2.5 py-1.5 rounded-md border border-[var(--ds-border)] flex items-center gap-1 disabled:opacity-50">
+                  className="text-[13px] px-2.5 py-1.5 rounded-[var(--ds-radius)] border border-[var(--ds-border)] flex items-center gap-1 disabled:opacity-50">
                   <Plus size={13} /> Aggiungi
                 </button>
               </div>
@@ -352,13 +352,13 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
           {/* Il buco si deve vedere qui, prima del servizio: un piatto di
               categoria scoperta parte e non compare su nessun monitor. */}
           {uncovered.length > 0 && (
-            <div className="rounded-md bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] px-3 py-2 mb-2 text-[13px]">
+            <div className="rounded-[var(--ds-radius)] bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] px-3 py-2 mb-2 text-[13px]">
               {uncovered.length === 1
                 ? <>La categoria <span className="font-semibold">{uncovered[0]}</span> è senza partita: i suoi piatti non compaiono su nessun monitor di cucina.</>
                 : <>{uncovered.length} categorie senza partita ({uncovered.join(', ')}): i loro piatti non compaiono su nessun monitor di cucina.</>}
             </div>
           )}
-          <div className="rounded-md border border-[var(--ds-border)] divide-y divide-[var(--ds-border)]">
+          <div className="rounded-[var(--ds-radius)] border border-[var(--ds-border)] divide-y divide-[var(--ds-border)]">
             {config.categories.map(cat => (
               <div key={cat} className="flex items-center gap-3 px-3 py-2">
                 <span className="flex-1 min-w-0 text-[13px] font-medium text-[var(--ds-text-primary)] truncate">{cat}</span>
@@ -371,7 +371,7 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
                       ? `${cat} → ${config.stations.find(s => s.id === Number(e.target.value))?.name ?? 'partita'}`
                       : `${cat}: senza partita`
                   )}
-                  className="text-[13px] rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1 disabled:opacity-60">
+                  className="text-[13px] rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1 disabled:opacity-60">
                   <option value="">Senza partita</option>
                   {config.stations.filter(s => s.is_active).map(s => (
                     <option key={s.id} value={s.id}>{s.name}</option>
@@ -406,7 +406,7 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
               {config.failed_jobs > 0 && ` · ${config.failed_jobs} falliti`}
             </span>
           </div>
-          <div className="rounded-md border border-[var(--ds-border)] divide-y divide-[var(--ds-border)]">
+          <div className="rounded-[var(--ds-radius)] border border-[var(--ds-border)] divide-y divide-[var(--ds-border)]">
             {thermal.map(p => (
               <div key={p.id} className={`flex items-center gap-3 px-3 py-2 ${p.is_active ? '' : 'opacity-50'}`}>
                 <Printer size={14} className="text-[var(--ds-text-muted)] flex-shrink-0" />
@@ -421,7 +421,7 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
                   aria-pressed={p.buzzer}
                   title={p.buzzer ? 'Cicalino alla stampa acceso: tocca per spegnerlo' : 'Cicalino alla stampa spento: tocca per accenderlo'}
                   onClick={() => act(() => updatePrinter(p.id, { buzzer: !p.buzzer }))}
-                  className={`inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors disabled:opacity-50 ${
+                  className={`inline-flex h-8 w-8 items-center justify-center rounded-[var(--ds-radius-control)] transition-colors disabled:opacity-50 ${
                     p.buzzer
                       ? 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]'
                       : 'text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]'
@@ -437,7 +437,7 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
                     } catch (err: any) { showToast(err?.message || 'Invio non riuscito', 'error'); }
                     finally { setTestingId(null); }
                   }}
-                  className="text-[12px] px-2 py-1 rounded-md border border-[var(--ds-border)] disabled:opacity-50">
+                  className="text-[12px] px-2 py-1 rounded-[var(--ds-radius)] border border-[var(--ds-border)] disabled:opacity-50">
                   {testingId === p.id ? 'invio…' : 'stampa prova'}
                 </button>
                 <button type="button" disabled={!canEdit || saving}
@@ -456,17 +456,17 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
             {canEdit && (
               <div className="flex flex-wrap items-center gap-2 px-3 py-2">
                 <input value={newPrinter.name} onChange={e => setNewPrinter(v => ({ ...v, name: e.target.value }))}
-                  placeholder="nome (es. cucina)" className="w-32 text-[13px] rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5" />
+                  placeholder="nome (es. cucina)" className="w-32 text-[13px] rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5" />
                 <input value={newPrinter.host} onChange={e => setNewPrinter(v => ({ ...v, host: e.target.value }))}
-                  placeholder="IP (es. 192.168.1.30)" className="w-40 text-[13px] rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5" />
+                  placeholder="IP (es. 192.168.1.30)" className="w-40 text-[13px] rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5" />
                 <input value={newPrinter.port} onChange={e => setNewPrinter(v => ({ ...v, port: e.target.value }))}
-                  placeholder="porta" className="w-20 text-[13px] rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5" />
+                  placeholder="porta" className="w-20 text-[13px] rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5" />
                 <button type="button" disabled={!newPrinter.name.trim() || !newPrinter.host.trim() || saving}
                   onClick={() => act(
                     () => createPrinter({ name: newPrinter.name.trim(), host: newPrinter.host.trim(), port: Number(newPrinter.port) || 9100 }),
                     'Stampante aggiunta'
                   ).then(() => setNewPrinter({ name: '', host: '', port: '9100' }))}
-                  className="text-[13px] px-2.5 py-1.5 rounded-md border border-[var(--ds-border)] flex items-center gap-1 disabled:opacity-50">
+                  className="text-[13px] px-2.5 py-1.5 rounded-[var(--ds-radius)] border border-[var(--ds-border)] flex items-center gap-1 disabled:opacity-50">
                   <Plus size={13} /> Aggiungi
                 </button>
               </div>
@@ -479,7 +479,7 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
           <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-2">
             Instradamento stampe del conto
           </h5>
-          <div className="rounded-md border border-[var(--ds-border)] divide-y divide-[var(--ds-border)]">
+          <div className="rounded-[var(--ds-radius)] border border-[var(--ds-border)] divide-y divide-[var(--ds-border)]">
             {([
               { fn: 'preconto' as const, label: 'Preconto', hint: 'dettaglio righe con QR in fondo' },
               { fn: 'qr' as const, label: 'Foglietto QR', hint: 'solo codice, da appoggiare al tavolo' },
@@ -498,7 +498,7 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
                       () => updatePrintRoutes({ [fn]: e.target.value === 'preconti' ? null : e.target.value }),
                       `${label} → stampante "${e.target.value}"`
                     )}
-                    className="text-[13px] rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1 disabled:opacity-60">
+                    className="text-[13px] rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1 disabled:opacity-60">
                     {!thermal.some(pr => pr.is_active && pr.name === 'preconti') && (
                       <option value="preconti">preconti (predefinita)</option>
                     )}
@@ -522,7 +522,7 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
           <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-2">
             Stampante fiscale
           </h5>
-          <div className="rounded-md bg-[var(--ds-surface-row)] border border-[var(--ds-border)] px-3 py-2.5 flex items-start gap-2.5">
+          <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] border border-[var(--ds-border)] px-3 py-2.5 flex items-start gap-2.5">
             <Receipt size={15} className="mt-0.5 text-[var(--ds-text-muted)] flex-shrink-0" />
             <div className="text-[13px]">
               {fiscal.length > 0 ? (

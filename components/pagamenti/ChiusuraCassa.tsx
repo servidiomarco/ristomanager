@@ -242,7 +242,7 @@ export const ChiusuraCassa: React.FC<{
                       key={f.value}
                       type="button"
                       onClick={() => setDocFilter(f.value)}
-                      className={`rounded-full px-3 py-1.5 text-[13px] font-medium transition-colors ${
+                      className={`rounded-[var(--ds-radius-control)] px-3 py-1.5 text-[13px] font-medium transition-colors ${
                         docFilter === f.value
                           ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                           : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'
@@ -290,7 +290,7 @@ export const ChiusuraCassa: React.FC<{
                             <button
                               type="button"
                               onClick={() => onSelectBill(b.id)}
-                              className={`-mx-2 flex w-[calc(100%+16px)] flex-col gap-1 rounded-[12px] px-2 py-2.5 text-left transition-colors ${
+                              className={`-mx-2 flex w-[calc(100%+16px)] flex-col gap-1 rounded-[var(--ds-radius)] px-2 py-2.5 text-left transition-colors ${
                                 selectedId === b.id
                                   ? 'bg-[var(--ds-surface-row)]'
                                   : 'hover:bg-[var(--ds-surface-row)]'

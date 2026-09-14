@@ -90,14 +90,14 @@ export const DishSearchSheet: React.FC<DishSearchSheetProps> = ({
             onChange={e => setQuery(e.target.value)}
             onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); onClose(); } }}
             placeholder="Cerca un piatto…"
-            className="h-12 w-full rounded-full bg-[var(--ds-surface)] pl-11 pr-11 text-[16px] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-raised)] outline-none placeholder:text-[var(--ds-text-muted)] focus-visible:outline-none sm:text-[15px]"
+            className="h-12 w-full rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] pl-11 pr-11 text-[16px] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-raised)] outline-none placeholder:text-[var(--ds-text-muted)] focus-visible:outline-none sm:text-[15px]"
           />
           {query && (
             <button
               type="button"
               onClick={() => setQuery('')}
               aria-label="Svuota ricerca"
-              className="absolute right-3 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              className="absolute right-3 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             >
               <X className="h-4 w-4" />
             </button>
@@ -105,7 +105,7 @@ export const DishSearchSheet: React.FC<DishSearchSheetProps> = ({
         </div>
 
         {showResultsPanel && (
-          <div className="mt-2 min-h-0 flex-shrink overflow-y-auto rounded-[20px] bg-[var(--ds-surface)] py-1 shadow-[var(--ds-shadow-raised)] sm:max-h-[min(60vh,30rem)]">
+          <div className="mt-2 min-h-0 flex-shrink overflow-y-auto rounded-[var(--ds-radius)] bg-[var(--ds-surface)] py-1 shadow-[var(--ds-shadow-raised)] sm:max-h-[min(60vh,30rem)]">
             {showEmpty && (
               <div className="px-6 py-12 text-center text-[14px] text-[var(--ds-text-muted)] sm:py-10 sm:text-[13px]">
                 Nessun piatto per <span className="font-medium text-[var(--ds-text-primary)]">"{query.trim()}"</span>.
@@ -123,7 +123,7 @@ export const DishSearchSheet: React.FC<DishSearchSheetProps> = ({
                   <button
                     type="button"
                     onClick={() => { onAdd(d); if (tapOpensSheet(d.id)) onClose(); }}
-                    className={`mx-3 flex min-h-[52px] w-[calc(100%-1.5rem)] items-center gap-3 rounded-[14px] py-2.5 text-left transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                    className={`mx-3 flex min-h-[52px] w-[calc(100%-1.5rem)] items-center gap-3 rounded-[var(--ds-radius)] py-2.5 text-left transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                       d.photo_url ? 'pl-[60px] pr-3' : 'px-3'
                     }`}
                   >
@@ -137,7 +137,7 @@ export const DishSearchSheet: React.FC<DishSearchSheetProps> = ({
                       </div>
                     </div>
                     {qty > 0 && (
-                      <span className="inline-flex h-6 min-w-[24px] flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-action-bg)] px-1.5 text-[12px] font-semibold tabular-nums text-[var(--ds-action-fg)]">
+                      <span className="inline-flex h-6 min-w-[24px] flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-1.5 text-[12px] font-semibold tabular-nums text-[var(--ds-action-fg)]">
                         {qty}
                       </span>
                     )}
@@ -147,7 +147,7 @@ export const DishSearchSheet: React.FC<DishSearchSheetProps> = ({
                       type="button"
                       onClick={() => setPhotoDish(d)}
                       aria-label={`Foto di ${d.name}`}
-                      className="absolute left-4 top-1/2 h-11 w-11 -translate-y-1/2 overflow-hidden rounded-[12px] bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                      className="absolute left-4 top-1/2 h-11 w-11 -translate-y-1/2 overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     >
                       <img src={d.photo_url} alt="" loading="lazy" className="h-full w-full object-cover" />
                     </button>

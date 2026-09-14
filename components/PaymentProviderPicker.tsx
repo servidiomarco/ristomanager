@@ -88,7 +88,7 @@ export const PaymentProviderPicker: React.FC<Props> = ({ flow, showToast, canEdi
                     value={flowState.override ?? ''}
                     onChange={(e) => onChange(e.target.value)}
                     disabled={!canEdit || saving}
-                    className="rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-3 py-2 text-[13px] text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
+                    className="rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-3 py-2 text-[13px] text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                 >
                     <option value="">Predefinito ({state.label})</option>
                     {state.providers.map(p => (

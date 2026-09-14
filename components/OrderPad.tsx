@@ -1574,14 +1574,14 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
           {scontrinoEsito.failed ? (
             <Callout tone="critical" icon={TriangleAlert}>{scontrinoEsito.failed}</Callout>
           ) : scontrinoEsito.token ? (
-            <div className="rounded-[16px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
+            <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
               {scontrinoEsito.docNumber && (
                 <p className="mb-3 text-[14px] font-medium text-[var(--ds-text-primary)]">
                   Scontrino n. {scontrinoEsito.docNumber}
                 </p>
               )}
               <div className="flex items-center gap-4">
-                <div className="rounded-[10px] bg-white p-2" aria-hidden>
+                <div className="rounded-[var(--ds-radius)] bg-white p-2" aria-hidden>
                   <QRCodeSVG value={`${window.location.origin}/scontrino/${scontrinoEsito.token}`} size={112} level="M" />
                 </div>
                 <div className="min-w-0 space-y-2">
@@ -1595,7 +1595,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
               </div>
             </div>
           ) : (
-            <div className="flex items-center gap-2.5 rounded-[16px] bg-[var(--ds-surface)] p-4 text-[14px] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)]">
+            <div className="flex items-center gap-2.5 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 text-[14px] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)]">
               <Loader2 size={16} className="animate-spin" aria-hidden /> Scontrino in emissione…
             </div>
           )}
@@ -1734,7 +1734,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
             <div className="flex flex-col gap-2">
               {notices}
               {serviceBills.size > 0 && (
-                <span className="inline-flex h-8 w-fit items-baseline gap-1.5 rounded-full border border-[var(--ds-pending-solid)] bg-[var(--ds-pending-tint)] px-3 leading-8 text-[var(--ds-pending-text)]">
+                <span className="inline-flex h-8 w-fit items-baseline gap-1.5 rounded-[var(--ds-radius-control)] border border-[var(--ds-pending-solid)] bg-[var(--ds-pending-tint)] px-3 leading-8 text-[var(--ds-pending-text)]">
                   <span className="text-[15px] font-bold tabular-nums">{serviceBills.size}</span>
                   <span className="text-[13px] font-medium">{serviceBills.size === 1 ? 'conto da incassare' : 'conti da incassare'}</span>
                 </span>
@@ -1966,7 +1966,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
               type="button"
               onClick={() => doTransfer(t.id)}
               disabled={busy}
-              className="h-14 rounded-[16px] bg-[var(--ds-surface-row)] text-[15px] font-semibold text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
+              className="h-14 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] text-[15px] font-semibold text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
             >
               {t.name}
             </button>
@@ -2019,7 +2019,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
                     else moveCourseTo(moveFor.from, n);
                     setMoveFor(null);
                   }}
-                  className="flex h-16 flex-col items-center justify-center gap-0.5 rounded-[16px] bg-[var(--ds-surface-row)] text-[15px] font-semibold text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
+                  className="flex h-16 flex-col items-center justify-center gap-0.5 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] text-[15px] font-semibold text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
                 >
                   {courseLabel(n)}
                   {sent && (
@@ -2162,12 +2162,12 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
             coperti e il conto di cui parla. */}
         <div className="flex flex-shrink-0 items-center gap-3">
           {padBrand}
-          <div className="flex min-w-0 flex-1 items-center gap-3 rounded-[28px] bg-[var(--ds-surface)] px-3 py-2.5 shadow-[var(--ds-shadow-card)]">
+          <div className="flex min-w-0 flex-1 items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-3 py-2.5 shadow-[var(--ds-shadow-card)]">
             <button
               type="button"
               onClick={leaveTable}
               aria-label="Torna alla scelta del tavolo"
-              className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             >
               <ArrowLeft size={20} aria-hidden />
             </button>
@@ -2238,7 +2238,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
           <button
             type="button"
             onClick={() => setCoursePickOpen(true)}
-            className="inline-flex h-11 flex-shrink-0 items-center gap-1.5 rounded-full bg-[var(--ds-action-bg)] px-4 text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="inline-flex h-11 flex-shrink-0 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-4 text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             {courseLabel(course)}
             {courseFilled && <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--ds-action-fg)]" aria-hidden />}
@@ -2248,7 +2248,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
             type="button"
             onClick={() => { if (segueTarget != null) setCourse(segueTarget); }}
             disabled={segueTarget == null}
-            className="inline-flex h-11 flex-shrink-0 items-center gap-2 rounded-full bg-[var(--ds-surface)] px-[18px] text-[16px] font-semibold text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="inline-flex h-11 flex-shrink-0 items-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-[18px] text-[16px] font-semibold text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             Segue
             <ArrowRight size={16} aria-hidden />
@@ -2260,7 +2260,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
               type="button"
               onClick={() => setComandaOpen(true)}
               aria-label={`Apri la comanda: ${draftCount === 1 ? '1 riga' : `${draftCount} righe`} da inviare, ${euro(draftTotal)}`}
-              className="ml-auto min-w-0 rounded-[10px] px-1.5 py-1 text-right transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              className="ml-auto min-w-0 rounded-[var(--ds-radius)] px-1.5 py-1 text-right transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             >
               <span className="block truncate text-[12px] leading-tight text-[var(--ds-text-muted)]">
                 {draftCount === 1 ? '1 riga da inviare' : `${draftCount} righe da inviare`}
@@ -2305,7 +2305,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
                   type="button"
                   onClick={() => { setCourse(n); setCoursePickOpen(false); }}
                   aria-pressed={active}
-                  className={`flex h-16 flex-col items-center justify-center gap-0.5 rounded-[16px] text-[15px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                  className={`flex h-16 flex-col items-center justify-center gap-0.5 rounded-[var(--ds-radius)] text-[15px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                     active
                       ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                       : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
@@ -2353,7 +2353,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
           dentro, non sulla zona che scorre, altrimenti quella dipinge sopra
           l'ombra e la taglia con una linea netta (regola 10). */}
       <div className="flex-shrink-0 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2">
-        <div className="rounded-[20px] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-raised)]">
+        <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-raised)]">
           {/* Le righe rimaste in bozza SUL SERVER (uscita richiamata, invio
               interrotto) contano come «da inviare»: senza, l'Invia resta
               spento e l'uscita è irrecuperabile dal palmare. */}
@@ -2391,7 +2391,7 @@ const ErrorBar: React.FC<{ message: string; onDismiss: () => void }> = ({ messag
         type="button"
         onClick={onDismiss}
         aria-label="Chiudi l'errore"
-        className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--ds-critical-text)] transition-[filter] hover:brightness-90"
+        className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-critical-text)] transition-[filter] hover:brightness-90"
       >
         <X size={16} />
       </button>

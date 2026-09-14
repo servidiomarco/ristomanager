@@ -53,7 +53,7 @@ const formatNumber = (n: number | null | undefined): string => {
    h-11, non h-9: il registro si compila col telefono in mano davanti alla
    cella frigo, e 44px è il minimo tattile del design system. */
 const field =
-  'h-11 w-full rounded-full bg-[var(--ds-surface-row)] px-4 text-[15px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] transition-shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+  'h-11 w-full rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-4 text-[15px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] transition-shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
 /** Etichetta di un campo nei form di coda. Minuscolo: le maiuscole a 13px
  *  perdono la forma della parola e gli screen reader le compitano. */
@@ -75,7 +75,7 @@ interface CardHeaderProps {
 const CardHeader: React.FC<CardHeaderProps> = ({ title, icon, status }) => (
   <div className="mb-3 flex items-center justify-between gap-3">
     <div className="flex min-w-0 items-center gap-2.5">
-      <span className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]">
+      <span className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]">
         {icon}
       </span>
       <h2 className="truncate text-[15px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">{title}</h2>
@@ -85,7 +85,7 @@ const CardHeader: React.FC<CardHeaderProps> = ({ title, icon, status }) => (
 );
 
 const Card: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <section className="rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)] sm:p-5">
+  <section className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)] sm:p-5">
     {children}
   </section>
 );
@@ -97,7 +97,7 @@ const row = 'grid grid-cols-12 items-center gap-2 py-2.5 sm:gap-3';
 const emptyNote = 'py-6 text-center text-[14px] text-[var(--ds-text-muted)]';
 
 const deleteButton =
-  'inline-flex h-9 w-9 items-center justify-center rounded-full text-[var(--ds-text-subtle)] transition-colors hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+  'inline-flex h-9 w-9 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-subtle)] transition-colors hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
 // =============================================================================
 // HaccpPage
@@ -341,7 +341,7 @@ export const HaccpPage: React.FC = () => {
               aria-label="Giorno"
               // Bianca e con l'ombra come il campo di ricerca delle altre
               // schermate, non incassata: qui sta sulla tela, non dentro una card.
-              className="h-11 w-auto min-w-0 cursor-pointer rounded-full bg-[var(--ds-surface)] pl-10 pr-4 text-[15px] tabular-nums text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-date-and-time-value]:min-w-0 [&::-webkit-date-and-time-value]:text-left"
+              className="h-11 w-auto min-w-0 cursor-pointer rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] pl-10 pr-4 text-[15px] tabular-nums text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-date-and-time-value]:min-w-0 [&::-webkit-date-and-time-value]:text-left"
             />
           </div>
           {/* Sul telefono perde la parola e resta un cerchio: la scritta si
@@ -379,7 +379,7 @@ export const HaccpPage: React.FC = () => {
                 type="button"
                 onClick={() => setError(null)}
                 aria-label="Chiudi avviso"
-                className="inline-flex h-7 w-7 items-center justify-center rounded-full opacity-70 transition-opacity hover:opacity-100"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--ds-radius-control)] opacity-70 transition-opacity hover:opacity-100"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -550,7 +550,7 @@ const TemperatureRow: React.FC<TempRowProps> = ({
             onChange={e => { setTemp(e.target.value); setTouched(true); }}
             onFocus={e => { setTouched(true); e.target.select(); }}
             onBlur={commit}
-            className={`h-11 w-full rounded-full pl-3 pr-9 text-right text-[15px] tabular-nums transition-shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${tempFieldTone}`}
+            className={`h-11 w-full rounded-[var(--ds-radius-control)] pl-3 pr-9 text-right text-[15px] tabular-nums transition-shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${tempFieldTone}`}
           />
           <span className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-[13px] text-[var(--ds-text-muted)]">°C</span>
         </div>
@@ -751,12 +751,12 @@ const CleaningRow: React.FC<CleaningRowProps> = ({
         <button
           type="button"
           onClick={toggle}
-          className="-my-2 inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          className="-my-2 inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           aria-pressed={done}
           aria-label={done ? 'Segna come non eseguito' : 'Segna come eseguito'}
         >
           <span
-            className={`flex h-6 w-6 items-center justify-center rounded-[8px] transition-colors ${
+            className={`flex h-6 w-6 items-center justify-center rounded-[var(--ds-radius)] transition-colors ${
               done
                 ? 'bg-[var(--ds-seated-solid)] text-white'
                 : 'bg-[var(--ds-surface-row)] text-transparent ring-1 ring-inset ring-[var(--ds-border-strong)]'
@@ -804,7 +804,7 @@ interface ReceiptsSectionProps {
    coppia tinta+testo è quella già verificata a contrasto dal design system. */
 const outcomeChip = (active: boolean, tone: 'positive' | 'critical'): string => {
   const base =
-    'inline-flex h-11 flex-1 items-center justify-center gap-1.5 rounded-full px-3 text-[14px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+    'inline-flex h-11 flex-1 items-center justify-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 text-[14px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
   if (!active) return `${base} bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]`;
   return tone === 'positive'
     ? `${base} bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] ring-2 ring-inset ring-[var(--ds-seated-solid)]`

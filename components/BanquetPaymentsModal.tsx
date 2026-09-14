@@ -163,7 +163,7 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
   return (
     <div className="fixed inset-0 bg-[var(--ds-backdrop)] flex items-center justify-center z-50 p-4" onClick={onClose}>
       <div
-        className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-raised)] border border-[var(--ds-border)] max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col"
+        className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-raised)] border border-[var(--ds-border)] max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col"
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between p-4 border-b border-[var(--ds-border)]">
@@ -174,7 +174,7 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             title="Chiudi"
           >
             <X className="h-4 w-4" />
@@ -183,7 +183,7 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
 
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
           {suggestConfirm && (
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--ds-pending-tint)] bg-[var(--ds-pending-tint)] p-3">
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--ds-radius)] border border-[var(--ds-pending-tint)] bg-[var(--ds-pending-tint)] p-3">
               <p className="text-sm text-[var(--ds-pending-text)]">
                 Pagamento registrato su un preventivo: confermare il banchetto?
               </p>
@@ -201,7 +201,7 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
                     } catch { /* resta preventivo: nessun falso ok */ }
                     finally { setConfirmBusy(false); }
                   }}
-                  className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 >
                   {confirmBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
                   Conferma banchetto
@@ -209,7 +209,7 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
                 <button
                   type="button"
                   onClick={() => setSuggestConfirm(false)}
-                  className="inline-flex h-9 items-center rounded-full px-3 text-[13px] font-medium text-[var(--ds-text-muted)] transition-colors hover:text-[var(--ds-text-primary)]"
+                  className="inline-flex h-9 items-center rounded-[var(--ds-radius-control)] px-3 text-[13px] font-medium text-[var(--ds-text-muted)] transition-colors hover:text-[var(--ds-text-primary)]"
                 >
                   Resta preventivo
                 </button>
@@ -217,7 +217,7 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
             </div>
           )}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="rounded-lg bg-[var(--ds-surface-row)] border border-[var(--ds-border)] p-3">
+            <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] border border-[var(--ds-border)] p-3">
               <div className="text-[11px] tracking-wide font-semibold text-[var(--ds-text-muted)]">Totale dovuto</div>
               <div className="text-xl font-bold text-[var(--ds-text-primary)] mt-1">
                 {totalDue > 0 ? formatEuro(totalDue) : '—'}
@@ -242,14 +242,14 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
                 </div>
               )}
             </div>
-            <div className="rounded-lg bg-[var(--ds-seated-tint)] border border-[var(--ds-seated-tint)] p-3">
+            <div className="rounded-[var(--ds-radius)] bg-[var(--ds-seated-tint)] border border-[var(--ds-seated-tint)] p-3">
               <div className="text-[11px] tracking-wide font-semibold text-[var(--ds-seated-text)]">Già pagato</div>
               <div className="text-xl font-bold text-[var(--ds-seated-text)] mt-1">{formatEuro(totalPaid)}</div>
               <div className="text-[11px] text-[var(--ds-seated-text)] mt-0.5">
                 {payments.length} {payments.length === 1 ? 'pagamento' : 'pagamenti'}
               </div>
             </div>
-            <div className={`rounded-lg border p-3 ${remaining != null && remaining > 0 ? 'bg-[var(--ds-critical-tint)] border-[var(--ds-critical-tint)]' : 'bg-[var(--ds-surface-row)] border-[var(--ds-border)]'}`}>
+            <div className={`rounded-[var(--ds-radius)] border p-3 ${remaining != null && remaining > 0 ? 'bg-[var(--ds-critical-tint)] border-[var(--ds-critical-tint)]' : 'bg-[var(--ds-surface-row)] border-[var(--ds-border)]'}`}>
               <div className={`text-[11px] tracking-wide font-semibold ${remaining != null && remaining > 0 ? 'text-[var(--ds-critical-text)]' : 'text-[var(--ds-text-muted)]'}`}>Residuo</div>
               <div className={`text-xl font-bold mt-1 ${remaining != null && remaining > 0 ? 'text-[var(--ds-critical-text)]' : 'text-[var(--ds-text-primary)]'}`}>
                 {remaining != null ? formatEuro(remaining) : '—'}
@@ -261,7 +261,7 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
           </div>
 
           {error && (
-            <div className="rounded-lg bg-[var(--ds-critical-tint)] border border-[var(--ds-critical-tint)] p-3 text-sm text-[var(--ds-critical-text)]">
+            <div className="rounded-[var(--ds-radius)] bg-[var(--ds-critical-tint)] border border-[var(--ds-critical-tint)] p-3 text-sm text-[var(--ds-critical-text)]">
               {error}
             </div>
           )}
@@ -285,16 +285,16 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
                 <Loader label="Caricamento…" size={40} />
               </div>
             ) : payments.length === 0 ? (
-              <p className="text-sm text-[var(--ds-text-subtle)] italic text-center py-6 bg-[var(--ds-surface-row)] rounded-lg border border-dashed border-[var(--ds-border)]">
+              <p className="text-sm text-[var(--ds-text-subtle)] italic text-center py-6 bg-[var(--ds-surface-row)] rounded-[var(--ds-radius)] border border-dashed border-[var(--ds-border)]">
                 Nessun pagamento registrato.
               </p>
             ) : (
-              <ul className="divide-y divide-[var(--ds-border)] border border-[var(--ds-border)] rounded-lg overflow-hidden">
+              <ul className="divide-y divide-[var(--ds-border)] border border-[var(--ds-border)] rounded-[var(--ds-radius)] overflow-hidden">
                 {payments.map(p => {
                   const MethodIcon = METHOD_ICON[p.payment_method];
                   return (
                     <li key={p.id} className="flex items-center gap-3 p-3 bg-white">
-                      <div className="h-9 w-9 rounded-full bg-[var(--ds-surface-row)] flex items-center justify-center flex-shrink-0">
+                      <div className="h-9 w-9 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] flex items-center justify-center flex-shrink-0">
                         <MethodIcon className="h-4 w-4 text-[var(--ds-text-secondary)]" />
                       </div>
                       <div className="min-w-0 flex-1">
@@ -315,7 +315,7 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
                       <button
                         type="button"
                         onClick={() => handleDelete(p.id)}
-                        className="p-1.5 rounded-md text-[var(--ds-text-subtle)] hover:text-[var(--ds-critical-text)] hover:bg-[var(--ds-critical-tint)] flex-shrink-0"
+                        className="p-1.5 rounded-[var(--ds-radius)] text-[var(--ds-text-subtle)] hover:text-[var(--ds-critical-text)] hover:bg-[var(--ds-critical-tint)] flex-shrink-0"
                         title="Elimina"
                       >
                         <Trash2 className="h-4 w-4" />
@@ -328,7 +328,7 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
           </div>
 
           {showForm && (
-            <form onSubmit={handleSubmit} className="rounded-lg border border-[var(--ds-arriving-tint)] bg-[var(--ds-arriving-tint)] p-4 space-y-3">
+            <form onSubmit={handleSubmit} className="rounded-[var(--ds-radius)] border border-[var(--ds-arriving-tint)] bg-[var(--ds-arriving-tint)] p-4 space-y-3">
               <div className="text-[13px] font-semibold text-[var(--ds-arriving-text)]">Nuovo pagamento</div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
@@ -340,7 +340,7 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
                     required
                     value={form.amount}
                     onChange={e => setForm({ ...form, amount: e.target.value })}
-                    className="w-full rounded-md border border-[var(--ds-border-strong)] bg-white px-3 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    className="w-full rounded-[var(--ds-radius)] border border-[var(--ds-border-strong)] bg-white px-3 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   />
                 </div>
                 <div>
@@ -350,7 +350,7 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
                     required
                     value={form.payment_date}
                     onChange={e => setForm({ ...form, payment_date: e.target.value })}
-                    className="w-full rounded-md border border-[var(--ds-border-strong)] bg-white px-3 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    className="w-full rounded-[var(--ds-radius)] border border-[var(--ds-border-strong)] bg-white px-3 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   />
                 </div>
                 <div>
@@ -358,7 +358,7 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
                   <select
                     value={form.payment_type}
                     onChange={e => setForm({ ...form, payment_type: e.target.value as BanquetPaymentType })}
-                    className="w-full rounded-md border border-[var(--ds-border-strong)] bg-white px-3 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    className="w-full rounded-[var(--ds-radius)] border border-[var(--ds-border-strong)] bg-white px-3 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
                     <option value={BanquetPaymentType.DEPOSIT}>Acconto</option>
                     <option value={BanquetPaymentType.BALANCE}>Saldo</option>
@@ -370,7 +370,7 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
                   <select
                     value={form.payment_method}
                     onChange={e => setForm({ ...form, payment_method: e.target.value as BanquetPaymentMethod })}
-                    className="w-full rounded-md border border-[var(--ds-border-strong)] bg-white px-3 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    className="w-full rounded-[var(--ds-radius)] border border-[var(--ds-border-strong)] bg-white px-3 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
                     <option value={BanquetPaymentMethod.CASH}>Contanti</option>
                     <option value={BanquetPaymentMethod.CARD}>Carta</option>
@@ -386,11 +386,11 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
                   value={form.notes}
                   onChange={e => setForm({ ...form, notes: e.target.value })}
                   placeholder="Es. Riferimento bonifico, ricevuta n. ..."
-                  className="w-full rounded-md border border-[var(--ds-border-strong)] bg-white px-3 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  className="w-full rounded-[var(--ds-radius)] border border-[var(--ds-border-strong)] bg-white px-3 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 />
               </div>
               {formError && (
-                <div className="text-xs text-[var(--ds-critical-text)] bg-[var(--ds-critical-tint)] border border-[var(--ds-critical-tint)] rounded-md px-2 py-1.5">
+                <div className="text-xs text-[var(--ds-critical-text)] bg-[var(--ds-critical-tint)] border border-[var(--ds-critical-tint)] rounded-[var(--ds-radius)] px-2 py-1.5">
                   {formError}
                 </div>
               )}
@@ -399,14 +399,14 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
                   type="button"
                   disabled={submitting}
                   onClick={() => { setShowForm(false); setFormError(null); }}
-                  className="rounded-full px-4 py-2 border border-[var(--ds-border-strong)] bg-white text-[var(--ds-text-primary)] text-sm font-medium hover:bg-[var(--ds-surface-row)]"
+                  className="rounded-[var(--ds-radius-control)] px-4 py-2 border border-[var(--ds-border-strong)] bg-white text-[var(--ds-text-primary)] text-sm font-medium hover:bg-[var(--ds-surface-row)]"
                 >
                   Annulla
                 </button>
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="rounded-full px-4 py-2 bg-[var(--ds-action-bg)] text-white dark:text-[var(--ds-action-fg)] text-sm font-medium hover:opacity-90 disabled:opacity-50 inline-flex items-center justify-center gap-1.5"
+                  className="rounded-[var(--ds-radius-control)] px-4 py-2 bg-[var(--ds-action-bg)] text-white dark:text-[var(--ds-action-fg)] text-sm font-medium hover:opacity-90 disabled:opacity-50 inline-flex items-center justify-center gap-1.5"
                 >
                   {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
                   Registra

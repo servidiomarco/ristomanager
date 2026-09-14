@@ -182,7 +182,7 @@ export const PaymentDetail: React.FC<{
   };
 
   const chip =
-    'inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+    'inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3.5 text-[13px] font-medium transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
   return (
     <>
@@ -344,7 +344,7 @@ export const PaymentDetail: React.FC<{
                 const ChIcon = ch.Icon;
                 const st = messageStatusView(msg.status);
                 return (
-                  <article key={msg.id} className="rounded-[16px] bg-[var(--ds-surface-row)] p-3.5">
+                  <article key={msg.id} className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3.5">
                     <div className="mb-1.5 flex flex-wrap items-center gap-2">
                       <StatusPill tone={ch.tone}>
                         <ChIcon className="h-3 w-3" /> {ch.label}
@@ -382,7 +382,7 @@ export const PaymentDetail: React.FC<{
 
       {checkoutUrl && (
         <div className="flex flex-shrink-0 gap-2 px-4 pb-4 pt-1 sm:px-6 lg:px-8">
-          <button type="button" onClick={copyLink} className="inline-flex h-12 flex-1 items-center justify-center gap-2 rounded-full bg-[var(--ds-surface)] text-[15px] font-medium text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]">
+          <button type="button" onClick={copyLink} className="inline-flex h-12 flex-1 items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[15px] font-medium text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]">
             {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
             {copied ? 'Copiato' : 'Copia link'}
           </button>
@@ -390,7 +390,7 @@ export const PaymentDetail: React.FC<{
             href={checkoutUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex h-12 flex-1 items-center justify-center gap-2 rounded-full bg-[var(--ds-action-bg)] text-[15px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="inline-flex h-12 flex-1 items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[15px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             <ExternalLink className="h-4 w-4" /> Apri checkout
           </a>

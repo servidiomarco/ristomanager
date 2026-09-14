@@ -85,8 +85,8 @@ const PaymentRow: React.FC<{
         inGroup
           ? active ? 'bg-[var(--ds-surface-row)]' : 'hover:bg-[var(--ds-surface-row)]'
           : active
-            ? 'rounded-[16px] bg-[var(--ds-surface-row)] shadow-[var(--ds-shadow-card)]'
-            : 'rounded-[16px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] hover:bg-[var(--ds-surface-row)]'
+            ? 'rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] shadow-[var(--ds-shadow-card)]'
+            : 'rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] hover:bg-[var(--ds-surface-row)]'
       }`}
     >
       {/* The state, before the number. Scanning this list is looking for the
@@ -94,7 +94,7 @@ const PaymentRow: React.FC<{
           at the left edge answers that in one pass down the column, where a
           pill on the right edge makes the eye cross every row to find it. The
           pill stays: colour alone is not a label. */}
-      <span className={`inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[12px] ${STATUS_TILE[status.tone]}`}>
+      <span className={`inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius)] ${STATUS_TILE[status.tone]}`}>
         <StatusIcon className="h-4 w-4" />
       </span>
       <span className="min-w-0 flex-1">
@@ -194,7 +194,7 @@ export const LinkDiPagamento: React.FC<{
             type="button"
             onClick={() => onStatusFilter(c.v)}
             aria-pressed={statusFilter === c.v}
-            className={`inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+            className={`inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3.5 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
               statusFilter === c.v
                 ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                 : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] hover:text-[var(--ds-text-primary)]'
@@ -242,7 +242,7 @@ export const LinkDiPagamento: React.FC<{
                 return (
                   <div
                     key={`bill-${day.key}-${group.billId}`}
-                    className="overflow-hidden rounded-[16px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]"
+                    className="overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]"
                   >
                     {/* Two lines, not one: the table, the customer, the running
                         total and the bar do not fit across a pane this wide. */}
@@ -263,7 +263,7 @@ export const LinkDiPagamento: React.FC<{
                         {billTotal > 0 && <>/ {formatEuro(billTotal)}</>}
                         {billTotal > 0 && (
                           <span className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-[var(--ds-border)]">
-                            <span className="block h-full rounded-full bg-[var(--ds-seated-solid)]" style={{ width: `${pct}%` }} />
+                            <span className="block h-full rounded-[var(--ds-radius-control)] bg-[var(--ds-seated-solid)]" style={{ width: `${pct}%` }} />
                           </span>
                         )}
                       </div>

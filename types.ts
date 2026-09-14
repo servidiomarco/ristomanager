@@ -958,6 +958,10 @@ export interface User {
   // (stile cassa, per chi arriva da Passepartout), null = classico.
   // Per utente e non per dispositivo: la scelta segue l'operatore.
   preferred_orderpad_layout?: string | null;
+  // Stile dell'interfaccia: 'squadrato' = il redesign dei raggi (6/4/8px),
+  // null = classico (scatole morbide, controlli a pillola). Stessa natura
+  // del layout comande: per utente, segue l'operatore su ogni dispositivo.
+  preferred_design_style?: string | null;
   // Account nell'allowlist REPORTS_ADMIN_EMAILS (env backend): vede la
   // Reportistica anche senza reports:view in matrice. Serve al lancio
   // ristretto — i permessi di ruolo restano la via ordinaria.

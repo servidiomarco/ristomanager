@@ -43,7 +43,7 @@ const CloseButton: React.FC<{ onClick: () => void }> = ({ onClick }) => (
     type="button"
     onClick={onClick}
     aria-label="Chiudi notifica"
-    className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-action-fg)] transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+    className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-action-fg)] transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
   >
     <X className="h-4 w-4" aria-hidden />
   </button>
@@ -63,7 +63,7 @@ const ActionButton: React.FC<{
         setBusy(true);
         try { await onAction(); } finally { onDone(); }
       }}
-      className="inline-flex h-9 flex-shrink-0 items-center rounded-full px-3 text-[14px] font-semibold text-[var(--ds-action-accent)] transition-colors hover:bg-white/10 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+      className="inline-flex h-9 flex-shrink-0 items-center rounded-[var(--ds-radius-control)] px-3 text-[14px] font-semibold text-[var(--ds-action-accent)] transition-colors hover:bg-white/10 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
     >
       {label}
     </button>
@@ -83,7 +83,7 @@ export const ToastPill: React.FC<{
   const trailing = !!action || dismissible;
   return (
     <div
-      className={`pointer-events-auto flex w-full max-w-md items-center gap-3 rounded-full bg-[var(--ds-action-bg)] py-2.5 pl-4 shadow-[var(--ds-shadow-raised)] ${trailing ? 'pr-2' : 'pr-4'}`}
+      className={`pointer-events-auto flex w-full max-w-md items-center gap-3 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] py-2.5 pl-4 shadow-[var(--ds-shadow-raised)] ${trailing ? 'pr-2' : 'pr-4'}`}
       style={{ animation: 'tileIn 200ms ease-out both' }}
       role={tone === 'error' ? 'alert' : 'status'}
     >
@@ -109,7 +109,7 @@ export const ToastCard: React.FC<{
   return (
     <div
       role={tone === 'error' ? 'alert' : 'status'}
-      className="pointer-events-auto w-full max-w-md rounded-[24px] bg-[var(--ds-action-bg)] py-3 pl-4 pr-3 shadow-[var(--ds-shadow-raised)]"
+      className="pointer-events-auto w-full max-w-md rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] py-3 pl-4 pr-3 shadow-[var(--ds-shadow-raised)]"
       style={{ animation: 'tileIn 200ms ease-out both' }}
     >
       <div className="flex items-start gap-3">

@@ -155,7 +155,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
     <div
       role="group"
       aria-label={t('header.langGroupAria')}
-      className="inline-flex gap-0.5 rounded-full bg-[var(--ds-surface)] p-0.5 shadow-[var(--ds-shadow-card)]"
+      className="inline-flex gap-0.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] p-0.5 shadow-[var(--ds-shadow-card)]"
     >
       {SUPPORTED_LANGUAGES.map(code => (
         <button
@@ -163,7 +163,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
           type="button"
           aria-pressed={lang === code}
           onClick={() => i18n.changeLanguage(code)}
-          className={`min-h-[30px] rounded-full px-3 text-xs font-semibold tracking-wide transition ${
+          className={`min-h-[30px] rounded-[var(--ds-radius-control)] px-3 text-xs font-semibold tracking-wide transition ${
             lang === code ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]' : 'text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]'
           }`}
         >
@@ -231,7 +231,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
           </div>
         </header>
 
-        <div className="rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] p-5 mb-4">
+        <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] p-5 mb-4">
           <div className="flex items-baseline justify-between">
             <span className="text-sm text-[var(--ds-text-muted)]">{t('bill.total')}</span>
             <span className="text-3xl font-bold tracking-tight">{totalEur}</span>
@@ -263,7 +263,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
         </div>
 
         {bill.splits.length > 0 && (
-          <div className="rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] p-4 mb-4">
+          <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] p-4 mb-4">
             <div className="text-[13px] font-semibold text-[var(--ds-text-secondary)] mb-2">{t('splits.title')}</div>
             <ul className="space-y-1.5">
               {bill.splits.filter(s => s.status === 'CLAIMED' || s.status === 'PAID').map((s, idx) => (
@@ -281,7 +281,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
         )}
 
         {errorMsg && (
-          <div className="mb-4 rounded-[16px] bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] px-4 py-3 text-[15px] flex items-start gap-2">
+          <div className="mb-4 rounded-[var(--ds-radius)] bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] px-4 py-3 text-[15px] flex items-start gap-2">
             <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
             <span>{errorMsg}</span>
           </div>
@@ -292,7 +292,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
             <button
               type="button"
               onClick={handleEqualShare}
-              className="w-full h-14 rounded-[14px] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] font-semibold text-base shadow-[var(--ds-shadow-card)] hover:bg-[var(--ds-action-bg-hover)] active:scale-[0.99] transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              className="w-full h-14 rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] font-semibold text-base shadow-[var(--ds-shadow-card)] hover:bg-[var(--ds-action-bg-hover)] active:scale-[0.99] transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             >
               {t('menu.myShare', { amount: formatEur(equalShareCents, lang) })}
             </button>
@@ -303,7 +303,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
               <button
                 type="button"
                 onClick={handleFullBill}
-                className="w-full h-14 rounded-[14px] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] font-semibold text-base hover:bg-[var(--ds-surface-row)] active:scale-[0.99] transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                className="w-full h-14 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] font-semibold text-base hover:bg-[var(--ds-surface-row)] active:scale-[0.99] transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               >
                 {t('menu.fullBill', { amount: residualEur })}
               </button>
@@ -312,7 +312,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
               <button
                 type="button"
                 onClick={handlePerItem}
-                className="w-full h-14 rounded-[14px] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] font-semibold text-base hover:bg-[var(--ds-surface-row)] active:scale-[0.99] transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                className="w-full h-14 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] font-semibold text-base hover:bg-[var(--ds-surface-row)] active:scale-[0.99] transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               >
                 {t('menu.perItem')}
               </button>
@@ -320,7 +320,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
             <button
               type="button"
               onClick={handleFixedAmount}
-              className="w-full h-14 rounded-[14px] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] font-semibold text-base hover:bg-[var(--ds-surface-row)] active:scale-[0.99] transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              className="w-full h-14 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] font-semibold text-base hover:bg-[var(--ds-surface-row)] active:scale-[0.99] transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             >
               {t('menu.customAmount')}
             </button>
@@ -328,7 +328,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
         )}
 
         {mode === 'items' && (
-          <div className="rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] p-4 space-y-3">
+          <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] p-4 space-y-3">
             <button
               type="button"
               onClick={handleBack}
@@ -379,14 +379,14 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
                 placeholder={t('items.namePlaceholder')}
                 value={claimantLabel}
                 onChange={e => setClaimantLabel(e.target.value.slice(0, 40))}
-                className="mt-1 w-full h-11 px-3 rounded-full bg-[var(--ds-surface-row)] text-[15px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                className="mt-1 w-full h-11 px-3 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[15px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               />
             </div>
             <button
               type="button"
               onClick={() => submitClaim('per_item')}
               disabled={submitting || pickedItems.length === 0}
-              className="w-full h-12 rounded-[14px] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] font-semibold hover:bg-[var(--ds-action-bg-hover)] active:scale-[0.99] transition disabled:opacity-40 flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              className="w-full h-12 rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] font-semibold hover:bg-[var(--ds-action-bg-hover)] active:scale-[0.99] transition disabled:opacity-40 flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             >
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
               {t('items.continue')}
@@ -395,7 +395,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
         )}
 
         {mode === 'menu' && bill.residual_cents === 0 && (
-          <div className="rounded-[16px] bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] p-4 text-center">
+          <div className="rounded-[var(--ds-radius)] bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] p-4 text-center">
             <CheckCircle2 className="h-6 w-6 mx-auto mb-1" />
             <div className="font-semibold">{t('paidInFull.title')}</div>
             <p className="text-xs mt-1">{t('paidInFull.text')}</p>
@@ -403,7 +403,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
         )}
 
         {(mode === 'equal' || mode === 'full' || mode === 'fixed') && (
-          <div className="rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] p-4 space-y-3">
+          <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] p-4 space-y-3">
             <button
               type="button"
               onClick={handleBack}
@@ -423,7 +423,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
                     placeholder={t('amountForm.amountPlaceholder')}
                     value={fixedAmountInput}
                     onChange={e => setFixedAmountInput(e.target.value)}
-                    className="w-full h-12 pl-8 pr-3 text-lg rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] tabular-nums"
+                    className="w-full h-12 pl-8 pr-3 text-lg rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] tabular-nums"
                   />
                 </div>
                 <div className="mt-1 text-[11px] text-[var(--ds-text-muted)]">{t('amountForm.maxAvailable', { amount: residualEur })}</div>
@@ -437,7 +437,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
                 placeholder={t('amountForm.namePlaceholder')}
                 value={claimantLabel}
                 onChange={e => setClaimantLabel(e.target.value.slice(0, 40))}
-                className="mt-1 w-full h-11 px-3 rounded-full bg-[var(--ds-surface-row)] text-[15px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                className="mt-1 w-full h-11 px-3 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[15px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               />
               <p className="mt-1 text-[11px] text-[var(--ds-text-muted)]">{t('amountForm.visibleNote')}</p>
             </div>
@@ -446,7 +446,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
               type="button"
               onClick={() => submitClaim(mode === 'equal' ? 'equal_share' : mode === 'full' ? 'full_bill' : 'fixed_amount')}
               disabled={submitting}
-              className="w-full h-12 rounded-[14px] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] font-semibold hover:bg-[var(--ds-action-bg-hover)] active:scale-[0.99] transition disabled:opacity-40 flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              className="w-full h-12 rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] font-semibold hover:bg-[var(--ds-action-bg-hover)] active:scale-[0.99] transition disabled:opacity-40 flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             >
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
               {t('amountForm.continue')}
@@ -455,7 +455,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
         )}
 
         {mode === 'claimed' && claim && (
-          <div className="rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] p-5 space-y-4">
+          <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] p-5 space-y-4">
             <div className="text-center">
               <div className="text-xs text-[var(--ds-text-muted)] mb-1">{t('claimed.yourShare')}</div>
               <div className="text-3xl font-bold">{formatEur(claim.amount_cents, lang)}</div>
@@ -467,12 +467,12 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
             {claim.checkout_url ? (
               <a
                 href={claim.checkout_url}
-                className="w-full inline-flex items-center justify-center gap-2 h-14 rounded-[14px] bg-[var(--ds-seated-solid)] text-[var(--ds-seated-fg)] font-semibold text-base shadow-[var(--ds-shadow-card)] hover:opacity-90 active:scale-[0.99] transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                className="w-full inline-flex items-center justify-center gap-2 h-14 rounded-[var(--ds-radius)] bg-[var(--ds-seated-solid)] text-[var(--ds-seated-fg)] font-semibold text-base shadow-[var(--ds-shadow-card)] hover:opacity-90 active:scale-[0.99] transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               >
                 <ExternalLink className="h-4 w-4" /> {t('claimed.goToPayment')}
               </a>
             ) : (
-              <div className="rounded-[16px] bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] p-3 text-[15px]">
+              <div className="rounded-[var(--ds-radius)] bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] p-3 text-[15px]">
                 {t('claimed.noCheckoutLink')}
               </div>
             )}
@@ -481,7 +481,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
               type="button"
               onClick={handleRelease}
               disabled={submitting}
-              className="w-full h-11 rounded-full bg-[var(--ds-surface)] ring-1 ring-inset ring-[var(--ds-border-strong)] text-[var(--ds-text-primary)] text-[15px] font-medium hover:bg-[var(--ds-surface-row)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              className="w-full h-11 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] ring-1 ring-inset ring-[var(--ds-border-strong)] text-[var(--ds-text-primary)] text-[15px] font-medium hover:bg-[var(--ds-surface-row)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             >
               {submitting ? t('claimed.cancelling') : t('claimed.cancelShare')}
             </button>

@@ -280,7 +280,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
           type="button"
           onClick={() => onAdd(d)}
           aria-label={`Aggiungi ${d.name}`}
-          className={`inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+          className={`inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
             qty > 0
               ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)]'
               : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
@@ -311,7 +311,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
             type="button"
             onClick={() => onRemove(d)}
             aria-label={`Togli ${d.name}`}
-            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             <Minus size={16} aria-hidden />
           </button>
@@ -327,7 +327,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
           type="button"
           onClick={() => onAdd(d)}
           aria-label={`Aggiungi ${d.name}`}
-          className={`inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+          className={`inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
             qty > 0
               ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)]'
               : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
@@ -348,7 +348,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
         type="button"
         onClick={e => { e.stopPropagation(); setPhotoDish(d); }}
         aria-label={`Foto di ${d.name}`}
-        className={`${size} flex-shrink-0 overflow-hidden rounded-[12px] bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]`}
+        className={`${size} flex-shrink-0 overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]`}
       >
         <img src={d.photo_url} alt="" loading="lazy" className="h-full w-full object-cover" />
       </button>
@@ -371,7 +371,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
     // Lo scorrimento orizzontale ritaglia anche in verticale: senza il margine
     // negativo con padding uguale, l'ombra sotto ogni chip esce tagliata di
     // netto e la pista legge come troncata (regola 11, sull'altro asse).
-    <div className="-my-1.5 flex flex-shrink-0 gap-2 overflow-x-auto py-1.5 scrollbar-hide">
+    <div className="-my-6 flex flex-shrink-0 gap-2 overflow-x-auto py-6 scrollbar-hide">
       {categories.map(c => {
         const active = !q && c === category;
         return (
@@ -380,7 +380,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
             type="button"
             onClick={() => { onQuery(''); onCategory(c); }}
             aria-pressed={active}
-            className={`inline-flex h-11 flex-shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-4 text-[15px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+            className={`inline-flex h-11 flex-shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[var(--ds-radius-control)] px-4 text-[15px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
               active
                 ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                 : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] hover:text-[var(--ds-text-primary)]'
@@ -451,7 +451,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
             type="button"
             onClick={() => { onQuery(''); onCategory(c); }}
             aria-pressed={active}
-            className={`flex w-[156px] flex-shrink-0 flex-col items-start gap-1.5 rounded-[6px] px-4 py-3.5 text-left transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${CAT_CARD[n]} ${
+            className={`flex w-[156px] flex-shrink-0 flex-col items-start gap-1.5 rounded-[var(--ds-radius)] px-4 py-3.5 text-left transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${CAT_CARD[n]} ${
               active
                 ? 'shadow-[var(--ds-shadow-card)] ring-2 ring-[var(--ds-action-bg)]'
                 : 'shadow-[var(--ds-shadow-card)]'
@@ -490,7 +490,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
       <button
         type="button"
         onClick={() => setSearchOpen(true)}
-        className="relative h-11 w-full flex-shrink-0 rounded-full bg-[var(--ds-surface)] pl-11 pr-4 text-left text-[15px] text-[var(--ds-text-muted)] shadow-[var(--ds-shadow-card)] transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+        className="relative h-11 w-full flex-shrink-0 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] pl-11 pr-4 text-left text-[15px] text-[var(--ds-text-muted)] shadow-[var(--ds-shadow-card)] transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
       >
         <Search
           className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ds-text-muted)]"
@@ -533,7 +533,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
             type="button"
             onClick={() => onLineCourseTap(l.key)}
             aria-label={`Sposta ${l.label} in un'altra uscita`}
-            className="inline-flex h-9 flex-shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-[var(--ds-arriving-tint)] px-2.5 text-[12px] font-semibold text-[var(--ds-arriving-text)] transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="inline-flex h-9 flex-shrink-0 items-center gap-1 whitespace-nowrap rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-tint)] px-2.5 text-[12px] font-semibold text-[var(--ds-arriving-text)] transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             <CornerDownRight size={13} aria-hidden />
             {courseTagShort(l.courseNo)}
@@ -553,7 +553,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
             type="button"
             onClick={() => onBumpLine(l.key, -1)}
             aria-label={l.qty === 1 ? `Togli ${l.label}` : `Uno in meno di ${l.label}`}
-            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             {l.qty === 1 ? <Trash2 size={15} /> : <Minus size={15} />}
           </button>
@@ -564,7 +564,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
             type="button"
             onClick={() => onBumpLine(l.key, +1)}
             aria-label={`Un altro ${l.label}`}
-            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             <Plus size={15} />
           </button>
@@ -593,7 +593,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
   // anche la pagina piatti della variante a pagine — stessa anatomia,
   // stessi controlli, bersagli a 44px.
   const compactCard = (
-    <div className="overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+    <div className="overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
       {visible.map((d, i) => (
         <React.Fragment key={d.id}>
           <div
@@ -662,7 +662,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
                   type="button"
                   onClick={() => { onQuery(''); onCategory(c); }}
                   style={{ animation: 'tileIn 260ms ease-out both', animationDelay: `${Math.min(tileNo++ * 45, 450)}ms` }}
-                  className={`flex min-h-[76px] select-none flex-col items-center justify-center gap-1 rounded-[16px] bg-[var(--ds-surface)] p-2 text-center shadow-[var(--ds-shadow-card)] transition-[transform,opacity] hover:bg-[var(--ds-surface-row)] active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                  className={`flex min-h-[76px] select-none flex-col items-center justify-center gap-1 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-2 text-center shadow-[var(--ds-shadow-card)] transition-[transform,opacity] hover:bg-[var(--ds-surface-row)] active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                     dimSelf && mutedCat(c) ? 'opacity-45' : ''
                   }`}
                 >
@@ -694,7 +694,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
                         {/* Intestazione leggera: cerchietto tinto, parola,
                             filetto che prende il resto della riga. */}
                         <div className="flex items-center gap-2.5">
-                          <span className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full ${chip}`}>
+                          <span className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] ${chip}`}>
                             <Icon size={14} aria-hidden />
                           </span>
                           <span className="text-[13px] font-semibold text-[var(--ds-text-secondary)]">{label}</span>
@@ -708,7 +708,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
                 </div>
               );
             })() : (
-              <div className="overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+              <div className="overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
                 {categories.map((c, i) => (
                   <button
                     key={c}
@@ -745,7 +745,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
             type="button"
             onClick={onCategoryBack}
             aria-label="Torna alle categorie"
-            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             <ArrowLeft size={20} aria-hidden />
           </button>
@@ -826,7 +826,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
               return (
                 <div
                   key={d.id}
-                  className={`relative flex flex-col overflow-hidden rounded-[6px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] ${
+                  className={`relative flex flex-col overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] ${
                     qty > 0 ? 'ring-2 ring-[var(--ds-action-bg)]' : ''
                   }`}
                 >
@@ -883,7 +883,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
                       type="button"
                       onClick={() => onCourseTap!(d)}
                       aria-label={`Sposta ${d.name} in un'altra uscita`}
-                      className="absolute right-2 top-2 inline-flex h-9 items-center gap-1 whitespace-nowrap rounded-full bg-[var(--ds-arriving-tint)] px-2.5 text-[12px] font-semibold text-[var(--ds-arriving-text)] shadow-[var(--ds-shadow-card)] transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                      className="absolute right-2 top-2 inline-flex h-9 items-center gap-1 whitespace-nowrap rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-tint)] px-2.5 text-[12px] font-semibold text-[var(--ds-arriving-text)] shadow-[var(--ds-shadow-card)] transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     >
                       <CornerDownRight size={13} aria-hidden />
                       {courseTagShort(courseOf!(d))}
@@ -905,7 +905,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
                   <button
                     type="button"
                     {...press(d)}
-                    className={`flex min-h-[76px] w-full select-none flex-col justify-center gap-0.5 rounded-[16px] bg-[var(--ds-surface)] py-3 text-left shadow-[var(--ds-shadow-card)] transition-transform hover:bg-[var(--ds-surface-row)] active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                    className={`flex min-h-[76px] w-full select-none flex-col justify-center gap-0.5 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] py-3 text-left shadow-[var(--ds-shadow-card)] transition-transform hover:bg-[var(--ds-surface-row)] active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                       d.photo_url ? 'pl-[68px] pr-4' : 'px-4'
                     } ${qty > 0 ? 'ring-2 ring-[var(--ds-action-bg)]' : ''}`}
                   >
@@ -934,13 +934,13 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
                           type="button"
                           onClick={() => onCourseTap!(d)}
                           aria-label={`Sposta ${d.name} in un'altra uscita`}
-                          className="inline-flex h-9 items-center gap-1 whitespace-nowrap rounded-full bg-[var(--ds-arriving-tint)] px-2.5 text-[12px] font-semibold text-[var(--ds-arriving-text)] transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                          className="inline-flex h-9 items-center gap-1 whitespace-nowrap rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-tint)] px-2.5 text-[12px] font-semibold text-[var(--ds-arriving-text)] transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                         >
                           <CornerDownRight size={13} aria-hidden />
                           {courseTagShort(courseOf!(d))}
                         </button>
                       )}
-                      <span className="inline-flex h-6 min-w-[24px] items-center justify-center rounded-full bg-[var(--ds-action-bg)] px-1.5 text-[12px] font-semibold tabular-nums text-[var(--ds-action-fg)]">
+                      <span className="inline-flex h-6 min-w-[24px] items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-1.5 text-[12px] font-semibold tabular-nums text-[var(--ds-action-fg)]">
                         {qty}
                       </span>
                     </span>
@@ -963,7 +963,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
                 // eventuali sotto-righe delle combinazioni battute.
                 <div
                   key={d.id}
-                  className={`flex flex-col rounded-[16px] bg-[var(--ds-surface)] px-4 py-3 shadow-[var(--ds-shadow-card)] ${
+                  className={`flex flex-col rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-4 py-3 shadow-[var(--ds-shadow-card)] ${
                     qty > 0 ? 'ring-2 ring-[var(--ds-action-bg)]' : ''
                   }`}
                 >

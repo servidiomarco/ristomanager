@@ -32,7 +32,9 @@ export const CourseChips: React.FC<{
 }> = ({ order, cart, course, onCourse, showBar, showDessert, variant = 'pill' }) => (
   // Margine negativo con padding uguale: lo scorrimento orizzontale ritaglia
   // anche in verticale, e senza questo l'ombra sotto le pastiglie esce tagliata.
-  <div className="-my-1.5 flex gap-2 overflow-x-auto py-1.5 scrollbar-hide">
+  // Ventiquattro e non sei: --ds-shadow-card scende 8px e sfuma per 24, quindi
+  // sei ne tagliavano comunque la maggior parte (regola 11).
+  <div className="-my-6 flex gap-2 overflow-x-auto py-6 scrollbar-hide">
     {[
       ...(showBar || course === BAR_COURSE_NO
         || cartForCourse(cart, BAR_COURSE_NO).length > 0
@@ -75,7 +77,7 @@ export const CourseChips: React.FC<{
             onClick={() => onCourse(n)}
             aria-pressed={active}
             aria-label={courseLabel(n)}
-            className={`flex min-w-[72px] flex-1 flex-shrink-0 flex-col items-center justify-center gap-1.5 rounded-[12px] px-3 py-2.5 text-[16px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+            className={`flex min-w-[72px] flex-1 flex-shrink-0 flex-col items-center justify-center gap-1.5 rounded-[var(--ds-radius)] px-3 py-2.5 text-[16px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
               active
                 ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                 : sent
@@ -96,7 +98,7 @@ export const CourseChips: React.FC<{
           onClick={() => onCourse(n)}
           aria-pressed={active}
           aria-label={courseLabel(n)}
-          className={`inline-flex h-11 min-w-[64px] flex-shrink-0 items-center justify-center gap-1.5 rounded-full px-4 text-[16px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+          className={`inline-flex h-11 min-w-[64px] flex-shrink-0 items-center justify-center gap-1.5 rounded-[var(--ds-radius-control)] px-4 text-[16px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
             active
               ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
               : 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]'

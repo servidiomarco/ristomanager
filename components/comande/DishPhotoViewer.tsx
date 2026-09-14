@@ -27,7 +27,7 @@ export const DishPhotoViewer: React.FC<{
       <img
         src={dish.photo_url}
         alt={dish.name}
-        className="max-h-[78vh] max-w-full rounded-[20px] object-contain"
+        className="max-h-[78vh] max-w-full rounded-[var(--ds-radius)] object-contain"
       />
       <div className="text-center">
         <div className="text-[22px] font-semibold text-white">{dish.name}</div>

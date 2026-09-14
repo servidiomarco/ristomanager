@@ -43,6 +43,15 @@ export const PRINT_TOKENS_CSS = `
     --ds-print-rule: #e2e8f0;           /* filetto di riga */
     --ds-print-fill: #f1f5f9;           /* fondo intestazione tabella */
     --ds-print-positive: #059669;       /* "✓ arrivato" */
+
+    /* Il raggio delle scatole sul foglio. Ricopiato come i colori qui sopra e
+       per lo stesso motivo: i fogli nascono in un iframe scritto a mano, che
+       index.css non lo vede mai — un var(--ds-radius) lì dentro non
+       risolverebbe e l'angolo tornerebbe quadro senza dirlo.
+       Sulla carta fra sei e dodici pixel non si vede: sta qui perché la
+       sorgente resti una sola, non perché cambi la stampa. */
+    --ds-print-radius: 6px;
+    --ds-print-radius-sm: 4px;
   }
 `;
 

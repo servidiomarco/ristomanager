@@ -86,10 +86,10 @@ export const MediaLibraryManager: React.FC<Props> = ({ showToast }) => {
     };
 
     return (
-        <details className="group bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] overflow-hidden">
+        <details className="group bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] overflow-hidden">
             <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--ds-surface-row)] transition-colors">
                 <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-10 h-10 rounded-md bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-arriving-text)] flex-shrink-0">
+                    <div className="w-10 h-10 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-arriving-text)] flex-shrink-0">
                         <Paperclip className="h-5 w-5" aria-hidden />
                     </div>
                     <div className="min-w-0">
@@ -111,13 +111,13 @@ export const MediaLibraryManager: React.FC<Props> = ({ showToast }) => {
                 </p>
 
                 {puoModificare && (
-                    <div className="rounded-[14px] border border-[var(--ds-border)] p-3 space-y-2.5">
+                    <div className="rounded-[var(--ds-radius)] border border-[var(--ds-border)] p-3 space-y-2.5">
                         <input
                             type="text"
                             value={titolo}
                             onChange={e => setTitolo(e.target.value)}
                             placeholder="Come lo chiami? (es. Menù di Ferragosto)"
-                            className="w-full h-10 rounded-[10px] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-3 text-[14px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                            className="w-full h-10 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-3 text-[14px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                         />
                         <input
                             ref={inputRef}
@@ -131,7 +131,7 @@ export const MediaLibraryManager: React.FC<Props> = ({ showToast }) => {
                             type="button"
                             onClick={() => inputRef.current?.click()}
                             disabled={caricando}
-                            className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-[10px] bg-[var(--ds-text-primary)] px-4 text-[14px] font-semibold text-[var(--ds-surface)] transition-opacity hover:opacity-90 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                            className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-[var(--ds-radius)] bg-[var(--ds-text-primary)] px-4 text-[14px] font-semibold text-[var(--ds-surface)] transition-opacity hover:opacity-90 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                         >
                             {caricando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
                             {caricando ? 'Carico…' : 'Scegli un file'}
@@ -168,7 +168,7 @@ export const MediaLibraryManager: React.FC<Props> = ({ showToast }) => {
                                             type="button"
                                             onClick={() => handleDelete(f)}
                                             aria-label={`Elimina ${f.title}`}
-                                            className="flex h-9 w-9 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-danger-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                                            className="flex h-9 w-9 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-danger-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                                         >
                                             <Trash2 className="h-4 w-4" />
                                         </button>

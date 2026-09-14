@@ -191,12 +191,12 @@ const RegistroEmessi: React.FC = () => {
   };
 
   const chipClass = (active: boolean) =>
-    `rounded-full px-3 py-1.5 text-[13px] font-medium transition-colors ${
+    `rounded-[var(--ds-radius-control)] px-3 py-1.5 text-[13px] font-medium transition-colors ${
       active ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
              : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'
     }`;
   const actionBtn =
-    'inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-surface)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+    'inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
   const chips: { value: ChipFilter; label: string; count?: number }[] = [
     { value: 'all', label: 'Tutti', count: counts?.all },
@@ -228,7 +228,7 @@ const RegistroEmessi: React.FC = () => {
             Stampa
           </button>
         </div>
-        <div className="flex w-full flex-shrink-0 items-center divide-x divide-[var(--ds-border)] rounded-[18px] bg-[var(--ds-surface)] px-1 py-1 shadow-[var(--ds-shadow-card)] lg:w-auto lg:px-4">
+        <div className="flex w-full flex-shrink-0 items-center divide-x divide-[var(--ds-border)] rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-1 py-1 shadow-[var(--ds-shadow-card)] lg:w-auto lg:px-4">
           <Kpi label="documentato" value={formatEuro(totals?.documented_total_cents ?? 0)} tone="positive" />
           <Kpi label={`scontrini · ${totals?.receipts.count ?? 0}`} value={formatEuro(totals?.receipts.total_cents ?? 0)} />
           <Kpi label={`fatture · ${totals?.invoices.count ?? 0}`} value={formatEuro(totals?.invoices.total_cents ?? 0)} />
@@ -264,7 +264,7 @@ const RegistroEmessi: React.FC = () => {
                       Tot. <span className="text-[var(--ds-text-primary)]">{formatEuro(dayTotals.get(day) ?? dayRows.reduce((n, r) => n + r.total_cents, 0))}</span>
                     </span>
                   </h3>
-                  <ul className="overflow-hidden rounded-2xl bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+                  <ul className="overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
                     {dayRows.map(row => (
                       <li key={row.id} className="[&+li]:border-t [&+li]:border-[var(--ds-border)]">
                         <button
@@ -293,7 +293,7 @@ const RegistroEmessi: React.FC = () => {
                   type="button"
                   disabled={loadingMore}
                   onClick={async () => { setLoadingMore(true); await fetchRegistry(rows.length); setLoadingMore(false); }}
-                  className="mx-auto flex h-10 items-center gap-2 rounded-full bg-[var(--ds-surface)] px-5 text-[14px] font-medium text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
+                  className="mx-auto flex h-10 items-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-5 text-[14px] font-medium text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
                 >
                   {loadingMore && <Loader2 className="h-4 w-4 animate-spin" />}
                   Carica altri ({data.total_count - rows.length})
@@ -340,7 +340,7 @@ const DocumentoDetail: React.FC<{ detail: FiscalDocumentDetail; onClose: () => v
           type="button"
           onClick={onClose}
           aria-label="Chiudi"
-          className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]"
+          className="inline-flex h-9 w-9 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]"
         >
           <X className="h-4 w-4" />
         </button>
@@ -370,7 +370,7 @@ const DocumentoDetail: React.FC<{ detail: FiscalDocumentDetail; onClose: () => v
             href={`${window.location.origin}/scontrino/${d.public_token}`}
             target="_blank"
             rel="noreferrer"
-            className="mt-3 inline-flex h-10 items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-4 text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]"
+            className="mt-3 inline-flex h-10 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-4 text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]"
           >
             <ExternalLink className="h-4 w-4" />
             Copia digitale

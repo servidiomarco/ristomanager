@@ -53,7 +53,7 @@ export const StampaCopiaButton: React.FC<StampaCopiaButtonProps> = ({ onPrint, v
         onClick={print}
         disabled={state === 'sending'}
         aria-live="polite"
-        className={`inline-flex h-11 items-center gap-1.5 rounded-full px-4 text-[14px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+        className={`inline-flex h-11 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-4 text-[14px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
           state === 'sent'
             ? 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'
             : variant === 'outline'

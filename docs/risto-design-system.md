@@ -220,15 +220,45 @@ spacing:
 # ---------------------------------------------------------------------------
 # RADIUS
 # ---------------------------------------------------------------------------
+# Due gradini per TUTTE le scatole, piu' il tondo pieno che non e' un raggio
+# ma una forma. La scala a otto gradini e' stata ritirata: otto valori per la
+# stessa domanda ("quanto e' tondo questo angolo?") si sceglievano a occhio, e
+# a fine giro l'app aveva schede a 16, 20 e 24px una accanto all'altra.
+#
+# I VALORI dei tre token dipendono dallo stile scelto dall'operatore
+# (users.preferred_design_style, card in Impostazioni → Profilo):
+#   classico  (default) — box 16px, inner 8px, control pillola (9999px):
+#                         l'aspetto storico dell'app.
+#   squadrato           — box 6px, inner 4px, control 8px: i valori qui sotto.
+# index.css tiene il classico su :root e lo squadrato su
+# :root[data-design='squadrato']; App.tsx mette l'attributo quando l'utente
+# e' caricato. Le REGOLE di questo capitolo (cosa e' box, cosa e' control,
+# cosa resta full) valgono identiche nei due stili: nel classico control e
+# full coincidono di valore, ma un controllo si scrive comunque col token —
+# e' la sola cosa che permette ai due stili di convivere.
 rounded:
-  xs:    "6px"    # comande: table tile, category card, dish card
-  sm:    "8px"    # checkbox
-  md:    "12px"   # icon chip, heatmap cell, table badge, input
-  lg:    "16px"   # rows, tiles, toast
-  xl:    "20px"   # inner tinted panels, popover
-  "2xl": "24px"   # cards
-  "3xl": "28px"   # sidebar, top bar, modal
-  full:  "999px"  # pills, badges, avatars, progress bars
+  box:     "6px"   # var(--ds-radius) — schede, pannelli, tessere, fogli, righe
+  inner:   "4px"   # var(--ds-radius-sm) — cio' che sta DENTRO una scatola:
+                   # pastiglia della quantita', quadratini di legenda, checkbox.
+                   # Un angolo interno allo stesso raggio del suo contenitore
+                   # legge piatto; un filo piu' stretto e i due si distinguono.
+  control: "8px"   # var(--ds-radius-control) — bottoni, campi, pastiglie, chip,
+                   # segmenti, bottoni icona. Piu' tondo della scatola di
+                   # proposito: un controllo si tocca, e l'angolo morbido lo
+                   # stacca dal contenitore invece di fonderlo con lui.
+  full:    "999px" # SOLO cio' che e' un cerchio e non un controllo: avatar,
+                   # pallini di stato, barre di avanzamento, maniglie dei fogli.
+                   # E la barra di navigazione mobile, col suo «+» e la
+                   # pastiglia della scheda attiva: quella barra GALLEGGIA
+                   # sopra il contenuto invece di appoggiarsi a un bordo, e una
+                   # forma chiusa si stacca da cio' che le scorre sotto. A sei
+                   # pixel leggeva come una scheda ritagliata male. Gli angoli
+                   # dentro di lei la seguono: tondo dentro tondo, o il
+                   # rettangolo smussato litiga con la curva che lo contiene.
+                   # Non passa dal token: e' una forma, non un raggio. Sui
+                   # pezzi minuscoli il CSS limita comunque il raggio a meta'
+                   # del lato, quindi un pallino resterebbe tondo comunque —
+                   # ma scriverlo `full` dice perche'.
 
 # ---------------------------------------------------------------------------
 # ELEVATION
@@ -657,7 +687,7 @@ floor, but expect to refine them against real screens during the revamp.
 
 | Variant | Appearance | Use |
 |---|---|---|
-| `primary` | `action-bg` fill, `action-fg` text, `rounded.full` | Main action (Conferma, Arrivato, +) |
+| `primary` | `action-bg` fill, `action-fg` text, `rounded.control` | Main action (Conferma, Arrivato, +) |
 | `secondary` | `surface` fill, `border` hairline, `text-primary` | Alternative (In uscita) |
 | `state-solid` | `states.X.solid` fill, `solid-fg` text | Coloured action (Ordina, Assegna) |
 | `state-tint` | `states.X.tint` fill, `states.X.text` | Lower-emphasis coloured action |
@@ -674,7 +704,7 @@ button resize mid-action.
 beside a solid primary — never a loud red block. Visual weight belongs to the action someone
 wants, not the one they might regret.
 
-**IconButton** [obs] — `rounded.md` or `rounded.full`, icon at `icons.md`, 44px hit area
+**IconButton** [obs] — `rounded.control`, icon at `icons.md`, 44px hit area
 regardless of visual size. Requires `aria-label`. Two fills: **bare** (transparent, tinting
 on hover) for controls inside a row or card, and **filled** (`surface-row`) for standalone
 controls in chrome, where a visible target matters more than restraint. Filled icon buttons
@@ -706,9 +736,9 @@ wrong".
 **Textarea** [der] — as Input, `rounded.lg`, min-height 96px, vertical resize only.
 
 **Select** [der/obs] — as Input plus trailing chevron. An observed **pill variant** exists
-for inline filters (`Cucina ⌄` in Spesa): `surface-row` fill, `rounded.full`, `label` type.
+for inline filters (`Cucina ⌄` in Spesa): `surface-row` fill, `rounded.control`, `label` type.
 
-**SearchInput** [der] — as Input, `rounded.full`, leading search icon at `text-muted`,
+**SearchInput** [der] — as Input, `rounded.control`, leading search icon at `text-muted`,
 optional trailing clear button. Debounce ≥200ms before firing.
 
 **Checkbox** [obs] — 20px, `rounded.sm`, `border-strong` outline, 44px hit area. Checked
@@ -717,7 +747,9 @@ fills `action-bg` with a white glyph. A circular variant is used in task lists.
 **Radio** [der] — 20px circle, `border-strong` outline. Checked shows an `action-bg` dot at
 8px. Always inside a `RadioGroup` with `role="radiogroup"` and arrow-key navigation.
 
-**Switch** [der] — 44×26 track at `rounded.full`, 22px knob. Off: `neutral.solid` track. On:
+**Switch** [der] — 44×26 track at `rounded.full`, 22px knob — track and knob stay FULL,
+not `rounded.control`: the shape is the gesture, and a squircle sliding inside a squircle
+reads as two boxes rather than as something you drag. Off: `neutral.solid` track. On:
 `action-bg` track. Transition at `motion.fast`. For immediate-effect settings only — never as
 a form field requiring a save.
 
@@ -758,15 +790,18 @@ there is no separate dropdown repeating the same values. A saved time that has s
 the grid is appended rather than dropped, or opening an old booking would silently blank
 its hour.
 
-**SearchField** [obs] — pill at `rounded.full`, 44px, leading search glyph, trailing clear
+**SearchField** [obs] — `rounded.control`, 44px, leading search glyph, trailing clear
 button once there is a value. **Always visible, never behind a toggle:** on a list you filter
 before you scroll, and a hidden search costs a tap plus remembering it exists.
 
-On the canvas it takes `surface` with `elevation.card`, not `surface-row` — see §8.8. Accepts
+Two treatments, by where it sits — the same rule as IconButton below, and DateNavigator's
+`onCanvas` from the other side. On the canvas it takes `surface` with `elevation.card`, not
+`surface-row` (§8.8). **Inside a white bar or card it goes recessed** to `surface-row` with no
+shadow: the canvas treatment there draws a white box on a white box, shadow and all. Accepts
 an optional passive hint parked inside the field (what Enter will do to the last remaining
 match), which never covers the clear button.
 
-**IconButton** [obs] — circle at 44px, one linear icon, always an `aria-label`. On the canvas
+**IconButton** [obs] — `rounded.control` at 44px, one linear icon, always an `aria-label`. On the canvas
 it is `surface` with `elevation.card`; inside a card it is `surface-row`. When it toggles
 something on it takes `action-bg`; when it carries a count the badge overlaps the top-right
 corner with a ring in the colour behind it.
@@ -788,7 +823,7 @@ action button all take the same family. The most repeated pattern in the product
 **IconChip** [obs] — rounded square at `rounded.md`, 32 or 36px, `surface-row` fill (or
 `states.X.tint` when marking a service), containing one linear icon.
 
-**EntityChip** [obs] — pill at `rounded.full`, `surface-row` fill, circular initials avatar
+**EntityChip** [obs] — `rounded.control`, `surface-row` fill, circular initials avatar
 plus name at `label`. Wraps freely in a flow row. Used for staff on shift.
 
 **Avatar** [obs] — circle at 24/32/40px. Initials at `label`, `surface-row` fill,
@@ -810,7 +845,8 @@ Two variants carry meaning beyond identity:
   `3 posti`) whenever `seats < guests`. This is the error worth catching while the host is
   still at the pass rather than walking a party of six to a table for three.
 
-**CountBadge** [obs] — pill at `rounded.full`, minimum 20px wide so two digits and `99+` fit,
+**CountBadge** [obs] — `rounded.control`, minimum 20px wide so two digits and `99+` fit; under
+20px tall the browser clamps the radius to half the side, so it still draws as a stadium,
 `states.X.solid` fill with `solid-fg` numeral at `tabular-nums`. Where it overlaps another
 surface (an icon button, a collapsed nav icon) it takes a 2px ring in the colour of the
 surface behind it.
@@ -831,7 +867,7 @@ for a reader who discriminates colour poorly the row flattens into one grey band
 clears 5.9:1 in every tone, so the hairline is not a WCAG requirement: it is definition, not
 compliance.
 
-Pill at `rounded.full`, 24px tall, `states.X.tint` fill with the
+`rounded.control`, 24px tall, `states.X.tint` fill with the
 family's `text` colour. Carries a state as words. Where the state can be changed it gains a
 leading dot and a trailing chevron and becomes a button; where it is read-only it stays a
 `<span>`. **The dot is what makes it survive a colour-blind reader**, per §4.3.
@@ -840,7 +876,7 @@ leading dot and a trailing chevron and becomes a button; where it is read-only i
 rather than in separate boxes. They are one reading of the same thing, and four cards claim
 they are four unrelated things.
 
-Two layouts: `inline` (value and label on one line, `rounded.full`) for a strip sitting among
+Two layouts: `inline` (value and label on one line, `rounded.control`) for a strip sitting among
 other controls, and `stacked` (value over label, `rounded.2xl`) where the strip is the page's
 headline. A segment takes a family only when it is **actionable** — the tinted background plus
 a chevron mark the one figure that is a task rather than a fact, and that segment is a button.
@@ -1134,7 +1170,7 @@ the `critical` family with a `motion.pulse` ring. Requires a visible text label 
    depth.
 9. **The redundancy rule.** State is never colour alone. See §4.3.
 
-The four rules below are about layout rather than taste. Each of them shipped as a visible
+The rules below are about layout rather than taste. Each of them shipped as a visible
 defect at least once, and each is invisible in review until it renders.
 
 10. **A fixed element owns the gap beneath it.** Where an opaque scrolling region sits below
@@ -1146,11 +1182,17 @@ defect at least once, and each is invisible in review until it renders.
 
 11. **A scroll container clips the other axis too.** `overflow-y: auto` also establishes
     horizontal clipping — and `overflow-x: auto` vertical — so card shadows and focus rings
-    inside come out sliced flat at whichever edges do not scroll. Give the container a small
-    bleed on that axis (negative margin plus equal padding) so elevation has room to render.
+    inside come out sliced flat at whichever edges do not scroll. Give the container a bleed on
+    that axis — negative margin plus equal padding — so elevation has room to render.
+    **Size it against the shadow, not by eye:** the bleed has to clear `offset-y + blur`, which
+    for `elevation.card` (`0 8px 24px`) is about 20px and for `elevation.raised`
+    (`0 20px 48px`) about 44px. 4–8px feels generous and still cuts the shadow in half; if a
+    rail needs `raised`, prefer marking its selection with a ring and keeping `card`, rather
+    than reserving twice the clearance.
     A horizontal chip track is the case that hides longest: every chip keeps its shadow at the
     sides and loses it top and bottom, which reads as a deliberately flat control rather than
-    as a bug.
+    as a bug — and a coloured border on the card hides it completely, until the day the border
+    goes.
 
 12. **A scroll container's own padding is eaten by its scrollbar.** Padding on the scrolling
     element sits *behind* the scrollbar, so content stops short of where the same padding puts
@@ -1171,6 +1213,18 @@ defect at least once, and each is invisible in review until it renders.
     `min-h-0 flex-1 overflow-y-auto`. The header then stays put as a bonus, which is the tell
     that a screen has it: if the title scrolls away on a phone, the bar is overlapping something
     further down. Six screens shipped without it.
+
+15. **A primitive that bakes in a display utility cannot be hidden from outside.** `hidden`
+    passed as a className does not beat an `inline-flex` (or `flex`, or `grid`) written into a
+    component's own base class: they are both plain utilities, so the winner is whichever
+    Tailwind emits later in the sheet — not whichever is written later in the string. The
+    caller needs a utility WITH A VARIANT, `max-md:hidden` rather than `hidden`, because
+    variants are emitted after the plain utilities and so win where they apply. This shipped
+    the day `LivePill` was lifted out of the top bar: the connection pill and the phone-only
+    dot were both on screen below `md`, two readouts of the same state. It had worked for
+    months as one string, `hidden md:inline-flex`, with nothing unconditional to fight.
+    Either keep display out of the primitive's base class, or document at the top of the file
+    that hiding it takes a variant.
 
 ---
 
@@ -1252,6 +1306,7 @@ components/
     ListPrimitives.tsx   # SplitPane, PaneHeader, SectionHeader, StatStrip, StatusPill, CountBadge,
                          # SearchField, Avatar, Callout, EmptyState, dsIconButton, useMediaQuery
     Calendar.tsx         # MonthGrid, DayPicker — one month grid for the whole app
+    LivePill.tsx         # connection state + clock, for any chrome that owns its own bar
     AttachmentRow.tsx    # a queued file inside a composer
     SwipeRow.tsx         # swipe actions + first-run hint
     index.ts             # barrel export — import from './ds', never from a file

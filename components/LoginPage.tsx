@@ -52,12 +52,12 @@ type LoginMode = 'login' | 'forgot' | 'reset';
 const submitClass = `${dsButton.primary} mt-3 w-full`;
 
 const linkClass =
-  'rounded-full text-[13px] leading-[18px] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] underline underline-offset-2 transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-40';
+  'rounded-[var(--ds-radius-control)] text-[13px] leading-[18px] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] underline underline-offset-2 transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-40';
 
 // Occhio mostra/nascondi, parcheggiato dentro il campo: `inset-y-0` gli dà
 // tutta l'altezza dell'input, quindi il bersaglio è già di 44px.
 const revealClass =
-  'absolute inset-y-0 right-0 pr-4 flex items-center rounded-full text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] transition-colors duration-150 disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+  'absolute inset-y-0 right-0 pr-4 flex items-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] transition-colors duration-150 disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
 export const LoginPage: React.FC = () => {
   const { login } = useAuth();
@@ -479,7 +479,7 @@ export const LoginPage: React.FC = () => {
                     className="peer sr-only"
                   />
                   <span
-                    className="h-5 w-5 rounded-[6px] border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] peer-checked:bg-[var(--ds-action-bg)] peer-checked:border-[var(--ds-action-bg)] peer-disabled:opacity-40 peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--ds-border-focus)] peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-[var(--ds-surface)] transition-colors duration-150"
+                    className="h-5 w-5 rounded-[var(--ds-radius)] border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] peer-checked:bg-[var(--ds-action-bg)] peer-checked:border-[var(--ds-action-bg)] peer-disabled:opacity-40 peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--ds-border-focus)] peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-[var(--ds-surface)] transition-colors duration-150"
                   />
                   <Check
                     className="absolute h-3.5 w-3.5 text-[var(--ds-action-fg)] opacity-0 peer-checked:opacity-100 transition-opacity duration-150 pointer-events-none"

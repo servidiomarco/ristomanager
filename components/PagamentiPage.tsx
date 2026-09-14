@@ -286,7 +286,7 @@ const PagamentiPage: React.FC<{
       <div className="flex flex-shrink-0 flex-col gap-3 pb-3 pl-4 pr-4 pt-4 sm:pr-6 lg:flex-row lg:items-center lg:justify-between lg:gap-4 lg:pb-0 lg:pr-8">
         <h1 className="flex items-center gap-2.5 text-[22px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)] sm:text-[26px]">
           <span className="relative flex h-2.5 w-2.5 flex-shrink-0" aria-hidden>
-            <span className="ds-live-dot absolute inset-0 rounded-full bg-[var(--ds-seated-solid)]" />
+            <span className="ds-live-dot absolute inset-0 rounded-[var(--ds-radius-control)] bg-[var(--ds-seated-solid)]" />
             <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[var(--ds-seated-solid)]" />
           </span>
           {/* Shortened below sm: the full sentence wraps to two lines on a
@@ -298,7 +298,7 @@ const PagamentiPage: React.FC<{
             of the same money, and boxing each gave three competing objects.
             No wrapping either — a third figure dropping to its own line reads
             as a separate object. They compress instead. */}
-        <div className="flex w-full flex-shrink-0 items-center divide-x divide-[var(--ds-border)] rounded-[18px] bg-[var(--ds-surface)] px-1 py-1 shadow-[var(--ds-shadow-card)] lg:w-auto lg:px-4">
+        <div className="flex w-full flex-shrink-0 items-center divide-x divide-[var(--ds-border)] rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-1 py-1 shadow-[var(--ds-shadow-card)] lg:w-auto lg:px-4">
           <Kpi label={KPI_LABELS.incassato} value={formatEuro(totals.paid)} tone="positive" />
           <Kpi label={KPI_LABELS.attesa} value={formatEuro(totals.pending)} tone="pending" />
           {billsAvailable && (
@@ -335,7 +335,7 @@ const PagamentiPage: React.FC<{
                   la lista — il colpo d'occhio che non deve dipendere da cosa
                   si sta guardando sotto. */}
               {billsAvailable && closureReport && (
-                <div className="flex items-center justify-between gap-3 rounded-[18px] bg-[var(--ds-surface)] px-4 py-3 shadow-[var(--ds-shadow-card)]">
+                <div className="flex items-center justify-between gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-4 py-3 shadow-[var(--ds-shadow-card)]">
                   <span className="text-[13px] text-[var(--ds-text-muted)]">Giornata</span>
                   <span className="text-[14px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
                     {formatEuro(closureReport.total_cents)}

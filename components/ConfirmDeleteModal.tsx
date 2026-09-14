@@ -29,7 +29,7 @@ export const ConfirmDeleteModal: React.FC<ConfirmDeleteModalProps> = ({
   onConfirm,
   onCancel,
   icon,
-  iconWrapperClassName = 'mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[var(--ds-critical-tint)]',
+  iconWrapperClassName = 'mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-tint)]',
   // §7.5: la conferma distruttiva e' l'unico posto dove `critical` porta
   // peso pieno — l'intenzione e' gia' stata presa.
   confirmClassName = dsButton.critical,

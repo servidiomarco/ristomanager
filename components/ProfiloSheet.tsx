@@ -195,7 +195,7 @@ export const ProfiloSheet: React.FC<ProfiloSheetProps> = ({ open, onClose, roleL
             onClick={() => setShowPasswords(p => !p)}
             aria-pressed={showPasswords}
             aria-label={showPasswords ? 'Nascondi password' : 'Mostra password'}
-            className="inline-flex h-11 w-11 items-center justify-center rounded-full text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             {showPasswords ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
           </button>

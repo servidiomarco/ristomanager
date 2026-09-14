@@ -191,7 +191,7 @@ export const PrintInventoryModal: React.FC<Props> = ({
           </Field>
 
           {/* What will come out of the printer, before the paper is spent. */}
-          <div className="rounded-[16px] bg-[var(--ds-surface-row)] p-4">
+          <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-4">
             <p className="text-[15px] font-medium text-[var(--ds-text-primary)]">
               {AREA_LABEL[area]} · {locationId == null ? "Tutta l'area" : toTitleCase(locationLabel)}
             </p>

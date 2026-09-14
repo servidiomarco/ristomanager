@@ -73,7 +73,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
     const t = setTimeout(() => setFlash(false), 1600);
     return () => clearTimeout(t);
   }, [paymentPulse]);
-  const flashCls = flash ? 'animate-flash-row rounded-[8px]' : '';
+  const flashCls = flash ? 'animate-flash-row rounded-[var(--ds-radius)]' : '';
   const [movements, setMovements] = useState<BillPaymentInput[]>([]);
   const [method, setMethod] = useState<BillPaymentInput['method']>('CONTANTI');
   const [amount, setAmount] = useState(
@@ -127,7 +127,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
     }, { invoiceIntent: doc === 'Fattura' });
   };
 
-  const field = 'h-12 w-full rounded-xl border border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-3 text-right text-[17px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]';
+  const field = 'h-12 w-full rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-3 text-right text-[17px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]';
 
   // I due gruppi «canale» e «documento+conferma» vivono nella colonna destra
   // in pagina, in una terza colonna dentro il modal: stessi nodi, un solo
@@ -143,7 +143,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
         type="button"
         onClick={onShowQr}
         disabled={busy || !bill.share_token}
-        className="mt-2 inline-flex h-11 items-center gap-2 rounded-full bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
+        className="mt-2 inline-flex h-11 items-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
       >
         <QrCode size={16} aria-hidden /> QR al tavolo
       </button>
@@ -199,7 +199,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
             type="button"
             onClick={onEdit}
             disabled={busy}
-            className="inline-flex h-12 flex-shrink-0 items-center rounded-full bg-[var(--ds-surface)] px-5 text-[15px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
+            className="inline-flex h-12 flex-shrink-0 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-5 text-[15px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
           >
             Correggi
           </button>
@@ -209,7 +209,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
             type="button"
             onClick={onDiscount}
             disabled={busy}
-            className="inline-flex h-12 flex-shrink-0 items-center rounded-full bg-[var(--ds-surface)] px-5 text-[15px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
+            className="inline-flex h-12 flex-shrink-0 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-5 text-[15px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
           >
             Sconto
           </button>
@@ -218,7 +218,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
           type="button"
           onClick={onSplit}
           disabled={busy || residual <= 0}
-          className="inline-flex h-12 flex-shrink-0 items-center rounded-full bg-[var(--ds-surface)] px-5 text-[15px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
+          className="inline-flex h-12 flex-shrink-0 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-5 text-[15px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
         >
           Dividi conto
         </button>
@@ -226,7 +226,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
           type="button"
           onClick={confirm}
           disabled={busy}
-          className="inline-flex h-12 flex-1 items-center justify-center gap-2 rounded-full bg-[var(--ds-action-bg)] text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
+          className="inline-flex h-12 flex-1 items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
         >
           {busy && <Loader2 size={16} className="animate-spin" />}
           Registra {euro(math.applied + math.recorded)} e chiudi
@@ -239,12 +239,12 @@ export const Pagamento: React.FC<PagamentoProps> = ({
     <div className="flex h-full min-h-0 flex-col">
       {!embedded && (
       <div className="mx-auto w-full max-w-[1200px] flex-shrink-0 px-4 pb-3 pt-4 lg:px-8">
-        <div className="flex items-center gap-3 rounded-[20px] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
+        <div className="flex items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
           <button
             type="button"
             onClick={onBack}
             aria-label="Torna alla comanda"
-            className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)]"
+            className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)]"
           >
             <ArrowLeft className="h-4 w-4" />
           </button>
@@ -265,7 +265,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
         ? 'grid w-full min-h-0 flex-1 gap-3 overflow-y-auto pb-1 lg:grid-cols-2'
         : 'mx-auto grid w-full min-h-0 max-w-[1200px] flex-1 gap-4 overflow-y-auto px-4 pb-6 lg:grid-cols-2 lg:px-8'}>
         {/* Riepilogo */}
-        <section className="rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
+        <section className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
           <h2 className="text-[13px] font-semibold text-[var(--ds-text-muted)]">Riepilogo</h2>
           <dl className="mt-3 space-y-1.5 text-[14px]">
             {discountShown > 0 && (
@@ -280,7 +280,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
             </div>
           </dl>
 
-          <div className="mt-3 space-y-1.5 rounded-[14px] bg-[var(--ds-surface-row)] p-3 text-[13px]">
+          <div className="mt-3 space-y-1.5 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3 text-[13px]">
             {deposit > 0 && (
               <div className="flex justify-between gap-2">
                 <span className="text-[var(--ds-text-secondary)]">Caparra prenotazione</span>
@@ -313,7 +313,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
             </Callout>
           )}
 
-          <div className={`mt-4 ${flash ? 'animate-flash-row rounded-[12px] p-2 -m-2' : ''}`}>
+          <div className={`mt-4 ${flash ? 'animate-flash-row rounded-[var(--ds-radius)] p-2 -m-2' : ''}`}>
             <div className="text-[13px] text-[var(--ds-pending-text)]">Residuo</div>
             <div className="text-[40px] font-semibold leading-none tabular-nums tracking-[-0.02em] text-[var(--ds-text-primary)]">
               {euro(math.remaining)}
@@ -322,7 +322,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
         </section>
 
         {/* Come si paga */}
-        <section className="rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
+        <section className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
           <h2 className="text-[13px] font-semibold text-[var(--ds-text-muted)]">Incassa</h2>
           <div className="mt-2 flex flex-wrap gap-1.5">
             {METHODS.map(m => {
@@ -336,7 +336,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
                   onClick={() => setMethod(m.value)}
                   disabled={busy || blocked}
                   title={blocked ? 'Serve un cliente sulla visita' : undefined}
-                  className={`inline-flex h-11 items-center rounded-full px-3.5 text-[14px] font-medium transition-colors disabled:opacity-40 ${
+                  className={`inline-flex h-11 items-center rounded-[var(--ds-radius-control)] px-3.5 text-[14px] font-medium transition-colors disabled:opacity-40 ${
                     method === m.value
                       ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                       : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'
@@ -351,7 +351,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
           {movements.length > 0 && (
             <ul className="mt-3 space-y-1">
               {movements.map((m, i) => (
-                <li key={i} className="flex items-center justify-between rounded-lg bg-[var(--ds-surface-row)] px-3 py-1.5 text-[14px] text-[var(--ds-text-secondary)]">
+                <li key={i} className="flex items-center justify-between rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3 py-1.5 text-[14px] text-[var(--ds-text-secondary)]">
                   <span>{methodLabel(m.method)}</span>
                   <span className="flex items-center gap-2">
                     <span className="tabular-nums">{euro(m.amount_cents)}</span>
@@ -360,7 +360,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
                       aria-label="Togli movimento"
                       onClick={() => setMovements(prev => prev.filter((_, j) => j !== i))}
                       disabled={busy}
-                      className="rounded-full px-2 text-[var(--ds-text-muted)] hover:bg-[var(--ds-border)] disabled:opacity-40"
+                      className="rounded-[var(--ds-radius-control)] px-2 text-[var(--ds-text-muted)] hover:bg-[var(--ds-border)] disabled:opacity-40"
                     >
                       ×
                     </button>
@@ -389,7 +389,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
                 type="button"
                 onClick={addMovement}
                 disabled={busy || math.applied <= 0 || math.applied >= math.remaining}
-                className="h-12 rounded-xl bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)] disabled:opacity-40"
+                className="h-12 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)] disabled:opacity-40"
               >
                 Aggiungi
               </button>

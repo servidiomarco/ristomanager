@@ -102,7 +102,7 @@ export const BloccoPrenotazioni: React.FC<{ data: ReservationsReport }> = ({ dat
       )}
 
       <div className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <div className="rounded-[16px] bg-[var(--ds-surface-row)] p-3">
+        <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3">
           <div className="mb-2 text-[13px] font-medium text-[var(--ds-text-secondary)]">Coperti per giorno della settimana</div>
           <div className="h-[140px] w-full">
             <ResponsiveContainer width="100%" height="100%">
@@ -115,7 +115,7 @@ export const BloccoPrenotazioni: React.FC<{ data: ReservationsReport }> = ({ dat
             </ResponsiveContainer>
           </div>
         </div>
-        <div className="rounded-[16px] bg-[var(--ds-surface-row)] p-3">
+        <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3">
           <div className="mb-2 text-[13px] font-medium text-[var(--ds-text-secondary)]">Coperti per ora di arrivo</div>
           {perOra.length > 0 ? (
             <div className="h-[140px] w-full">
@@ -135,7 +135,7 @@ export const BloccoPrenotazioni: React.FC<{ data: ReservationsReport }> = ({ dat
       </div>
 
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <div className="rounded-[16px] bg-[var(--ds-surface-row)] p-3">
+        <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3">
           <div className="mb-1 text-[13px] font-medium text-[var(--ds-text-secondary)]">Da dove arrivano</div>
           {data.per_canale.length > 0 ? data.per_canale.map((c, i) => (
             <ShareRow
@@ -150,7 +150,7 @@ export const BloccoPrenotazioni: React.FC<{ data: ReservationsReport }> = ({ dat
             <div className="py-4 text-center text-[13px] text-[var(--ds-text-muted)]">Nessun dato</div>
           )}
         </div>
-        <div className="rounded-[16px] bg-[var(--ds-surface-row)] p-3">
+        <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3">
           <div className="mb-1 text-[13px] font-medium text-[var(--ds-text-secondary)]">Coperti per sala</div>
           {data.per_sala.length > 0 ? data.per_sala.map((s, i) => (
             <ShareRow

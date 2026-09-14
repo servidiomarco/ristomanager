@@ -155,7 +155,7 @@ export const ReservationAllergensManager: React.FC<Props> = ({ showToast }) => {
                             onDragOver={(e) => handleDragOver(e, i)}
                             onDrop={() => handleDrop(i)}
                             onDragEnd={handleDragEnd}
-                            className={`flex items-center gap-2 rounded-md border px-2 py-1.5 bg-[var(--ds-surface)] transition-colors ${
+                            className={`flex items-center gap-2 rounded-[var(--ds-radius)] border px-2 py-1.5 bg-[var(--ds-surface)] transition-colors ${
                                 dragOverIndex === i ? 'border-[var(--ds-arriving-solid)] bg-[var(--ds-arriving-tint)]' : 'border-[var(--ds-border)]'
                             }`}
                         >
@@ -172,7 +172,7 @@ export const ReservationAllergensManager: React.FC<Props> = ({ showToast }) => {
                                 <button
                                     type="button"
                                     onClick={() => removeAt(i)}
-                                    className="p-1.5 rounded-md text-[var(--ds-critical-solid)] hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                                    className="p-1.5 rounded-[var(--ds-radius)] text-[var(--ds-critical-solid)] hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                                     title="Rimuovi"
                                     aria-label={`Rimuovi ${d.label}`}
                                 >
@@ -193,13 +193,13 @@ export const ReservationAllergensManager: React.FC<Props> = ({ showToast }) => {
                         maxLength={MAX_LABEL_LENGTH}
                         onChange={(e) => setNewLabel(e.target.value)}
                         onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addLabel(); } }}
-                        className="flex-1 rounded-md border border-[var(--ds-border)] px-3 py-1.5 text-[14px] bg-[var(--ds-surface)] focus:outline-none focus:border-[var(--ds-action-bg)]"
+                        className="flex-1 rounded-[var(--ds-radius)] border border-[var(--ds-border)] px-3 py-1.5 text-[14px] bg-[var(--ds-surface)] focus:outline-none focus:border-[var(--ds-action-bg)]"
                     />
                     <button
                         type="button"
                         onClick={addLabel}
                         disabled={!newLabel.trim() || drafts.length >= MAX_LABELS}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[13px] font-medium hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[13px] font-medium hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                         <Plus className="w-4 h-4" /> Aggiungi
                     </button>
@@ -215,7 +215,7 @@ export const ReservationAllergensManager: React.FC<Props> = ({ showToast }) => {
                         type="button"
                         onClick={save}
                         disabled={!isDirty || saving}
-                        className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[13px] font-medium hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed"
+                        className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[13px] font-medium hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                         {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                         Salva modifiche

@@ -184,7 +184,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpe
   };
 
   const cardAction =
-    'inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+    'inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
   const newUserLabel = (
     <>
@@ -229,7 +229,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpe
             return (
               <div
                 key={user.id}
-                className="flex flex-col gap-3 rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]"
+                className="flex flex-col gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]"
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex min-w-0 items-center gap-3">
@@ -403,7 +403,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpe
               // era il controllo più piccolo della pagina.
               <label
                 htmlFor="is_active"
-                className="mt-4 inline-flex min-h-[44px] cursor-pointer items-center gap-2.5 rounded-full pr-3 text-[15px] text-[var(--ds-text-primary)]"
+                className="mt-4 inline-flex min-h-[44px] cursor-pointer items-center gap-2.5 rounded-[var(--ds-radius-control)] pr-3 text-[15px] text-[var(--ds-text-primary)]"
               >
                 <input
                   type="checkbox"

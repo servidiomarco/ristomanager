@@ -54,7 +54,7 @@ export const PayAtTableSettingsManager: React.FC<Props> = ({ showToast }) => {
 
     if (loading || !flags) {
         return (
-            <div className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] px-4 py-3 flex items-center gap-2 text-[13px] text-[var(--ds-text-muted)]">
+            <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] px-4 py-3 flex items-center gap-2 text-[13px] text-[var(--ds-text-muted)]">
                 <Loader2 className="h-4 w-4 animate-spin" /> Caricamento…
             </div>
         );
@@ -63,10 +63,10 @@ export const PayAtTableSettingsManager: React.FC<Props> = ({ showToast }) => {
     const enabled = flags.pay_at_table_enabled;
 
     return (
-        <details className="group bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] overflow-hidden">
+        <details className="group bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] overflow-hidden">
             <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--ds-surface-row)] transition-colors">
                 <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-10 h-10 rounded-md bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-arriving-text)] flex-shrink-0">
+                    <div className="w-10 h-10 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-arriving-text)] flex-shrink-0">
                         <Receipt className="w-5 h-5" />
                     </div>
                     <div className="min-w-0">
@@ -112,7 +112,7 @@ export const PayAtTableSettingsManager: React.FC<Props> = ({ showToast }) => {
                 {/* Parametri tecnici — read-only. Sono costanti nel backend; qui
                     mostrati per trasparenza operativa (il gestore sa quando un
                     claim scade, e perché un guest colpisce il rate limit). */}
-                <div className="rounded-md bg-[var(--ds-surface-row)] border border-[var(--ds-border)] p-3">
+                <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] border border-[var(--ds-border)] p-3">
                     <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-3">
                         Parametri tecnici (sola lettura)
                     </h5>

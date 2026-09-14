@@ -113,7 +113,7 @@ export const Transazioni: React.FC<TransazioniProps> = ({
             type="button"
             onClick={onBack}
             aria-label="Torna alla coda"
-            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)]"
+            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)]"
           >
             <ArrowLeft className="h-4 w-4" />
           </button>
@@ -164,7 +164,7 @@ export const Transazioni: React.FC<TransazioniProps> = ({
                   key={m.id}
                   type="button"
                   onClick={() => onOpenBill(m.bill_id)}
-                  className={`flex items-center gap-3 rounded-[16px] px-3 py-2.5 text-left transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)] ${
+                  className={`flex items-center gap-3 rounded-[var(--ds-radius)] px-3 py-2.5 text-left transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)] ${
                     m.voided ? 'bg-[var(--ds-critical-tint)]' : 'bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]'
                   }`}
                 >
@@ -194,7 +194,7 @@ export const Transazioni: React.FC<TransazioniProps> = ({
         )}
 
         {t && (
-          <div className="mt-4 flex flex-wrap gap-x-5 gap-y-1 rounded-[16px] bg-[var(--ds-surface-row)] px-4 py-3 text-[13px] text-[var(--ds-text-secondary)]">
+          <div className="mt-4 flex flex-wrap gap-x-5 gap-y-1 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-4 py-3 text-[13px] text-[var(--ds-text-secondary)]">
             <span>{t.movements} movimenti · {visible.length} mostrati</span>
             <span>Incassati <strong className="tabular-nums text-[var(--ds-text-primary)]">{euro(t.collected_cents)}</strong></span>
             {t.voided_cents > 0 && <span>Stornati <strong className="tabular-nums">{euro(t.voided_cents)}</strong></span>}

@@ -197,21 +197,21 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
           <Loader label="Caricamento…" size={40} />
         </div>
       ) : error ? (
-        <div role="alert" className="rounded-[16px] bg-[var(--ds-critical-tint)] px-4 py-3 text-[14px] text-[var(--ds-critical-text)]">
+        <div role="alert" className="rounded-[var(--ds-radius)] bg-[var(--ds-critical-tint)] px-4 py-3 text-[14px] text-[var(--ds-critical-text)]">
           {error}
         </div>
       ) : (
         <>
           {/* Role tabs — pill group on the canvas, so the strip reads as
               chrome rather than as one more card. */}
-          <div className="mb-6 inline-flex items-center gap-0.5 rounded-full bg-[var(--ds-surface)] p-1 shadow-[var(--ds-shadow-card)]">
+          <div className="mb-6 inline-flex items-center gap-0.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] p-1 shadow-[var(--ds-shadow-card)]">
             {roles.map(role => (
               <button
                 key={role}
                 type="button"
                 onClick={() => setSelectedRole(role)}
                 aria-pressed={selectedRole === role}
-                className={`rounded-full px-3 py-1.5 text-[14px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                className={`rounded-[var(--ds-radius-control)] px-3 py-1.5 text-[14px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                   selectedRole === role
                     ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                     : 'text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
@@ -223,7 +223,7 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
           </div>
 
           {selectedRole === 'OWNER' && (
-            <div className="mb-6 flex items-start gap-2.5 rounded-[16px] bg-[var(--ds-pending-tint)] p-4 text-[14px] leading-relaxed text-[var(--ds-pending-text)]">
+            <div className="mb-6 flex items-start gap-2.5 rounded-[var(--ds-radius)] bg-[var(--ds-pending-tint)] p-4 text-[14px] leading-relaxed text-[var(--ds-pending-text)]">
               <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" aria-hidden />
               <span>Il ruolo Proprietario ha sempre tutti i permessi e non può essere modificato.</span>
             </div>
@@ -232,7 +232,7 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
           {/* Permissions grid */}
           <div className="space-y-3">
             {features.map(feature => (
-              <div key={feature.feature} className="overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+              <div key={feature.feature} className="overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
                 <div className="border-b border-[var(--ds-border)] px-4 py-2.5">
                   <h3 className="text-[13px] font-semibold text-[var(--ds-text-secondary)]">{feature.feature}</h3>
                 </div>
@@ -244,7 +244,7 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
                         <label
                           key={permission}
                           title={isLocked ? 'Riservato alla piattaforma' : undefined}
-                          className={`flex min-h-11 cursor-pointer items-center gap-2 rounded-full px-3.5 text-[14px] font-medium transition-colors ${
+                          className={`flex min-h-11 cursor-pointer items-center gap-2 rounded-[var(--ds-radius-control)] px-3.5 text-[14px] font-medium transition-colors ${
                             hasPermission(permission)
                               ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                               : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'

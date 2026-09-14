@@ -128,7 +128,7 @@ export const TableGrid: React.FC<TableGridProps> = ({
                 in servizio non si usano. */}
             <div className="flex items-center gap-3">
               {brand}
-              <div className="flex min-w-0 flex-1 items-center gap-2 rounded-[28px] bg-[var(--ds-surface)] px-3 py-2.5 shadow-[var(--ds-shadow-card)]">
+              <div className="flex min-w-0 flex-1 items-center gap-2 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-3 py-2.5 shadow-[var(--ds-shadow-card)]">
                 <SearchField
                   value={query}
                   onChange={onQuery}
@@ -152,7 +152,7 @@ export const TableGrid: React.FC<TableGridProps> = ({
                     aria-haspopup="dialog"
                     aria-expanded={funnelOpen}
                     aria-label="Filtra per stato"
-                    className="relative inline-flex h-11 w-11 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    className="relative inline-flex h-11 w-11 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
                     <SlidersHorizontal size={18} aria-hidden />
                     {filter !== 'ALL' && (
@@ -179,7 +179,7 @@ export const TableGrid: React.FC<TableGridProps> = ({
                       <div
                         role="dialog"
                         aria-label="Filtra i tavoli per stato"
-                        className="absolute right-0 top-[52px] z-50 w-[320px] rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-raised)]"
+                        className="absolute right-0 top-[52px] z-50 w-[320px] rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-raised)]"
                       >
                         <div className="flex items-center justify-between">
                           <span className="text-[12px] font-semibold text-[var(--ds-text-primary)]">Stato</span>
@@ -200,7 +200,7 @@ export const TableGrid: React.FC<TableGridProps> = ({
                               type="button"
                               onClick={() => onFilter(opt.value)}
                               aria-pressed={filter === opt.value}
-                              className={`inline-flex items-center gap-1.5 rounded-full border px-3.5 py-2 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                              className={`inline-flex items-center gap-1.5 rounded-[var(--ds-radius-control)] border px-3.5 py-2 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                                 filter === opt.value
                                   ? 'border-[var(--ds-action-bg)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                                   : 'border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]'
@@ -320,7 +320,7 @@ export const TableGrid: React.FC<TableGridProps> = ({
           c'è, il colore non porta l'informazione da solo (§4.3). */}
       {paged && roomTabs.length > 1 && (
         <div className="mx-auto w-full max-w-[1400px] flex-shrink-0 px-4 pb-3 pt-2 lg:px-8">
-          <div className="-my-1.5 flex gap-2 overflow-x-auto py-1.5 scrollbar-hide">
+          <div className="-my-6 flex gap-2 overflow-x-auto py-6 scrollbar-hide">
             {roomTabs.map(rm => {
               const active = rm.id === activeRoom;
               const marked = rows.some(r =>
@@ -331,7 +331,7 @@ export const TableGrid: React.FC<TableGridProps> = ({
                   type="button"
                   onClick={() => onRoom?.(rm.id)}
                   aria-pressed={active}
-                  className={`inline-flex h-11 flex-shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-4 text-[15px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                  className={`inline-flex h-11 flex-shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[var(--ds-radius-control)] px-4 text-[15px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                     active
                       ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                       : 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]'

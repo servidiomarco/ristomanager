@@ -84,7 +84,7 @@ export const ComandaSheet: React.FC<ComandaSheetProps> = ({
   // bianco, come un segmented — è un filtro di lettura, non un'azione.
   const viewSwitch = (
     <div
-      className="inline-flex flex-shrink-0 items-center rounded-full bg-[var(--ds-surface-row)] p-1"
+      className="inline-flex flex-shrink-0 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] p-1"
       role="tablist"
       aria-label="Come leggere la comanda"
     >
@@ -95,7 +95,7 @@ export const ComandaSheet: React.FC<ComandaSheetProps> = ({
         aria-label="Per uscita"
         title="Per uscita"
         onClick={() => setTab('course')}
-        className={`inline-flex h-9 w-11 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+        className={`inline-flex h-9 w-11 items-center justify-center rounded-[var(--ds-radius-control)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
           tab === 'course'
             ? 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]'
             : 'text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]'
@@ -110,7 +110,7 @@ export const ComandaSheet: React.FC<ComandaSheetProps> = ({
         aria-label="Tutto il tavolo"
         title="Tutto il tavolo"
         onClick={() => setTab('table')}
-        className={`inline-flex h-9 w-11 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+        className={`inline-flex h-9 w-11 items-center justify-center rounded-[var(--ds-radius-control)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
           tab === 'table'
             ? 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]'
             : 'text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]'
@@ -162,7 +162,7 @@ export const ComandaSheet: React.FC<ComandaSheetProps> = ({
         type="button"
         onClick={() => onRepeatAll(lines)}
         disabled={busy || lines.every(l => l.dish === null)}
-        className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-[var(--ds-action-bg)] px-5 text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+        className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-5 text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
       >
         <RefreshCw size={17} aria-hidden />
         Ripeti tutto nella {ordinal(course)} uscita
@@ -229,7 +229,7 @@ export const ComandaSheet: React.FC<ComandaSheetProps> = ({
                 {g.lines.map(l => (
                   <div
                     key={l.key}
-                    className="flex items-center gap-3 rounded-[16px] bg-[var(--ds-surface)] px-3 py-2.5 shadow-[var(--ds-shadow-card)]"
+                    className="flex items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-3 py-2.5 shadow-[var(--ds-shadow-card)]"
                   >
                     <span className="w-8 flex-shrink-0 text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
                       {l.qty}×
@@ -260,7 +260,7 @@ export const ComandaSheet: React.FC<ComandaSheetProps> = ({
                       disabled={busy || l.dish === null}
                       title={l.dish === null ? 'Il piatto non è più a menu' : undefined}
                       aria-label={`Ripeti ${l.qty}× ${l.name} nella ${courseLabel(course)}`}
-                      className="inline-flex h-11 flex-shrink-0 items-center gap-1 rounded-full bg-[var(--ds-surface)] px-3 text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                      className="inline-flex h-11 flex-shrink-0 items-center gap-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-3 text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     >
                       + {l.qty}×
                     </button>

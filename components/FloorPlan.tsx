@@ -39,7 +39,7 @@ const detectShiftFromNow = (): Shift => {
 // retyped per breakpoint, where they drifted apart before. Height is applied at
 // the call site: 44px on mobile, 32px in the dense desktop row.
 const HIDDEN_TOGGLE_BASE =
-  'inline-flex items-center gap-1.5 rounded-full px-3 text-[12px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+  'inline-flex items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 text-[12px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 const HIDDEN_TOGGLE_ON = 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]';
 const HIDDEN_TOGGLE_OFF =
   'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]';
@@ -48,7 +48,7 @@ const HIDDEN_TOGGLE_OFF =
 // reach — you still need to open it again from here, so "closed" is carried by
 // the strike-through and the door glyph, not by disabling the control.
 const ROOM_TAB_BASE =
-  'inline-flex h-11 flex-shrink-0 items-center gap-2 whitespace-nowrap rounded-full px-4 text-[15px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+  'inline-flex h-11 flex-shrink-0 items-center gap-2 whitespace-nowrap rounded-[var(--ds-radius-control)] px-4 text-[15px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 const ROOM_TAB_ACTIVE = 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]';
 const ROOM_TAB_ACTIVE_CLOSED = 'bg-[var(--ds-text-muted)] text-[var(--ds-surface)] line-through';
 const ROOM_TAB_IDLE =
@@ -64,13 +64,13 @@ const TOOL_BUTTON_ON = 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-tex
 // optional short label, so "Unisci", "Dividi" and "Elimina" differ by tone
 // only and the row keeps a single rhythm however many actions are showing.
 const EDIT_ACTION_BASE =
-  'inline-flex h-11 flex-shrink-0 items-center gap-1.5 rounded-full px-3 text-[13px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+  'inline-flex h-11 flex-shrink-0 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 text-[13px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 const EDIT_ACTION_QUIET =
   'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]';
 // Inline value editors (name, seats) sit on the same 44px baseline as the
 // buttons beside them — a shorter field made the row look broken.
 const EDIT_FIELD_WRAP =
-  'flex h-11 flex-shrink-0 items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-3';
+  'flex h-11 flex-shrink-0 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3';
 
 interface FloorPlanProps {
   rooms: Room[];
@@ -1147,21 +1147,21 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
         {/* Timer Badge */}
         {timerDisplay && (
-          <div className="absolute bg-[var(--ds-pending-solid)] text-[#ffffff] text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-[var(--ds-canvas)] pointer-events-none" style={{ top: -4, right: -4 }}>
+          <div className="absolute bg-[var(--ds-pending-solid)] text-[#ffffff] text-[10px] font-semibold px-1.5 py-0.5 rounded-[var(--ds-radius-control)] flex items-center gap-0.5 border border-[var(--ds-canvas)] pointer-events-none" style={{ top: -4, right: -4 }}>
             <Timer size={8} /> {timerDisplay}
           </div>
         )}
 
         {/* Merged Table Badge */}
         {isMerged && !timerDisplay && (
-          <div className="absolute bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-[var(--ds-canvas)] pointer-events-none" style={{ top: -4, left: -4 }}>
+          <div className="absolute bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[10px] font-semibold px-1.5 py-0.5 rounded-[var(--ds-radius-control)] flex items-center gap-0.5 border border-[var(--ds-canvas)] pointer-events-none" style={{ top: -4, left: -4 }}>
             <Combine size={8} />
           </div>
         )}
 
         {/* Hidden-for-shift Badge */}
         {isHidden && (
-          <div className="absolute bg-[var(--ds-text-muted)] text-[var(--ds-surface)] text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 border border-[var(--ds-canvas)] pointer-events-none" style={{ top: -4, left: -4 }}>
+          <div className="absolute bg-[var(--ds-text-muted)] text-[var(--ds-surface)] text-[10px] font-semibold px-1.5 py-0.5 rounded-[var(--ds-radius-control)] flex items-center gap-0.5 border border-[var(--ds-canvas)] pointer-events-none" style={{ top: -4, left: -4 }}>
             <EyeOff size={8} />
           </div>
         )}
@@ -1209,7 +1209,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       onTouchEnd={handleTouchEnd}
     >
       {/* Mobile: Date + Shift Picker (controls per-shift merge scope) */}
-      <div className="md:hidden flex flex-wrap items-center gap-3 rounded-[20px] bg-[var(--ds-surface)] px-3 py-2.5 shadow-[var(--ds-shadow-card)] sm:px-4 z-20">
+      <div className="md:hidden flex flex-wrap items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-3 py-2.5 shadow-[var(--ds-shadow-card)] sm:px-4 z-20">
         <DateNavigator
           value={selectedDate}
           onChange={setSelectedDate}
@@ -1266,7 +1266,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       </div>
 
       {/* Toolbar */}
-      <div className="rounded-[20px] bg-[var(--ds-surface)] p-3 sm:p-4 shadow-[var(--ds-shadow-card)] flex flex-wrap items-center justify-between gap-2 sm:gap-4 z-20">
+      <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-3 sm:p-4 shadow-[var(--ds-shadow-card)] flex flex-wrap items-center justify-between gap-2 sm:gap-4 z-20">
         <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide w-full sm:flex-1 sm:min-w-0 pb-1">
           {rooms.map(room => (
             <button
@@ -1366,13 +1366,13 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           <div className="h-6 w-px bg-[var(--ds-border)] mx-1"></div>
 
           <button onClick={() => handleAddTable(TableShape.RECTANGLE)} className={`${dsIconButton} bg-[var(--ds-surface-row)] shadow-none`} title="Rettangolo">
-            <div className="w-6 h-4 border-2 border-current rounded-sm" />
+            <div className="w-6 h-4 border-2 border-current rounded-[var(--ds-radius-sm)]" />
           </button>
           <button onClick={() => handleAddTable(TableShape.SQUARE)} className={`${dsIconButton} bg-[var(--ds-surface-row)] shadow-none`} title="Quadrato">
-            <div className="w-4 h-4 border-2 border-current rounded-sm" />
+            <div className="w-4 h-4 border-2 border-current rounded-[var(--ds-radius-sm)]" />
           </button>
           <button onClick={() => handleAddTable(TableShape.CIRCLE)} className={`${dsIconButton} bg-[var(--ds-surface-row)] shadow-none`} title="Tondo">
-             <div className="w-4 h-4 border-2 border-current rounded-full" />
+             <div className="w-4 h-4 border-2 border-current rounded-[var(--ds-radius-control)]" />
           </button>
 
           <div className="h-6 w-px bg-[var(--ds-border)] mx-1"></div>
@@ -1398,7 +1398,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                       setRoomClosureMenuOpen(true);
                     }
                   }}
-                  className={`inline-flex h-11 flex-shrink-0 items-center gap-1 rounded-full px-3 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                  className={`inline-flex h-11 flex-shrink-0 items-center gap-1 rounded-[var(--ds-radius-control)] px-3 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                     isAnyClosed
                       ? 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'
                       : 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]'
@@ -1416,7 +1416,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                       onClick={() => setRoomClosureMenuOpen(false)}
                     />
                     <div
-                      className="fixed z-[61] w-72 overflow-hidden rounded-[16px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)]"
+                      className="fixed z-[61] w-72 overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)]"
                       style={{
                         top: roomClosureAnchor.bottom + 4,
                         left: Math.max(8, Math.min(roomClosureAnchor.right - 288, window.innerWidth - 296)),
@@ -1471,7 +1471,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           {/* Delete Room Button (Safe location) */}
           <button
             onClick={() => handleDeleteRoomClick(activeRoomId)}
-            className="inline-flex h-11 flex-shrink-0 items-center gap-1 rounded-full px-3 text-[var(--ds-critical-text)] transition-colors hover:bg-[var(--ds-critical-tint)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="inline-flex h-11 flex-shrink-0 items-center gap-1 rounded-[var(--ds-radius-control)] px-3 text-[var(--ds-critical-text)] transition-colors hover:bg-[var(--ds-critical-tint)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             title={`Elimina Sala Corrente: ${rooms.find(r => r.id === activeRoomId)?.name}`}
           >
              <Layout className="h-4 w-4"/>
@@ -1647,7 +1647,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             <button
               type="button"
               onClick={() => setDismissedOverlapSig(overlapSig)}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors hover:bg-[var(--ds-critical-solid)]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--ds-radius-control)] transition-colors hover:bg-[var(--ds-critical-solid)]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               aria-label="Ignora avviso"
               title="Ignora avviso"
             >
@@ -1665,7 +1665,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       {/* Canvas */}
       <div
         ref={canvasRef}
-        className={`flex-1 bg-[var(--ds-canvas)] rounded-[20px] border border-dashed border-[var(--ds-border-strong)] relative overflow-hidden ${isSelectionMode ? 'cursor-crosshair' : 'cursor-default'}`}
+        className={`flex-1 bg-[var(--ds-canvas)] rounded-[var(--ds-radius)] border border-dashed border-[var(--ds-border-strong)] relative overflow-hidden ${isSelectionMode ? 'cursor-crosshair' : 'cursor-default'}`}
         onClick={() => !isSelectionMode && setSelectedTables([])}
         style={{
             backgroundImage: 'radial-gradient(var(--floor-dot) 1px, transparent 1px)',
@@ -1685,7 +1685,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                 in the same room are visually distinct. */}
             {floorLabels.hulls.map((h, i) => (
               <div key={`hull-${h.banquetId}-${i}`}
-                className={`${floorLabels.banquetColorByBanquetId.get(h.banquetId) || 'banquet-color-0'} absolute rounded-2xl border border-[var(--ds-banquet-border)] bg-[var(--ds-banquet-bg)] pointer-events-none`}
+                className={`${floorLabels.banquetColorByBanquetId.get(h.banquetId) || 'banquet-color-0'} absolute rounded-[var(--ds-radius)] border border-[var(--ds-banquet-border)] bg-[var(--ds-banquet-bg)] pointer-events-none`}
                 style={{ left: h.box.x, top: h.box.y, width: h.box.w, height: h.box.h, zIndex: 0 }} />
             ))}
             {currentTables.map(renderTableShape)}
@@ -1704,7 +1704,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
           {isLoadingMerges && (
               <div className="absolute inset-0 z-30 bg-[var(--ds-canvas)]/70 backdrop-blur-[1px] flex items-center justify-center">
-                  <div className="flex items-center gap-2 px-4 py-2 bg-[var(--ds-surface)] rounded-[16px] shadow-[var(--ds-shadow-card)]">
+                  <div className="flex items-center gap-2 px-4 py-2 bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)]">
                       <Loader label="Caricamento tavoli…" size={40} />
                   </div>
               </div>
@@ -1717,7 +1717,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           )}
 
           {isSelectionMode && (
-              <div className="absolute top-4 left-4 bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] px-3 py-1.5 rounded-full text-[13px] font-medium pointer-events-none flex items-center gap-2">
+              <div className="absolute top-4 left-4 bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] px-3 py-1.5 rounded-[var(--ds-radius-control)] text-[13px] font-medium pointer-events-none flex items-center gap-2">
                   <CheckSquare size={12} /> Modalità selezione attiva
               </div>
           )}
@@ -1730,7 +1730,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             if (!extended && !shiftOnly) return null;
             const label = extended ? 'Sala Chiusa' : 'Sala Chiusa per il turno';
             return (
-              <div className="absolute top-4 right-4 bg-[var(--ds-pending-solid)] text-[#ffffff] px-3 py-1.5 rounded-full text-[13px] font-semibold shadow-[var(--ds-shadow-raised)] pointer-events-none flex items-center gap-1.5">
+              <div className="absolute top-4 right-4 bg-[var(--ds-pending-solid)] text-[#ffffff] px-3 py-1.5 rounded-[var(--ds-radius-control)] text-[13px] font-semibold shadow-[var(--ds-shadow-raised)] pointer-events-none flex items-center gap-1.5">
                 <DoorClosed size={12} /> {label}
               </div>
             );
@@ -1741,7 +1741,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); setIsLegendOpen(o => !o); }}
-                className="flex h-11 items-center gap-2 px-4 bg-[var(--ds-surface)] rounded-full shadow-[var(--ds-shadow-card)] text-[13px] font-semibold text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                className="flex h-11 items-center gap-2 px-4 bg-[var(--ds-surface)] rounded-[var(--ds-radius-control)] shadow-[var(--ds-shadow-card)] text-[13px] font-semibold text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 aria-expanded={isLegendOpen}
             >
                 <Info size={14} />
@@ -1749,14 +1749,14 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             </button>
             {isLegendOpen && (
                 <div
- className="absolute bottom-full right-0 mb-2 w-56 bg-[var(--ds-surface)] p-4 rounded-[16px] shadow-[var(--ds-shadow-raised)] text-[13px] space-y-2 duration-150"
+ className="absolute bottom-full right-0 mb-2 w-56 bg-[var(--ds-surface)] p-4 rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-raised)] text-[13px] space-y-2 duration-150"
                     onClick={(e) => e.stopPropagation()}
                 >
                     <div className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-1">Legenda stato</div>
                     {(['libera', 'attesa', 'inarrivo', 'arrivato', 'uscita', 'noshow'] as TableDisplayStatus[]).map(s => (
                         <div key={s} className="flex items-center gap-2 text-[var(--ds-text-secondary)]">
                             <div
-                                className={`w-3 h-3 rounded-sm border ${s === 'inarrivo' ? 'motion-safe:animate-pulse' : ''}`}
+                                className={`w-3 h-3 rounded-[var(--ds-radius-sm)] border ${s === 'inarrivo' ? 'motion-safe:animate-pulse' : ''}`}
                                 style={{ background: `var(--tg-${s}-bg)`, borderColor: `var(--tg-${s}-stroke)` }}
                             ></div>
                             {TABLE_STATUS_LABEL[s]}
@@ -1789,7 +1789,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           }
         >
           <div className="flex items-start gap-3">
-            <div className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full ${
+            <div className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] ${
               alertModal.type === 'error' ? 'bg-[var(--ds-critical-tint)]' : 'bg-[var(--ds-pending-tint)]'
             }`}>
               <AlertTriangle className={`h-5 w-5 ${
@@ -1842,8 +1842,8 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         message={`Stai per riattivare ${hiddenTableIds.size} ${hiddenTableIds.size === 1 ? 'tavolo nascosto' : 'tavoli nascosti'} per questo turno.`}
         confirmLabel="Riattiva tutti"
         icon={<Eye className="h-5 w-5 text-[var(--ds-seated-fg)]" />}
-        iconWrapperClassName="mx-auto w-12 h-12 bg-[var(--ds-seated-tint)] rounded-full flex items-center justify-center mb-4"
-        confirmClassName="rounded-full px-5 h-11 inline-flex items-center bg-[var(--ds-seated-solid)] text-[var(--ds-seated-fg)] text-[15px] font-semibold hover:opacity-90 transition-opacity"
+        iconWrapperClassName="mx-auto w-12 h-12 bg-[var(--ds-seated-tint)] rounded-[var(--ds-radius-control)] flex items-center justify-center mb-4"
+        confirmClassName="rounded-[var(--ds-radius-control)] px-5 h-11 inline-flex items-center bg-[var(--ds-seated-solid)] text-[var(--ds-seated-fg)] text-[15px] font-semibold hover:opacity-90 transition-opacity"
         showIrreversibleWarning={false}
         onCancel={() => setUnhideAllConfirm(false)}
         onConfirm={async () => {

@@ -152,13 +152,13 @@ export const SettleDialog: React.FC<{
   };
 
   const field =
-    'h-12 w-full rounded-xl border border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-3 text-right text-[17px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]';
+    'h-12 w-full rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-3 text-right text-[17px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]';
 
   return createPortal(
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-[var(--ds-backdrop)] p-4" onClick={busy ? undefined : onCancel}>
       {/* max-w-lg e corpi pieni: questo dialogo si usa al banco col cliente
           davanti — a max-w-sm i numeri si leggevano da vicino e basta. */}
-      <div className="w-full max-w-lg overflow-hidden rounded-2xl bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)]" onClick={e => e.stopPropagation()}>
+      <div className="w-full max-w-lg overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)]" onClick={e => e.stopPropagation()}>
         <div className="border-b border-[var(--ds-border)] p-5">
           <h3 className="text-[18px] font-semibold text-[var(--ds-text-primary)]">Chiudi conto in cassa</h3>
           <p className="mt-1 text-[14px] text-[var(--ds-text-muted)]">Tavolo {bill.table_name ?? '—'} · totale {euro(bill.total_cents)}</p>
@@ -179,7 +179,7 @@ export const SettleDialog: React.FC<{
           {movements.length > 0 && (
             <ul className="space-y-1">
               {movements.map((m, i) => (
-                <li key={i} className="flex items-center justify-between rounded-lg bg-[var(--ds-surface-row)] px-3 py-1.5 text-[14px] text-[var(--ds-text-secondary)]">
+                <li key={i} className="flex items-center justify-between rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3 py-1.5 text-[14px] text-[var(--ds-text-secondary)]">
                   <span>{methodLabel(m.method)}</span>
                   <span className="flex items-center gap-2">
                     <span className="tabular-nums">{euro(m.amount_cents)}</span>
@@ -188,7 +188,7 @@ export const SettleDialog: React.FC<{
                       aria-label="Togli movimento"
                       onClick={() => setMovements(prev => prev.filter((_, j) => j !== i))}
                       disabled={busy}
-                      className="rounded-full p-1 text-[var(--ds-text-muted)] hover:bg-[var(--ds-border)] disabled:opacity-40"
+                      className="rounded-[var(--ds-radius-control)] p-1 text-[var(--ds-text-muted)] hover:bg-[var(--ds-border)] disabled:opacity-40"
                     >
                       <X className="h-3.5 w-3.5" />
                     </button>
@@ -207,7 +207,7 @@ export const SettleDialog: React.FC<{
                     type="button"
                     onClick={() => setMethod(m.value)}
                     disabled={busy}
-                    className={`inline-flex h-11 items-center rounded-full px-4 text-[15px] font-medium transition-colors disabled:opacity-40 ${
+                    className={`inline-flex h-11 items-center rounded-[var(--ds-radius-control)] px-4 text-[15px] font-medium transition-colors disabled:opacity-40 ${
                       method === m.value
                         ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                         : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'
@@ -230,7 +230,7 @@ export const SettleDialog: React.FC<{
                   type="button"
                   onClick={addMovement}
                   disabled={busy || applied <= 0 || applied >= remaining}
-                  className="h-12 rounded-xl bg-[var(--ds-surface-row)] px-4 text-[15px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)] disabled:opacity-40"
+                  className="h-12 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-4 text-[15px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)] disabled:opacity-40"
                 >
                   Aggiungi
                 </button>
@@ -251,7 +251,7 @@ export const SettleDialog: React.FC<{
                     type="button"
                     onClick={() => setPpDoc(d)}
                     disabled={busy}
-                    className={`inline-flex h-11 items-center rounded-full px-4 text-[15px] font-medium transition-colors disabled:opacity-40 ${
+                    className={`inline-flex h-11 items-center rounded-[var(--ds-radius-control)] px-4 text-[15px] font-medium transition-colors disabled:opacity-40 ${
                       ppDoc === d
                         ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                         : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'
@@ -330,12 +330,12 @@ export const SettleDialog: React.FC<{
           </p>
         </div>
         <div className="flex items-center justify-end gap-2 border-t border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-4 py-3">
-          <button type="button" onClick={onCancel} disabled={busy} className="inline-flex h-11 items-center rounded-full px-4 text-[15px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-hover)] disabled:opacity-40">Annulla</button>
+          <button type="button" onClick={onCancel} disabled={busy} className="inline-flex h-11 items-center rounded-[var(--ds-radius-control)] px-4 text-[15px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-hover)] disabled:opacity-40">Annulla</button>
           <button
             type="button"
             onClick={confirm}
             disabled={busy || !lotteryValid}
-            className="inline-flex h-11 items-center gap-2 rounded-full bg-[var(--ds-action-bg)] px-6 text-[15px] font-semibold text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
+            className="inline-flex h-11 items-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-6 text-[15px] font-semibold text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
           >
             {busy && <Loader2 className="h-4 w-4 animate-spin" />}
             Chiudi conto
@@ -360,7 +360,7 @@ const SettleButton: React.FC<{
         type="button"
         onClick={() => setOpen(true)}
         disabled={busy}
-        className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-[var(--ds-action-bg)] text-[15px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+        className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[15px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
       >
         {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Banknote className="h-4 w-4" />}
         Chiudi conto
@@ -411,7 +411,7 @@ const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
   };
 
   const quiet =
-    'inline-flex h-11 flex-1 items-center justify-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+    'inline-flex h-11 flex-1 items-center justify-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
   return (
     <>
@@ -420,7 +420,7 @@ const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
           <div className="flex flex-col items-center gap-3">
             {/* Fixed white plate: in dark mode a QR on a dark ground will not
                 scan. This is the one place a hardcoded #ffffff is correct. */}
-            <div className="rounded-[16px] bg-[#ffffff] p-3">
+            <div className="rounded-[var(--ds-radius)] bg-[#ffffff] p-3">
               <QRCodeSVG value={url} size={168} level="M" />
             </div>
             <p className="text-center text-[13px] text-[var(--ds-text-muted)]">
@@ -663,14 +663,14 @@ export const InvoiceDialog: React.FC<{
   };
 
   const field =
-    'h-11 w-full rounded-xl border border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-3 text-[14px] text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]';
+    'h-11 w-full rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-3 text-[14px] text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]';
   const label = 'mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]';
   const set = (k: keyof typeof buyer) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setBuyer(prev => ({ ...prev, [k]: e.target.value }));
 
   return createPortal(
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-[var(--ds-backdrop)] p-4" onClick={busy ? undefined : onCancel}>
-      <div className="flex max-h-[90vh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)]" onClick={e => e.stopPropagation()}>
+      <div className="flex max-h-[90vh] w-full max-w-md flex-col overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)]" onClick={e => e.stopPropagation()}>
         <div className="border-b border-[var(--ds-border)] p-5">
           <h3 className="text-[16px] font-semibold text-[var(--ds-text-primary)]">Fattura elettronica</h3>
           <p className="mt-1 text-[13px] text-[var(--ds-text-muted)]">Tavolo {bill.table_name ?? '—'} · {euro(bill.total_cents)} · sostituisce lo scontrino</p>
@@ -687,7 +687,7 @@ export const InvoiceDialog: React.FC<{
               className={field}
             />
             {results.length > 0 && (
-              <ul className="absolute z-10 mt-1 w-full overflow-hidden rounded-xl border border-[var(--ds-border)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+              <ul className="absolute z-10 mt-1 w-full overflow-hidden rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
                 {results.map(c => (
                   <li key={c.id}>
                     <button
@@ -721,7 +721,7 @@ export const InvoiceDialog: React.FC<{
                   onClick={lookup}
                   disabled={busy || lookupBusy}
                   aria-label="Cerca i dati aziendali dalla P.IVA"
-                  className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 >
                   {lookupBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
                 </button>
@@ -762,12 +762,12 @@ export const InvoiceDialog: React.FC<{
           {error && <p className="text-[13px] text-[var(--ds-critical-text)]">{error}</p>}
         </div>
         <div className="flex items-center justify-end gap-2 border-t border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-4 py-3">
-          <button type="button" onClick={onCancel} disabled={busy} className="inline-flex h-11 items-center rounded-full px-4 text-[15px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-hover)] disabled:opacity-40">Annulla</button>
+          <button type="button" onClick={onCancel} disabled={busy} className="inline-flex h-11 items-center rounded-[var(--ds-radius-control)] px-4 text-[15px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-hover)] disabled:opacity-40">Annulla</button>
           <button
             type="button"
             onClick={submit}
             disabled={busy || !buyer.name.trim()}
-            className="inline-flex h-11 items-center gap-2 rounded-full bg-[var(--ds-action-bg)] px-6 text-[15px] font-semibold text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
+            className="inline-flex h-11 items-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-6 text-[15px] font-semibold text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
           >
             {busy && <Loader2 className="h-4 w-4 animate-spin" />}
             Invia a SDI
@@ -855,7 +855,7 @@ export const FiscalCard: React.FC<{
   };
 
   const quiet =
-    'inline-flex h-10 items-center justify-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-4 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+    'inline-flex h-10 items-center justify-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-4 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
   return (
     <FormCard title="Scontrino" aside={<StatusPill tone={pill.tone}>{pill.label}</StatusPill>}>
@@ -894,8 +894,8 @@ export const FiscalCard: React.FC<{
             sulla termica. Solo per i nativi: quello Passepartout esce
             dall'RT di cassa, di carta ce n'è già una. */}
         {st === 'CONFIRMED' && !proforma && !invoice && !viaPP && bill.fiscal_public_token && (
-          <div className="flex items-center gap-4 rounded-[14px] bg-[var(--ds-surface-row)] p-3">
-            <div className="rounded-[10px] bg-white p-2" aria-hidden>
+          <div className="flex items-center gap-4 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3">
+            <div className="rounded-[var(--ds-radius)] bg-white p-2" aria-hidden>
               <QRCodeSVG value={`${window.location.origin}/scontrino/${bill.fiscal_public_token}`} size={96} level="M" />
             </div>
             <div className="min-w-0 space-y-2">
@@ -1012,7 +1012,7 @@ export const FiscalCard: React.FC<{
                   value={rtNumber}
                   onChange={e => setRtNumber(e.target.value)}
                   disabled={busy}
-                  className="h-10 w-44 rounded-full border border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-3.5 text-[13px] text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]"
+                  className="h-10 w-44 rounded-[var(--ds-radius-control)] border border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-3.5 text-[13px] text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]"
                 />
                 <button
                   type="button"
@@ -1040,7 +1040,7 @@ export const FiscalCard: React.FC<{
                   type="button"
                   disabled={busy}
                   onClick={() => run(() => billsApiService.voidFiscalDoc(bill.id, bill.fiscal_doc_id!))}
-                  className="inline-flex h-10 items-center justify-center gap-1.5 rounded-full bg-[var(--ds-critical-solid)] px-4 text-[13px] font-semibold text-white transition-colors disabled:opacity-40"
+                  className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-solid)] px-4 text-[13px] font-semibold text-white transition-colors disabled:opacity-40"
                 >
                   {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
                   Confermo l'annullo
@@ -1065,7 +1065,7 @@ export const FiscalCard: React.FC<{
                   type="button"
                   disabled={busy}
                   onClick={() => run(() => billsApiService.issueCreditNote(bill.id, bill.fiscal_doc_id!))}
-                  className="inline-flex h-10 items-center justify-center gap-1.5 rounded-full bg-[var(--ds-critical-solid)] px-4 text-[13px] font-semibold text-white transition-colors disabled:opacity-40"
+                  className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-solid)] px-4 text-[13px] font-semibold text-white transition-colors disabled:opacity-40"
                 >
                   {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
                   Confermo lo storno

@@ -223,7 +223,7 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
             Storna la portata contestata: resta in comanda come riga annullata con la
             motivazione, e il totale del conto si riallinea da solo.
           </p>
-          <ul className="divide-y divide-[var(--ds-border)] rounded-[16px] bg-[var(--ds-surface-row)] px-3">
+          <ul className="divide-y divide-[var(--ds-border)] rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3">
             {editOrder.items.filter(i => !isSystemLine(i)).map(i => (
               <li key={i.id} className="flex items-center gap-3 py-2.5">
                 <span className={`min-w-0 flex-1 text-[15px] ${i.status === 'VOIDED' ? 'text-[var(--ds-text-muted)] line-through' : 'text-[var(--ds-text-primary)]'}`}>
@@ -240,7 +240,7 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
                     type="button"
                     onClick={() => setVoidTarget(i)}
                     disabled={busy}
-                    className="flex-shrink-0 rounded-full bg-[var(--ds-surface)] px-3 py-1.5 text-[13px] font-medium text-[var(--ds-critical-text)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-critical-tint)] disabled:opacity-40"
+                    className="flex-shrink-0 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-3 py-1.5 text-[13px] font-medium text-[var(--ds-critical-text)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-critical-tint)] disabled:opacity-40"
                   >
                     Storna
                   </button>
@@ -248,14 +248,14 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
               </li>
             ))}
           </ul>
-          <div className="flex items-center justify-between rounded-[14px] bg-[var(--ds-surface-row)] px-3.5 py-2.5">
+          <div className="flex items-center justify-between rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3.5 py-2.5">
             <span className="text-[14px] font-semibold text-[var(--ds-text-primary)]">Residuo aggiornato</span>
             <span className="text-[17px] font-semibold tabular-nums text-[var(--ds-text-primary)]">{euro(bill.residual_cents)}</span>
           </div>
           <button
             type="button"
             onClick={() => setScreen('payment')}
-            className="inline-flex h-12 w-full items-center justify-center rounded-full bg-[var(--ds-action-bg)] text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)]"
+            className="inline-flex h-12 w-full items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)]"
           >
             Torna al pagamento
           </button>

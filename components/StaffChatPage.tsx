@@ -429,13 +429,13 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
       type="button"
       onClick={() => setSelectedKey(t.threadKey)}
       aria-current={selectedKey === t.threadKey ? 'true' : undefined}
-      className={`flex w-full items-center gap-3 rounded-[16px] px-3 py-2.5 text-left shadow-[var(--ds-shadow-card)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+      className={`flex w-full items-center gap-3 rounded-[var(--ds-radius)] px-3 py-2.5 text-left shadow-[var(--ds-shadow-card)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
         selectedKey === t.threadKey ? 'bg-[var(--ds-surface-row)]' : 'bg-[var(--ds-surface)] hover:bg-[var(--ds-surface-row)]'
       }`}
     >
       {t.kind === 'channel'
         ? (
-          <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]">
+          <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]">
             <Hash className="h-4 w-4" aria-hidden />
           </span>
         )
@@ -489,7 +489,7 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
         ) : (
           <div className="space-y-1">
             {pickerOpen && (
-              <div className="mb-2 rounded-[16px] bg-[var(--ds-surface)] p-1.5">
+              <div className="mb-2 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-1.5">
                 <SectionHeader>Scrivi a</SectionHeader>
                 {colleagues.length === 0 ? (
                   <p className="px-3 py-2 text-[14px] text-[var(--ds-text-muted)]">Nessun altro utente attivo.</p>
@@ -498,7 +498,7 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
                     key={c.id}
                     type="button"
                     onClick={() => openDmWith(c)}
-                    className="flex w-full items-center gap-2.5 rounded-[12px] px-2.5 py-2 text-left transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    className="flex w-full items-center gap-2.5 rounded-[var(--ds-radius)] px-2.5 py-2 text-left transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
                     <Avatar name={c.fullName} size="sm" />
                     <span className="min-w-0 flex-1 truncate text-[14px] text-[var(--ds-text-primary)]">{c.fullName}</span>
@@ -554,7 +554,7 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
                           type="button"
                           onClick={loadOlder}
                           disabled={loadingMore}
-                          className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-surface)] px-3.5 text-[13px] font-medium text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                          className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-3.5 text-[13px] font-medium text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                         >
                           {loadingMore ? <Loader2 className="h-4 w-4 animate-spin" /> : <ChevronUp className="h-4 w-4" />}
                           Messaggi precedenti
@@ -564,7 +564,7 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
                     {grouped.map(g => (
                       <div key={g.day} className="space-y-2">
                         <div className="flex justify-center">
-                          <span className="rounded-full bg-[var(--ds-surface)] px-2.5 py-1 text-[12px] text-[var(--ds-text-muted)] shadow-[var(--ds-shadow-card)]">
+                          <span className="rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-2.5 py-1 text-[12px] text-[var(--ds-text-muted)] shadow-[var(--ds-shadow-card)]">
                             {formatDayHeader(g.day)}
                           </span>
                         </div>
@@ -582,10 +582,10 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
                             // non vanno mai dietro testo piccolo.
                             <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
                               <div
-                                className={`max-w-[80%] rounded-[18px] px-3.5 py-2 ${
+                                className={`max-w-[80%] rounded-[var(--ds-radius)] px-3.5 py-2 ${
                                   mine
-                                    ? 'rounded-br-[6px] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
-                                    : 'rounded-bl-[6px] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]'
+                                    ? 'rounded-br-[var(--ds-radius)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                                    : 'rounded-bl-[var(--ds-radius)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]'
                                 } ${mentionsMe ? 'ring-1 ring-[var(--ds-arriving-solid)]' : ''}`}
                               >
                                 {!mine && selected.kind === 'channel' && (
@@ -595,7 +595,7 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
                                   <div className="mb-1.5 space-y-1.5">
                                     {(m.media ?? []).map(att => (
                                       <a key={att.token} href={staffMediaUrl(att.token)} target="_blank" rel="noopener noreferrer">
-                                        <img src={staffMediaUrl(att.token)} alt={att.filename || 'Foto'} className="max-h-64 w-auto rounded-[12px] object-cover" loading="lazy" />
+                                        <img src={staffMediaUrl(att.token)} alt={att.filename || 'Foto'} className="max-h-64 w-auto rounded-[var(--ds-radius)] object-cover" loading="lazy" />
                                       </a>
                                     ))}
                                   </div>
@@ -635,7 +635,7 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
                       type="button"
                       onClick={() => doSend(p.label, p.key)}
                       disabled={sending}
-                      className="inline-flex h-9 items-center rounded-full bg-[var(--ds-surface)] px-3 text-[13px] font-medium text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                      className="inline-flex h-9 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-3 text-[13px] font-medium text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     >
                       {p.label}
                     </button>
@@ -645,13 +645,13 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
                 {/* Autocomplete menzioni: compare quando il testo finisce con
                     "@parziale", elenca i membri del canale. */}
                 {mentionCandidates.length > 0 && (
-                  <div className="rounded-[14px] bg-[var(--ds-surface)] p-1.5 shadow-[var(--ds-shadow-card)]">
+                  <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-1.5 shadow-[var(--ds-shadow-card)]">
                     {mentionCandidates.map(c => (
                       <button
                         key={c.id}
                         type="button"
                         onClick={() => applyMention(c)}
-                        className="flex w-full items-center gap-2.5 rounded-[10px] px-2.5 py-2 text-left transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                        className="flex w-full items-center gap-2.5 rounded-[var(--ds-radius)] px-2.5 py-2 text-left transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                       >
                         <Avatar name={c.fullName} size="sm" />
                         <span className="min-w-0 flex-1 truncate text-[14px] text-[var(--ds-text-primary)]">{c.fullName}</span>
@@ -661,7 +661,7 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
                   </div>
                 )}
 
-                <div className="rounded-[24px] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-shadow focus-within:ring-2 focus-within:ring-[var(--ds-border-focus)]">
+                <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-shadow focus-within:ring-2 focus-within:ring-[var(--ds-border-focus)]">
                   {/* Gli allegati stanno dentro la scheda del composer, sopra
                       la riga di scrittura: appartengono al messaggio che si sta
                       componendo, non alla pagina. Qui la chat ha l'anteprima
@@ -696,7 +696,7 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
                     disabled={uploading || sending || attachments.length >= STAFF_MAX_ATTACHMENTS}
                     aria-label="Allega una foto"
                     title="Allega una foto"
-                    className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
                     {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
                   </button>
@@ -713,7 +713,7 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
                     onClick={() => doSend(composerText)}
                     disabled={(!composerText.trim() && attachments.length === 0) || sending || uploading}
                     aria-label="Invia messaggio"
-                    className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] transition-all hover:bg-[var(--ds-action-bg-hover)] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:cursor-not-allowed disabled:bg-[var(--ds-surface-row)] disabled:text-[var(--ds-text-subtle)]"
+                    className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] transition-all hover:bg-[var(--ds-action-bg-hover)] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:cursor-not-allowed disabled:bg-[var(--ds-surface-row)] disabled:text-[var(--ds-text-subtle)]"
                   >
                     {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                   </button>

@@ -101,7 +101,7 @@ export const EsitoChiusura: React.FC<EsitoChiusuraProps> = ({
 
   return (
     <div className="flex h-full min-h-0 items-center justify-center px-4 py-8">
-      <div className="w-full max-w-[480px] rounded-[24px] bg-[var(--ds-surface)] p-6 shadow-[var(--ds-shadow-card)]">
+      <div className="w-full max-w-[480px] rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-6 shadow-[var(--ds-shadow-card)]">
         <StatusPill tone={head.tone}>{head.label}</StatusPill>
 
         <div className="mt-3 text-[40px] font-semibold leading-none tabular-nums tracking-[-0.02em] text-[var(--ds-text-primary)]">
@@ -113,8 +113,8 @@ export const EsitoChiusura: React.FC<EsitoChiusuraProps> = ({
         {/* Lo scontrino si consegna adesso, col cliente ancora davanti: QR
             da inquadrare col telefono, o copia di cortesia dalla termica. */}
         {esito === 'saldato' && receiptToken && (
-          <div className="mt-4 flex items-center gap-4 rounded-[16px] bg-[var(--ds-surface-row)] p-3.5">
-            <div className="rounded-[10px] bg-white p-2" aria-hidden>
+          <div className="mt-4 flex items-center gap-4 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3.5">
+            <div className="rounded-[var(--ds-radius)] bg-white p-2" aria-hidden>
               <QRCodeSVG value={`${window.location.origin}/scontrino/${receiptToken}`} size={104} level="M" />
             </div>
             <div className="min-w-0 space-y-2">
@@ -144,7 +144,7 @@ export const EsitoChiusura: React.FC<EsitoChiusuraProps> = ({
               type="button"
               onClick={a.onClick}
               disabled={busy}
-              className="inline-flex h-11 items-center rounded-full bg-[var(--ds-surface)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
+              className="inline-flex h-11 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
             >
               {a.label}
             </button>
@@ -155,7 +155,7 @@ export const EsitoChiusura: React.FC<EsitoChiusuraProps> = ({
           type="button"
           onClick={esito === 'da-verificare' ? onRetryDocument : onBackToQueue}
           disabled={busy}
-          className="mt-3 inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-[var(--ds-action-bg)] text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
+          className="mt-3 inline-flex h-12 w-full items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
         >
           {busy && <Loader2 size={16} className="animate-spin" />}
           {esito === 'da-verificare' ? 'Ritenta lo scontrino' : 'Torna alla coda'}

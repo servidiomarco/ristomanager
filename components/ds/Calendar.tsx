@@ -83,7 +83,7 @@ export const MonthGrid: React.FC<{
               // side on a tablet, and the cells sit in a dense field of
               // identical targets where the row/column alignment does the
               // aiming. The shortcuts above are the 44px path.
-              className={`mx-auto inline-flex h-9 w-9 items-center justify-center rounded-full text-[14px] tabular-nums transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+              className={`mx-auto inline-flex h-9 w-9 items-center justify-center rounded-[var(--ds-radius-control)] text-[14px] tabular-nums transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                 isPast
                   ? 'cursor-not-allowed text-[var(--ds-text-subtle)] opacity-50'
                   : isStart || isEnd
@@ -127,10 +127,10 @@ export const DayPicker: React.FC<{
   React.useEffect(() => { setMonth(initial); }, [initial]);
 
   const arrow =
-    'inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+    'inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
   return (
-    <div className={`rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-raised)] ${className}`}>
+    <div className={`rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-raised)] ${className}`}>
       <div className="mb-2 flex items-center justify-between gap-2">
         <button
           type="button"

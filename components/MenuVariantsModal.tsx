@@ -132,7 +132,7 @@ export const MenuVariantsModal: React.FC<{
                     schiacciato a una lettera. */}
                 <div className="flex flex-wrap items-center gap-x-1.5 text-[12px] tabular-nums text-[var(--ds-text-muted)]">
                   {isPP(g) && (
-                    <span className="rounded-full bg-[var(--ds-surface-row)] px-1.5 py-0.5 text-[11px] font-medium">
+                    <span className="rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-1.5 py-0.5 text-[11px] font-medium">
                       dalla cassa
                     </span>
                   )}
@@ -373,7 +373,7 @@ const GroupEditor: React.FC<{
 
       <div>
         <div className="mb-1 text-[13px] font-semibold text-[var(--ds-text-muted)]">Opzioni</div>
-        <div className="divide-y divide-[var(--ds-border)] rounded-[14px] bg-[var(--ds-surface-row)] px-3">
+        <div className="divide-y divide-[var(--ds-border)] rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3">
           {group.modifiers.length === 0 && (
             <p className="py-4 text-center text-[13px] text-[var(--ds-text-muted)]">Nessuna opzione.</p>
           )}
@@ -445,7 +445,7 @@ const GroupEditor: React.FC<{
                   aria-pressed={full}
                   onClick={() => run(() => setCategoryModifierGroup(c.name, group.id, !full))}
                   title={partial ? `La spunta completa la categoria` : undefined}
-                  className={`inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50 ${
+                  className={`inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3.5 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50 ${
                     full
                       ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                       : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
@@ -553,7 +553,7 @@ const MemberRow: React.FC<{
   return (
     <div className="flex min-h-[52px] flex-wrap items-center gap-2 py-2">
       <input
-        className="h-9 min-w-0 flex-1 rounded-[10px] bg-[var(--ds-surface)] px-3 text-[14px] text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+        className="h-9 min-w-0 flex-1 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-3 text-[14px] text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
         maxLength={100}
         value={name}
         disabled={busy}
@@ -563,7 +563,7 @@ const MemberRow: React.FC<{
       />
       <div className="flex flex-shrink-0 items-center gap-1">
         <input
-          className="h-9 w-24 rounded-[10px] bg-[var(--ds-surface)] px-2 text-right text-[14px] tabular-nums text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          className="h-9 w-24 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-2 text-right text-[14px] tabular-nums text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           inputMode="decimal"
           placeholder="0"
           value={amount}
@@ -582,7 +582,7 @@ const MemberRow: React.FC<{
               onClick={() => switchKind(k === '%')}
               aria-pressed={active}
               title={k === '%' ? 'Percentuale del prezzo del piatto' : 'Importo fisso'}
-              className={`inline-flex h-9 w-8 items-center justify-center rounded-[10px] text-[13px] font-medium transition-colors ${
+              className={`inline-flex h-9 w-8 items-center justify-center rounded-[var(--ds-radius)] text-[13px] font-medium transition-colors ${
                 active ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
               }`}
             >
@@ -637,7 +637,7 @@ const MemberRow: React.FC<{
           flex-wrap. */}
       <div className="flex w-full gap-2">
         <input
-          className="h-8 min-w-0 flex-1 rounded-[10px] bg-[var(--ds-surface)] px-3 text-[13px] text-[var(--ds-text-secondary)] placeholder:text-[var(--ds-text-subtle)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          className="h-8 min-w-0 flex-1 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-3 text-[13px] text-[var(--ds-text-secondary)] placeholder:text-[var(--ds-text-subtle)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           maxLength={300}
           placeholder="Nota (es. 48–52°C al cuore)"
           value={note}
@@ -647,7 +647,7 @@ const MemberRow: React.FC<{
           onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
         />
         <input
-          className="h-8 w-36 flex-none rounded-[10px] bg-[var(--ds-surface)] px-3 text-[13px] text-[var(--ds-text-secondary)] placeholder:text-[var(--ds-text-subtle)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          className="h-8 w-36 flex-none rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-3 text-[13px] text-[var(--ds-text-secondary)] placeholder:text-[var(--ds-text-subtle)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           maxLength={100}
           placeholder="Inglese (es. Rare)"
           title="Traduzione per il cameriere: in cucina non esce"

@@ -116,7 +116,7 @@ export const BloccoIncassi: React.FC<{ data: RevenueReport }> = ({ data }) => {
       )}
 
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <div className="rounded-[16px] bg-[var(--ds-surface-row)] p-3">
+        <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3">
           <div className="mb-1 flex items-center justify-between gap-2">
             <span className="text-[13px] font-medium text-[var(--ds-text-secondary)]">Metodi di pagamento</span>
             <CsvButton onClick={esportaMetodi} label="csv" />
@@ -134,7 +134,7 @@ export const BloccoIncassi: React.FC<{ data: RevenueReport }> = ({ data }) => {
             <div className="py-4 text-center text-[13px] text-[var(--ds-text-muted)]">Nessun movimento</div>
           )}
         </div>
-        <div className="rounded-[16px] bg-[var(--ds-surface-row)] p-3">
+        <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3">
           <div className="mb-1 text-[13px] font-medium text-[var(--ds-text-secondary)]">Differenze di cassa</div>
           <div className="mb-2 text-[12px] text-[var(--ds-text-muted)]">
             {formatInt(data.casse.chiuse)} sessioni chiuse su {formatInt(data.casse.sessioni)} ·

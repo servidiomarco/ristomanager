@@ -76,7 +76,7 @@ export const PublicQuotePage: React.FC = () => {
   if (notFound) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[var(--ds-canvas)] p-6">
-        <div className="max-w-sm rounded-[20px] bg-[var(--ds-surface)] p-6 text-center shadow-[var(--ds-shadow-card)]">
+        <div className="max-w-sm rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-6 text-center shadow-[var(--ds-shadow-card)]">
           <p className="text-[15px] font-semibold text-[var(--ds-text-primary)]">Preventivo non trovato</p>
           <p className="mt-2 text-[13px] text-[var(--ds-text-muted)]">
             Il link potrebbe essere incompleto. Chiedi al ristorante di inviartelo di nuovo.
@@ -112,7 +112,7 @@ export const PublicQuotePage: React.FC = () => {
             />
           )}
           <p className="text-[15px] font-semibold text-[var(--ds-text-primary)]">{business.name}</p>
-          <span className={`mt-3 inline-flex h-7 items-center rounded-full px-3 text-[13px] font-medium ${
+          <span className={`mt-3 inline-flex h-7 items-center rounded-[var(--ds-radius-control)] px-3 text-[13px] font-medium ${
             isQuote
               ? 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]'
               : 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'
@@ -142,7 +142,7 @@ export const PublicQuotePage: React.FC = () => {
         {quote.courses.length > 0 && (
           <div className="mt-6 space-y-3">
             {quote.courses.map((course, i) => (
-              <section key={`${course.name}-${i}`} className="rounded-[20px] bg-[var(--ds-surface)] p-5 shadow-[var(--ds-shadow-card)]">
+              <section key={`${course.name}-${i}`} className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-5 shadow-[var(--ds-shadow-card)]">
                 <h2 className="text-[13px] font-semibold text-[var(--ds-text-muted)]">{course.name}</h2>
                 <ul className="mt-2 space-y-2.5">
                   {course.dishes.map((d, j) => (
@@ -168,7 +168,7 @@ export const PublicQuotePage: React.FC = () => {
         )}
 
         {quote.totals && (
-          <section className="mt-3 rounded-[20px] bg-[var(--ds-surface)] p-5 shadow-[var(--ds-shadow-card)]">
+          <section className="mt-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-5 shadow-[var(--ds-shadow-card)]">
             <h2 className="text-[13px] font-semibold text-[var(--ds-text-muted)]">Tariffe</h2>
             <dl className="mt-2 space-y-1.5 text-[14px] text-[var(--ds-text-primary)]">
               {quote.price_per_person != null && (
@@ -209,7 +209,7 @@ export const PublicQuotePage: React.FC = () => {
           {isQuote && <p>Il preventivo non è un impegno: si conferma insieme al ristorante.</p>}
           {/* La carta d'identità del ristorante: chi manda il preventivo e
               come raggiungerlo con un tocco. */}
-          <div className="mt-4 rounded-[20px] bg-[var(--ds-surface)] px-5 py-4 shadow-[var(--ds-shadow-card)]">
+          <div className="mt-4 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-5 py-4 shadow-[var(--ds-shadow-card)]">
             <p className="text-[14px] font-semibold text-[var(--ds-text-primary)]">{business.name}</p>
             {business.tagline && (
               <p className="mt-0.5 text-[13px] text-[var(--ds-text-muted)]">{business.tagline}</p>

@@ -126,7 +126,7 @@ export const NotificationsPanel: React.FC<{
       role="dialog"
       aria-label="Notifiche"
       style={{ top: at.top, left: at.left, width: PANEL_WIDTH, maxHeight: 'min(70vh, 620px)' }}
-      className="fixed z-[60] flex flex-col overflow-hidden rounded-[24px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)]"
+      className="fixed z-[60] flex flex-col overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)]"
     >
       <div className="flex-shrink-0 space-y-3 p-4">
         <div className="flex items-center justify-between gap-3">
@@ -137,7 +137,7 @@ export const NotificationsPanel: React.FC<{
             type="button"
             onClick={onClose}
             aria-label="Chiudi"
-            className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]"
+            className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]"
           >
             <X className="h-4 w-4" />
           </button>
@@ -184,7 +184,7 @@ export const NotificationsPanel: React.FC<{
           type="button"
           onClick={markAllRead}
           disabled={markingAll || counts.unread === 0}
-          className="inline-flex h-9 items-center gap-1.5 rounded-full px-3 text-[14px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
+          className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 text-[14px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
         >
           <CheckCheck className="h-4 w-4" aria-hidden />
           Tutte lette
@@ -192,7 +192,7 @@ export const NotificationsPanel: React.FC<{
         <button
           type="button"
           onClick={() => { onClose(); onSeeAll(); }}
-          className="inline-flex h-9 items-center gap-1.5 rounded-full px-3 text-[14px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]"
+          className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 text-[14px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]"
         >
           Vedi tutte
           <ArrowRight className="h-4 w-4" aria-hidden />

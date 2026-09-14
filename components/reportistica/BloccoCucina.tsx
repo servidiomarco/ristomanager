@@ -42,7 +42,7 @@ export const BloccoCucina: React.FC<{ data: DishesReport }> = ({ data }) => {
       subtitle="Dalle comande lanciate nel periodo · righe stornate escluse dai venduti, contate negli scarti"
       actions={<CsvButton onClick={esporta} />}
     >
-      <div className="mb-4 rounded-[16px] bg-[var(--ds-surface-row)] p-3">
+      <div className="mb-4 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3">
         <div className="mb-2 flex items-center justify-between gap-2">
           <span className="text-[13px] font-medium text-[var(--ds-text-secondary)]">Piatti più venduti</span>
           <SegmentedControl<Ordinamento>
@@ -81,7 +81,7 @@ export const BloccoCucina: React.FC<{ data: DishesReport }> = ({ data }) => {
       </div>
 
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <div className="rounded-[16px] bg-[var(--ds-surface-row)] p-3">
+        <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3">
           <div className="mb-1 text-[13px] font-medium text-[var(--ds-text-secondary)]">Tempi per partita</div>
           {partite.length > 0 ? (
             <table className="w-full text-[13px]">
@@ -108,7 +108,7 @@ export const BloccoCucina: React.FC<{ data: DishesReport }> = ({ data }) => {
             <div className="py-4 text-center text-[13px] text-[var(--ds-text-muted)]">Nessuna riga pronta nel periodo.</div>
           )}
         </div>
-        <div className="rounded-[16px] bg-[var(--ds-surface-row)] p-3">
+        <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3">
           <div className="mb-1 flex items-center gap-1.5 text-[13px] font-medium text-[var(--ds-text-secondary)]">
             <Trash2 className="h-3.5 w-3.5" aria-hidden />
             Scarti per motivo

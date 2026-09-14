@@ -65,10 +65,10 @@ const UNCATEGORIZED = -1;
 
 // The quiet round control that sits at the end of a row.
 const rowIconButton =
-  'inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+  'inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
 const rowIconButtonDanger =
-  'inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+  'inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
 
@@ -767,7 +767,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
       aria-expanded={menuOpen}
       aria-label="Gestisci inventario"
       title="Gestisci inventario"
-      className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+      className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
     >
       <MoreVertical className="h-4 w-4" aria-hidden />
     </button>
@@ -898,7 +898,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
                 onClick={() => handleStep(p.id, -1)}
                 disabled={isPending}
                 aria-label={`${p.name}: togli uno`}
-                className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[20px] font-medium leading-none text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[20px] font-medium leading-none text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               >
                 −
               </button>
@@ -933,7 +933,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
                 }
               }}
               readOnly={!canEdit || isPending}
-              className="ds-stepper-input h-11 w-[76px] rounded-full bg-[var(--ds-surface-row)] px-2 text-center text-[17px] font-semibold tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              className="ds-stepper-input h-11 w-[76px] rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-2 text-center text-[17px] font-semibold tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             />
             {canEdit && (
               <button
@@ -941,7 +941,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
                 onClick={() => handleStep(p.id, 1)}
                 disabled={isPending}
                 aria-label={`${p.name}: aggiungi uno`}
-                className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-[var(--ds-action-bg)] text-[20px] font-medium leading-none text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[20px] font-medium leading-none text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               >
                 +
               </button>
@@ -1034,7 +1034,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
                 <div
                   ref={menuRef}
                   role="menu"
-                  className="absolute right-0 top-full z-30 mt-2 w-[264px] overflow-hidden rounded-[20px] bg-[var(--ds-surface)] py-1.5 shadow-[var(--ds-shadow-raised)]"
+                  className="absolute right-0 top-full z-30 mt-2 w-[264px] overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] py-1.5 shadow-[var(--ds-shadow-raised)]"
                 >
                   {manageActions.map(a => (
                     <button
@@ -1119,7 +1119,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
           <button
             type="button"
             onClick={openCategoriesModal}
-            className="inline-flex h-10 flex-shrink-0 items-center gap-2 rounded-full border border-dashed border-[var(--ds-border-strong)] px-4 text-[14px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:border-solid hover:bg-[var(--ds-surface)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="inline-flex h-10 flex-shrink-0 items-center gap-2 rounded-[var(--ds-radius-control)] border border-dashed border-[var(--ds-border-strong)] px-4 text-[14px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:border-solid hover:bg-[var(--ds-surface)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             <Pencil className="h-3.5 w-3.5" aria-hidden />
             Modifica
@@ -1138,7 +1138,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
             <button
               type="button"
               onClick={() => setOnlyLowStock(v => !v)}
-              className="inline-flex h-10 items-center rounded-full bg-[var(--ds-surface)] px-4 text-[14px] font-medium text-[var(--ds-critical-text)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              className="inline-flex h-10 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-4 text-[14px] font-medium text-[var(--ds-critical-text)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             >
               {onlyLowStock ? 'Mostra tutti' : 'Mostra solo questi'}
             </button>
@@ -1219,7 +1219,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
                 Nemmeno nelle altre aree.
               </p>
             ) : (
-              <div className="overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+              <div className="overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
                 {crossArea.results.map((p, i) => (
                   <button
                     key={p.id}
@@ -1261,7 +1261,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
 
       {/* The list */}
       {!isLoading && !error && groups.length > 0 && (
-        <div className="overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+        <div className="overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
           {/* Column names, from md up. On a phone the row carries its own
               labels, so a header would be a line of text with nothing under it. */}
           <div className="hidden items-center gap-3 px-5 py-3 text-[13px] text-[var(--ds-text-muted)] md:flex">
@@ -1317,7 +1317,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
           </button>
         }
       >
-        <div className="overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+        <div className="overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
           {manageActions.map((a, i) => (
             <button
               key={a.label}
@@ -1391,7 +1391,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
                 onDragOver={(e) => { e.preventDefault(); setDragLoc(d => (d ? { ...d, over: i } : d)); }}
                 onDrop={(e) => { e.preventDefault(); handleDropLocation(i); }}
                 onDragEnd={() => setDragLoc(null)}
-                className={`flex items-center gap-2 rounded-[16px] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-colors ${
+                className={`flex items-center gap-2 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-colors ${
                   dragLoc?.over === i && dragLoc.from !== i ? 'bg-[var(--ds-arriving-tint)]' : ''
                 }`}
               >
@@ -1513,7 +1513,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
                 onDragOver={(e) => { e.preventDefault(); setDragCat(d => (d ? { ...d, over: i } : d)); }}
                 onDrop={(e) => { e.preventDefault(); handleDropCategory(i); }}
                 onDragEnd={() => setDragCat(null)}
-                className={`flex items-center gap-2 rounded-[16px] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-colors ${
+                className={`flex items-center gap-2 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-colors ${
                   dragCat?.over === i && dragCat.from !== i ? 'bg-[var(--ds-arriving-tint)]' : ''
                 }`}
               >
@@ -1637,7 +1637,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
                       key={u}
                       type="button"
                       onClick={() => setProductForm(f => ({ ...f, unit: u }))}
-                      className="inline-flex h-8 items-center rounded-full bg-[var(--ds-surface-row)] px-3 text-[13px] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)]"
+                      className="inline-flex h-8 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3 text-[13px] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)]"
                     >
                       {u}
                     </button>

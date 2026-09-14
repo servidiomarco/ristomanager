@@ -183,6 +183,7 @@ export class AuthService {
     const result = await queryWithRetry(
       `SELECT u.id, u.email, u.password_hash, u.full_name, u.phone, u.role, u.is_active,
               u.created_at, u.updated_at, u.last_login, u.preferred_landing_view, u.preferred_orderpad_layout,
+              u.preferred_design_style,
               u.tenant_id, t.status AS tenant_status, t.slug AS tenant_slug, t.name AS tenant_name,
               t.onboarding_completed_at IS NULL AS tenant_needs_onboarding
          FROM users u
@@ -243,6 +244,7 @@ export class AuthService {
       last_login: userRow.last_login,
       preferred_landing_view: userRow.preferred_landing_view ?? null,
       preferred_orderpad_layout: userRow.preferred_orderpad_layout ?? null,
+      preferred_design_style: userRow.preferred_design_style ?? null,
       tenant: {
         id: Number(userRow.tenant_id),
         slug: userRow.tenant_slug,
@@ -391,6 +393,7 @@ export class AuthService {
     const result = await queryWithRetry(
       `SELECT u.id, u.email, u.full_name, u.phone, u.role, u.is_active, u.created_at,
               u.updated_at, u.last_login, u.preferred_landing_view, u.preferred_orderpad_layout,
+              u.preferred_design_style,
               u.tenant_id, t.slug AS tenant_slug, t.name AS tenant_name,
               t.onboarding_completed_at IS NULL AS tenant_needs_onboarding
          FROM users u
@@ -416,6 +419,7 @@ export class AuthService {
       last_login: row.last_login,
       preferred_landing_view: row.preferred_landing_view ?? null,
       preferred_orderpad_layout: row.preferred_orderpad_layout ?? null,
+      preferred_design_style: row.preferred_design_style ?? null,
       tenant: {
         id: Number(row.tenant_id),
         slug: row.tenant_slug,
@@ -458,7 +462,7 @@ export class AuthService {
   // a field as it is; `null` clears it.
   static async updatePreferences(
     userId: number,
-    prefs: { preferred_landing_view?: string | null; preferred_orderpad_layout?: string | null }
+    prefs: { preferred_landing_view?: string | null; preferred_orderpad_layout?: string | null; preferred_design_style?: string | null }
   ): Promise<User | null> {
     const fields: string[] = [];
     const values: unknown[] = [];
@@ -470,6 +474,10 @@ export class AuthService {
       fields.push(`preferred_orderpad_layout = $${values.length + 1}`);
       values.push(prefs.preferred_orderpad_layout);
     }
+    if (prefs.preferred_design_style !== undefined) {
+      fields.push(`preferred_design_style = $${values.length + 1}`);
+      values.push(prefs.preferred_design_style);
+    }
     if (fields.length === 0) {
       return this.getUserById(userId);
     }
@@ -479,7 +487,7 @@ export class AuthService {
       `UPDATE users
        SET ${fields.join(', ')}, updated_at = CURRENT_TIMESTAMP
        WHERE id = $${values.length}
-       RETURNING id, email, full_name, phone, role, is_active, created_at, updated_at, last_login, preferred_landing_view, preferred_orderpad_layout`,
+       RETURNING id, email, full_name, phone, role, is_active, created_at, updated_at, last_login, preferred_landing_view, preferred_orderpad_layout, preferred_design_style`,
       values
     );
 
@@ -502,7 +510,8 @@ export class AuthService {
       updated_at: row.updated_at,
       last_login: row.last_login,
       preferred_landing_view: row.preferred_landing_view ?? null,
-      preferred_orderpad_layout: row.preferred_orderpad_layout ?? null
+      preferred_orderpad_layout: row.preferred_orderpad_layout ?? null,
+      preferred_design_style: row.preferred_design_style ?? null
     };
   }
 

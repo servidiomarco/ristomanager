@@ -127,13 +127,13 @@ export const PaneHeader: React.FC<{
   // Horizontal padding matches the page ramp used elsewhere in the app, so the
   // detail column lines up with everything else rather than hugging its edge.
   <div className="flex-shrink-0 px-4 pb-4 pt-4 sm:px-6 lg:px-8">
-    <div className="flex items-center gap-3 rounded-[20px] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
+    <div className="flex items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
       {onBack && (
         <button
           type="button"
           onClick={onBack}
           aria-label={backLabel}
-          className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] md:hidden"
+          className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] md:hidden"
         >
           <ArrowLeft className="h-4 w-4" />
         </button>
@@ -197,7 +197,7 @@ export const StatusPill: React.FC<{
 }> = ({ tone = 'neutral', title, className = '', children }) => (
   <span
     title={title}
-    className={`inline-flex h-6 flex-shrink-0 items-center gap-1 rounded-full px-2 text-[12px] font-medium ring-1 ring-inset ring-[var(--ds-border-strong)] ${PILL_TONE[tone]} ${className}`}
+    className={`inline-flex h-6 flex-shrink-0 items-center gap-1 rounded-[var(--ds-radius-control)] px-2 text-[12px] font-medium ring-1 ring-inset ring-[var(--ds-border-strong)] ${PILL_TONE[tone]} ${className}`}
   >
     {children}
   </span>
@@ -215,7 +215,7 @@ export const CountBadge: React.FC<{
   className?: string;
 }> = ({ count, tone = 'neutral', max = 99, className = '' }) => (
   <span
-    className={`inline-flex h-6 min-w-[24px] flex-shrink-0 items-center justify-center rounded-full px-1.5 text-[12px] font-semibold tabular-nums ${
+    className={`inline-flex h-6 min-w-[24px] flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] px-1.5 text-[12px] font-semibold tabular-nums ${
       tone === 'alert'
         ? 'bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)]'
         : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]'
@@ -230,7 +230,7 @@ export const CountBadge: React.FC<{
    the recessed grey: a level-2 surface on the canvas measures about 1.03:1 and
    effectively disappears, leaving a bare glyph with no hit area you can see. */
 export const dsIconButton =
-  'inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+  'inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
 /* ── SearchField ──────────────────────────────────────────────────────────
    Always visible, never behind a toggle: on a list you filter before you
@@ -268,7 +268,7 @@ export const SearchField: React.FC<{
       onKeyDown={onKeyDown}
       placeholder={placeholder}
       aria-label={ariaLabel}
-      className={`h-11 w-full rounded-full pl-11 pr-11 text-[15px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] transition-shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+      className={`h-11 w-full rounded-[var(--ds-radius-control)] pl-11 pr-11 text-[15px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] transition-shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
         recessed
           ? 'bg-[var(--ds-surface-row)]'
           : 'bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]'
@@ -284,7 +284,7 @@ export const SearchField: React.FC<{
         type="button"
         onClick={() => onChange('')}
         aria-label="Svuota ricerca"
-        className="absolute right-3 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]"
+        className="absolute right-3 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]"
       >
         <X className="h-4 w-4" />
       </button>
@@ -365,7 +365,7 @@ export const SectionHeader: React.FC<{
       // The bottom margin only applies while the group is open, where it buys
       // air before the first card. Collapsed, consecutive headers should stack
       // tightly — an extra gap there would read as a missing group.
-      className={`-mx-1 flex min-h-[44px] w-full items-center gap-2 rounded-[14px] border border-[var(--ds-border)] bg-[var(--ds-surface-row)] px-3 py-1.5 text-left transition-colors hover:border-[var(--ds-border-strong)] hover:bg-[var(--ds-border)] active:bg-[var(--ds-border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+      className={`-mx-1 flex min-h-[44px] w-full items-center gap-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface-row)] px-3 py-1.5 text-left transition-colors hover:border-[var(--ds-border-strong)] hover:bg-[var(--ds-border)] active:bg-[var(--ds-border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
         expanded ? 'mb-2.5' : ''
       }`}
     >
@@ -382,7 +382,7 @@ export const SectionHeader: React.FC<{
           chevron is what people aim at, and a 16px icon floating in space
           reads as decoration rather than a control. */}
       <span
-        className={`inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-transform ${
+        className={`inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-transform ${
           expanded ? '' : '-rotate-90'
         }`}
         aria-hidden
@@ -458,7 +458,7 @@ export const StatStrip: React.FC<{
   return (
     <div
       className={`flex items-stretch overflow-hidden bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] ${
-        stacked ? 'rounded-[20px]' : 'rounded-full'
+        stacked ? 'rounded-[var(--ds-radius)]' : 'rounded-[var(--ds-radius-control)]'
       } ${className}`}
     >
       {stats.map((s, i) => {
@@ -525,6 +525,9 @@ export const Avatar: React.FC<{
     : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]';
   return (
     <div className={`relative flex-shrink-0 ${badge ? 'pb-1' : ''} ${className}`}>
+      {/* L'avatar resta un cerchio: un volto, o le iniziali di una persona, in
+          un quadrato smussato leggono come una tessera. È l'eccezione alla
+          regola dei controlli — e non è un controllo. */}
       <div className={`flex items-center justify-center rounded-full font-semibold ${shell} ${
         size === 'sm' ? 'h-6 w-6 text-[10px]' : 'h-10 w-10 text-[13px]'
       }`}>
@@ -559,7 +562,7 @@ export const Callout: React.FC<{
   className?: string;
   children: React.ReactNode;
 }> = ({ tone, icon: Icon, title, action, className = '', children }) => (
-  <div className={`flex items-start gap-2.5 rounded-[16px] p-4 text-[14px] leading-relaxed ${CALLOUT_TONE[tone]} ${className}`}>
+  <div className={`flex items-start gap-2.5 rounded-[var(--ds-radius)] p-4 text-[14px] leading-relaxed ${CALLOUT_TONE[tone]} ${className}`}>
     {Icon && <Icon className="mt-0.5 h-4 w-4 flex-shrink-0" aria-hidden />}
     <div className="min-w-0 flex-1">
       {title && <div className="mb-0.5 font-semibold">{title}</div>}
@@ -577,7 +580,7 @@ export const EmptyState: React.FC<{
   children: React.ReactNode;
   action?: React.ReactNode;
 }> = ({ icon: Icon, children, action }) => (
-  <div className="rounded-[20px] bg-[var(--ds-surface)] px-6 py-12 text-center shadow-[var(--ds-shadow-card)]">
+  <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-6 py-12 text-center shadow-[var(--ds-shadow-card)]">
     <Icon className="mx-auto mb-3 h-8 w-8 text-[var(--ds-text-subtle)]" aria-hidden />
     <p className="text-[14px] text-[var(--ds-text-muted)]">{children}</p>
     {action && <div className="mt-4 flex justify-center">{action}</div>}

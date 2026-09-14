@@ -34,7 +34,7 @@ export const BanquetCompositionModal: React.FC<Props> = ({ banquet, dishes, onCl
   return (
     <div className="fixed inset-0 bg-[var(--ds-backdrop)] flex items-center justify-center z-50 p-4" onClick={onClose}>
       <div
-        className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-raised)] border border-[var(--ds-border)] max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col"
+        className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-raised)] border border-[var(--ds-border)] max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
@@ -84,7 +84,7 @@ export const BanquetCompositionModal: React.FC<Props> = ({ banquet, dishes, onCl
             <button
               type="button"
               onClick={() => printBanquet(banquet, dishes, { showPrice: canViewBanquetPrice })}
-              className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               title="Stampa"
             >
               <Printer className="h-4 w-4" />
@@ -92,7 +92,7 @@ export const BanquetCompositionModal: React.FC<Props> = ({ banquet, dishes, onCl
             <button
               type="button"
               onClick={() => printBanquet(banquet, dishes, { kitchenMode: true })}
-              className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               title="Stampa per cucina"
             >
               <ChefHat className="h-4 w-4" />
@@ -100,7 +100,7 @@ export const BanquetCompositionModal: React.FC<Props> = ({ banquet, dishes, onCl
             <button
               type="button"
               onClick={onClose}
-              className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               title="Chiudi"
             >
               <X className="h-4 w-4" />
@@ -123,7 +123,7 @@ export const BanquetCompositionModal: React.FC<Props> = ({ banquet, dishes, onCl
                     .filter((d): d is Dish => !!d);
                   if (items.length === 0) return null;
                   return (
-                    <div key={`${course.name}-${idx}`} className="border border-[var(--ds-border)] rounded-lg p-3 bg-[var(--ds-surface-row)]">
+                    <div key={`${course.name}-${idx}`} className="border border-[var(--ds-border)] rounded-[var(--ds-radius)] p-3 bg-[var(--ds-surface-row)]">
                       <h4 className="mb-2 text-[15px] font-semibold text-[var(--ds-text-primary)]">{course.name}</h4>
                       <ul className="space-y-2">
                         {items.map(d => (
@@ -132,10 +132,10 @@ export const BanquetCompositionModal: React.FC<Props> = ({ banquet, dishes, onCl
                               <img
                                 src={d.photo_url}
                                 alt={d.name}
-                                className="h-12 w-12 rounded-lg object-cover flex-shrink-0 border border-[var(--ds-border)]"
+                                className="h-12 w-12 rounded-[var(--ds-radius)] object-cover flex-shrink-0 border border-[var(--ds-border)]"
                               />
                             ) : (
-                              <div className="h-12 w-12 rounded-lg bg-[var(--ds-surface-row)] flex items-center justify-center flex-shrink-0 border border-[var(--ds-border)]">
+                              <div className="h-12 w-12 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] flex items-center justify-center flex-shrink-0 border border-[var(--ds-border)]">
                                 <ImageIcon className="h-5 w-5 text-[var(--ds-text-subtle)]" />
                               </div>
                             )}
@@ -165,10 +165,10 @@ export const BanquetCompositionModal: React.FC<Props> = ({ banquet, dishes, onCl
                       <img
                         src={d.photo_url}
                         alt={d.name}
-                        className="h-12 w-12 rounded-lg object-cover flex-shrink-0 border border-[var(--ds-border)]"
+                        className="h-12 w-12 rounded-[var(--ds-radius)] object-cover flex-shrink-0 border border-[var(--ds-border)]"
                       />
                     ) : (
-                      <div className="h-12 w-12 rounded-lg bg-[var(--ds-surface-row)] flex items-center justify-center flex-shrink-0 border border-[var(--ds-border)]">
+                      <div className="h-12 w-12 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] flex items-center justify-center flex-shrink-0 border border-[var(--ds-border)]">
                         <ImageIcon className="h-5 w-5 text-[var(--ds-text-subtle)]" />
                       </div>
                     )}
@@ -192,19 +192,19 @@ export const BanquetCompositionModal: React.FC<Props> = ({ banquet, dishes, onCl
                 Note operative
               </h3>
               {banquet.notes_courses && (
-                <div className="border-l-3 border-l-[var(--ds-pending-solid)] bg-[var(--ds-pending-tint)] rounded-r-lg p-2.5 border border-[var(--ds-pending-tint)] dark:border-l-[var(--ds-pending-solid)]">
+                <div className="border-l-3 border-l-[var(--ds-pending-solid)] bg-[var(--ds-pending-tint)] rounded-r-[var(--ds-radius)] p-2.5 border border-[var(--ds-pending-tint)] dark:border-l-[var(--ds-pending-solid)]">
                   <h4 className="text-[13px] font-semibold text-[var(--ds-pending-text)] mb-1">Portate (Cucina)</h4>
                   <p className="text-sm text-[var(--ds-text-primary)] whitespace-pre-wrap">{banquet.notes_courses}</p>
                 </div>
               )}
               {banquet.notes_service && (
-                <div className="border-l-3 border-l-[var(--ds-pending-solid)] bg-[var(--ds-pending-tint)] rounded-r-lg p-2.5 border border-[var(--ds-pending-tint)] dark:border-l-[var(--ds-pending-solid)]">
+                <div className="border-l-3 border-l-[var(--ds-pending-solid)] bg-[var(--ds-pending-tint)] rounded-r-[var(--ds-radius)] p-2.5 border border-[var(--ds-pending-tint)] dark:border-l-[var(--ds-pending-solid)]">
                   <h4 className="text-[13px] font-semibold text-[var(--ds-pending-text)] mb-1">Servizio (Sala)</h4>
                   <p className="text-sm text-[var(--ds-text-primary)] whitespace-pre-wrap">{banquet.notes_service}</p>
                 </div>
               )}
               {banquet.notes_mise_en_place && (
-                <div className="border-l-3 border-l-[var(--ds-pending-solid)] bg-[var(--ds-pending-tint)] rounded-r-lg p-2.5 border border-[var(--ds-pending-tint)] dark:border-l-[var(--ds-pending-solid)]">
+                <div className="border-l-3 border-l-[var(--ds-pending-solid)] bg-[var(--ds-pending-tint)] rounded-r-[var(--ds-radius)] p-2.5 border border-[var(--ds-pending-tint)] dark:border-l-[var(--ds-pending-solid)]">
                   <h4 className="text-[13px] font-semibold text-[var(--ds-pending-text)] mb-1">Mise en Place</h4>
                   <p className="text-sm text-[var(--ds-text-primary)] whitespace-pre-wrap">{banquet.notes_mise_en_place}</p>
                 </div>

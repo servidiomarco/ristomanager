@@ -26,7 +26,7 @@ export const ReasonDialog: React.FC<{
   const partial = maxQty != null && maxQty > 1;
   const PRESETS = ['Errore di battitura', 'Cliente ha cambiato idea', 'Piatto non riuscito', 'Ingrediente finito'];
   const stepper =
-    'inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+    'inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
   return (
     <ModalShell
       open
@@ -49,7 +49,7 @@ export const ReasonDialog: React.FC<{
       }
     >
       {partial && (
-        <div className="flex items-center justify-between gap-3 rounded-[14px] bg-[var(--ds-surface-row)] p-2 pl-4">
+        <div className="flex items-center justify-between gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-2 pl-4">
           <span className="text-[14px] text-[var(--ds-text-secondary)]">Quantità</span>
           <div className="flex items-center gap-1">
             <button
@@ -83,7 +83,7 @@ export const ReasonDialog: React.FC<{
             type="button"
             onClick={() => setReason(pr)}
             aria-pressed={reason === pr}
-            className={`inline-flex h-11 items-center rounded-full px-3.5 text-[14px] font-medium transition-colors ${
+            className={`inline-flex h-11 items-center rounded-[var(--ds-radius-control)] px-3.5 text-[14px] font-medium transition-colors ${
               reason === pr
                 ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                 : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'

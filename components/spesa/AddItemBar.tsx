@@ -48,7 +48,7 @@ export const AddItemBar: React.FC<{
   // h-10, not h-9: these sit under the thumb and the row is the one place on
   // the page where four controls compete for a phone's width.
   const control =
-    'h-10 rounded-full bg-[var(--ds-surface-row)] pl-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+    'h-10 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] pl-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
   // ds-select draws our own chevron and reserves room for it; without it the
   // browser's native arrow sits flush against the pill's right edge.
   const selectControl = `${control} pr-0 cursor-pointer ds-select ds-select-sm`;
@@ -56,7 +56,7 @@ export const AddItemBar: React.FC<{
   return (
     <div
       aria-hidden={disabled}
-      className={`relative rounded-[20px] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)] transition-opacity ${
+      className={`relative rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)] transition-opacity ${
         disabled ? 'pointer-events-none opacity-40' : ''
       }`}
     >
@@ -81,7 +81,7 @@ export const AddItemBar: React.FC<{
           onClick={() => onAdd()}
           disabled={disabled || !name.trim() || adding}
           aria-label="Aggiungi"
-          className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
         >
           {adding ? <Loader2 className="h-5 w-5 animate-spin" /> : <Plus className="h-5 w-5" />}
         </button>
@@ -143,7 +143,7 @@ export const AddItemBar: React.FC<{
       </div>
 
       {showSuggestions && !disabled && suggestions.length > 0 && (
-        <div className="absolute inset-x-3 top-full z-20 mt-1 overflow-hidden rounded-[16px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)]">
+        <div className="absolute inset-x-3 top-full z-20 mt-1 overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)]">
           <div className="px-4 pt-3 text-[13px] font-semibold text-[var(--ds-text-muted)]">
             Già in lista in passato
           </div>

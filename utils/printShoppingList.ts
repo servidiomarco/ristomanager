@@ -170,7 +170,7 @@ ${PRINT_TOKENS_CSS}
     width: 18px;
     height: 18px;
     border: 2px solid var(--ds-print-ink-subtle);
-    border-radius: 4px;
+    border-radius: var(--ds-print-radius-sm);
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -188,7 +188,7 @@ ${PRINT_TOKENS_CSS}
     background: var(--ds-print-fill);
     color: #1e293b;
     border: 1px solid var(--ds-print-rule-strong);
-    border-radius: 4px;
+    border-radius: var(--ds-print-radius-sm);
     font-size: 12px;
     font-weight: 600;
     font-variant-numeric: tabular-nums;

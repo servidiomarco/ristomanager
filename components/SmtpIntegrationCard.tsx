@@ -77,7 +77,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
         if (!status) return null;
         if (!status.configured) {
             return (
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] border border-[var(--ds-border)]">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[var(--ds-radius-control)] text-[11px] font-medium bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] border border-[var(--ds-border)]">
                     <span className="w-1.5 h-1.5 rounded-full bg-[var(--ds-border-strong)]"></span>
                     Non configurato
                 </span>
@@ -85,7 +85,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
         }
         const label = status.provider === 'resend' ? 'Attivo (Resend)' : 'Attivo (SMTP)';
         return (
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] border-[var(--ds-seated-solid)]">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[var(--ds-radius-control)] text-[11px] font-medium border bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] border-[var(--ds-seated-solid)]">
                 <span className="w-1.5 h-1.5 rounded-full bg-[var(--ds-seated-solid)]"></span>
                 {label}
             </span>
@@ -170,7 +170,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
 
     if (loading) {
         return (
-            <div className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] p-4 flex items-center gap-2 text-[13px] text-[var(--ds-text-muted)]">
+            <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] p-4 flex items-center gap-2 text-[13px] text-[var(--ds-text-muted)]">
                 <Loader label="Caricamento…" size={40} />
             </div>
         );
@@ -178,7 +178,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
     if (!status) return null;
 
     return (
-        <div className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] overflow-hidden">
+        <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] overflow-hidden">
             <button
                 type="button"
                 onClick={() => setExpanded((v) => !v)}
@@ -186,7 +186,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                 className="w-full flex items-center justify-between gap-3 p-4 text-left hover:bg-[var(--ds-surface-row)] transition-colors"
             >
                 <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-10 h-10 rounded-md bg-[var(--ds-surface-row)] flex items-center justify-center flex-shrink-0">
+                    <div className="w-10 h-10 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] flex items-center justify-center flex-shrink-0">
                         <Mail className="w-5 h-5 text-[var(--ds-text-primary)]" />
                     </div>
                     <div className="min-w-0">
@@ -214,7 +214,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                     : 'Invio SMTP diretto (Aruba, Gmail, server on-prem…).'}
                             </p>
                         </div>
-                        <div className="inline-flex rounded-md border border-[var(--ds-border)] overflow-hidden text-[12px] font-medium">
+                        <div className="inline-flex rounded-[var(--ds-radius)] border border-[var(--ds-border)] overflow-hidden text-[12px] font-medium">
                             <button
                                 type="button"
                                 onClick={() => canEdit && setProviderInput('smtp')}
@@ -255,7 +255,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                         disabled={!canEdit || saving}
                                         autoComplete="off"
                                         spellCheck={false}
-                                        className="w-full px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
+                                        className="w-full px-3 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                                     />
                                 </div>
                                 <div>
@@ -268,7 +268,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                         onChange={(e) => setPortInput(e.target.value)}
                                         placeholder="465"
                                         disabled={!canEdit || saving}
-                                        className="w-full px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
+                                        className="w-full px-3 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                                     />
                                 </div>
                             </div>
@@ -282,7 +282,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                             : 'STARTTLS o non cifrato (di solito porta 587).'}
                                     </p>
                                 </div>
-                                <div className="inline-flex rounded-md border border-[var(--ds-border)] overflow-hidden text-[12px] font-medium">
+                                <div className="inline-flex rounded-[var(--ds-radius)] border border-[var(--ds-border)] overflow-hidden text-[12px] font-medium">
                                     <button
                                         type="button"
                                         onClick={() => canEdit && setSecureInput(false)}
@@ -320,7 +320,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                     disabled={!canEdit || saving}
                                     autoComplete="off"
                                     spellCheck={false}
-                                    className="w-full px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
+                                    className="w-full px-3 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                                 />
                             </div>
 
@@ -335,7 +335,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                         disabled={!canEdit || saving}
                                         autoComplete="new-password"
                                         spellCheck={false}
-                                        className="w-full pr-10 px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
+                                        className="w-full pr-10 px-3 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                                     />
                                     <button
                                         type="button"
@@ -366,7 +366,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                     disabled={!canEdit || saving}
                                     autoComplete="off"
                                     spellCheck={false}
-                                    className="w-full pr-10 px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
+                                    className="w-full pr-10 px-3 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                                 />
                                 <button
                                     type="button"
@@ -395,7 +395,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                 disabled={!canEdit || saving}
                                 autoComplete="off"
                                 spellCheck={false}
-                                className="w-full px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
+                                className="w-full px-3 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                             />
                         </div>
                         <div>
@@ -406,7 +406,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                 onChange={(e) => setFromNameInput(e.target.value)}
                                 placeholder="Nome del ristorante"
                                 disabled={!canEdit || saving}
-                                className="w-full px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
+                                className="w-full px-3 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                             />
                         </div>
                     </div>
@@ -421,7 +421,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                             disabled={!canEdit || saving}
                             autoComplete="off"
                             spellCheck={false}
-                            className="w-full px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
+                            className="w-full px-3 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                         />
                         <p className="text-[11px] text-[var(--ds-text-subtle)] mt-1">
                             Quando il cliente clicca “Rispondi”, la mail va a questo indirizzo. Deve essere la casella pollata via IMAP.
@@ -440,7 +440,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                             type="button"
                             onClick={handleSave}
                             disabled={!canEdit || saving || !hasChanges}
-                            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[13px] font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[13px] font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                             Salva
@@ -459,13 +459,13 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                 onChange={(e) => setTestRecipient(e.target.value)}
                                 placeholder="destinatario@esempio.it"
                                 disabled={!canEdit || testing || !status.configured}
-                                className="flex-1 px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
+                                className="flex-1 px-3 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                             />
                             <button
                                 type="button"
                                 onClick={handleTest}
                                 disabled={!canEdit || testing || !status.configured || !testRecipient.trim()}
-                                className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 {testing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                                 Invia test

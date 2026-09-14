@@ -47,7 +47,7 @@ export const BillFigures: React.FC<{
       </div>
       <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-[var(--ds-border)]">
         <div
-          className="h-full rounded-full bg-[var(--ds-seated-solid)] transition-all"
+          className="h-full rounded-[var(--ds-radius-control)] bg-[var(--ds-seated-solid)] transition-all"
           style={{ width: `${pct}%` }}
         />
       </div>

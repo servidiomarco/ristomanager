@@ -182,7 +182,7 @@ const Chip: React.FC<{
     type="button"
     onClick={onClick}
     aria-pressed={active}
-    className={`inline-flex h-11 max-w-full items-center gap-1.5 rounded-full px-3.5 text-[14px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+    className={`inline-flex h-11 max-w-full items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3.5 text-[14px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
       active
         ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
         : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'
@@ -195,7 +195,7 @@ const Chip: React.FC<{
 /* The row's own actions. Full 44px under a thumb, compact where there is a
    cursor and they only appear on hover anyway. */
 const rowAction =
-  'inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] md:h-9 md:w-9';
+  'inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] md:h-9 md:w-9';
 
 /* ── AssigneePill ─────────────────────────────────────────────────────────
    Who owns it. A person wins over a team when both are set, which is what the
@@ -251,7 +251,7 @@ const TodoRow: React.FC<{
   return (
     <div
       onClick={selectMode ? onToggleSelect : undefined}
-      className={`group relative rounded-[18px] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-shadow ${
+      className={`group relative rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-shadow ${
         selectMode ? 'cursor-pointer' : ''
       } ${isSelected ? 'ring-2 ring-[var(--ds-border-focus)]' : ''}`}
     >
@@ -265,10 +265,10 @@ const TodoRow: React.FC<{
               : todo.completed ? 'Segna come da fare' : 'Segna come fatta'
           }
           aria-pressed={selectMode ? isSelected : undefined}
-          className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
         >
           <span
-            className={`inline-flex h-5 w-5 items-center justify-center rounded-full transition-colors ${
+            className={`inline-flex h-5 w-5 items-center justify-center rounded-[var(--ds-radius-control)] transition-colors ${
               ticked
                 ? selectMode
                   ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
@@ -354,7 +354,7 @@ const TodoRow: React.FC<{
                 type="button"
                 onClick={e => { e.stopPropagation(); onOpenBanquet(banquet); }}
                 title="Visualizza composizione"
-                className="inline-flex h-6 max-w-full flex-shrink-0 items-center gap-1 rounded-full bg-[var(--ds-arriving-tint)] px-2 text-[12px] font-medium text-[var(--ds-arriving-text)] transition-[filter] hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                className="inline-flex h-6 max-w-full flex-shrink-0 items-center gap-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-tint)] px-2 text-[12px] font-medium text-[var(--ds-arriving-text)] transition-[filter] hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               >
                 <Utensils className="h-3 w-3 flex-shrink-0" aria-hidden />
                 <span className="truncate">{banquet.name}</span>
@@ -710,7 +710,7 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
               aria-label="Filtri"
               title="Filtri"
               className={activeFilterCount > 0
-                ? 'relative inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] shadow-[var(--ds-shadow-card)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]'
+                ? 'relative inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] shadow-[var(--ds-shadow-card)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]'
                 : `relative ${dsIconButton}`}
             >
               <ListFilter className="h-4 w-4" />
@@ -730,7 +730,7 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
               aria-pressed={selectMode}
               aria-label={selectMode ? 'Annulla selezione' : 'Seleziona attività'}
               title={selectMode ? 'Annulla selezione' : 'Seleziona attività'}
-              className={`inline-flex h-11 flex-shrink-0 items-center justify-center gap-2 rounded-full px-3 text-[15px] font-medium shadow-[var(--ds-shadow-card)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] sm:px-4 ${
+              className={`inline-flex h-11 flex-shrink-0 items-center justify-center gap-2 rounded-[var(--ds-radius-control)] px-3 text-[15px] font-medium shadow-[var(--ds-shadow-card)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] sm:px-4 ${
                 selectMode
                   ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                   : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]'
@@ -746,7 +746,7 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-6 sm:px-6 lg:px-8">
           {selectMode && (
-            <div className="mb-3 flex items-center justify-between gap-3 rounded-full bg-[var(--ds-action-bg)] py-1.5 pl-4 pr-1.5">
+            <div className="mb-3 flex items-center justify-between gap-3 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] py-1.5 pl-4 pr-1.5">
               <span className="min-w-0 truncate text-[14px] font-medium text-[var(--ds-action-fg)] tabular-nums">
                 {selected.size === 0
                   ? statusTab === 'DONE'
@@ -758,7 +758,7 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
                 type="button"
                 onClick={bulkApply}
                 disabled={selected.size === 0}
-                className={`inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-full px-3.5 text-[14px] font-semibold transition-[filter] hover:brightness-95 disabled:opacity-40 ${
+                className={`inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3.5 text-[14px] font-semibold transition-[filter] hover:brightness-95 disabled:opacity-40 ${
                   statusTab === 'DONE'
                     ? 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)]'
                     : 'bg-[var(--ds-seated-solid)] text-white'
@@ -817,7 +817,7 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
                           onClick={() => toggleGroup(bucket.key)}
                           aria-expanded={expanded}
                           aria-label={expanded ? 'Comprimi le scadute' : 'Espandi le scadute'}
-                          className={`inline-flex h-9 w-9 items-center justify-center rounded-full text-[var(--ds-critical-text)] transition-transform hover:brightness-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                          className={`inline-flex h-9 w-9 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-critical-text)] transition-transform hover:brightness-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                             expanded ? '' : '-rotate-90'
                           }`}
                         >
@@ -885,7 +885,7 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
             <div
               onClick={e => e.stopPropagation()}
               style={{ animation: 'slideUpSheet 260ms cubic-bezier(0.32, 0.72, 0, 1) both' }}
-              className="relative max-h-full w-full overflow-y-auto rounded-t-[24px] bg-[var(--ds-surface)] pb-6 shadow-[var(--ds-shadow-raised)]"
+              className="relative max-h-full w-full overflow-y-auto rounded-t-[var(--ds-radius)] bg-[var(--ds-surface)] pb-6 shadow-[var(--ds-shadow-raised)]"
             >
               <div className="flex justify-center pb-2 pt-3" aria-hidden>
                 <span className="h-1 w-9 rounded-full bg-[var(--ds-border-strong)]" />
@@ -1155,7 +1155,7 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
                   </span>
                 </span>
                 <span
-                  className={`inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-transform ${
+                  className={`inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-transform ${
                     banquetPickerOpen ? '' : '-rotate-90'
                   }`}
                   aria-hidden
@@ -1176,14 +1176,14 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
                           type="button"
                           onClick={() => toggleBanquetLink(b.id)}
                           aria-pressed={linked}
-                          className={`flex w-full items-center gap-3 rounded-[16px] p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                          className={`flex w-full items-center gap-3 rounded-[var(--ds-radius)] p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                             linked
                               ? 'bg-[var(--ds-arriving-tint)]'
                               : 'bg-[var(--ds-surface-row)] hover:bg-[var(--ds-border)]'
                           }`}
                         >
                           <span
-                            className={`inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full ${
+                            className={`inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] ${
                               linked
                                 ? 'bg-[var(--ds-arriving-solid)] text-[var(--ds-arriving-fg)]'
                                 : 'ring-[1.5px] ring-inset ring-[var(--ds-border-strong)]'

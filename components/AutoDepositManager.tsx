@@ -155,7 +155,7 @@ export const AutoDepositManager: React.FC<Props> = ({ showToast }) => {
                         value={perPersonInput}
                         onChange={(e) => setPerPersonInput(e.target.value)}
                         disabled={!canEdit || saving || !effectiveEnabled}
-                        className="w-24 px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
+                        className="w-24 px-3 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                     />
                     <span className="text-[12px] text-[var(--ds-text-muted)]">a persona</span>
                 </div>
@@ -178,7 +178,7 @@ export const AutoDepositManager: React.FC<Props> = ({ showToast }) => {
                         value={minGuestsInput}
                         onChange={(e) => setMinGuestsInput(e.target.value)}
                         disabled={!canEdit || saving || !effectiveEnabled}
-                        className="w-24 px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
+                        className="w-24 px-3 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                     />
                     <span className="text-[12px] text-[var(--ds-text-muted)]">coperti o più</span>
                 </div>
@@ -202,7 +202,7 @@ export const AutoDepositManager: React.FC<Props> = ({ showToast }) => {
                         type="button"
                         onClick={save}
                         disabled={!isDirty || saving}
-                        className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[13px] font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+                        className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[13px] font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                         {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                         Salva modifiche

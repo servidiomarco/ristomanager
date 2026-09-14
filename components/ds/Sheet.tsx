@@ -106,9 +106,9 @@ export const Sheet: React.FC<SheetProps> = ({
           in from the right on a phone both read as the wrong gesture. */}
       <div
         onClick={e => e.stopPropagation()}
-        className={`ds-sheet absolute inset-x-0 bottom-0 flex flex-col overflow-hidden bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] sm:inset-y-0 sm:left-auto sm:right-0 sm:max-h-none sm:w-[min(30rem,100vw)] sm:rounded-none sm:rounded-l-[24px] ${
+        className={`ds-sheet absolute inset-x-0 bottom-0 flex flex-col overflow-hidden bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] sm:inset-y-0 sm:left-auto sm:right-0 sm:max-h-none sm:w-[min(30rem,100vw)] sm:rounded-none sm:rounded-l-[var(--ds-radius)] ${
           // Toccando il bordo alto, la pagina deve rispettare il notch da sé.
-          fullPage ? 'top-0 rounded-none pt-[env(safe-area-inset-top)] sm:pt-0' : 'max-h-[92dvh] rounded-t-[24px]'
+          fullPage ? 'top-0 rounded-none pt-[env(safe-area-inset-top)] sm:pt-0' : 'max-h-[92dvh] rounded-t-[var(--ds-radius)]'
         }`}
       >
         {/* Grab handle — phone only. It is the affordance that says this panel
@@ -137,8 +137,8 @@ export const Sheet: React.FC<SheetProps> = ({
               onClick={onClose}
               aria-label="Chiudi"
               className={fullPage
-                ? 'inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]'
-                : 'inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]'}
+                ? 'inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]'
+                : 'inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]'}
             >
               <X className={fullPage ? 'h-[18px] w-[18px]' : 'h-4 w-4'} />
             </button>

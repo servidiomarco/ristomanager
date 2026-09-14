@@ -176,7 +176,7 @@ export const CustomerPickerModal: React.FC<Props> = ({ isOpen, initialQuery, onC
             <EmptyState icon={BookUser}>Nessun cliente trovato.</EmptyState>
           )}
           {!isLoading && sortedCustomers.length > 0 && (
-            <ul className="divide-y divide-[var(--ds-border)] overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+            <ul className="divide-y divide-[var(--ds-border)] overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
               {sortedCustomers.map(c => (
                 <li key={c.id}>
                   <button
@@ -207,7 +207,7 @@ export const CustomerPickerModal: React.FC<Props> = ({ isOpen, initialQuery, onC
 
       {showCreate && (
         <form id={CREATE_FORM_ID} onSubmit={handleCreate}>
-          <div className="space-y-4 rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
+          <div className="space-y-4 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
             <Field label="Nome" htmlFor="new-customer-name" required>
               <input
                 id="new-customer-name"

@@ -126,7 +126,7 @@ export const SwipeRow: React.FC<{
 
   return (
     // The row is the card here — it carries its own elevation off the canvas.
-    <div className={`relative overflow-hidden rounded-[16px] shadow-[var(--ds-shadow-card)] ${className}`}>
+    <div className={`relative overflow-hidden rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] ${className}`}>
       {left && (
         <button
           type="button"

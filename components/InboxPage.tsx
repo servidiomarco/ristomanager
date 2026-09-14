@@ -108,17 +108,17 @@ const MediaAttachment: React.FC<{ messageId: number; index: number; media: Messa
     return <p className="text-[13px] italic opacity-70">Allegato non disponibile</p>;
   }
   if (!url) {
-    return <div className="h-32 w-44 animate-pulse rounded-[12px] bg-[var(--ds-surface-row)]" />;
+    return <div className="h-32 w-44 animate-pulse rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)]" />;
   }
   if (isImage) {
     return (
       <a href={url} target="_blank" rel="noopener noreferrer">
-        <img src={url} alt="Allegato" className="max-h-64 w-auto rounded-[12px] object-cover" />
+        <img src={url} alt="Allegato" className="max-h-64 w-auto rounded-[var(--ds-radius)] object-cover" />
       </a>
     );
   }
   if (isAudio) return <audio controls src={url} className="max-w-[240px]" />;
-  if (isVideo) return <video controls src={url} className="max-h-64 rounded-[12px]" />;
+  if (isVideo) return <video controls src={url} className="max-h-64 rounded-[var(--ds-radius)]" />;
   return (
     <a href={url} download target="_blank" rel="noopener noreferrer" className="text-[14px] underline">
       Scarica allegato
@@ -733,7 +733,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
           <Avatar
             name={c.customer_name || undefined}
             badge={
-              <span className={`inline-flex h-4 items-center rounded-full px-1.5 text-[9px] font-semibold leading-none ring-2 ring-[var(--ds-surface)] ${
+              <span className={`inline-flex h-4 items-center rounded-[var(--ds-radius-control)] px-1.5 text-[9px] font-semibold leading-none ring-2 ring-[var(--ds-surface)] ${
                 whatsapp
                   ? 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'
                   : 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]'
@@ -792,7 +792,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
       }
       list={
         convLoading ? (
-          <SkeletonInboxList count={7} className="overflow-hidden rounded-[20px] bg-[var(--ds-surface)]" />
+          <SkeletonInboxList count={7} className="overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)]" />
         ) : convError ? (
           <Callout tone="critical" icon={AlertTriangle}>{convError}</Callout>
         ) : conversations.length === 0 ? (
@@ -857,7 +857,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                         onClick={() => setResMenuOpen(o => !o)}
                         aria-haspopup="menu"
                         aria-expanded={resMenuOpen}
-                        className="inline-flex h-9 items-center gap-1.5 rounded-full border border-[var(--ds-border)] px-3.5 text-[13px] font-semibold text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                        className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] border border-[var(--ds-border)] px-3.5 text-[13px] font-semibold text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                       >
                         <ArrowRight className="h-4 w-4" aria-hidden />
                         <span className="hidden sm:inline">Prenotazioni</span>
@@ -869,7 +869,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                           <div className="fixed inset-0 z-40" onClick={() => setResMenuOpen(false)} aria-hidden />
                           <div
                             role="menu"
-                            className="absolute right-0 z-50 mt-1.5 max-h-[60vh] w-[19rem] max-w-[85vw] overflow-y-auto rounded-[14px] border border-[var(--ds-border)] bg-[var(--ds-surface)] p-1.5 shadow-lg"
+                            className="absolute right-0 z-50 mt-1.5 max-h-[60vh] w-[19rem] max-w-[85vw] overflow-y-auto rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] p-1.5 shadow-lg"
                           >
                             {reservationsForPhone.map(res => {
                               const badge = reservationStatusPill(res.reservation_status ?? null);
@@ -879,7 +879,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                                   type="button"
                                   role="menuitem"
                                   onClick={() => { setResMenuOpen(false); onOpenReservation(res.id); }}
-                                  className="flex w-full flex-col gap-0.5 rounded-[10px] px-2.5 py-2 text-left transition-colors hover:bg-[var(--ds-surface-row)]"
+                                  className="flex w-full flex-col gap-0.5 rounded-[var(--ds-radius)] px-2.5 py-2 text-left transition-colors hover:bg-[var(--ds-surface-row)]"
                                 >
                                   <span className="flex items-center gap-2 text-[14px] text-[var(--ds-text-primary)]">
                                     <span className="truncate font-medium">{toTitleCase(res.customer_name) || 'Prenotazione'}</span>
@@ -902,7 +902,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                       type="button"
                       onClick={handleCreateReservation}
                       disabled={suggesting}
-                      className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                      className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     >
                       {suggesting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <CalendarPlus className="h-4 w-4" aria-hidden />}
                       <span className="hidden sm:inline">Crea prenotazione</span>
@@ -927,7 +927,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                   {grouped.map(g => (
                     <div key={g.day} className="space-y-2">
                       <div className="flex justify-center">
-                        <span className="rounded-full bg-[var(--ds-surface)] px-2.5 py-1 text-[12px] text-[var(--ds-text-muted)]">
+                        <span className="rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-2.5 py-1 text-[12px] text-[var(--ds-text-muted)]">
                           {formatDayHeader(g.day)}
                         </span>
                       </div>
@@ -939,10 +939,10 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                                 surface — the same side assignment the page
                                 already used, now on tokens. */}
                             <div
-                              className={`max-w-[80%] rounded-[18px] px-3.5 py-2 ${
+                              className={`max-w-[80%] rounded-[var(--ds-radius)] px-3.5 py-2 ${
                                 outbound
-                                  ? 'rounded-br-[6px] bg-[var(--ds-seated-solid)] text-white'
-                                  : 'rounded-bl-[6px] bg-[var(--ds-surface)] text-[var(--ds-text-primary)]'
+                                  ? 'rounded-br-[var(--ds-radius)] bg-[var(--ds-seated-solid)] text-white'
+                                  : 'rounded-bl-[var(--ds-radius)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)]'
                               }`}
                             >
                               {Array.isArray(m.media) && m.media.length > 0 && (
@@ -958,7 +958,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                               <div className={`mt-1 flex items-center justify-end gap-1.5 text-[12px] ${outbound ? 'text-white/75' : 'text-[var(--ds-text-muted)]'}`}>
                                 <span className="tabular-nums">{formatTime(m.sent_at)}</span>
                                 {statusIcon(m)}
-                                <span className={`rounded-full px-1.5 text-[11px] ${outbound ? 'bg-white/20' : 'bg-[var(--ds-surface-row)]'}`}>
+                                <span className={`rounded-[var(--ds-radius-control)] px-1.5 text-[11px] ${outbound ? 'bg-white/20' : 'bg-[var(--ds-surface-row)]'}`}>
                                   {m.channel === 'whatsapp' ? 'WA' : 'SMS'}
                                 </span>
                               </div>
@@ -998,7 +998,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                     Sta qui e non in un dialogo perché allegare il menù è un
                     gesto da due secondi in mezzo a una conversazione. */}
                 {libreriaAperta && (
-                  <div className="rounded-[14px] border border-[var(--ds-border)] bg-[var(--ds-surface-row)] px-3 py-2.5">
+                  <div className="rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface-row)] px-3 py-2.5">
                     {libreria === null ? (
                       <p className="flex items-center gap-2 py-1 text-[13px] text-[var(--ds-text-muted)]">
                         <Loader2 className="h-3.5 w-3.5 animate-spin" /> Carico la libreria…
@@ -1015,7 +1015,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                               type="button"
                               onClick={() => handleAllegaDallaLibreria(f)}
                               disabled={uploading}
-                              className="flex w-full items-center gap-2.5 rounded-[10px] px-2 py-2 text-left transition-colors hover:bg-[var(--ds-surface)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                              className="flex w-full items-center gap-2.5 rounded-[var(--ds-radius)] px-2 py-2 text-left transition-colors hover:bg-[var(--ds-surface)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                             >
                               <Paperclip className="h-3.5 w-3.5 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
                               <span className="min-w-0 flex-1 truncate text-[14px] text-[var(--ds-text-primary)]">{f.title}</span>
@@ -1052,7 +1052,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                             type="button"
                             onClick={handleConfirmProposal}
                             disabled={proposalBusy}
-                            className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                            className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                           >
                             {proposalBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
                             Conferma ed esegui
@@ -1061,7 +1061,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                             type="button"
                             onClick={handleDiscardProposal}
                             disabled={proposalBusy}
-                            className="inline-flex h-9 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50"
+                            className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 text-[13px] font-medium text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50"
                           >
                             <XIcon className="h-4 w-4" /> Scarta
                           </button>
@@ -1094,7 +1094,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                 </div>
 
                 {/* Composer: one card, send button inside the field. */}
-                <div className="rounded-[24px] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-shadow focus-within:ring-2 focus-within:ring-[var(--ds-border-focus)]">
+                <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-shadow focus-within:ring-2 focus-within:ring-[var(--ds-border-focus)]">
                   {/* Allegati pronti: si vedono prima di premere invia, e si
                       tolgono uno per uno se si sbaglia file. Stanno dentro la
                       scheda perche' appartengono al messaggio in scrittura;
@@ -1131,7 +1131,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                       disabled={suggesting || sending}
                       aria-label="Suggerisci una risposta"
                       title="Proponi una risposta in base alla conversazione e alle regole della casa"
-                      className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                      className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     >
                       {suggesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
                     </button>
@@ -1142,7 +1142,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                     disabled={uploading || sending}
                     aria-label="Allega un file"
                     title="Allega foto, PDF o audio (solo WhatsApp)"
-                    className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
                     {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
                   </button>
@@ -1152,7 +1152,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                     disabled={uploading || sending}
                     aria-label="Allega un file dalla libreria"
                     title="Allega un file già caricato (menù, piantina…)"
-                    className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
                     <FolderOpen className="h-4 w-4" />
                   </button>
@@ -1172,7 +1172,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                     onClick={handleSend}
                     disabled={(!composerText.trim() && attachments.length === 0) || sending || uploading || (preferredChannel === 'whatsapp' && !waWindowOpen)}
                     aria-label="Invia messaggio"
-                    className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-white transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:cursor-not-allowed disabled:bg-[var(--ds-surface-row)] disabled:text-[var(--ds-text-subtle)] ${
+                    className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-white transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:cursor-not-allowed disabled:bg-[var(--ds-surface-row)] disabled:text-[var(--ds-text-subtle)] ${
                       preferredChannel === 'whatsapp'
                         ? 'bg-[var(--ds-seated-solid)] hover:brightness-95 active:scale-95'
                         : 'bg-[var(--ds-arriving-solid)] hover:brightness-95 active:scale-95'

@@ -315,7 +315,7 @@ export const DevelopmentPage: React.FC = () => {
                 type="button"
                 onClick={() => setError(null)}
                 aria-label="Chiudi l'errore"
-                className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--ds-critical-text)] transition-[filter] hover:brightness-90"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-critical-text)] transition-[filter] hover:brightness-90"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -338,7 +338,7 @@ export const DevelopmentPage: React.FC = () => {
             // 1.03:1 e sparirebbe, lasciando cinque liste senza contorno.
             <div
               key={col.key}
-              className={`flex min-h-0 w-[82vw] max-w-72 flex-none snap-center flex-col rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] transition-shadow sm:w-72 sm:max-w-none lg:w-80 ${
+              className={`flex min-h-0 w-[82vw] max-w-72 flex-none snap-center flex-col rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] transition-shadow sm:w-72 sm:max-w-none lg:w-80 ${
                 isDropTarget ? 'ring-2 ring-[var(--ds-border-focus)]' : ''
               }`}
               onDragOver={(e) => { e.preventDefault(); setDropHint(prev => (prev?.column === col.key ? prev : { column: col.key, index: null })); }}
@@ -360,7 +360,7 @@ export const DevelopmentPage: React.FC = () => {
                   title={`Aggiungi in ${col.label}`}
                   aria-label={`Aggiungi in ${col.label}`}
                   onClick={() => { setComposerColumn(col.key); setComposerTitle(''); }}
-                  className="inline-flex h-9 w-9 flex-none items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  className="inline-flex h-9 w-9 flex-none items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 >
                   <Plus className="h-4 w-4" />
                 </button>
@@ -385,7 +385,7 @@ export const DevelopmentPage: React.FC = () => {
                       onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDropHint({ column: col.key, index: hoverIndex(e, i) }); }}
                       onDrop={(e) => { e.preventDefault(); e.stopPropagation(); handleDrop(col.key, hoverIndex(e, i)); }}
                       onClick={() => setEditDraft({ id: card.id, title: card.title, description: card.description || '', column_key: card.column_key, labels: card.labels ?? [] })}
-                      className={`group cursor-pointer rounded-[14px] bg-[var(--ds-surface-row)] px-3 py-2.5 transition-colors hover:bg-[var(--ds-border)] ${
+                      className={`group cursor-pointer rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3 py-2.5 transition-colors hover:bg-[var(--ds-border)] ${
                         draggingId === card.id ? 'opacity-40' : ''
                       }`}
                     >
@@ -397,7 +397,7 @@ export const DevelopmentPage: React.FC = () => {
                               {card.labels.map(key => {
                                 const meta = labelMeta(key);
                                 return meta ? (
-                                  <span key={key} className={`rounded-full px-2 py-0.5 text-[11px] font-semibold leading-none ${meta.chipClass}`}>
+                                  <span key={key} className={`rounded-[var(--ds-radius-control)] px-2 py-0.5 text-[11px] font-semibold leading-none ${meta.chipClass}`}>
                                     {meta.name}
                                   </span>
                                 ) : null;
@@ -429,7 +429,7 @@ export const DevelopmentPage: React.FC = () => {
                                 type="button"
                                 disabled={busyClaudeId === card.id}
                                 onClick={(e) => { e.stopPropagation(); approveForClaude(card); }}
-                                className="inline-flex h-8 items-center gap-1.5 rounded-full bg-[var(--ds-action-bg)] px-3 text-[12px] font-semibold text-[var(--ds-action-fg)] opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100 hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
+                                className="inline-flex h-8 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-3 text-[12px] font-semibold text-[var(--ds-action-fg)] opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100 hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
                               >
                                 {busyClaudeId === card.id
                                   ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -441,7 +441,7 @@ export const DevelopmentPage: React.FC = () => {
                                 {(() => {
                                   const meta = CLAUDE_STATUS_META[card.claude_status];
                                   return (
-                                    <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[11px] font-semibold leading-none ${meta.chipClass}`}>
+                                    <span className={`inline-flex items-center gap-1.5 rounded-[var(--ds-radius-control)] px-2 py-1 text-[11px] font-semibold leading-none ${meta.chipClass}`}>
                                       <span className={`h-1.5 w-1.5 rounded-full ${meta.dot} ${meta.pulse ? 'animate-pulse' : ''}`} aria-hidden />
                                       <Bot className="h-3 w-3" aria-hidden />
                                       {meta.label}
@@ -454,7 +454,7 @@ export const DevelopmentPage: React.FC = () => {
                                     target="_blank"
                                     rel="noreferrer"
                                     onClick={(e) => e.stopPropagation()}
-                                    className="inline-flex h-8 items-center gap-1 rounded-full px-2 text-[12px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface)]"
+                                    className="inline-flex h-8 items-center gap-1 rounded-[var(--ds-radius-control)] px-2 text-[12px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface)]"
                                   >
                                     <ExternalLink className="h-3 w-3" aria-hidden /> Log
                                   </a>
@@ -465,7 +465,7 @@ export const DevelopmentPage: React.FC = () => {
                                     target="_blank"
                                     rel="noreferrer"
                                     onClick={(e) => e.stopPropagation()}
-                                    className="inline-flex h-8 items-center gap-1 rounded-full px-2 text-[12px] font-semibold text-[var(--ds-seated-text)] transition-colors hover:bg-[var(--ds-seated-tint)]"
+                                    className="inline-flex h-8 items-center gap-1 rounded-[var(--ds-radius-control)] px-2 text-[12px] font-semibold text-[var(--ds-seated-text)] transition-colors hover:bg-[var(--ds-seated-tint)]"
                                   >
                                     <ExternalLink className="h-3 w-3" aria-hidden /> Vedi PR
                                   </a>
@@ -476,7 +476,7 @@ export const DevelopmentPage: React.FC = () => {
                                     disabled={busyClaudeId === card.id}
                                     title={card.claude_status === 'failed' ? 'Riprova' : 'Rilancia'}
                                     onClick={(e) => { e.stopPropagation(); approveForClaude(card); }}
-                                    className="inline-flex h-8 items-center gap-1 rounded-full px-2 text-[12px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface)] disabled:opacity-40"
+                                    className="inline-flex h-8 items-center gap-1 rounded-[var(--ds-radius-control)] px-2 text-[12px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface)] disabled:opacity-40"
                                   >
                                     {busyClaudeId === card.id
                                       ? <Loader2 className="h-3 w-3 animate-spin" />
@@ -504,7 +504,7 @@ export const DevelopmentPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => { setComposerColumn(col.key); setComposerTitle(''); }}
-                    className="w-full rounded-[14px] border border-dashed border-[var(--ds-border-strong)] px-3 py-4 text-[13px] text-[var(--ds-text-muted)] transition-colors hover:border-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]"
+                    className="w-full rounded-[var(--ds-radius)] border border-dashed border-[var(--ds-border-strong)] px-3 py-4 text-[13px] text-[var(--ds-text-muted)] transition-colors hover:border-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]"
                   >
                     {col.hint} — aggiungi la prima card
                   </button>
@@ -512,7 +512,7 @@ export const DevelopmentPage: React.FC = () => {
 
                 {/* Inline composer */}
                 {composerColumn === col.key && (
-                  <div className="space-y-2 rounded-[14px] bg-[var(--ds-surface-row)] p-2">
+                  <div className="space-y-2 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-2">
                     <textarea
                       ref={composerInputRef}
                       value={composerTitle}
@@ -523,14 +523,14 @@ export const DevelopmentPage: React.FC = () => {
                       }}
                       rows={2}
                       placeholder="Titolo della card…"
-                      className="w-full resize-none rounded-[12px] bg-[var(--ds-surface)] px-3 py-2 text-[14px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                      className="w-full resize-none rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-3 py-2 text-[14px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     />
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
                         onClick={submitComposer}
                         disabled={!composerTitle.trim() || isComposerSaving}
-                        className="inline-flex h-10 items-center gap-1.5 rounded-full bg-[var(--ds-action-bg)] px-4 text-[14px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
+                        className="inline-flex h-10 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-4 text-[14px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
                       >
                         {isComposerSaving && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Aggiungi
                       </button>
@@ -538,7 +538,7 @@ export const DevelopmentPage: React.FC = () => {
                         type="button"
                         onClick={() => setComposerColumn(null)}
                         aria-label="Chiudi il compositore"
-                        className="inline-flex h-10 w-10 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)]"
+                        className="inline-flex h-10 w-10 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)]"
                       >
                         <X className="h-4 w-4" />
                       </button>
@@ -564,7 +564,7 @@ export const DevelopmentPage: React.FC = () => {
               <button
                 type="button"
                 onClick={() => { const card = cards.find(c => c.id === editDraft.id); if (card) setDeleteCandidate(card); }}
-                className="inline-flex h-11 items-center gap-1.5 rounded-full px-4 text-[15px] font-medium text-[var(--ds-critical-text)] transition-colors hover:bg-[var(--ds-critical-tint)]"
+                className="inline-flex h-11 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-4 text-[15px] font-medium text-[var(--ds-critical-text)] transition-colors hover:bg-[var(--ds-critical-tint)]"
               >
                 <Trash2 className="h-4 w-4" aria-hidden /> Elimina
               </button>
@@ -576,7 +576,7 @@ export const DevelopmentPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => { resetClaude(card); setEditDraft(null); }}
-                    className="inline-flex h-11 items-center gap-1.5 rounded-full px-4 text-[15px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)]"
+                    className="inline-flex h-11 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-4 text-[15px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)]"
                   >
                     <RotateCcw className="h-4 w-4" aria-hidden /> Azzera Claude
                   </button>
@@ -628,7 +628,7 @@ export const DevelopmentPage: React.FC = () => {
                       type="button"
                       onClick={() => setEditDraft(d => d ? { ...d, column_key: col.key } : d)}
                       aria-pressed={active}
-                      className={`flex h-11 items-center gap-2 rounded-full px-3 text-[14px] font-medium transition-colors ${
+                      className={`flex h-11 items-center gap-2 rounded-[var(--ds-radius-control)] px-3 text-[14px] font-medium transition-colors ${
                         active
                           ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                           : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'
@@ -657,7 +657,7 @@ export const DevelopmentPage: React.FC = () => {
                       // Selezionata = anello. Prima le non selezionate stavano
                       // al 45% di opacità, che portava il testo del chip sotto
                       // il minimo di contrasto per leggere quello che offre.
-                      className={`inline-flex h-11 items-center rounded-full px-4 text-[14px] font-semibold transition-shadow ${l.chipClass} ${
+                      className={`inline-flex h-11 items-center rounded-[var(--ds-radius-control)] px-4 text-[14px] font-semibold transition-shadow ${l.chipClass} ${
                         active ? 'ring-2 ring-[var(--ds-text-primary)]' : ''
                       }`}
                     >
@@ -682,7 +682,7 @@ export const DevelopmentPage: React.FC = () => {
           <button
             type="button"
             onClick={confirmDelete}
-            className="inline-flex h-11 items-center justify-center gap-2 rounded-full bg-[var(--ds-critical-solid)] px-5 text-[15px] font-semibold text-[var(--ds-critical-fg)] transition-[filter] hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-solid)] px-5 text-[15px] font-semibold text-[var(--ds-critical-fg)] transition-[filter] hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             <Trash2 className="h-4 w-4" aria-hidden /> Elimina
           </button>

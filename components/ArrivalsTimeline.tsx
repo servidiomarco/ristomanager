@@ -206,7 +206,7 @@ export const ArrivalsTimeline: React.FC<ArrivalsTimelineProps> = ({
   }, [assigning, rooms, tables, takenTableIds, assignMerges]);
 
   return (
-    <div className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] p-4 sm:p-5 flex flex-col gap-3 min-w-0 w-full h-full">
+    <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] p-4 sm:p-5 flex flex-col gap-3 min-w-0 w-full h-full">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
@@ -221,7 +221,7 @@ export const ArrivalsTimeline: React.FC<ArrivalsTimelineProps> = ({
           <button
             type="button"
             onClick={onNavigateToReservations}
-            className="flex-shrink-0 inline-flex items-center gap-1.5 text-[14px] font-medium text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] rounded-full px-1"
+            className="flex-shrink-0 inline-flex items-center gap-1.5 text-[14px] font-medium text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] rounded-[var(--ds-radius-control)] px-1"
           >
             Vedi tutte <ArrowRight className="h-4 w-4" aria-hidden />
           </button>
@@ -229,7 +229,7 @@ export const ArrivalsTimeline: React.FC<ArrivalsTimelineProps> = ({
       </div>
 
       {rows.length === 0 ? (
-        <div className="rounded-[16px] bg-[var(--ds-surface-row)] px-4 py-8 text-center text-[14px] text-[var(--ds-text-muted)]">
+        <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-4 py-8 text-center text-[14px] text-[var(--ds-text-muted)]">
           Nessuna prenotazione per questo turno
         </div>
       ) : (
@@ -249,7 +249,7 @@ export const ArrivalsTimeline: React.FC<ArrivalsTimelineProps> = ({
             const busy = busyId === r.id;
 
             return (
-              <div key={r.id} className={`flex items-center gap-3 rounded-[16px] p-3 min-w-0 ${tone}`}>
+              <div key={r.id} className={`flex items-center gap-3 rounded-[var(--ds-radius)] p-3 min-w-0 ${tone}`}>
                 {/* Wide enough for the longest realistic label ("tra 10h 30m")
                     on a single line — two lines here would set the row height
                     and break the rhythm of the list. */}
@@ -263,7 +263,7 @@ export const ArrivalsTimeline: React.FC<ArrivalsTimelineProps> = ({
                 </div>
 
                 <span
-                  className="flex-shrink-0 inline-flex h-9 min-w-[36px] px-1.5 items-center justify-center rounded-[10px] bg-[var(--ds-surface)]/70 text-[14px] font-semibold tabular-nums text-[var(--ds-text-secondary)]"
+                  className="flex-shrink-0 inline-flex h-9 min-w-[36px] px-1.5 items-center justify-center rounded-[var(--ds-radius)] bg-[var(--ds-surface)]/70 text-[14px] font-semibold tabular-nums text-[var(--ds-text-secondary)]"
                   aria-label={tableLabel ? `Tavolo ${tableLabel}` : 'Senza tavolo'}
                 >
                   {tableLabel ?? '—'}
@@ -283,7 +283,7 @@ export const ArrivalsTimeline: React.FC<ArrivalsTimelineProps> = ({
                     type="button"
                     disabled={busy || (action !== 'confirm' && action !== 'assign' && !onUpdateReservation)}
                     onClick={() => runAction(r, action)}
-                    className={`flex-shrink-0 h-9 px-3.5 rounded-full text-[14px] font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${ACTION_STYLE[action]}`}
+                    className={`flex-shrink-0 h-9 px-3.5 rounded-[var(--ds-radius-control)] text-[14px] font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${ACTION_STYLE[action]}`}
                   >
                     {busy ? '…' : ACTION_LABEL[action]}
                   </button>
@@ -296,7 +296,7 @@ export const ArrivalsTimeline: React.FC<ArrivalsTimelineProps> = ({
 
       {assigning && createPortal(
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-[var(--ds-backdrop)]">
-          <div className="w-full max-w-lg max-h-[80vh] flex flex-col bg-[var(--ds-surface)] rounded-[24px] shadow-[var(--ds-shadow-raised)] overflow-hidden">
+          <div className="w-full max-w-lg max-h-[80vh] flex flex-col bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-raised)] overflow-hidden">
             <div className="flex items-start justify-between gap-3 p-5 pb-3">
               <div className="min-w-0">
                 <h3 className="text-[17px] font-semibold text-[var(--ds-text-primary)] truncate">
@@ -310,7 +310,7 @@ export const ArrivalsTimeline: React.FC<ArrivalsTimelineProps> = ({
               <button
                 type="button"
                 onClick={() => setAssigning(null)}
-                className="flex-shrink-0 h-9 w-9 inline-flex items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)] transition-colors"
+                className="flex-shrink-0 h-9 w-9 inline-flex items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)] transition-colors"
                 aria-label="Chiudi"
               >
                 <X className="h-4 w-4" />
@@ -338,7 +338,7 @@ export const ArrivalsTimeline: React.FC<ArrivalsTimelineProps> = ({
                             setAssigning(null);
                             await patch(target, { table_id: t.id });
                           }}
-                          className={`h-10 min-w-[48px] px-3 rounded-[12px] text-[14px] font-semibold tabular-nums transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                          className={`h-10 min-w-[48px] px-3 rounded-[var(--ds-radius)] text-[14px] font-semibold tabular-nums transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                             t.seats < assigning.guests
                               ? 'bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] hover:bg-[var(--ds-border)]'
                               : 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] hover:brightness-95'

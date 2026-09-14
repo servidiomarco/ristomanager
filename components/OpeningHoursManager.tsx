@@ -245,7 +245,7 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
                         return (
                             <div
                                 key={weekday}
-                                className="bg-[var(--ds-surface)] rounded-lg border border-[var(--ds-border)] p-3"
+                                className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] border border-[var(--ds-border)] p-3"
                             >
                                 <div className="flex items-center justify-between mb-2">
                                     <span className="text-[13px] font-semibold text-[var(--ds-text-primary)]">
@@ -256,7 +256,7 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
                                             type="button"
                                             disabled={!isDirty || saving}
                                             onClick={() => handleSave(weekday)}
-                                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[12px] font-medium bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed"
+                                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[var(--ds-radius)] text-[12px] font-medium bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed"
                                         >
                                             {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
                                             Salva
@@ -264,7 +264,7 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
                                     )}
                                 </div>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                    <div className="border border-[var(--ds-border)] rounded-md p-2 bg-[var(--ds-pending-tint)]">
+                                    <div className="border border-[var(--ds-border)] rounded-[var(--ds-radius)] p-2 bg-[var(--ds-pending-tint)]">
                                         <div className="flex items-center gap-1.5 text-[11px] font-semibold text-[var(--ds-pending-text)] mb-1.5">
                                             <Sun className="h-3 w-3" /> Pranzo
                                         </div>
@@ -288,7 +288,7 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
                                             />
                                         </div>
                                     </div>
-                                    <div className="border border-[var(--ds-border)] rounded-md p-2 bg-[var(--ds-arriving-tint)]">
+                                    <div className="border border-[var(--ds-border)] rounded-[var(--ds-radius)] p-2 bg-[var(--ds-arriving-tint)]">
                                         <div className="flex items-center gap-1.5 text-[11px] font-semibold text-[var(--ds-arriving-text)] mb-1.5">
                                             <Moon className="h-3 w-3" /> Cena
                                         </div>
@@ -408,7 +408,7 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
                 </p>
 
                 {canEdit && (
-                    <div className="bg-[var(--ds-surface)] rounded-lg border border-[var(--ds-border)] p-3 mb-3">
+                    <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] border border-[var(--ds-border)] p-3 mb-3">
                         <div className="grid grid-cols-1 sm:grid-cols-[1fr,1fr,2fr,auto] gap-2 items-end">
                             <div>
                                 <label className="block text-[11px] font-medium text-[var(--ds-text-muted)] mb-1">Data</label>
@@ -445,7 +445,7 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
                                 type="button"
                                 onClick={handleAddClosure}
                                 disabled={!newDate || addingClosure}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[13px] font-medium bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed"
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--ds-radius)] text-[13px] font-medium bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed"
                             >
                                 {addingClosure ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
                                 Aggiungi
@@ -457,7 +457,7 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
                 {closures.length === 0 ? (
                     <p className="text-[13px] text-[var(--ds-text-muted)] italic">Nessuna chiusura programmata.</p>
                 ) : (
-                    <ul className="divide-y divide-[var(--ds-border)] bg-[var(--ds-surface)] rounded-lg border border-[var(--ds-border)]">
+                    <ul className="divide-y divide-[var(--ds-border)] bg-[var(--ds-surface)] rounded-[var(--ds-radius)] border border-[var(--ds-border)]">
                         {closures.map(c => (
                             <li key={c.id} className="flex items-center justify-between gap-2 px-3 py-2">
                                 <div className="min-w-0 flex-1">
@@ -489,7 +489,7 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
                                     <button
                                         type="button"
                                         onClick={() => handleDeleteClosure(c.id)}
-                                        className="p-1.5 rounded-md text-[var(--ds-text-muted)] hover:text-[var(--ds-critical-text)] hover:bg-[var(--ds-critical-tint)] dark:hover:bg-[var(--ds-critical-tint)]"
+                                        className="p-1.5 rounded-[var(--ds-radius)] text-[var(--ds-text-muted)] hover:text-[var(--ds-critical-text)] hover:bg-[var(--ds-critical-tint)] dark:hover:bg-[var(--ds-critical-tint)]"
                                         title="Rimuovi"
                                     >
                                         <Trash2 className="h-4 w-4" />
