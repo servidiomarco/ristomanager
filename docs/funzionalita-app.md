@@ -604,6 +604,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-14 | Pagamenti, conto al tavolo e cassa | Transazioni della Cassa raggruppate per tavolo: una card per conto con cliente, subtotale incassato e «conto aperto» in testa, e dentro le righe dei movimenti (ora, metodo, stato); il riepilogo in fondo conta anche i tavoli. |
 | 2026-09-14 | Pagamenti, conto al tavolo e cassa | Le Quote del foglio conto mostrano anche chi sta pagando in quel momento (il claim arriva via evento, come sul telefono dell’ospite, e sparisce da solo se scade); barra e «Saldato» contano solo i soldi arrivati — il resto coperto da quote in checkout diventa la pastiglia «quote in pagamento». |
 | 2026-09-14 | Pagamenti, conto al tavolo e cassa | Il foglio del conto aperto dalla Cassa segue i pagamenti in tempo reale (prima restava lo snapshot del tocco: barra e totali fermi); nuova sezione «Quote» nel foglio — chi ha pagato cosa, con etichetta, ora e importo, e «sta pagando» per l’ospite al checkout in quel momento. |
 | 2026-09-14 | Pagamenti, conto al tavolo e cassa | La barra pagamenti si muove all’istante sull’evento della quota (senza aspettare il ricarico dei conti) e compare anche nel foglio mostrato appena chiusa la comanda; quando l’ultima quota salda tutto, il foglio mostra prima barra piena e «Saldato» e si congeda da solo dopo un paio di secondi, invece di sparire di colpo. |
