@@ -377,6 +377,47 @@ const SettleButton: React.FC<{
   );
 };
 
+/* L'avanzamento dei pagamenti, nella stessa lingua della pagina ospite:
+   barra verde, «Pagato», percentuale. Il pagato è derivato dal residuo —
+   include quote QR, acconti e incassi manuali, qualunque sia la superficie
+   che li ha registrati. La larghezza è in transizione: quando una quota
+   arriva via socket il riempimento cammina da solo, ed è quel movimento a
+   dire "sta succedendo" prima ancora del numero. `live` accende la lama di
+   luce sul tratto scoperto (QR attivo, si aspettano pagamenti). */
+const PaymentProgress: React.FC<{ bill: BillLike; live: boolean }> = ({ bill, live }) => {
+  if (bill.residual_cents == null || bill.total_cents <= 0) return null;
+  const paid = Math.max(0, bill.total_cents - bill.residual_cents);
+  if (paid === 0 && !live) return null;
+  const pct = Math.max(0, Math.min(100, Math.round((paid / bill.total_cents) * 100)));
+  const settled = bill.residual_cents === 0;
+  return (
+    <div className="w-full">
+      <div className="flex items-baseline justify-between text-[13px]">
+        <span className={settled ? 'font-medium text-[var(--ds-seated-text)]' : 'text-[var(--ds-text-muted)]'}>
+          {settled ? 'Saldato' : <>Pagato <span className="tabular-nums">{euro(paid)}</span></>}
+        </span>
+        <span className="tabular-nums text-[var(--ds-text-muted)]">{pct}%</span>
+      </div>
+      <div
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={pct}
+        aria-label="Avanzamento pagamenti"
+        className="relative mt-1.5 h-2 overflow-hidden rounded-full bg-[var(--ds-surface-row)]"
+      >
+        <div
+          className="h-full rounded-full bg-[var(--ds-seated-solid)] transition-[width] duration-700 ease-out"
+          style={{ width: `${pct}%` }}
+        />
+        {live && !settled && (
+          <div aria-hidden className="ds-pay-sweep absolute inset-y-0 left-0 w-1/4" />
+        )}
+      </div>
+    </div>
+  );
+};
+
 /** The QR, the items and the totals — identical in the pane and in the sheet. */
 const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
   const [copied, setCopied] = useState(false);
@@ -426,6 +467,7 @@ const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
             <p className="text-center text-[13px] text-[var(--ds-text-muted)]">
               L'ospite inquadra e paga la sua parte.
             </p>
+            <PaymentProgress bill={bill} live />
             <div className="flex w-full items-center gap-2">
               <button type="button" onClick={copy} className={quiet}>
                 {copied ? <><Check className="h-4 w-4" /> Link copiato</> : <><Copy className="h-4 w-4" /> Copia link</>}
@@ -445,12 +487,15 @@ const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
             </div>
           </div>
         ) : (
-          <p className="flex items-center gap-2 text-[14px] text-[var(--ds-text-muted)]">
-            <QrCode className="h-4 w-4 flex-shrink-0" aria-hidden />
-            {(bill.residual_cents ?? 0) > 0
-              ? 'QR non più attivo: incassa il resto in cassa e chiudi il conto.'
-              : 'Conto saldato: il codice non è più attivo.'}
-          </p>
+          <div className="space-y-3">
+            <PaymentProgress bill={bill} live={false} />
+            <p className="flex items-center gap-2 text-[14px] text-[var(--ds-text-muted)]">
+              <QrCode className="h-4 w-4 flex-shrink-0" aria-hidden />
+              {(bill.residual_cents ?? 0) > 0
+                ? 'QR non più attivo: incassa il resto in cassa e chiudi il conto.'
+                : 'Conto saldato: il codice non è più attivo.'}
+            </p>
+          </div>
         )}
       </FormCard>
 

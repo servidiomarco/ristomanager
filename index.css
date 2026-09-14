@@ -1121,6 +1121,30 @@ body {
   .ds-swipe-hint { animation: none; }
 }
 
+/* La barra pagamenti del foglio conto. Il riempimento cammina per transizione
+   di larghezza quando una quota arriva dal QR (bill:split-paid → refresh);
+   questa lama di luce percorre il tratto ancora scoperto finché il link è
+   vivo e manca qualcosa — dice «stiamo in ascolto» senza far lampeggiare i
+   numeri. Colore: famiglia seated, la stessa del «pagato» ovunque. */
+@keyframes ds-pay-sweep {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(400%); }
+}
+.ds-pay-sweep {
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--ds-seated-solid) 30%, transparent),
+    transparent
+  );
+  animation: ds-pay-sweep 2.6s ease-in-out infinite;
+}
+
+/* Decorative — the fill width alone tells the story. */
+@media (prefers-reduced-motion: reduce) {
+  .ds-pay-sweep { animation: none; }
+}
+
 /* Native select chevrons sit hard against the right edge and can't be inset
    reliably across browsers, so we draw our own. appearance:none removes the
    platform arrow; the SVG is inlined (no network request) and re-declared for

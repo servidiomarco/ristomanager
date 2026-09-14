@@ -336,6 +336,7 @@ Modulo completo per presa comanda, produzione e coordinamento delle uscite. Si a
 
 **Conto al tavolo per l'ospite (pay-at-table)**
 - Il cameriere stampa un **QR**; l'ospite paga dal telefono, senza app e senza login.
+- Nel foglio del conto (palmare comande, Pagamenti, cassa) una **barra di avanzamento** sotto il QR mostra pagato e percentuale: si riempie da sola quando arriva una quota, e finché il QR è attivo una luce scorre sul tratto scoperto — si vede a colpo d'occhio che il conto è «in ascolto».
 - **Dividi il conto**: quota uguale, importo libero, **per riga** ("io ho preso solo l'antipasto") o **tutto il conto** in un tocco ("offro io": paga l'intero residuo, quote degli altri già scalate), con etichetta facoltativa del pagante.
 - Gestione sicura della concorrenza: due ospiti non possono pagare la stessa quota; le quote abbandonate si liberano da sole e un controllo periodico recupera anche i pagamenti il cui esito si fosse perso.
 - Pagina bilingue IT/EN, aggiornata ogni 5 secondi.
@@ -603,6 +604,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-14 | Pagamenti, conto al tavolo e cassa | Barra di avanzamento pagamenti nel foglio del conto: pagato, percentuale e riempimento animato in tempo reale sulle quote del QR; una luce scorre sul tratto scoperto finché il link è attivo, «Saldato» a barra piena. |
 | 2026-09-14 | Comande, Cucina e Passe | La griglia tavoli in carico mostra tessere scheletro (stesse misure delle vere, shimmer discreto) invece del vuoto «Nessun tavolo»: solo al primo carico — gli aggiornamenti in sottofondo non lampeggiano sopra i dati. |
 | 2026-09-14 | Comande, Cucina e Passe | Coperto e servizio non compaiono più dentro le uscite dei monitor (coda, card a binario, Consegnate) né nei loro conteggi: non sono piatti da cucinare. I coperti restano nell'intestazione della comanda, accanto al tavolo. |
 | 2026-09-14 | Comande, Cucina e Passe | Le comande rimaste aperte da un servizio passato (appese) restano visibili sulla griglia tavoli in ogni servizio: tessera in verde con «appesa da ieri» (o da pranzo, o dalla data), e il tocco riprende la comanda dal suo servizio invece di aprirne una nuova. |
