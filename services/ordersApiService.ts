@@ -243,6 +243,13 @@ export interface OpenOrderSummary {
   table_id: number;
   total_cents: number;
   course: { course_no: number; status: CourseStatus } | null;
+  /** Il servizio a cui la comanda appartiene, e `stale` quando NON è quello
+   *  guardato: è un'appesa di un servizio precedente. Opzionali: fra deploy
+   *  del client e del server c'è sempre una finestra in cui il nuovo parla
+   *  col vecchio, e i campi possono non esserci. */
+  service_date?: string;
+  shift?: 'LUNCH' | 'DINNER';
+  stale?: boolean;
 }
 
 export const getOpenOrderTables = async (
