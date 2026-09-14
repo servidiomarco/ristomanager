@@ -6781,11 +6781,13 @@ async function registerNativeProforma(tenantId: number, billId: number, userId: 
     if (!bill || bill.status !== 'CLOSED') return { skipped: 'bill_not_closed' };
     if (passepartoutComandaIdFromRef(bill.external_ref) != null) return { skipped: 'passepartout' }; // il PP ha la sua proforma di cassa
     const ins = await queryWithRetry(
-        `INSERT INTO fiscal_documents (tenant_id, table_bill_id, doc_type, provider, status, total_cents, created_by_user_id, confirmed_at)
-         VALUES ($1, $2, 'PROFORMA', 'crm', 'CONFIRMED', $3, $4, CURRENT_TIMESTAMP)
+        // Anche la proforma ha il token: /scontrino/<token> la mostra
+        // (etichettata «non fiscale»), quindi il link dal registro esiste.
+        `INSERT INTO fiscal_documents (tenant_id, table_bill_id, doc_type, provider, status, total_cents, created_by_user_id, confirmed_at, public_token)
+         VALUES ($1, $2, 'PROFORMA', 'crm', 'CONFIRMED', $3, $4, CURRENT_TIMESTAMP, $5)
          ON CONFLICT (table_bill_id) WHERE status IN ('PENDING', 'CONFIRMED') AND table_bill_split_id IS NULL AND doc_type <> 'CREDIT_NOTE' DO NOTHING
          RETURNING ${FISCAL_DOC_COLUMNS}`,
-        [tenantId, billId, bill.total_cents, userId]
+        [tenantId, billId, bill.total_cents, userId, newFiscalPublicToken()]
     );
     if (!ins.rows[0]) return { skipped: 'doc_exists' };
     try { socketService?.broadcastToAll(tenantId, 'fiscal:updated', { bill_id: billId, doc: ins.rows[0] }); } catch (_) {}
@@ -8130,16 +8132,18 @@ app.get('/scontrino/:token', publicPayLimiter, async (req, res) => runAsPlatform
         const token = String(req.params.token || '');
         if (!token || token.length < 32) return res.status(404).json({ error: 'Not found' });
         const rs = await queryWithRetry(
-            // Solo scontrini nativi: quelli Passepartout li stampa l'RT di
-            // cassa e la riga qui non ha il dettaglio (request NULL) — la
-            // pagina mostrerebbe un documento vuoto.
-            `SELECT fd.tenant_id, fd.status, fd.doc_number, fd.total_cents,
+            // Scontrini nativi + proforma. Quelli Passepartout/RT esterno li
+            // batte la cassa e la riga qui non ha il dettaglio (request NULL)
+            // — la pagina mostrerebbe un documento vuoto. La proforma il
+            // dettaglio non l'ha mai avuto: si ricostruisce dallo snapshot
+            // righe del conto (b.items), lo stesso del preconto.
+            `SELECT fd.tenant_id, fd.status, fd.doc_type, fd.doc_number, fd.total_cents,
                     fd.fiscal_id_snapshot, fd.request, fd.response, fd.confirmed_at, fd.voided_at,
-                    t.name AS table_name
+                    t.name AS table_name, b.items AS bill_items
              FROM fiscal_documents fd
              JOIN table_bills b ON b.id = fd.table_bill_id AND b.tenant_id = fd.tenant_id
              LEFT JOIN tables t ON t.id = b.table_id AND t.tenant_id = b.tenant_id
-             WHERE fd.public_token = $1 AND fd.doc_type = 'RECEIPT'
+             WHERE fd.public_token = $1 AND fd.doc_type IN ('RECEIPT', 'PROFORMA')
                AND fd.provider NOT IN ('passepartout', 'external_rt') AND fd.status IN ('CONFIRMED', 'VOIDED')`,
             [token]
         );
@@ -8149,6 +8153,19 @@ app.get('/scontrino/:token', publicPayLimiter, async (req, res) => runAsPlatform
         const payload = doc.request ?? {};
         const respData = doc.response?.data ?? {};
         const euroToCents = (s: unknown): number => Math.round((parseFloat(String(s ?? '0')) || 0) * 100);
+        const items = Array.isArray(payload.items) && payload.items.length > 0
+            ? payload.items.map((i: any) => ({
+                  description: String(i.description ?? ''),
+                  quantity: parseFloat(String(i.quantity ?? '1')) || 1,
+                  unit_price_cents: euroToCents(i.unit_price),
+                  vat_rate_code: String(i.vat_rate_code ?? ''),
+              }))
+            : (Array.isArray(doc.bill_items) ? doc.bill_items : []).map((i: any) => ({
+                  description: String(i.name ?? ''),
+                  quantity: Number(i.qty) || 1,
+                  unit_price_cents: Number(i.unit_price_cents) || 0,
+                  vat_rate_code: '',
+              }));
         res.json({
             business: {
                 name: identity.name,
@@ -8157,17 +8174,13 @@ app.get('/scontrino/:token', publicPayLimiter, async (req, res) => runAsPlatform
             },
             receipt: {
                 status: doc.status,
+                doc_type: doc.doc_type,
                 doc_number: doc.doc_number ?? respData.document_number ?? null,
                 document_date: respData.document_date ?? doc.confirmed_at,
                 voided_at: doc.voided_at,
                 table_name: doc.table_name ?? null,
                 total_cents: doc.total_cents,
-                items: (Array.isArray(payload.items) ? payload.items : []).map((i: any) => ({
-                    description: String(i.description ?? ''),
-                    quantity: parseFloat(String(i.quantity ?? '1')) || 1,
-                    unit_price_cents: euroToCents(i.unit_price),
-                    vat_rate_code: String(i.vat_rate_code ?? ''),
-                })),
+                items,
                 cash_cents: euroToCents(payload.cash_payment_amount),
                 electronic_cents: euroToCents(payload.electronic_payment_amount),
                 ticket_cents: euroToCents(payload.ticket_restaurant_payment_amount),
