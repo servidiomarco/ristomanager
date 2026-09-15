@@ -322,6 +322,7 @@ const VIEW_PERMISSIONS: Record<ViewState, Permission[]> = {
   [ViewState.PASSE]: ['orders:expedite'],
   [ViewState.RESERVATIONS]: ['reservations:view'],
   [ViewState.RECEPTION]: ['reception:view'],
+  [ViewState.ASPORTO]: ['takeaway:view'],
   [ViewState.ATTIVITA]: ['dashboard:view'],
   [ViewState.LISTA_DELLA_SPESA]: ['dashboard:view'],
   [ViewState.HACCP]: ['dashboard:view'],

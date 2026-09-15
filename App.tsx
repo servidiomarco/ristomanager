@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChevronUp, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, AlertTriangle, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator, BarChart3, Star } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChevronUp, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, AlertTriangle, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator, BarChart3, Star, ShoppingBag } from 'lucide-react';
 import { ViewState, Room, Table, Dish, RestaurantMenu, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, UserRole, ReservationSource, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -39,6 +39,7 @@ import { RoadmapPage } from './components/RoadmapPage';
 import { MonitoringPage } from './components/MonitoringPage';
 import { ReportisticaPage } from './components/reportistica/ReportisticaPage';
 import ReceptionPage from './components/ReceptionPage';
+import AsportoPage from './components/AsportoPage';
 import { AttivitaPage } from './components/AttivitaPage';
 import { PushNotificationsCard } from './components/PushNotificationsCard';
 import { StaffChatPresetsCard } from './components/StaffChatPresetsCard';
@@ -178,6 +179,7 @@ const NAV_ITEMS: NavItem[] = [
   // Servizio
   { kind: 'link', label: 'Prenotazioni', Icon: Calendar, group: 'servizio', isTab: true, view: ViewState.RESERVATIONS, sidebarCollapse: true },
   { kind: 'link', label: 'Reception', Icon: ConciergeBell, group: 'servizio', isTab: false, view: ViewState.RECEPTION, sidebarCollapse: true },
+  { kind: 'link', label: 'Asporto', Icon: ShoppingBag, group: 'servizio', isTab: false, view: ViewState.ASPORTO, sidebarCollapse: true },
   { kind: 'link', label: 'Sale & Tavoli', Icon: Grid, group: 'servizio', isTab: false, view: ViewState.FLOOR_PLAN, sidebarCollapse: true },
   { kind: 'link', label: 'Menu', Icon: UtensilsCrossed, group: 'servizio', isTab: false, view: ViewState.MENU, sidebarCollapse: false },
   { kind: 'link', label: 'Banchetti', Icon: PartyPopper, group: 'servizio', isTab: false, view: ViewState.BANCHETTI, sidebarCollapse: false },
@@ -2476,7 +2478,7 @@ const App: React.FC = () => {
                w-1/2) so it takes exactly the free space between the mobile logo
                and the right actions — with the sidebar open at lg the content
                area shrinks and a fixed half would overflow into the "+" button. */}
-           <div className={`hidden md:flex items-center gap-2.5 flex-1 min-w-0 ${[ViewState.SETTINGS, ViewState.USERS, ViewState.CLIENTI, ViewState.STAFF, ViewState.PLATFORM].includes(view) ? '!hidden' : ''}`}>
+           <div className={`hidden md:flex items-center gap-2.5 flex-1 min-w-0 ${[ViewState.SETTINGS, ViewState.USERS, ViewState.CLIENTI, ViewState.STAFF, ViewState.PLATFORM, ViewState.ASPORTO].includes(view) ? '!hidden' : ''}`}>
              <DateNavigator
                value={globalDateStr}
                onChange={(dateOnly) => {
@@ -3024,6 +3026,12 @@ const App: React.FC = () => {
           />
         )}
 
+        {view === ViewState.ASPORTO && (
+          <CardErrorBoundary label="Asporto">
+            <AsportoPage dishes={dishes} isInitialLoading={isInitialDataLoading} />
+          </CardErrorBoundary>
+        )}
+
         {view === ViewState.ATTIVITA && (
           <AttivitaPage
             banquetMenus={banquetMenus}
@@ -3092,6 +3100,7 @@ const App: React.FC = () => {
                       [ViewState.DASHBOARD]: 'Dashboard',
                       [ViewState.RESERVATIONS]: 'Prenotazioni',
                       [ViewState.RECEPTION]: 'Reception',
+                      [ViewState.ASPORTO]: 'Asporto',
                       [ViewState.CHAT_STAFF]: 'Chat staff',
                       [ViewState.FLOOR_PLAN]: 'Sale & Tavoli',
                       [ViewState.MENU]: 'Menu',
