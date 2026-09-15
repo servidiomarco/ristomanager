@@ -634,6 +634,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-15 | Asporto | L'interruttore «Ordini online» sta nella card Impostazioni → Asporto (permesso «Gestisce ordini asporto», come lo stop) e mostra il link della pagina da copiare. |
 | 2026-09-15 | Asporto | Pagina pubblica /ordina: ordinazione d'asporto online con slot fattibili per la cucina, menu Alla carta, conferma immediata e push allo staff; si accende con l'interruttore «Ordini online» del modulo. |
 | 2026-09-15 | Asporto | «Manda in cucina»: l'ordine d'asporto genera la comanda (KDS, passe e stampa per partita, intestata «Asporto HH:MM»); il «pronto» del monitor riporta da solo l'ordine a Pronto sulla board, con push dedicata. |
 | 2026-09-15 | Asporto | Sezione Impostazioni → Asporto: capienza per slot, minuti di preparazione e «stop asporto» per data (dalla card o direttamente dalla board), con aggiornamento in tempo reale delle board aperte. |

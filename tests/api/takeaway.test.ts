@@ -50,7 +50,7 @@ describe('asporto — slot e capienza', () => {
     it('la config espone capienza e minuti di preparazione', async () => {
         const res = await api().get('/takeaway/config').set(bearer(token));
         expect(res.status).toBe(200);
-        expect(res.body).toEqual({ capacity_per_slot: 4, prep_minutes: 20, stop_date: null });
+        expect(res.body).toEqual({ capacity_per_slot: 4, prep_minutes: 20, stop_date: null, online_enabled: false });
     });
 });
 
@@ -298,7 +298,17 @@ describe('asporto — impostazioni', () => {
 
         const ripristino = await api().put('/takeaway/config').set(bearer(token))
             .send({ capacity_per_slot: 4, prep_minutes: 20, stop_date: null });
-        expect(ripristino.body).toEqual({ capacity_per_slot: 4, prep_minutes: 20, stop_date: null });
+        expect(ripristino.body).toEqual({ capacity_per_slot: 4, prep_minutes: 20, stop_date: null, online_enabled: false });
+    });
+
+    it('l\'interruttore online passa dalla config e accende la pagina pubblica', async () => {
+        const on = await api().put('/takeaway/config').set(bearer(token)).send({ online_enabled: true });
+        expect(on.status).toBe(200);
+        expect(on.body.online_enabled).toBe(true);
+        const info = await api().get('/public/takeaway/info');
+        expect(info.body.takeawayEnabled).toBe(true);
+        const off = await api().put('/takeaway/config').set(bearer(token)).send({ online_enabled: false });
+        expect(off.body.online_enabled).toBe(false);
     });
 });
 

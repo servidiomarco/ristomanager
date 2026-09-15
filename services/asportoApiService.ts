@@ -40,6 +40,8 @@ export interface TakeawayConfig {
   capacity_per_slot: number;
   prep_minutes: number;
   stop_date: string | null;
+  /** Interruttore della pagina pubblica /ordina (flag takeaway_online_enabled). */
+  online_enabled: boolean;
 }
 
 const getHeaders = (): HeadersInit => {
