@@ -17,11 +17,14 @@ import { queryWithRetry } from '../db.js';
 // 'reviews' = gestione recensioni Google (richiesta post-visita, inbox
 // recensioni, risposte AI): add-on, acceso per il tenant 1 dalla migration
 // richieste-recensione.
-export const TENANT_FEATURES = ['voice', 'whatsapp', 'web_booking', 'pay_at_table', 'passepartout', 'reviews'] as const;
+// 'takeaway' = modulo asporto (ordini da ritirare, slot di ritiro, e nelle
+// fasi successive pagina pubblica e Sofia): add-on, acceso per il tenant 1
+// dalla migration modulo-asporto.
+export const TENANT_FEATURES = ['voice', 'whatsapp', 'web_booking', 'pay_at_table', 'passepartout', 'reviews', 'takeaway'] as const;
 export type TenantFeature = (typeof TENANT_FEATURES)[number];
 export type TenantFeatureMap = Record<TenantFeature, boolean>;
 
-const ALL_DISABLED: TenantFeatureMap = { voice: false, whatsapp: false, web_booking: false, pay_at_table: false, passepartout: false, reviews: false };
+const ALL_DISABLED: TenantFeatureMap = { voice: false, whatsapp: false, web_booking: false, pay_at_table: false, passepartout: false, reviews: false, takeaway: false };
 
 // Cache per tenant con TTL breve, stesso schema di identityCache
 // (businessIdentity in server.ts): gli entitlement si leggono su ogni

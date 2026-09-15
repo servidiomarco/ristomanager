@@ -62,7 +62,12 @@ export type Permission =
   // `manage` copre impostazioni, richieste e — in Fase B — la pubblicazione
   // delle risposte. Le route esigono anche l'entitlement 'reviews'.
   | 'reviews:view'
-  | 'reviews:manage';
+  | 'reviews:manage'
+  // Modulo asporto (piano take-away): `view` apre la board e gli slot,
+  // `manage` copre creazione, modifica e cambi di stato degli ordini. Le
+  // route esigono anche l'entitlement 'takeaway'.
+  | 'takeaway:view'
+  | 'takeaway:manage';
 
 // Role-permission mapping
 const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
@@ -113,7 +118,9 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'cash:close_session',
     'staffchat:use',
     'reviews:view',
-    'reviews:manage'
+    'reviews:manage',
+    'takeaway:view',
+    'takeaway:manage'
   ],
   [UserRole.OWNER]: [
     'dashboard:view',
@@ -158,7 +165,9 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'cash:close_session',
     'staffchat:use',
     'reviews:view',
-    'reviews:manage'
+    'reviews:manage',
+    'takeaway:view',
+    'takeaway:manage'
   ],
   [UserRole.GENERAL_MANAGER]: [
     'dashboard:view',
@@ -196,7 +205,9 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'cash:close_session',
     'staffchat:use',
     'reviews:view',
-    'reviews:manage'
+    'reviews:manage',
+    'takeaway:view',
+    'takeaway:manage'
   ],
   [UserRole.MANAGER]: [
     'dashboard:view',
@@ -229,7 +240,9 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'cash:close_session',
     'staffchat:use',
     'reviews:view',
-    'reviews:manage'
+    'reviews:manage',
+    'takeaway:view',
+    'takeaway:manage'
   ],
   [UserRole.RECEPTION]: [
     'dashboard:view',
@@ -243,7 +256,9 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'voice_calls:view',
     'payments:view',
     'orders:view',
-    'staffchat:use'
+    'staffchat:use',
+    'takeaway:view',
+    'takeaway:manage'
   ],
   [UserRole.WAITER]: [
     'dashboard:view',
@@ -287,7 +302,9 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'orders:void',
     'cash:operate',
     'cash:void_payment',
-    'staffchat:use'
+    'staffchat:use',
+    'takeaway:view',
+    'takeaway:manage'
   ]
 };
 

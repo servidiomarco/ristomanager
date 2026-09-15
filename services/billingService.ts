@@ -65,6 +65,8 @@ function priceToFeature(): Map<string, TenantFeature> {
         // Recensioni: idem, si accende dal pannello piattaforma finché non
         // entra a listino.
         reviews: process.env.STRIPE_PRICE_REVIEWS,
+        // Asporto: idem, acceso a mano finché non entra a listino.
+        takeaway: process.env.STRIPE_PRICE_TAKEAWAY,
     };
     const map = new Map<string, TenantFeature>();
     for (const feature of TENANT_FEATURES) {

@@ -24,7 +24,8 @@ export const ALL_PERMISSIONS: { feature: string; permissions: Permission[] }[] =
   { feature: 'Comande e Cucina', permissions: ['orders:view', 'orders:take', 'orders:kds', 'orders:expedite', 'orders:void'] },
   { feature: 'Cassa', permissions: ['cash:operate', 'cash:void_payment', 'cash:close_partial', 'cash:close_session'] },
   { feature: 'Chat staff', permissions: ['staffchat:use'] },
-  { feature: 'Recensioni', permissions: ['reviews:view', 'reviews:manage'] }
+  { feature: 'Recensioni', permissions: ['reviews:view', 'reviews:manage'] },
+  { feature: 'Asporto', permissions: ['takeaway:view', 'takeaway:manage'] }
 ];
 
 // La lista piatta: è ciò che /auth/me risponde a una sessione di

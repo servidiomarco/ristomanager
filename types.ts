@@ -834,6 +834,71 @@ export interface OrderWithItems {
   voided_cents: number;
 }
 
+// ============================================
+// MODULO ASPORTO
+// ============================================
+// L'ordine d'asporto è un'entità di primo livello, non una comanda: ruota
+// attorno all'ora di ritiro. REQUESTED e i canali WEB/VOICE/WHATSAPP
+// arrivano nelle fasi successive (pagina pubblica, Sofia) ma sono già nel
+// dominio per non rimaneggiare il CHECK a DB.
+export type TakeawayStatus = 'REQUESTED' | 'CONFIRMED' | 'IN_PREPARATION' | 'READY' | 'PICKED_UP' | 'NO_SHOW' | 'CANCELLED';
+export type TakeawayChannel = 'STAFF' | 'WEB' | 'VOICE' | 'WHATSAPP';
+
+export interface TakeawayOrderItem {
+  id: number;
+  takeaway_order_id: number;
+  dish_id: number | null;
+  /** Nome e prezzo congelati alla presa dell'ordine: il menu cambia,
+   *  l'ordine preso resta quello che si è detto al cliente. */
+  name_snapshot: string;
+  unit_price_cents: number;
+  qty: number;
+  note?: string | null;
+}
+
+export interface TakeawayOrder {
+  id: number;
+  customer_name: string;
+  customer_phone: string | null;
+  /** YYYY-MM-DD (il parser DATE del pool restituisce già la stringa). */
+  pickup_date: string;
+  /** HH:MM — uno slot della griglia opening_hours. */
+  pickup_time: string;
+  shift: 'LUNCH' | 'DINNER';
+  status: TakeawayStatus;
+  channel: TakeawayChannel;
+  notes?: string | null;
+  kitchen_order_id: number | null;
+  created_by_user_id?: number | null;
+  ready_at?: string | null;
+  picked_up_at?: string | null;
+  cancelled_at?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+// Risposta delle route /takeaway: il totale è calcolato dal server così la
+// UI non lo ri-deriva (stessa regola di OrderWithItems).
+export interface TakeawayOrderView extends TakeawayOrder {
+  items: TakeawayOrderItem[];
+  total_cents: number;
+}
+
+export interface TakeawaySlot {
+  time: string;
+  booked: number;
+  capacity: number;
+}
+
+export interface TakeawaySlotBoard {
+  date: string;
+  /** true = «stop asporto» premuto per questa data: niente ordini nuovi. */
+  stopped: boolean;
+  capacity_per_slot: number;
+  lunch: TakeawaySlot[];
+  dinner: TakeawaySlot[];
+}
+
 export interface Notification {
   id: string;
   title: string;
