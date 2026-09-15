@@ -302,6 +302,105 @@ describe('asporto — impostazioni', () => {
     });
 });
 
+describe('asporto — pubblico (/ordina, fase 2)', () => {
+    afterAll(async () => {
+        // Il flag torna spento: è il default e gli altri file ci contano.
+        await api().put('/settings/features').set(bearer(token)).send({ takeaway_online_enabled: false });
+    });
+
+    it('col flag spento: info dice chiuso, catalogo e ordini 503', async () => {
+        const info = await api().get('/public/takeaway/info');
+        expect(info.status).toBe(200);
+        expect(info.body.takeawayEnabled).toBe(false);
+        expect(info.body.branding.name).toBeTruthy();
+        const cat = await api().get('/public/takeaway/catalogo');
+        expect(cat.status).toBe(503);
+        const post = await api().post('/public/takeaway/orders').send({
+            customer_name: 'Web Chiuso', customer_phone: '3331112223',
+            pickup_date: DATA_ASPORTO, pickup_time: '13:00',
+            items: [{ dish_id: dishId, qty: 1 }],
+        });
+        expect(post.status).toBe(503);
+    });
+
+    it('col flag acceso: catalogo con id e prezzi in cents, slot con available', async () => {
+        const on = await api().put('/settings/features').set(bearer(token)).send({ takeaway_online_enabled: true });
+        expect(on.status).toBe(200);
+
+        // Il piatto entra nel catalogo solo se sta nel menu Alla carta.
+        const menus = await api().get('/menus').set(bearer(token));
+        const allaCarta = menus.body.find((m: any) => m.system_key === 'ALLA_CARTA');
+        expect(allaCarta).toBeTruthy();
+        const dish = await api().post('/dishes').set(bearer(token)).send({
+            name: 'Pizza Web Test', price: 9, category: 'Pizze Test Asporto', menu_ids: [allaCarta.id],
+        });
+        expect(dish.status).toBe(201);
+
+        const cat = await api().get('/public/takeaway/catalogo');
+        expect(cat.status).toBe(200);
+        const mine = cat.body.piatti.find((p: any) => p.name === 'Pizza Web Test');
+        expect(mine).toBeTruthy();
+        expect(mine.price_cents).toBe(900);
+        expect(typeof mine.id).toBe('number');
+
+        const slots = await api().get('/public/takeaway/slots').query({ date: DATA_ASPORTO });
+        expect(slots.status).toBe(200);
+        expect(slots.body.stopped).toBe(false);
+        const cena = slots.body.dinner.find((s: any) => s.time === '20:30');
+        expect(cena).toEqual({ time: '20:30', available: true });
+        // 19:30 è al completo dai test sopra: il pubblico lo vede non disponibile.
+        const pieno = slots.body.dinner.find((s: any) => s.time === '19:30');
+        expect(pieno.available).toBe(false);
+    });
+
+    it('ordine web valido → confermato, canale WEB, push-safe; honeypot scartato', async () => {
+        const ok = await api().post('/public/takeaway/orders').send({
+            customer_name: 'Cliente Web',
+            customer_phone: '+39 333 444 5566',
+            pickup_date: DATA_ASPORTO,
+            pickup_time: '20:30',
+            items: [{ dish_id: dishId, qty: 2, note: 'ben cotta' }],
+            notes: 'citofono rotto',
+        });
+        expect(ok.status).toBe(201);
+        expect(ok.body).toMatchObject({ ok: true, confirmed: true, pickup_time: '20:30', total_cents: 1700 });
+
+        const list = await api().get('/takeaway/orders').set(bearer(token)).query({ date: DATA_ASPORTO });
+        const mine = list.body.orders.find((o: any) => o.customer_name === 'Cliente Web');
+        expect(mine.channel).toBe('WEB');
+        expect(mine.status).toBe('CONFIRMED');
+        expect(mine.items[0].note).toBe('ben cotta');
+
+        const honeypot = await api().post('/public/takeaway/orders').send({
+            customer_name: 'Bot', customer_phone: '3330000000', website: 'http://spam',
+            pickup_date: DATA_ASPORTO, pickup_time: '20:30',
+            items: [{ dish_id: dishId, qty: 1 }],
+        });
+        expect(honeypot.status).toBe(201);
+        const after = await api().get('/takeaway/orders').set(bearer(token)).query({ date: DATA_ASPORTO });
+        expect(after.body.orders.find((o: any) => o.customer_name === 'Bot')).toBeUndefined();
+    });
+
+    it('il web non forza: telefono obbligatorio, slot pieno 409 senza scampo', async () => {
+        const senzaTelefono = await api().post('/public/takeaway/orders').send({
+            customer_name: 'Senza Telefono',
+            pickup_date: DATA_ASPORTO, pickup_time: '20:30',
+            items: [{ dish_id: dishId, qty: 1 }],
+        });
+        expect(senzaTelefono.status).toBe(400);
+        expect(senzaTelefono.body.error).toBe('invalid_phone');
+
+        const pieno = await api().post('/public/takeaway/orders').send({
+            customer_name: 'Su Slot Pieno', customer_phone: '3335556677',
+            pickup_date: DATA_ASPORTO, pickup_time: '19:30',
+            items: [{ dish_id: dishId, qty: 1 }],
+            force: true,
+        });
+        expect(pieno.status).toBe(409);
+        expect(pieno.body.error).toBe('slot_full');
+    });
+});
+
 describe('asporto — entitlement', () => {
     it('senza l\'add-on le route rispondono 403', async () => {
         const off = await api().put('/settings/entitlements').set(bearer(token)).send({ takeaway: false });
