@@ -9,6 +9,7 @@ import express from 'express';
 import { createServer } from 'http';
 import crypto from 'crypto';
 import path from 'path';
+import { readFile as readFileAsync } from 'node:fs/promises';
 import cors from 'cors';
 import compression from 'compression';
 import rateLimit from 'express-rate-limit';
@@ -28029,6 +28030,33 @@ app.get('/prenota/logo-dark.png', (_req, res) => {
 
 app.get('/prenota', withPublicTenant(servePrenota));
 app.get('/prenota/:slug', withPublicTenant(servePrenota));
+
+// La pagina ordini d'asporto: stessa famiglia di /prenota, servita
+// esplicitamente (mai express.static) e col no-store che ha già salvato
+// /prenota dai webview iOS che rispolveravano HTML vecchio. La pagina è
+// noindex e il branding lo prende via JS da /public/takeaway/info, quindi
+// niente render SEO server-side. Eventuali asset sotto /ordina/* vanno
+// registrati PRIMA di /ordina/:slug (lezione dei loghi di /prenota).
+// fs.readFile con cache, non res.sendFile: sendFile rifiuta in silenzio i
+// path con un segmento puntato (dotfiles 'ignore'), e in un checkout sotto
+// .claude/worktrees la pagina spariva con un 404 muto.
+let ordinaHtmlCache: string | null = null;
+const serveOrdina = async (_tenantId: number, _req: express.Request, res: express.Response) => {
+    res.set('Cache-Control', 'no-store, must-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+    try {
+        if (ordinaHtmlCache == null) {
+            ordinaHtmlCache = await readFileAsync(path.join(process.cwd(), 'public', 'ordina.html'), 'utf8');
+        }
+        res.type('html').send(ordinaHtmlCache);
+    } catch (err) {
+        console.error('GET /ordina error:', err);
+        res.status(500).send('Pagina non disponibile');
+    }
+};
+app.get('/ordina', withPublicTenant(serveOrdina));
+app.get('/ordina/:slug', withPublicTenant(serveOrdina));
 
 app.get('/__prenota_statica', (_req, res) => {
     // Force browsers to fetch a fresh copy on every visit. `no-cache` was

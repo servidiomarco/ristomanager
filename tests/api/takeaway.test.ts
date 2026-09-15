@@ -308,6 +308,15 @@ describe('asporto — pubblico (/ordina, fase 2)', () => {
         await api().put('/settings/features').set(bearer(token)).send({ takeaway_online_enabled: false });
     });
 
+    it('la pagina /ordina è servita; slug ignoto 404, mai fallback', async () => {
+        const page = await api().get('/ordina');
+        expect(page.status).toBe(200);
+        expect(page.headers['content-type']).toContain('text/html');
+        expect(page.text).toContain('Ordina d\'asporto');
+        const bad = await api().get('/ordina/ristorante-inesistente');
+        expect(bad.status).toBe(404);
+    });
+
     it('col flag spento: info dice chiuso, catalogo e ordini 503', async () => {
         const info = await api().get('/public/takeaway/info');
         expect(info.status).toBe(200);
