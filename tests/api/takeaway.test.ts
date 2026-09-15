@@ -467,9 +467,11 @@ describe('asporto — pubblico (/ordina, fase 2)', () => {
 describe('asporto — branding per tenant', () => {
     // Tenant con anagrafe pubblica NON compilata: i letterali del fallback
     // sono l'identità del Frantoio e non devono comparire sulla sua pagina.
-    // Id alto e riservato come prenota-slug: la cache entitlement ha TTL 60s
-    // e un id riusato arriverebbe avvelenato dai file precedenti.
-    const TID = 4303;
+    // Id alto e LONTANO dalla sequence: prenota-slug lascia la sequence a
+    // 4302, quindi il tenant che provisioning crea via API prende proprio
+    // 4303 — e la cache entitlement (TTL 60s) resta avvelenata con le sue
+    // feature. Con 4303 questo test era rosso SOLO nella suite completa.
+    const TID = 8303;
     const SLUG = 'asporto-branding-test';
     let pgb: Client;
 
