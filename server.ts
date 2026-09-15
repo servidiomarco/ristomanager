@@ -24853,15 +24853,26 @@ async function handlePublicTakeawayInfo(tenantId: number, _req: express.Request,
         ]);
         if (!identityCache.has(tenantId)) await refreshBusinessIdentity(tenantId).catch(() => {});
         const identity = businessIdentity(tenantId);
+        // I letterali di IDENTITY_FALLBACK SONO l'identità del Frantoio: su
+        // un altro tenant un campo rimasto al fallback è un'anagrafe non
+        // compilata, non un dato — e la pagina del Demo mostrava telefono e
+        // mappa di un altro ristorante. Meglio il campo vuoto.
+        const own = (value: string, fallback: string): string | null =>
+            tenantId === PUBLIC_TENANT_ID || value !== fallback ? (value || null) : null;
+        let name = own(identity.name, IDENTITY_FALLBACK.name);
+        if (!name) {
+            const suo = await queryWithRetry('SELECT name FROM tenants WHERE id = $1', [tenantId]);
+            name = String(suo.rows[0]?.name || '').trim() || null;
+        }
         res.json({
             takeawayEnabled: enabled,
             prep_minutes: settings.prepMinutes,
             branding: {
-                name: identity.name,
-                tagline: identity.tagline,
-                phone: identity.phone,
-                address: identity.address,
-                maps_url: identity.mapsUrl,
+                name,
+                tagline: own(identity.tagline, IDENTITY_FALLBACK.tagline),
+                phone: own(identity.phone, IDENTITY_FALLBACK.phone),
+                address: own(identity.address, IDENTITY_FALLBACK.address),
+                maps_url: own(identity.mapsUrl, IDENTITY_FALLBACK.mapsUrl),
                 logo_url: identity.logoUrl || null,
                 logo_dark_url: identity.logoDarkUrl || null,
             },

@@ -464,6 +464,51 @@ describe('asporto — pubblico (/ordina, fase 2)', () => {
     });
 });
 
+describe('asporto — branding per tenant', () => {
+    // Tenant con anagrafe pubblica NON compilata: i letterali del fallback
+    // sono l'identità del Frantoio e non devono comparire sulla sua pagina.
+    // Id alto e riservato come prenota-slug: la cache entitlement ha TTL 60s
+    // e un id riusato arriverebbe avvelenato dai file precedenti.
+    const TID = 4303;
+    const SLUG = 'asporto-branding-test';
+    let pgb: Client;
+
+    beforeAll(async () => {
+        pgb = new Client({ connectionString: process.env.DATABASE_URL || 'postgresql://localhost/ristotest_api' });
+        await pgb.connect();
+        await pgb.query(`INSERT INTO tenants (id, slug, name, status) VALUES ($1, $2, 'Trattoria Prova', 'active')`, [TID, SLUG]);
+        await pgb.query(`SELECT setval('tenants_id_seq', (SELECT MAX(id) FROM tenants))`);
+        await pgb.query(`INSERT INTO tenant_features (tenant_id, feature, enabled) VALUES ($1, 'takeaway', true)`, [TID]);
+        await pgb.query(`INSERT INTO app_settings (tenant_id, key, value) VALUES ($1, 'takeaway_online_enabled', true)`, [TID]);
+    });
+    afterAll(async () => {
+        try {
+            await pgb.query('DELETE FROM app_settings WHERE tenant_id = $1', [TID]);
+            await pgb.query('DELETE FROM tenant_features WHERE tenant_id = $1', [TID]);
+            await pgb.query('DELETE FROM tenants WHERE id = $1', [TID]);
+        } finally {
+            await pgb.end();
+        }
+    });
+
+    it('senza anagrafe compilata: nome del tenant, MAI i dati del Frantoio', async () => {
+        const res = await api().get(`/public/${SLUG}/takeaway/info`);
+        expect(res.status).toBe(200);
+        expect(res.body.takeawayEnabled).toBe(true);
+        expect(res.body.branding.name).toBe('Trattoria Prova');
+        expect(res.body.branding.tagline).toBeNull();
+        expect(res.body.branding.phone).toBeNull();
+        expect(res.body.branding.maps_url).toBeNull();
+    });
+
+    it('il tenant 1 tiene i suoi letterali storici', async () => {
+        const res = await api().get('/public/takeaway/info');
+        expect(res.status).toBe(200);
+        expect(res.body.branding.name).toBeTruthy();
+        expect(res.body.branding.phone).toBeTruthy();
+    });
+});
+
 describe('asporto — Sofia (tool voce, fase 3)', () => {
     // Il secret ElevenLabs è vuoto nei test: i webhook accettano senza header.
     afterAll(async () => {
