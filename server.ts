@@ -22355,8 +22355,8 @@ app.post('/voice-calls/sync', authenticate, requireFeature('voice'), voiceCallsA
 // directly — the endpoints they gate are low-volume (a handful per minute
 // at most), so caching isn't worth the complexity.
 
-type FeatureFlagKey = 'public_bookings_enabled' | 'voice_agent_enabled' | 'voice_bookings_suspended' | 'voice_double_seating_enabled' | 'pay_at_table_enabled' | 'table_orders_enabled' | 'ai_messages_enabled' | 'ai_wine_pairing_enabled' | 'digital_menu_enabled' | 'passe_enabled';
-const FEATURE_FLAG_KEYS: FeatureFlagKey[] = ['public_bookings_enabled', 'voice_agent_enabled', 'voice_bookings_suspended', 'voice_double_seating_enabled', 'pay_at_table_enabled', 'table_orders_enabled', 'ai_messages_enabled', 'ai_wine_pairing_enabled', 'digital_menu_enabled', 'passe_enabled'];
+type FeatureFlagKey = 'public_bookings_enabled' | 'voice_agent_enabled' | 'voice_bookings_suspended' | 'voice_double_seating_enabled' | 'pay_at_table_enabled' | 'table_orders_enabled' | 'ai_messages_enabled' | 'ai_wine_pairing_enabled' | 'digital_menu_enabled' | 'passe_enabled' | 'review_requests_enabled';
+const FEATURE_FLAG_KEYS: FeatureFlagKey[] = ['public_bookings_enabled', 'voice_agent_enabled', 'voice_bookings_suspended', 'voice_double_seating_enabled', 'pay_at_table_enabled', 'table_orders_enabled', 'ai_messages_enabled', 'ai_wine_pairing_enabled', 'digital_menu_enabled', 'passe_enabled', 'review_requests_enabled'];
 
 async function getFeatureFlag(tenantId: number, key: FeatureFlagKey, fallback: boolean): Promise<boolean> {
     try {
@@ -22401,6 +22401,10 @@ const FEATURE_FLAG_DEFAULTS: Record<FeatureFlagKey, boolean> = {
     // comanda del cameriere. È solo UI: le route restano aperte a entrambi
     // i permessi, il flag decide chi ha il bottone davanti.
     passe_enabled: true,
+    // Spento di default: la richiesta di recensione post-visita parte solo
+    // quando il titolare la accende da Impostazioni → Recensioni e ha
+    // compilato il Place ID del profilo Google (senza link non si invia).
+    review_requests_enabled: false,
 };
 
 app.get('/settings/features', authenticate, async (req, res) => {
@@ -22419,6 +22423,9 @@ app.get('/settings/features', authenticate, async (req, res) => {
         // conoscere gli entitlement una per una.
         if (!(await isFeatureEnabledForTenant(req.tenantId!, 'pay_at_table'))) {
             flags.pay_at_table_enabled = false;
+        }
+        if (!(await isFeatureEnabledForTenant(req.tenantId!, 'reviews'))) {
+            flags.review_requests_enabled = false;
         }
         res.json(flags);
     } catch (err) {

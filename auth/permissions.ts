@@ -57,7 +57,12 @@ export type Permission =
   // Chat interna dello staff (docs/chat-staff-plan.md). Un solo permesso:
   // chi ce l'ha legge e scrive nei canali del suo ruolo e nei DM — cosa
   // vede lo decide la membership per ruolo in services/staffChat.ts.
-  | 'staffchat:use';
+  | 'staffchat:use'
+  // Gestione recensioni Google (piano recensioni): `view` apre la pagina,
+  // `manage` copre impostazioni, richieste e — in Fase B — la pubblicazione
+  // delle risposte. Le route esigono anche l'entitlement 'reviews'.
+  | 'reviews:view'
+  | 'reviews:manage';
 
 // Role-permission mapping
 const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
@@ -106,7 +111,9 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'cash:void_payment',
     'cash:close_partial',
     'cash:close_session',
-    'staffchat:use'
+    'staffchat:use',
+    'reviews:view',
+    'reviews:manage'
   ],
   [UserRole.OWNER]: [
     'dashboard:view',
@@ -149,7 +156,9 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'cash:void_payment',
     'cash:close_partial',
     'cash:close_session',
-    'staffchat:use'
+    'staffchat:use',
+    'reviews:view',
+    'reviews:manage'
   ],
   [UserRole.GENERAL_MANAGER]: [
     'dashboard:view',
@@ -185,7 +194,9 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'cash:void_payment',
     'cash:close_partial',
     'cash:close_session',
-    'staffchat:use'
+    'staffchat:use',
+    'reviews:view',
+    'reviews:manage'
   ],
   [UserRole.MANAGER]: [
     'dashboard:view',
@@ -216,7 +227,9 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'cash:void_payment',
     'cash:close_partial',
     'cash:close_session',
-    'staffchat:use'
+    'staffchat:use',
+    'reviews:view',
+    'reviews:manage'
   ],
   [UserRole.RECEPTION]: [
     'dashboard:view',
