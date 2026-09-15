@@ -22673,8 +22673,8 @@ app.post('/voice-calls/sync', authenticate, requireFeature('voice'), voiceCallsA
 // directly — the endpoints they gate are low-volume (a handful per minute
 // at most), so caching isn't worth the complexity.
 
-type FeatureFlagKey = 'public_bookings_enabled' | 'voice_agent_enabled' | 'voice_bookings_suspended' | 'voice_double_seating_enabled' | 'pay_at_table_enabled' | 'table_orders_enabled' | 'ai_messages_enabled' | 'ai_wine_pairing_enabled' | 'digital_menu_enabled' | 'passe_enabled' | 'review_requests_enabled';
-const FEATURE_FLAG_KEYS: FeatureFlagKey[] = ['public_bookings_enabled', 'voice_agent_enabled', 'voice_bookings_suspended', 'voice_double_seating_enabled', 'pay_at_table_enabled', 'table_orders_enabled', 'ai_messages_enabled', 'ai_wine_pairing_enabled', 'digital_menu_enabled', 'passe_enabled', 'review_requests_enabled'];
+type FeatureFlagKey = 'public_bookings_enabled' | 'voice_agent_enabled' | 'voice_bookings_suspended' | 'voice_double_seating_enabled' | 'pay_at_table_enabled' | 'table_orders_enabled' | 'ai_messages_enabled' | 'ai_wine_pairing_enabled' | 'digital_menu_enabled' | 'passe_enabled' | 'review_requests_enabled' | 'takeaway_online_enabled';
+const FEATURE_FLAG_KEYS: FeatureFlagKey[] = ['public_bookings_enabled', 'voice_agent_enabled', 'voice_bookings_suspended', 'voice_double_seating_enabled', 'pay_at_table_enabled', 'table_orders_enabled', 'ai_messages_enabled', 'ai_wine_pairing_enabled', 'digital_menu_enabled', 'passe_enabled', 'review_requests_enabled', 'takeaway_online_enabled'];
 
 async function getFeatureFlag(tenantId: number, key: FeatureFlagKey, fallback: boolean): Promise<boolean> {
     try {
@@ -22723,6 +22723,10 @@ const FEATURE_FLAG_DEFAULTS: Record<FeatureFlagKey, boolean> = {
     // quando il titolare la accende da Impostazioni → Recensioni e ha
     // compilato il Place ID del profilo Google (senza link non si invia).
     review_requests_enabled: false,
+    // Spento di default: la pagina pubblica /ordina si accende da
+    // Impostazioni → Asporto quando il ristoratore è pronto a esporla —
+    // stessa regola prudente di public_bookings_enabled.
+    takeaway_online_enabled: false,
 };
 
 app.get('/settings/features', authenticate, async (req, res) => {
@@ -22744,6 +22748,9 @@ app.get('/settings/features', authenticate, async (req, res) => {
         }
         if (!(await isFeatureEnabledForTenant(req.tenantId!, 'reviews'))) {
             flags.review_requests_enabled = false;
+        }
+        if (!(await isFeatureEnabledForTenant(req.tenantId!, 'takeaway'))) {
+            flags.takeaway_online_enabled = false;
         }
         res.json(flags);
     } catch (err) {
@@ -24436,6 +24443,228 @@ app.post('/takeaway/orders/:id/fire', authenticate, requireFeature('takeaway'), 
         res.status(500).json({ error: 'Internal server error' });
     }
 });
+
+// ── Asporto pubblico (pagina /ordina) ───────────────────────────────────
+// Doppio gate come le prenotazioni web: entitlement 'takeaway' (venduto)
+// AND flag takeaway_online_enabled (acceso dal ristoratore). Il default è
+// spento e il fallimento chiude: la pagina mostra la maintenance card.
+async function isTakeawayOnline(tenantId: number): Promise<boolean> {
+    if (!(await isFeatureEnabledForTenant(tenantId, 'takeaway'))) return false;
+    return getFeatureFlag(tenantId, 'takeaway_online_enabled', false);
+}
+
+// Minuti da un orario 'HH:MM'; -1 su forma imprevista (slot scartato).
+const slotMinutes = (time: string): number => {
+    const m = /^(\d{2}):(\d{2})$/.exec(time);
+    return m ? Number(m[1]) * 60 + Number(m[2]) : -1;
+};
+
+// Per OGGI uno slot è ordinabile solo se la cucina fa in tempo: ritiro ≥
+// adesso + minuti di preparazione. La griglia di domani passa intera.
+function filterOrderableSlots(slots: string[], date: string, prepMinutes: number): string[] {
+    if (date !== getItalianTodayIso()) return slots;
+    const now = new Date().toLocaleTimeString('it-IT', { timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit', hour12: false });
+    const cutoff = slotMinutes(now) + prepMinutes;
+    return slots.filter(s => slotMinutes(s) >= cutoff);
+}
+
+// Bootstrap della pagina: identità + stato del canale. `takeawayEnabled`
+// gata tutto, e il default della pagina è la maintenance card.
+async function handlePublicTakeawayInfo(tenantId: number, _req: express.Request, res: express.Response) {
+    try {
+        const [enabled, settings] = await Promise.all([
+            isTakeawayOnline(tenantId),
+            getTakeawaySettings(tenantId),
+        ]);
+        if (!identityCache.has(tenantId)) await refreshBusinessIdentity(tenantId).catch(() => {});
+        const identity = businessIdentity(tenantId);
+        res.json({
+            takeawayEnabled: enabled,
+            prep_minutes: settings.prepMinutes,
+            branding: {
+                name: identity.name,
+                tagline: identity.tagline,
+                phone: identity.phone,
+                address: identity.address,
+                maps_url: identity.mapsUrl,
+                logo_url: identity.logoUrl || null,
+                logo_dark_url: identity.logoDarkUrl || null,
+            },
+        });
+    } catch (err) {
+        console.error('GET /public/takeaway/info error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+}
+
+// Il catalogo ordinabile: stessa selezione del menu digitale (is_active AND
+// crm_enabled, solo Alla carta, categorie secondo le preferenze) ma CON gli
+// id — servono al carrello — e i prezzi in cents. Fuori i piatti al peso:
+// non si ordinano a distanza senza pesarli.
+// NB il path è /takeaway/catalogo, non /takeaway/menu: '/public/:slug/menu'
+// è registrato prima e catturerebbe 'takeaway' come slug (404 unknown_slug).
+async function handlePublicTakeawayCatalogue(tenantId: number, _req: express.Request, res: express.Response) {
+    try {
+        if (!(await isTakeawayOnline(tenantId))) {
+            return res.status(503).json({ error: 'takeaway_disabled' });
+        }
+        const dishesRs = await queryWithRetry(
+            `SELECT d.id, d.name, d.description, d.price, d.category, d.allergens, d.translations
+             FROM dishes d
+             WHERE d.tenant_id = $1 AND d.is_active AND d.crm_enabled
+               AND COALESCE(d.sold_by_weight, false) = false
+               AND EXISTS (SELECT 1 FROM dish_menus dm JOIN menus m ON m.id = dm.menu_id
+                           WHERE dm.dish_id = d.id AND m.system_key = 'ALLA_CARTA')
+             ORDER BY d.category, d.sort_order NULLS LAST, d.name`,
+            [tenantId]
+        );
+        const prefs = await getMenuCategoryPrefs(tenantId);
+        const rows = dishesRs.rows.filter((d: any) => prefs[String(d.category || 'Altro')]?.enabled !== false);
+        const present = [...new Set(rows.map((d: any) => String(d.category || 'Altro')))] as string[];
+        res.json({
+            categorie_ordine: sortCategoriesByPrefs(present, prefs),
+            piatti: rows.map((d: any) => ({
+                id: d.id,
+                name: d.name,
+                description: d.description,
+                price_cents: Math.max(0, Math.round(Number(d.price) * 100)),
+                category: d.category,
+                allergens: d.allergens || [],
+                translations: d.translations || null,
+            })),
+        });
+    } catch (err) {
+        console.error('GET /public/takeaway/catalogo error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+}
+
+// Gli slot della pagina: solo `available` booleano — prenotato/capienza
+// sono cucina interna, all'ospite serve sapere se può, non quanto margine
+// c'è. È una fotografia: la POST ricontrolla comunque.
+async function handlePublicTakeawaySlots(tenantId: number, req: express.Request, res: express.Response) {
+    try {
+        if (!(await isTakeawayOnline(tenantId))) {
+            return res.status(503).json({ error: 'takeaway_disabled' });
+        }
+        const date = typeof req.query.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date)
+            ? req.query.date : getItalianTodayIso();
+        const [lunch, dinner, settings, counts] = await Promise.all([
+            getAvailableSlots(tenantId, date, Shift.LUNCH),
+            getAvailableSlots(tenantId, date, Shift.DINNER),
+            getTakeawaySettings(tenantId),
+            queryWithRetry(
+                `SELECT pickup_time, COUNT(*)::int AS n FROM takeaway_orders
+                 WHERE tenant_id = $1 AND pickup_date = $2 AND status NOT IN ('CANCELLED', 'NO_SHOW')
+                 GROUP BY pickup_time`,
+                [tenantId, date]
+            ),
+        ]);
+        const stopped = settings.stopDate === date;
+        const booked = new Map<string, number>(counts.rows.map((r: any) => [r.pickup_time, r.n]));
+        const toSlots = (times: string[]) => filterOrderableSlots(times, date, settings.prepMinutes)
+            .map(time => ({ time, available: !stopped && (booked.get(time) ?? 0) < settings.capacityPerSlot }));
+        res.json({ date, stopped, lunch: toSlots(lunch), dinner: toSlots(dinner) });
+    } catch (err) {
+        console.error('GET /public/takeaway/slots error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+}
+
+async function handlePublicTakeawayOrderCreate(tenantId: number, req: express.Request, res: express.Response) {
+    try {
+        if (!(await isTakeawayOnline(tenantId))) {
+            return res.status(503).json({ error: 'takeaway_disabled' });
+        }
+        const body = req.body ?? {};
+        // Honeypot: accetta e scarta in silenzio, come le prenotazioni.
+        if (typeof body.website === 'string' && body.website.trim() !== '') {
+            console.warn('[public-takeaway] honeypot triggered');
+            return res.status(201).json({ ok: true, confirmed: true });
+        }
+        const name = typeof body.customer_name === 'string' ? body.customer_name.trim().slice(0, 120) : '';
+        if (!name) return res.status(400).json({ error: 'invalid_customer', message: 'Serve il nome' });
+        // Al banco il telefono è facoltativo; da web è l'unico filo che
+        // resta in mano al ristorante se qualcosa va storto: obbligatorio.
+        const phone = typeof body.customer_phone === 'string' ? body.customer_phone.trim().slice(0, 40) : '';
+        if (phone.replace(/\D/g, '').length < 6) {
+            return res.status(400).json({ error: 'invalid_phone', message: 'Serve un numero di telefono' });
+        }
+        const date = typeof body.pickup_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(body.pickup_date) ? body.pickup_date : null;
+        const time = typeof body.pickup_time === 'string' && /^\d{2}:\d{2}$/.test(body.pickup_time) ? body.pickup_time : null;
+        if (!date || !time) return res.status(400).json({ error: 'invalid_slot', message: 'Servono data e orario di ritiro' });
+        if (date < getItalianTodayIso()) return res.status(400).json({ error: 'invalid_slot', message: 'La data è già passata' });
+
+        // Mai force da qui: stop e capienza per il web sono la regola.
+        const slot = await validateTakeawaySlot(tenantId, date, time, { force: false });
+        if (slot.error) return res.status(slot.error.status).json(slot.error.body);
+        const settings = await getTakeawaySettings(tenantId);
+        if (!filterOrderableSlots([time], date, settings.prepMinutes).includes(time)) {
+            return res.status(409).json({ error: 'slot_too_soon', message: 'La cucina non fa in tempo per questo orario' });
+        }
+
+        const built = await buildTakeawayItems(tenantId, body.items);
+        if (built.error) return res.status(400).json({ error: 'invalid_items', message: built.error });
+        const notes = typeof body.notes === 'string' ? body.notes.trim().slice(0, 1000) : '';
+
+        const orderId = await withTenant(tenantId, async client => {
+            const ins = await client.query(
+                `INSERT INTO takeaway_orders (tenant_id, customer_name, customer_phone, pickup_date, pickup_time, shift, status, channel, notes)
+                 VALUES ($1, $2, $3, $4, $5, $6, 'CONFIRMED', 'WEB', $7) RETURNING id`,
+                [tenantId, name, phone, date, time, slot.shift, notes || null]
+            );
+            const id = Number(ins.rows[0].id);
+            for (const item of built.items!) {
+                await client.query(
+                    `INSERT INTO takeaway_order_items (tenant_id, takeaway_order_id, dish_id, name_snapshot, unit_price_cents, qty, note)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+                    [tenantId, id, item.dish_id, item.name, item.cents, item.qty, item.note]
+                );
+            }
+            return id;
+        });
+
+        const view = await loadTakeawayView(tenantId, orderId);
+        try { socketService?.broadcastToAll(tenantId, 'takeaway:created', view); } catch (_) {}
+        // Il banco deve accorgersene anche a CRM chiuso: push come le
+        // prenotazioni voce. Best-effort, l'ordine è comunque in board.
+        const pieces = view.items.reduce((sum: number, i: any) => sum + Number(i.qty), 0);
+        pushSendToRoles(tenantId, ['RECEPTION', 'CASSA', 'MANAGER', 'GENERAL_MANAGER', 'OWNER'], {
+            category: 'service',
+            title: `Asporto ${time} — nuovo ordine`,
+            body: `${name} · ${pieces === 1 ? '1 pezzo' : `${pieces} pezzi`}`,
+            url: '/?view=ASPORTO',
+            tag: `takeaway-new-${orderId}`,
+        }).catch(err => console.warn('[takeaway] push nuovo ordine non inviata:', err?.message ?? err));
+
+        res.status(201).json({
+            ok: true,
+            confirmed: true,
+            pickup_date: view.pickup_date,
+            pickup_time: view.pickup_time,
+            customer_name: view.customer_name,
+            total_cents: view.total_cents,
+        });
+    } catch (err) {
+        console.error('POST /public/takeaway/orders error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+}
+
+// Stesso stampo di publicBookingLimiter: per-IP sulla sola POST, env var
+// dedicata perché la suite di test gira in sequenza dallo stesso IP.
+const publicTakeawayLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    limit: Number(process.env.PUBLIC_ORDER_RATE_LIMIT) || 5,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    message: { error: 'rate_limited', message: 'Troppe richieste, riprova tra qualche minuto.' },
+});
+
+app.get(['/public/takeaway/info', '/public/:slug/takeaway/info'], withPublicTenant(handlePublicTakeawayInfo));
+app.get(['/public/takeaway/catalogo', '/public/:slug/takeaway/catalogo'], withPublicTenant(handlePublicTakeawayCatalogue));
+app.get(['/public/takeaway/slots', '/public/:slug/takeaway/slots'], withPublicTenant(handlePublicTakeawaySlots));
+app.post(['/public/takeaway/orders', '/public/:slug/takeaway/orders'], publicTakeawayLimiter, withPublicTenant(handlePublicTakeawayOrderCreate));
 
 app.get('/takeaway/orders', authenticate, requireFeature('takeaway'), requirePermission('takeaway:view'), async (req, res) => {
     try {

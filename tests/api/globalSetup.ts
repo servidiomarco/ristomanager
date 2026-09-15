@@ -88,6 +88,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
             // La suite fa più POST pubblici al minuto dallo stesso IP di
             // quanti il limiter di produzione ne conceda (5).
             PUBLIC_BOOKING_RATE_LIMIT: '1000',
+            PUBLIC_ORDER_RATE_LIMIT: '1000',
             JWT_REFRESH_SECRET: 'test-jwt-refresh-secret',
             DEFAULT_OWNER_PASSWORD: OWNER_PASSWORD,
             // Gate degli endpoint /admin/tenants (Fase D1): senza questo i
