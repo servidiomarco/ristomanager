@@ -26,8 +26,9 @@ const todayIso = (): string =>
 const ordinaUrl = `${import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app'}/ordina`;
 
 export const TakeawaySettingsCard: React.FC<TakeawaySettingsCardProps> = ({ showToast }) => {
-  const { hasPermission } = useAuth();
+  const { hasPermission, hasFeature } = useAuth();
   const canEdit = hasPermission('takeaway:manage');
+  const hasVoice = hasFeature('voice');
   const [config, setConfig] = useState<TakeawayConfig | null>(null);
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState(false);
@@ -127,6 +128,36 @@ export const TakeawaySettingsCard: React.FC<TakeawaySettingsCardProps> = ({ show
                 <p className="text-[13px] text-[var(--ds-text-muted)]">Accendila quando la cucina è pronta a ricevere ordini dal sito.</p>
               )}
             </Field>
+
+            {hasVoice && (
+              <Field
+                label="Ordini al telefono"
+                hint="Sofia prende gli ordini d'asporto in chiamata, con le stesse regole di slot e capienza."
+                aside={
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={config.voice_enabled}
+                    disabled={!canEdit}
+                    onClick={() => save({ voice_enabled: !config.voice_enabled })}
+                    className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
+                      config.voice_enabled ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-surface-row)] border border-[var(--ds-border)]'
+                    }`}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${
+                        config.voice_enabled ? 'translate-x-5' : 'translate-x-0.5'
+                      } translate-y-0.5`}
+                    />
+                  </button>
+                }
+              >
+                <p className="text-[13px] text-[var(--ds-text-muted)]">
+                  {config.voice_enabled ? 'Sofia propone e registra gli ordini da ritirare.' : 'Spento: al telefono Sofia invita a ordinare di persona o dal sito.'}
+                </p>
+              </Field>
+            )}
 
             <div className="grid gap-4 sm:grid-cols-2">
               <Field

@@ -42,6 +42,8 @@ export interface TakeawayConfig {
   stop_date: string | null;
   /** Interruttore della pagina pubblica /ordina (flag takeaway_online_enabled). */
   online_enabled: boolean;
+  /** Interruttore degli ordini presi da Sofia al telefono (takeaway_voice_enabled). */
+  voice_enabled: boolean;
 }
 
 const getHeaders = (): HeadersInit => {
