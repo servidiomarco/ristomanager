@@ -635,6 +635,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-15 | Funzionalità trasversali | Nei wizard a passi (banchetti, clienti, personale, prenotazioni, onboarding) la barra dei passi su mobile centra da sola il passo attivo: dopo un «Avanti» si vede subito su quale passo ci si trova. |
 | 2026-09-15 | Menu & Banchetti | Nel wizard del banchetto ogni uscita ha un campo di ricerca piatti: filtra la lista per nome o categoria, resta visibile mentre si scorre. |
 | 2026-09-15 | Asporto | Ordini d'asporto al telefono con Sofia: tool voce con match dei piatti per nome e stesse regole di slot/capienza, dietro l'interruttore «Ordini al telefono» (spento di default); configurazione dei tool documentata nel manuale dell'agente. |
 | 2026-09-15 | Asporto | Incasso al ritiro: «Prepara il conto» dalla board apre il conto in coda Cassa (riga «Asporto HH:MM» col nome del cliente); incasso, scontrino e libro cassa seguono il flusso di sempre. |

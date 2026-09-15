@@ -27,8 +27,19 @@ export const StepNav: React.FC<{
   current: number;
   onSelect: (index: number) => void;
   ariaLabel?: string;
-}> = ({ steps, current, onSelect, ariaLabel = 'Passi' }) => (
-  <nav className="flex gap-2 overflow-x-auto scrollbar-hide" aria-label={ariaLabel}>
+}> = ({ steps, current, onSelect, ariaLabel = 'Passi' }) => {
+  const navRef = React.useRef<HTMLElement>(null);
+  // Su mobile la nav scorre e il passo attivo può stare fuori schermo: dopo
+  // un «Avanti» sembra che il form non sia cambiato. Il passo attivo si
+  // centra da solo; `block: 'nearest'` lascia in pace lo scroll verticale
+  // del corpo, che ha già il suo aggancio per-step.
+  React.useEffect(() => {
+    navRef.current
+      ?.querySelector<HTMLElement>('[aria-current="step"]')
+      ?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
+  }, [current]);
+  return (
+  <nav ref={navRef} className="flex gap-2 overflow-x-auto scrollbar-hide" aria-label={ariaLabel}>
     {steps.map((step, i) => {
       const isCurrent = i === current;
       const isDone = i < current && !step.disabled;
@@ -72,4 +83,5 @@ export const StepNav: React.FC<{
       );
     })}
   </nav>
-);
+  );
+};
