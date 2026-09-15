@@ -24088,6 +24088,383 @@ app.get('/reviews/requests', authenticate, requireFeature('reviews'), requirePer
 });
 
 // ============================================
+// MODULO ASPORTO (fase 1 — entità e slot)
+// ============================================
+// L'ordine d'asporto ruota attorno all'ora di ritiro: lo slot viene dalla
+// stessa griglia opening_hours delle prenotazioni (getAvailableSlots, che
+// già sconta chiusure e slot disabilitati), la capienza è per slot ed è di
+// PRODUZIONE (quanti ordini regge la cucina in un quarto d'ora), non di
+// posti. La comanda in cucina non nasce qui: arriva in una PR dedicata via
+// kitchen_order_id. Tutte le route esigono l'entitlement 'takeaway'.
+
+const TAKEAWAY_CAPACITY_KEY = 'takeaway_capacity_per_slot';
+const TAKEAWAY_CAPACITY_DEFAULT = 4;
+const TAKEAWAY_PREP_MINUTES_KEY = 'takeaway_prep_minutes';
+const TAKEAWAY_PREP_MINUTES_DEFAULT = 20;
+// text_value = data ISO: lo «stop asporto» vale per UNA data (di solito
+// stasera) e decade da solo — niente interruttore da ricordarsi di riaprire.
+const TAKEAWAY_STOP_DATE_KEY = 'takeaway_stop_date';
+
+const TAKEAWAY_STATUSES = ['REQUESTED', 'CONFIRMED', 'IN_PREPARATION', 'READY', 'PICKED_UP', 'NO_SHOW', 'CANCELLED'] as const;
+
+async function getTakeawaySettings(tenantId: number): Promise<{ capacityPerSlot: number; prepMinutes: number; stopDate: string | null }> {
+    try {
+        const result = await queryWithRetry(
+            'SELECT key, int_value, text_value FROM app_settings WHERE tenant_id = $1 AND key = ANY($2)',
+            [tenantId, [TAKEAWAY_CAPACITY_KEY, TAKEAWAY_PREP_MINUTES_KEY, TAKEAWAY_STOP_DATE_KEY]]
+        );
+        const byKey = new Map<string, any>(result.rows.map((r: any) => [r.key, r]));
+        const intOr = (key: string, fallback: number) => {
+            const n = Number(byKey.get(key)?.int_value);
+            return Number.isFinite(n) && n > 0 ? Math.trunc(n) : fallback;
+        };
+        const stopRaw = byKey.get(TAKEAWAY_STOP_DATE_KEY)?.text_value;
+        return {
+            capacityPerSlot: intOr(TAKEAWAY_CAPACITY_KEY, TAKEAWAY_CAPACITY_DEFAULT),
+            prepMinutes: intOr(TAKEAWAY_PREP_MINUTES_KEY, TAKEAWAY_PREP_MINUTES_DEFAULT),
+            stopDate: typeof stopRaw === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(stopRaw) ? stopRaw : null,
+        };
+    } catch (err) {
+        console.error('[takeaway] lettura impostazioni fallita, uso i default:', (err as any)?.message || err);
+        return { capacityPerSlot: TAKEAWAY_CAPACITY_DEFAULT, prepMinutes: TAKEAWAY_PREP_MINUTES_DEFAULT, stopDate: null };
+    }
+}
+
+// Uno slot di ritiro è valido se sta nella griglia di apertura di uno dei
+// due turni; il turno dell'ordine deriva da qui, mai dal client.
+async function resolveTakeawayShift(tenantId: number, date: string, time: string): Promise<'LUNCH' | 'DINNER' | null> {
+    const [lunch, dinner] = await Promise.all([
+        getAvailableSlots(tenantId, date, Shift.LUNCH),
+        getAvailableSlots(tenantId, date, Shift.DINNER),
+    ]);
+    if (lunch.includes(time)) return 'LUNCH';
+    if (dinner.includes(time)) return 'DINNER';
+    return null;
+}
+
+async function countTakeawayInSlot(tenantId: number, date: string, time: string, excludeId?: number): Promise<number> {
+    const result = await queryWithRetry(
+        `SELECT COUNT(*)::int AS n FROM takeaway_orders
+         WHERE tenant_id = $1 AND pickup_date = $2 AND pickup_time = $3
+           AND status NOT IN ('CANCELLED', 'NO_SHOW') AND id <> COALESCE($4, -1)`,
+        [tenantId, date, time, excludeId ?? null]
+    );
+    return result.rows[0]?.n ?? 0;
+}
+
+async function loadTakeawayView(tenantId: number, orderId: number): Promise<any | null> {
+    const [order, items] = await Promise.all([
+        queryWithRetry('SELECT * FROM takeaway_orders WHERE id = $1 AND tenant_id = $2', [orderId, tenantId]),
+        queryWithRetry(
+            'SELECT id, takeaway_order_id, dish_id, name_snapshot, unit_price_cents, qty, note FROM takeaway_order_items WHERE takeaway_order_id = $1 AND tenant_id = $2 ORDER BY id',
+            [orderId, tenantId]
+        ),
+    ]);
+    if (order.rows.length === 0) return null;
+    const rows = items.rows;
+    const total = rows.reduce((sum: number, r: any) => sum + Number(r.unit_price_cents) * Number(r.qty), 0);
+    return { ...order.rows[0], items: rows, total_cents: total };
+}
+
+// Valida le righe e congela nome/prezzo dal menu. Prezzo base del piatto:
+// il listino dedicato all'asporto arriva con la scelta menu-asporto, non qui.
+async function buildTakeawayItems(tenantId: number, raw: unknown): Promise<{ error?: string; items?: { dish_id: number; name: string; cents: number; qty: number; note: string | null }[] }> {
+    if (!Array.isArray(raw) || raw.length === 0) return { error: 'Serve almeno una riga' };
+    if (raw.length > 50) return { error: 'Troppe righe (max 50)' };
+    const parsed: { dish_id: number; qty: number; note: string | null }[] = [];
+    for (const r of raw) {
+        const dishId = Math.trunc(Number((r as any)?.dish_id));
+        const qty = Math.trunc(Number((r as any)?.qty ?? 1));
+        if (!Number.isFinite(dishId) || dishId <= 0) return { error: 'dish_id mancante o non valido' };
+        if (!Number.isFinite(qty) || qty < 1 || qty > 99) return { error: 'Quantità non valida (1-99)' };
+        const note = typeof (r as any)?.note === 'string' ? (r as any).note.trim().slice(0, 300) : '';
+        parsed.push({ dish_id: dishId, qty, note: note || null });
+    }
+    const dishIds = [...new Set(parsed.map(p => p.dish_id))];
+    const dishes = await queryWithRetry(
+        'SELECT id, name, price FROM dishes WHERE id = ANY($1::int[]) AND tenant_id = $2',
+        [dishIds, tenantId]
+    );
+    const byId = new Map<number, any>(dishes.rows.map((d: any) => [Number(d.id), d]));
+    const items = [];
+    for (const p of parsed) {
+        const dish = byId.get(p.dish_id);
+        if (!dish) return { error: `Piatto ${p.dish_id} inesistente` };
+        items.push({
+            dish_id: p.dish_id,
+            name: String(dish.name),
+            cents: Math.max(0, Math.round(Number(dish.price) * 100)),
+            qty: p.qty,
+            note: p.note,
+        });
+    }
+    return { items };
+}
+
+// Le route di scrittura ricontrollano slot, stop e capienza; `force: true`
+// scavalca stop e capienza (MAI la validità dello slot): chi prende
+// l'ordine al banco può decidere che uno in più ci sta, la pagina pubblica
+// delle fasi successive no.
+async function validateTakeawaySlot(
+    tenantId: number, date: string, time: string,
+    opts: { force: boolean; excludeId?: number }
+): Promise<{ error?: { status: number; body: any }; shift?: 'LUNCH' | 'DINNER' }> {
+    const shift = await resolveTakeawayShift(tenantId, date, time);
+    if (!shift) return { error: { status: 400, body: { error: 'invalid_slot', message: 'Orario fuori dalla griglia di apertura' } } };
+    const settings = await getTakeawaySettings(tenantId);
+    if (!opts.force) {
+        if (settings.stopDate === date) {
+            return { error: { status: 409, body: { error: 'takeaway_stopped', message: 'Asporto fermo per questa data' } } };
+        }
+        const booked = await countTakeawayInSlot(tenantId, date, time, opts.excludeId);
+        if (booked >= settings.capacityPerSlot) {
+            return { error: { status: 409, body: { error: 'slot_full', message: 'Slot al completo', booked, capacity: settings.capacityPerSlot } } };
+        }
+    }
+    return { shift };
+}
+
+// La disponibilità per la scelta dello slot: griglia dei due turni con
+// prenotato/capienza. È la fotografia per chi prende l'ordine, non un
+// lock: la POST ricontrolla comunque.
+app.get('/takeaway/slots', authenticate, requireFeature('takeaway'), requirePermission('takeaway:view'), async (req, res) => {
+    try {
+        const date = typeof req.query.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date)
+            ? req.query.date : getItalianTodayIso();
+        const [lunch, dinner, settings, counts] = await Promise.all([
+            getAvailableSlots(req.tenantId!, date, Shift.LUNCH),
+            getAvailableSlots(req.tenantId!, date, Shift.DINNER),
+            getTakeawaySettings(req.tenantId!),
+            queryWithRetry(
+                `SELECT pickup_time, COUNT(*)::int AS n FROM takeaway_orders
+                 WHERE tenant_id = $1 AND pickup_date = $2 AND status NOT IN ('CANCELLED', 'NO_SHOW')
+                 GROUP BY pickup_time`,
+                [req.tenantId!, date]
+            ),
+        ]);
+        const booked = new Map<string, number>(counts.rows.map((r: any) => [r.pickup_time, r.n]));
+        const toSlots = (times: string[]) => times.map(time => ({
+            time,
+            booked: booked.get(time) ?? 0,
+            capacity: settings.capacityPerSlot,
+        }));
+        res.json({
+            date,
+            stopped: settings.stopDate === date,
+            capacity_per_slot: settings.capacityPerSlot,
+            lunch: toSlots(lunch),
+            dinner: toSlots(dinner),
+        });
+    } catch (err) {
+        console.error('GET /takeaway/slots error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Impostazioni operative del modulo (capienza, minuti di preparazione,
+// stop): la lettura serve anche alla board per gli stati a orologio, la
+// scrittura arriva con la card Impostazioni della PR dedicata.
+app.get('/takeaway/config', authenticate, requireFeature('takeaway'), requirePermission('takeaway:view'), async (req, res) => {
+    try {
+        const s = await getTakeawaySettings(req.tenantId!);
+        res.json({ capacity_per_slot: s.capacityPerSlot, prep_minutes: s.prepMinutes, stop_date: s.stopDate });
+    } catch (err) {
+        console.error('GET /takeaway/config error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.get('/takeaway/orders', authenticate, requireFeature('takeaway'), requirePermission('takeaway:view'), async (req, res) => {
+    try {
+        const date = typeof req.query.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date)
+            ? req.query.date : getItalianTodayIso();
+        const orders = await queryWithRetry(
+            `SELECT * FROM takeaway_orders WHERE tenant_id = $1 AND pickup_date = $2
+             ORDER BY pickup_time, id`,
+            [req.tenantId!, date]
+        );
+        const ids = orders.rows.map((r: any) => Number(r.id));
+        const items = ids.length === 0 ? { rows: [] } : await queryWithRetry(
+            `SELECT id, takeaway_order_id, dish_id, name_snapshot, unit_price_cents, qty, note
+             FROM takeaway_order_items WHERE takeaway_order_id = ANY($1::bigint[]) AND tenant_id = $2 ORDER BY id`,
+            [ids, req.tenantId!]
+        );
+        const byOrder = new Map<number, any[]>();
+        for (const item of items.rows) {
+            const key = Number(item.takeaway_order_id);
+            if (!byOrder.has(key)) byOrder.set(key, []);
+            byOrder.get(key)!.push(item);
+        }
+        res.json({
+            date,
+            orders: orders.rows.map((o: any) => {
+                const rows = byOrder.get(Number(o.id)) ?? [];
+                const total = rows.reduce((sum, r) => sum + Number(r.unit_price_cents) * Number(r.qty), 0);
+                return { ...o, items: rows, total_cents: total };
+            }),
+        });
+    } catch (err) {
+        console.error('GET /takeaway/orders error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/takeaway/orders', authenticate, requireFeature('takeaway'), requirePermission('takeaway:manage'), async (req, res) => {
+    try {
+        const body = req.body ?? {};
+        const name = typeof body.customer_name === 'string' ? body.customer_name.trim().slice(0, 120) : '';
+        if (!name) return res.status(400).json({ error: 'invalid_customer', message: 'Serve il nome del cliente' });
+        const phone = typeof body.customer_phone === 'string' ? body.customer_phone.trim().slice(0, 40) : '';
+        const notes = typeof body.notes === 'string' ? body.notes.trim().slice(0, 1000) : '';
+        const date = typeof body.pickup_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(body.pickup_date) ? body.pickup_date : null;
+        const time = typeof body.pickup_time === 'string' && /^\d{2}:\d{2}$/.test(body.pickup_time) ? body.pickup_time : null;
+        if (!date || !time) return res.status(400).json({ error: 'invalid_slot', message: 'Servono pickup_date (YYYY-MM-DD) e pickup_time (HH:MM)' });
+
+        const slot = await validateTakeawaySlot(req.tenantId!, date, time, { force: body.force === true });
+        if (slot.error) return res.status(slot.error.status).json(slot.error.body);
+
+        const built = await buildTakeawayItems(req.tenantId!, body.items);
+        if (built.error) return res.status(400).json({ error: 'invalid_items', message: built.error });
+
+        const orderId = await withTenant(req.tenantId!, async client => {
+            const ins = await client.query(
+                `INSERT INTO takeaway_orders (tenant_id, customer_name, customer_phone, pickup_date, pickup_time, shift, status, channel, notes, created_by_user_id)
+                 VALUES ($1, $2, $3, $4, $5, $6, 'CONFIRMED', 'STAFF', $7, $8) RETURNING id`,
+                [req.tenantId!, name, phone || null, date, time, slot.shift, notes || null, req.user?.userId ?? null]
+            );
+            const id = Number(ins.rows[0].id);
+            for (const item of built.items!) {
+                await client.query(
+                    `INSERT INTO takeaway_order_items (tenant_id, takeaway_order_id, dish_id, name_snapshot, unit_price_cents, qty, note)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+                    [req.tenantId!, id, item.dish_id, item.name, item.cents, item.qty, item.note]
+                );
+            }
+            return id;
+        });
+
+        const view = await loadTakeawayView(req.tenantId!, orderId);
+        // A tutti, mittente compreso: la riga del server è autoritativa,
+        // come per le prenotazioni.
+        try { socketService?.broadcastToAll(req.tenantId!, 'takeaway:created', view); } catch (_) {}
+        res.status(201).json(view);
+    } catch (err) {
+        console.error('POST /takeaway/orders error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.patch('/takeaway/orders/:id', authenticate, requireFeature('takeaway'), requirePermission('takeaway:manage'), async (req, res) => {
+    try {
+        const orderId = Math.trunc(Number(req.params.id));
+        if (!Number.isFinite(orderId) || orderId <= 0) return res.status(400).json({ error: 'invalid_id' });
+        const current = await queryWithRetry('SELECT * FROM takeaway_orders WHERE id = $1 AND tenant_id = $2', [orderId, req.tenantId!]);
+        if (current.rows.length === 0) return res.status(404).json({ error: 'not_found' });
+        const body = req.body ?? {};
+
+        const fields: string[] = [];
+        const params: any[] = [orderId, req.tenantId!];
+        const push = (sql: string, value: any) => { params.push(value); fields.push(`${sql} = $${params.length}`); };
+
+        if ('customer_name' in body) {
+            const name = typeof body.customer_name === 'string' ? body.customer_name.trim().slice(0, 120) : '';
+            if (!name) return res.status(400).json({ error: 'invalid_customer', message: 'Il nome non può essere vuoto' });
+            push('customer_name', name);
+        }
+        if ('customer_phone' in body) {
+            const phone = typeof body.customer_phone === 'string' ? body.customer_phone.trim().slice(0, 40) : '';
+            push('customer_phone', phone || null);
+        }
+        if ('notes' in body) {
+            const notes = typeof body.notes === 'string' ? body.notes.trim().slice(0, 1000) : '';
+            push('notes', notes || null);
+        }
+        if ('pickup_date' in body || 'pickup_time' in body) {
+            const date = 'pickup_date' in body ? body.pickup_date : current.rows[0].pickup_date;
+            const time = 'pickup_time' in body ? body.pickup_time : current.rows[0].pickup_time;
+            if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date) || typeof time !== 'string' || !/^\d{2}:\d{2}$/.test(time)) {
+                return res.status(400).json({ error: 'invalid_slot', message: 'Formato data/ora non valido' });
+            }
+            const slot = await validateTakeawaySlot(req.tenantId!, date, time, { force: body.force === true, excludeId: orderId });
+            if (slot.error) return res.status(slot.error.status).json(slot.error.body);
+            push('pickup_date', date);
+            push('pickup_time', time);
+            push('shift', slot.shift);
+        }
+
+        let builtItems: Awaited<ReturnType<typeof buildTakeawayItems>>['items'] | undefined;
+        if ('items' in body) {
+            const built = await buildTakeawayItems(req.tenantId!, body.items);
+            if (built.error) return res.status(400).json({ error: 'invalid_items', message: built.error });
+            builtItems = built.items;
+        }
+
+        if (fields.length === 0 && !builtItems) return res.status(400).json({ error: 'empty_patch', message: 'Nessun campo da aggiornare' });
+
+        await withTenant(req.tenantId!, async client => {
+            if (fields.length > 0) {
+                await client.query(
+                    `UPDATE takeaway_orders SET ${fields.join(', ')}, updated_at = now() WHERE id = $1 AND tenant_id = $2`,
+                    params
+                );
+            }
+            if (builtItems) {
+                await client.query('DELETE FROM takeaway_order_items WHERE takeaway_order_id = $1 AND tenant_id = $2', [orderId, req.tenantId!]);
+                for (const item of builtItems) {
+                    await client.query(
+                        `INSERT INTO takeaway_order_items (tenant_id, takeaway_order_id, dish_id, name_snapshot, unit_price_cents, qty, note)
+                         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+                        [req.tenantId!, orderId, item.dish_id, item.name, item.cents, item.qty, item.note]
+                    );
+                }
+                await client.query('UPDATE takeaway_orders SET updated_at = now() WHERE id = $1 AND tenant_id = $2', [orderId, req.tenantId!]);
+            }
+        });
+
+        const view = await loadTakeawayView(req.tenantId!, orderId);
+        try { socketService?.broadcastToAll(req.tenantId!, 'takeaway:updated', view); } catch (_) {}
+        res.json(view);
+    } catch (err) {
+        console.error('PATCH /takeaway/orders/:id error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Cambio di stato esplicito, niente DELETE: annullare È uno stato, e la
+// board deve poter correggere (un «ritirato» per sbaglio torna «pronto»).
+// I timestamp seguono lo stato: tornare indietro li azzera.
+app.post('/takeaway/orders/:id/status', authenticate, requireFeature('takeaway'), requirePermission('takeaway:manage'), async (req, res) => {
+    try {
+        const orderId = Math.trunc(Number(req.params.id));
+        if (!Number.isFinite(orderId) || orderId <= 0) return res.status(400).json({ error: 'invalid_id' });
+        const status = req.body?.status;
+        if (!(TAKEAWAY_STATUSES as readonly string[]).includes(status)) {
+            return res.status(400).json({ error: 'invalid_status', message: `Stato non valido: ${String(status).slice(0, 30)}` });
+        }
+        const updated = await queryWithRetry(
+            `UPDATE takeaway_orders SET
+                status = $3::text,
+                ready_at = CASE
+                    WHEN $3::text = 'READY' THEN COALESCE(ready_at, now())
+                    WHEN $3::text IN ('REQUESTED', 'CONFIRMED', 'IN_PREPARATION') THEN NULL
+                    ELSE ready_at END,
+                picked_up_at = CASE WHEN $3::text = 'PICKED_UP' THEN COALESCE(picked_up_at, now()) ELSE NULL END,
+                cancelled_at = CASE WHEN $3::text IN ('CANCELLED', 'NO_SHOW') THEN COALESCE(cancelled_at, now()) ELSE NULL END,
+                updated_at = now()
+             WHERE id = $1 AND tenant_id = $2 RETURNING id`,
+            [orderId, req.tenantId!, status]
+        );
+        if (updated.rows.length === 0) return res.status(404).json({ error: 'not_found' });
+        const view = await loadTakeawayView(req.tenantId!, orderId);
+        try { socketService?.broadcastToAll(req.tenantId!, 'takeaway:updated', view); } catch (_) {}
+        res.json(view);
+    } catch (err) {
+        console.error('POST /takeaway/orders/:id/status error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ============================================
 // CANALI DI RISPOSTA PRENOTAZIONI (bookingChannelPolicy)
 // ============================================
 // Per ogni fonte di prenotazione, l'ordine dei canali con cui rispondere
