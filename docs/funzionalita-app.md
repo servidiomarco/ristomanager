@@ -196,7 +196,8 @@ Modulo add-on (venduto a parte, come Recensioni) per gli ordini da ritirare — 
 - **Presa ordine al banco**: nome e telefono del cliente, slot, piatti dal menu con quantità e nota per la cucina, note dell'ordine; nome e prezzo restano congelati come detti al cliente anche se il menu cambia dopo.
 - **Stati che avanzano da soli**: un ordine confermato diventa «Da produrre» quando ora di ritiro − minuti di preparazione è passata, un «Pronto» oltre l'ora di ritiro diventa «Ritiro in ritardo» — stessi automatismi a orologio di «In arrivo»/«In uscita» delle prenotazioni. Il banco muove solo gli stati veri: in preparazione, pronto, ritirato (con correzioni sempre possibili).
 - **Impostazioni → Asporto**: capienza per slot e minuti di preparazione; lo stop si mette e si toglie anche dalla board. Le manopole stanno sul permesso «Gestisce ordini asporto», non sulle impostazioni generali: sono decisioni di servizio.
-- In arrivo nelle prossime fasi: comanda in cucina generata al momento giusto, pagina pubblica di ordinazione e presa ordine telefonica con Sofia.
+- **«Manda in cucina»**: da Confermato/Da produrre l'ordine genera una comanda vera — monitor di partita, passe e stampa per centro come una comanda di sala, intestata «Asporto HH:MM» col nome del cliente. Quando la cucina segna pronta l'uscita, l'ordine passa da solo a «Pronto» sulla board e parte la notifica push «Asporto HH:MM — Pronto l'ordine di …».
+- In arrivo nelle prossime fasi: pagina pubblica di ordinazione e presa ordine telefonica con Sofia.
 
 ---
 
@@ -632,6 +633,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-15 | Asporto | «Manda in cucina»: l'ordine d'asporto genera la comanda (KDS, passe e stampa per partita, intestata «Asporto HH:MM»); il «pronto» del monitor riporta da solo l'ordine a Pronto sulla board, con push dedicata. |
 | 2026-09-15 | Asporto | Sezione Impostazioni → Asporto: capienza per slot, minuti di preparazione e «stop asporto» per data (dalla card o direttamente dalla board), con aggiornamento in tempo reale delle board aperte. |
 | 2026-09-15 | Asporto | Nuovo modulo add-on: board degli ordini da ritirare con slot a capienza di produzione, presa ordine al banco (piatti, quantità, note cucina) e stati che avanzano da soli con l'orologio (Da produrre, Ritiro in ritardo); permessi dedicati «Visualizza/Gestisce ordini asporto». |
 | 2026-09-14 | Recensioni Google | Nuova pagina «Recensioni» nel gruppo Comunicazioni: il registro delle richieste post-visita con esito, canale e motivo degli eventuali salti. |

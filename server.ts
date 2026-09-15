@@ -24325,6 +24325,118 @@ app.put('/takeaway/config', authenticate, requireFeature('takeaway'), requirePer
     }
 });
 
+// «Manda in cucina»: genera la comanda TAKEAWAY (senza tavolo — il CHECK
+// lo permette dalla migration asporto-in-cucina) e lancia l'unica uscita
+// con fireCourseInTx, che accoda anche le stampe per partita. Da qui in
+// poi KDS, passe, coda stampa e push «uscita pronta» lavorano l'ordine
+// come una comanda qualunque, etichettata «Asporto HH:MM».
+app.post('/takeaway/orders/:id/fire', authenticate, requireFeature('takeaway'), requirePermission('takeaway:manage'), async (req, res) => {
+    try {
+        const takeawayId = Math.trunc(Number(req.params.id));
+        if (!Number.isFinite(takeawayId) || takeawayId <= 0) return res.status(400).json({ error: 'invalid_id' });
+
+        const result = await withTenant(req.tenantId!, async client => {
+            // FOR UPDATE: due «manda in cucina» simultanei non devono
+            // stampare la comanda due volte.
+            const cur = await client.query(
+                'SELECT * FROM takeaway_orders WHERE id = $1 AND tenant_id = $2 FOR UPDATE',
+                [takeawayId, req.tenantId!]
+            );
+            const tw = cur.rows[0];
+            if (!tw) return { error: { status: 404, body: { error: 'not_found' } } };
+            if (tw.kitchen_order_id != null) {
+                return { error: { status: 409, body: { error: 'already_fired', kitchen_order_id: tw.kitchen_order_id } } };
+            }
+            if (!['REQUESTED', 'CONFIRMED'].includes(tw.status)) {
+                return { error: { status: 409, body: { error: 'invalid_state', status: tw.status } } };
+            }
+            const items = await client.query(
+                'SELECT * FROM takeaway_order_items WHERE takeaway_order_id = $1 AND tenant_id = $2 ORDER BY id',
+                [takeawayId, req.tenantId!]
+            );
+            if (items.rows.length === 0) return { error: { status: 409, body: { error: 'empty_order' } } };
+
+            // Il servizio della comanda è quello del RITIRO, non l'orologio:
+            // un asporto delle 19:30 lanciato alle 16:50 è comunque cena.
+            const ins = await client.query(
+                `INSERT INTO orders
+                    (tenant_id, reservation_id, table_id, order_type, covers, notes,
+                     opened_by_user_id, service_date, shift)
+                 VALUES ($1, NULL, NULL, 'TAKEAWAY', 1, $2, $3, $4, $5)
+                 RETURNING id`,
+                [req.tenantId!, `Asporto ${tw.pickup_time} · ${tw.customer_name}`,
+                 req.user?.userId ?? null, tw.pickup_date, tw.shift]
+            );
+            const kitchenOrderId = Number(ins.rows[0].id);
+
+            // Partita per piatto come alla battuta: la scelta del piatto,
+            // altrimenti la partita di default della categoria.
+            const dishIds = [...new Set(items.rows.map((r: any) => r.dish_id).filter((d: any) => d != null))];
+            const stations = dishIds.length === 0 ? { rows: [] } : await client.query(
+                `SELECT d.id, COALESCE(d.station_id, cs.station_id) AS station_id
+                 FROM dishes d
+                 LEFT JOIN LATERAL (
+                     SELECT station_id FROM category_stations cs
+                     WHERE cs.tenant_id = d.tenant_id AND LOWER(cs.category) = LOWER(d.category)
+                     ORDER BY (cs.category = d.category) DESC LIMIT 1
+                 ) cs ON true
+                 WHERE d.id = ANY($1::int[]) AND d.tenant_id = $2`,
+                [dishIds, req.tenantId!]
+            );
+            const stationByDish = new Map<number, number | null>(
+                stations.rows.map((r: any) => [Number(r.id), r.station_id ?? null])
+            );
+            for (const item of items.rows) {
+                await client.query(
+                    `INSERT INTO order_items
+                        (tenant_id, order_id, dish_id, name_snapshot, unit_price_cents, qty,
+                         note, course_no, seat_no, station_id, status, queued_at, created_by_user_id)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, 1, NULL, $8, 'QUEUED', CURRENT_TIMESTAMP, $9)`,
+                    [req.tenantId!, kitchenOrderId, item.dish_id, item.name_snapshot,
+                     item.unit_price_cents, item.qty, item.note,
+                     item.dish_id != null ? stationByDish.get(Number(item.dish_id)) ?? null : null,
+                     req.user?.userId ?? null]
+                );
+            }
+            const fired = await fireCourseInTx(client, req.tenantId!, kitchenOrderId, 1);
+            await client.query(
+                `UPDATE takeaway_orders
+                 SET kitchen_order_id = $3, status = 'IN_PREPARATION', updated_at = now()
+                 WHERE id = $1 AND tenant_id = $2`,
+                [takeawayId, req.tenantId!, kitchenOrderId]
+            );
+            return { kitchenOrderId, fired };
+        });
+        if (result.error) return res.status(result.error.status).json(result.error.body);
+
+        const kitchenOrderId = result.kitchenOrderId!;
+        const fired = result.fired!;
+        const kitchenView = await loadOrderView(req.tenantId!, kitchenOrderId);
+        try {
+            socketService?.broadcastToAll(req.tenantId!, 'order:created', kitchenView.order);
+            const firedItems = kitchenView.items.filter((i: any) => i.course_no === 1 && i.status === 'SENT');
+            socketService?.broadcastToAll(req.tenantId!, 'course:fired', {
+                order_id: kitchenOrderId, course_no: 1, table_id: null, items: firedItems,
+            });
+            // Ogni monitor riceve solo le righe della propria partita.
+            for (const st of new Set(firedItems.map((i: any) => i.station_id))) {
+                socketService?.broadcastToStation(req.tenantId!, st as number | null, 'kds:fired', {
+                    order_id: kitchenOrderId, course_no: 1, table_id: null,
+                    items: firedItems.filter((i: any) => i.station_id === st),
+                });
+            }
+        } catch (_) {}
+        await broadcastCourseReadyIfAutoComplete(req.tenantId!, kitchenOrderId, 1, fired);
+
+        const view = await loadTakeawayView(req.tenantId!, takeawayId);
+        try { socketService?.broadcastToAll(req.tenantId!, 'takeaway:updated', view); } catch (_) {}
+        res.json(view);
+    } catch (err) {
+        console.error('POST /takeaway/orders/:id/fire error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 app.get('/takeaway/orders', authenticate, requireFeature('takeaway'), requirePermission('takeaway:view'), async (req, res) => {
     try {
         const date = typeof req.query.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date)
@@ -28240,9 +28352,15 @@ async function broadcastCourseReadyIfAutoComplete(tenantId: number, orderId: num
 // COMANDA_ANNULLO — un agente vecchio NON deve poterli stampare come piatti
 // da cucinare, e su un kind sconosciuto si arena senza stampare.
 async function enqueueCoursePrintsInTx(client: any, tenantId: number, orderId: number, courseNo: number, firedRows: any[], variation?: { label: 'AGGIUNTA' | 'ANNULLO CHIAMATA' | 'STORNO'; reason?: string | null }): Promise<void> {
+    // Per l'asporto il ticket non ha tavolo né coperti: l'intestazione è
+    // «Asporto HH:MM» — l'ora di ritiro è ciò che serve alla partita.
     const ctx = await client.query(
-        `SELECT o.covers, t.name AS table_name
-         FROM orders o LEFT JOIN tables t ON t.id = o.table_id AND t.tenant_id = o.tenant_id
+        `SELECT CASE WHEN o.order_type = 'TAKEAWAY' THEN NULL ELSE o.covers END AS covers,
+                CASE WHEN o.order_type = 'TAKEAWAY' THEN 'Asporto ' || COALESCE(tw.pickup_time, '')
+                     ELSE t.name END AS table_name
+         FROM orders o
+         LEFT JOIN tables t ON t.id = o.table_id AND t.tenant_id = o.tenant_id
+         LEFT JOIN takeaway_orders tw ON tw.kitchen_order_id = o.id AND tw.tenant_id = o.tenant_id
          WHERE o.id = $1 AND o.tenant_id = $2`,
         [orderId, tenantId]
     );
@@ -29634,14 +29752,19 @@ app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req,
             `SELECT oi.id, oi.order_id, oi.course_no, oi.name_snapshot, oi.qty,
                     oi.modifiers, oi.note, oi.status, oi.station_id, oi.weight_grams,
                     oi.fired_at, oi.station_start_at, oi.started_at, oi.ready_at,
-                    o.table_id, t.name AS table_name, o.opened_at AS order_opened_at,
+                    o.table_id,
+                    CASE WHEN o.order_type = 'TAKEAWAY' THEN 'Asporto ' || tw.pickup_time
+                         ELSE t.name END AS table_name,
+                    o.opened_at AS order_opened_at,
                     o.covers AS order_covers,
-                    r.customer_name, r.notes AS reservation_notes,
+                    COALESCE(r.customer_name, tw.customer_name) AS customer_name,
+                    r.notes AS reservation_notes,
                     u.full_name AS opened_by_name,
                     c.dietary_notes AS customer_dietary_notes
              FROM order_items oi
              JOIN orders o ON o.id = oi.order_id
              LEFT JOIN tables t ON t.id = o.table_id AND t.tenant_id = o.tenant_id
+             LEFT JOIN takeaway_orders tw ON tw.kitchen_order_id = o.id AND tw.tenant_id = o.tenant_id
              LEFT JOIN users u ON u.id = o.opened_by_user_id AND u.tenant_id = o.tenant_id
              LEFT JOIN reservations r ON r.id = o.reservation_id AND r.tenant_id = o.tenant_id
              -- Gli allergeni stanno in anagrafica cliente, agganciata per
@@ -30063,21 +30186,48 @@ app.post('/kds/items/:id/status', authenticate, requirePermission('orders:kds'),
         // passe: senza push resta il socket e la lampada sui monitor.
         if (courseReady) {
             queryWithRetry(
-                `SELECT t.name AS table_name
-                 FROM orders o LEFT JOIN tables t ON t.id = o.table_id AND t.tenant_id = o.tenant_id
+                `SELECT o.order_type, t.name AS table_name,
+                        tw.pickup_time AS takeaway_time, tw.customer_name AS takeaway_customer
+                 FROM orders o
+                 LEFT JOIN tables t ON t.id = o.table_id AND t.tenant_id = o.tenant_id
+                 LEFT JOIN takeaway_orders tw ON tw.kitchen_order_id = o.id AND tw.tenant_id = o.tenant_id
                  WHERE o.id = $1 AND o.tenant_id = $2`,
                 [item.order_id, req.tenantId!]
-            ).then(info => pushSendToRoles(
-                req.tenantId!,
-                ['WAITER', 'MANAGER', 'GENERAL_MANAGER', 'OWNER'],
-                {
-                    category: 'service',
-                    title: `Tavolo ${info.rows[0]?.table_name ?? '—'} — cucina`,
-                    body: `${item.course_no}ª uscita pronta`,
-                    url: `/?view=COMANDE`,
-                    tag: `course-${item.order_id}-${item.course_no}`,
-                }
-            )).catch(err => console.warn('[kds] push uscita pronta non inviata:', err?.message ?? err));
+            ).then(info => {
+                const row = info.rows[0];
+                const takeaway = row?.order_type === 'TAKEAWAY';
+                return pushSendToRoles(
+                    req.tenantId!,
+                    ['WAITER', 'MANAGER', 'GENERAL_MANAGER', 'OWNER'],
+                    {
+                        category: 'service',
+                        title: takeaway
+                            ? `Asporto ${row?.takeaway_time ?? ''} — cucina`
+                            : `Tavolo ${row?.table_name ?? '—'} — cucina`,
+                        body: takeaway
+                            ? `Pronto l'ordine di ${row?.takeaway_customer ?? '—'}`
+                            : `${item.course_no}ª uscita pronta`,
+                        url: takeaway ? `/?view=ASPORTO` : `/?view=COMANDE`,
+                        tag: `course-${item.order_id}-${item.course_no}`,
+                    }
+                );
+            }).catch(err => console.warn('[kds] push uscita pronta non inviata:', err?.message ?? err));
+
+            // Il cerchio dell'asporto si chiude da solo: il «pronto» del
+            // monitor porta l'ordine a READY sulla board del banco, senza
+            // che nessuno lo ribatta a mano. Best-effort come la push.
+            queryWithRetry(
+                `UPDATE takeaway_orders
+                 SET status = 'READY', ready_at = COALESCE(ready_at, now()), updated_at = now()
+                 WHERE kitchen_order_id = $1 AND tenant_id = $2 AND status = 'IN_PREPARATION'
+                 RETURNING id`,
+                [item.order_id, req.tenantId!]
+            ).then(async upd => {
+                const takeawayId = upd.rows[0]?.id;
+                if (takeawayId == null) return;
+                const view = await loadTakeawayView(req.tenantId!, Number(takeawayId));
+                socketService?.broadcastToAll(req.tenantId!, 'takeaway:updated', view);
+            }).catch(err => console.warn('[kds] takeaway READY non propagato:', err?.message ?? err));
         }
 
         res.json({
@@ -30115,10 +30265,14 @@ app.get('/kds/expediter', authenticate, requirePermission('orders:expedite'), as
             `SELECT oi.id, oi.order_id, oi.course_no, oi.name_snapshot, oi.qty,
                     oi.status, oi.station_id, oi.queued_at, oi.fired_at,
                     oi.station_start_at, oi.ready_at,
-                    o.table_id, t.name AS table_name, r.customer_name
+                    o.table_id,
+                    CASE WHEN o.order_type = 'TAKEAWAY' THEN 'Asporto ' || tw.pickup_time
+                         ELSE t.name END AS table_name,
+                    COALESCE(r.customer_name, tw.customer_name) AS customer_name
              FROM order_items oi
              JOIN orders o ON o.id = oi.order_id
              LEFT JOIN tables t ON t.id = o.table_id AND t.tenant_id = o.tenant_id
+             LEFT JOIN takeaway_orders tw ON tw.kitchen_order_id = o.id AND tw.tenant_id = o.tenant_id
              LEFT JOIN reservations r ON r.id = o.reservation_id AND r.tenant_id = o.tenant_id
              WHERE o.status = 'OPEN'
                AND o.tenant_id = $3

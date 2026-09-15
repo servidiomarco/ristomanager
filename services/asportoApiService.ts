@@ -110,6 +110,14 @@ class AsportoApiService {
     });
   }
 
+  /** «Manda in cucina»: genera la comanda TAKEAWAY e lancia l'uscita. */
+  async fire(id: number): Promise<TakeawayOrderView> {
+    return apiRequest(`${API_URL}/takeaway/orders/${id}/fire`, {
+      method: 'POST',
+      headers: getHeaders(),
+    });
+  }
+
   async setStatus(id: number, status: TakeawayStatus): Promise<TakeawayOrderView> {
     return apiRequest(`${API_URL}/takeaway/orders/${id}/status`, {
       method: 'POST',

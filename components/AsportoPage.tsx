@@ -236,12 +236,22 @@ export const AsportoPage: React.FC<AsportoPageProps> = ({ dishes, isInitialLoadi
     }
   };
 
+  const fireOrder = async (order: TakeawayOrderView) => {
+    try {
+      applyView(await asportoApiService.fire(order.id));
+    } catch {
+      // already_fired, stato cambiato altrove, o rete: la verità è sul server.
+      fetchDay(dateRef.current);
+    }
+  };
+
   const detail = selected && (
     <DetailPanel
       order={selected}
       state={stateOf(selected)}
       readOnly={!canManage}
       onSetStatus={state => setStatus(selected, state)}
+      onFire={() => fireOrder(selected)}
       onEdit={() => setSheetOrder(selected)}
       onClose={() => setSelectedId(null)}
     />
@@ -445,17 +455,20 @@ const DetailPanel: React.FC<{
   state: AsportoStateKey;
   readOnly?: boolean;
   onSetStatus: (state: Exclude<AsportoStateKey, 'due' | 'late'>) => void;
+  onFire: () => void;
   onEdit: () => void;
   onClose: () => void;
-}> = ({ order, state, readOnly, onSetStatus, onEdit }) => {
+}> = ({ order, state, readOnly, onSetStatus, onFire, onEdit }) => {
   const ds = asportoStateDs(state);
   // Il verbo giusto per lo stato in cui l'ordine si trova adesso: un solo
-  // bottone primario, mai un menu di sette stati.
-  const primary: { label: string; icon: React.ComponentType<{ className?: string }>; next: Exclude<AsportoStateKey, 'due' | 'late'> } | null =
-    state === 'requested' ? { label: 'Conferma', icon: Check, next: 'confirmed' }
-    : state === 'confirmed' || state === 'due' ? { label: 'In preparazione', icon: ChefHat, next: 'preparing' }
-    : state === 'preparing' ? { label: 'Pronto', icon: Check, next: 'ready' }
-    : state === 'ready' || state === 'late' ? { label: 'Ritirato', icon: ShoppingBag, next: 'picked' }
+  // bottone primario, mai un menu di sette stati. Da confermato/da produrre
+  // il verbo è «Manda in cucina»: genera la comanda (KDS + stampa) e il
+  // ritorno a «Pronto» arriva da solo dal monitor di partita.
+  const primary: { label: string; icon: React.ComponentType<{ className?: string }>; action: () => void } | null =
+    state === 'requested' ? { label: 'Conferma', icon: Check, action: () => onSetStatus('confirmed') }
+    : state === 'confirmed' || state === 'due' ? { label: 'Manda in cucina', icon: ChefHat, action: onFire }
+    : state === 'preparing' ? { label: 'Pronto', icon: Check, action: () => onSetStatus('ready') }
+    : state === 'ready' || state === 'late' ? { label: 'Ritirato', icon: ShoppingBag, action: () => onSetStatus('picked') }
     : null;
   const closed = state === 'picked' || state === 'cancelled' || state === 'noshow';
 
@@ -502,7 +515,7 @@ const DetailPanel: React.FC<{
 
       {!readOnly && <div className="flex flex-col gap-2">
         {primary && (
-          <button type="button" onClick={() => onSetStatus(primary.next)} className={dsButton.primary}>
+          <button type="button" onClick={primary.action} className={dsButton.primary}>
             <primary.icon className="h-4 w-4" aria-hidden />
             {primary.label}
           </button>
