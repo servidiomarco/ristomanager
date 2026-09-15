@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Ban, Loader2, ShoppingBag } from 'lucide-react';
+import { Ban, Copy, Loader2, ShoppingBag } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { asportoApiService, TakeawayConfig } from '../services/asportoApiService';
 import { Callout, Field, Stepper } from './ds';
@@ -21,6 +21,9 @@ interface TakeawaySettingsCardProps {
 /** Oggi in Italia — lo stop dal pannello si mette quasi sempre per stasera. */
 const todayIso = (): string =>
   new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome' }).format(new Date());
+
+/** La pagina pubblica vive sul dominio del backend, come /prenota. */
+const ordinaUrl = `${import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app'}/ordina`;
 
 export const TakeawaySettingsCard: React.FC<TakeawaySettingsCardProps> = ({ showToast }) => {
   const { hasPermission } = useAuth();
@@ -82,6 +85,49 @@ export const TakeawaySettingsCard: React.FC<TakeawaySettingsCardProps> = ({ show
         )}
         {config && (
           <>
+            <Field
+              label="Ordini online"
+              hint="La pagina pubblica /ordina: spenta mostra la card di manutenzione coi contatti."
+              aside={
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={config.online_enabled}
+                  disabled={!canEdit}
+                  onClick={() => save({ online_enabled: !config.online_enabled })}
+                  className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
+                    config.online_enabled ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-surface-row)] border border-[var(--ds-border)]'
+                  }`}
+                >
+                  <span
+                    aria-hidden="true"
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${
+                      config.online_enabled ? 'translate-x-5' : 'translate-x-0.5'
+                    } translate-y-0.5`}
+                  />
+                </button>
+              }
+            >
+              {config.online_enabled ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard?.writeText(ordinaUrl).then(
+                      () => showToastRef.current('Link copiato', 'success'),
+                      () => showToastRef.current('Copia non riuscita', 'error')
+                    );
+                  }}
+                  title="Copia il link della pagina"
+                  className="inline-flex h-11 max-w-full items-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-4 text-[13px] font-medium text-[var(--ds-text-primary)]"
+                >
+                  <Copy className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
+                  <span className="truncate">{ordinaUrl}</span>
+                </button>
+              ) : (
+                <p className="text-[13px] text-[var(--ds-text-muted)]">Accendila quando la cucina è pronta a ricevere ordini dal sito.</p>
+              )}
+            </Field>
+
             <div className="grid gap-4 sm:grid-cols-2">
               <Field
                 label="Ordini per slot"

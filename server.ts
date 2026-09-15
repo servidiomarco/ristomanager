@@ -24275,7 +24275,12 @@ app.get('/takeaway/slots', authenticate, requireFeature('takeaway'), requirePerm
 app.get('/takeaway/config', authenticate, requireFeature('takeaway'), requirePermission('takeaway:view'), async (req, res) => {
     try {
         const s = await getTakeawaySettings(req.tenantId!);
-        res.json({ capacity_per_slot: s.capacityPerSlot, prep_minutes: s.prepMinutes, stop_date: s.stopDate });
+        res.json({
+            capacity_per_slot: s.capacityPerSlot,
+            prep_minutes: s.prepMinutes,
+            stop_date: s.stopDate,
+            online_enabled: await getFeatureFlag(req.tenantId!, 'takeaway_online_enabled', false),
+        });
     } catch (err) {
         console.error('GET /takeaway/config error:', err);
         res.status(500).json({ error: 'Internal server error' });
@@ -24322,8 +24327,28 @@ app.put('/takeaway/config', authenticate, requireFeature('takeaway'), requirePer
                 [req.tenantId!, TAKEAWAY_STOP_DATE_KEY, raw]
             );
         }
+        // L'interruttore della pagina /ordina passa da qui e non da
+        // PUT /settings/features: accendere il canale è una decisione di
+        // servizio (takeaway:manage), come lo stop.
+        if ('online_enabled' in body) {
+            if (typeof body.online_enabled !== 'boolean') {
+                return res.status(400).json({ error: 'invalid_value', message: 'online_enabled deve essere boolean' });
+            }
+            await queryWithRetry(
+                `INSERT INTO app_settings (tenant_id, key, value, updated_at)
+                 VALUES ($1, 'takeaway_online_enabled', $2, CURRENT_TIMESTAMP)
+                 ON CONFLICT (tenant_id, key) DO UPDATE
+                   SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP`,
+                [req.tenantId!, body.online_enabled]
+            );
+        }
         const s = await getTakeawaySettings(req.tenantId!);
-        const payload = { capacity_per_slot: s.capacityPerSlot, prep_minutes: s.prepMinutes, stop_date: s.stopDate };
+        const payload = {
+            capacity_per_slot: s.capacityPerSlot,
+            prep_minutes: s.prepMinutes,
+            stop_date: s.stopDate,
+            online_enabled: await getFeatureFlag(req.tenantId!, 'takeaway_online_enabled', false),
+        };
         // Le board aperte devono vedere subito stop e capienza nuovi.
         try { socketService?.broadcastToAll(req.tenantId!, 'takeaway:config', payload); } catch (_) {}
         res.json(payload);
