@@ -679,6 +679,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     if (target == null) return dishes;
     return dishes.filter(d => (d.menu_ids ?? []).includes(target));
   }, [dishes, pickerMenuId, banquetsMenu]);
+  // Ricerca piatti dentro il picker di ogni uscita, chiavata sull'indice
+  // dell'uscita: segue spostamenti e rimozioni, si azzera all'apertura.
+  const [courseDishQuery, setCourseDishQuery] = useState<Record<number, string>>({});
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
   const [isDishFormOpen, setIsDishFormOpen] = useState(false);
   const [isBanquetFormOpen, setIsBanquetFormOpen] = useState(false);
@@ -1150,6 +1153,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     setIsEditingBanquet(true);
     setBanquetStep(0);
     setPickerMenuId(null);
+    setCourseDishQuery({});
     setIsBanquetFormOpen(true);
   };
 
@@ -1172,6 +1176,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     });
     setBanquetStep(0);
     setPickerMenuId(null);
+    setCourseDishQuery({});
     setIsBanquetFormOpen(true);
 
     const existing = loadDraft<Partial<BanquetMenu>>(DRAFT_KEYS.BANQUET_NEW);
@@ -1260,6 +1265,17 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       const courses = (prev.courses || []).filter((_, i) => i !== index);
       return { ...prev, courses };
     });
+    // La ricerca è chiavata sull'indice: scala quelle dopo l'uscita rimossa,
+    // o il filtro digitato resterebbe appiccicato all'uscita sbagliata.
+    setCourseDishQuery(prev => {
+      const next: Record<number, string> = {};
+      for (const [k, q] of Object.entries(prev)) {
+        const i = Number(k);
+        if (i < index) next[i] = q;
+        else if (i > index) next[i - 1] = q;
+      }
+      return next;
+    });
   };
 
   const renameCourse = (index: number, name: string) => {
@@ -1294,6 +1310,15 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       if (newIndex < 0 || newIndex >= courses.length) return prev;
       [courses[index], courses[newIndex]] = [courses[newIndex], courses[index]];
       return { ...prev, courses };
+    });
+    const newIndex = index + direction;
+    if (newIndex < 0 || newIndex >= (newBanquet.courses || []).length) return;
+    setCourseDishQuery(prev => {
+      if (prev[index] === undefined && prev[newIndex] === undefined) return prev;
+      const next = { ...prev };
+      if (prev[newIndex] !== undefined) next[index] = prev[newIndex]; else delete next[index];
+      if (prev[index] !== undefined) next[newIndex] = prev[index]; else delete next[newIndex];
+      return next;
     });
   };
 
@@ -3586,6 +3611,12 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 <div className="space-y-3">
                   {(newBanquet.courses || []).map((course, courseIndex) => {
                     const totalCourses = (newBanquet.courses || []).length;
+                    const courseQuery = (courseDishQuery[courseIndex] ?? '').trim().toLowerCase();
+                    const courseDishes = courseQuery
+                      ? pickerDishes.filter(d =>
+                          d.name.toLowerCase().includes(courseQuery) ||
+                          (d.category || '').toLowerCase().includes(courseQuery))
+                      : pickerDishes;
                     return (
                       <div key={courseIndex} className="bg-[var(--ds-canvas)] rounded-[var(--ds-radius)] border border-[var(--ds-border)] overflow-hidden">
                         <div className="flex items-center gap-2 px-3 py-2 bg-[var(--ds-surface)] border-b border-[var(--ds-border)]">
@@ -3629,9 +3660,22 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           </button>
                         </div>
 
+                        {/* Fuori dall'area scrollabile: la ricerca resta visibile
+                            anche a lista lunga, che è quando serve. */}
+                        {pickerDishes.length > 0 && (
+                          <div className="px-3 pt-3">
+                            <SearchField
+                              value={courseDishQuery[courseIndex] ?? ''}
+                              onChange={q => setCourseDishQuery(prev => ({ ...prev, [courseIndex]: q }))}
+                              placeholder="Cerca piatto…"
+                              ariaLabel={`Cerca piatto in ${course.name || 'questa uscita'}`}
+                            />
+                          </div>
+                        )}
+
                         <div className="p-3 max-h-60 overflow-y-auto space-y-3">
                           {BANQUET_DISH_CATEGORIES.map(category => {
-                            const categoryDishes = pickerDishes.filter(d => d.category === category);
+                            const categoryDishes = courseDishes.filter(d => d.category === category);
                             if (categoryDishes.length === 0) return null;
                             return (
                               <div key={category}>
@@ -3668,7 +3712,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             );
                           })}
                           {(() => {
-                            const orphan = pickerDishes.filter(d => !BANQUET_DISH_CATEGORIES.includes(d.category as any));
+                            const orphan = courseDishes.filter(d => !BANQUET_DISH_CATEGORIES.includes(d.category as any));
                             if (orphan.length === 0) return null;
                             return (
                               <div>
@@ -3703,6 +3747,11 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           {pickerDishes.length === 0 && (
                             <div className="text-xs text-[var(--ds-text-subtle)] text-center py-4">
                               Nessun piatto in questo menu: spuntalo dalla scheda del piatto, in Menu.
+                            </div>
+                          )}
+                          {pickerDishes.length > 0 && courseDishes.length === 0 && (
+                            <div className="text-xs text-[var(--ds-text-subtle)] text-center py-4">
+                              Nessun piatto per «{(courseDishQuery[courseIndex] ?? '').trim()}».
                             </div>
                           )}
                         </div>

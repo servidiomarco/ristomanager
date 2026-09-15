@@ -265,7 +265,7 @@ Due voci in sidebar: **Menu** (i piatti, organizzati in menu) e **Banchetti** (g
 **Banchetti ed eventi**
 - **Preventivi e Confermati**: ogni banchetto nasce come preventivo e si conferma con un'azione dello staff; la registrazione di un acconto propone la conferma. Le due liste sono separate, e i numeri di testata (eventi in arrivo, coperti, da incassare) contano solo i confermati.
 - **Preventivo condivisibile**: ogni banchetto ha un link pubblico stabile (pagina senza login con menù per uscite, tariffe e totale, sempre aggiornata alle ultime modifiche) da inviare **su WhatsApp dal numero business del ristorante** (modello approvato da Meta; finché il modello non è attivo il canale si presenta «in attivazione») **o via email** (invio dal server con il pulsante «Apri il preventivo»). Le note operative interne non compaiono mai.
-- Wizard a passi: evento e cliente → coperti e tariffa (prezzo adulti, bambini, sconto in € o %) → composizione del menù per uscite → tavoli assegnati → note operative (Portate, Servizio, Mise en place). La composizione pesca dal menu Banchetti, o da un menu stagionale a scelta.
+- Wizard a passi: evento e cliente → coperti e tariffa (prezzo adulti, bambini, sconto in € o %) → composizione del menù per uscite → tavoli assegnati → note operative (Portate, Servizio, Mise en place). La composizione pesca dal menu Banchetti, o da un menu stagionale a scelta; ogni uscita ha il suo campo di ricerca per trovare il piatto per nome o categoria senza scorrere la lista.
 - **Registro pagamenti del banchetto**: acconti e saldo per contanti/carta/bonifico, stato Saldato / Parziale / Non pagato. Prezzi e pagamenti visibili solo ai ruoli autorizzati.
 - Calendario eventi e filtri temporali (questa settimana, questo mese, più avanti, passati).
 - **Promemoria automatici in cucina a 72, 48 e 24 ore** dall'evento, a priorità crescente, che si spostano da soli se la data cambia.
@@ -635,6 +635,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-15 | Menu & Banchetti | Nel wizard del banchetto ogni uscita ha un campo di ricerca piatti: filtra la lista per nome o categoria, resta visibile mentre si scorre. |
 | 2026-09-15 | Asporto | Ordini d'asporto al telefono con Sofia: tool voce con match dei piatti per nome e stesse regole di slot/capienza, dietro l'interruttore «Ordini al telefono» (spento di default); configurazione dei tool documentata nel manuale dell'agente. |
 | 2026-09-15 | Asporto | Incasso al ritiro: «Prepara il conto» dalla board apre il conto in coda Cassa (riga «Asporto HH:MM» col nome del cliente); incasso, scontrino e libro cassa seguono il flusso di sempre. |
 | 2026-09-15 | Asporto | L'interruttore «Ordini online» sta nella card Impostazioni → Asporto (permesso «Gestisce ordini asporto», come lo stop) e mostra il link della pagina da copiare. |
