@@ -50,7 +50,7 @@ describe('asporto — slot e capienza', () => {
     it('la config espone capienza e minuti di preparazione', async () => {
         const res = await api().get('/takeaway/config').set(bearer(token));
         expect(res.status).toBe(200);
-        expect(res.body).toEqual({ capacity_per_slot: 4, prep_minutes: 20, stop_date: null, online_enabled: false });
+        expect(res.body).toEqual({ capacity_per_slot: 4, prep_minutes: 20, stop_date: null, online_enabled: false, voice_enabled: false });
     });
 });
 
@@ -342,7 +342,7 @@ describe('asporto — impostazioni', () => {
 
         const ripristino = await api().put('/takeaway/config').set(bearer(token))
             .send({ capacity_per_slot: 4, prep_minutes: 20, stop_date: null });
-        expect(ripristino.body).toEqual({ capacity_per_slot: 4, prep_minutes: 20, stop_date: null, online_enabled: false });
+        expect(ripristino.body).toEqual({ capacity_per_slot: 4, prep_minutes: 20, stop_date: null, online_enabled: false, voice_enabled: false });
     });
 
     it('l\'interruttore online passa dalla config e accende la pagina pubblica', async () => {
@@ -461,6 +461,69 @@ describe('asporto — pubblico (/ordina, fase 2)', () => {
         });
         expect(pieno.status).toBe(409);
         expect(pieno.body.error).toBe('slot_full');
+    });
+});
+
+describe('asporto — Sofia (tool voce, fase 3)', () => {
+    // Il secret ElevenLabs è vuoto nei test: i webhook accettano senza header.
+    afterAll(async () => {
+        await api().put('/takeaway/config').set(bearer(token)).send({ voice_enabled: false });
+    });
+
+    it('a canale spento i tool rispondono 200 con la frase di cortesia', async () => {
+        const r = await api().post('/webhook/elevenlabs/create-takeaway-order').send({
+            customer_name: 'Test', caller_id: '+393330001122',
+            date: DATA_ASPORTO, time: '21:00', items: [{ name: 'pizza', qty: 1 }],
+        });
+        expect(r.status).toBe(200);
+        expect(r.body.success).toBe(false);
+        expect(r.body.error).toBe('takeaway_voice_disabled');
+    });
+
+    it('gli slot liberi arrivano come frase pronta da leggere', async () => {
+        await api().put('/takeaway/config').set(bearer(token)).send({ voice_enabled: true });
+        const r = await api().post('/webhook/elevenlabs/check-takeaway-slots').send({ date: DATA_ASPORTO });
+        expect(r.status).toBe(200);
+        expect(r.body.success).toBe(true);
+        expect(r.body.dinner_slots).toContain('21:00');
+        // 19:30 è al completo dai test sopra: non va proposto.
+        expect(r.body.dinner_slots).not.toContain('19:30');
+        expect(r.body.message).toContain('cena');
+    });
+
+    it('l\'ordine dettato matcha i piatti per nome e nasce canale VOICE', async () => {
+        const r = await api().post('/webhook/elevenlabs/create-takeaway-order').send({
+            customer_name: 'Verdi Anna',
+            caller_id: '+39 331 222 3344',
+            date: DATA_ASPORTO,
+            time: '21:00',
+            items: [{ name: 'pizza asporto test', qty: 2 }],
+            notes: 'senza basilico',
+        });
+        expect(r.status).toBe(200);
+        expect(r.body.success).toBe(true);
+        expect(r.body.total_cents).toBe(1700);
+        expect(r.body.total_readback).toBe('17 euro');
+        expect(r.body.confirmation_phrase).toContain('Verdi Anna');
+        expect(r.body.confirmation_phrase).toContain('21:00');
+
+        const list = await api().get('/takeaway/orders').set(bearer(token)).query({ date: DATA_ASPORTO });
+        const mine = list.body.orders.find((o: any) => o.customer_name === 'Verdi Anna');
+        expect(mine.channel).toBe('VOICE');
+        expect(mine.status).toBe('CONFIRMED');
+        expect(mine.customer_phone).toContain('331');
+    });
+
+    it('piatto sconosciuto → si chiede, non si tira a indovinare', async () => {
+        const r = await api().post('/webhook/elevenlabs/create-takeaway-order').send({
+            customer_name: 'Verdi Anna', caller_id: '+393312223344',
+            date: DATA_ASPORTO, time: '21:00',
+            items: [{ name: 'lasagna spaziale', qty: 1 }],
+        });
+        expect(r.status).toBe(200);
+        expect(r.body.success).toBe(false);
+        expect(r.body.error).toBe('unknown_dish');
+        expect(r.body.message).toContain('lasagna spaziale');
     });
 });
 

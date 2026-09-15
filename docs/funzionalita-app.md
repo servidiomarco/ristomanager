@@ -199,7 +199,7 @@ Modulo add-on (venduto a parte, come Recensioni) per gli ordini da ritirare — 
 - **«Manda in cucina»**: da Confermato/Da produrre l'ordine genera una comanda vera — monitor di partita, passe e stampa per centro come una comanda di sala, intestata «Asporto HH:MM» col nome del cliente. Quando la cucina segna pronta l'uscita, l'ordine passa da solo a «Pronto» sulla board e parte la notifica push «Asporto HH:MM — Pronto l'ordine di …».
 - **Pagina pubblica `/ordina`** (e `/ordina/<slug>` per tenant): il cliente sceglie giorno e orario di ritiro (solo slot in cui la cucina fa in tempo), compone l'ordine dal menu Alla carta con quantità e note, lascia nome e telefono (obbligatorio) e riceve conferma immediata. Gate doppio come /prenota: modulo venduto **e** interruttore «Ordini online» acceso — spento, la pagina mostra la card di manutenzione coi contatti. Ordini col canale «WEB» in board, push allo staff alla creazione; honeypot e rate limit contro i bot; la pagina non può mai forzare capienza o stop.
 - **Incasso al ritiro**: «Prepara il conto» chiude la comanda e mette il conto in coda Cassa — riga «Asporto HH:MM» col nome del cliente al posto del tavolo; da lì incasso, scontrino e libro cassa sono il flusso di sempre. La coda cassa funziona anche per chi ha il solo modulo asporto.
-- In arrivo nelle prossime fasi: presa ordine telefonica con Sofia.
+- **Ordini al telefono con Sofia** (richiede anche il modulo Voce): l'agente propone gli orari di ritiro fattibili, abbina i piatti dettati al menu (e chiede, invece di indovinare, se il nome è ambiguo o sconosciuto), registra l'ordine col canale «Telefono» e riepiloga piatti, orario e totale. Interruttore dedicato «Ordini al telefono» nella card Asporto, spento di default; i tool vanno configurati sull'agente ElevenLabs (istruzioni nel manuale dell'agente).
 
 ---
 
@@ -635,6 +635,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-15 | Asporto | Ordini d'asporto al telefono con Sofia: tool voce con match dei piatti per nome e stesse regole di slot/capienza, dietro l'interruttore «Ordini al telefono» (spento di default); configurazione dei tool documentata nel manuale dell'agente. |
 | 2026-09-15 | Asporto | Incasso al ritiro: «Prepara il conto» dalla board apre il conto in coda Cassa (riga «Asporto HH:MM» col nome del cliente); incasso, scontrino e libro cassa seguono il flusso di sempre. |
 | 2026-09-15 | Asporto | L'interruttore «Ordini online» sta nella card Impostazioni → Asporto (permesso «Gestisce ordini asporto», come lo stop) e mostra il link della pagina da copiare. |
 | 2026-09-15 | Asporto | Pagina pubblica /ordina: ordinazione d'asporto online con slot fattibili per la cucina, menu Alla carta, conferma immediata e push allo staff; si accende con l'interruttore «Ordini online» del modulo. |

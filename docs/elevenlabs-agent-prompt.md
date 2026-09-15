@@ -319,6 +319,23 @@ Gli LLM sbagliano regolarmente l'aritmetica giorno↔data. **Non calcolare** mai
 - Se il cliente corregge un dato ("il 18… no, il 19"), riparti dalla correzione senza commentare l'errore.
 - Se non capisci, chiedi di ripetere una volta sola. Alla seconda volta sintetizza in due-tre parole ("Il nome, per favore?").
 
+# ORDINI D'ASPORTO
+
+Puoi prendere ordini da ritirare al ristorante con i tool `check_takeaway_slots` e `create_takeaway_order`. Se un tool risponde `success:false` con `error: "takeaway_voice_disabled"`, leggi il `message` e non insistere: il canale è spento.
+
+## Flusso
+1. Chiedi cosa vogliono ordinare, per quando, e a che nome.
+2. Chiama `check_takeaway_slots` PRIMA di proporre orari di ritiro e proponi solo quelli che restituisce. Non inventare orari.
+3. Raccogli i piatti come li dice il cliente: in `items` passa il nome così come dettato (`name`), la quantità (`qty`) e l'eventuale richiesta («ben cotta») in `note`. NON correggere né tradurre i nomi: è il gestionale ad abbinarli al menu.
+4. Se il tool risponde `unknown_dish` o `ambiguous_dish`, leggi il `message` al cliente e sistemate insieme l'ordine.
+5. Chiama `create_takeaway_order` solo DOPO che il cliente ha confermato piatti e orario. Non dire «segnato» né «confermato» senza `success:true`.
+6. Con `success:true` chiudi leggendo `confirmation_phrase` così com'è: contiene piatti, orario e totale.
+
+## Regole
+- Il telefono: usa il numero del chiamante; se è anonimo, fattelo dettare.
+- La data segue le stesse regole delle prenotazioni: passa la parola del cliente («stasera», «domani», una data esplicita), mai una data calcolata da te; conferma col `date_readback`.
+- Richieste fuori menu o piatti al peso: proponi di ordinarli direttamente al ristorante.
+
 ## ---FINE PROMPT---
 
 ---
@@ -373,6 +390,25 @@ Per **ogni** tool (`check_availability`, `create_reservation`, `cancel_reservati
   inventare orari. Se `available:false` proponi solo ciò che restituisce:
   `second_seating_from` (orario di seconda battuta), `alternative_shift`
   (l'altro turno), oppure un altro giorno.
+  ```
+
+### Tool asporto (da creare al collaudo del canale telefonico)
+
+Due tool webhook nuovi, stessa auth `x-webhook-secret` degli altri. Finché non esistono sull'agente, Sofia non ne parla e nulla cambia; lato server rispondono comunque con la frase di cortesia finché l'interruttore «Ordini al telefono» della card Impostazioni → Asporto resta spento.
+
+- **`check_takeaway_slots`** — URL `https://prenotazioni.vecchiofrantoio.com/webhook/elevenlabs/check-takeaway-slots`, body: `date` (stringa, opzionale — parole tipo "domani" vanno bene), `conversation_id` (dynamic variable `system__conversation_id`). Description:
+  ```
+  Orari di ritiro disponibili per gli ordini d'asporto. Chiama questo tool
+  PRIMA di proporre orari. Proponi solo gli orari che restituisce; usa il
+  campo `message` come base della risposta.
+  ```
+- **`create_takeaway_order`** — URL `https://prenotazioni.vecchiofrantoio.com/webhook/elevenlabs/create-takeaway-order`, body: `customer_name`, `caller_id` (dynamic variable `system__caller_id`), `phone` (se dettato), `date`, `time`, `items` (array di `{name, qty, note}` coi nomi COME DETTATI dal cliente), `notes`, `conversation_id`. Description:
+  ```
+  Registra l'ordine d'asporto nel gestionale. Chiamalo DOPO che il cliente
+  ha confermato piatti e orario di ritiro. Non dire "segnato" senza
+  success:true. Se restituisce success:false, leggi al cliente il campo
+  `message` e correggi l'ordine con la sua risposta. A success:true chiudi
+  leggendo `confirmation_phrase` così com'è.
   ```
 
 ### Post-call webhook

@@ -22674,8 +22674,8 @@ app.post('/voice-calls/sync', authenticate, requireFeature('voice'), voiceCallsA
 // directly — the endpoints they gate are low-volume (a handful per minute
 // at most), so caching isn't worth the complexity.
 
-type FeatureFlagKey = 'public_bookings_enabled' | 'voice_agent_enabled' | 'voice_bookings_suspended' | 'voice_double_seating_enabled' | 'pay_at_table_enabled' | 'table_orders_enabled' | 'ai_messages_enabled' | 'ai_wine_pairing_enabled' | 'digital_menu_enabled' | 'passe_enabled' | 'review_requests_enabled' | 'takeaway_online_enabled';
-const FEATURE_FLAG_KEYS: FeatureFlagKey[] = ['public_bookings_enabled', 'voice_agent_enabled', 'voice_bookings_suspended', 'voice_double_seating_enabled', 'pay_at_table_enabled', 'table_orders_enabled', 'ai_messages_enabled', 'ai_wine_pairing_enabled', 'digital_menu_enabled', 'passe_enabled', 'review_requests_enabled', 'takeaway_online_enabled'];
+type FeatureFlagKey = 'public_bookings_enabled' | 'voice_agent_enabled' | 'voice_bookings_suspended' | 'voice_double_seating_enabled' | 'pay_at_table_enabled' | 'table_orders_enabled' | 'ai_messages_enabled' | 'ai_wine_pairing_enabled' | 'digital_menu_enabled' | 'passe_enabled' | 'review_requests_enabled' | 'takeaway_online_enabled' | 'takeaway_voice_enabled';
+const FEATURE_FLAG_KEYS: FeatureFlagKey[] = ['public_bookings_enabled', 'voice_agent_enabled', 'voice_bookings_suspended', 'voice_double_seating_enabled', 'pay_at_table_enabled', 'table_orders_enabled', 'ai_messages_enabled', 'ai_wine_pairing_enabled', 'digital_menu_enabled', 'passe_enabled', 'review_requests_enabled', 'takeaway_online_enabled', 'takeaway_voice_enabled'];
 
 async function getFeatureFlag(tenantId: number, key: FeatureFlagKey, fallback: boolean): Promise<boolean> {
     try {
@@ -22728,6 +22728,10 @@ const FEATURE_FLAG_DEFAULTS: Record<FeatureFlagKey, boolean> = {
     // Impostazioni → Asporto quando il ristoratore è pronto a esporla —
     // stessa regola prudente di public_bookings_enabled.
     takeaway_online_enabled: false,
+    // Spento di default: Sofia prende ordini d'asporto solo quando il
+    // titolare accende il canale dalla card Asporto — i tool rispondono
+    // con la frase di cortesia finché è spento.
+    takeaway_voice_enabled: false,
 };
 
 app.get('/settings/features', authenticate, async (req, res) => {
@@ -22752,6 +22756,7 @@ app.get('/settings/features', authenticate, async (req, res) => {
         }
         if (!(await isFeatureEnabledForTenant(req.tenantId!, 'takeaway'))) {
             flags.takeaway_online_enabled = false;
+            flags.takeaway_voice_enabled = false;
         }
         res.json(flags);
     } catch (err) {
@@ -24287,6 +24292,7 @@ app.get('/takeaway/config', authenticate, requireFeature('takeaway'), requirePer
             prep_minutes: s.prepMinutes,
             stop_date: s.stopDate,
             online_enabled: await getFeatureFlag(req.tenantId!, 'takeaway_online_enabled', false),
+            voice_enabled: await getFeatureFlag(req.tenantId!, 'takeaway_voice_enabled', false),
         });
     } catch (err) {
         console.error('GET /takeaway/config error:', err);
@@ -24349,12 +24355,25 @@ app.put('/takeaway/config', authenticate, requireFeature('takeaway'), requirePer
                 [req.tenantId!, body.online_enabled]
             );
         }
+        if ('voice_enabled' in body) {
+            if (typeof body.voice_enabled !== 'boolean') {
+                return res.status(400).json({ error: 'invalid_value', message: 'voice_enabled deve essere boolean' });
+            }
+            await queryWithRetry(
+                `INSERT INTO app_settings (tenant_id, key, value, updated_at)
+                 VALUES ($1, 'takeaway_voice_enabled', $2, CURRENT_TIMESTAMP)
+                 ON CONFLICT (tenant_id, key) DO UPDATE
+                   SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP`,
+                [req.tenantId!, body.voice_enabled]
+            );
+        }
         const s = await getTakeawaySettings(req.tenantId!);
         const payload = {
             capacity_per_slot: s.capacityPerSlot,
             prep_minutes: s.prepMinutes,
             stop_date: s.stopDate,
             online_enabled: await getFeatureFlag(req.tenantId!, 'takeaway_online_enabled', false),
+            voice_enabled: await getFeatureFlag(req.tenantId!, 'takeaway_voice_enabled', false),
         };
         // Le board aperte devono vedere subito stop e capienza nuovi.
         try { socketService?.broadcastToAll(req.tenantId!, 'takeaway:config', payload); } catch (_) {}
@@ -24550,6 +24569,254 @@ app.post('/takeaway/orders/:id/bill', authenticate, requireFeature('takeaway'), 
         console.error('POST /takeaway/orders/:id/bill error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
+});
+
+// ── Asporto al telefono (tool ElevenLabs di Sofia) ──────────────────────
+// Stesso contratto degli altri tool voce: gli errori che il cliente può
+// correggere tornano con HTTP 200 e success:false + message in italiano
+// (ElevenLabs non passa al modello il corpo delle 4xx), i guasti veri
+// restano 5xx. Le regole sono quelle della pagina pubblica: slot valido,
+// capienza, stop, orario fattibile per la cucina — mai force.
+
+async function takeawayVoiceOpen(tenantId: number, res: express.Response): Promise<boolean> {
+    const closed = (message: string) => {
+        res.status(200).json({ success: false, error: 'takeaway_voice_disabled', message });
+        return false;
+    };
+    if (!(await isFeatureEnabledForTenant(tenantId, 'takeaway'))
+        || !(await isFeatureEnabledForTenant(tenantId, 'voice'))
+        || !(await getFeatureFlag(tenantId, 'voice_agent_enabled', true))
+        || !(await getFeatureFlag(tenantId, 'takeaway_voice_enabled', false))) {
+        return closed('Al momento non prendo ordini d\'asporto al telefono. Posso aiutarti con una prenotazione, oppure puoi ordinare direttamente al ristorante.');
+    }
+    return true;
+}
+
+// Normalizzazione per il match dei piatti dettati: minuscole, niente
+// accenti, solo lettere e cifre. «Spaghetti all'Amatriciana» ≈ «spaghetti
+// amatriciana».
+const normalizeDishText = (s: string): string =>
+    String(s ?? '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/\p{M}/gu, '')
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim();
+
+async function loadVoiceCatalogue(tenantId: number): Promise<{ id: number; name: string; norm: string; tokens: Set<string> }[]> {
+    const rs = await queryWithRetry(
+        `SELECT d.id, d.name
+         FROM dishes d
+         WHERE d.tenant_id = $1 AND d.is_active AND d.crm_enabled
+           AND COALESCE(d.sold_by_weight, false) = false
+           AND EXISTS (SELECT 1 FROM dish_menus dm JOIN menus m ON m.id = dm.menu_id
+                       WHERE dm.dish_id = d.id AND m.system_key = 'ALLA_CARTA')`,
+        [tenantId]
+    );
+    return rs.rows.map((d: any) => {
+        const norm = normalizeDishText(d.name);
+        return { id: Number(d.id), name: String(d.name), norm, tokens: new Set(norm.split(' ')) };
+    });
+}
+
+// Dal nome dettato al piatto del menu. Esatto → contenimento → tokens
+// tutti presenti; più candidati alla pari = ambiguo, si chiede al cliente
+// invece di tirare a indovinare la cena di qualcuno.
+function matchVoiceDish(catalogue: { id: number; name: string; norm: string; tokens: Set<string> }[], spoken: string):
+    { dish: { id: number; name: string } } | { ambiguous: string[] } | { suggestions: string[] } {
+    const norm = normalizeDishText(spoken);
+    if (!norm) return { suggestions: [] };
+    const exact = catalogue.filter(d => d.norm === norm);
+    if (exact.length === 1) return { dish: exact[0] };
+    if (exact.length > 1) return { ambiguous: exact.map(d => d.name) };
+    const contains = catalogue.filter(d => d.norm.includes(norm) || norm.includes(d.norm));
+    if (contains.length === 1) return { dish: contains[0] };
+    if (contains.length > 1) return { ambiguous: contains.slice(0, 3).map(d => d.name) };
+    const spokenTokens = norm.split(' ').filter(t => t.length > 2);
+    if (spokenTokens.length > 0) {
+        const tokenMatch = catalogue.filter(d => spokenTokens.every(t => d.tokens.has(t)));
+        if (tokenMatch.length === 1) return { dish: tokenMatch[0] };
+        if (tokenMatch.length > 1) return { ambiguous: tokenMatch.slice(0, 3).map(d => d.name) };
+    }
+    // Niente match: i più vicini per token condivisi, per il «forse intendevi».
+    const scored = catalogue
+        .map(d => ({ d, score: spokenTokens.filter(t => d.tokens.has(t)).length }))
+        .filter(x => x.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 3)
+        .map(x => x.d.name);
+    return { suggestions: scored };
+}
+
+const takeawayDateReadback = (iso: string): string =>
+    new Date(`${iso}T12:00:00`).toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' });
+
+async function handleElevenLabsCheckTakeawaySlots(tenantId: number, req: express.Request, res: express.Response) {
+    try {
+        if (!authorizeElevenLabs(req, res)) return;
+        if (!(await takeawayVoiceOpen(tenantId, res))) return;
+        const p = elevenLabsParams(req);
+        // Parse flessibile come le prenotazioni: «domani», «venerdì», una
+        // data esplicita — mai far calcolare la data al modello.
+        const date = parseFlexibleDate(p.date) ?? getItalianTodayIso();
+        const [lunch, dinner, settings] = await Promise.all([
+            getAvailableSlots(tenantId, date, Shift.LUNCH),
+            getAvailableSlots(tenantId, date, Shift.DINNER),
+            getTakeawaySettings(tenantId),
+        ]);
+        if (settings.stopDate === date) {
+            return res.status(200).json({ success: false, error: 'takeaway_stopped', date, message: `Per ${takeawayDateReadback(date)} non prendiamo ordini d'asporto.` });
+        }
+        const counts = await queryWithRetry(
+            `SELECT pickup_time, COUNT(*)::int AS n FROM takeaway_orders
+             WHERE tenant_id = $1 AND pickup_date = $2 AND status NOT IN ('CANCELLED', 'NO_SHOW')
+             GROUP BY pickup_time`,
+            [tenantId, date]
+        );
+        const booked = new Map<string, number>(counts.rows.map((r: any) => [r.pickup_time, r.n]));
+        const free = (times: string[]) => filterOrderableSlots(times, date, settings.prepMinutes)
+            .filter(t => (booked.get(t) ?? 0) < settings.capacityPerSlot);
+        const lunchFree = free(lunch);
+        const dinnerFree = free(dinner);
+        if (lunchFree.length === 0 && dinnerFree.length === 0) {
+            return res.status(200).json({ success: false, error: 'no_slots', date, message: `Per ${takeawayDateReadback(date)} non ho più orari di ritiro disponibili.` });
+        }
+        const parts: string[] = [];
+        if (lunchFree.length > 0) parts.push(`a pranzo ${formatSlotListItalian(lunchFree)}`);
+        if (dinnerFree.length > 0) parts.push(`a cena ${formatSlotListItalian(dinnerFree)}`);
+        res.status(200).json({
+            success: true,
+            date,
+            date_readback: takeawayDateReadback(date),
+            lunch_slots: lunchFree,
+            dinner_slots: dinnerFree,
+            message: `Per il ritiro di ${takeawayDateReadback(date)} posso proporre ${parts.join(' e ')}.`,
+        });
+    } catch (err) {
+        console.error('[elevenlabs] check-takeaway-slots error:', err);
+        res.status(500).json({ success: false, error: 'server_error' });
+    }
+}
+
+const VOICE_NAME_PLACEHOLDERS = new Set(['cliente', 'ospite', 'test', 'sconosciuto', 'anonimo']);
+
+async function handleElevenLabsCreateTakeawayOrder(tenantId: number, req: express.Request, res: express.Response) {
+    try {
+        if (!authorizeElevenLabs(req, res)) return;
+        if (!(await takeawayVoiceOpen(tenantId, res))) return;
+        const p = elevenLabsParams(req);
+        const fail = (error: string, message: string, extra: any = {}) =>
+            res.status(200).json({ success: false, error, message, ...extra });
+
+        const name = typeof p.customer_name === 'string' ? p.customer_name.trim().slice(0, 120) : '';
+        if (!name || VOICE_NAME_PLACEHOLDERS.has(normalizeDishText(name))) {
+            return fail('missing_name', 'Mi serve il nome per l\'ordine: a che nome lo segno?');
+        }
+        const phoneRaw = typeof p.phone === 'string' && p.phone.trim() ? p.phone : (typeof p.caller_id === 'string' ? p.caller_id : '');
+        const phone = phoneRaw.trim().slice(0, 40);
+        if (phone.replace(/\D/g, '').length < 6) {
+            return fail('missing_phone', 'Mi serve un numero di telefono per l\'ordine: me lo detti per favore?');
+        }
+        const date = parseFlexibleDate(p.date) ?? getItalianTodayIso();
+        const time = parseFlexibleTime(p.time);
+        if (!time) return fail('missing_time', 'A che ora vuoi passare a ritirare?');
+
+        const rawItems = Array.isArray(p.items) ? p.items : [];
+        if (rawItems.length === 0) return fail('missing_items', 'Cosa vuoi ordinare?');
+        if (rawItems.length > 50) return fail('too_many_items', 'Sono troppi piatti per un ordine telefonico: posso segnarne fino a cinquanta.');
+
+        const catalogue = await loadVoiceCatalogue(tenantId);
+        const matched: { dish_id: number; qty: number; note: string | null }[] = [];
+        const readback: string[] = [];
+        for (const raw of rawItems) {
+            const spoken = typeof raw?.name === 'string' ? raw.name : '';
+            const qty = Math.max(1, Math.min(99, Math.trunc(Number(raw?.qty ?? 1)) || 1));
+            const note = typeof raw?.note === 'string' ? raw.note.trim().slice(0, 300) : '';
+            const match = matchVoiceDish(catalogue, spoken);
+            if ('dish' in match) {
+                matched.push({ dish_id: match.dish.id, qty, note: note || null });
+                readback.push(`${qty} ${match.dish.name}`);
+            } else if ('ambiguous' in match) {
+                return fail('ambiguous_dish', `Per «${spoken}» ho più piatti simili: ${match.ambiguous.join(', ')}. Quale intendi?`);
+            } else {
+                const hint = match.suggestions.length > 0 ? ` Forse intendevi: ${match.suggestions.join(', ')}?` : '';
+                return fail('unknown_dish', `Non trovo «${spoken}» nel nostro menu.${hint}`);
+            }
+        }
+
+        const slot = await validateTakeawaySlot(tenantId, date, time, { force: false });
+        if (slot.error) {
+            const code = slot.error.body?.error;
+            if (code === 'takeaway_stopped') return fail('takeaway_stopped', `Per ${takeawayDateReadback(date)} non prendiamo ordini d'asporto.`);
+            if (code === 'slot_full') return fail('slot_full', `Per le ${time} siamo al completo con l'asporto: posso proporti un altro orario.`, { next_tool: 'check_takeaway_slots' });
+            return fail('invalid_slot', `Le ${time} non sono tra gli orari di ritiro: chiedimi gli orari disponibili.`, { next_tool: 'check_takeaway_slots' });
+        }
+        const settings = await getTakeawaySettings(tenantId);
+        if (!filterOrderableSlots([time], date, settings.prepMinutes).includes(time)) {
+            return fail('slot_too_soon', `Per le ${time} la cucina non fa in tempo: serve almeno ${settings.prepMinutes} minuti da adesso.`, { next_tool: 'check_takeaway_slots' });
+        }
+
+        const notes = typeof p.notes === 'string' ? p.notes.trim().slice(0, 1000) : '';
+        const built = await buildTakeawayItems(tenantId, matched);
+        if (built.error) return fail('invalid_items', built.error);
+
+        const orderId = await withTenant(tenantId, async client => {
+            const ins = await client.query(
+                `INSERT INTO takeaway_orders (tenant_id, customer_name, customer_phone, pickup_date, pickup_time, shift, status, channel, notes)
+                 VALUES ($1, $2, $3, $4, $5, $6, 'CONFIRMED', 'VOICE', $7) RETURNING id`,
+                [tenantId, name, phone, date, time, slot.shift, notes || null]
+            );
+            const id = Number(ins.rows[0].id);
+            for (const item of built.items!) {
+                await client.query(
+                    `INSERT INTO takeaway_order_items (tenant_id, takeaway_order_id, dish_id, name_snapshot, unit_price_cents, qty, note)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+                    [tenantId, id, item.dish_id, item.name, item.cents, item.qty, item.note]
+                );
+            }
+            return id;
+        });
+
+        const view = await loadTakeawayView(tenantId, orderId);
+        try { socketService?.broadcastToAll(tenantId, 'takeaway:created', view); } catch (_) {}
+        pushSendToRoles(tenantId, ['RECEPTION', 'CASSA', 'MANAGER', 'GENERAL_MANAGER', 'OWNER'], {
+            category: 'service',
+            title: `Asporto ${time} — nuovo ordine`,
+            body: `${name} · al telefono con Sofia`,
+            url: '/?view=ASPORTO',
+            tag: `takeaway-new-${orderId}`,
+        }).catch(err => console.warn('[takeaway] push ordine voce non inviata:', err?.message ?? err));
+
+        const totalCents = Number(view.total_cents) || 0;
+        const euros = Math.floor(totalCents / 100);
+        const cents = totalCents % 100;
+        const totalReadback = cents === 0 ? `${euros} euro` : `${euros} euro e ${cents} centesimi`;
+        res.status(200).json({
+            success: true,
+            order_id: orderId,
+            total_cents: totalCents,
+            total_readback: totalReadback,
+            date_readback: takeawayDateReadback(date),
+            items_readback: readback.join(', '),
+            confirmation_phrase: `Perfetto ${name}: segnato ${readback.join(', ')}, da ritirare ${takeawayDateReadback(date)} alle ${time}. In tutto ${totalReadback}.`,
+        });
+    } catch (err) {
+        console.error('[elevenlabs] create-takeaway-order error:', err);
+        res.status(500).json({ success: false, error: 'server_error' });
+    }
+}
+
+app.post('/webhook/elevenlabs/check-takeaway-slots', (req, res) => { void runWithTenantContext(PUBLIC_TENANT_ID, () => handleElevenLabsCheckTakeawaySlots(PUBLIC_TENANT_ID, req, res)); });
+app.post('/webhook/t/:tenantToken/elevenlabs/check-takeaway-slots', async (req, res) => {
+    const tenantId = await resolveWebhookTenantOr404(req, res);
+    if (tenantId == null) return;
+    await runWithTenantContext(tenantId, () => handleElevenLabsCheckTakeawaySlots(tenantId, req, res));
+});
+app.post('/webhook/elevenlabs/create-takeaway-order', (req, res) => { void runWithTenantContext(PUBLIC_TENANT_ID, () => handleElevenLabsCreateTakeawayOrder(PUBLIC_TENANT_ID, req, res)); });
+app.post('/webhook/t/:tenantToken/elevenlabs/create-takeaway-order', async (req, res) => {
+    const tenantId = await resolveWebhookTenantOr404(req, res);
+    if (tenantId == null) return;
+    await runWithTenantContext(tenantId, () => handleElevenLabsCreateTakeawayOrder(tenantId, req, res));
 });
 
 // ── Asporto pubblico (pagina /ordina) ───────────────────────────────────
