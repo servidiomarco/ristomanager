@@ -24,8 +24,10 @@ beforeAll(async () => {
 
 afterAll(async () => {
     // Il tenant 1 torna com'era: i file girano in sequenza sullo stesso
-    // server e gli altri contano sugli add-on attivi.
+    // server e gli altri contano sugli add-on attivi e sui default.
     await api().put('/settings/entitlements').set(bearer(token)).send({ takeaway: true });
+    await api().put('/takeaway/config').set(bearer(token))
+        .send({ capacity_per_slot: 4, prep_minutes: 20, stop_date: null });
 });
 
 describe('asporto — slot e capienza', () => {
@@ -178,6 +180,46 @@ describe('asporto — ciclo dell\'ordine', () => {
         expect(res.body.shift).toBe('LUNCH');
         expect(res.body.pickup_time).toBe('13:00');
         expect(res.body.total_cents).toBe(2550);
+    });
+});
+
+describe('asporto — impostazioni', () => {
+    it('capienza, minuti e stop si regolano e mordono subito', async () => {
+        const put = await api().put('/takeaway/config').set(bearer(token))
+            .send({ capacity_per_slot: 2, prep_minutes: 30 });
+        expect(put.status).toBe(200);
+        expect(put.body.capacity_per_slot).toBe(2);
+        expect(put.body.prep_minutes).toBe(30);
+
+        // 19:30 ha ancora 4 ordini attivi dai test sopra: con capienza 2 è pieno.
+        const slots = await api().get('/takeaway/slots').set(bearer(token)).query({ date: DATA_ASPORTO });
+        expect(slots.body.capacity_per_slot).toBe(2);
+        const pieno = await api().post('/takeaway/orders').set(bearer(token)).send({
+            customer_name: 'Oltre Capienza',
+            pickup_date: DATA_ASPORTO,
+            pickup_time: '19:30',
+            items: [{ dish_id: dishId, qty: 1 }],
+        });
+        expect(pieno.status).toBe(409);
+        expect(pieno.body.error).toBe('slot_full');
+
+        const stop = await api().put('/takeaway/config').set(bearer(token)).send({ stop_date: DATA_ASPORTO });
+        expect(stop.body.stop_date).toBe(DATA_ASPORTO);
+        const fermo = await api().post('/takeaway/orders').set(bearer(token)).send({
+            customer_name: 'A Stop Attivo',
+            pickup_date: DATA_ASPORTO,
+            pickup_time: '13:30',
+            items: [{ dish_id: dishId, qty: 1 }],
+        });
+        expect(fermo.status).toBe(409);
+        expect(fermo.body.error).toBe('takeaway_stopped');
+
+        const invalido = await api().put('/takeaway/config').set(bearer(token)).send({ capacity_per_slot: 0 });
+        expect(invalido.status).toBe(400);
+
+        const ripristino = await api().put('/takeaway/config').set(bearer(token))
+            .send({ capacity_per_slot: 4, prep_minutes: 20, stop_date: null });
+        expect(ripristino.body).toEqual({ capacity_per_slot: 4, prep_minutes: 20, stop_date: null });
     });
 });
 

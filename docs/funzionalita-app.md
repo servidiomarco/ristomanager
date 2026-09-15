@@ -195,7 +195,8 @@ Modulo add-on (venduto a parte, come Recensioni) per gli ordini da ritirare — 
 - **Slot di ritiro con capienza**: la griglia oraria è quella degli orari di apertura (chiusure e slot disabilitati compresi); ogni slot ha una capienza di produzione (quanti ordini regge la cucina), e il banco può scavalcarla caso per caso. «Stop asporto» ferma una singola data e decade da solo.
 - **Presa ordine al banco**: nome e telefono del cliente, slot, piatti dal menu con quantità e nota per la cucina, note dell'ordine; nome e prezzo restano congelati come detti al cliente anche se il menu cambia dopo.
 - **Stati che avanzano da soli**: un ordine confermato diventa «Da produrre» quando ora di ritiro − minuti di preparazione è passata, un «Pronto» oltre l'ora di ritiro diventa «Ritiro in ritardo» — stessi automatismi a orologio di «In arrivo»/«In uscita» delle prenotazioni. Il banco muove solo gli stati veri: in preparazione, pronto, ritirato (con correzioni sempre possibili).
-- In arrivo nelle prossime fasi: impostazioni dedicate (capienza, minuti di preparazione), comanda in cucina generata al momento giusto, pagina pubblica di ordinazione e presa ordine telefonica con Sofia.
+- **Impostazioni → Asporto**: capienza per slot e minuti di preparazione; lo stop si mette e si toglie anche dalla board. Le manopole stanno sul permesso «Gestisce ordini asporto», non sulle impostazioni generali: sono decisioni di servizio.
+- In arrivo nelle prossime fasi: comanda in cucina generata al momento giusto, pagina pubblica di ordinazione e presa ordine telefonica con Sofia.
 
 ---
 
@@ -631,6 +632,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-15 | Asporto | Sezione Impostazioni → Asporto: capienza per slot, minuti di preparazione e «stop asporto» per data (dalla card o direttamente dalla board), con aggiornamento in tempo reale delle board aperte. |
 | 2026-09-15 | Asporto | Nuovo modulo add-on: board degli ordini da ritirare con slot a capienza di produzione, presa ordine al banco (piatti, quantità, note cucina) e stati che avanzano da soli con l'orologio (Da produrre, Ritiro in ritardo); permessi dedicati «Visualizza/Gestisce ordini asporto». |
 | 2026-09-14 | Recensioni Google | Nuova pagina «Recensioni» nel gruppo Comunicazioni: il registro delle richieste post-visita con esito, canale e motivo degli eventuali salti. |
 | 2026-09-14 | Recensioni Google | Nuovo modulo: richiesta di recensione automatica dopo la visita (link diretto al profilo Google via WhatsApp/SMS/email) con sezione dedicata in Impostazioni — quando inviare, a chi (consenso o tutti), Place ID e livello di risposta alle recensioni. |

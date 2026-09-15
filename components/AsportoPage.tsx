@@ -13,8 +13,9 @@ import {
   X,
 } from 'lucide-react';
 import { Dish, TakeawayOrderView, TakeawaySlotBoard } from '../types';
-import { asportoApiService, TakeawayItemPayload } from '../services/asportoApiService';
+import { asportoApiService, TakeawayConfig, TakeawayItemPayload } from '../services/asportoApiService';
 import { socketClient } from '../services/socketClient';
+import { useAuth } from '../contexts/AuthContext';
 import { useNow } from '../hooks/useNow';
 import {
   AsportoStateKey,
@@ -110,6 +111,8 @@ export const AsportoPage: React.FC<AsportoPageProps> = ({ dishes, isInitialLoadi
   const [sheetOrder, setSheetOrder] = useState<TakeawayOrderView | null | 'new'>(null);
   const now = useNow(30_000);
   const isDesktop = useMediaQuery('(min-width: 1024px)');
+  const { hasPermission } = useAuth();
+  const canManage = hasPermission('takeaway:manage');
 
   const dateRef = useRef(date);
   dateRef.current = date;
@@ -151,14 +154,21 @@ export const AsportoPage: React.FC<AsportoPageProps> = ({ dishes, isInitialLoadi
       });
     };
     const onConnect = () => { fetchDay(dateRef.current); };
+    const onConfig = (config: TakeawayConfig) => {
+      if (!config) return;
+      setPrepMinutes(config.prep_minutes);
+      setStopDate(config.stop_date);
+    };
     const attach = (socket: ReturnType<typeof socketClient.getSocket>) => {
       if (!socket) return () => {};
       socket.on('takeaway:created', onEvent);
       socket.on('takeaway:updated', onEvent);
+      socket.on('takeaway:config', onConfig);
       socket.on('connect', onConnect);
       return () => {
         socket.off('takeaway:created', onEvent);
         socket.off('takeaway:updated', onEvent);
+        socket.off('takeaway:config', onConfig);
         socket.off('connect', onConnect);
       };
     };
@@ -230,6 +240,7 @@ export const AsportoPage: React.FC<AsportoPageProps> = ({ dishes, isInitialLoadi
     <DetailPanel
       order={selected}
       state={stateOf(selected)}
+      readOnly={!canManage}
       onSetStatus={state => setStatus(selected, state)}
       onEdit={() => setSheetOrder(selected)}
       onClose={() => setSelectedId(null)}
@@ -259,15 +270,43 @@ export const AsportoPage: React.FC<AsportoPageProps> = ({ dishes, isInitialLoadi
             <ChevronRight className="h-4 w-4" />
           </button>
         </div>
-        <button type="button" onClick={() => setSheetOrder('new')} className={dsButton.primary}>
-          <Plus className="h-4 w-4" aria-hidden />
-          Nuovo ordine
-        </button>
+        {canManage && stopDate !== date && (
+          <button
+            type="button"
+            onClick={() => asportoApiService.updateConfig({ stop_date: date }).then(c => { setStopDate(c.stop_date); setPrepMinutes(c.prep_minutes); }).catch(() => {})}
+            aria-label="Ferma asporto per questo giorno"
+            title="Ferma asporto per questo giorno"
+            className={dsIconButton}
+          >
+            <Ban className="h-4 w-4" />
+          </button>
+        )}
+        {canManage && (
+          <button type="button" onClick={() => setSheetOrder('new')} className={dsButton.primary}>
+            <Plus className="h-4 w-4" aria-hidden />
+            Nuovo ordine
+          </button>
+        )}
       </div>
 
       {stopDate === date && (
-        <Callout tone="pending" icon={Ban} title="Asporto fermo per questa data">
-          Niente ordini nuovi: lo stop si toglie dalle impostazioni del modulo.
+        <Callout
+          tone="pending"
+          icon={Ban}
+          title="Asporto fermo per questa data"
+          action={
+            canManage ? (
+              <button
+                type="button"
+                onClick={() => asportoApiService.updateConfig({ stop_date: null }).then(c => { setStopDate(c.stop_date); setPrepMinutes(c.prep_minutes); }).catch(() => {})}
+                className="rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-3 py-1.5 text-[13px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)]"
+              >
+                Riapri
+              </button>
+            ) : undefined
+          }
+        >
+          Niente ordini nuovi finché non si riapre.
         </Callout>
       )}
 
@@ -404,10 +443,11 @@ const OrderCard: React.FC<{
 const DetailPanel: React.FC<{
   order: TakeawayOrderView;
   state: AsportoStateKey;
+  readOnly?: boolean;
   onSetStatus: (state: Exclude<AsportoStateKey, 'due' | 'late'>) => void;
   onEdit: () => void;
   onClose: () => void;
-}> = ({ order, state, onSetStatus, onEdit }) => {
+}> = ({ order, state, readOnly, onSetStatus, onEdit }) => {
   const ds = asportoStateDs(state);
   // Il verbo giusto per lo stato in cui l'ordine si trova adesso: un solo
   // bottone primario, mai un menu di sette stati.
@@ -460,7 +500,7 @@ const DetailPanel: React.FC<{
 
       {order.notes && <p className="text-[14px] leading-relaxed text-[var(--ds-text-secondary)]">{order.notes}</p>}
 
-      <div className="flex flex-col gap-2">
+      {!readOnly && <div className="flex flex-col gap-2">
         {primary && (
           <button type="button" onClick={() => onSetStatus(primary.next)} className={dsButton.primary}>
             <primary.icon className="h-4 w-4" aria-hidden />
@@ -493,7 +533,7 @@ const DetailPanel: React.FC<{
             </button>
           )}
         </div>
-      </div>
+      </div>}
     </div>
   );
 };
