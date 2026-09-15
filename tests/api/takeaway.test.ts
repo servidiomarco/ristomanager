@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { Client } from 'pg';
 import { api, ownerToken, bearer } from './helpers';
 
 // Modulo asporto, fase 1: entità + slot con capienza. Il tenant 1 nasce con
@@ -180,6 +181,84 @@ describe('asporto — ciclo dell\'ordine', () => {
         expect(res.body.shift).toBe('LUNCH');
         expect(res.body.pickup_time).toBe('13:00');
         expect(res.body.total_cents).toBe(2550);
+    });
+});
+
+describe('asporto — cucina', () => {
+    // La comanda si verifica direttamente a DB: le route /orders e /kds
+    // stanno dietro il flag table_orders_enabled, che qui resta com'è.
+    let pg: Client;
+    let asportoId = 0;
+    let kitchenId = 0;
+
+    beforeAll(async () => {
+        pg = new Client({ connectionString: process.env.DATABASE_URL || 'postgresql://localhost/ristotest_api' });
+        await pg.connect();
+    });
+    afterAll(async () => { await pg.end(); });
+
+    it('«manda in cucina» genera la comanda TAKEAWAY senza tavolo e lancia l\'uscita', async () => {
+        const created = await api().post('/takeaway/orders').set(bearer(token)).send({
+            customer_name: 'Verdi Luigi',
+            pickup_date: DATA_ASPORTO,
+            pickup_time: '20:00',
+            items: [
+                { dish_id: dishId, qty: 2, note: 'doppia mozzarella' },
+                { dish_id: dishId, qty: 1 },
+            ],
+        });
+        expect(created.status).toBe(201);
+        asportoId = created.body.id;
+
+        const fired = await api().post(`/takeaway/orders/${asportoId}/fire`).set(bearer(token)).send({});
+        expect(fired.status).toBe(200);
+        expect(fired.body.status).toBe('IN_PREPARATION');
+        expect(typeof fired.body.kitchen_order_id).toBe('number');
+        kitchenId = fired.body.kitchen_order_id;
+
+        const order = await pg.query('SELECT * FROM orders WHERE id = $1', [kitchenId]);
+        expect(order.rows[0].order_type).toBe('TAKEAWAY');
+        expect(order.rows[0].table_id).toBeNull();
+        expect(order.rows[0].reservation_id).toBeNull();
+        expect(order.rows[0].shift).toBe('DINNER');
+        expect(order.rows[0].notes).toContain('Asporto 20:00');
+
+        // Righe lanciate (SENT), snapshot e note conservati.
+        const items = await pg.query(
+            'SELECT name_snapshot, qty, note, status, course_no FROM order_items WHERE order_id = $1 ORDER BY id',
+            [kitchenId]
+        );
+        expect(items.rows).toHaveLength(2);
+        expect(items.rows[0]).toMatchObject({ name_snapshot: 'Pizza Asporto Test', qty: 2, note: 'doppia mozzarella', status: 'SENT', course_no: 1 });
+    });
+
+    it('un secondo lancio non duplica la comanda', async () => {
+        const again = await api().post(`/takeaway/orders/${asportoId}/fire`).set(bearer(token)).send({});
+        expect(again.status).toBe(409);
+        expect(again.body.error).toBe('already_fired');
+        const count = await pg.query(
+            "SELECT COUNT(*)::int AS n FROM orders WHERE order_type = 'TAKEAWAY' AND notes LIKE '%Verdi Luigi%'",
+        );
+        expect(count.rows[0].n).toBe(1);
+    });
+
+    it('il «pronto» del monitor porta l\'ordine asporto a READY da solo', async () => {
+        // Le route KDS stanno dietro il flag: si accende, si usa, si rispegne.
+        const flagOn = await api().put('/settings/features').set(bearer(token)).send({ table_orders_enabled: true });
+        expect(flagOn.status).toBe(200);
+        try {
+            const items = await pg.query('SELECT id FROM order_items WHERE order_id = $1 ORDER BY id', [kitchenId]);
+            for (const row of items.rows) {
+                const r = await api().post(`/kds/items/${row.id}/status`).set(bearer(token)).send({ status: 'READY' });
+                expect(r.status).toBe(200);
+            }
+            const list = await api().get('/takeaway/orders').set(bearer(token)).query({ date: DATA_ASPORTO });
+            const mine = list.body.orders.find((o: any) => o.id === asportoId);
+            expect(mine.status).toBe('READY');
+            expect(mine.ready_at).not.toBeNull();
+        } finally {
+            await api().put('/settings/features').set(bearer(token)).send({ table_orders_enabled: false });
+        }
     });
 });
 
