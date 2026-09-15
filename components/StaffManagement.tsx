@@ -1521,8 +1521,11 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
 
             {/* Wider than it was: "Pranzo" needs about 52px of cell to sit on
                 one line, and a clipped label defeats the point of writing the
-                service out. Below that the grid scrolls sideways. */}
-            <div className="overflow-x-auto">
+                service out. Below that the grid scrolls sideways. The 2px of
+                padding are the room the today/focus rings need (ring-2 draws
+                OUTSIDE the cell): without it the overflow container clips
+                them on the edge columns. */}
+            <div className="overflow-x-auto p-0.5">
               <div className="min-w-[600px]">
                 <div className="mb-2 grid grid-cols-7 gap-1.5">
                   {['Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab', 'Dom'].map(day => (
