@@ -24274,6 +24274,57 @@ app.get('/takeaway/config', authenticate, requireFeature('takeaway'), requirePer
     }
 });
 
+// La modifica sta su takeaway:manage, non settings:full: capienza, minuti
+// e stop sono manopole DI SERVIZIO — lo stop lo preme chi sta al banco
+// quando la sala esplode, non il titolare dalle impostazioni.
+app.put('/takeaway/config', authenticate, requireFeature('takeaway'), requirePermission('takeaway:manage'), async (req, res) => {
+    const body = req.body ?? {};
+    try {
+        const upsertInt = (key: string, value: number) => queryWithRetry(
+            `INSERT INTO app_settings (tenant_id, key, int_value, updated_at)
+             VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+             ON CONFLICT (tenant_id, key) DO UPDATE
+               SET int_value = EXCLUDED.int_value, updated_at = CURRENT_TIMESTAMP`,
+            [req.tenantId!, key, value]
+        );
+        if ('capacity_per_slot' in body) {
+            const n = Math.trunc(Number(body.capacity_per_slot));
+            if (!Number.isFinite(n) || n < 1 || n > 50) {
+                return res.status(400).json({ error: 'invalid_value', message: 'capacity_per_slot deve essere un intero fra 1 e 50' });
+            }
+            await upsertInt(TAKEAWAY_CAPACITY_KEY, n);
+        }
+        if ('prep_minutes' in body) {
+            const n = Math.trunc(Number(body.prep_minutes));
+            if (!Number.isFinite(n) || n < 5 || n > 180) {
+                return res.status(400).json({ error: 'invalid_value', message: 'prep_minutes deve essere un intero fra 5 e 180' });
+            }
+            await upsertInt(TAKEAWAY_PREP_MINUTES_KEY, n);
+        }
+        if ('stop_date' in body) {
+            const raw = body.stop_date;
+            if (raw !== null && (typeof raw !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(raw))) {
+                return res.status(400).json({ error: 'invalid_value', message: 'stop_date deve essere YYYY-MM-DD o null' });
+            }
+            await queryWithRetry(
+                `INSERT INTO app_settings (tenant_id, key, text_value, updated_at)
+                 VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+                 ON CONFLICT (tenant_id, key) DO UPDATE
+                   SET text_value = EXCLUDED.text_value, updated_at = CURRENT_TIMESTAMP`,
+                [req.tenantId!, TAKEAWAY_STOP_DATE_KEY, raw]
+            );
+        }
+        const s = await getTakeawaySettings(req.tenantId!);
+        const payload = { capacity_per_slot: s.capacityPerSlot, prep_minutes: s.prepMinutes, stop_date: s.stopDate };
+        // Le board aperte devono vedere subito stop e capienza nuovi.
+        try { socketService?.broadcastToAll(req.tenantId!, 'takeaway:config', payload); } catch (_) {}
+        res.json(payload);
+    } catch (err) {
+        console.error('PUT /takeaway/config error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 app.get('/takeaway/orders', authenticate, requireFeature('takeaway'), requirePermission('takeaway:view'), async (req, res) => {
     try {
         const date = typeof req.query.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date)

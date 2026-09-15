@@ -40,6 +40,7 @@ import { MonitoringPage } from './components/MonitoringPage';
 import { ReportisticaPage } from './components/reportistica/ReportisticaPage';
 import ReceptionPage from './components/ReceptionPage';
 import AsportoPage from './components/AsportoPage';
+import TakeawaySettingsCard from './components/TakeawaySettingsCard';
 import { AttivitaPage } from './components/AttivitaPage';
 import { PushNotificationsCard } from './components/PushNotificationsCard';
 import { StaffChatPresetsCard } from './components/StaffChatPresetsCard';
@@ -247,11 +248,12 @@ const SETTINGS_GROUPS: {
   id: string;
   label: string;
   Icon: React.ComponentType<{ size?: number; className?: string }>;
-  guard?: 'admin' | 'pay_at_table' | 'reviews';
+  guard?: 'admin' | 'pay_at_table' | 'reviews' | 'takeaway';
 }[] = [
   { id: 'imp-profilo', label: 'Profilo', Icon: UserCheck },
   { id: 'imp-ristorante', label: 'Ristorante', Icon: Clock },
   { id: 'imp-prenotazioni', label: 'Prenotazioni', Icon: Calendar },
+  { id: 'imp-asporto', label: 'Asporto', Icon: ShoppingBag, guard: 'takeaway' },
   { id: 'imp-pagamenti', label: 'Pagamenti', Icon: CreditCard },
   { id: 'imp-fiscalita', label: 'Fiscalità', Icon: Landmark, guard: 'pay_at_table' },
   { id: 'imp-comunicazioni', label: 'Comunicazioni', Icon: MessagesSquare },
@@ -2055,6 +2057,7 @@ const App: React.FC = () => {
     g.guard === 'admin' ? (canManageUsers() || canViewLogs())
     : g.guard === 'pay_at_table' ? hasFeature('pay_at_table')
     : g.guard === 'reviews' ? hasFeature('reviews')
+    : g.guard === 'takeaway' ? hasFeature('takeaway')
     : true
   );
 
@@ -3284,6 +3287,17 @@ const App: React.FC = () => {
                 </SettingsDisclosure>
               </div>
             </SettingsSection>
+
+            {/* Le manopole di servizio dell'asporto: capienza per slot,
+                minuti di preparazione, stop per data. Visibile solo col
+                modulo venduto. */}
+            {hasFeature('takeaway') && (
+              <SettingsSection id="imp-asporto" label="Asporto">
+                <CardErrorBoundary label="Impostazioni asporto">
+                  <TakeawaySettingsCard showToast={addToast} />
+                </CardErrorBoundary>
+              </SettingsSection>
+            )}
 
             {/* Gateway e regole dei pagamenti. */}
             <SettingsSection id="imp-pagamenti" label="Pagamenti">

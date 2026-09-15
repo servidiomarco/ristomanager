@@ -86,6 +86,14 @@ class AsportoApiService {
     return apiRequest(`${API_URL}/takeaway/config`, { headers: getHeaders() });
   }
 
+  async updateConfig(payload: Partial<TakeawayConfig>): Promise<TakeawayConfig> {
+    return apiRequest(`${API_URL}/takeaway/config`, {
+      method: 'PUT',
+      headers: getHeaders(),
+      body: JSON.stringify(payload),
+    });
+  }
+
   async createOrder(payload: CreateTakeawayPayload): Promise<TakeawayOrderView> {
     return apiRequest(`${API_URL}/takeaway/orders`, {
       method: 'POST',
