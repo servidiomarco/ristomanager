@@ -12852,6 +12852,7 @@ const SCHEDULER_LOCK_REMINDERS = 761003;
 const SCHEDULER_LOCK_PAYMENT_LINK_EXPIRY = 761004;
 const SCHEDULER_LOCK_STAFF_CHAT_RETENTION = 761005;
 const SCHEDULER_LOCK_ELEVENLABS_QUOTA = 761006;
+const SCHEDULER_LOCK_REVIEW_REQUESTS = 761007;
 
 // Il lock advisory è di SESSIONE: va preso su un client dedicato tenuto per
 // tutta la durata del tick (sul pool condiviso un'altra query potrebbe
@@ -13419,6 +13420,242 @@ const startElevenLabsQuotaWatchdog = () => {
         .catch((err: any) => console.error('[elevenlabs-quota] lock wrapper failed:', err?.message || err));
     lockedTick();
     setInterval(lockedTick, 60 * 60 * 1000);
+};
+
+// ============================================
+// RICHIESTA RECENSIONE POST-VISITA — sweep (piano recensioni, Fase A)
+// ============================================
+// Ogni 15 minuti pesca le prenotazioni la cui visita è finita e mai valutata
+// (review_request_status IS NULL) e manda all'ospite il link «scrivi una
+// recensione» di Google sui canali della policy prenotazioni. Idempotenza:
+// OGNI esito scrive review_request_status e una riga valutata non si tocca
+// mai più; una riga non ancora eleggibile (timing non raggiunto, feature
+// spenta) resta NULL e si riconsidera al giro dopo. Sweep e non hook nel
+// PUT /reservations/:id di proposito: arrival_status DEPARTED dipende
+// dall'operatore e in un servizio pieno spesso non viene mai impostato.
+
+type ReviewRequestTiming = 'immediate' | 'delay' | 'next_morning';
+type ReviewRequestAudience = 'consent' | 'all';
+interface ReviewRequestSettings {
+    timing: ReviewRequestTiming;
+    delayHours: number;
+    audience: ReviewRequestAudience;
+}
+const REVIEW_REQUEST_TIMING_KEY = 'review_request_timing';
+const REVIEW_REQUEST_DELAY_HOURS_KEY = 'review_request_delay_hours';
+const REVIEW_REQUEST_AUDIENCE_KEY = 'review_request_audience';
+// Default prudenti: mattina dopo, solo chi ha il consenso marketing.
+const REVIEW_REQUEST_DEFAULTS: ReviewRequestSettings = { timing: 'next_morning', delayHours: 2, audience: 'consent' };
+// Finestra d'invio in minuti da mezzanotte, Europe/Rome: mai prima delle
+// 10:00 né dopo le 21:00 — una cena finita a mezzanotte non deve suonare
+// il telefono all'1:30. Il «mattina dopo» parte alle 10:30.
+const REVIEW_REQUEST_WINDOW_START_MIN = 10 * 60;
+const REVIEW_REQUEST_WINDOW_END_MIN = 21 * 60;
+const REVIEW_REQUEST_NEXT_MORNING_MIN = 10 * 60 + 30;
+// Cooldown per telefono: un habitué non riceve la richiesta a ogni visita.
+const REVIEW_REQUEST_COOLDOWN_DAYS = 60;
+
+async function getReviewRequestSettings(tenantId: number): Promise<ReviewRequestSettings> {
+    try {
+        const result = await queryWithRetry(
+            'SELECT key, int_value, text_value FROM app_settings WHERE tenant_id = $1 AND key = ANY($2)',
+            [tenantId, [REVIEW_REQUEST_TIMING_KEY, REVIEW_REQUEST_DELAY_HOURS_KEY, REVIEW_REQUEST_AUDIENCE_KEY]]
+        );
+        const out: ReviewRequestSettings = { ...REVIEW_REQUEST_DEFAULTS };
+        for (const row of result.rows) {
+            if (row.key === REVIEW_REQUEST_TIMING_KEY && ['immediate', 'delay', 'next_morning'].includes(row.text_value)) {
+                out.timing = row.text_value as ReviewRequestTiming;
+            } else if (row.key === REVIEW_REQUEST_DELAY_HOURS_KEY && Number.isFinite(Number(row.int_value))) {
+                out.delayHours = Math.min(24, Math.max(1, Math.trunc(Number(row.int_value))));
+            } else if (row.key === REVIEW_REQUEST_AUDIENCE_KEY && ['consent', 'all'].includes(row.text_value)) {
+                out.audience = row.text_value as ReviewRequestAudience;
+            }
+        }
+        return out;
+    } catch (err) {
+        console.error('[review-request] lettura impostazioni fallita:', err);
+        return { ...REVIEW_REQUEST_DEFAULTS };
+    }
+}
+
+async function getGooglePlaceId(tenantId: number): Promise<string | null> {
+    try {
+        const r = await queryWithRetry(
+            `SELECT google_place_id FROM integration_settings WHERE tenant_id = $1 AND provider = 'google_business'`,
+            [tenantId]
+        );
+        const v = r.rows[0]?.google_place_id;
+        return typeof v === 'string' && v.trim() ? v.trim() : null;
+    } catch (err) {
+        console.error('[review-request] lettura google_place_id fallita:', err);
+        return null;
+    }
+}
+
+const romeMinutesOfDay = (d: Date): number => {
+    const [h, m] = getRomeTimePart(d).split(':').map(Number);
+    return h * 60 + m;
+};
+
+// Quando la riga diventa eleggibile, dato il timing del tenant. La visita
+// finisce a reservation_time + durata (esplicita o default per turno).
+function reviewRequestEligibleAt(visitEnd: Date, settings: ReviewRequestSettings): Date {
+    if (settings.timing === 'immediate') return visitEnd;
+    if (settings.timing === 'delay') return new Date(visitEnd.getTime() + settings.delayHours * 3600_000);
+    // next_morning: le 10:30 (Roma) del giorno dopo la fine visita —
+    // dall'istante di fine si va a mezzanotte di Roma e si sommano 10:30.
+    // Un eventuale scarto DST di un'ora lo assorbe la finestra d'invio.
+    const minutes = romeMinutesOfDay(visitEnd);
+    return new Date(visitEnd.getTime() + (24 * 60 - minutes + REVIEW_REQUEST_NEXT_MORNING_MIN) * 60_000);
+}
+
+const startReviewRequestScheduler = () => {
+    const tick = async () => {
+        try {
+            const now = new Date();
+            // Fuori dalla finestra d'invio non si valuta niente: le righe
+            // restano NULL e il primo giro dentro la finestra le riprende.
+            const nowMin = romeMinutesOfDay(now);
+            if (nowMin < REVIEW_REQUEST_WINDOW_START_MIN || nowMin > REVIEW_REQUEST_WINDOW_END_MIN) return;
+
+            // Nessun filtro tenant, di proposito (come gli altri tick): ogni
+            // riga porta il suo tenant_id. Lookback 3 giorni: al primo deploy
+            // con la feature accesa lo storico non va inondato di richieste.
+            const result = await queryWithRetry(
+                `SELECT r.id, r.tenant_id, r.customer_name, r.phone, r.email, r.source,
+                        r.reservation_time, r.language, r.consent_marketing,
+                        (r.reservation_time + make_interval(mins => COALESCE(r.duration_minutes, ${SHIFT_DEFAULT_DURATION_SQL}))) AS visit_end
+                 FROM reservations r
+                 WHERE r.review_request_status IS NULL
+                   AND r.reservation_status = 'CONFIRMED'
+                   AND r.arrival_status IN ('ARRIVED', 'DEPARTING', 'DEPARTED')
+                   AND r.reservation_time > NOW() - INTERVAL '3 days'
+                   AND r.reservation_time + make_interval(mins => COALESCE(r.duration_minutes, ${SHIFT_DEFAULT_DURATION_SQL})) < NOW()
+                 ORDER BY r.reservation_time
+                 LIMIT 50`
+            );
+            if (result.rows.length === 0) return;
+
+            // Guardie e impostazioni per tenant, calcolate una volta per giro.
+            const tenantGate = new Map<number, { ok: boolean; settings: ReviewRequestSettings; placeId: string | null }>();
+            const gateFor = async (tenantId: number) => {
+                let gate = tenantGate.get(tenantId);
+                if (!gate) {
+                    const enabled = await isFeatureEnabledForTenant(tenantId, 'reviews')
+                        && await getFeatureFlag(tenantId, 'review_requests_enabled', false);
+                    const placeId = enabled ? await getGooglePlaceId(tenantId) : null;
+                    const settings = enabled ? await getReviewRequestSettings(tenantId) : { ...REVIEW_REQUEST_DEFAULTS };
+                    gate = { ok: enabled && !!placeId, settings, placeId };
+                    // Identità fresca prima di comporre i messaggi del tenant.
+                    if (gate.ok) await refreshBusinessIdentity(tenantId).catch(() => {});
+                    tenantGate.set(tenantId, gate);
+                }
+                return gate;
+            };
+
+            for (const row of result.rows) {
+                const tenantId = Number(row.tenant_id);
+                const gate = await gateFor(tenantId);
+                if (!gate.ok) continue;
+
+                const eligibleAt = reviewRequestEligibleAt(new Date(row.visit_end), gate.settings);
+                if (now < eligibleAt) continue;
+
+                const phone = String(row.phone || '').trim();
+                const email = String(row.email || '').trim();
+                // La WHERE ripete review_request_status IS NULL: se un'altra
+                // replica ha marcato nel frattempo, qui non si sovrascrive.
+                const mark = async (status: string, channel: string | null = null, error: string | null = null) => {
+                    await queryWithRetry(
+                        `UPDATE reservations
+                         SET review_request_status = $1,
+                             review_request_channel = $2,
+                             review_request_sent_at = CASE WHEN $1 = 'sent' THEN CURRENT_TIMESTAMP ELSE review_request_sent_at END,
+                             review_request_error = $3
+                         WHERE id = $4 AND tenant_id = $5 AND review_request_status IS NULL`,
+                        [status, channel, error, row.id, tenantId]
+                    );
+                };
+
+                try {
+                    if (!phone && !email) {
+                        await mark('skipped_no_contact');
+                        continue;
+                    }
+
+                    if (gate.settings.audience === 'consent') {
+                        // Consenso sulla prenotazione oppure sulla scheda
+                        // cliente agganciata per telefono (espressione
+                        // indicizzata right-10, come le altre query telefono).
+                        let consent = row.consent_marketing === true;
+                        if (!consent && phone) {
+                            const c = await queryWithRetry(
+                                `SELECT 1 FROM customers
+                                 WHERE tenant_id = $1
+                                   AND consent_marketing = TRUE
+                                   AND right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10)
+                                     = right(regexp_replace($2, '\\D', '', 'g'), 10)
+                                 LIMIT 1`,
+                                [tenantId, phone]
+                            );
+                            consent = c.rows.length > 0;
+                        }
+                        if (!consent) {
+                            await mark('skipped_consent');
+                            continue;
+                        }
+                    }
+
+                    if (phone) {
+                        const recent = await queryWithRetry(
+                            `SELECT 1 FROM reservations
+                             WHERE tenant_id = $1
+                               AND review_request_status = 'sent'
+                               AND review_request_sent_at > NOW() - make_interval(days => $2::int)
+                               AND right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10)
+                                 = right(regexp_replace($3, '\\D', '', 'g'), 10)
+                             LIMIT 1`,
+                            [tenantId, REVIEW_REQUEST_COOLDOWN_DAYS, phone]
+                        );
+                        if (recent.rows.length > 0) {
+                            await mark('skipped_recent');
+                            continue;
+                        }
+                    }
+
+                    const language = resolveGuestLanguage(row);
+                    const identity = businessIdentity(tenantId);
+                    const reviewUrl = buildGoogleReviewUrl(gate.placeId!);
+                    const outcome = await dispatchBookingNotification({
+                        tenantId,
+                        source: row.source,
+                        phone,
+                        email,
+                        reservationId: row.id,
+                        smsText: buildReviewRequestMessage(row.customer_name, reviewUrl, identity, language),
+                        whatsappTemplate: buildReviewRequestTemplate(row.customer_name, reviewUrl, language),
+                        buildEmail: () => buildReviewRequestEmail({ customerName: row.customer_name, reviewUrl, identity, language }),
+                        kind: 'review_request',
+                    });
+                    if (outcome.delivered) {
+                        await mark('sent', outcome.channel);
+                        console.log(`⭐ Richiesta recensione inviata (tenant ${tenantId}, prenotazione ${row.id}, canale ${outcome.channel})`);
+                    } else {
+                        await mark('failed', null, outcome.error || 'invio non riuscito');
+                    }
+                } catch (err: any) {
+                    console.error(`[review-request] prenotazione ${row.id} fallita:`, err?.message || err);
+                    await mark('failed', null, err?.message || String(err)).catch(() => {});
+                }
+            }
+        } catch (err) {
+            console.error('Review request scheduler error:', err);
+        }
+    };
+    const lockedTick = () => runSchedulerTickWithLock(SCHEDULER_LOCK_REVIEW_REQUESTS, 'review-requests', tick)
+        .catch((err: any) => console.error('[review-requests] lock wrapper failed:', err?.message || err));
+    lockedTick();
+    setInterval(lockedTick, 15 * 60 * 1000);
 };
 
 // ============================================
@@ -19382,6 +19619,75 @@ function buildBookingDepositConfirmedTemplate(
     };
 }
 
+// Richiesta di recensione post-visita (piano recensioni, Fase A). Il link
+// «scrivi una recensione» non richiede nessuna API: basta il Place ID del
+// profilo Google (integration_settings.google_place_id). Template WA a due
+// variabili ({{1}} nome, {{2}} link); finché la SID non è impostata il
+// builder torna undefined e il dispatcher scala su SMS/email da solo.
+function buildGoogleReviewUrl(placeId: string): string {
+    return `https://search.google.com/local/writereview?placeid=${encodeURIComponent(placeId)}`;
+}
+function buildReviewRequestMessage(
+    customerName: string | null | undefined,
+    reviewUrl: string,
+    identity: BusinessIdentity,
+    language?: string | null
+): string {
+    const fullName = toTitleCase(customerName);
+    if (isEnglishGuest(language)) {
+        const greeting = fullName ? `Hi ${fullName}!` : 'Hi!';
+        return `${greeting} Thank you for dining at ${identity.name}. If you enjoyed it, would you leave us a review on Google? ${reviewUrl} — one minute for you, it means a lot to us. See you soon!`;
+    }
+    const greeting = fullName ? `Ciao ${fullName}!` : 'Ciao!';
+    return `${greeting} Grazie per essere stati da ${identity.name}. Se ti va, lasciaci una recensione su Google: ${reviewUrl} — un minuto per te, per noi conta molto. A presto!`;
+}
+function buildReviewRequestTemplate(
+    customerName: string | null | undefined,
+    reviewUrl: string,
+    language?: string | null
+): WhatsAppTemplateOpts | undefined {
+    const picked = pickWhatsAppTemplateSid('TWILIO_WA_CONTENT_SID_REVIEW_REQUEST', language);
+    if (!picked) return undefined;
+    return {
+        contentSid: picked.contentSid,
+        contentVariables: {
+            '1': templateName(customerName),
+            '2': reviewUrl,
+        },
+    };
+}
+function buildReviewRequestEmail(params: {
+    customerName: string | null | undefined;
+    reviewUrl: string;
+    identity: BusinessIdentity;
+    language?: string | null;
+}): { subject: string; text: string; html: string } {
+    const name = toTitleCase(params.customerName);
+    const text = buildReviewRequestMessage(params.customerName, params.reviewUrl, params.identity, params.language);
+    if (isEnglishGuest(params.language)) {
+        const subject = `How was it? — ${params.identity.name}`;
+        const detailsHtml = `
+      <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${name ? `Hi ${escapeHtml(name)},` : 'Hi,'}<br>thank you for dining at ${escapeHtml(params.identity.name)}.</p>
+      <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">If you enjoyed it, would you leave us a review on Google? One minute for you, it means a lot to us.</p>
+      <p style="margin:0 0 16px;">
+        <a href="${escapeHtml(params.reviewUrl)}" style="display:inline-block;background:#065f46;color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:12px 28px;border-radius:10px;">Leave a review</a>
+      </p>
+      <p style="margin:16px 0 0;font-size:14px;">See you soon!<br><em>${escapeHtml(params.identity.name)}</em></p>
+    `;
+        return { subject, text, html: wrapEmailHtml(`How was it at ${params.identity.name}?`, detailsHtml, params.language) };
+    }
+    const subject = `Com'è andata? — ${params.identity.name}`;
+    const detailsHtml = `
+      <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${name ? `Ciao ${escapeHtml(name)},` : 'Ciao,'}<br>grazie per essere stati da ${escapeHtml(params.identity.name)}.</p>
+      <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">Se ti va, lasciaci una recensione su Google: un minuto per te, per noi conta molto.</p>
+      <p style="margin:0 0 16px;">
+        <a href="${escapeHtml(params.reviewUrl)}" style="display:inline-block;background:#065f46;color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:12px 28px;border-radius:10px;">Lascia una recensione</a>
+      </p>
+      <p style="margin:16px 0 0;font-size:14px;">A presto!<br><em>${escapeHtml(params.identity.name)}</em></p>
+    `;
+    return { subject, text, html: wrapEmailHtml(`Com'è andata da ${params.identity.name}?`, detailsHtml) };
+}
+
 // Twilio templates for the pay-at-table link. Two shapes are supported so
 // we can switch as Meta approvals land:
 //   - CTA (preferred, `TWILIO_WA_CONTENT_SID_TABLE_BILL_LINK_CTA`):
@@ -20655,9 +20961,9 @@ async function dispatchBookingNotification(params: {
     whatsappTemplate?: WhatsAppTemplateOpts;
     /** Assente = questa notifica non ha una versione email. */
     buildEmail?: () => { subject: string; text: string; html: string };
-    /** Etichetta nei log: 'ack' | 'confirmation' | 'decline'. */
+    /** Etichetta nei log: 'ack' | 'confirmation' | 'decline' | 'review_request'. */
     kind: string;
-}): Promise<void> {
+}): Promise<{ delivered: boolean; channel: string | null; error?: string }> {
     const { tenantId, kind } = params;
     const phone = (params.phone || '').trim();
     const email = (params.email || '').trim();
@@ -20710,8 +21016,9 @@ async function dispatchBookingNotification(params: {
             // Non è un errore della richiesta: l'ospite non ha lasciato recapiti
             // utilizzabili o i provider non sono configurati. Si logga e basta.
             console.warn(`[booking-notify:${kind}] nessun canale disponibile (tenant ${tenantId}, prenotazione ${params.reservationId ?? '—'})`);
+            return { delivered: false, channel: null, error: 'nessun canale disponibile' };
         }
-        let delivered = false;
+        let deliveredChannel: string | null = null;
         for (const channel of attempts) {
             try {
                 if (channel === 'email') {
@@ -20722,13 +21029,13 @@ async function dispatchBookingNotification(params: {
                         forceChannel: channel,
                     });
                 }
-                delivered = true;
+                deliveredChannel = channel;
                 break;
             } catch (err: any) {
                 console.warn(`[booking-notify:${kind}] canale ${channel} fallito, provo il successivo:`, err?.message || err);
             }
         }
-        if (!delivered && attempts.length > 0) {
+        if (!deliveredChannel) {
             console.error(`[booking-notify:${kind}] tutti i canali falliti (tenant ${tenantId}, prenotazione ${params.reservationId ?? '—'})`);
         }
         // Copia email (comportamento storico telefono+email in parallelo):
@@ -20738,8 +21045,12 @@ async function dispatchBookingNotification(params: {
             await sendEmailNotification().catch(err =>
                 console.warn(`[booking-notify:${kind}] email in copia fallita:`, err?.message || err));
         }
+        return deliveredChannel
+            ? { delivered: true, channel: deliveredChannel }
+            : { delivered: false, channel: null, error: 'tutti i canali falliti' };
     } catch (err: any) {
         console.error(`[booking-notify:${kind}] dispatch fallito:`, err?.message || err);
+        return { delivered: false, channel: null, error: err?.message || String(err) };
     }
 }
 
@@ -33150,6 +33461,12 @@ const startServer = async () => {
                         console.log('✅ ElevenLabs quota watchdog started (1h, soglie 80/95%)');
                     } catch (schedErr) {
                         console.error('ElevenLabs quota watchdog failed to start:', schedErr);
+                    }
+                    try {
+                        startReviewRequestScheduler();
+                        console.log('✅ Review request scheduler started (15 min, finestra 10-21 Europe/Rome)');
+                    } catch (schedErr) {
+                        console.error('Review request scheduler failed to start:', schedErr);
                     }
                     try {
                         startPaymentRequestReconcileScheduler();
