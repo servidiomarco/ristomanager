@@ -444,6 +444,7 @@ Modulo a parte (si attiva con l'abbonamento «recensioni»).
 - **Richiesta di recensione dopo la visita**: a visita conclusa il cliente riceve, sui canali già usati per la prenotazione (WhatsApp con template approvato, SMS o email con bottone), il link diretto «scrivi una recensione» del profilo Google del ristorante.
 - **Quando e a chi lo decide il titolare** da Impostazioni → Recensioni: subito all'uscita, qualche ora dopo o la mattina dopo (default); solo ai clienti con consenso marketing (default) oppure a tutti i contatti. In ogni caso l'invio resta tra le 10 e le 21, mai due richieste allo stesso numero in 60 giorni, una sola richiesta per prenotazione.
 - **Place ID del profilo Google** impostato una volta sola nella stessa sezione: da lì nasce il link, senza bisogno di collegare account.
+- **Pagina Recensioni** (voce nel gruppo Comunicazioni): il registro delle richieste inviate — chi ha ricevuto il link e su che canale, chi è stato saltato e perché (senza consenso, senza recapiti, richiesta recente) e gli invii non riusciti.
 - Nella stessa sezione si sceglie già il **livello di risposta alle recensioni** (nessuna, bozza con approvazione, automatica per le positive, tutta automatica): diventa operativo col collegamento del profilo Google, in arrivo con la pagina Recensioni.
 
 ---
@@ -617,6 +618,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-14 | Recensioni Google | Nuova pagina «Recensioni» nel gruppo Comunicazioni: il registro delle richieste post-visita con esito, canale e motivo degli eventuali salti. |
 | 2026-09-14 | Recensioni Google | Nuovo modulo: richiesta di recensione automatica dopo la visita (link diretto al profilo Google via WhatsApp/SMS/email) con sezione dedicata in Impostazioni — quando inviare, a chi (consenso o tutti), Place ID e livello di risposta alle recensioni. |
 | 2026-09-14 | Personale (turni e presenze) | I nomi dei dipendenti (nome, cognome, ruolo) si salvano sempre con le iniziali maiuscole, comunque vengano digitati; le anagrafiche già inserite sono state riallineate. |
 | 2026-09-14 | Personale (turni e presenze) | Nuova area «Compensi»: tariffe per dipendente (mensile, o a servizio singolo/doppio per gli extra), acconti e saldi con residuo del mese, dovuto degli extra calcolato dai turni e correggibile a mano; riservata al permesso «Compensi e acconti» (default solo titolare) con secondo sblocco a password che scade in 15 minuti o uscendo dalla sezione. |

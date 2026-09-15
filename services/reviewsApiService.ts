@@ -85,3 +85,25 @@ export const updateReviewSettings = (input: Partial<ReviewSettings>): Promise<Re
     headers: getHeaders(),
     body: JSON.stringify(input),
   });
+
+/** Esito della richiesta post-visita su una prenotazione già valutata. */
+export type ReviewRequestStatus = 'sent' | 'skipped_consent' | 'skipped_no_contact' | 'skipped_recent' | 'failed';
+
+export interface ReviewRequestRow {
+  id: number;
+  customer_name: string;
+  phone: string | null;
+  email: string | null;
+  reservation_time: string;
+  guests: number;
+  status: ReviewRequestStatus;
+  channel: string | null;
+  sent_at: string | null;
+  error: string | null;
+}
+
+export const getReviewRequests = (offset = 0, limit = 50): Promise<{ total: number; requests: ReviewRequestRow[] }> =>
+  apiRequest(`${API_URL}/reviews/requests?offset=${offset}&limit=${limit}`, {
+    headers: getHeaders(false),
+    cache: 'no-store',
+  });

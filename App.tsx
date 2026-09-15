@@ -57,6 +57,7 @@ import { FiscalSettingsManager } from './components/FiscalSettingsManager';
 import { SalaCucinaSettingsManager } from './components/SalaCucinaSettingsManager';
 import { AiMessagesSettingsManager } from './components/AiMessagesSettingsManager';
 import { ReviewSettingsCard } from './components/ReviewSettingsCard';
+import { RecensioniPage } from './components/RecensioniPage';
 import { MediaLibraryManager } from './components/MediaLibraryManager';
 import { RevolutIntegrationCard } from './components/RevolutIntegrationCard';
 import { SumUpIntegrationCard } from './components/SumUpIntegrationCard';
@@ -194,6 +195,7 @@ const NAV_ITEMS: NavItem[] = [
   { kind: 'link', label: 'Email', Icon: Mail, group: 'comunicazioni', isTab: true, view: ViewState.EMAIL, sidebarCollapse: false },
   { kind: 'link', label: 'Chat staff', Icon: MessagesSquare, group: 'comunicazioni', isTab: true, view: ViewState.CHAT_STAFF, sidebarCollapse: false },
   { kind: 'link', label: 'Notifiche', Icon: Bell, group: 'comunicazioni', isTab: true, view: ViewState.NOTIFICHE, sidebarCollapse: false },
+  { kind: 'link', label: 'Recensioni', Icon: Star, group: 'comunicazioni', isTab: false, view: ViewState.RECENSIONI, sidebarCollapse: false },
 
   // Operazioni
   { kind: 'link', label: 'Attività', Icon: ListChecks, group: 'operazioni', isTab: false, view: ViewState.ATTIVITA, sidebarCollapse: false },
@@ -2990,6 +2992,12 @@ const App: React.FC = () => {
           <RoadmapPage />
         )}
 
+        {view === ViewState.RECENSIONI && (
+          <CardErrorBoundary label="Recensioni">
+            <RecensioniPage />
+          </CardErrorBoundary>
+        )}
+
         {view === ViewState.REPORTISTICA && (
           <ReportisticaPage />
         )}
@@ -3110,6 +3118,7 @@ const App: React.FC = () => {
                       [ViewState.MONITORING]: 'Consumi AI',
                       [ViewState.DEVELOPMENT]: 'Development',
                       [ViewState.ROADMAP]: 'Roadmap',
+                      [ViewState.RECENSIONI]: 'Recensioni',
                       [ViewState.PLATFORM]: 'Piattaforma',
                     };
                     return (

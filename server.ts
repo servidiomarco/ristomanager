@@ -24054,6 +24054,39 @@ app.put('/review-settings', authenticate, requireFeature('reviews'), requirePerm
     }
 });
 
+// Il registro delle richieste inviate (pagina Recensioni): le prenotazioni
+// già valutate dallo sweep, esito compreso — anche gli skip, così il
+// titolare vede PERCHÉ un cliente non ha ricevuto niente.
+app.get('/reviews/requests', authenticate, requireFeature('reviews'), requirePermission('reviews:view'), async (req, res) => {
+    try {
+        const limit = Math.min(100, Math.max(1, Math.trunc(Number(req.query.limit)) || 50));
+        const offset = Math.max(0, Math.trunc(Number(req.query.offset)) || 0);
+        const [rows, count] = await Promise.all([
+            queryWithRetry(
+                `SELECT id, customer_name, phone, email, reservation_time, guests,
+                        review_request_status AS status,
+                        review_request_channel AS channel,
+                        review_request_sent_at AS sent_at,
+                        review_request_error AS error
+                 FROM reservations
+                 WHERE tenant_id = $1 AND review_request_status IS NOT NULL
+                 ORDER BY COALESCE(review_request_sent_at, reservation_time) DESC, id DESC
+                 LIMIT $2 OFFSET $3`,
+                [req.tenantId!, limit, offset]
+            ),
+            queryWithRetry(
+                `SELECT COUNT(*)::int AS total FROM reservations
+                 WHERE tenant_id = $1 AND review_request_status IS NOT NULL`,
+                [req.tenantId!]
+            ),
+        ]);
+        res.json({ total: count.rows[0]?.total ?? 0, requests: rows.rows });
+    } catch (err) {
+        console.error('GET /reviews/requests error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 // ============================================
 // CANALI DI RISPOSTA PRENOTAZIONI (bookingChannelPolicy)
 // ============================================
