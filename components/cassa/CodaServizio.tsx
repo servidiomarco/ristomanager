@@ -58,18 +58,21 @@ const QueueRow: React.FC<{
         className="flex min-w-0 flex-1 items-center gap-3 p-3 text-left transition-colors hover:bg-[var(--ds-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)] sm:p-4"
       >
         {/* Il numero del tavolo è l'identificatore: si cerca quello, non il
-            nome dell'ospite. */}
+            nome dell'ospite. Per l'asporto l'identificatore è l'ora di
+            ritiro: è quella che il cliente dice entrando. */}
         <span className="flex h-12 w-12 flex-shrink-0 flex-col items-center justify-center rounded-[var(--ds-radius)] bg-[var(--ds-surface)] sm:h-14 sm:w-14">
-          <span className="text-[17px] font-semibold leading-none tracking-[-0.01em] text-[var(--ds-text-primary)] sm:text-[19px]">
-            {bill.table_name ?? '—'}
+          <span className={`font-semibold leading-none tracking-[-0.01em] text-[var(--ds-text-primary)] ${bill.takeaway_order_id != null ? 'text-[13px] tabular-nums sm:text-[14px]' : 'text-[17px] sm:text-[19px]'}`}>
+            {bill.takeaway_order_id != null ? (bill.takeaway_time ?? '—') : (bill.table_name ?? '—')}
           </span>
-          <span className="mt-0.5 text-[10px] text-[var(--ds-text-muted)]">Sala</span>
+          <span className="mt-0.5 text-[10px] text-[var(--ds-text-muted)]">{bill.takeaway_order_id != null ? 'Asporto' : 'Sala'}</span>
         </span>
 
         <span className="min-w-0 flex-1">
           <span className="flex min-w-0 flex-wrap items-center gap-2">
             <span className="truncate text-[16px] font-semibold text-[var(--ds-text-primary)] sm:text-[17px]">
-              Tavolo {bill.table_name ?? '—'}
+              {bill.takeaway_order_id != null
+                ? `Asporto ${bill.takeaway_time ?? ''}`
+                : `Tavolo ${bill.table_name ?? '—'}`}
             </span>
             <StatusPill tone={pill.tone}>{pill.label}</StatusPill>
           </span>

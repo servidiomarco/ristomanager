@@ -45,7 +45,10 @@ export const guestLabel = (bill: OpenBillRow): string =>
 
 /** La riga di dettaglio: chi, quanti, da quando, e cosa è già entrato. */
 export const queueSubtitle = (bill: OpenBillRow): string => {
-  const parts = [guestLabel(bill), `${bill.covers} copert${bill.covers === 1 ? 'o' : 'i'}`];
+  const parts = [guestLabel(bill)];
+  // I coperti sono un dato di sala: sull'asporto «1 coperto» direbbe una
+  // cosa falsa.
+  if (bill.takeaway_order_id == null) parts.push(`${bill.covers} copert${bill.covers === 1 ? 'o' : 'i'}`);
   if (bill.opened_at) parts.push(`aperto ${getRomeTimePart(bill.opened_at)}`);
   if (bill.paid_cents > 0) parts.push(`${euro(bill.paid_cents)} già pagati`);
   return parts.join(' · ');

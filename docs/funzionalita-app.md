@@ -198,6 +198,7 @@ Modulo add-on (venduto a parte, come Recensioni) per gli ordini da ritirare — 
 - **Impostazioni → Asporto**: capienza per slot e minuti di preparazione; lo stop si mette e si toglie anche dalla board. Le manopole stanno sul permesso «Gestisce ordini asporto», non sulle impostazioni generali: sono decisioni di servizio.
 - **«Manda in cucina»**: da Confermato/Da produrre l'ordine genera una comanda vera — monitor di partita, passe e stampa per centro come una comanda di sala, intestata «Asporto HH:MM» col nome del cliente. Quando la cucina segna pronta l'uscita, l'ordine passa da solo a «Pronto» sulla board e parte la notifica push «Asporto HH:MM — Pronto l'ordine di …».
 - **Pagina pubblica `/ordina`** (e `/ordina/<slug>` per tenant): il cliente sceglie giorno e orario di ritiro (solo slot in cui la cucina fa in tempo), compone l'ordine dal menu Alla carta con quantità e note, lascia nome e telefono (obbligatorio) e riceve conferma immediata. Gate doppio come /prenota: modulo venduto **e** interruttore «Ordini online» acceso — spento, la pagina mostra la card di manutenzione coi contatti. Ordini col canale «WEB» in board, push allo staff alla creazione; honeypot e rate limit contro i bot; la pagina non può mai forzare capienza o stop.
+- **Incasso al ritiro**: «Prepara il conto» chiude la comanda e mette il conto in coda Cassa — riga «Asporto HH:MM» col nome del cliente al posto del tavolo; da lì incasso, scontrino e libro cassa sono il flusso di sempre. La coda cassa funziona anche per chi ha il solo modulo asporto.
 - In arrivo nelle prossime fasi: presa ordine telefonica con Sofia.
 
 ---
@@ -634,6 +635,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-15 | Asporto | Incasso al ritiro: «Prepara il conto» dalla board apre il conto in coda Cassa (riga «Asporto HH:MM» col nome del cliente); incasso, scontrino e libro cassa seguono il flusso di sempre. |
 | 2026-09-15 | Asporto | L'interruttore «Ordini online» sta nella card Impostazioni → Asporto (permesso «Gestisce ordini asporto», come lo stop) e mostra il link della pagina da copiare. |
 | 2026-09-15 | Asporto | Pagina pubblica /ordina: ordinazione d'asporto online con slot fattibili per la cucina, menu Alla carta, conferma immediata e push allo staff; si accende con l'interruttore «Ordini online» del modulo. |
 | 2026-09-15 | Asporto | «Manda in cucina»: l'ordine d'asporto genera la comanda (KDS, passe e stampa per partita, intestata «Asporto HH:MM»); il «pronto» del monitor riporta da solo l'ordine a Pronto sulla board, con push dedicata. |

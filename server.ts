@@ -24162,7 +24162,14 @@ async function countTakeawayInSlot(tenantId: number, date: string, time: string,
 
 async function loadTakeawayView(tenantId: number, orderId: number): Promise<any | null> {
     const [order, items] = await Promise.all([
-        queryWithRetry('SELECT * FROM takeaway_orders WHERE id = $1 AND tenant_id = $2', [orderId, tenantId]),
+        // bill_id in vista: la board mostra «conto in cassa» senza
+        // interrogare /bills/open.
+        queryWithRetry(
+            `SELECT t.*, o.table_bill_id AS bill_id FROM takeaway_orders t
+             LEFT JOIN orders o ON o.id = t.kitchen_order_id AND o.tenant_id = t.tenant_id
+             WHERE t.id = $1 AND t.tenant_id = $2`,
+            [orderId, tenantId]
+        ),
         queryWithRetry(
             'SELECT id, takeaway_order_id, dish_id, name_snapshot, unit_price_cents, qty, note FROM takeaway_order_items WHERE takeaway_order_id = $1 AND tenant_id = $2 ORDER BY id',
             [orderId, tenantId]
@@ -24470,6 +24477,81 @@ app.post('/takeaway/orders/:id/fire', authenticate, requireFeature('takeaway'), 
     }
 });
 
+// «Prepara il conto»: chiude la comanda TAKEAWAY e apre il conto in coda
+// cassa, ancorato a takeaway_order_id (migration conto-asporto). Rotta
+// dedicata invece di POST /orders/:id/close, di proposito: quella sta
+// dietro ordersEnabledGuard e l'asporto incassa anche dove la UI comande
+// è spenta. Da qui in poi incasso, scontrino e libro cassa sono il flusso
+// di sempre — la pipeline non guarda mai il tavolo.
+app.post('/takeaway/orders/:id/bill', authenticate, requireFeature('takeaway'), requirePermission('takeaway:manage'), async (req, res) => {
+    try {
+        const takeawayId = Math.trunc(Number(req.params.id));
+        if (!Number.isFinite(takeawayId) || takeawayId <= 0) return res.status(400).json({ error: 'invalid_id' });
+
+        const result = await withTenant(req.tenantId!, async client => {
+            const cur = await client.query(
+                'SELECT * FROM takeaway_orders WHERE id = $1 AND tenant_id = $2 FOR UPDATE',
+                [takeawayId, req.tenantId!]
+            );
+            const tw = cur.rows[0];
+            if (!tw) return { error: { status: 404, body: { error: 'not_found' } } };
+            if (tw.kitchen_order_id == null) {
+                return { error: { status: 409, body: { error: 'not_fired', message: 'Prima manda l\'ordine in cucina' } } };
+            }
+            const ord = await client.query(
+                'SELECT * FROM orders WHERE id = $1 AND tenant_id = $2 FOR UPDATE',
+                [tw.kitchen_order_id, req.tenantId!]
+            );
+            const order = ord.rows[0];
+            if (!order) return { error: { status: 409, body: { error: 'kitchen_order_missing' } } };
+            if (order.table_bill_id != null) {
+                // Doppio tocco: il conto c'è già, si torna quello.
+                return { billId: Number(order.table_bill_id), reused: true };
+            }
+            const shareToken = crypto.randomBytes(24).toString('base64url');
+            const ins = await client.query(
+                `INSERT INTO table_bills
+                    (tenant_id, reservation_id, table_id, takeaway_order_id, total_cents, covers,
+                     share_token, opened_by_user_id, service_date, shift)
+                 VALUES ($1, NULL, NULL, $2, 1, 1, $3, $4, $5, $6)
+                 RETURNING id`,
+                [req.tenantId!, takeawayId, shareToken, req.user?.userId ?? null, order.service_date, order.shift]
+            );
+            const billId = Number(ins.rows[0].id);
+            await client.query('UPDATE orders SET table_bill_id = $2 WHERE id = $1', [tw.kitchen_order_id, billId]);
+            await syncBillTotalInTx(client, req.tenantId!, billId);
+            if (order.status === 'OPEN') {
+                await client.query(
+                    `UPDATE orders SET status = 'CLOSED', closed_at = CURRENT_TIMESTAMP, closed_by_user_id = $2
+                     WHERE id = $1`,
+                    [tw.kitchen_order_id, req.user?.userId ?? null]
+                );
+                await outboxEnqueueInTx(client, req.tenantId!, 'order:updated', `order:${tw.kitchen_order_id}`, { order_id: tw.kitchen_order_id });
+            }
+            return { billId, reused: false };
+        });
+        if (result.error) return res.status(result.error.status).json(result.error.body);
+
+        const bill = await queryWithRetry(
+            'SELECT id, total_cents, status FROM table_bills WHERE id = $1 AND tenant_id = $2',
+            [result.billId, req.tenantId!]
+        );
+        try { socketService?.broadcastToAll(req.tenantId!, 'bill:updated', bill.rows[0]); } catch (_) {}
+        outboxKick();
+        res.status(result.reused ? 200 : 201).json({
+            bill_id: result.billId,
+            reused: result.reused,
+            total_cents: bill.rows[0]?.total_cents ?? 0,
+        });
+    } catch (err: any) {
+        if (err instanceof BillSyncError) {
+            return res.status(409).json({ error: err.message, ...err.detail });
+        }
+        console.error('POST /takeaway/orders/:id/bill error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 // ── Asporto pubblico (pagina /ordina) ───────────────────────────────────
 // Doppio gate come le prenotazioni web: entitlement 'takeaway' (venduto)
 // AND flag takeaway_online_enabled (acceso dal ristoratore). Il default è
@@ -24697,8 +24779,10 @@ app.get('/takeaway/orders', authenticate, requireFeature('takeaway'), requirePer
         const date = typeof req.query.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date)
             ? req.query.date : getItalianTodayIso();
         const orders = await queryWithRetry(
-            `SELECT * FROM takeaway_orders WHERE tenant_id = $1 AND pickup_date = $2
-             ORDER BY pickup_time, id`,
+            `SELECT t.*, o.table_bill_id AS bill_id FROM takeaway_orders t
+             LEFT JOIN orders o ON o.id = t.kitchen_order_id AND o.tenant_id = t.tenant_id
+             WHERE t.tenant_id = $1 AND t.pickup_date = $2
+             ORDER BY t.pickup_time, t.id`,
             [req.tenantId!, date]
         );
         const ids = orders.rows.map((r: any) => Number(r.id));
@@ -32486,7 +32570,10 @@ app.get('/reports/kitchen', authenticate, requirePermission('orders:expedite'), 
 // endpoint elenca i conti attivi per tavolo, con o senza prenotazione.
 app.get('/bills/open', authenticate, requirePermission('payments:view'), async (req, res) => {
     try {
-        if (!(await isPayAtTableActive(req.tenantId!))) {
+        // La coda cassa vive col pay-at-table, ma un tenant col solo modulo
+        // asporto incassa da qui i suoi conti: basta uno dei due.
+        if (!(await isPayAtTableActive(req.tenantId!))
+            && !(await isFeatureEnabledForTenant(req.tenantId!, 'takeaway'))) {
             return res.json({ bills: [] });
         }
 
@@ -32512,8 +32599,12 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
                     b.currency, b.items, b.status, b.share_token, b.opened_at, b.closed_at,
                     b.cash_settled_cents, b.tip_cents, b.external_ref,
                     b.discount_type, b.discount_value, b.discount_reason,
+                    b.takeaway_order_id,
                     t.name AS table_name,
-                    r.customer_name,
+                    -- La riga asporto in coda dice cliente e ora di ritiro
+                    -- al posto del tavolo.
+                    COALESCE(r.customer_name, tw.customer_name) AS customer_name,
+                    tw.pickup_time AS takeaway_time,
                     -- Il servizio del conto arriva dalla comanda; per un conto
                     -- aperto a mano (senza comanda) si deduce dall'orario con
                     -- la stessa regola del giorno di servizio.
@@ -32585,6 +32676,7 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
              FROM table_bills b
              LEFT JOIN tables t ON t.id = b.table_id AND t.tenant_id = b.tenant_id
              LEFT JOIN reservations r ON r.id = b.reservation_id AND r.tenant_id = b.tenant_id
+             LEFT JOIN takeaway_orders tw ON tw.id = b.takeaway_order_id AND tw.tenant_id = b.tenant_id
              LEFT JOIN table_bill_splits s ON s.table_bill_id = b.id
              LEFT JOIN LATERAL (
                  SELECT id, status, error, provider, provider_ref, doc_type, doc_number, public_token, related_doc_id FROM fiscal_documents
@@ -32601,7 +32693,7 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
                         (SELECT o.shift FROM orders o WHERE o.table_bill_id = b.id ORDER BY o.id LIMIT 1),
                         CASE WHEN EXTRACT(hour FROM (b.opened_at AT TIME ZONE 'Europe/Rome')) BETWEEN 5 AND 16
                              THEN 'LUNCH' ELSE 'DINNER' END) = $2::varchar)
-             GROUP BY b.id, t.name, r.customer_name, fd.id, fd.status, fd.error, fd.provider, fd.provider_ref, fd.doc_type, fd.doc_number, fd.public_token, fd.related_doc_id
+             GROUP BY b.id, t.name, r.customer_name, tw.customer_name, tw.pickup_time, fd.id, fd.status, fd.error, fd.provider, fd.provider_ref, fd.doc_type, fd.doc_number, fd.public_token, fd.related_doc_id
              ORDER BY b.closed_at DESC NULLS LAST, b.opened_at DESC`,
             [filterDate, filterShift, statuses, req.tenantId!]
         );

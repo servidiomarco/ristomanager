@@ -112,6 +112,14 @@ class AsportoApiService {
     });
   }
 
+  /** «Prepara il conto»: chiude la comanda e apre il conto in coda cassa. */
+  async prepareBill(id: number): Promise<{ bill_id: number; reused: boolean; total_cents: number }> {
+    return apiRequest(`${API_URL}/takeaway/orders/${id}/bill`, {
+      method: 'POST',
+      headers: getHeaders(),
+    });
+  }
+
   /** «Manda in cucina»: genera la comanda TAKEAWAY e lancia l'uscita. */
   async fire(id: number): Promise<TakeawayOrderView> {
     return apiRequest(`${API_URL}/takeaway/orders/${id}/fire`, {

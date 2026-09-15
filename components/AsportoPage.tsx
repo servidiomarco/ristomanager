@@ -9,6 +9,7 @@ import {
   Pencil,
   Phone,
   Plus,
+  Receipt,
   ShoppingBag,
   X,
 } from 'lucide-react';
@@ -245,6 +246,15 @@ export const AsportoPage: React.FC<AsportoPageProps> = ({ dishes, isInitialLoadi
     }
   };
 
+  const prepareBill = async (order: TakeawayOrderView) => {
+    try {
+      await asportoApiService.prepareBill(order.id);
+    } catch {
+      // not_fired o rete: la rilettura mostra lo stato vero.
+    }
+    fetchDay(dateRef.current);
+  };
+
   const detail = selected && (
     <DetailPanel
       order={selected}
@@ -252,6 +262,7 @@ export const AsportoPage: React.FC<AsportoPageProps> = ({ dishes, isInitialLoadi
       readOnly={!canManage}
       onSetStatus={state => setStatus(selected, state)}
       onFire={() => fireOrder(selected)}
+      onPrepareBill={() => prepareBill(selected)}
       onEdit={() => setSheetOrder(selected)}
       onClose={() => setSelectedId(null)}
     />
@@ -456,9 +467,10 @@ const DetailPanel: React.FC<{
   readOnly?: boolean;
   onSetStatus: (state: Exclude<AsportoStateKey, 'due' | 'late'>) => void;
   onFire: () => void;
+  onPrepareBill: () => void;
   onEdit: () => void;
   onClose: () => void;
-}> = ({ order, state, readOnly, onSetStatus, onFire, onEdit }) => {
+}> = ({ order, state, readOnly, onSetStatus, onFire, onPrepareBill, onEdit }) => {
   const ds = asportoStateDs(state);
   // Il verbo giusto per lo stato in cui l'ordine si trova adesso: un solo
   // bottone primario, mai un menu di sette stati. Da confermato/da produrre
@@ -519,6 +531,21 @@ const DetailPanel: React.FC<{
             <primary.icon className="h-4 w-4" aria-hidden />
             {primary.label}
           </button>
+        )}
+        {/* Il conto si prepara appena la comanda è partita: chi paga al
+            ritiro trova la riga già in coda cassa. */}
+        {order.kitchen_order_id != null && state !== 'cancelled' && state !== 'noshow' && (
+          order.bill_id != null ? (
+            <div className="inline-flex h-11 items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-seated-tint)] px-5 text-[14px] font-medium text-[var(--ds-seated-text)]">
+              <Receipt className="h-4 w-4" aria-hidden />
+              Conto in cassa
+            </div>
+          ) : (
+            <button type="button" onClick={onPrepareBill} className={dsButton.secondary}>
+              <Receipt className="h-4 w-4" aria-hidden />
+              Prepara il conto
+            </button>
+          )
         )}
         <div className="flex gap-2">
           <button type="button" onClick={onEdit} className={`${dsButton.secondary} flex-1`}>

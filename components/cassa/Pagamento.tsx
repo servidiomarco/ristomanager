@@ -251,7 +251,9 @@ export const Pagamento: React.FC<PagamentoProps> = ({
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-[17px] font-semibold text-[var(--ds-text-primary)]">Pagamento</h1>
             <p className="truncate text-[13px] text-[var(--ds-text-muted)]">
-              Tavolo {bill.table_name ?? '—'} · {bill.covers} copert{bill.covers === 1 ? 'o' : 'i'}
+              {bill.takeaway_order_id != null
+                ? `Asporto ${bill.takeaway_time ?? ''} · ${bill.customer_name ?? ''}`
+                : `Tavolo ${bill.table_name ?? '—'} · ${bill.covers} copert${bill.covers === 1 ? 'o' : 'i'}`}
             </p>
           </div>
           <StatusPill tone={residual > 0 ? 'pending' : 'positive'}>

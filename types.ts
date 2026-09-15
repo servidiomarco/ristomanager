@@ -869,6 +869,8 @@ export interface TakeawayOrder {
   channel: TakeawayChannel;
   notes?: string | null;
   kitchen_order_id: number | null;
+  /** Conto in cassa della comanda generata (orders.table_bill_id). */
+  bill_id?: number | null;
   created_by_user_id?: number | null;
   ready_at?: string | null;
   picked_up_at?: string | null;
