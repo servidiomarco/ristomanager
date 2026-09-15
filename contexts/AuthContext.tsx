@@ -36,6 +36,7 @@ const VIEW_PERMISSIONS: Record<ViewState, string> = {
   [ViewState.REPORTISTICA]: 'reports:view',
   [ViewState.FISCALITA]: 'fiscal:view',
   [ViewState.EMAIL]: 'reservations:view',
+  [ViewState.RECENSIONI]: 'reviews:view',
   [ViewState.NOTIFICHE]: 'dashboard:view',
   [ViewState.MONITORING]: '', // gated by account email, not by permission — see canAccessView
   [ViewState.DEVELOPMENT]: '', // gated by account email, not by permission — see canAccessView
@@ -58,6 +59,7 @@ export type TenantFeatureKey = 'voice' | 'whatsapp' | 'web_booking' | 'pay_at_ta
 const VIEW_FEATURES: Partial<Record<ViewState, TenantFeatureKey>> = {
   [ViewState.CONVERSAZIONI]: 'voice',
   [ViewState.MESSAGGI]: 'whatsapp',
+  [ViewState.RECENSIONI]: 'reviews',
 };
 
 interface AuthContextType {

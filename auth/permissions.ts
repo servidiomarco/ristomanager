@@ -325,6 +325,9 @@ const VIEW_PERMISSIONS: Record<ViewState, Permission[]> = {
   // Email inbox reuses the same permission as the SMS/WhatsApp inbox — anyone
   // who can read reservations can read the email thread with those customers.
   [ViewState.EMAIL]: ['reservations:view'],
+  // Recensioni Google: permesso dedicato; le route esigono anche
+  // l'entitlement 'reviews' (requireFeature).
+  [ViewState.RECENSIONI]: ['reviews:view'],
   // Notifiche is a personal centre — dashboard-level visibility is enough.
   [ViewState.NOTIFICHE]: ['dashboard:view'],
   // Consumi AI (token monitoring) and Development (dev board) are gated by

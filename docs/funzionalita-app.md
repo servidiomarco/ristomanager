@@ -30,20 +30,21 @@
 18. [Email](#email)
 19. [Chat staff](#chat-staff)
 20. [Notifiche](#notifiche)
-21. [Clienti (CRM / rubrica)](#clienti-crm--rubrica)
-22. [Attività / to-do](#attività--to-do)
-23. [Personale (turni e presenze)](#personale-turni-e-presenze)
-24. [Inventario](#inventario)
-25. [Lista della spesa e fornitori](#lista-della-spesa-e-fornitori)
-26. [HACCP](#haccp)
-27. [Funzioni AI](#funzioni-ai)
-28. [Impostazioni](#impostazioni)
-29. [Utenti, ruoli e permessi](#utenti-ruoli-e-permessi)
-30. [Privacy e GDPR](#privacy-e-gdpr)
-31. [Piattaforma SaaS: multi-tenant, moduli e abbonamenti](#piattaforma-saas-multi-tenant-moduli-e-abbonamenti)
-32. [Funzionalità trasversali](#funzionalità-trasversali)
-33. [Integrazioni esterne](#integrazioni-esterne)
-34. [Registro aggiornamenti](#registro-aggiornamenti)
+21. [Recensioni Google](#recensioni-google)
+22. [Clienti (CRM / rubrica)](#clienti-crm--rubrica)
+23. [Attività / to-do](#attività--to-do)
+24. [Personale (turni e presenze)](#personale-turni-e-presenze)
+25. [Inventario](#inventario)
+26. [Lista della spesa e fornitori](#lista-della-spesa-e-fornitori)
+27. [HACCP](#haccp)
+28. [Funzioni AI](#funzioni-ai)
+29. [Impostazioni](#impostazioni)
+30. [Utenti, ruoli e permessi](#utenti-ruoli-e-permessi)
+31. [Privacy e GDPR](#privacy-e-gdpr)
+32. [Piattaforma SaaS: multi-tenant, moduli e abbonamenti](#piattaforma-saas-multi-tenant-moduli-e-abbonamenti)
+33. [Funzionalità trasversali](#funzionalità-trasversali)
+34. [Integrazioni esterne](#integrazioni-esterne)
+35. [Registro aggiornamenti](#registro-aggiornamenti)
 
 ---
 
@@ -436,6 +437,18 @@ Per i ristoranti con cassa **Passepartout Menù** (modulo dedicato):
 
 ---
 
+## Recensioni Google
+
+Modulo a parte (si attiva con l'abbonamento «recensioni»).
+
+- **Richiesta di recensione dopo la visita**: a visita conclusa il cliente riceve, sui canali già usati per la prenotazione (WhatsApp con template approvato, SMS o email con bottone), il link diretto «scrivi una recensione» del profilo Google del ristorante.
+- **Quando e a chi lo decide il titolare** da Impostazioni → Recensioni: subito all'uscita, qualche ora dopo o la mattina dopo (default); solo ai clienti con consenso marketing (default) oppure a tutti i contatti. In ogni caso l'invio resta tra le 10 e le 21, mai due richieste allo stesso numero in 60 giorni, una sola richiesta per prenotazione.
+- **Place ID del profilo Google** impostato una volta sola nella stessa sezione: da lì nasce il link, senza bisogno di collegare account.
+- **Pagina Recensioni** (voce nel gruppo Comunicazioni): il registro delle richieste inviate — chi ha ricevuto il link e su che canale, chi è stato saltato e perché (senza consenso, senza recapiti, richiesta recente) e gli invii non riusciti.
+- Nella stessa sezione si sceglie già il **livello di risposta alle recensioni** (nessuna, bozza con approvazione, automatica per le positive, tutta automatica): diventa operativo col collegamento del profilo Google, in arrivo con la pagina Recensioni.
+
+---
+
 ## Clienti (CRM / rubrica)
 
 - Rubrica con **indice alfabetico**, ricerca e scheda cliente completa: contatti, indirizzo, **dati di fatturazione** (denominazione, P.IVA, CF, codice SDI, PEC), preferenze di servizio (tavolo preferito, note), **allergie e note alimentari**, lingua dell'ospite.
@@ -556,7 +569,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 ## Piattaforma SaaS: multi-tenant, moduli e abbonamenti
 
 - **Ogni ristorante è un tenant isolato a livello di database** (Row Level Security): dati, branding, impostazioni, permessi e integrazioni separati. Pagine pubbliche per **slug** (`/prenota/nome-ristorante`) o **dominio personalizzato**.
-- **Moduli vendibili (add-on)**: Agente vocale (`voice`), WhatsApp (`whatsapp`), Prenotazioni web (`web_booking`), Conto al tavolo (`pay_at_table`), integrazione Passepartout (`passepartout`). L'email è canale base. Un modulo non incluso nel piano non compare nemmeno al Proprietario.
+- **Moduli vendibili (add-on)**: Agente vocale (`voice`), WhatsApp (`whatsapp`), Prenotazioni web (`web_booking`), Conto al tavolo (`pay_at_table`), integrazione Passepartout (`passepartout`), Recensioni Google (`reviews`). L'email è canale base. Un modulo non incluso nel piano non compare nemmeno al Proprietario.
 - **Doppio livello di controllo**: il modulo va *venduto* (entitlement) e poi *acceso* dal ristoratore (interruttore operativo). Tutti i default sono prudenti (spento).
 - **Billing con Stripe**: abbonamento per tenant con add-on, checkout e portale clienti; lo stato dell'abbonamento accende/spegne i moduli da solo (webhook). Quadro MRR e stato clienti per l'amministrazione.
 - **Pannello Piattaforma** (solo admin): creazione nuovo ristorante in un click (con owner e password temporanea mostrata una sola volta), sospensione/riattivazione (la sospensione spegne anche login e pagine pubbliche), accensione moduli, **impersonificazione** dell'owner per assistenza (sessione breve, tracciata e con banner visibile).
@@ -605,6 +618,8 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-14 | Recensioni Google | Nuova pagina «Recensioni» nel gruppo Comunicazioni: il registro delle richieste post-visita con esito, canale e motivo degli eventuali salti. |
+| 2026-09-14 | Recensioni Google | Nuovo modulo: richiesta di recensione automatica dopo la visita (link diretto al profilo Google via WhatsApp/SMS/email) con sezione dedicata in Impostazioni — quando inviare, a chi (consenso o tutti), Place ID e livello di risposta alle recensioni. |
 | 2026-09-14 | Personale (turni e presenze) | I nomi dei dipendenti (nome, cognome, ruolo) si salvano sempre con le iniziali maiuscole, comunque vengano digitati; le anagrafiche già inserite sono state riallineate. |
 | 2026-09-14 | Personale (turni e presenze) | Nuova area «Compensi»: tariffe per dipendente (mensile, o a servizio singolo/doppio per gli extra), acconti e saldi con residuo del mese, dovuto degli extra calcolato dai turni e correggibile a mano; riservata al permesso «Compensi e acconti» (default solo titolare) con secondo sblocco a password che scade in 15 minuti o uscendo dalla sezione. |
 | 2026-09-14 | Pagamenti, conto al tavolo e cassa | Nel foglio conto le card Quote e Pagamenti diventano una sola «Pagamenti quote»: ogni quota porta il riferimento del pagamento (provider e id ordine) e il bottone che apre la pagina esito del checkout — ricevuta del riuscito e del non riuscito; compaiono anche i tentativi falliti (carta rifiutata), in rosso; sotto, gli incassi battuti dallo staff. |
