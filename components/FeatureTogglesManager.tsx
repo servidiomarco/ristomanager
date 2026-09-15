@@ -203,6 +203,8 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
         digital_menu_enabled: { title: 'Menu digitale', on: 'attivo', off: 'disattivato' },
         // Idem: gestito dalla sezione Sala e cucina.
         passe_enabled: { title: 'Passe', on: 'attivo', off: 'disattivato' },
+        // Idem: gestito dalla sezione Recensioni (ReviewSettingsCard).
+        review_requests_enabled: { title: 'Richiesta recensione', on: 'attiva', off: 'disattivata' },
     };
 
     const toggle = async (key: FlagKey) => {

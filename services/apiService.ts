@@ -1216,6 +1216,8 @@ export interface FeatureFlags {
   /** Postazione passe. Spenta: la pagina Passe sparisce e i verbi
    *  chiama/servito passano alla comanda del cameriere. */
   passe_enabled: boolean;
+  /** Richiesta di recensione Google dopo la visita (Impostazioni → Recensioni). */
+  review_requests_enabled: boolean;
 }
 
 export const getFeatureFlags = async (): Promise<FeatureFlags> => {
@@ -1831,8 +1833,8 @@ export const completeOnboarding = async (): Promise<void> => {
 // Autenticate col JWT PLATFORM_ADMIN via il normale bearer di getHeaders():
 // il server prova prima il JWT, l'env token resta per gli script.
 
-export type AdminTenantFeature = 'voice' | 'whatsapp' | 'web_booking' | 'pay_at_table' | 'passepartout';
-export const ADMIN_TENANT_FEATURES: AdminTenantFeature[] = ['voice', 'whatsapp', 'web_booking', 'pay_at_table', 'passepartout'];
+export type AdminTenantFeature = 'voice' | 'whatsapp' | 'web_booking' | 'pay_at_table' | 'passepartout' | 'reviews';
+export const ADMIN_TENANT_FEATURES: AdminTenantFeature[] = ['voice', 'whatsapp', 'web_booking', 'pay_at_table', 'passepartout', 'reviews'];
 
 export interface AdminTenant {
   id: number;
