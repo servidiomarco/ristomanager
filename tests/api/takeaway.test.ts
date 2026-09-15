@@ -242,6 +242,50 @@ describe('asporto — cucina', () => {
         expect(count.rows[0].n).toBe(1);
     });
 
+    it('«prepara il conto» apre il conto ancorato all\'ordine e si incassa dalla cassa', async () => {
+        const bill = await api().post(`/takeaway/orders/${asportoId}/bill`).set(bearer(token)).send({});
+        expect(bill.status).toBe(201);
+        expect(bill.body.total_cents).toBe(2550);
+
+        const row = await pg.query(
+            'SELECT takeaway_order_id, table_id, reservation_id, status FROM table_bills WHERE id = $1',
+            [bill.body.bill_id]
+        );
+        expect(Number(row.rows[0].takeaway_order_id)).toBe(Number(asportoId));
+        expect(row.rows[0].table_id).toBeNull();
+        expect(row.rows[0].reservation_id).toBeNull();
+        expect(row.rows[0].status).toBe('OPEN');
+        const ord = await pg.query('SELECT status, table_bill_id FROM orders WHERE id = $1', [kitchenId]);
+        expect(ord.rows[0].status).toBe('CLOSED');
+        expect(Number(ord.rows[0].table_bill_id)).toBe(bill.body.bill_id);
+
+        // Doppio tocco: riusa, mai due conti.
+        const again = await api().post(`/takeaway/orders/${asportoId}/bill`).set(bearer(token)).send({});
+        expect(again.status).toBe(200);
+        expect(again.body).toMatchObject({ reused: true, bill_id: bill.body.bill_id });
+
+        // In coda cassa con l'etichetta asporto (il gate passa con il solo
+        // entitlement takeaway: pay_at_table_enabled resta spento).
+        const open = await api().get('/bills/open').set(bearer(token))
+            .query({ date: DATA_ASPORTO, shift: 'DINNER' });
+        const mine = (open.body.bills || []).find((b: any) => b.id === bill.body.bill_id);
+        expect(mine).toBeTruthy();
+        expect(mine.takeaway_time).toBe('20:00');
+        expect(mine.customer_name).toBe('Verdi Luigi');
+
+        // Incasso in contanti: pipeline di sempre, nessun tavolo richiesto.
+        const close = await api().post(`/bills/${bill.body.bill_id}/close`).set(bearer(token))
+            .send({ payments: [{ method: 'CONTANTI', amount_cents: 2550 }] });
+        expect(close.status).toBe(200);
+        const closed = await pg.query('SELECT status FROM table_bills WHERE id = $1', [bill.body.bill_id]);
+        expect(closed.rows[0].status).toBe('CLOSED');
+
+        // La board mostra «conto in cassa» via bill_id in vista.
+        const list = await api().get('/takeaway/orders').set(bearer(token)).query({ date: DATA_ASPORTO });
+        const view = list.body.orders.find((o: any) => o.id === asportoId);
+        expect(Number(view.bill_id)).toBe(bill.body.bill_id);
+    });
+
     it('il «pronto» del monitor porta l\'ordine asporto a READY da solo', async () => {
         // Le route KDS stanno dietro il flag: si accende, si usa, si rispegne.
         const flagOn = await api().put('/settings/features').set(bearer(token)).send({ table_orders_enabled: true });

@@ -297,6 +297,10 @@ export interface OpenBillRow {
   id: number;
   reservation_id: number | null;
   table_id: number | null;
+  /** Conto asporto: ancorato all'ordine, non a un tavolo. */
+  takeaway_order_id?: number | null;
+  /** Ora di ritiro dell'ordine asporto, per la riga in coda. */
+  takeaway_time?: string | null;
   table_name: string | null;
   customer_name: string | null;
   total_cents: number;
