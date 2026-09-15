@@ -21,6 +21,7 @@ const VIEW_PERMISSIONS: Record<ViewState, string> = {
   [ViewState.PASSE]: 'orders:expedite',
   [ViewState.RESERVATIONS]: 'reservations:view',
   [ViewState.RECEPTION]: 'reception:view',
+  [ViewState.ASPORTO]: 'takeaway:view',
   [ViewState.ATTIVITA]: 'dashboard:view',
   [ViewState.LISTA_DELLA_SPESA]: 'dashboard:view',
   [ViewState.HACCP]: 'dashboard:view',
@@ -55,11 +56,12 @@ const DEV_BOARD_ADMIN_EMAIL = 'admin@ristomanager.com';
 // venduta a UN ristorante (chi ha la cassa Passepartout), non un canale
 // storico — un payload vecchio senza la chiave non deve accenderla per tutti.
 // 'reviews' segue la stessa regola: add-on venduto a parte, fail-closed.
-export type TenantFeatureKey = 'voice' | 'whatsapp' | 'web_booking' | 'pay_at_table' | 'passepartout' | 'reviews';
+export type TenantFeatureKey = 'voice' | 'whatsapp' | 'web_booking' | 'pay_at_table' | 'passepartout' | 'reviews' | 'takeaway';
 const VIEW_FEATURES: Partial<Record<ViewState, TenantFeatureKey>> = {
   [ViewState.CONVERSAZIONI]: 'voice',
   [ViewState.MESSAGGI]: 'whatsapp',
   [ViewState.RECENSIONI]: 'reviews',
+  [ViewState.ASPORTO]: 'takeaway',
 };
 
 interface AuthContextType {
@@ -200,6 +202,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // fail-open qui sotto vale per i canali storici, non per questi.
     if (feature === 'passepartout') return features?.passepartout === true;
     if (feature === 'reviews') return features?.reviews === true;
+    if (feature === 'takeaway') return features?.takeaway === true;
     if (!features) return true;
     return features[feature] !== false;
   }, [user]);

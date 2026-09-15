@@ -1,0 +1,114 @@
+// Servizio API del modulo asporto, sullo stampo di ordersApiService:
+// stesso refresh su 401, stesso X-Socket-ID sulle scritture (il server
+// però broadcasta takeaway:* a TUTTI, mittente compreso: la riga del
+// server è autoritativa, come per le prenotazioni).
+import { authApiService } from './authApiService';
+import { socketClient } from './socketClient';
+import type { TakeawayOrderView, TakeawaySlotBoard, TakeawayStatus } from '../types';
+import { buildApiError } from './apiError';
+
+const API_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';
+
+export interface TakeawayItemPayload {
+  dish_id: number;
+  qty: number;
+  note?: string | null;
+}
+
+export interface CreateTakeawayPayload {
+  customer_name: string;
+  customer_phone?: string;
+  pickup_date: string;
+  pickup_time: string;
+  items: TakeawayItemPayload[];
+  notes?: string;
+  /** Scavalca stop e capienza — la decisione di chi sta al banco. */
+  force?: boolean;
+}
+
+export interface PatchTakeawayPayload {
+  customer_name?: string;
+  customer_phone?: string;
+  pickup_date?: string;
+  pickup_time?: string;
+  items?: TakeawayItemPayload[];
+  notes?: string;
+  force?: boolean;
+}
+
+export interface TakeawayConfig {
+  capacity_per_slot: number;
+  prep_minutes: number;
+  stop_date: string | null;
+}
+
+const getHeaders = (): HeadersInit => {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const socketId = socketClient.getSocket()?.id;
+  if (socketId) headers['X-Socket-ID'] = socketId;
+  const token = authApiService.getAccessToken();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  return headers;
+};
+
+const fetchWithAuth = async (url: string, options: RequestInit = {}, retried = false): Promise<Response> => {
+  const response = await fetch(url, options);
+  if (response.status === 401 && !retried) {
+    const refreshed = await authApiService.refreshToken();
+    if (refreshed) {
+      const newHeaders = { ...options.headers } as Record<string, string>;
+      newHeaders['Authorization'] = `Bearer ${refreshed.accessToken}`;
+      return fetchWithAuth(url, { ...options, headers: newHeaders }, true);
+    }
+  }
+  return response;
+};
+
+const apiRequest = async <T>(url: string, options: RequestInit = {}): Promise<T> => {
+  const response = await fetchWithAuth(url, options);
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ error: 'Request failed' }));
+    throw buildApiError(response.status, errorData);
+  }
+  return response.json();
+};
+
+class AsportoApiService {
+  async getOrders(date: string): Promise<{ date: string; orders: TakeawayOrderView[] }> {
+    return apiRequest(`${API_URL}/takeaway/orders?date=${encodeURIComponent(date)}`, { headers: getHeaders() });
+  }
+
+  async getSlots(date: string): Promise<TakeawaySlotBoard> {
+    return apiRequest(`${API_URL}/takeaway/slots?date=${encodeURIComponent(date)}`, { headers: getHeaders() });
+  }
+
+  async getConfig(): Promise<TakeawayConfig> {
+    return apiRequest(`${API_URL}/takeaway/config`, { headers: getHeaders() });
+  }
+
+  async createOrder(payload: CreateTakeawayPayload): Promise<TakeawayOrderView> {
+    return apiRequest(`${API_URL}/takeaway/orders`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateOrder(id: number, payload: PatchTakeawayPayload): Promise<TakeawayOrderView> {
+    return apiRequest(`${API_URL}/takeaway/orders/${id}`, {
+      method: 'PATCH',
+      headers: getHeaders(),
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async setStatus(id: number, status: TakeawayStatus): Promise<TakeawayOrderView> {
+    return apiRequest(`${API_URL}/takeaway/orders/${id}/status`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ status }),
+    });
+  }
+}
+
+export const asportoApiService = new AsportoApiService();

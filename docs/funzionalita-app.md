@@ -16,35 +16,36 @@
 4. [Prenotazione online (pagina pubblica /prenota)](#prenotazione-online-pagina-pubblica-prenota)
 5. [Agente vocale "Sofia"](#agente-vocale-sofia)
 6. [Reception e accoglienza](#reception-e-accoglienza)
-7. [Sale & Tavoli (planimetria)](#sale--tavoli-planimetria)
-8. [Dashboard](#dashboard)
-9. [Reportistica](#reportistica)
-10. [Menu & Banchetti](#menu--banchetti)
-11. [Menu digitale pubblico](#menu-digitale-pubblico)
-12. [Comande, Cucina e Passe (gestionale di sala)](#comande-cucina-e-passe-gestionale-di-sala)
-13. [Pagamenti, conto al tavolo e cassa](#pagamenti-conto-al-tavolo-e-cassa)
-14. [Fiscalità: scontrino, fattura elettronica, proforma](#fiscalità-scontrino-fattura-elettronica-proforma)
-15. [Integrazione cassa Passepartout](#integrazione-cassa-passepartout)
-16. [Stampa termica e print agent](#stampa-termica-e-print-agent)
-17. [Messaggi: WhatsApp e SMS](#messaggi-whatsapp-e-sms)
-18. [Email](#email)
-19. [Chat staff](#chat-staff)
-20. [Notifiche](#notifiche)
-21. [Recensioni Google](#recensioni-google)
-22. [Clienti (CRM / rubrica)](#clienti-crm--rubrica)
-23. [Attività / to-do](#attività--to-do)
-24. [Personale (turni e presenze)](#personale-turni-e-presenze)
-25. [Inventario](#inventario)
-26. [Lista della spesa e fornitori](#lista-della-spesa-e-fornitori)
-27. [HACCP](#haccp)
-28. [Funzioni AI](#funzioni-ai)
-29. [Impostazioni](#impostazioni)
-30. [Utenti, ruoli e permessi](#utenti-ruoli-e-permessi)
-31. [Privacy e GDPR](#privacy-e-gdpr)
-32. [Piattaforma SaaS: multi-tenant, moduli e abbonamenti](#piattaforma-saas-multi-tenant-moduli-e-abbonamenti)
-33. [Funzionalità trasversali](#funzionalità-trasversali)
-34. [Integrazioni esterne](#integrazioni-esterne)
-35. [Registro aggiornamenti](#registro-aggiornamenti)
+7. [Asporto](#asporto)
+8. [Sale & Tavoli (planimetria)](#sale--tavoli-planimetria)
+9. [Dashboard](#dashboard)
+10. [Reportistica](#reportistica)
+11. [Menu & Banchetti](#menu--banchetti)
+12. [Menu digitale pubblico](#menu-digitale-pubblico)
+13. [Comande, Cucina e Passe (gestionale di sala)](#comande-cucina-e-passe-gestionale-di-sala)
+14. [Pagamenti, conto al tavolo e cassa](#pagamenti-conto-al-tavolo-e-cassa)
+15. [Fiscalità: scontrino, fattura elettronica, proforma](#fiscalità-scontrino-fattura-elettronica-proforma)
+16. [Integrazione cassa Passepartout](#integrazione-cassa-passepartout)
+17. [Stampa termica e print agent](#stampa-termica-e-print-agent)
+18. [Messaggi: WhatsApp e SMS](#messaggi-whatsapp-e-sms)
+19. [Email](#email)
+20. [Chat staff](#chat-staff)
+21. [Notifiche](#notifiche)
+22. [Recensioni Google](#recensioni-google)
+23. [Clienti (CRM / rubrica)](#clienti-crm--rubrica)
+24. [Attività / to-do](#attività--to-do)
+25. [Personale (turni e presenze)](#personale-turni-e-presenze)
+26. [Inventario](#inventario)
+27. [Lista della spesa e fornitori](#lista-della-spesa-e-fornitori)
+28. [HACCP](#haccp)
+29. [Funzioni AI](#funzioni-ai)
+30. [Impostazioni](#impostazioni)
+31. [Utenti, ruoli e permessi](#utenti-ruoli-e-permessi)
+32. [Privacy e GDPR](#privacy-e-gdpr)
+33. [Piattaforma SaaS: multi-tenant, moduli e abbonamenti](#piattaforma-saas-multi-tenant-moduli-e-abbonamenti)
+34. [Funzionalità trasversali](#funzionalità-trasversali)
+35. [Integrazioni esterne](#integrazioni-esterne)
+36. [Registro aggiornamenti](#registro-aggiornamenti)
 
 ---
 
@@ -74,7 +75,7 @@ Navigazione a gruppi (sidebar desktop, bottom bar + sheet "Altro" su mobile):
 | Gruppo | Sezioni |
 |---|---|
 | — | Dashboard |
-| Servizio | Prenotazioni · Reception · Sale & Tavoli · Menu & Banchetti · Comande · Cucina · Passe |
+| Servizio | Prenotazioni · Reception · Asporto · Sale & Tavoli · Menu & Banchetti · Comande · Cucina · Passe |
 | Comunicazioni | Chiamate · Messaggi · Email · Chat staff · Notifiche |
 | Operazioni | Attività · Inventario · Lista della Spesa · HACCP |
 | Gestione | Pagamenti · Clienti · Personale · Utenti |
@@ -183,6 +184,18 @@ Postazione "alla porta" per la gestione degli arrivi.
 - **Assegnazione tavolo guidata**: il selettore etichetta ogni tavolo come Adatto / Piccolo / Grande / Occupato / Attuale, e permette lo **scambio di tavolo tra due prenotazioni** con conferma.
 - **Walk-in** in due tocchi (nome, coperti, telefono, note), apribile da qualunque pagina col "+" globale. Il telefono resta facoltativo anche modificando il walk-in dopo (es. correzione coperti): il contatto obbligatorio vale solo per le prenotazioni normali.
 - Timeline degli arrivi con azioni rapide.
+
+---
+
+## Asporto
+
+Modulo add-on (venduto a parte, come Recensioni) per gli ordini da ritirare — pizzeria, gastronomia, ristorante. Tutto ruota attorno all'**ora di ritiro**.
+
+- **Board del giorno** (pagina Asporto, gruppo Servizio): ordini in lista per slot di ritiro, con ricerca per nome o telefono e filtro Attivi/Tutti; contatori attivi, da produrre, pronti, ritirati.
+- **Slot di ritiro con capienza**: la griglia oraria è quella degli orari di apertura (chiusure e slot disabilitati compresi); ogni slot ha una capienza di produzione (quanti ordini regge la cucina), e il banco può scavalcarla caso per caso. «Stop asporto» ferma una singola data e decade da solo.
+- **Presa ordine al banco**: nome e telefono del cliente, slot, piatti dal menu con quantità e nota per la cucina, note dell'ordine; nome e prezzo restano congelati come detti al cliente anche se il menu cambia dopo.
+- **Stati che avanzano da soli**: un ordine confermato diventa «Da produrre» quando ora di ritiro − minuti di preparazione è passata, un «Pronto» oltre l'ora di ritiro diventa «Ritiro in ritardo» — stessi automatismi a orologio di «In arrivo»/«In uscita» delle prenotazioni. Il banco muove solo gli stati veri: in preparazione, pronto, ritirato (con correzioni sempre possibili).
+- In arrivo nelle prossime fasi: impostazioni dedicate (capienza, minuti di preparazione), comanda in cucina generata al momento giusto, pagina pubblica di ordinazione e presa ordine telefonica con Sofia.
 
 ---
 
@@ -618,6 +631,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-15 | Asporto | Nuovo modulo add-on: board degli ordini da ritirare con slot a capienza di produzione, presa ordine al banco (piatti, quantità, note cucina) e stati che avanzano da soli con l'orologio (Da produrre, Ritiro in ritardo); permessi dedicati «Visualizza/Gestisce ordini asporto». |
 | 2026-09-14 | Recensioni Google | Nuova pagina «Recensioni» nel gruppo Comunicazioni: il registro delle richieste post-visita con esito, canale e motivo degli eventuali salti. |
 | 2026-09-14 | Recensioni Google | Nuovo modulo: richiesta di recensione automatica dopo la visita (link diretto al profilo Google via WhatsApp/SMS/email) con sezione dedicata in Impostazioni — quando inviare, a chi (consenso o tutti), Place ID e livello di risposta alle recensioni. |
 | 2026-09-14 | Personale (turni e presenze) | I nomi dei dipendenti (nome, cognome, ruolo) si salvano sempre con le iniziali maiuscole, comunque vengano digitati; le anagrafiche già inserite sono state riallineate. |
