@@ -19358,6 +19358,41 @@ async function refreshBusinessIdentity(tenantId: number): Promise<void> {
     });
 }
 
+// L'identità per le PAGINE PUBBLICHE (/prenota, /ordina, /public/contact).
+// I letterali di IDENTITY_FALLBACK sono l'anagrafe del tenant 1: su un
+// altro tenant un campo rimasto al fallback è un'anagrafe non compilata,
+// non un dato — la pagina del Demo mostrava telefono e mappa di un altro
+// ristorante. Qui il fallback vale solo per il tenant 1; per gli altri il
+// campo torna vuoto e il nome ripiega su tenants.name (che c'è sempre ed
+// è suo). Email, ricevute e Sofia continuano a usare businessIdentity
+// direttamente: lì il fallback storico resta deliberato.
+async function publicBusinessIdentity(tenantId: number): Promise<BusinessIdentity> {
+    if (!identityCache.has(tenantId)) {
+        // Alla prima richiesta di un tenant appena risolto l'identità non è
+        // ancora in cache: senza l'attesa la pagina uscirebbe col brand
+        // sbagliato — nel titolo, dove resta indicizzato.
+        await refreshBusinessIdentity(tenantId).catch(() => {});
+    }
+    const id = businessIdentity(tenantId);
+    if (tenantId === PUBLIC_TENANT_ID) return id;
+    const own = (value: string, fallback: string): string => (value !== fallback ? value : '');
+    let name = own(id.name, IDENTITY_FALLBACK.name);
+    if (!name) {
+        const suo = await queryWithRetry('SELECT name FROM tenants WHERE id = $1', [tenantId]);
+        name = String(suo.rows[0]?.name || '').trim();
+    }
+    return {
+        ...id,
+        name,
+        voiceName: own(id.voiceName, IDENTITY_FALLBACK.voiceName) || name,
+        tagline: own(id.tagline, IDENTITY_FALLBACK.tagline),
+        phone: own(id.phone, IDENTITY_FALLBACK.phone),
+        whatsapp: own(id.whatsapp, IDENTITY_FALLBACK.whatsapp),
+        mapsUrl: own(id.mapsUrl, IDENTITY_FALLBACK.mapsUrl),
+        websiteUrl: own(id.websiteUrl, IDENTITY_FALLBACK.websiteUrl),
+    };
+}
+
 // tel:/wa.me a partire dal numero scritto per umani. Regola: se c'è un "+"
 // il prefisso internazionale è già nel numero, altrimenti si assume Italia —
 // coerente col resto del codebase (normalizeItalianPhone).
@@ -24851,28 +24886,18 @@ async function handlePublicTakeawayInfo(tenantId: number, _req: express.Request,
             isTakeawayOnline(tenantId),
             getTakeawaySettings(tenantId),
         ]);
-        if (!identityCache.has(tenantId)) await refreshBusinessIdentity(tenantId).catch(() => {});
-        const identity = businessIdentity(tenantId);
-        // I letterali di IDENTITY_FALLBACK SONO l'identità del Frantoio: su
-        // un altro tenant un campo rimasto al fallback è un'anagrafe non
-        // compilata, non un dato — e la pagina del Demo mostrava telefono e
-        // mappa di un altro ristorante. Meglio il campo vuoto.
-        const own = (value: string, fallback: string): string | null =>
-            tenantId === PUBLIC_TENANT_ID || value !== fallback ? (value || null) : null;
-        let name = own(identity.name, IDENTITY_FALLBACK.name);
-        if (!name) {
-            const suo = await queryWithRetry('SELECT name FROM tenants WHERE id = $1', [tenantId]);
-            name = String(suo.rows[0]?.name || '').trim() || null;
-        }
+        // publicBusinessIdentity: fallback del Frantoio solo per il tenant 1,
+        // campi non compilati vuoti e nome sempre del tenant.
+        const identity = await publicBusinessIdentity(tenantId);
         res.json({
             takeawayEnabled: enabled,
             prep_minutes: settings.prepMinutes,
             branding: {
-                name,
-                tagline: own(identity.tagline, IDENTITY_FALLBACK.tagline),
-                phone: own(identity.phone, IDENTITY_FALLBACK.phone),
-                address: own(identity.address, IDENTITY_FALLBACK.address),
-                maps_url: own(identity.mapsUrl, IDENTITY_FALLBACK.mapsUrl),
+                name: identity.name || null,
+                tagline: identity.tagline || null,
+                phone: identity.phone || null,
+                address: identity.address || null,
+                maps_url: identity.mapsUrl || null,
                 logo_url: identity.logoUrl || null,
                 logo_dark_url: identity.logoDarkUrl || null,
             },
@@ -27797,15 +27822,10 @@ const handlePublicContact = async (tenantId: number, _req: express.Request, res:
     // Identità per titolo, footer e link del sito sulla pagina prenota, e
     // agent id per il widget vocale del CRM: dati pubblici per costruzione
     // (compaiono comunque nella pagina/bundle), serviti da qui perché la
-    // pagina questo endpoint lo chiama già.
-    // businessIdentity è sync col refresh in background e il fallback è il
-    // brand del Frantoio: alla PRIMA richiesta di un tenant appena risolto
-    // (slug/dominio) si attende il refresh, o la pagina di un ristorante
-    // mostrerebbe per qualche secondo il nome di un altro.
-    if (!identityCache.has(tenantId)) {
-        await refreshBusinessIdentity(tenantId).catch(() => {});
-    }
-    const identity = businessIdentity(tenantId);
+    // pagina questo endpoint lo chiama già. publicBusinessIdentity attende
+    // il primo refresh e neutralizza il fallback del Frantoio sui tenant
+    // che non hanno compilato l'anagrafe.
+    const identity = await publicBusinessIdentity(tenantId);
     res.json({
         voice,
         bookingsEnabled,
@@ -28327,25 +28347,10 @@ const servePrenota = async (tenantId: number, req: express.Request, res: express
     res.set('Cache-Control', 'no-store, must-revalidate');
     res.set('Pragma', 'no-cache');
     res.set('Expires', '0');
-    // Alla prima richiesta di un tenant appena risolto l'identita' non e'
-    // ancora in cache: senza l'attesa la pagina uscirebbe col nome di un
-    // altro ristorante — nel titolo, dove resta indicizzato.
-    if (!identityCache.has(tenantId)) {
-        await refreshBusinessIdentity(tenantId).catch(() => {});
-    }
-    const id = businessIdentity(tenantId);
-    // businessIdentity ripiega su IDENTITY_FALLBACK, che e' cablato sul primo
-    // ristorante: un locale che non ha ancora compilato l'identita' si
-    // ritroverebbe il NOME DI UN ALTRO nel titolo — e nel titolo resta
-    // indicizzato. Il nome in `tenants` c'e' sempre ed e' suo: si usa quello
-    // quando l'identita' non e' stata configurata.
-    const suo = await queryWithRetry(`SELECT name FROM tenants WHERE id = $1`, [tenantId]);
-    const nomeProprio = String(suo.rows[0]?.name || '').trim();
-    const identitaConfigurata = id.name && id.name !== IDENTITY_FALLBACK.name;
-    const identita = {
-        ...id,
-        name: identitaConfigurata ? id.name : (nomeProprio || id.name),
-    };
+    // publicBusinessIdentity: nome sempre del tenant (mai quello di un
+    // altro nel titolo, dove resta indicizzato) e fallback del Frantoio
+    // neutralizzato anche su tagline/contatti per i tenant non compilati.
+    const identita = await publicBusinessIdentity(tenantId);
     const slug = typeof req.params.slug === 'string' ? req.params.slug : '';
     const canonical = `${req.protocol}://${req.get('host')}${slug ? `/prenota/${slug}` : '/prenota'}`;
     res.type('html').send(await renderPrenota(identita, canonical));

@@ -509,6 +509,21 @@ describe('asporto — branding per tenant', () => {
         expect(res.body.branding.name).toBeTruthy();
         expect(res.body.branding.phone).toBeTruthy();
     });
+
+    it('anche /prenota e /public/contact non mostrano i dati del Frantoio', async () => {
+        const contact = await api().get(`/public/${SLUG}/contact`);
+        expect(contact.status).toBe(200);
+        expect(contact.body.branding.name).toBe('Trattoria Prova');
+        expect(contact.body.branding.tagline || null).toBeNull();
+        expect(contact.body.branding.maps_url || null).toBeNull();
+        expect(contact.body.branding.website_url || null).toBeNull();
+
+        const page = await api().get(`/prenota/${SLUG}`);
+        expect(page.status).toBe(200);
+        expect(page.text).toContain('Trattoria Prova');
+        expect(page.text).not.toContain('Cucina Tradizionale');
+        expect(page.text).not.toContain('vecchiofrantoio.com');
+    });
 });
 
 describe('asporto — Sofia (tool voce, fase 3)', () => {
