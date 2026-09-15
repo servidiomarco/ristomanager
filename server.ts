@@ -30429,7 +30429,12 @@ app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req,
              ) c ON true
              WHERE oi.status IN ('SENT','PREPARING','READY')
                AND o.tenant_id = $4
-               AND o.service_date = $2 AND o.shift = $3
+               -- L'asporto del giorno si mostra a prescindere dal turno:
+               -- «manda in cucina» alle 15:35 per un ritiro delle 19:30 è
+               -- cucina ADESSO, non alle 17 quando gira il servizio — la
+               -- card dice già «Asporto 19:30». Il ticket era già così
+               -- (la stampa non filtra per servizio).
+               AND o.service_date = $2 AND (o.shift = $3 OR o.order_type = 'TAKEAWAY')
                AND ($1::int IS NULL OR oi.station_id = $1)
                AND ($1::int IS NOT NULL OR oi.station_id IS NULL)
                -- Coperto e servizio non sono piatti: la cucina non li lavora.
@@ -30543,7 +30548,12 @@ app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req,
              JOIN orders o ON o.id = oi.order_id
              LEFT JOIN tables t ON t.id = o.table_id AND t.tenant_id = o.tenant_id
              WHERE o.tenant_id = $4 AND o.status = 'OPEN'
-               AND o.service_date = $2 AND o.shift = $3
+               -- L'asporto del giorno si mostra a prescindere dal turno:
+               -- «manda in cucina» alle 15:35 per un ritiro delle 19:30 è
+               -- cucina ADESSO, non alle 17 quando gira il servizio — la
+               -- card dice già «Asporto 19:30». Il ticket era già così
+               -- (la stampa non filtra per servizio).
+               AND o.service_date = $2 AND (o.shift = $3 OR o.order_type = 'TAKEAWAY')
                AND oi.status IN ('QUEUED','SENT','PREPARING')
                AND COALESCE(oi.line_kind, 'DISH') = 'DISH'
                AND ($1::int IS NULL OR oi.station_id = $1)
@@ -30584,7 +30594,12 @@ app.get('/kds/served', authenticate, requirePermission('orders:kds'), async (req
                 JOIN orders o ON o.id = oi.order_id
                 WHERE oi.status = 'SERVED' AND oi.served_at IS NOT NULL
                   AND o.tenant_id = $4
-                  AND o.service_date = $2 AND o.shift = $3
+                  -- L'asporto del giorno si mostra a prescindere dal turno:
+               -- «manda in cucina» alle 15:35 per un ritiro delle 19:30 è
+               -- cucina ADESSO, non alle 17 quando gira il servizio — la
+               -- card dice già «Asporto 19:30». Il ticket era già così
+               -- (la stampa non filtra per servizio).
+               AND o.service_date = $2 AND (o.shift = $3 OR o.order_type = 'TAKEAWAY')
                   AND COALESCE(oi.line_kind, 'DISH') = 'DISH'
                   AND ($1::int IS NULL OR oi.station_id = $1)
                   AND ($1::int IS NOT NULL OR oi.station_id IS NULL)
@@ -30925,7 +30940,9 @@ app.get('/kds/expediter', authenticate, requirePermission('orders:expedite'), as
              LEFT JOIN reservations r ON r.id = o.reservation_id AND r.tenant_id = o.tenant_id
              WHERE o.status = 'OPEN'
                AND o.tenant_id = $3
-               AND o.service_date = $1 AND o.shift = $2
+               -- Come la coda KDS: l'asporto del giorno passa a
+               -- prescindere dal turno (vedi il commento lì).
+               AND o.service_date = $1 AND (o.shift = $2 OR o.order_type = 'TAKEAWAY')
                AND oi.status IN ('QUEUED','SENT','PREPARING','READY')
                AND COALESCE(oi.line_kind, 'DISH') = 'DISH'
              ORDER BY oi.course_no, oi.id`,
@@ -31018,7 +31035,9 @@ app.get('/kds/expediter', authenticate, requirePermission('orders:expedite'), as
              JOIN orders o ON o.id = oi.order_id
              LEFT JOIN tables t ON t.id = o.table_id AND t.tenant_id = o.tenant_id
              WHERE o.status = 'OPEN' AND o.tenant_id = $3
-               AND o.service_date = $1 AND o.shift = $2
+               -- Come la coda KDS: l'asporto del giorno passa a
+               -- prescindere dal turno (vedi il commento lì).
+               AND o.service_date = $1 AND (o.shift = $2 OR o.order_type = 'TAKEAWAY')
                AND oi.status = 'SERVED' AND oi.ready_at IS NOT NULL
                AND oi.served_at >= NOW() - INTERVAL '30 minutes'
              GROUP BY oi.order_id, oi.course_no, t.name

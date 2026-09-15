@@ -306,6 +306,43 @@ describe('asporto — cucina', () => {
     });
 });
 
+describe('asporto — KDS senza confini di turno', () => {
+    // «Manda in cucina» alle 15:35 per un ritiro delle 19:30 deve comparire
+    // sul monitor SUBITO, non alle 17 quando gira il servizio: le comande
+    // TAKEAWAY del giorno passano il filtro turno.
+    it('la comanda asporto si vede sul KDS anche nell\'altro turno del giorno', async () => {
+        const created = await api().post('/takeaway/orders').set(bearer(token)).send({
+            customer_name: 'Viola Kds',
+            pickup_date: DATA_ASPORTO,
+            pickup_time: '21:30',
+            items: [{ dish_id: dishId, qty: 1 }],
+        });
+        expect(created.status).toBe(201);
+        const fired = await api().post(`/takeaway/orders/${created.body.id}/fire`).set(bearer(token)).send({});
+        expect(fired.status).toBe(200);
+        const kid = fired.body.kitchen_order_id;
+
+        const flagOn = await api().put('/settings/features').set(bearer(token)).send({ table_orders_enabled: true });
+        expect(flagOn.status).toBe(200);
+        try {
+            // Turno OPPOSTO a quello del ritiro: la card c'è lo stesso,
+            // etichettata con l'ora di ritiro.
+            const lunch = await api().get('/kds/queue').set(bearer(token))
+                .query({ date: DATA_ASPORTO, shift: 'LUNCH' });
+            expect(lunch.status).toBe(200);
+            const mine = lunch.body.items.filter((i: any) => i.order_id === kid);
+            expect(mine.length).toBeGreaterThan(0);
+            expect(mine[0].table_name).toBe('Asporto 21:30');
+
+            const dinner = await api().get('/kds/queue').set(bearer(token))
+                .query({ date: DATA_ASPORTO, shift: 'DINNER' });
+            expect(dinner.body.items.some((i: any) => i.order_id === kid)).toBe(true);
+        } finally {
+            await api().put('/settings/features').set(bearer(token)).send({ table_orders_enabled: false });
+        }
+    });
+});
+
 describe('asporto — impostazioni', () => {
     it('capienza, minuti e stop si regolano e mordono subito', async () => {
         const put = await api().put('/takeaway/config').set(bearer(token))
