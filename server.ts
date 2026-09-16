@@ -7493,6 +7493,11 @@ app.get('/company-lookup/:piva', authenticate, requirePermission('payments:full'
 app.post('/webhook/t/:tenantToken/openapi-fiscale', express.urlencoded({ extended: false }), async (req, res) => {
     const tenantId = await resolveWebhookTenantOr404(req, res);
     if (tenantId == null) return;
+    // DENTRO il contesto tenant, come ogni altro webhook: senza, con
+    // app.rls_strict acceso la SELECT su fiscal_documents vede zero righe e
+    // l'esito SDI (anche un REJECTED) muore in un "unknown_ref" silenzioso.
+    // Trovato certificando con TEST_STRICT_RLS=1 il 16/09.
+    await runWithTenantContext(tenantId, async () => {
     try {
         // method JSON → l'entità è il body; method POST → JSON incodato nel
         // campo 'data' (default del sistema di callback Openapi).
@@ -7541,6 +7546,7 @@ app.post('/webhook/t/:tenantToken/openapi-fiscale', express.urlencoded({ extende
         console.error('POST /webhook/openapi-fiscale error:', err?.message);
         res.json({ ok: true, ignored: 'error' });
     }
+    });
 });
 
 // Emissione fattura elettronica (SDI) su un conto CHIUSO o su una singola
@@ -34240,7 +34246,14 @@ async function getPrintRoutes(tenantId: number): Promise<Record<PrintRouteFn, st
 // eventi in attesa che i JWT scadano. Stessa condizione per l'HTTP qui sotto
 // e per l'handshake del bridge socket.
 const salaNodeTenantAuthorized = async (tenantId: number): Promise<boolean> => {
-    if (!(await isFeatureEnabledForTenant(tenantId, 'sala_node'))) return false;
+    // La lettura dell'entitlement DENTRO il contesto tenant: qui siamo PRIMA
+    // del runWithTenantContext di salaNodeAuth (e nell'handshake del bridge
+    // un contesto non c'è proprio), e con app.rls_strict acceso una query su
+    // tenant_features fuori contesto vede zero righe → add-on "spento" →
+    // 403 eterno col token giusto. Stessa lezione del print agent (21/08),
+    // trovata di nuovo al collaudo in produzione del 16/09 — e in più la
+    // lettura a vuoto avvelena la cache degli entitlement per 60s.
+    if (!(await runWithTenantContext(tenantId, () => isFeatureEnabledForTenant(tenantId, 'sala_node')))) return false;
     try {
         const rs = await runAsPlatform(() => queryWithRetry('SELECT status FROM tenants WHERE id = $1', [tenantId]));
         return rs.rows[0]?.status === 'active';
