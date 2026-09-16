@@ -67,6 +67,8 @@ function priceToFeature(): Map<string, TenantFeature> {
         reviews: process.env.STRIPE_PRICE_REVIEWS,
         // Asporto: idem, acceso a mano finché non entra a listino.
         takeaway: process.env.STRIPE_PRICE_TAKEAWAY,
+        // Nodo di sala: hardware in comodato, non a listino Stripe (a mano).
+        sala_node: process.env.STRIPE_PRICE_SALA_NODE,
     };
     const map = new Map<string, TenantFeature>();
     for (const feature of TENANT_FEATURES) {

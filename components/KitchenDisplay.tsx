@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { isBarCourse, isDessertCourse, isOffSequenceCourse, ordinal } from '../utils/courses';
 import { Bell, BellOff, BellRing, Check, ChevronRight, CookingPot, Loader2, MessagesSquare, Pencil, Play, Search, TriangleAlert, Users, WifiOff, X } from 'lucide-react';
 import { useNow } from '../hooks/useNow';
+import { useSalaNodeStale, formatStaleAsOf } from '../hooks/useSalaNodeStale';
 import { useAuth } from '../contexts/AuthContext';
 import { socketClient } from '../services/socketClient';
 import { staffChatApiService } from '../services/staffChatApiService';
@@ -187,6 +188,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
   const [revisionsFor, setRevisionsFor] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [offline, setOffline] = useState(false);
+  const nodeStale = useSalaNodeStale();
   const [picking, setPicking] = useState(false);
   // Riepilogo del servizio (aggregato lato server dalle note strutturate +
   // dalle dietary_notes clienti). Aggiornato all'apertura e ogni 60s: cambia
@@ -382,6 +384,9 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
     };
     socket.on('order:revised', onRevised);
     socket.on('order:revision-acked', onRevisionAcked);
+    // Modalità ibrida: il nodo ha riagganciato il cloud dopo un buco — la
+    // cache è stata svuotata, si rilegge tutto (come su connect).
+    socket.on('sala:resync', onChange);
 
     const poll = setInterval(reload, 60_000);
     return () => {
@@ -397,6 +402,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
       socket.off('course:ready', onSibling);
       socket.off('order:revised', onRevised);
       socket.off('order:revision-acked', onRevisionAcked);
+      socket.off('sala:resync', onChange);
       clearInterval(poll);
       if (stationId != null) socketClient.unsubscribeFromStation(stationId);
     };
@@ -708,11 +714,19 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
               ]}
             />
           </div>
-          {offline && (
+          {offline ? (
             <StatusPill tone="pending">
               <WifiOff size={13} aria-hidden /> riconnessione…
             </StatusPill>
-          )}
+          ) : nodeStale.stale ? (
+            /* Terzo stato della modalità ibrida: lo schermo è vivo (il nodo
+               risponde) ma il cloud no — la coda mostrata è ferma all'ultima
+               copia buona. La sala deve saperlo, non scoprirlo. */
+            <StatusPill tone="pending">
+              <WifiOff size={13} aria-hidden />
+              {nodeStale.asOf ? `dati fermi alle ${formatStaleAsOf(nodeStale.asOf)}` : 'dati fermi'} — cloud non raggiungibile
+            </StatusPill>
+          ) : null}
           {/* Data e orologio al centro: in Cucina la testata globale non c'è
               (lo spazio è delle comande), quindi il servizio si àncora qui.
               La pill dell'ora nello stile della vecchia «Live» — tinta
