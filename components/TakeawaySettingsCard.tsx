@@ -23,10 +23,15 @@ const todayIso = (): string =>
   new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome' }).format(new Date());
 
 /** La pagina pubblica vive sul dominio del backend, come /prenota. */
-const ordinaUrl = `${import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app'}/ordina`;
+const ORDINA_BASE = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';
 
 export const TakeawaySettingsCard: React.FC<TakeawaySettingsCardProps> = ({ showToast }) => {
-  const { hasPermission, hasFeature } = useAuth();
+  const { hasPermission, hasFeature, user } = useAuth();
+  // Sempre con lo slug: /ordina nudo risolve il tenant dal dominio e ripiega
+  // sul tenant 1 — copiato da un altro ristorante aprirebbe la pagina del
+  // Frantoio. La forma /ordina/<slug> vale per tutti, tenant 1 compreso.
+  const slug = user?.tenant?.slug;
+  const ordinaUrl = slug ? `${ORDINA_BASE}/ordina/${slug}` : `${ORDINA_BASE}/ordina`;
   const canEdit = hasPermission('takeaway:manage');
   const hasVoice = hasFeature('voice');
   const [config, setConfig] = useState<TakeawayConfig | null>(null);

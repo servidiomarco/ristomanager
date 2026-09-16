@@ -199,7 +199,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     autoOpenNewDish,
     onAutoOpenNewDishHandled
 }) => {
-  const { hasPermission, hasFeature } = useAuth();
+  const { hasPermission, hasFeature, user } = useAuth();
   const canViewBanquetPrice = hasPermission('banquet:view_price');
   const canManageBanquetPayments = hasPermission('banquet:manage_payments');
   // Import dalla cassa Passepartout: entitlement del solo ristorante col
@@ -391,7 +391,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const [pairEsito, setPairEsito] = useState<PairWinesResult | null>(null);
   const [pairError, setPairError] = useState<string | null>(null);
   const [linkCopiato, setLinkCopiato] = useState(false);
-  const menuUrl = digitalMenuUrl();
+  const menuUrl = digitalMenuUrl(user?.tenant?.slug);
 
   useEffect(() => {
     if (!qrOpen) return;
