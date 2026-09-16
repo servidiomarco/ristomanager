@@ -63,6 +63,9 @@ describe('auth', () => {
             // Onboarding (coda D1): i tenant nati prima del wizard sono
             // backfillati a completato.
             needs_onboarding: false,
+            // Base pubblica per i link da ospiti: nei test l'env
+            // PUBLIC_BOOKING_BASE_URL non è configurata, quindi null.
+            public_base_url: null,
         });
 
         // Il claim tenantId sta nel payload del JWT (segmento centrale).
