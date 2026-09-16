@@ -92,6 +92,12 @@ const main = async () => {
                 // Senza expose la SPA (cross-origin) non può leggere il
                 // marchio staleness e il banner "dati fermi" non esisterebbe.
                 'Access-Control-Expose-Headers': 'X-Sala-Node, X-Sala-Node-Age',
+                // Private Network Access: un sito pubblico (la SPA su Vercel)
+                // che chiama un IP di LAN deve ricevere questo header nel
+                // preflight, o Chrome pre-138 blocca tutto in silenzio. I
+                // Chrome recenti usano invece il permesso "rete locale"
+                // chiesto all'utente (visto dal vivo al collaudo del 16/09).
+                'Access-Control-Allow-Private-Network': 'true',
                 'Access-Control-Max-Age': '600',
             };
         },
