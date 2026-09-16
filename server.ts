@@ -2250,7 +2250,7 @@ app.get('/reservations', authenticate, requirePermission('reservations:view'), a
 
 app.post('/reservations', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
-        const { customer_name, reservation_time, shift, guests, children, table_id, notes, note_selections, email, phone, payment_status, arrival_status, reservation_status, duration_minutes, consent_marketing, consent_data_health } = req.body;
+        const { customer_name, reservation_time, shift, guests, children, table_id, notes, note_selections, email, phone, payment_status, arrival_status, reservation_status, duration_minutes, consent_marketing, consent_data_health, banquet_menu_id } = req.body;
         const childrenCount = Math.max(0, Math.min(Number(children) || 0, Number(guests) || 0));
         const noteSelectionsJson = sanitizeNoteSelections(note_selections);
         // GDPR consents (optional). Stamp consent_updated_at whenever the client
@@ -2317,7 +2317,23 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
             }
         }
 
-        if (await isTableInClosedRoom(req.tenantId!, effectiveTableId)) {
+        // Prenotazione collegata a un banchetto: l'evento può legittimamente
+        // sedere in una sala chiusa al servizio normale (è il motivo per cui
+        // la si chiude), quindi il gate sala-chiusa qui sotto non scatta.
+        // Il menù dev'essere del tenant: il solo FK accetterebbe l'id di un
+        // banchetto altrui.
+        let banquetMenuId: number | null = null;
+        if (banquet_menu_id != null && banquet_menu_id !== '') {
+            const parsedBanquetId = Number(banquet_menu_id);
+            if (!Number.isInteger(parsedBanquetId) || parsedBanquetId <= 0) {
+                return res.status(400).json({ error: 'Menù banchetto non valido.' });
+            }
+            const menuCheck = await queryWithRetry('SELECT id FROM banquet_menus WHERE id = $1 AND tenant_id = $2', [parsedBanquetId, req.tenantId!]);
+            if (menuCheck.rowCount === 0) return res.status(400).json({ error: 'Menù banchetto inesistente.' });
+            banquetMenuId = parsedBanquetId;
+        }
+
+        if (banquetMenuId == null && await isTableInClosedRoom(req.tenantId!, effectiveTableId)) {
             return res.status(400).json({ error: 'La sala selezionata è chiusa. Scegli un tavolo in una sala aperta.' });
         }
         if (effectiveTableId != null && reservation_time && shift) {
@@ -2335,8 +2351,8 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
         }
         const result = await queryWithRetry(
             `WITH ins AS (
-                INSERT INTO reservations (customer_name, reservation_time, shift, guests, children, table_id, notes, email, phone, payment_status, arrival_status, reservation_status, duration_minutes, created_by_user_id, consent_marketing, consent_data_health, consent_updated_at, note_selections, tenant_id)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18::jsonb, $19)
+                INSERT INTO reservations (customer_name, reservation_time, shift, guests, children, table_id, notes, email, phone, payment_status, arrival_status, reservation_status, duration_minutes, created_by_user_id, consent_marketing, consent_data_health, consent_updated_at, note_selections, tenant_id, banquet_menu_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18::jsonb, $19, $20)
                 RETURNING *
             )
             SELECT ins.*, u.full_name AS created_by_user_name,
@@ -2380,6 +2396,7 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
                 consentUpdatedAt,
                 noteSelectionsJson,
                 req.tenantId!,
+                banquetMenuId,
             ]
         );
         const newReservation = result.rows[0];
@@ -2457,7 +2474,7 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
 app.put('/reservations/:id', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const { customer_name, reservation_time, shift, guests, children, table_id, notes, note_selections, email, phone, payment_status, arrival_status, reservation_status, duration_minutes, consent_marketing, consent_data_health } = req.body;
+        const { customer_name, reservation_time, shift, guests, children, table_id, notes, note_selections, email, phone, payment_status, arrival_status, reservation_status, duration_minutes, consent_marketing, consent_data_health, banquet_menu_id } = req.body;
         // Consents are non-destructive: only touched when the client sends an
         // explicit boolean. Missing → keep the stored value (COALESCE).
         const consentMarketing = typeof consent_marketing === 'boolean' ? consent_marketing : null;
@@ -2472,7 +2489,30 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
         const rawDuration = duration_minutes == null || duration_minutes === '' ? null : Number(duration_minutes);
         const durationValue: number | null = Number.isFinite(rawDuration) && rawDuration! > 0 ? Math.min(600, Math.max(15, Math.round(rawDuration!))) : null;
         const effectiveDurationForCheck = durationValue ?? (shift === 'LUNCH' ? 90 : 120);
-        if (await isTableInClosedRoom(req.tenantId!, table_id)) {
+        // Come nelle POST: campo assente = non toccare il collegamento
+        // banchetto salvato; null/'' = scollegare; numero = collegare (dopo
+        // verifica che il menù sia del tenant).
+        const banquetProvided = banquet_menu_id !== undefined;
+        let banquetMenuId: number | null = null;
+        if (banquetProvided && banquet_menu_id != null && banquet_menu_id !== '') {
+            const parsedBanquetId = Number(banquet_menu_id);
+            if (!Number.isInteger(parsedBanquetId) || parsedBanquetId <= 0) {
+                return res.status(400).json({ error: 'Menù banchetto non valido.' });
+            }
+            const menuCheck = await queryWithRetry('SELECT id FROM banquet_menus WHERE id = $1 AND tenant_id = $2', [parsedBanquetId, req.tenantId!]);
+            if (menuCheck.rowCount === 0) return res.status(400).json({ error: 'Menù banchetto inesistente.' });
+            banquetMenuId = parsedBanquetId;
+        }
+        // Il gate sala-chiusa non scatta per le prenotazioni di un banchetto:
+        // l'evento siede legittimamente in una sala chiusa al servizio
+        // normale. Se il client non ha mandato il campo, fa fede il
+        // collegamento già salvato.
+        let isBanquetLinked = banquetMenuId != null;
+        if (!isBanquetLinked && !banquetProvided && table_id != null) {
+            const stored = await queryWithRetry('SELECT banquet_menu_id FROM reservations WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
+            isBanquetLinked = stored.rows[0]?.banquet_menu_id != null;
+        }
+        if (!isBanquetLinked && await isTableInClosedRoom(req.tenantId!, table_id)) {
             return res.status(400).json({ error: 'La sala selezionata è chiusa. Scegli un tavolo in una sala aperta.' });
         }
         // Both CANCELLED and DECLINED free the assigned table so it can be
@@ -2507,7 +2547,8 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                     consent_marketing = COALESCE($15, consent_marketing),
                     consent_data_health = COALESCE($16, consent_data_health),
                     consent_updated_at = CASE WHEN ($15 IS NOT NULL OR $16 IS NOT NULL) THEN CURRENT_TIMESTAMP ELSE consent_updated_at END,
-                    note_selections = COALESCE($17::jsonb, note_selections)
+                    note_selections = COALESCE($17::jsonb, note_selections),
+                    banquet_menu_id = CASE WHEN $19::boolean THEN $20::integer ELSE banquet_menu_id END
                 WHERE id = $14 AND tenant_id = $18
                 RETURNING *
             )
@@ -2554,6 +2595,8 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                 consentDataHealth,
                 noteSelectionsJson,
                 req.tenantId!,
+                banquetProvided,
+                banquetMenuId,
             ]
         );
         const updatedReservation = result.rows[0];
@@ -11745,7 +11788,11 @@ app.post('/room-closed', authenticate, requirePermission('floorplan:full'), asyn
 
         // Block if any active reservation is on a table of this room for the
         // given date+shift. Uses the same "active" semantics as public/rooms:
-        // CANCELLED and DECLINED don't count.
+        // CANCELLED and DECLINED don't count. Le prenotazioni collegate a un
+        // banchetto nemmeno: chiudere la sala al servizio normale ATTORNO al
+        // banchetto è proprio il flusso previsto (sala riservata all'evento),
+        // e conta anche il caso inverso — banchetto assegnato prima, chiusura
+        // dopo.
         const reservationCheck = await queryWithRetry(
             `SELECT res.id, res.customer_name
              FROM reservations res
@@ -11754,6 +11801,7 @@ app.post('/room-closed', authenticate, requirePermission('floorplan:full'), asyn
                AND t.room_id = $1
                AND res.shift = $2
                AND DATE(res.reservation_time AT TIME ZONE 'Europe/Rome') = $3
+               AND res.banquet_menu_id IS NULL
                AND COALESCE(res.reservation_status, 'CONFIRMED') NOT IN ('CANCELLED', 'DECLINED')`,
             [room_id, shift, date, req.tenantId!]
         );

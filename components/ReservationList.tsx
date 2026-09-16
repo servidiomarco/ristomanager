@@ -3078,8 +3078,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   };
 
   // Rooms available for new assignments: neither closed for an extended
-  // period nor closed for the date+shift currently in focus.
-  const openRooms = rooms.filter(r => !isRoomClosed(r));
+  // period nor closed for the date+shift currently in focus. Eccezione: una
+  // prenotazione collegata a un banchetto può sedere in una sala chiusa al
+  // servizio normale (è il motivo per cui la si chiude), quindi con un
+  // banchetto selezionato le sale chiuse restano nel picker, marcate
+  // «Chiusa» invece che nascoste.
+  const formHasBanquet = formData.banquet_menu_id != null;
+  const openRooms = formHasBanquet ? rooms : rooms.filter(r => !isRoomClosed(r));
   const displayedRooms = modalRoomFilter === 'ALL' ? openRooms : openRooms.filter(r => r.id === modalRoomFilter);
   const selectedTableObj = displayTables.find(t => t.id === formData.table_id);
 
@@ -5325,7 +5330,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                 value={formData.banquet_menu_id ?? ''}
                                                 onChange={e => setFormData({
                                                     ...formData,
-                                                    banquet_menu_id: e.target.value ? Number(e.target.value) : undefined
+                                                    // null, non undefined: undefined sparirebbe dal JSON
+                                                    // e il server lo leggerebbe come "non toccare".
+                                                    banquet_menu_id: e.target.value ? Number(e.target.value) : null
                                                 })}
                                             >
                                                 <option value="">Nessuno</option>
@@ -5728,8 +5735,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                             key={room.id}
                                             type="button"
                                             onClick={() => setModalRoomFilter(room.id)}
-                                            className={`px-4 py-1.5 text-sm font-medium rounded-[var(--ds-radius-control)] whitespace-nowrap transition-colors flex-shrink-0 border ${modalRoomFilter === room.id ? 'bg-[var(--ds-text-primary)] text-[var(--ds-action-fg)] border-[var(--ds-text-primary)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)]'}`}
+                                            className={`inline-flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium rounded-[var(--ds-radius-control)] whitespace-nowrap transition-colors flex-shrink-0 border ${modalRoomFilter === room.id ? 'bg-[var(--ds-text-primary)] text-[var(--ds-action-fg)] border-[var(--ds-text-primary)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)]'}`}
                                          >
+                                             {isRoomClosed(room) && <DoorClosed size={14} aria-hidden />}
                                              {room.name}
                                          </button>
                                      ))}
@@ -5796,6 +5804,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                     {eventiCount > 0 ? ` · ${eventiCount} ${eventiCount === 1 ? 'evento' : 'eventi'}` : ''}
                                                 </span>
                                             </h4>
+                                            {isRoomClosed(room) && (
+                                                <span className="inline-flex flex-shrink-0 items-center gap-1 rounded-[var(--ds-radius-control)] border border-[var(--ds-pending-tint)] bg-[var(--ds-pending-tint)] px-2 py-0.5 text-[12px] font-medium text-[var(--ds-pending-text)]">
+                                                    <DoorClosed size={12} aria-hidden /> Chiusa
+                                                </span>
+                                            )}
                                             <div className="ml-auto flex flex-shrink-0 items-center gap-2">
                                                 <span className={`inline-flex h-8 flex-shrink-0 items-baseline gap-1.5 rounded-[var(--ds-radius-control)] border px-3 leading-8 ${
                                                     liberiCount > 0

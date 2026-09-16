@@ -284,7 +284,9 @@ export interface Reservation {
   payment_status: PaymentStatus;
   deposit_amount?: number;
   total_amount?: number;
-  banquet_menu_id?: number;
+  // null esplicito = scollegato: il PUT distingue «campo assente» (non
+  // toccare) da «null» (togliere il collegamento banchetto).
+  banquet_menu_id?: number | null;
   enable_reminder?: boolean;
   reminder_sent?: boolean;
   arrival_status?: ArrivalStatus;
