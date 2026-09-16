@@ -460,8 +460,12 @@ export const importMenuPassepartout = async (): Promise<MenuImportResult> => {
   });
 };
 
-/** URL pubblico del menu digitale (pagina servita dal backend, come /prenota). */
-export const digitalMenuUrl = (): string => `${API_URL}/menu`;
+/** URL pubblico del menu digitale (pagina servita dal backend, come /prenota).
+ *  Con lo slug usa la forma /m/<slug>: senza, withPublicTenant risolve il
+ *  tenant dal dominio e ripiega sul tenant 1 — su un altro ristorante il QR
+ *  aprirebbe il menu del Frantoio. */
+export const digitalMenuUrl = (slug?: string): string =>
+  slug ? `${API_URL}/m/${slug}` : `${API_URL}/menu`;
 
 /** Categoria del menu con stato e ordine (le preferenze vivono sul server,
  *  le categorie restano stringhe libere sui piatti). */
