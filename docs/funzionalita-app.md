@@ -271,6 +271,7 @@ Due voci in sidebar: **Menu** (i piatti, organizzati in menu) e **Banchetti** (g
 - Calendario eventi e filtri temporali (questa settimana, questo mese, più avanti, passati).
 - **Promemoria automatici in cucina a 72, 48 e 24 ore** dall'evento, a priorità crescente, che si spostano da soli se la data cambia.
 - Stampa della scheda evento; colore identificativo per evento visibile su tutte le superfici.
+- **Le sale chiuse restano assegnabili al banchetto**: nel passo «Tavoli assegnati» (e nel modale prenotazioni, se la prenotazione è collegata a un banchetto) le sale chiuse — per il turno o in via estesa — compaiono con il badge «Chiusa» invece di sparire. È il flusso «sala riservata all'evento»: si chiude la sala al servizio normale e la si assegna al banchetto, in qualunque ordine (le prenotazioni del banchetto non bloccano più la chiusura della sala).
 
 ---
 
@@ -645,6 +646,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-16 | Menu & Banchetti | Le sale chiuse (per turno o estese) restano assegnabili ai banchetti: nel picker tavoli compaiono col badge «Chiusa» invece di sparire, e chiudere una sala non è più bloccato dalle prenotazioni collegate al banchetto. |
 | 2026-09-16 | Nodo di sala (modalità ibrida) | Nuovo modulo (add-on): un nodo sulla rete del locale fa da ripetitore per comande/cucina/passe — a linea caduta gli schermi restano vivi con l'avviso "dati fermi"; toggle e stato in Impostazioni → Sala & Cucina. |
 | 2026-09-15 | Funzionalità trasversali | Nei wizard a passi (banchetti, clienti, personale, prenotazioni, onboarding) la barra dei passi su mobile centra da sola il passo attivo: dopo un «Avanti» si vede subito su quale passo ci si trova. |
 | 2026-09-15 | Menu & Banchetti | Nel wizard del banchetto ogni uscita ha un campo di ricerca piatti: filtra la lista per nome o categoria, resta visibile mentre si scorre. |
