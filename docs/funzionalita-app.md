@@ -26,26 +26,27 @@
 14. [Pagamenti, conto al tavolo e cassa](#pagamenti-conto-al-tavolo-e-cassa)
 15. [Fiscalità: scontrino, fattura elettronica, proforma](#fiscalità-scontrino-fattura-elettronica-proforma)
 16. [Integrazione cassa Passepartout](#integrazione-cassa-passepartout)
-17. [Stampa termica e print agent](#stampa-termica-e-print-agent)
-18. [Messaggi: WhatsApp e SMS](#messaggi-whatsapp-e-sms)
-19. [Email](#email)
-20. [Chat staff](#chat-staff)
-21. [Notifiche](#notifiche)
-22. [Recensioni Google](#recensioni-google)
-23. [Clienti (CRM / rubrica)](#clienti-crm--rubrica)
-24. [Attività / to-do](#attività--to-do)
-25. [Personale (turni e presenze)](#personale-turni-e-presenze)
-26. [Inventario](#inventario)
-27. [Lista della spesa e fornitori](#lista-della-spesa-e-fornitori)
-28. [HACCP](#haccp)
-29. [Funzioni AI](#funzioni-ai)
-30. [Impostazioni](#impostazioni)
-31. [Utenti, ruoli e permessi](#utenti-ruoli-e-permessi)
-32. [Privacy e GDPR](#privacy-e-gdpr)
-33. [Piattaforma SaaS: multi-tenant, moduli e abbonamenti](#piattaforma-saas-multi-tenant-moduli-e-abbonamenti)
-34. [Funzionalità trasversali](#funzionalità-trasversali)
-35. [Integrazioni esterne](#integrazioni-esterne)
-36. [Registro aggiornamenti](#registro-aggiornamenti)
+17. [Nodo di sala (modalità ibrida)](#nodo-di-sala-modalità-ibrida)
+18. [Stampa termica e print agent](#stampa-termica-e-print-agent)
+19. [Messaggi: WhatsApp e SMS](#messaggi-whatsapp-e-sms)
+20. [Email](#email)
+21. [Chat staff](#chat-staff)
+22. [Notifiche](#notifiche)
+23. [Recensioni Google](#recensioni-google)
+24. [Clienti (CRM / rubrica)](#clienti-crm--rubrica)
+25. [Attività / to-do](#attività--to-do)
+26. [Personale (turni e presenze)](#personale-turni-e-presenze)
+27. [Inventario](#inventario)
+28. [Lista della spesa e fornitori](#lista-della-spesa-e-fornitori)
+29. [HACCP](#haccp)
+30. [Funzioni AI](#funzioni-ai)
+31. [Impostazioni](#impostazioni)
+32. [Utenti, ruoli e permessi](#utenti-ruoli-e-permessi)
+33. [Privacy e GDPR](#privacy-e-gdpr)
+34. [Piattaforma SaaS: multi-tenant, moduli e abbonamenti](#piattaforma-saas-multi-tenant-moduli-e-abbonamenti)
+35. [Funzionalità trasversali](#funzionalità-trasversali)
+36. [Integrazioni esterne](#integrazioni-esterne)
+37. [Registro aggiornamenti](#registro-aggiornamenti)
 
 ---
 
@@ -401,6 +402,15 @@ Per i ristoranti con cassa **Passepartout Menù** (modulo dedicato):
 
 ---
 
+## Nodo di sala (modalità ibrida)
+
+- **Un piccolo server sulla rete del locale** (add-on, hardware fornito) che fa da ripetitore per comande, cucina, passe e conti aperti: gli schermi parlano col nodo, il nodo col cloud.
+- **Se cade la linea internet il servizio non si ferma**: i monitor restano vivi sull'ultima copia buona, con un avviso "dati fermi alle HH:MM" — la sala sa di essere in modalità isola. Al ritorno della linea tutto si riallinea da solo.
+- Le **scritture** (nuove comande, incassi) passano sempre dal cloud: a linea caduta il palmare lo dice chiaramente, e il rinvio è sicuro (nessun piatto duplicato).
+- Si attiva e disattiva da **Impostazioni → Sala & Cucina → Nodo di sala** (interruttore, dominio e IP del nodo, stato online e dispositivi collegati). Certificato e credenziali li distribuisce il cloud: il nodo si installa e si dimentica.
+
+---
+
 ## Stampa termica e print agent
 
 - **Stampanti termiche di rete** censite dalle Impostazioni (nome, IP, porta, **cicalino alla stampa** attivabile per stampante — la termica di cucina suona quando arriva la comanda, il banco resta muto); un **agente di stampa** sulla rete del ristorante ritira i lavori dal cloud — aggiungere una stampante diventa effettivo in pochi secondi, e lo stato online/offline dell'agente è visibile in Impostazioni.
@@ -635,6 +645,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-16 | Nodo di sala (modalità ibrida) | Nuovo modulo (add-on): un nodo sulla rete del locale fa da ripetitore per comande/cucina/passe — a linea caduta gli schermi restano vivi con l'avviso "dati fermi"; toggle e stato in Impostazioni → Sala & Cucina. |
 | 2026-09-15 | Funzionalità trasversali | Nei wizard a passi (banchetti, clienti, personale, prenotazioni, onboarding) la barra dei passi su mobile centra da sola il passo attivo: dopo un «Avanti» si vede subito su quale passo ci si trova. |
 | 2026-09-15 | Menu & Banchetti | Nel wizard del banchetto ogni uscita ha un campo di ricerca piatti: filtra la lista per nome o categoria, resta visibile mentre si scorre. |
 | 2026-09-15 | Asporto | Ordini d'asporto al telefono con Sofia: tool voce con match dei piatti per nome e stesse regole di slot/capienza, dietro l'interruttore «Ordini al telefono» (spento di default); configurazione dei tool documentata nel manuale dell'agente. |

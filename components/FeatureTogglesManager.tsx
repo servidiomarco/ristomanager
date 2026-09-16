@@ -205,6 +205,8 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
         passe_enabled: { title: 'Passe', on: 'attivo', off: 'disattivato' },
         // Idem: gestito dalla sezione Recensioni (ReviewSettingsCard).
         review_requests_enabled: { title: 'Richiesta recensione', on: 'attiva', off: 'disattivata' },
+        // Idem: gestito dalla card Nodo di sala (Sala & Cucina).
+        sala_node_enabled: { title: 'Modalità ibrida', on: 'attiva', off: 'disattivata' },
     };
 
     const toggle = async (key: FlagKey) => {

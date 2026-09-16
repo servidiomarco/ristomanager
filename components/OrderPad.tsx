@@ -20,6 +20,7 @@ import { StampaCopiaButton } from './pagamenti/StampaCopiaButton';
 import { PagamentoSheet } from './cassa/PagamentoSheet';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
+import { useSalaNodeStale } from '../hooks/useSalaNodeStale';
 import { billsApiService, printBill } from '../services/billsApiService';
 
 import { socketClient } from '../services/socketClient';
@@ -217,6 +218,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
   // Slot esclusivo: la conferma nuova sostituisce la precedente.
   const { addToast } = useToast();
   const setFlash = (msg: string) => addToast(msg, 'success', { replaceKey: 'orderpad-flash' });
+  const nodeStale = useSalaNodeStale();
   const [variantFor, setVariantFor] = useState<Dish | null>(null);
   // Riga in bozza riaperta per leggere/correggere le varianti (le lunghe si
   // troncano in lista): stesso foglio della battitura, precompilato.
@@ -1042,7 +1044,12 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
         )
       );
     } catch (err: any) {
-      setError(err?.data?.error ?? err?.message ?? 'Invio non riuscito');
+      // Modalità ibrida a cloud giù: gli schermi restano vivi via nodo, ma
+      // le scritture vanno al cloud — dire "invio non riuscito" non basta,
+      // il cameriere deve sapere che la cucina NON ha visto niente.
+      setError(err instanceof TypeError && nodeStale.stale
+        ? 'Linea giù: comanda non inviata, la cucina non la vede. Riprova quando torna.'
+        : err?.data?.error ?? err?.message ?? 'Invio non riuscito');
     } finally {
       setBusy(false);
     }
@@ -1421,12 +1428,15 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
       }
     };
     socket.on('order:deleted', onOrderDeleted);
+    // Modalità ibrida: al riaggancio del cloud lo stato conti si rilegge.
+    socket.on('sala:resync', refresh);
     return () => {
       socket.off('bill:updated', refresh);
       socket.off('bill:closed', refresh);
       socket.off('bill:split-paid', onPaid);
       socket.off('bill:settled', onPaid);
       socket.off('order:deleted', onOrderDeleted);
+      socket.off('sala:resync', refresh);
     };
   }, [serviceQuery]);
 

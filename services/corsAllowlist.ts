@@ -76,6 +76,22 @@ const platformHostnames = (): Set<string> => {
     return hosts;
 };
 
+// Hostname consentiti per un singolo tenant, per il provisioning del nodo di
+// sala (/sala-node/credentials): il nodo applica in LAN la stessa allowlist
+// del cloud, ma non ha accesso al DB — gli si spedisce la lista già risolta
+// (piattaforma + domini del tenant). localhost e i suffissi di preview
+// (*.vercel.app / *.railway.app) restano regole cablate anche sul nodo.
+export const allowedOriginHostnamesForTenant = async (tenantId: number): Promise<string[]> => {
+    const hosts = new Set<string>(platformHostnames());
+    try {
+        const res = await queryWithRetry('SELECT domain FROM tenant_domains WHERE tenant_id = $1', [tenantId]);
+        for (const row of res.rows) hosts.add(String(row.domain).trim().toLowerCase());
+    } catch (err: any) {
+        console.warn('[cors] lettura domini tenant per nodo di sala fallita:', err?.message || err);
+    }
+    return [...hosts];
+};
+
 // Decide se un Origin può parlare con l'API. Usata sia dal middleware cors
 // di Express sia dal cors del handshake Socket.IO: la risposta DEVE essere
 // identica, o il client carica la SPA ma non riceve gli eventi real-time.

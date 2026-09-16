@@ -20,11 +20,14 @@ import { queryWithRetry } from '../db.js';
 // 'takeaway' = modulo asporto (ordini da ritirare, slot di ritiro, e nelle
 // fasi successive pagina pubblica e Sofia): add-on, acceso per il tenant 1
 // dalla migration modulo-asporto.
-export const TENANT_FEATURES = ['voice', 'whatsapp', 'web_booking', 'pay_at_table', 'passepartout', 'reviews', 'takeaway'] as const;
+// 'sala_node' = nodo di sala (relay + cache sulla LAN, hardware in comodato):
+// add-on con hardware dietro, fail-closed come 'passepartout' — acceso per il
+// tenant 1 dalla migration nodo-di-sala.
+export const TENANT_FEATURES = ['voice', 'whatsapp', 'web_booking', 'pay_at_table', 'passepartout', 'reviews', 'takeaway', 'sala_node'] as const;
 export type TenantFeature = (typeof TENANT_FEATURES)[number];
 export type TenantFeatureMap = Record<TenantFeature, boolean>;
 
-const ALL_DISABLED: TenantFeatureMap = { voice: false, whatsapp: false, web_booking: false, pay_at_table: false, passepartout: false, reviews: false, takeaway: false };
+const ALL_DISABLED: TenantFeatureMap = { voice: false, whatsapp: false, web_booking: false, pay_at_table: false, passepartout: false, reviews: false, takeaway: false, sala_node: false };
 
 // Cache per tenant con TTL breve, stesso schema di identityCache
 // (businessIdentity in server.ts): gli entitlement si leggono su ogni
