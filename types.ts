@@ -1055,6 +1055,12 @@ export interface User {
     // true finché l'OWNER non completa il wizard di primo accesso (D1):
     // la SPA lo mostra al posto dell'app, solo all'OWNER.
     needs_onboarding?: boolean;
+    // Base pubblica della piattaforma (PUBLIC_BOOKING_BASE_URL del backend,
+    // es. https://prenota.sympotia.com): con questa si compongono i link da
+    // ospiti (/ordina/<slug>, /m/<slug>). Assente o null (env non
+    // configurata, o backend vecchio nella finestra di deploy): si ripiega
+    // su VITE_API_URL — stesso host, solo meno bello da leggere.
+    public_base_url?: string | null;
   };
 }
 

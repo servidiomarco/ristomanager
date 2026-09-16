@@ -391,7 +391,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const [pairEsito, setPairEsito] = useState<PairWinesResult | null>(null);
   const [pairError, setPairError] = useState<string | null>(null);
   const [linkCopiato, setLinkCopiato] = useState(false);
-  const menuUrl = digitalMenuUrl(user?.tenant?.slug);
+  const menuUrl = digitalMenuUrl(user?.tenant?.slug, user?.tenant?.public_base_url);
 
   useEffect(() => {
     if (!qrOpen) return;
