@@ -220,6 +220,95 @@ describe('menu, sala & cucina', () => {
             });
             expect(res.status).toBe(404);
         });
+
+        it('il banchetto siede nella sala chiusa, e la sala si chiude attorno al banchetto', async () => {
+            // La chiusura sala vale per il servizio normale; il banchetto è
+            // l'eccezione dichiarata (si chiude la sala PERCHÉ c'è l'evento).
+            const DATA2 = '2027-04-11';
+            const banquet = await api().post('/banquet-menus').set(bearer(token)).send({
+                name: 'Evento B33', description: '', price_per_person: 60,
+                courses: [], event_date: DATA2, shift: 'DINNER',
+            });
+            expect(banquet.status).toBe(201);
+            const banquetId = banquet.body.id;
+
+            // Una prenotazione normale sul tavolo blocca ancora la chiusura…
+            const normale = await api().post('/reservations').set(bearer(token)).send({
+                customer_name: 'Ospite Normale',
+                phone: '340 555 0433',
+                reservation_time: `${DATA2}T19:30:00.000Z`,
+                shift: 'DINNER',
+                guests: 4,
+                table_id: tavolo1,
+            });
+            expect(normale.status).toBe(201);
+            const bloccata = await api().post('/room-closed').set(bearer(token)).send({
+                date: DATA2, shift: 'DINNER', room_id: roomId,
+            });
+            expect(bloccata.status).toBe(409);
+            expect(bloccata.body.error).toBe('Sala con prenotazioni');
+
+            // …ma collegata al banchetto non conta più tra le bloccanti.
+            // Di passaggio: il PUT deve persistere banquet_menu_id (prima
+            // veniva scartato).
+            const collegata = await api().put(`/reservations/${normale.body.id}`).set(bearer(token)).send({
+                customer_name: 'Ospite Normale',
+                phone: '340 555 0433',
+                reservation_time: `${DATA2}T19:30:00.000Z`,
+                shift: 'DINNER',
+                guests: 4,
+                table_id: tavolo1,
+                banquet_menu_id: banquetId,
+            });
+            expect(collegata.status).toBe(200);
+            expect(collegata.body.banquet_menu_id).toBe(banquetId);
+            const chiusa = await api().post('/room-closed').set(bearer(token)).send({
+                date: DATA2, shift: 'DINNER', room_id: roomId,
+            });
+            expect(chiusa.status).toBe(201);
+
+            // Chiusura estesa: il gate resta per il servizio normale, non per
+            // il banchetto. Un banquet_menu_id inesistente fa 400 pulito.
+            const estesa = await api().patch(`/rooms/${roomId}`).set(bearer(token)).send({ is_closed: true });
+            expect(estesa.status).toBe(200);
+            const rifiutata = await api().post('/reservations').set(bearer(token)).send({
+                customer_name: 'Ospite Fuori Evento',
+                phone: '340 555 0434',
+                reservation_time: `${DATA2}T19:00:00.000Z`,
+                shift: 'DINNER',
+                guests: 2,
+                table_id: tavolo2,
+            });
+            expect(rifiutata.status).toBe(400);
+            const fantasma = await api().post('/reservations').set(bearer(token)).send({
+                customer_name: 'Ospite Evento',
+                phone: '340 555 0435',
+                reservation_time: `${DATA2}T19:00:00.000Z`,
+                shift: 'DINNER',
+                guests: 2,
+                table_id: tavolo2,
+                banquet_menu_id: 99999999,
+            });
+            expect(fantasma.status).toBe(400);
+            const delBanchetto = await api().post('/reservations').set(bearer(token)).send({
+                customer_name: 'Ospite Evento',
+                phone: '340 555 0435',
+                reservation_time: `${DATA2}T19:00:00.000Z`,
+                shift: 'DINNER',
+                guests: 2,
+                table_id: tavolo2,
+                banquet_menu_id: banquetId,
+            });
+            expect(delBanchetto.status).toBe(201);
+            expect(delBanchetto.body.banquet_menu_id).toBe(banquetId);
+
+            // Pulizia: sala riaperta, override tolto, prenotazioni ed evento via.
+            await api().patch(`/rooms/${roomId}`).set(bearer(token)).send({ is_closed: false });
+            await api().delete('/room-closed').set(bearer(token)).send({ date: DATA2, shift: 'DINNER', room_id: roomId });
+            await api().delete(`/reservations/${normale.body.id}`).set(bearer(token));
+            await api().delete(`/reservations/${delBanchetto.body.id}`).set(bearer(token));
+            await api().delete(`/banquet-menus/${banquetId}`).set(bearer(token));
+        });
     });
 
     describe('cucina: stampanti, partite e mappa categorie', () => {
