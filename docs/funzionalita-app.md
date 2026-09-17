@@ -652,6 +652,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-17 | Pagamenti, conto al tavolo e cassa | Il Riepilogo del pagamento in Cassa elenca le righe del conto (quantità, piatto, prezzo, con scroll interno sui conti lunghi); i bottoni «QR del conto» e «Invia link al cliente» stanno affiancati. |
 | 2026-09-17 | Asporto | «Invia link al cliente» dal pagamento in Cassa: il link del conto va al telefono dell'ordine d'asporto (WhatsApp col template dedicato se configurato, altrimenti SMS) — si paga prima del ritiro, anche in gruppo girandosi il link. |
 | 2026-09-17 | Pagamenti, conto al tavolo e cassa | Anche sul conto d'asporto si può «pagare quello che ho preso»: l'ordine online di gruppo si divide girandosi il link, ognuno paga i propri piatti; resta esclusa solo la quota equa (divide per coperti che l'asporto non ha). |
 | 2026-09-17 | Pagamenti, conto al tavolo e cassa | Nella Chiusura i conti d'asporto si presentano come «Asporto #N» col cliente (in lista e nella scheda, con l'ora di ritiro) invece di «Tav. —»; i loro coperti tecnici non contano più fra i coperti serviti né nella riga «Giornata». |
