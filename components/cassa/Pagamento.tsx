@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Loader2, QrCode } from 'lucide-react';
+import { ArrowLeft, Loader2, QrCode, Send } from 'lucide-react';
 import { chime } from '../../utils/chime';
+import { billsApiService } from '../../services/billsApiService';
 import type { BillPaymentInput, OpenBillRow } from '../../services/billsApiService';
 import { Callout, SegmentedControl, StatusPill } from '../ds';
 import { METHODS, methodLabel, nextAmountText, settleMath, settlePayments } from '../pagamenti/settleView';
@@ -83,6 +84,21 @@ export const Pagamento: React.FC<PagamentoProps> = ({
   );
   const [tip, setTip] = useState('');
   const [doc, setDoc] = useState<Doc>('Scontrino');
+  // Invio del link /pay al telefono dell'ordine d'asporto. Esito inline
+  // sotto il bottone (niente toast: l'operatore sta guardando qui) e
+  // reinvio sempre possibile — il server rimanda a ogni chiamata.
+  const [linkSend, setLinkSend] = useState<{ state: 'idle' | 'sending' | 'sent' | 'error'; detail?: string }>({ state: 'idle' });
+  useEffect(() => { setLinkSend({ state: 'idle' }); }, [bill.id]);
+  const sendTakeawayLink = async () => {
+    if (bill.takeaway_order_id == null) return;
+    setLinkSend({ state: 'sending' });
+    try {
+      const r = await billsApiService.notifyTakeawayBillLink(bill.takeaway_order_id);
+      setLinkSend({ state: 'sent', detail: r.channel === 'whatsapp' ? 'WhatsApp' : 'SMS' });
+    } catch (err: any) {
+      setLinkSend({ state: 'error', detail: err?.message });
+    }
+  };
 
   const math = useMemo(
     () => settleMath(residual, movements, method, amount),
@@ -145,8 +161,29 @@ export const Pagamento: React.FC<PagamentoProps> = ({
         disabled={busy || !bill.share_token}
         className="mt-2 inline-flex h-11 items-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
       >
-        <QrCode size={16} aria-hidden /> QR al tavolo
+        <QrCode size={16} aria-hidden /> {bill.takeaway_order_id != null ? 'QR del conto' : 'QR al tavolo'}
       </button>
+      {bill.takeaway_order_id != null && (
+        <div className="mt-2">
+          <button
+            type="button"
+            onClick={sendTakeawayLink}
+            disabled={busy || linkSend.state === 'sending' || !bill.share_token}
+            className="inline-flex h-11 items-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
+          >
+            {linkSend.state === 'sending'
+              ? <Loader2 size={16} className="animate-spin" aria-hidden />
+              : <Send size={16} aria-hidden />}
+            {linkSend.state === 'sent' ? 'Reinvia il link' : 'Invia link al cliente'}
+          </button>
+          {linkSend.state === 'sent' && (
+            <p className="mt-1 text-[12px] text-[var(--ds-seated-text)]">Inviato via {linkSend.detail}.</p>
+          )}
+          {linkSend.state === 'error' && (
+            <p className="mt-1 text-[12px] text-[var(--ds-critical-text)]">{linkSend.detail || 'Invio non riuscito, riprova.'}</p>
+          )}
+        </div>
+      )}
 
       <div className="mt-5">
         <span className="mb-1.5 block text-[13px] font-medium text-[var(--ds-text-secondary)]">
