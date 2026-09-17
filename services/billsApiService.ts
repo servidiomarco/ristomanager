@@ -282,6 +282,20 @@ class BillsApiService {
       headers: getHeaders(),
     });
   }
+
+  /** Gemello per l'asporto: il link /pay va al telefono dell'ordine. */
+  async notifyTakeawayBillLink(takeawayOrderId: number): Promise<{
+    ok: true;
+    bill_id: number;
+    channel: 'sms' | 'whatsapp' | string;
+    provider_sid: string | null;
+    public_url: string;
+  }> {
+    return apiRequest(`${API_URL}/takeaway/orders/${takeawayOrderId}/bill/notify`, {
+      method: 'POST',
+      headers: getHeaders(),
+    });
+  }
 }
 
 /** Mappatura IVA del tenant: default piatti e voci di sistema. */

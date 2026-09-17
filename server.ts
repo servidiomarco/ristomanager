@@ -9949,6 +9949,14 @@ function buildTableBillLinkMessage(customerName: string, amountCents: number, co
     return `Ciao ${toTitleCase(customerName)}, ecco il link per pagare al tavolo (${coversLabel} · totale ${amount}): ${url}\nGrazie!`;
 }
 
+// La variante asporto: niente coperti (sull'asporto sarebbero un dato
+// falso), al loro posto l'ora di ritiro. Corto: un segmento SMS.
+function buildTakeawayBillLinkMessage(customerName: string, amountCents: number, pickupTime: string | null, url: string): string {
+    const amount = formatEuroMinor(amountCents);
+    const when = pickupTime ? ` delle ${pickupTime}` : '';
+    return `Ciao ${toTitleCase(customerName)}, ecco il link per pagare il tuo asporto${when} (totale ${amount}): ${url}\nGrazie!`;
+}
+
 // Compose the message we send to the customer with the Revolut checkout link.
 // Kept intentionally short so it fits comfortably inside an SMS segment when
 // WhatsApp isn't available.
@@ -19883,6 +19891,29 @@ function buildTableBillLinkTemplate(
     };
 }
 
+// Template WhatsApp del link conto ASPORTO, quando ne verrà approvato uno
+// su Twilio: body {{1}}..{{3}} (nome, ora ritiro, totale), bottone col
+// token {{4}}. Senza l'env si torna all'SMS via sendBookingConfirmation —
+// mai riusare il template del tavolo, che parla di coperti e di tavolo.
+function buildTakeawayBillLinkTemplate(
+    customerName: string | null | undefined,
+    pickupTime: string | null | undefined,
+    amountCents: number,
+    shareToken: string
+): WhatsAppTemplateOpts | undefined {
+    const sid = (process.env.TWILIO_WA_CONTENT_SID_TAKEAWAY_BILL_LINK_CTA || '').trim();
+    if (!sid || !shareToken) return undefined;
+    return {
+        contentSid: sid,
+        contentVariables: {
+            '1': templateName(customerName),
+            '2': pickupTime || '—',
+            '3': formatEuroMinor(amountCents),
+            '4': shareToken,
+        },
+    };
+}
+
 // The deposit-request templates on Twilio are Call-to-Action cards: body has
 // {{1}}..{{5}} (name, guests, date, time, amount), and the button URL is
 // hardcoded per provider (https://checkout.revolut.com/pay/{{6}} vs
@@ -24726,6 +24757,97 @@ app.post('/takeaway/orders/:id/bill', authenticate, requireFeature('takeaway'), 
             return res.status(409).json({ error: err.message, ...err.detail });
         }
         console.error('POST /takeaway/orders/:id/bill error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Gemello di /reservations/:id/bill/notify per l'asporto: manda il link
+// /pay al telefono dell'ordine, così il cliente paga prima di venire (e
+// può girare il link agli amici: il per-piatto sull'asporto c'è). Stessa
+// semantica del gemello: idempotente sul conto (non ne crea), NON sul
+// canale — ogni chiamata reinvia, per il «rimandalo» da banco.
+app.post('/takeaway/orders/:id/bill/notify', authenticate, requireFeature('takeaway'), requirePermission('payments:full'), async (req, res) => {
+    try {
+        if (!(await isPayAtTableActive(req.tenantId!))) {
+            return res.status(403).json({
+                error: 'feature_disabled',
+                message: 'Il conto al tavolo è disattivato. Attivalo da Impostazioni → Conto al tavolo.',
+            });
+        }
+        const takeawayId = Math.trunc(Number(req.params.id));
+        if (!Number.isFinite(takeawayId) || takeawayId <= 0) return res.status(400).json({ error: 'invalid_id' });
+
+        const twRow = await queryWithRetry(
+            `SELECT id, customer_name, customer_phone, pickup_time, daily_number
+             FROM takeaway_orders WHERE id = $1 AND tenant_id = $2`,
+            [takeawayId, req.tenantId!]
+        );
+        if (twRow.rowCount === 0) return res.status(404).json({ error: 'not_found' });
+        const tw = twRow.rows[0];
+        if (!tw.customer_phone) {
+            return res.status(400).json({ error: 'no_phone', message: "L'ordine non ha un numero di telefono" });
+        }
+
+        const billRow = await queryWithRetry(
+            `SELECT id, total_cents, share_token, status
+             FROM table_bills
+             WHERE takeaway_order_id = $1 AND tenant_id = $2
+               AND status IN ('OPEN','LOCKED')
+             ORDER BY opened_at DESC
+             LIMIT 1`,
+            [takeawayId, req.tenantId!]
+        );
+        if (billRow.rowCount === 0) {
+            return res.status(404).json({ error: 'no_bill', message: 'Nessun conto aperto per questo ordine: prima «Prepara il conto»' });
+        }
+        const bill = billRow.rows[0];
+        if (!bill.share_token) {
+            return res.status(409).json({ error: 'Il conto non ha un link pubblico attivo' });
+        }
+
+        const publicUrl = `${payAtTableBaseUrl()}/pay/${bill.share_token}`;
+        const message = buildTakeawayBillLinkMessage(
+            tw.customer_name, Number(bill.total_cents), tw.pickup_time, publicUrl
+        );
+
+        try {
+            // Niente reservation_id: il threading dei messaggi resta sul
+            // telefono. Senza template WA dedicato parte l'SMS — mai riusare
+            // il template del tavolo, che parla di coperti e di tavolo.
+            const delivery = await sendBookingConfirmation(req.tenantId!, tw.customer_phone, message, null, {
+                whatsappTemplate: buildTakeawayBillLinkTemplate(
+                    tw.customer_name, tw.pickup_time, Number(bill.total_cents), bill.share_token
+                ),
+                recordConfirmation: false,
+            });
+            if (req.user) {
+                LogService.logActivity(
+                    req.tenantId!,
+                    req.user.userId,
+                    req.user.email,
+                    req.user.email,
+                    ActivityAction.CREATE,
+                    ResourceType.ORDER,
+                    tw.id,
+                    `Asporto${tw.daily_number != null ? ` #${tw.daily_number}` : ''} · ${tw.customer_name} — inviato link del conto (${delivery.channel})`
+                );
+            }
+            res.json({
+                ok: true,
+                bill_id: bill.id,
+                channel: delivery.channel,
+                provider_sid: delivery.sid || null,
+                public_url: publicUrl,
+            });
+        } catch (err: any) {
+            console.error('[takeaway bill:notify] delivery failed:', err?.message || err);
+            res.status(502).json({
+                error: 'delivery_failed',
+                message: err?.message || 'Invio del messaggio non riuscito',
+            });
+        }
+    } catch (err: any) {
+        console.error('POST /takeaway/orders/:id/bill/notify error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
