@@ -11,6 +11,18 @@ import { PublicQuotePage } from './components/PublicQuotePage';
 import I18nProvider from './i18n/I18nProvider';
 import './index.css';
 
+// Shell offline: il service worker (precache Workbox + push) si registra al
+// boot per TUTTI — prima lo installava solo chi attivava le notifiche push,
+// e a linea caduta un refresh moriva in pagina bianca perché la shell vive
+// su Vercel. Solo in produzione: sotto HMR un SW serve shell stantie.
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {
+      // Best-effort: senza SW l'app funziona come sempre, solo non offline.
+    });
+  });
+}
+
 const rootElement = document.getElementById('root');
 if (!rootElement) {
   throw new Error("Could not find root element to mount to");

@@ -414,6 +414,7 @@ Per i ristoranti con cassa **Passepartout Menù** (modulo dedicato):
 - **Un piccolo server sulla rete del locale** (add-on, hardware fornito) che fa da ripetitore per comande, cucina, passe e conti aperti: gli schermi parlano col nodo, il nodo col cloud.
 - **Se cade la linea internet il servizio non si ferma**: i monitor restano vivi sull'ultima copia buona, con un avviso "dati fermi alle HH:MM" — la sala sa di essere in modalità isola. Al ritorno della linea tutto si riallinea da solo.
 - **Se invece è il nodo a non rispondere** (PC spento, in standby, firewall), l'app se ne accorge in pochi secondi e passa da sola al cloud — nessuno schermo resta appeso; il nodo rientra in gioco solo quando torna davvero raggiungibile.
+- **L'app riparte anche senza internet**: la schermata vive in una copia sul dispositivo (PWA), quindi un refresh o una riapertura a linea caduta non finisce più in pagina bianca — l'app si apre e parla col nodo di sala per quello che il nodo sa servire.
 - Le **scritture** (nuove comande, incassi) passano sempre dal cloud: a linea caduta il palmare lo dice chiaramente, e il rinvio è sicuro (nessun piatto duplicato).
 - Si attiva e disattiva da **Impostazioni → Sala & Cucina → Nodo di sala** (interruttore, dominio e IP del nodo, stato online e dispositivi collegati). Certificato e credenziali li distribuisce il cloud: il nodo si installa e si dimentica.
 
@@ -653,6 +654,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-17 | Nodo di sala (modalità ibrida) | La shell dell'app è installata sul dispositivo (PWA): refresh e riapertura funzionano anche senza internet — prima un reload a linea caduta finiva in pagina bianca. |
 | 2026-09-17 | Nodo di sala (modalità ibrida) | Nodo che non risponde ≠ linea caduta: se il nodo tace l'app passa al cloud in pochi secondi (letture, realtime e riepilogo cucina) invece di restare appesa, e torna sul nodo solo quando un controllo di salute lo vede di nuovo vivo. |
 | 2026-09-17 | Pagamenti, conto al tavolo e cassa | Il Riepilogo del pagamento in Cassa elenca le righe del conto (quantità, piatto, prezzo, con scroll interno sui conti lunghi); i bottoni «QR del conto» e «Invia link al cliente» stanno affiancati. |
 | 2026-09-17 | Asporto | «Invia link al cliente» dal pagamento in Cassa: il link del conto va al telefono dell'ordine d'asporto (WhatsApp col template dedicato se configurato, altrimenti SMS) — si paga prima del ritiro, anche in gruppo girandosi il link. |
