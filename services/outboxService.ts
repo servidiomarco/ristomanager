@@ -20,8 +20,20 @@
 // il primo mattone del protocollo di replica del nodo di sala
 // (docs/brainstorming-installazione-ibrida.md nel repo marketing, sez. 7).
 import pool, { runAsPlatform } from '../db.js';
+import { requireRegisteredEvent } from './eventRegistry.js';
 
 type OutboxHandler = (tenantId: number, payload: any) => Promise<void>;
+
+/** Contesto opzionale dell'envelope (sez. 7 del protocollo): chi e cosa ha
+ *  prodotto l'evento. Tutto per riferimento, mai anagrafiche. */
+export interface OutboxEventContext {
+    /** La Idempotency-Key del comando client che ha prodotto l'evento. */
+    commandId?: string | null;
+    /** event_id dell'evento (anche dell'altro stream) che ha causato questo. */
+    causationId?: string | null;
+    /** Riferimenti dell'autore: { user_id, role, channel } — MAI nome/email. */
+    actor?: Record<string, string | number | null> | null;
+}
 
 const SWEEP_MS = 3000;
 /** Oltre questa soglia si smette di ritentare: una riga avvelenata non deve
@@ -35,18 +47,33 @@ let timer: ReturnType<typeof setInterval> | null = null;
 let draining = false;
 
 /** Scrive l'evento DENTRO la transazione del chiamante. Il payload porta
- *  riferimenti (order_id, non nomi): la regola PII dell'event log. */
+ *  riferimenti (order_id, non nomi): la regola PII dell'event log.
+ *
+ *  Il tipo DEVE stare nel registro (eventRegistry): un tipo non dichiarato
+ *  esplode qui — in CI, non in produzione con una riga che nessun handler
+ *  consegnerà. schema_ver viene dal registro, mai dal chiamante. */
 export const outboxEnqueueInTx = async (
     client: { query: (sql: string, params?: any[]) => Promise<any> },
     tenantId: number,
     event: string,
     aggregate: string,
     payload: Record<string, any> | null,
+    context: OutboxEventContext = {},
 ): Promise<void> => {
+    const spec = requireRegisteredEvent(event);
     await client.query(
-        `INSERT INTO outbox_events (tenant_id, event, aggregate, payload)
-         VALUES ($1, $2, $3, $4::jsonb)`,
-        [tenantId, event, aggregate, payload ? JSON.stringify(payload) : null]
+        `INSERT INTO outbox_events (tenant_id, event, aggregate, payload, schema_ver, command_id, causation_id, actor)
+         VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8::jsonb)`,
+        [
+            tenantId,
+            event,
+            aggregate,
+            payload ? JSON.stringify(payload) : null,
+            spec.schema_ver,
+            context.commandId ?? null,
+            context.causationId ?? null,
+            context.actor ? JSON.stringify(context.actor) : null,
+        ]
     );
 };
 
