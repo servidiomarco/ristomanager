@@ -25246,6 +25246,28 @@ app.post('/takeaway/orders/:id/status', authenticate, requireFeature('takeaway')
         if (!(TAKEAWAY_STATUSES as readonly string[]).includes(status)) {
             return res.status(400).json({ error: 'invalid_status', message: `Stato non valido: ${String(status).slice(0, 30)}` });
         }
+        // Ritiro con conto ancora aperto: il sacchetto può uscire (chi paga
+        // in contanti passa dalla cassa un attimo dopo), ma serve un sì
+        // esplicito — l'ordine ritirato sparisce dalla board e il conto
+        // orfano in coda cassa si dimentica. Il check sta qui e non nel
+        // client perché la board può avere uno stato conto stantio; dopo la
+        // conferma il client ripete la chiamata con force_unpaid.
+        if (status === 'PICKED_UP' && req.body?.force_unpaid !== true) {
+            const unpaid = await queryWithRetry(
+                `SELECT status FROM table_bills
+                 WHERE tenant_id = $2 AND takeaway_order_id = $1
+                   AND status IN ('OPEN', 'LOCKED', 'SETTLED_PARTIAL')
+                 LIMIT 1`,
+                [orderId, req.tenantId!]
+            );
+            if (unpaid.rows.length > 0) {
+                return res.status(409).json({
+                    error: 'bill_unpaid',
+                    bill_status: unpaid.rows[0].status,
+                    message: 'Il conto non risulta incassato',
+                });
+            }
+        }
         const updated = await queryWithRetry(
             `UPDATE takeaway_orders SET
                 status = $3::text,

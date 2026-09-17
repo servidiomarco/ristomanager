@@ -304,6 +304,42 @@ describe('asporto — cucina', () => {
             await api().put('/settings/features').set(bearer(token)).send({ table_orders_enabled: false });
         }
     });
+
+    it('«ritirato» a conto aperto vuole la conferma; a conto chiuso passa liscio', async () => {
+        // Il conto di Verdi Luigi è stato incassato sopra: ritiro senza attriti.
+        const chiuso = await api().post(`/takeaway/orders/${asportoId}/status`).set(bearer(token)).send({ status: 'PICKED_UP' });
+        expect(chiuso.status).toBe(200);
+        expect(chiuso.body.picked_up_at).not.toBeNull();
+
+        // Ordine nuovo con conto aperto (mai incassato): il ritiro secco è 409.
+        const created = await api().post('/takeaway/orders').set(bearer(token)).send({
+            customer_name: 'Bianchi Anna',
+            pickup_date: DATA_ASPORTO,
+            pickup_time: '20:30',
+            items: [{ dish_id: dishId, qty: 1 }],
+        });
+        expect(created.status).toBe(201);
+        const secondoId = created.body.id;
+        const fired = await api().post(`/takeaway/orders/${secondoId}/fire`).set(bearer(token)).send({});
+        expect(fired.status).toBe(200);
+        const bill = await api().post(`/takeaway/orders/${secondoId}/bill`).set(bearer(token)).send({});
+        expect(bill.status).toBe(201);
+
+        const rifiutato = await api().post(`/takeaway/orders/${secondoId}/status`).set(bearer(token)).send({ status: 'PICKED_UP' });
+        expect(rifiutato.status).toBe(409);
+        expect(rifiutato.body.error).toBe('bill_unpaid');
+        expect(rifiutato.body.bill_status).toBe('OPEN');
+        const fermo = await pg.query('SELECT status, picked_up_at FROM takeaway_orders WHERE id = $1', [secondoId]);
+        expect(fermo.rows[0].status).not.toBe('PICKED_UP');
+        expect(fermo.rows[0].picked_up_at).toBeNull();
+
+        // Con la conferma dell'operatore il ritiro passa: contanti alla cassa dopo.
+        const forzato = await api().post(`/takeaway/orders/${secondoId}/status`).set(bearer(token))
+            .send({ status: 'PICKED_UP', force_unpaid: true });
+        expect(forzato.status).toBe(200);
+        expect(forzato.body.status).toBe('PICKED_UP');
+        expect(forzato.body.picked_up_at).not.toBeNull();
+    });
 });
 
 describe('asporto — KDS senza confini di turno', () => {
