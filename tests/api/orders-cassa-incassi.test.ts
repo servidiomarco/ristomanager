@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll } from 'vitest';
+import { Client } from 'pg';
 import { api, bearer, ownerToken } from './helpers';
 
 // Libro cassa del conto (table_bill_payments): incassi multi-metodo,
@@ -39,13 +40,23 @@ describe('libro cassa incassi', () => {
         return bill.body.bill.id as number;
     };
 
+    // Il giorno di servizio del conto, esplicito su ogni report: a cavallo
+    // della mezzanotte il default del server e il service_date del conto
+    // divergono (un conto aperto all'una è della serata prima) e il test
+    // diventava il flake notturno documentato.
+    let dataServizio = '';
+
     beforeAll(async () => {
         token = await ownerToken();
-        const report = await api().get('/reports/cash-closure').set(bearer(token));
+        billId = await openBill('CASSA1', 10000);
+        const db = new Client({ connectionString: process.env.DATABASE_URL || 'postgresql://localhost/ristotest_api' });
+        await db.connect();
+        dataServizio = (await db.query('SELECT service_date::text AS d FROM table_bills WHERE id = $1', [billId])).rows[0].d;
+        await db.end();
+        const report = await api().get(`/reports/cash-closure?date=${dataServizio}`).set(bearer(token));
         expect(report.status).toBe(200);
         baseline = methodMap(report.body);
         baselineClosed = report.body.bills_closed;
-        billId = await openBill('CASSA1', 10000);
     });
 
     it('registra un incasso POS e il residuo scende', async () => {
@@ -119,7 +130,7 @@ describe('libro cassa incassi', () => {
     });
 
     it('la chiusura di cassa somma per metodo, storni esclusi', async () => {
-        const report = await api().get('/reports/cash-closure').set(bearer(token));
+        const report = await api().get(`/reports/cash-closure?date=${dataServizio}`).set(bearer(token));
         expect(report.status).toBe(200);
         const methods = methodMap(report.body);
         const delta = (m: string) => (methods[m] ?? 0) - (baseline[m] ?? 0);
@@ -169,7 +180,11 @@ describe('libro cassa incassi', () => {
         expect(repYest.body.methods.some((m: any) =>
             m.method === 'SATISPAY' && m.shift === 'DINNER' && m.amount_cents >= 3000)).toBe(true);
 
-        const repToday = await api().get('/reports/cash-closure').set(bearer(token));
+        // Data esplicita anche qui: il default del server dopo mezzanotte È
+        // il giorno di servizio della serata — cioè ieri — e conterrebbe
+        // legittimamente il conto.
+        const oggi = (await db.query(`SELECT CURRENT_DATE::text AS d`)).rows[0].d;
+        const repToday = await api().get(`/reports/cash-closure?date=${oggi}`).set(bearer(token));
         expect(repToday.body.bills.some((b: any) => b.id === lateId)).toBe(false);
         await db.end();
     });
