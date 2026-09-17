@@ -155,16 +155,16 @@ export const Pagamento: React.FC<PagamentoProps> = ({
       <p className="mt-1 text-[12px] text-[var(--ds-text-muted)]">
         Il conto resta aperto: il residuo scende quando l'ospite paga.
       </p>
-      <button
-        type="button"
-        onClick={onShowQr}
-        disabled={busy || !bill.share_token}
-        className="mt-2 inline-flex h-11 items-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
-      >
-        <QrCode size={16} aria-hidden /> {bill.takeaway_order_id != null ? 'QR del conto' : 'QR al tavolo'}
-      </button>
-      {bill.takeaway_order_id != null && (
-        <div className="mt-2">
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={onShowQr}
+          disabled={busy || !bill.share_token}
+          className="inline-flex h-11 items-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
+        >
+          <QrCode size={16} aria-hidden /> {bill.takeaway_order_id != null ? 'QR del conto' : 'QR al tavolo'}
+        </button>
+        {bill.takeaway_order_id != null && (
           <button
             type="button"
             onClick={sendTakeawayLink}
@@ -176,13 +176,13 @@ export const Pagamento: React.FC<PagamentoProps> = ({
               : <Send size={16} aria-hidden />}
             {linkSend.state === 'sent' ? 'Reinvia il link' : 'Invia link al cliente'}
           </button>
-          {linkSend.state === 'sent' && (
-            <p className="mt-1 text-[12px] text-[var(--ds-seated-text)]">Inviato via {linkSend.detail}.</p>
-          )}
-          {linkSend.state === 'error' && (
-            <p className="mt-1 text-[12px] text-[var(--ds-critical-text)]">{linkSend.detail || 'Invio non riuscito, riprova.'}</p>
-          )}
-        </div>
+        )}
+      </div>
+      {linkSend.state === 'sent' && (
+        <p className="mt-1 text-[12px] text-[var(--ds-seated-text)]">Inviato via {linkSend.detail}.</p>
+      )}
+      {linkSend.state === 'error' && (
+        <p className="mt-1 text-[12px] text-[var(--ds-critical-text)]">{linkSend.detail || 'Invio non riuscito, riprova.'}</p>
       )}
 
       <div className="mt-5">
@@ -306,6 +306,20 @@ export const Pagamento: React.FC<PagamentoProps> = ({
         {/* Riepilogo */}
         <section className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
           <h2 className="text-[13px] font-semibold text-[var(--ds-text-muted)]">Riepilogo</h2>
+          {/* Le righe del conto: cosa si sta incassando, non solo quanto.
+              Tetto in altezza con scroll interno — un banchetto lungo non
+              deve spingere il residuo fuori dallo schermo. */}
+          {(bill.items?.length ?? 0) > 0 && (
+            <ul className="mt-3 max-h-56 space-y-1 overflow-y-auto border-b border-[var(--ds-border)] pb-3 pr-1 text-[13px]">
+              {(bill.items ?? []).map((it, idx) => (
+                <li key={idx} className="flex items-baseline gap-2">
+                  <span className="shrink-0 tabular-nums text-[var(--ds-text-muted)]">{it.qty}×</span>
+                  <span className="min-w-0 flex-1 truncate text-[var(--ds-text-secondary)]">{it.name}</span>
+                  <span className="tabular-nums text-[var(--ds-text-secondary)]">{euro(it.unit_price_cents * it.qty)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
           <dl className="mt-3 space-y-1.5 text-[14px]">
             {discountShown > 0 && (
               <div className="flex justify-between gap-2">
