@@ -62,8 +62,9 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
     if (ready) document.title = t(bill?.takeaway === true ? 'header.takeawayTitle' : 'meta.title');
   }, [ready, t, lang, bill?.takeaway]);
 
-  // Un conto d'asporto è di una persona sola: via i coperti e lo split
-  // (equo e per piatto), resta «pago tutto» più l'importo libero.
+  // Sul conto d'asporto: via i coperti e la quota equa (dividono per i
+  // covers, che sull'asporto sono un 1 tecnico), ma il per-piatto RESTA —
+  // gli ordini online di gruppo si dividono così, girandosi il link.
   // Letto in modo difensivo: il backend deployato può non mandarlo ancora.
   const isTakeaway = bill?.takeaway === true;
   const branding = bill?.branding ?? null;
@@ -372,7 +373,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
                 )}
               </>
             )}
-            {!isTakeaway && bill.per_item_available && pickableItems.some(i => !i.taken) && (
+            {bill.per_item_available && pickableItems.some(i => !i.taken) && (
               <button
                 type="button"
                 onClick={handlePerItem}
@@ -503,7 +504,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
                 onChange={e => setClaimantLabel(e.target.value.slice(0, 40))}
                 className="mt-1 w-full h-11 px-3 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[15px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               />
-              {!isTakeaway && <p className="mt-1 text-[11px] text-[var(--ds-text-muted)]">{t('amountForm.visibleNote')}</p>}
+              <p className="mt-1 text-[11px] text-[var(--ds-text-muted)]">{t(isTakeaway ? 'amountForm.visibleNoteTakeaway' : 'amountForm.visibleNote')}</p>
             </div>
 
             <button

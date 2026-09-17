@@ -363,7 +363,7 @@ Modulo completo per presa comanda, produzione e coordinamento delle uscite. Si a
 - Gestione sicura della concorrenza: due ospiti non possono pagare la stessa quota; le quote abbandonate si liberano da sole e un controllo periodico recupera anche i pagamenti il cui esito si fosse perso.
 - La pagina porta l'**identità del ristorante**: logo e nome in testata, indirizzo (con link alla mappa) e telefono nel footer — dall'anagrafe pubblica di Impostazioni, come la pagina prenota.
 - Sotto il totale, il **dettaglio del conto** (quantità, piatto, prezzo): oltre le 6 righe parte ripiegato sulle prime 5 con «Mostra tutte». Compare anche dove lo split per piatto non è disponibile.
-- Sul conto di un **asporto** la pagina cambia faccia: titolo «Il conto dell'asporto», niente coperti né divisione in quote — «Pago tutto il conto» in primo piano, più l'importo libero.
+- Sul conto di un **asporto** la pagina cambia faccia: titolo «Il conto dell'asporto», niente coperti né quota equa — «Pago tutto il conto» in primo piano, più «Pago quello che ho preso» e l'importo libero. Il link si condivide: un ordine online di gruppo si divide girandosi l'URL, ognuno paga i propri piatti.
 - Pagina bilingue IT/EN, aggiornata ogni 5 secondi.
 
 **Link di pagamento (caparre e acconti)**
@@ -653,6 +653,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 | Data | Sezione | Modifica |
 |---|---|---|
 | 2026-09-17 | Asporto | «Invia link al cliente» dal pagamento in Cassa: il link del conto va al telefono dell'ordine d'asporto (WhatsApp col template dedicato se configurato, altrimenti SMS) — si paga prima del ritiro, anche in gruppo girandosi il link. |
+| 2026-09-17 | Pagamenti, conto al tavolo e cassa | Anche sul conto d'asporto si può «pagare quello che ho preso»: l'ordine online di gruppo si divide girandosi il link, ognuno paga i propri piatti; resta esclusa solo la quota equa (divide per coperti che l'asporto non ha). |
 | 2026-09-17 | Pagamenti, conto al tavolo e cassa | Nella Chiusura i conti d'asporto si presentano come «Asporto #N» col cliente (in lista e nella scheda, con l'ora di ritiro) invece di «Tav. —»; i loro coperti tecnici non contano più fra i coperti serviti né nella riga «Giornata». |
 | 2026-09-17 | Pagamenti, conto al tavolo e cassa | La pagina pubblica del conto mostra il dettaglio delle righe sotto il totale (quantità, piatto, prezzo), ripiegato con «Mostra tutte» sui conti lunghi; visibile anche quando lo split per piatto non è disponibile. |
 | 2026-09-17 | Pagamenti, conto al tavolo e cassa | La pagina pubblica del conto porta l'identità del ristorante (logo e nome in testata, indirizzo e telefono nel footer) e la firma diventa «by Sympotia»; sul conto di un asporto niente coperti né quote — «Pago tutto il conto» in primo piano. |
