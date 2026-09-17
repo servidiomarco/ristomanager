@@ -130,11 +130,13 @@ class AsportoApiService {
     });
   }
 
-  async setStatus(id: number, status: TakeawayStatus): Promise<TakeawayOrderView> {
+  /** force_unpaid: ritiro confermato dall'operatore a conto ancora aperto
+      (il server altrimenti risponde 409 bill_unpaid). */
+  async setStatus(id: number, status: TakeawayStatus, opts?: { forceUnpaid?: boolean }): Promise<TakeawayOrderView> {
     return apiRequest(`${API_URL}/takeaway/orders/${id}/status`, {
       method: 'POST',
       headers: getHeaders(),
-      body: JSON.stringify({ status }),
+      body: JSON.stringify(opts?.forceUnpaid ? { status, force_unpaid: true } : { status }),
     });
   }
 }

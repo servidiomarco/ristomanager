@@ -14,6 +14,7 @@ import {
   X,
 } from 'lucide-react';
 import { Dish, TakeawayOrderView, TakeawaySlotBoard } from '../types';
+import { ApiError } from '../services/apiError';
 import { asportoApiService, TakeawayConfig, TakeawayItemPayload } from '../services/asportoApiService';
 import { socketClient } from '../services/socketClient';
 import { useAuth } from '../contexts/AuthContext';
@@ -229,12 +230,22 @@ export const AsportoPage: React.FC<AsportoPageProps> = ({ dishes, isInitialLoadi
     });
   };
 
-  const setStatus = async (order: TakeawayOrderView, state: Exclude<AsportoStateKey, 'due' | 'late'>) => {
+  // 'bill_unpaid': il server ha rifiutato il ritiro perché il conto è ancora
+  // aperto in cassa — il bottone si arma per la conferma invece di trattarlo
+  // come un errore di rete.
+  const setStatus = async (
+    order: TakeawayOrderView,
+    state: Exclude<AsportoStateKey, 'due' | 'late'>,
+    opts?: { forceUnpaid?: boolean },
+  ): Promise<'done' | 'bill_unpaid'> => {
     try {
-      applyView(await asportoApiService.setStatus(order.id, asportoStatusFor(state)));
-    } catch {
+      applyView(await asportoApiService.setStatus(order.id, asportoStatusFor(state), opts));
+    } catch (err) {
+      const apiErr = err as ApiError;
+      if (apiErr?.status === 409 && apiErr?.data?.error === 'bill_unpaid') return 'bill_unpaid';
       fetchDay(dateRef.current);
     }
+    return 'done';
   };
 
   const fireOrder = async (order: TakeawayOrderView) => {
@@ -260,7 +271,7 @@ export const AsportoPage: React.FC<AsportoPageProps> = ({ dishes, isInitialLoadi
       order={selected}
       state={stateOf(selected)}
       readOnly={!canManage}
-      onSetStatus={state => setStatus(selected, state)}
+      onSetStatus={(state, opts) => setStatus(selected, state, opts)}
       onFire={() => fireOrder(selected)}
       onPrepareBill={() => prepareBill(selected)}
       onEdit={() => setSheetOrder(selected)}
@@ -474,22 +485,38 @@ const DetailPanel: React.FC<{
   order: TakeawayOrderView;
   state: AsportoStateKey;
   readOnly?: boolean;
-  onSetStatus: (state: Exclude<AsportoStateKey, 'due' | 'late'>) => void;
+  onSetStatus: (state: Exclude<AsportoStateKey, 'due' | 'late'>, opts?: { forceUnpaid?: boolean }) => Promise<'done' | 'bill_unpaid'>;
   onFire: () => void;
   onPrepareBill: () => void;
   onEdit: () => void;
   onClose: () => void;
 }> = ({ order, state, readOnly, onSetStatus, onFire, onPrepareBill, onEdit }) => {
   const ds = asportoStateDs(state);
+  // Ritiro a conto aperto: il server risponde bill_unpaid e il bottone si
+  // arma — secondo tocco per confermare, come Revoca/Rimborsa in cassa.
+  const [pickupArmed, setPickupArmed] = useState(false);
+  useEffect(() => { setPickupArmed(false); }, [order.id, state]);
+  const pickup = async () => {
+    if (pickupArmed) {
+      setPickupArmed(false);
+      void onSetStatus('picked', { forceUnpaid: true });
+      return;
+    }
+    if ((await onSetStatus('picked')) === 'bill_unpaid') setPickupArmed(true);
+  };
   // Il verbo giusto per lo stato in cui l'ordine si trova adesso: un solo
   // bottone primario, mai un menu di sette stati. Da confermato/da produrre
   // il verbo è «Manda in cucina»: genera la comanda (KDS + stampa) e il
   // ritorno a «Pronto» arriva da solo dal monitor di partita.
   const primary: { label: string; icon: React.ComponentType<{ className?: string }>; action: () => void } | null =
-    state === 'requested' ? { label: 'Conferma', icon: Check, action: () => onSetStatus('confirmed') }
+    state === 'requested' ? { label: 'Conferma', icon: Check, action: () => void onSetStatus('confirmed') }
     : state === 'confirmed' || state === 'due' ? { label: 'Manda in cucina', icon: ChefHat, action: onFire }
-    : state === 'preparing' ? { label: 'Pronto', icon: Check, action: () => onSetStatus('ready') }
-    : state === 'ready' || state === 'late' ? { label: 'Ritirato', icon: ShoppingBag, action: () => onSetStatus('picked') }
+    : state === 'preparing' ? { label: 'Pronto', icon: Check, action: () => void onSetStatus('ready') }
+    : state === 'ready' || state === 'late' ? {
+        label: pickupArmed ? 'Conto non incassato — confermi?' : 'Ritirato',
+        icon: ShoppingBag,
+        action: () => void pickup(),
+      }
     : null;
   const closed = state === 'picked' || state === 'cancelled' || state === 'noshow';
 
@@ -541,7 +568,12 @@ const DetailPanel: React.FC<{
 
       {!readOnly && <div className="flex flex-col gap-2">
         {primary && (
-          <button type="button" onClick={primary.action} className={dsButton.primary}>
+          <button
+            type="button"
+            onClick={primary.action}
+            onBlur={() => setPickupArmed(false)}
+            className={pickupArmed ? dsButton.critical : dsButton.primary}
+          >
             <primary.icon className="h-4 w-4" aria-hidden />
             {primary.label}
           </button>
