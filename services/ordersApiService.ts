@@ -2,7 +2,7 @@ import { authApiService } from './authApiService';
 import { socketClient } from './socketClient';
 import type { CourseStatus, OrderWithItems } from '../types';
 import { buildApiError } from './apiError';
-import { routedGetUrl, cloudFallbackUrl, noteRoutedResponse } from './apiRouting';
+import { routedGetUrl, cloudFallbackUrl, noteRoutedResponse, fetchNodeAware } from './apiRouting';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';
 
@@ -65,7 +65,7 @@ const getHeaders = (idempotencyKey?: string): HeadersInit => {
 const fetchWithAuth = async (url: string, options: RequestInit = {}, retried = false): Promise<Response> => {
   let response: Response;
   try {
-    response = await fetch(url, options);
+    response = await fetchNodeAware(url, options);
   } catch (err) {
     // Modalità ibrida: se l'URL era del nodo di sala e il nodo non risponde,
     // si ritenta subito sul cloud (e il circuito resta aperto 30s). Un

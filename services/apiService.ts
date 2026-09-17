@@ -3,7 +3,7 @@ import { socketClient } from './socketClient';
 import { authApiService } from './authApiService';
 import { buildApiError } from './apiError';
 import { offlineQueue } from './offlineQueue';
-import { routedGetUrl } from './apiRouting';
+import { routedGetUrl, cloudFallbackUrl, noteRoutedResponse, fetchNodeAware } from './apiRouting';
 
 // Use import.meta.env for Vite frontend environment variables
 const API_URL = import.meta.env.VITE_API_URL || "https://ristomanager-production.up.railway.app";
@@ -37,7 +37,18 @@ const fetchWithAuth = async (
   options: RequestInit = {},
   retried = false
 ): Promise<Response> => {
-  const response = await fetch(url, options);
+  let response: Response;
+  try {
+    response = await fetchNodeAware(url, options);
+  } catch (err) {
+    // Nodo di sala non raggiungibile (il riepilogo cucina è l'unica GET di
+    // questo file instradata in LAN) → retry immediato sul cloud, come nei
+    // servizi sala; errori verso il cloud si propagano com'è sempre stato.
+    const cloudUrl = cloudFallbackUrl(url);
+    if (!cloudUrl) throw err;
+    return fetchWithAuth(cloudUrl, options, retried);
+  }
+  noteRoutedResponse(url, response);
 
   // If unauthorized and not already retried, try to refresh token
   if (response.status === 401 && !retried) {
@@ -2099,9 +2110,8 @@ export const getKitchenServiceSummary = async (
   if (params?.shift) qs.set('shift', params.shift);
   const query = qs.toString();
   // Instradata via nodo di sala in modalità ibrida (unica GET di questo file
-  // nella whitelist del nodo): senza il retry-su-cloud dei servizi sala — se
-  // il nodo cade, il circuito lo apre comunque il poll gemello del KDS e il
-  // giro successivo (60s) passa dal cloud.
+  // nella whitelist del nodo): il retry-su-cloud sta in fetchWithAuth, come
+  // nei servizi sala.
   return apiRequest<KitchenServiceSummary>(
     routedGetUrl(`/kitchen/service-summary${query ? `?${query}` : ''}`),
     { headers: getHeaders(false) },

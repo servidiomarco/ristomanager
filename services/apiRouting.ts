@@ -6,10 +6,14 @@
 // piano ibrido: «il downgrade è il failover» — qualunque dubbio sul nodo e
 // si torna al cloud, senza chiedere niente a nessuno.
 //
-// Il circuito: un errore di rete verso il nodo apre il circuito per 30s
-// (tutto al cloud), poi il primo GET instradabile riprova il nodo — se
-// fallisce ancora, il circuito si riapre da solo. Niente timer, niente
-// stato da ripulire.
+// Il circuito: un errore di rete verso il nodo lo apre (tutto al cloud) e a
+// richiuderlo è SOLO un probe /healthz riuscito, tentato in background al
+// più ogni 30s dal primo GET instradabile che passa. Mai più il traffico
+// vero a fare da probe: al collaudo del 17/09 il PC del nodo inghiottiva i
+// SYN senza rifiutarli (blackhole: firewall/standby) e ogni «riprova» reale
+// appendeva lo schermo per il timeout TCP del sistema — l'app sembrava
+// piantata e il reload, ripartendo dalla config persistita, ripiombava nel
+// buco. Stessa ragione del timeout esplicito in fetchNodeAware qui sotto.
 //
 // Config da GET /sala-node/client-config, persistita in localStorage così il
 // boot non aspetta la rete (e durante un outage il reload — se la shell è in
@@ -20,8 +24,12 @@ import { authApiService } from './authApiService';
 export const CLOUD_API_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';
 
 const STORAGE_KEY = 'sala_node_config_v1';
-const CIRCUIT_OPEN_MS = 30_000;
+const PROBE_EVERY_MS = 30_000;
 const PROBE_TIMEOUT_MS = 2_000;
+// Sopra i 5s di CLOUD_TIMEOUT_MS del nodo (readCache): a cloud giù il nodo
+// risponde stale solo DOPO il suo timeout verso il cloud — un limite client
+// più stretto aborterebbe proprio le risposte che l'ibrido esiste per dare.
+const NODE_FETCH_TIMEOUT_MS = 8_000;
 
 interface NodeConfig {
     enabled: boolean;
@@ -59,11 +67,40 @@ const loadConfig = (): NodeConfig => {
 };
 
 let config: NodeConfig = loadConfig();
-let circuitOpenUntil = 0;
+let circuitOpen = false;
+let nextProbeAt = 0;
+let probeInFlight = false;
 const changeCallbacks = new Set<RoutingChangeCallback>();
 
-const nodeActive = (): boolean =>
-    config.enabled && Boolean(config.node_url) && Date.now() >= circuitOpenUntil;
+/** Circuito chiuso (se era aperto): il nodo torna in gioco e il socket si
+ *  riattacca in LAN via onRoutingChange. */
+const closeCircuit = (): void => {
+    if (!circuitOpen) return;
+    circuitOpen = false;
+    console.info('[sala-node] nodo di nuovo raggiungibile: si torna a instradare in LAN');
+    notifyChange();
+};
+
+/** Probe di salute in background: l'unica cosa che richiude il circuito.
+ *  Fallisce → si riproverà fra 30s; il traffico vero intanto resta al cloud. */
+const probeNode = (): void => {
+    if (probeInFlight || !config.node_url) return;
+    probeInFlight = true;
+    nextProbeAt = Date.now() + PROBE_EVERY_MS;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
+    fetch(`${config.node_url}/healthz`, { signal: controller.signal, cache: 'no-store' })
+        .then(res => { if (res.ok) closeCircuit(); })
+        .catch(() => { /* nodo ancora giù: nextProbeAt è già avanti */ })
+        .finally(() => { clearTimeout(timer); probeInFlight = false; });
+};
+
+const nodeActive = (): boolean => {
+    if (!config.enabled || !config.node_url) return false;
+    if (!circuitOpen) return true;
+    if (Date.now() >= nextProbeAt) probeNode();
+    return false;
+};
 
 const isRoutablePath = (pathname: string): boolean =>
     ROUTABLE_EXACT.has(pathname) || ROUTABLE_PATTERNS.some(p => p.test(pathname));
@@ -85,10 +122,29 @@ export const serviceSocketUrl = (): string =>
 export const isNodeUrl = (url: string): boolean =>
     Boolean(config.node_url) && url.startsWith(config.node_url as string);
 
-/** Il nodo non ha risposto (errore di rete): circuito aperto per 30s. */
+/** Il nodo non ha risposto (errore di rete o timeout): circuito aperto,
+ *  tutto al cloud finché un probe /healthz non lo richiude. */
 export const noteNodeFailure = (): void => {
-    circuitOpenUntil = Date.now() + CIRCUIT_OPEN_MS;
-    console.warn('[sala-node] nodo non raggiungibile: si torna al cloud per 30s');
+    if (circuitOpen) return;
+    circuitOpen = true;
+    nextProbeAt = Date.now() + PROBE_EVERY_MS;
+    console.warn('[sala-node] nodo non raggiungibile: si torna al cloud (probe fra 30s)');
+};
+
+/** fetch con guinzaglio per gli URL del nodo: un nodo che inghiotte i
+ *  pacchetti senza rispondere (PC in standby, firewall che droppa) non deve
+ *  appendere lo schermo per il timeout TCP del sistema. Verso il cloud è un
+ *  fetch qualunque. L'abort arriva nel catch del chiamante come un errore di
+ *  rete → cloudFallbackUrl apre il circuito e dà l'URL gemello per il retry. */
+export const fetchNodeAware = async (url: string, options: RequestInit = {}): Promise<Response> => {
+    if (!isNodeUrl(url)) return fetch(url, options);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), NODE_FETCH_TIMEOUT_MS);
+    try {
+        return await fetch(url, { ...options, signal: controller.signal });
+    } finally {
+        clearTimeout(timer);
+    }
 };
 
 /** Da chiamare nel catch di un fetch: se l'URL era del nodo, segna il
@@ -155,7 +211,7 @@ export const refreshNodeConfig = async (): Promise<void> => {
             const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
             const health = await fetch(`${config.node_url}/healthz`, { signal: controller.signal, cache: 'no-store' });
             clearTimeout(timer);
-            if (!health.ok) noteNodeFailure();
+            if (health.ok) closeCircuit(); else noteNodeFailure();
         } catch {
             noteNodeFailure();
         }
