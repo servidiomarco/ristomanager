@@ -295,7 +295,7 @@ export const DividiConto: React.FC<DividiContoProps> = ({
                   type="text" inputMode="decimal" value={amount} autoFocus
                   onChange={e => setAmount(e.target.value)}
                   placeholder={(residualCents / 100).toFixed(2)}
-                  className="h-12 w-full rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface-2)] pl-8 pr-3 text-right text-[17px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]"
+                  className="h-12 w-full rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] pl-8 pr-3 text-right text-[17px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]"
                 />
               </div>
             </label>

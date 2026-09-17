@@ -40,7 +40,7 @@ const toCents = (s: string): number => {
   return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) : 0;
 };
 
-const field = 'h-12 w-full rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-3 text-right text-[17px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]';
+const field = 'h-12 w-full rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-3 text-right text-[17px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]';
 
 export const FondoEChiusura: React.FC<FondoEChiusuraProps> = ({
   view, loading, error, busy, canClose, onBack, onOpen, onUpdateFloat, onClose, onPrint, onOpenGiornale,
@@ -310,7 +310,7 @@ export const FondoEChiusura: React.FC<FondoEChiusuraProps> = ({
                     </span>
                     <textarea
                       value={note} onChange={e => setNote(e.target.value)} rows={3}
-                      className="w-full rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface-2)] p-3 text-[14px] text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]"
+                      className="w-full rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] p-3 text-[14px] text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]"
                     />
                     <span className="mt-1 block text-[12px] text-[var(--ds-text-muted)]">
                       Resta a registro con il tuo nome.
