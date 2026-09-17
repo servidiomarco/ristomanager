@@ -56,8 +56,14 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
   const [pickedItems, setPickedItems] = useState<number[]>([]);
 
   useEffect(() => {
-    if (ready) document.title = t('meta.title');
-  }, [ready, t, lang]);
+    if (ready) document.title = t(bill?.takeaway === true ? 'header.takeawayTitle' : 'meta.title');
+  }, [ready, t, lang, bill?.takeaway]);
+
+  // Un conto d'asporto è di una persona sola: via i coperti e lo split
+  // (equo e per piatto), resta «pago tutto» più l'importo libero.
+  // Letto in modo difensivo: il backend deployato può non mandarlo ancora.
+  const isTakeaway = bill?.takeaway === true;
+  const branding = bill?.branding ?? null;
 
   const load = useCallback(async (background = false) => {
     if (!background) setLoading(true);
@@ -226,8 +232,16 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
             <LanguageToggle />
           </div>
           <div className="text-center mt-1">
-            <h1 className="text-xl font-semibold text-[var(--ds-text-primary)]">{t('header.title')}</h1>
-            <p className="text-xs text-[var(--ds-text-muted)] mt-1">{t('header.subtitle')}</p>
+            {/* La pagina pubblica resta in tema chiaro (nessuna classe .dark
+                fuori dall'app), quindi basta la variante light del logo. */}
+            {branding?.logo_url && (
+              <img src={branding.logo_url} alt={branding.name ?? ''} className="mx-auto mb-2 h-12 w-auto max-w-[200px] object-contain" />
+            )}
+            {branding?.name && (
+              <div className="text-sm font-semibold text-[var(--ds-text-secondary)]">{branding.name}</div>
+            )}
+            <h1 className="text-xl font-semibold text-[var(--ds-text-primary)]">{t(isTakeaway ? 'header.takeawayTitle' : 'header.title')}</h1>
+            <p className="text-xs text-[var(--ds-text-muted)] mt-1">{t(isTakeaway ? 'header.takeawaySubtitle' : 'header.subtitle')}</p>
           </div>
         </header>
 
@@ -236,10 +250,12 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
             <span className="text-sm text-[var(--ds-text-muted)]">{t('bill.total')}</span>
             <span className="text-3xl font-bold tracking-tight">{totalEur}</span>
           </div>
-          <div className="mt-2 flex items-center gap-2 text-xs text-[var(--ds-text-muted)]">
-            <Users className="h-3.5 w-3.5" />
-            <span>{t('bill.cover', { count: bill.bill.covers })}</span>
-          </div>
+          {!isTakeaway && (
+            <div className="mt-2 flex items-center gap-2 text-xs text-[var(--ds-text-muted)]">
+              <Users className="h-3.5 w-3.5" />
+              <span>{t('bill.cover', { count: bill.bill.covers })}</span>
+            </div>
+          )}
 
           {bill.deposit_credit_cents != null && bill.deposit_credit_cents > 0 && (
             <div className="mt-3 flex items-baseline justify-between border-t border-[var(--ds-border)] pt-3 text-sm">
@@ -289,26 +305,40 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
 
         {mode === 'menu' && bill.residual_cents > 0 && (
           <div className="space-y-2">
-            <button
-              type="button"
-              onClick={handleEqualShare}
-              className="w-full h-14 rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] font-semibold text-base shadow-[var(--ds-shadow-card)] hover:bg-[var(--ds-action-bg-hover)] active:scale-[0.99] transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-            >
-              {t('menu.myShare', { amount: formatEur(equalShareCents, lang) })}
-            </button>
-            {/* Nascosto quando coincide con «La mia parte» (es. un solo coperto
-                o residuo sotto la quota): due bottoni con lo stesso importo
-                confonderebbero e basta. */}
-            {bill.residual_cents !== equalShareCents && (
+            {isTakeaway ? (
+              /* Asporto: un solo pagante, «pago tutto» è LA scelta e prende
+                 lo stile primario che al tavolo ha «la mia parte». */
               <button
                 type="button"
                 onClick={handleFullBill}
-                className="w-full h-14 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] font-semibold text-base hover:bg-[var(--ds-surface-row)] active:scale-[0.99] transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                className="w-full h-14 rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] font-semibold text-base shadow-[var(--ds-shadow-card)] hover:bg-[var(--ds-action-bg-hover)] active:scale-[0.99] transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               >
                 {t('menu.fullBill', { amount: residualEur })}
               </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={handleEqualShare}
+                  className="w-full h-14 rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] font-semibold text-base shadow-[var(--ds-shadow-card)] hover:bg-[var(--ds-action-bg-hover)] active:scale-[0.99] transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                >
+                  {t('menu.myShare', { amount: formatEur(equalShareCents, lang) })}
+                </button>
+                {/* Nascosto quando coincide con «La mia parte» (es. un solo coperto
+                    o residuo sotto la quota): due bottoni con lo stesso importo
+                    confonderebbero e basta. */}
+                {bill.residual_cents !== equalShareCents && (
+                  <button
+                    type="button"
+                    onClick={handleFullBill}
+                    className="w-full h-14 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] font-semibold text-base hover:bg-[var(--ds-surface-row)] active:scale-[0.99] transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  >
+                    {t('menu.fullBill', { amount: residualEur })}
+                  </button>
+                )}
+              </>
             )}
-            {bill.per_item_available && (bill.items ?? []).some(i => !i.taken) && (
+            {!isTakeaway && bill.per_item_available && (bill.items ?? []).some(i => !i.taken) && (
               <button
                 type="button"
                 onClick={handlePerItem}
@@ -398,7 +428,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
           <div className="rounded-[var(--ds-radius)] bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] p-4 text-center">
             <CheckCircle2 className="h-6 w-6 mx-auto mb-1" />
             <div className="font-semibold">{t('paidInFull.title')}</div>
-            <p className="text-xs mt-1">{t('paidInFull.text')}</p>
+            <p className="text-xs mt-1">{t(isTakeaway ? 'paidInFull.takeawayText' : 'paidInFull.text')}</p>
           </div>
         )}
 
@@ -439,7 +469,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
                 onChange={e => setClaimantLabel(e.target.value.slice(0, 40))}
                 className="mt-1 w-full h-11 px-3 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[15px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               />
-              <p className="mt-1 text-[11px] text-[var(--ds-text-muted)]">{t('amountForm.visibleNote')}</p>
+              {!isTakeaway && <p className="mt-1 text-[11px] text-[var(--ds-text-muted)]">{t('amountForm.visibleNote')}</p>}
             </div>
 
             <button
@@ -490,8 +520,25 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
           </div>
         )}
 
-        <footer className="mt-8 text-center text-[11px] text-[var(--ds-text-subtle)]">
-          {t('footer.text')}
+        <footer className="mt-8 space-y-1 text-center text-[11px] text-[var(--ds-text-subtle)]">
+          {(branding?.name || branding?.address || branding?.phone) && (
+            <div className="space-y-0.5 text-[var(--ds-text-muted)]">
+              {branding?.name && <div className="font-medium">{branding.name}</div>}
+              {branding?.address && (
+                branding.maps_url ? (
+                  <a href={branding.maps_url} target="_blank" rel="noreferrer" className="block underline underline-offset-2">
+                    {branding.address}
+                  </a>
+                ) : (
+                  <div>{branding.address}</div>
+                )
+              )}
+              {branding?.phone && (
+                <a href={`tel:${branding.phone.replace(/\s+/g, '')}`} className="block">{branding.phone}</a>
+              )}
+            </div>
+          )}
+          <div>{t('footer.text')}</div>
         </footer>
       </div>
     </div>

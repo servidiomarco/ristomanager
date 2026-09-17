@@ -8003,7 +8003,7 @@ const publicSplitView = (s: any) => ({
 // porta il suo tenant_id e tutto ciò che segue è scopato su quello.
 async function loadBillByToken(token: string) {
     const rs = await queryWithRetry(
-        `SELECT id, tenant_id, reservation_id, table_id, total_cents, covers, currency,
+        `SELECT id, tenant_id, reservation_id, table_id, takeaway_order_id, total_cents, covers, currency,
                 items, status, share_token, opened_at, closed_at,
                 opened_by_user_id, closed_by_user_id, external_ref,
                 cash_settled_cents, tip_cents, notes
@@ -8094,12 +8094,38 @@ app.get('/pay/:token', publicPayLimiter, async (req, res) => runAsPlatform(async
         );
         const perItemAvailable = billItems.length > 0 && itemsSum === bill.total_cents;
 
+        // Un conto d'asporto è di una persona sola: la pagina non deve mostrare
+        // coperti né proporre lo split equo/per piatto. Il flag viene dalla
+        // riga (takeaway_order_id), non dai covers — che su alcuni percorsi
+        // storici sono i posti del tavolo, non le persone reali.
+        const isTakeawayBill = bill.takeaway_order_id != null;
+
+        // Identità del ristorante per testata (logo, nome) e footer (indirizzo,
+        // telefono): publicBusinessIdentity, come /public/contact e /ordina —
+        // fallback del Frantoio solo per il tenant 1. Il logo in anagrafica è
+        // un path del backend (/public/media/…) e la pagina vive sul dominio
+        // dell'app: lo assolutizziamo qui, come per email e preventivi.
+        const identity = await publicBusinessIdentity(bill.tenant_id);
+        const payApiBase = publicAppBaseUrl();
+        const absLogo = (u: string): string | null => !u ? null
+            : (/^https?:\/\//i.test(u) ? u : (payApiBase ? `${payApiBase}${u}` : null));
+
         res.json({
             bill: {
                 total_cents: bill.total_cents,
                 covers: bill.covers,
                 currency: bill.currency,
                 status: bill.status,
+            },
+            takeaway: isTakeawayBill,
+            branding: {
+                name: identity.name || null,
+                tagline: identity.tagline || null,
+                phone: identity.phone || null,
+                address: identity.address || null,
+                maps_url: identity.mapsUrl || null,
+                logo_url: absLogo(identity.logoUrl),
+                logo_dark_url: absLogo(identity.logoDarkUrl),
             },
             splits: splitsRows.rows.filter((r: any) => r.kind !== 'deposit').map(publicSplitView),
             paid_cents: paidCents,

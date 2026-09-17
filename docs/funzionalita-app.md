@@ -360,6 +360,8 @@ Modulo completo per presa comanda, produzione e coordinamento delle uscite. Si a
 - Nel foglio del conto (palmare comande, Pagamenti, cassa) una **barra di avanzamento** sotto il QR mostra pagato e percentuale: si riempie da sola quando arriva una quota, e finché il QR è attivo una luce scorre sul tratto scoperto — si vede a colpo d'occhio che il conto è «in ascolto».
 - **Dividi il conto**: quota uguale, importo libero, **per riga** ("io ho preso solo l'antipasto") o **tutto il conto** in un tocco ("offro io": paga l'intero residuo, quote degli altri già scalate), con etichetta facoltativa del pagante.
 - Gestione sicura della concorrenza: due ospiti non possono pagare la stessa quota; le quote abbandonate si liberano da sole e un controllo periodico recupera anche i pagamenti il cui esito si fosse perso.
+- La pagina porta l'**identità del ristorante**: logo e nome in testata, indirizzo (con link alla mappa) e telefono nel footer — dall'anagrafe pubblica di Impostazioni, come la pagina prenota.
+- Sul conto di un **asporto** la pagina cambia faccia: titolo «Il conto dell'asporto», niente coperti né divisione in quote — «Pago tutto il conto» in primo piano, più l'importo libero.
 - Pagina bilingue IT/EN, aggiornata ogni 5 secondi.
 
 **Link di pagamento (caparre e acconti)**
@@ -647,6 +649,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-17 | Pagamenti, conto al tavolo e cassa | La pagina pubblica del conto porta l'identità del ristorante (logo e nome in testata, indirizzo e telefono nel footer) e la firma diventa «by Sympotia»; sul conto di un asporto niente coperti né quote — «Pago tutto il conto» in primo piano. |
 | 2026-09-17 | Asporto | «Ritirato» a conto non incassato chiede conferma: il bottone si arma al primo tocco («Conto non incassato — confermi?») e il secondo tocco conferma il ritiro; a conto chiuso nessun attrito. |
 | 2026-09-17 | Menu & Banchetti | Rifinitura del Title Case dei titoli: le unità di misura dopo una quantità restano minuscole («33 cl», «½ l», «0,5 kg») e «IPA» è riconosciuta come sigla; i titoli esistenti sono sistemati dalla migration. |
 | 2026-09-17 | Asporto | Numero d'ordine del giorno («#12») su ogni canale: in board, sulla comanda in cucina e cassa, a caratteri grandi nella conferma di /ordina e nel riepilogo di Sofia — al ritiro basta dire il numero. |
