@@ -63,14 +63,21 @@ describe('registro dei tipi-evento con autorità', () => {
 describe("l'envelope dell'event log", () => {
     let token: string;
     let db: Client;
+    let tableOrdersPrima: boolean;
 
     beforeAll(async () => {
         token = await ownerToken();
         db = new Client({ connectionString: process.env.DATABASE_URL || 'postgresql://localhost/ristotest_api' });
         await db.connect();
+        // I file di test condividono DB e server IN SEQUENZA, e questo file
+        // viene alfabeticamente PRIMA di orders-bills, che pretende il flag
+        // al default di fabbrica: si legge com'era e si rimette com'era.
+        const flags = await api().get('/settings/features').set(bearer(token));
+        tableOrdersPrima = flags.body.table_orders_enabled === true;
     });
 
     afterAll(async () => {
+        await api().put('/settings/features').set(bearer(token)).send({ table_orders_enabled: tableOrdersPrima });
         await db.end();
     });
 
