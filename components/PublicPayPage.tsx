@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { publicPayApiService, PublicBillView, ClaimResponse } from '../services/publicPayApiService';
 import { PAY_NAMESPACE, SUPPORTED_LANGUAGES, SupportedLanguage } from '../i18n/config';
-import { Loader2, Users, CheckCircle2, AlertTriangle, ExternalLink, X } from 'lucide-react';
+import { Loader2, Users, CheckCircle2, AlertTriangle, ExternalLink, X, ChevronDown } from 'lucide-react';
 
 // Extract the share_token from the current URL. Kept as a plain function
 // so the page can be mounted directly without a router.
@@ -54,6 +54,9 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
   // Righe scelte per lo split per piatto: è così che la gente divide davvero
   // il conto — «io ho preso solo l'antipasto».
   const [pickedItems, setPickedItems] = useState<number[]>([]);
+  // Dettaglio del conto sotto il totale: oltre la soglia parte ripiegato,
+  // così su un conto lungo totale e bottoni restano a portata di pollice.
+  const [itemsExpanded, setItemsExpanded] = useState(false);
 
   useEffect(() => {
     if (ready) document.title = t(bill?.takeaway === true ? 'header.takeawayTitle' : 'meta.title');
@@ -223,6 +226,13 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
     bill.residual_cents,
     Math.ceil(bill.bill.total_cents / Math.max(1, bill.bill.covers))
   );
+  // Il dettaglio righe arriva anche quando lo split per piatto non c'è; le
+  // righe senza id (snapshot Passepartout) si mostrano ma non si scelgono.
+  const allItems = bill.items ?? [];
+  const pickableItems = allItems.filter((i): i is typeof i & { id: number } => i.id != null);
+  const COLLAPSED_ITEM_ROWS = 5;
+  const itemsCollapsible = allItems.length > COLLAPSED_ITEM_ROWS + 1;
+  const visibleItems = itemsCollapsible && !itemsExpanded ? allItems.slice(0, COLLAPSED_ITEM_ROWS) : allItems;
 
   return (
     <div className="min-h-screen bg-[var(--ds-canvas)] text-[var(--ds-text-primary)]">
@@ -255,6 +265,30 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
               <Users className="h-3.5 w-3.5" />
               <span>{t('bill.cover', { count: bill.bill.covers })}</span>
             </div>
+          )}
+
+          {allItems.length > 0 && (
+            <ul className="mt-3 space-y-1.5 border-t border-[var(--ds-border)] pt-3">
+              {visibleItems.map((it, idx) => (
+                <li key={idx} className="flex items-baseline gap-2 text-[13px]">
+                  <span className="shrink-0 tabular-nums text-[var(--ds-text-muted)]">{it.qty}×</span>
+                  <span className="min-w-0 flex-1 truncate text-[var(--ds-text-secondary)]">{it.name}</span>
+                  <span className="tabular-nums text-[var(--ds-text-secondary)]">{formatEur(it.total_cents, lang)}</span>
+                </li>
+              ))}
+              {itemsCollapsible && (
+                <li>
+                  <button
+                    type="button"
+                    onClick={() => setItemsExpanded(v => !v)}
+                    className="mt-0.5 inline-flex min-h-[32px] items-center gap-1 text-xs font-medium text-[var(--ds-text-muted)] transition-colors hover:text-[var(--ds-text-primary)]"
+                  >
+                    <ChevronDown className={`h-3.5 w-3.5 transition-transform ${itemsExpanded ? 'rotate-180' : ''}`} aria-hidden />
+                    {itemsExpanded ? t('bill.showFewerItems') : t('bill.showAllItems', { count: allItems.length })}
+                  </button>
+                </li>
+              )}
+            </ul>
           )}
 
           {bill.deposit_credit_cents != null && bill.deposit_credit_cents > 0 && (
@@ -338,7 +372,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
                 )}
               </>
             )}
-            {!isTakeaway && bill.per_item_available && (bill.items ?? []).some(i => !i.taken) && (
+            {!isTakeaway && bill.per_item_available && pickableItems.some(i => !i.taken) && (
               <button
                 type="button"
                 onClick={handlePerItem}
@@ -368,7 +402,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
             </button>
             <div className="text-sm font-semibold">{t('items.question')}</div>
             <ul className="divide-y divide-[var(--ds-border)] -mx-1">
-              {(bill.items ?? []).map(it => {
+              {pickableItems.map(it => {
                 const picked = pickedItems.includes(it.id);
                 return (
                   <li key={it.id}>
@@ -398,7 +432,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
             <div className="flex items-baseline justify-between border-t border-[var(--ds-border)] pt-3">
               <span className="text-xs text-[var(--ds-text-muted)]">{t('items.yourShare')}</span>
               <span className="text-xl font-bold tabular-nums">
-                {formatEur((bill.items ?? []).filter(i => pickedItems.includes(i.id))
+                {formatEur(pickableItems.filter(i => pickedItems.includes(i.id))
                              .reduce((n, i) => n + i.total_cents, 0), lang)}
               </span>
             </div>

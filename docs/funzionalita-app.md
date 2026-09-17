@@ -361,6 +361,7 @@ Modulo completo per presa comanda, produzione e coordinamento delle uscite. Si a
 - **Dividi il conto**: quota uguale, importo libero, **per riga** ("io ho preso solo l'antipasto") o **tutto il conto** in un tocco ("offro io": paga l'intero residuo, quote degli altri già scalate), con etichetta facoltativa del pagante.
 - Gestione sicura della concorrenza: due ospiti non possono pagare la stessa quota; le quote abbandonate si liberano da sole e un controllo periodico recupera anche i pagamenti il cui esito si fosse perso.
 - La pagina porta l'**identità del ristorante**: logo e nome in testata, indirizzo (con link alla mappa) e telefono nel footer — dall'anagrafe pubblica di Impostazioni, come la pagina prenota.
+- Sotto il totale, il **dettaglio del conto** (quantità, piatto, prezzo): oltre le 6 righe parte ripiegato sulle prime 5 con «Mostra tutte». Compare anche dove lo split per piatto non è disponibile.
 - Sul conto di un **asporto** la pagina cambia faccia: titolo «Il conto dell'asporto», niente coperti né divisione in quote — «Pago tutto il conto» in primo piano, più l'importo libero.
 - Pagina bilingue IT/EN, aggiornata ogni 5 secondi.
 
@@ -649,6 +650,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-17 | Pagamenti, conto al tavolo e cassa | La pagina pubblica del conto mostra il dettaglio delle righe sotto il totale (quantità, piatto, prezzo), ripiegato con «Mostra tutte» sui conti lunghi; visibile anche quando lo split per piatto non è disponibile. |
 | 2026-09-17 | Pagamenti, conto al tavolo e cassa | La pagina pubblica del conto porta l'identità del ristorante (logo e nome in testata, indirizzo e telefono nel footer) e la firma diventa «by Sympotia»; sul conto di un asporto niente coperti né quote — «Pago tutto il conto» in primo piano. |
 | 2026-09-17 | Asporto | «Ritirato» a conto non incassato chiede conferma: il bottone si arma al primo tocco («Conto non incassato — confermi?») e il secondo tocco conferma il ritiro; a conto chiuso nessun attrito. |
 | 2026-09-17 | Menu & Banchetti | Rifinitura del Title Case dei titoli: le unità di misura dopo una quantità restano minuscole («33 cl», «½ l», «0,5 kg») e «IPA» è riconosciuta come sigla; i titoli esistenti sono sistemati dalla migration. |
