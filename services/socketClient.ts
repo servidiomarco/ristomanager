@@ -104,11 +104,15 @@ class SocketClient {
       if (this.reconnectAttempts <= 3 || this.reconnectAttempts % 5 === 0) {
         console.error(`❌ Connection error (attempt ${this.reconnectAttempts}):`, error.message);
       }
-      // Il NODO non risponde da 5 tentativi: circuito aperto e si riconnette
-      // al cloud («il downgrade è il failover»). Verso il cloud invece si
-      // insiste all'infinito, com'è sempre stato: non c'è un piano B.
+      // Il NODO non risponde da 2 tentativi: circuito aperto e si riconnette
+      // al cloud («il downgrade è il failover»). Erano 5, ma con timeout di
+      // handshake a 20s e backoff erano minuti di realtime morto a metà
+      // servizio (visto al collaudo del 17/09); il rientro sul nodo lo decide
+      // comunque il probe /healthz di apiRouting, non serve insistere qui.
+      // Verso il cloud invece si insiste all'infinito, com'è sempre stato:
+      // non c'è un piano B.
       const uri = (this.socket?.io as any)?.uri as string | undefined;
-      if (this.reconnectAttempts >= 5 && uri && isNodeUrl(uri)) {
+      if (this.reconnectAttempts >= 2 && uri && isNodeUrl(uri)) {
         noteNodeFailure();
         this.reconnectWithToken();
       }

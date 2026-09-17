@@ -2,7 +2,7 @@ import { authApiService } from './authApiService';
 import { socketClient } from './socketClient';
 import type { BillPaymentMethod, CashClosureReport, CustomerBilling, FiscalDocument, FiscalProviderSetting, TableBill, TableBillWithSplits } from '../types';
 import { buildApiError } from './apiError';
-import { routedGetUrl, cloudFallbackUrl, noteRoutedResponse } from './apiRouting';
+import { routedGetUrl, cloudFallbackUrl, noteRoutedResponse, fetchNodeAware } from './apiRouting';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';
 
@@ -60,7 +60,7 @@ const getHeaders = (): HeadersInit => {
 const fetchWithAuth = async (url: string, options: RequestInit = {}, retried = false): Promise<Response> => {
   let response: Response;
   try {
-    response = await fetch(url, options);
+    response = await fetchNodeAware(url, options);
   } catch (err) {
     // Nodo di sala non raggiungibile → retry immediato sul cloud (vedi
     // apiRouting); errori verso il cloud si propagano com'è sempre stato.
