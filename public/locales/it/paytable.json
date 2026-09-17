@@ -58,6 +58,7 @@
     "nameLabel": "Nome (opzionale)",
     "namePlaceholder": "Es. Marco",
     "visibleNote": "Sarà visibile agli altri ospiti del tavolo.",
+    "visibleNoteTakeaway": "Sarà visibile agli altri sul conto.",
     "continue": "Continua al pagamento"
   },
   "paidInFull": {
