@@ -647,6 +647,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-17 | Menu & Banchetti | Rifinitura del Title Case dei titoli: le unità di misura dopo una quantità restano minuscole («33 cl», «½ l», «0,5 kg») e «IPA» è riconosciuta come sigla; i titoli esistenti sono sistemati dalla migration. |
 | 2026-09-17 | Asporto | Numero d'ordine del giorno («#12») su ogni canale: in board, sulla comanda in cucina e cassa, a caratteri grandi nella conferma di /ordina e nel riepilogo di Sofia — al ritiro basta dire il numero. |
 | 2026-09-16 | Menu & Banchetti | Le sale chiuse (per turno o estese) restano assegnabili ai banchetti: nel picker tavoli compaiono col badge «Chiusa» invece di sparire, e chiudere una sala non è più bloccato dalle prenotazioni collegate al banchetto. |
 | 2026-09-16 | Nodo di sala (modalità ibrida) | Nuovo modulo (add-on): un nodo sulla rete del locale fa da ripetitore per comande/cucina/passe — a linea caduta gli schermi restano vivi con l'avviso "dati fermi"; toggle e stato in Impostazioni → Sala & Cucina. |

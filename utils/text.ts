@@ -11,7 +11,7 @@ export const toTitleCase = (input: string | null | undefined): string => {
 // diventare sigle per sbaglio, quindi niente euristica «tutto maiuscolo se
 // corto». Replicata byte per byte nella migration titoli-menu-title-case:
 // toccarla qui significa toccarla anche là, o i confronti esatti divergono.
-const MENU_ACRONYMS = /\b(Doc|Docg|Igt|Igp|Dop|Stg|Aoc|Aop)\b/g;
+const MENU_ACRONYMS = /\b(Doc|Docg|Igt|Igp|Dop|Stg|Aoc|Aop|Ipa)\b/g;
 
 // Sigle puntate: una sequenza di almeno due coppie lettera-punto è una
 // sigla («d.o.p.» → «D.O.P.», «s.p.a.» → «S.P.A.»). Il minimo di due
@@ -38,12 +38,22 @@ const MENU_MINOR_WORDS = new Set([
 // restano fuori apposta: sono pezzi di nome proprio.
 const MENU_ELISION_PREFIXES = new Set(['d', 'l', 'un', 'all', 'dell', 'dall', 'nell', 'sull', 'coll']);
 
+// Unità di misura dopo una quantità: «33 cl», «½ l», «0,5 kg» — mai «Cl».
+// Lista chiusa come le sigle, e il vincolo del numero davanti protegge le
+// parole vere («G» iniziale di un nome non c'entra con i grammi). Replicata
+// nella migration unita-di-misura-minuscole, stessa regola byte per byte.
+const MENU_UNIT_WORDS = new Set(['cl', 'l', 'ml', 'lt', 'g', 'kg']);
+const MENU_QUANTITY_TOKEN = /^([0-9.,]+|[½¼¾])$/;
+
 const lowerMinorWords = (titled: string): string =>
   titled
     .split(' ')
-    .map((w, idx) => {
+    .map((w, idx, all) => {
       if (idx === 0) return w;
       if (MENU_MINOR_WORDS.has(w.toLowerCase())) return w.toLowerCase();
+      if (MENU_UNIT_WORDS.has(w.toLowerCase()) && MENU_QUANTITY_TOKEN.test(all[idx - 1])) {
+        return w.toLowerCase();
+      }
       const m = w.match(/^(\p{L}+)(['’])(.*)$/u);
       if (m && MENU_ELISION_PREFIXES.has(m[1].toLowerCase())) {
         return m[1].toLowerCase() + m[2] + m[3];
