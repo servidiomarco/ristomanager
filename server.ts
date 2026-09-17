@@ -23,6 +23,7 @@ import * as aiReport from './services/aiReportService.js';
 import { renderPrenota } from './services/prenotaSeo.js';
 import { COST_USD_SQL, UNPRICED_SQL, USD_EUR } from './services/aiPricing.js';
 import { outboxEnqueueInTx, outboxKick, outboxRegister, startOutboxDispatcher } from './services/outboxService.js';
+import { SERVER_PROFILE, isServiceNode } from './services/topology.js';
 import { VOICE_CHANNEL, WHATSAPP_CHANNEL, type ToolOutcome } from './services/bookingTools.js';
 import { TENANT_FEATURES, getTenantFeatures, isFeatureEnabledForTenant, invalidateTenantFeaturesCache, clearTenantFeaturesCache, type TenantFeature } from './services/entitlements.js';
 import { provisionTenant, ProvisioningError } from './services/tenantProvisioning.js';
@@ -237,6 +238,24 @@ app.use(cors(corsOptions));
 // Il filtro di default comprime json/testo e lascia stare immagini e
 // stream già compressi (proxy media Twilio incluso).
 app.use(compression());
+
+// Profilo service-node (fase 2 ibrido): il nodo non serve il mondo inbound.
+// Webhook dei provider, pagine e API pubbliche, conto dell'ospite: tutto
+// questo esiste solo dove c'è internet, cioè sul cloud. 503 esplicito e non
+// 404: chi arriva qui per sbaglio (un webhook configurato male, un QR che
+// punta al nodo) deve capire che ha sbagliato porta, non che la risorsa
+// non esiste. Prefissi chiusi con '/' dove serve: '/pay/' non deve
+// catturare '/payments' (route di servizio della cassa).
+const SERVICE_NODE_BLOCKED_PREFIXES = ['/webhook/', '/public/', '/pay/', '/prenota', '/ordina'];
+if (isServiceNode) {
+    console.log('🏠 Profilo service-node: mondo inbound spento, servito solo il dominio sala');
+    app.use((req, res, next) => {
+        if (SERVICE_NODE_BLOCKED_PREFIXES.some(p => req.path.startsWith(p))) {
+            return res.status(503).json({ error: 'profile_not_served', profile: SERVER_PROFILE });
+        }
+        next();
+    });
+}
 // 2 MB body limit accommodates inlined dish photos as base64 data URLs
 // (resized client-side to ~200KB). Default 100KB would reject them.
 // `verify` stashes the raw payload so HMAC-signed webhooks (e.g. ElevenLabs)
@@ -21037,6 +21056,11 @@ async function sendWhatsAppText(
     template?: WhatsAppTemplateOpts,
     mediaUrls?: string[]
 ): Promise<OutboundConfirmationResult> {
+    // Sul nodo di sala non si spedisce niente: l'invio è lavoro del cloud, e
+    // un nodo che mandasse WhatsApp dalla propria replica li duplicherebbe.
+    // Si lancia (non si finge il successo): i chiamanti fire-and-forget
+    // loggano, quelli interattivi mostrano l'errore — che è la verità.
+    if (isServiceNode) throw new Error('profilo service-node: gli invii esterni partono solo dal cloud');
     if (isTwilioWhatsAppConfigured()) {
         return sendTwilioWhatsApp(tenantId, to, text, reservationId, template, mediaUrls);
     }
@@ -21244,6 +21268,11 @@ async function dispatchBookingNotification(params: {
     /** Etichetta nei log: 'ack' | 'confirmation' | 'decline' | 'review_request'. */
     kind: string;
 }): Promise<{ delivered: boolean; channel: string | null; error?: string }> {
+    // Vedi sendWhatsAppText: sul nodo di sala le notifiche al cliente non
+    // partono — le manderà il cloud quando l'evento gli arriva in replica.
+    if (isServiceNode) {
+        return { delivered: false, channel: null, error: 'profilo service-node: gli invii esterni partono solo dal cloud' };
+    }
     const { tenantId, kind } = params;
     const phone = (params.phone || '').trim();
     const email = (params.email || '').trim();
@@ -35392,19 +35421,21 @@ const startServer = async () => {
             try {
                 socketService = new SocketService(httpServer);
                 console.log('✅ Socket.IO initialized');
-                if (isPassepartoutAgentConfigured()) {
+                if (isPassepartoutAgentConfigured() && !isServiceNode) {
                     setupPassepartoutBridge(socketService.getIO());
                     console.log('✅ Passepartout agent bridge attivo su /pp-agent');
                 }
                 // Sempre attivo (a differenza del pp-agent non dipende da un
                 // env): il token è per-tenant a DB, e senza nodo collegato il
                 // mirror costa una lookup su una Map vuota.
-                setupSalaNodeBridge(
-                    socketService.getIO(),
-                    (token) => resolveTenantByTokenColumn('sala_node_token', token),
-                    salaNodeTenantAuthorized,
-                );
-                console.log('✅ Nodo di sala: bridge attivo su /sala-node');
+                if (!isServiceNode) {
+                    setupSalaNodeBridge(
+                        socketService.getIO(),
+                        (token) => resolveTenantByTokenColumn('sala_node_token', token),
+                        salaNodeTenantAuthorized,
+                    );
+                    console.log('✅ Nodo di sala: bridge attivo su /sala-node');
+                }
             } catch (socketError) {
                 console.error('Socket.IO initialization failed:', socketError);
             }
@@ -35483,7 +35514,7 @@ const startServer = async () => {
                         // Rinnovo certificati del nodo di sala: parte solo a
                         // migration riuscite (la sua tabella deve esistere) e
                         // solo se Cloudflare è configurato.
-                        startSalaNodeCertRenewal();
+                        if (!isServiceNode) startSalaNodeCertRenewal();
                     } catch (migErr) {
                         console.error('❌ Database migrations failed:', migErr);
                     }
@@ -35514,7 +35545,7 @@ const startServer = async () => {
                     } catch (permErr) {
                         console.warn('Permission cache warm-up skipped:', permErr);
                     }
-                    try {
+                    if (!isServiceNode) try {
                         const today = new Date().toISOString().substring(0, 10);
                         // Backfill di boot: nessuna richiesta in mano, il
                         // tenant si legge dalla riga del banchetto stesso.
@@ -35531,44 +35562,44 @@ const startServer = async () => {
                     } catch (backfillErr) {
                         console.error('Banquet reminder backfill failed:', backfillErr);
                     }
-                    try {
+                    if (!isServiceNode) try {
                         startRemindersScheduler();
                         console.log('✅ Reminders scheduler started (polls every 5 min, Europe/Rome)');
                     } catch (schedErr) {
                         console.error('Bread reminder scheduler failed to start:', schedErr);
                     }
-                    try {
+                    if (!isServiceNode) try {
                         startBillSplitReconcileScheduler();
                         console.log('✅ Bill split reconcile scheduler started (60s)');
                     } catch (schedErr) {
                         console.error('Bill split reconcile scheduler failed to start:', schedErr);
                     }
-                    try {
+                    if (!isServiceNode) try {
                         startStaffChatRetentionScheduler();
                         console.log('✅ Staff chat retention scheduler started (6h, 90 giorni)');
                     } catch (schedErr) {
                         console.error('Staff chat retention scheduler failed to start:', schedErr);
                     }
-                    try {
+                    if (!isServiceNode) try {
                         startElevenLabsQuotaWatchdog();
                         console.log('✅ ElevenLabs quota watchdog started (1h, soglie 80/95%)');
                     } catch (schedErr) {
                         console.error('ElevenLabs quota watchdog failed to start:', schedErr);
                     }
-                    try {
+                    if (!isServiceNode) try {
                         startReviewRequestScheduler();
                         console.log('✅ Review request scheduler started (15 min, finestra 10-21 Europe/Rome)');
                     } catch (schedErr) {
                         console.error('Review request scheduler failed to start:', schedErr);
                     }
-                    try {
+                    if (!isServiceNode) try {
                         startPaymentRequestReconcileScheduler();
                         startPaymentLinkExpiryScheduler();
                         console.log('✅ Payment reconcile scheduler started (2 min)');
                     } catch (schedErr) {
                         console.error('Payment reconcile scheduler failed to start:', schedErr);
                     }
-                    try {
+                    if (!isServiceNode) try {
                         // Fire-and-forget: the IMAP handshake can take seconds
                         // and we don't want to block schema-init callbacks.
                         // Da C4 è un supervisore: un listener per ogni tenant

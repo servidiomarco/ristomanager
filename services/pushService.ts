@@ -2,6 +2,7 @@ import webpush from 'web-push';
 import { queryWithRetry, runAsPlatform } from '../db.js';
 import { channelsForRole } from './staffChat.js';
 import type { UserRole } from '../types.js';
+import { isServiceNode } from './topology.js';
 
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || '';
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '';
@@ -273,6 +274,9 @@ async function fetchUserIdsForRoles(tenantId: number, roles: string[], excludeUs
 }
 
 export const sendToUser = async (userId: number, payload: PushPayload) => {
+    // Sul nodo di sala il push non parte (e la riga notifica non si
+    // persiste sulla replica): è lavoro del cloud — vedi services/topology.ts.
+    if (isServiceNode) return;
     // Il tenant (badge E riga notifica) è quello del destinatario: si legge
     // dalla sua riga utente, così le rotte chiamanti non devono threadare
     // nulla. Va risolto PRIMA di persistere, la notifica nasce già scopata.
@@ -296,6 +300,7 @@ export const sendToRoles = async (
     payload: PushPayload,
     options?: { excludeUserId?: number | null }
 ) => {
+    if (isServiceNode) return; // vedi sendToUser
     const recipients = await fetchUserIdsForRoles(tenantId, roles, options?.excludeUserId);
     await persistForUsers(tenantId, recipients, payload);
     const subs = await fetchSubscriptionsForRoles(tenantId, roles, options?.excludeUserId);
@@ -308,6 +313,7 @@ export const sendToRoles = async (
 // sendToUser, che scopa badge e riga notifica sul tenant di appartenenza
 // di ciascun destinatario.
 export const sendToPlatformAdmins = async (payload: PushPayload) => {
+    if (isServiceNode) return; // vedi sendToUser
     try {
         // Lettura di piattaforma dichiarata: i destinatari stanno sopra i
         // tenant, e il chiamante (webhook Stripe) può avere ogni contesto.
