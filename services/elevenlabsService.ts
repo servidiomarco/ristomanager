@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import type { Request } from 'express';
 import { queryWithRetry } from '../db.js';
+import { outboxEnqueueInTx, withOutboxTx } from './outboxService.js';
 import { Shift, ReservationSource } from '../types.js';
 import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime.js';
 import { spokenFirstName } from '../utils/text.js';
@@ -872,7 +873,10 @@ export async function createVoiceReservation(
         overlapTime
     );
 
-    const result = await queryWithRetry(`
+    // Fase 3b ibrido: la nascita entra nel log di replica nella stessa
+    // transazione dell'INSERT (solo-log, il broadcast resta del chiamante).
+    const result = await withOutboxTx(async (client) => {
+        const ins = await client.query(`
         INSERT INTO reservations (
             customer_name, reservation_time, shift, guests, children, phone,
             notes, payment_status, arrival_status, source, requires_review, table_id,
@@ -894,6 +898,12 @@ export async function createVoiceReservation(
         tenantId,
         input.language ?? null,
     ]);
+        if (ins.rows[0]) {
+            await outboxEnqueueInTx(client, tenantId, 'reservation:created', `reservation:${ins.rows[0].id}`,
+                { reservation_id: ins.rows[0].id }, { actor: { channel: 'voice' } });
+        }
+        return ins;
+    });
 
     const row = result.rows[0];
     return {

@@ -2370,7 +2370,12 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
                 });
             }
         }
-        const result = await queryWithRetry(
+        // Fase 3b: la nascita entra nel log di replica nella stessa
+        // transazione dell'INSERT — il nodo vede la prenotazione subito,
+        // non al primo evento che la tocca. Solo-log come il resto dei
+        // reservation:* (tipo 'split'): il broadcast resta diretto.
+        const result = await runWithOutboxTx(async (txClient) => {
+            const insRes = await txClient.query(
             `WITH ins AS (
                 INSERT INTO reservations (customer_name, reservation_time, shift, guests, children, table_id, notes, email, phone, payment_status, arrival_status, reservation_status, duration_minutes, created_by_user_id, consent_marketing, consent_data_health, consent_updated_at, note_selections, tenant_id, banquet_menu_id)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18::jsonb, $19, $20)
@@ -2419,7 +2424,14 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
                 req.tenantId!,
                 banquetMenuId,
             ]
-        );
+            );
+            if (insRes.rows[0]) {
+                await outboxEnqueueInTx(txClient, req.tenantId!, 'reservation:created', `reservation:${insRes.rows[0].id}`,
+                    { reservation_id: insRes.rows[0].id }, outboxContext(req));
+            }
+            return insRes;
+        });
+        outboxKick();
         const newReservation = result.rows[0];
 
         // Log activity
@@ -19417,7 +19429,8 @@ async function processWhatsAppBooking(phoneNumber: string, messageText: string) 
         // Create reservation in database. WhatsApp bookings land as PENDING ("Da
         // confermare") — staff reviews them in the list and the confirmation
         // message is fired automatically when they flip the status to CONFIRMED.
-        const result = await queryWithRetry(
+        const result = await runWithOutboxTx(async (txClient) => {
+            const insRes = await txClient.query(
             // Canale WhatsApp inbound: niente JWT, la prenotazione nasce sul
             // tenant pubblico come il resto del flusso webhook.
             'INSERT INTO reservations (customer_name, reservation_time, shift, guests, phone, payment_status, arrival_status, reservation_status, tenant_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *',
@@ -19432,7 +19445,13 @@ async function processWhatsAppBooking(phoneNumber: string, messageText: string) 
                 'PENDING',
                 PUBLIC_TENANT_ID
             ]
-        );
+            );
+            if (insRes.rows[0]) {
+                await outboxEnqueueInTx(txClient, PUBLIC_TENANT_ID, 'reservation:created', `reservation:${insRes.rows[0].id}`,
+                    { reservation_id: insRes.rows[0].id }, { actor: { channel: 'whatsapp' } });
+            }
+            return insRes;
+        });
 
         const newReservation = result.rows[0];
 
@@ -24798,6 +24817,12 @@ app.post('/takeaway/orders/:id/fire', authenticate, requireFeature('takeaway'), 
                  WHERE id = $1 AND tenant_id = $2`,
                 [takeawayId, req.tenantId!, kitchenOrderId]
             );
+            // Fase 3b: la comanda cucina nasce QUI (mai da POST /orders) e
+            // l'asporto cambia stato — entrambi nel log, stessa transazione.
+            await outboxEnqueueInTx(client, req.tenantId!, 'order:created', `order:${kitchenOrderId}`,
+                { order_id: kitchenOrderId }, outboxContext(req));
+            await outboxEnqueueInTx(client, req.tenantId!, 'takeaway:updated', `takeaway:${takeawayId}`,
+                { takeaway_order_id: takeawayId }, outboxContext(req));
             return { kitchenOrderId, fired };
         });
         if (result.error) return res.status(result.error.status).json(result.error.body);
@@ -25193,6 +25218,8 @@ async function handleElevenLabsCreateTakeawayOrder(tenantId: number, req: expres
                 [tenantId, name, phone, date, time, slot.shift, notes || null, dailyNumber]
             );
             const id = Number(ins.rows[0].id);
+            await outboxEnqueueInTx(client, tenantId, 'takeaway:created', `takeaway:${id}`,
+                { takeaway_order_id: id }, { actor: { channel: 'voice' } });
             for (const item of built.items!) {
                 await client.query(
                     `INSERT INTO takeaway_order_items (tenant_id, takeaway_order_id, dish_id, name_snapshot, unit_price_cents, qty, note)
@@ -25420,6 +25447,8 @@ async function handlePublicTakeawayOrderCreate(tenantId: number, req: express.Re
                 [tenantId, name, phone, date, time, slot.shift, notes || null, dailyNumber]
             );
             const id = Number(ins.rows[0].id);
+            await outboxEnqueueInTx(client, tenantId, 'takeaway:created', `takeaway:${id}`,
+                { takeaway_order_id: id }, { actor: { channel: 'web' } });
             for (const item of built.items!) {
                 await client.query(
                     `INSERT INTO takeaway_order_items (tenant_id, takeaway_order_id, dish_id, name_snapshot, unit_price_cents, qty, note)
@@ -25535,6 +25564,8 @@ app.post('/takeaway/orders', authenticate, requireFeature('takeaway'), requirePe
                 [req.tenantId!, name, phone || null, date, time, slot.shift, notes || null, req.user?.userId ?? null, dailyNumber]
             );
             const id = Number(ins.rows[0].id);
+            await outboxEnqueueInTx(client, req.tenantId!, 'takeaway:created', `takeaway:${id}`,
+                { takeaway_order_id: id }, outboxContext(req));
             for (const item of built.items!) {
                 await client.query(
                     `INSERT INTO takeaway_order_items (tenant_id, takeaway_order_id, dish_id, name_snapshot, unit_price_cents, qty, note)
@@ -25630,6 +25661,8 @@ app.patch('/takeaway/orders/:id', authenticate, requireFeature('takeaway'), requ
                 }
                 await client.query('UPDATE takeaway_orders SET updated_at = now() WHERE id = $1 AND tenant_id = $2', [orderId, req.tenantId!]);
             }
+            await outboxEnqueueInTx(client, req.tenantId!, 'takeaway:updated', `takeaway:${orderId}`,
+                { takeaway_order_id: orderId }, outboxContext(req));
         });
 
         const view = await loadTakeawayView(req.tenantId!, orderId);
@@ -25674,7 +25707,8 @@ app.post('/takeaway/orders/:id/status', authenticate, requireFeature('takeaway')
                 });
             }
         }
-        const updated = await queryWithRetry(
+        const updated = await runWithOutboxTx(async (txClient) => {
+            const upd = await txClient.query(
             `UPDATE takeaway_orders SET
                 status = $3::text,
                 ready_at = CASE
@@ -25686,7 +25720,13 @@ app.post('/takeaway/orders/:id/status', authenticate, requireFeature('takeaway')
                 updated_at = now()
              WHERE id = $1 AND tenant_id = $2 RETURNING id`,
             [orderId, req.tenantId!, status]
-        );
+            );
+            if (upd.rows[0]) {
+                await outboxEnqueueInTx(txClient, req.tenantId!, 'takeaway:updated', `takeaway:${orderId}`,
+                    { takeaway_order_id: orderId }, outboxContext(req));
+            }
+            return upd;
+        });
         if (updated.rows.length === 0) return res.status(404).json({ error: 'not_found' });
         const view = await loadTakeawayView(req.tenantId!, orderId);
         try { socketService?.broadcastToAll(req.tenantId!, 'takeaway:updated', view); } catch (_) {}
@@ -28517,7 +28557,8 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
         }
         const autoConfirmed = autoTable !== null;
 
-        const result = await queryWithRetry(
+        const result = await runWithOutboxTx(async (txClient) => {
+            const insRes = await txClient.query(
             `INSERT INTO reservations (
                 customer_name, reservation_time, shift, guests, children,
                 table_id, notes, email, phone, payment_status, arrival_status,
@@ -28534,7 +28575,13 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
              tenantId,
              childrenNum,
              language]
-        );
+            );
+            if (insRes.rows[0]) {
+                await outboxEnqueueInTx(txClient, tenantId, 'reservation:created', `reservation:${insRes.rows[0].id}`,
+                    { reservation_id: insRes.rows[0].id }, { actor: { channel: 'web' } });
+            }
+            return insRes;
+        });
         const created = result.rows[0];
 
         // Guardia anti-doppia-assegnazione: pick e INSERT non sono atomici,
@@ -29603,7 +29650,13 @@ app.delete('/orders/:id', authenticate, requirePermission('orders:take'), async 
         }
         await client.query(`DELETE FROM order_items WHERE order_id = $1`, [id]);
         await client.query(`DELETE FROM orders WHERE id = $1 AND tenant_id = $2`, [id, req.tenantId!]);
+        // Fase 3b: senza questo evento il nodo terrebbe per sempre la
+        // comanda disfatta (il replay converge per rifetch: l'assenza della
+        // riga si scopre solo se un evento la cita).
+        await outboxEnqueueInTx(client, req.tenantId!, 'order:deleted', `order:${id}`,
+            { order_id: Number(id) }, outboxContext(req));
         await client.query('COMMIT');
+        outboxKick();
         client.release();
 
         try {
@@ -29700,7 +29753,8 @@ app.post('/orders', authenticate, requirePermission('orders:take'), async (req, 
 
         let created: any;
         try {
-            const ins = await queryWithRetry(
+            created = await runWithOutboxTx(async (txClient) => {
+                const ins = await txClient.query(
                 `INSERT INTO orders
                     (tenant_id, reservation_id, table_id, order_type, price_list_id, covers, notes,
                      opened_by_user_id, idempotency_key, service_date, shift)
@@ -29708,8 +29762,12 @@ app.post('/orders', authenticate, requirePermission('orders:take'), async (req, 
                  RETURNING *`,
                 [reservationId, tableId, orderType, priceListId, Math.round(covers), notes,
                  req.user?.userId ?? null, idemKey, service.service_date, service.shift, req.tenantId!]
-            );
-            created = ins.rows[0];
+                );
+                await outboxEnqueueInTx(txClient, req.tenantId!, 'order:created', `order:${ins.rows[0].id}`,
+                    { order_id: ins.rows[0].id }, outboxContext(req));
+                return ins.rows[0];
+            });
+            outboxKick();
         } catch (err: any) {
             // 23505 = violazione di unicità. Sui due indici parziali significa
             // "comanda già aperta qui": la restituiamo invece di far fallire il
@@ -31318,19 +31376,35 @@ app.post('/kds/items/:id/status', authenticate, requirePermission('orders:kds'),
 
             // Il cerchio dell'asporto si chiude da solo: il «pronto» del
             // monitor porta l'ordine a READY sulla board del banco, senza
-            // che nessuno lo ribatta a mano. Best-effort come la push.
-            queryWithRetry(
-                `UPDATE takeaway_orders
-                 SET status = 'READY', ready_at = COALESCE(ready_at, now()), updated_at = now()
-                 WHERE kitchen_order_id = $1 AND tenant_id = $2 AND status = 'IN_PREPARATION'
-                 RETURNING id`,
-                [item.order_id, req.tenantId!]
-            ).then(async upd => {
+            // che nessuno lo ribatta a mano. L'UPDATE (col suo evento nel
+            // log, fase 3b) si ATTENDE — sono pochi ms, e chi rilegge la
+            // board subito dopo la risposta deve trovarla coerente (prima
+            // era fire-and-forget e una GET al volo poteva sorpassarlo);
+            // resta best-effort il broadcast, che è solo notifica.
+            try {
+                const upd = await runWithOutboxTx(async (txClient) => {
+                    const r = await txClient.query(
+                        `UPDATE takeaway_orders
+                         SET status = 'READY', ready_at = COALESCE(ready_at, now()), updated_at = now()
+                         WHERE kitchen_order_id = $1 AND tenant_id = $2 AND status = 'IN_PREPARATION'
+                         RETURNING id`,
+                        [item.order_id, req.tenantId!]
+                    );
+                    if (r.rows[0]?.id != null) {
+                        await outboxEnqueueInTx(txClient, req.tenantId!, 'takeaway:updated', `takeaway:${r.rows[0].id}`,
+                            { takeaway_order_id: Number(r.rows[0].id) }, outboxContext(req));
+                    }
+                    return r;
+                });
                 const takeawayId = upd.rows[0]?.id;
-                if (takeawayId == null) return;
-                const view = await loadTakeawayView(req.tenantId!, Number(takeawayId));
-                socketService?.broadcastToAll(req.tenantId!, 'takeaway:updated', view);
-            }).catch(err => console.warn('[kds] takeaway READY non propagato:', err?.message ?? err));
+                if (takeawayId != null) {
+                    loadTakeawayView(req.tenantId!, Number(takeawayId)).then(view => {
+                        socketService?.broadcastToAll(req.tenantId!, 'takeaway:updated', view);
+                    }).catch(err => console.warn('[kds] takeaway READY non propagato:', err?.message ?? err));
+                }
+            } catch (err: any) {
+                console.warn('[kds] takeaway READY non propagato:', err?.message ?? err);
+            }
         }
 
         res.json({
@@ -34965,6 +35039,7 @@ app.post('/sala-node/rows', salaNodeAuth, async (req: any, res) => {
         const tableIds = ids('tables');
         const reservationIds = ids('reservations');
         const orderIds = ids('orders');
+        const takeawayIds = ids('takeaways');
         const [tablesRs, reservationsRs, ordersRs, itemsRs, revisionsRs] = await Promise.all([
             tableIds.length
                 ? queryWithRetry(`SELECT * FROM tables WHERE tenant_id = $1 AND id = ANY($2::int[])`, [tenantId, tableIds])
@@ -34982,12 +35057,22 @@ app.post('/sala-node/rows', salaNodeAuth, async (req: any, res) => {
                 ? queryWithRetry(`SELECT * FROM order_revisions WHERE tenant_id = $1 AND order_id = ANY($2::int[])`, [tenantId, orderIds])
                 : Promise.resolve({ rows: [] as any[] }),
         ]);
+        const [takeawayRs, takeawayItemsRs] = await Promise.all([
+            takeawayIds.length
+                ? queryWithRetry(`SELECT * FROM takeaway_orders WHERE tenant_id = $1 AND id = ANY($2::int[])`, [tenantId, takeawayIds])
+                : Promise.resolve({ rows: [] as any[] }),
+            takeawayIds.length
+                ? queryWithRetry(`SELECT * FROM takeaway_order_items WHERE tenant_id = $1 AND takeaway_order_id = ANY($2::int[])`, [tenantId, takeawayIds])
+                : Promise.resolve({ rows: [] as any[] }),
+        ]);
         res.json({
             tables: tablesRs.rows,
             reservations: reservationsRs.rows,
             orders: ordersRs.rows,
             order_items: itemsRs.rows,
             order_revisions: revisionsRs.rows,
+            takeaway_orders: takeawayRs.rows,
+            takeaway_order_items: takeawayItemsRs.rows,
         });
     } catch (err: any) {
         console.error('POST /sala-node/rows error:', err);
