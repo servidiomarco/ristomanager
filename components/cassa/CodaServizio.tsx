@@ -55,7 +55,7 @@ const QueueRow: React.FC<{
       <button
         type="button"
         onClick={onOpen}
-        className="flex min-w-0 flex-1 items-center gap-3 p-3 text-left transition-colors hover:bg-[var(--ds-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)] sm:p-4"
+        className="flex min-w-0 flex-1 items-center gap-3 p-3 text-left transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)] sm:p-4"
       >
         {/* Il numero del tavolo è l'identificatore: si cerca quello, non il
             nome dell'ospite. Per l'asporto l'identificatore è l'ora di

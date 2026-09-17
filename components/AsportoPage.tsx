@@ -445,7 +445,11 @@ const OrderCard: React.FC<{
       type="button"
       onClick={onClick}
       className={`flex w-full items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-3 text-left shadow-[var(--ds-shadow-card)] transition-shadow ${
-        selected ? 'ring-2 ring-[var(--ds-border-focus)]' : 'hover:shadow-[var(--ds-shadow-card-hover)]'
+        // Inchiostro e inset: l'anello ESTERNO si sommava all'ombra della
+        // card e disegnava un doppio contorno sporco agli angoli; e
+        // border-focus è il segno del focus tastiera, non della selezione —
+        // «selezionato = action-bg» come ogni scelta nell'app.
+        selected ? 'ring-2 ring-inset ring-[var(--ds-action-bg)]' : 'hover:shadow-[var(--ds-shadow-card-hover)]'
       }`}
     >
       <div className="min-w-0 flex-1">

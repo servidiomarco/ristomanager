@@ -6254,17 +6254,22 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     onClick={() => setPaymentChannel(key)}
                                     title={available ? (target || undefined) : missing}
                                     className={`flex items-center gap-2 rounded-[var(--ds-radius)] border px-3 py-2.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
+                                      // I token --ds-accent* / --ds-surface-2 /
+                                      // --ds-surface-hover non sono mai esistiti:
+                                      // il bordo ripiegava su currentColor e gli
+                                      // sfondi su trasparente. Selezione in
+                                      // inchiostro come ogni scelta nell'app.
                                       selected
-                                        ? 'border-[var(--ds-accent)] bg-[var(--ds-accent-subtle)] ring-1 ring-[var(--ds-accent)]'
-                                        : 'border-[var(--ds-border)] bg-[var(--ds-surface-2)] hover:bg-[var(--ds-surface-hover)]'
+                                        ? 'border-[var(--ds-action-bg)] bg-[var(--ds-surface-row)] ring-1 ring-inset ring-[var(--ds-action-bg)]'
+                                        : 'border-[var(--ds-border)] bg-[var(--ds-surface)] hover:bg-[var(--ds-surface-row)]'
                                     }`}
                                   >
-                                    <Icon className={`h-4 w-4 flex-shrink-0 ${selected ? 'text-[var(--ds-accent)]' : 'text-[var(--ds-text-muted)]'}`} aria-hidden />
+                                    <Icon className={`h-4 w-4 flex-shrink-0 ${selected ? 'text-[var(--ds-text-primary)]' : 'text-[var(--ds-text-muted)]'}`} aria-hidden />
                                     <span className="min-w-0 flex-1">
                                       <span className="block text-[13px] font-semibold text-[var(--ds-text-primary)]">{label}</span>
                                       <span className="block truncate text-[11px] text-[var(--ds-text-muted)]">{available ? (target || '') : missing}</span>
                                     </span>
-                                    {selected && <Check className="h-4 w-4 flex-shrink-0 text-[var(--ds-accent)]" aria-hidden />}
+                                    {selected && <Check className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-primary)]" aria-hidden />}
                                   </button>
                                 );
                               })}

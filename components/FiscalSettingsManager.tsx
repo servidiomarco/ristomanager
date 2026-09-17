@@ -20,7 +20,7 @@ const PROVIDER_LABELS: Record<FiscalProviderSetting, string> = {
     'rt-local': 'Registratore in sala (Epson RT)',
 };
 
-const inputCls = 'h-10 w-full rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-3 text-[14px] text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)] disabled:opacity-50';
+const inputCls = 'h-10 w-full rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-3 text-[14px] text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)] disabled:opacity-50';
 
 export const FiscalSettingsManager: React.FC<Props> = ({ showToast }) => {
     const { hasPermission } = useAuth();
