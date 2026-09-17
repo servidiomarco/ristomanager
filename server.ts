@@ -34775,6 +34775,131 @@ app.get('/sala-node/client-config', authenticate, async (req, res) => {
     }
 });
 
+// --- Snapshot per il bootstrap del nodo (tappa 4, fase 2b) ------------------
+// Le proiezioni del dominio servizio, marcate «al seq N» del log (sez.
+// «Bootstrap, ritenzione» del brainstorming): il nodo nuovo — o rimasto
+// indietro oltre la ritenzione — carica questo dump nel Postgres locale e
+// segue il log da N. Stesso meccanismo del funzionamento normale, nessun
+// percorso speciale di riconciliazione.
+//
+// Coerenza: tutte le SELECT girano in UNA transazione REPEATABLE READ, e il
+// seq si legge lì dentro — le righe e il cursore raccontano lo stesso
+// istante. Il timeout di statement del pool (15s, tarato sulle query
+// dell'app) qui non basta: SET LOCAL a 60s, vale solo per questa tx.
+//
+// Cosa NON esce mai da qui: integration_settings (segreti dei provider),
+// gli hash di users (il nodo verifica JWT col segreto condiviso, il login
+// con password resta un affare del cloud), la chiave ACME. L'elenco è una
+// allow-list esplicita: una tabella nuova NON entra nello snapshot finché
+// qualcuno non la dichiara — mai un dump "tutto meno i segreti che ricordo".
+const SNAPSHOT_WINDOW_DAYS = 60;
+interface SnapshotTableSpec {
+    name: string;
+    /** Clausola aggiuntiva (il filtro tenant c'è sempre). $2 = cutoff. */
+    where?: string;
+    /** Colonne tolte riga per riga prima della risposta (hash, segreti). */
+    dropColumns?: string[];
+}
+// L'ORDINE è quello di caricamento sul nodo (prima i genitori delle FK).
+const SNAPSHOT_TABLES: SnapshotTableSpec[] = [
+    // Identità e permessi: servono al nodo per autorizzare i client LAN.
+    { name: 'users', dropColumns: ['password_hash', 'refresh_token_hash', 'reset_token_hash', 'reset_token_expires_at'] },
+    { name: 'role_permissions' },
+    // Pianta e configurazione sala.
+    { name: 'rooms' },
+    { name: 'tables' },
+    { name: 'sala_profiles' },
+    { name: 'stations' },
+    { name: 'category_stations' },
+    { name: 'printers' },
+    // Menu e listini: la validazione delle comande ne ha bisogno.
+    { name: 'menus' },
+    { name: 'menu_price_lists' },
+    { name: 'dishes' },
+    { name: 'dish_menus' },
+    { name: 'dish_prices' },
+    { name: 'dish_components' },
+    { name: 'modifier_groups' },
+    { name: 'modifiers' },
+    { name: 'dish_modifier_groups' },
+    // Servizio e calendario.
+    { name: 'opening_hours' },
+    { name: 'opening_hours_disabled_slots' },
+    { name: 'special_closures' },
+    { name: 'reservation_note_presets' },
+    { name: 'reservation_note_preset_variants' },
+    { name: 'reservation_allergen_presets' },
+    { name: 'banquet_menus' },
+    // Rubrica: VIP/blacklist che reception e sala leggono.
+    { name: 'customers' },
+    // Impostazioni per-tenant (MAI la chiave ACME: è un segreto del cloud).
+    { name: 'app_settings', where: `key <> 'sala_node_acme_account_key'` },
+    // Stato del servizio, finestrato: il nodo serve la sala, non lo storico
+    // (i report restano sul cloud). 60 giorni coprono anche la ripresa di
+    // una comanda appesa di un servizio passato.
+    { name: 'reservations', where: `reservation_time >= $2::date` },
+    { name: 'table_merges', where: `date >= $2::date` },
+    { name: 'table_hidden_overrides', where: `date >= $2::date` },
+    { name: 'room_closed_overrides', where: `date >= $2::date` },
+    { name: 'orders', where: `service_date >= $2::date` },
+    { name: 'order_items', where: `order_id IN (SELECT id FROM orders WHERE tenant_id = $1 AND service_date >= $2::date)` },
+    { name: 'order_revisions', where: `order_id IN (SELECT id FROM orders WHERE tenant_id = $1 AND service_date >= $2::date)` },
+    { name: 'table_bills', where: `service_date >= $2::date` },
+    { name: 'table_bill_splits', where: `table_bill_id IN (SELECT id FROM table_bills WHERE tenant_id = $1 AND service_date >= $2::date)` },
+    { name: 'table_bill_payments', where: `table_bill_id IN (SELECT id FROM table_bills WHERE tenant_id = $1 AND service_date >= $2::date)` },
+    { name: 'takeaway_orders', where: `pickup_date >= $2::date` },
+    { name: 'takeaway_order_items', where: `takeaway_order_id IN (SELECT id FROM takeaway_orders WHERE tenant_id = $1 AND pickup_date >= $2::date)` },
+];
+
+app.get('/sala-node/snapshot', salaNodeAuth, async (req: any, res) => {
+    const client = await pool.connect();
+    try {
+        const tenantId = req.salaNodeTenantId as number;
+        await client.query('BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+        await client.query(`SET LOCAL statement_timeout = '60s'`);
+        // Il cursore, DENTRO la stessa foto: gli eventi con id <= seq sono
+        // già raccontati dalle righe qui sotto, il replay parte da seq.
+        const seqRs = await client.query(
+            'SELECT COALESCE(MAX(id), 0)::bigint AS seq FROM outbox_events WHERE tenant_id = $1',
+            [tenantId]
+        );
+        const cutoff = new Date(Date.now() - SNAPSHOT_WINDOW_DAYS * 24 * 60 * 60 * 1000)
+            .toISOString().slice(0, 10);
+        const tablesOut: Record<string, any[]> = {};
+        for (const spec of SNAPSHOT_TABLES) {
+            const params: any[] = [tenantId];
+            let sql = `SELECT * FROM ${spec.name} WHERE tenant_id = $1`;
+            if (spec.where) {
+                sql += ` AND (${spec.where})`;
+                if (spec.where.includes('$2')) params.push(cutoff);
+            }
+            const rs = await client.query(sql, params);
+            tablesOut[spec.name] = spec.dropColumns
+                ? rs.rows.map((row: any) => {
+                    for (const col of spec.dropColumns!) delete row[col];
+                    return row;
+                })
+                : rs.rows;
+        }
+        await client.query('COMMIT');
+        res.json({
+            format: 1,
+            tenant_id: tenantId,
+            seq: Number(seqRs.rows[0].seq),
+            window_days: SNAPSHOT_WINDOW_DAYS,
+            generated_at: new Date().toISOString(),
+            // Le chiavi sono in ordine di caricamento (genitori FK prima).
+            tables: tablesOut,
+        });
+    } catch (err: any) {
+        await client.query('ROLLBACK').catch(() => { /* noop */ });
+        console.error('GET /sala-node/snapshot error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    } finally {
+        client.release();
+    }
+});
+
 // Dominio, IP LAN e porta del nodo, dalla card Impostazioni → Nodo di sala.
 // Sentinella "campo presente nel body": assente = non toccare, null/'' =
 // azzera (come /sala/print-routes).
