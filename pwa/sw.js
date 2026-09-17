@@ -1,6 +1,71 @@
-// Service worker for Web Push notifications.
-// Receives push events and surfaces system notifications; handles click to focus
-// or open the app, navigating to the optional payload.url.
+// Service worker dell'app: shell offline (precache Workbox) + Web Push.
+//
+// Shell offline — il prerequisito della modalità ibrida: al collaudo del
+// 17/09, a linea caduta, un refresh mostrava pagina bianca perché index.html
+// e bundle vivono su Vercel. Da qui in poi la shell riparte dalla cache del
+// dispositivo e l'app può parlare col nodo di sala anche senza internet.
+//
+// Le strategie, e perché:
+// - asset con hash (assets/*.js|css) → precache: immutabili per costruzione.
+// - navigazioni → NetworkFirst con timeout: a rete viva si serve SEMPRE la
+//   shell fresca di Vercel (il flusso deploy → banner «Ricarica» resta
+//   com'è oggi, nessun bundle vecchio incollato); a rete giù si ripiega
+//   sull'index.html precachato.
+// - font Google → cache runtime, così anche il primo avvio offline ha la
+//   grafia giusta.
+// - NIENTE cache sulle API: sono su un altro dominio (cloud o nodo di
+//   sala) e il SW same-origin non le tocca per costruzione — la staleness
+//   dei dati la governa già il nodo con X-Sala-Node, non il browser.
+//
+// Compilato da vite-plugin-pwa (strategia injectManifest): self.__WB_MANIFEST
+// è la lista degli asset del build, iniettata a build time.
+
+import { precacheAndRoute, cleanupOutdatedCaches, matchPrecache } from 'workbox-precaching';
+import { registerRoute, NavigationRoute } from 'workbox-routing';
+import { NetworkFirst, CacheFirst, StaleWhileRevalidate } from 'workbox-strategies';
+import { ExpirationPlugin } from 'workbox-expiration';
+
+precacheAndRoute(self.__WB_MANIFEST);
+cleanupOutdatedCaches();
+
+const navigationStrategy = new NetworkFirst({
+  cacheName: 'pages',
+  // A rete lenta non si aspetta il TCP: dopo 3s si serve la copia in cache
+  // (o il fallback precache sotto) — la stessa filosofia di fetchNodeAware.
+  networkTimeoutSeconds: 3,
+});
+
+registerRoute(new NavigationRoute(
+  async (params) => {
+    try {
+      return await navigationStrategy.handle(params);
+    } catch {
+      // Prima navigazione offline di sempre (cache 'pages' vuota): la shell
+      // precachata è la rete di salvataggio.
+      const shell = await matchPrecache('/index.html');
+      if (shell) return shell;
+      throw new Error('shell non in cache');
+    }
+  },
+  {
+    // Le pagine statiche del backend (copiate in public/ ma servite dal
+    // dominio API) e qualunque richiesta di file diretto non sono la SPA.
+    denylist: [/^\/(menu|prenota|ordina)\.html/, /\/[^/?]+\.[^/?]+$/],
+  },
+));
+
+// Font: il CSS di Google cambia (SWR), i woff2 sono immutabili (CacheFirst).
+registerRoute(
+  ({ url }) => url.origin === 'https://fonts.googleapis.com',
+  new StaleWhileRevalidate({ cacheName: 'google-fonts-css' }),
+);
+registerRoute(
+  ({ url }) => url.origin === 'https://fonts.gstatic.com',
+  new CacheFirst({
+    cacheName: 'google-fonts-woff',
+    plugins: [new ExpirationPlugin({ maxEntries: 8, maxAgeSeconds: 365 * 24 * 60 * 60 })],
+  }),
+);
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
