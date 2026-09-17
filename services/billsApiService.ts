@@ -312,6 +312,8 @@ export interface OpenBillRow {
   takeaway_order_id?: number | null;
   /** Ora di ritiro dell'ordine asporto, per la riga in coda. */
   takeaway_time?: string | null;
+  /** Numero d'ordine del giorno («#12»): è come il cliente si presenta. */
+  takeaway_daily_number?: number | null;
   table_name: string | null;
   customer_name: string | null;
   total_cents: number;

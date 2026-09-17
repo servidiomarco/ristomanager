@@ -112,7 +112,10 @@ export const ChiusuraCassa: React.FC<{
   }, [report, shift]);
   const totalCents = methods.reduce((n, m) => n + m.amount_cents, 0);
   const covers = useMemo(() => {
-    const sum = (rows: CashClosureBillRow[]) => rows.reduce((n, b) => n + (b.covers || 0), 0);
+    // Gli asporti restano fuori: i loro covers sono un 1 tecnico
+    // dell'apertura conto, non persone sedute.
+    const sum = (rows: CashClosureBillRow[]) =>
+      rows.reduce((n, b) => n + (b.takeaway_order_id != null ? 0 : (b.covers || 0)), 0);
     const all = report?.bills ?? [];
     return {
       lunch: sum(all.filter(b => b.shift === 'LUNCH')),
@@ -267,7 +270,9 @@ export const ChiusuraCassa: React.FC<{
                         <>
                           <div className="flex items-baseline justify-between gap-2">
                             <span className="min-w-0 truncate text-[14px] font-medium text-[var(--ds-text-primary)]">
-                              Tav. {b.table_name ?? '—'}
+                              {b.takeaway_order_id != null
+                                ? `Asporto${b.takeaway_daily_number != null ? ` #${b.takeaway_daily_number}` : ''}`
+                                : `Tav. ${b.table_name ?? '—'}`}
                               {b.customer_name && <span className="ml-1.5 font-normal text-[var(--ds-text-muted)]">{b.customer_name}</span>}
                             </span>
                             <span className={`flex-shrink-0 text-[14px] font-semibold tabular-nums ${b.status === 'SETTLED_PARTIAL' ? 'text-[var(--ds-pending-text)]' : 'text-[var(--ds-text-primary)]'}`}>

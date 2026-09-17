@@ -6325,7 +6325,14 @@ app.get('/reports/cash-closure', authenticate, requirePermission('payments:view'
         // si filtra per tipo di chiusura (scontrino/fattura/proforma/senza).
         const billListRs = await queryWithRetry(
             `SELECT b.id, b.total_cents, b.status, b.tip_cents, b.closed_at, b.covers,
-                    t.name AS table_name, r.customer_name,
+                    t.name AS table_name,
+                    -- Un conto d'asporto non ha tavolo: la riga dice «Asporto
+                    -- #N» col cliente dell'ordine, e i covers (fissi a 1 in
+                    -- apertura) non vanno contati fra i coperti serviti.
+                    b.takeaway_order_id,
+                    tw.pickup_time AS takeaway_time,
+                    tw.daily_number AS takeaway_daily_number,
+                    COALESCE(r.customer_name, tw.customer_name) AS customer_name,
                     -- Turno del conto: lo stesso tavolo serve pranzo e cena,
                     -- senza turno le righe del giorno si confondono.
                     ${SERVICE_SHIFT} AS shift,
@@ -6337,6 +6344,7 @@ app.get('/reports/cash-closure', authenticate, requirePermission('payments:view'
              FROM table_bills b
              LEFT JOIN tables t ON t.id = b.table_id AND t.tenant_id = b.tenant_id
              LEFT JOIN reservations r ON r.id = b.reservation_id AND r.tenant_id = b.tenant_id
+             LEFT JOIN takeaway_orders tw ON tw.id = b.takeaway_order_id AND tw.tenant_id = b.tenant_id
              LEFT JOIN LATERAL (
                  SELECT doc_type, status, doc_number, public_token, provider FROM fiscal_documents
                  WHERE table_bill_id = b.id ORDER BY created_at DESC LIMIT 1
@@ -33072,6 +33080,7 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
                     -- al posto del tavolo.
                     COALESCE(r.customer_name, tw.customer_name) AS customer_name,
                     tw.pickup_time AS takeaway_time,
+                    tw.daily_number AS takeaway_daily_number,
                     -- Il servizio del conto arriva dalla comanda; per un conto
                     -- aperto a mano (senza comanda) si deduce dall'orario con
                     -- la stessa regola del giorno di servizio.
