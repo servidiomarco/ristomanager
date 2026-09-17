@@ -24,6 +24,7 @@ import { renderPrenota } from './services/prenotaSeo.js';
 import { COST_USD_SQL, UNPRICED_SQL, USD_EUR } from './services/aiPricing.js';
 import { outboxEnqueueInTx, outboxKick, outboxRegister, startOutboxDispatcher } from './services/outboxService.js';
 import { SERVER_PROFILE, isServiceNode } from './services/topology.js';
+import { scheduleSalaNodeBootstrap } from './services/salaNodeBootstrap.js';
 import { VOICE_CHANNEL, WHATSAPP_CHANNEL, type ToolOutcome } from './services/bookingTools.js';
 import { TENANT_FEATURES, getTenantFeatures, isFeatureEnabledForTenant, invalidateTenantFeaturesCache, clearTenantFeaturesCache, type TenantFeature } from './services/entitlements.js';
 import { provisionTenant, ProvisioningError } from './services/tenantProvisioning.js';
@@ -34845,6 +34846,9 @@ const SNAPSHOT_TABLES: SnapshotTableSpec[] = [
     { name: 'order_items', where: `order_id IN (SELECT id FROM orders WHERE tenant_id = $1 AND service_date >= $2::date)` },
     { name: 'order_revisions', where: `order_id IN (SELECT id FROM orders WHERE tenant_id = $1 AND service_date >= $2::date)` },
     { name: 'table_bills', where: `service_date >= $2::date` },
+    // Referenziata dalle quote (FK): senza, il nodo avrebbe split che
+    // puntano nel vuoto. Stessa finestra dei conti.
+    { name: 'payment_requests', where: `created_at >= $2::date` },
     { name: 'table_bill_splits', where: `table_bill_id IN (SELECT id FROM table_bills WHERE tenant_id = $1 AND service_date >= $2::date)` },
     { name: 'table_bill_payments', where: `table_bill_id IN (SELECT id FROM table_bills WHERE tenant_id = $1 AND service_date >= $2::date)` },
     { name: 'takeaway_orders', where: `pickup_date >= $2::date` },
@@ -35735,6 +35739,15 @@ const startServer = async () => {
                     } catch (imapErr) {
                         console.error('IMAP inbound service failed to start:', imapErr);
                     }
+                    // Profilo service-node: al primo avvio (nessun cursore)
+                    // scarica lo snapshot dal cloud e carica le proiezioni;
+                    // ritenta ogni minuto finché la linea non c'è. ULTIMO
+                    // della catena di boot, di proposito: la transazione di
+                    // carico tiene RowExclusive su tutte le proiezioni e i
+                    // re-assert qui sopra fanno ALTER TABLE — in parallelo
+                    // si abbracciavano in deadlock (visto al primo collaudo
+                    // del test e2e). Sul cloud è un no-op.
+                    scheduleSalaNodeBootstrap();
                 }))
                 .catch((dbError) => {
                     console.error('Database initialization failed:', dbError);
