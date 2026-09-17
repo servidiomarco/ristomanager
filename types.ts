@@ -500,6 +500,10 @@ export interface CashClosureBillRow {
   shift: 'LUNCH' | 'DINNER';
   table_name: string | null;
   customer_name: string | null;
+  /** Conto d'asporto: la riga dice «Asporto #N» e i covers non contano. */
+  takeaway_order_id?: number | null;
+  takeaway_time?: string | null;
+  takeaway_daily_number?: number | null;
   fiscal_doc_type: 'RECEIPT' | 'PROFORMA' | 'INVOICE' | 'CREDIT_NOTE' | null;
   fiscal_status: FiscalDocumentStatus | null;
   fiscal_doc_number: string | null;

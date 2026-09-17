@@ -118,7 +118,8 @@ const PagamentiPage: React.FC<{
   // e la riga «Giornata» sotto i tab, che deve restare a vista anche su Link.
   const { report: closureReport, error: closureError } = useCashClosure(serviceFilter?.service_date);
   const dayCovers = useMemo(
-    () => (closureReport?.bills ?? []).reduce((n, b) => n + (b.covers || 0), 0),
+    // Gli asporti non contano: il loro covers è un 1 tecnico, non un coperto.
+    () => (closureReport?.bills ?? []).reduce((n, b) => n + (b.takeaway_order_id != null ? 0 : (b.covers || 0)), 0),
     [closureReport],
   );
 

@@ -63,7 +63,7 @@ const euro = (cents: number) => formatEuro(cents);
 
 type BillLike =
   Pick<OpenBillRow, 'id' | 'table_name' | 'total_cents' | 'covers' | 'share_token' | 'items'>
-  & Partial<Pick<OpenBillRow, 'paid_cents' | 'residual_cents' | 'open_orders' | 'deposit_credit_cents' | 'deposit_paid_cents' | 'refund_due_cents' | 'cash_settled_cents' | 'status' | 'fiscal_status' | 'fiscal_doc_id' | 'fiscal_error' | 'fiscal_provider' | 'fiscal_ref' | 'fiscal_doc_type' | 'fiscal_doc_number' | 'fiscal_public_token' | 'fiscal_related_doc_id' | 'external_ref' | 'payments' | 'splits'>>;
+  & Partial<Pick<OpenBillRow, 'paid_cents' | 'residual_cents' | 'open_orders' | 'deposit_credit_cents' | 'deposit_paid_cents' | 'refund_due_cents' | 'cash_settled_cents' | 'status' | 'fiscal_status' | 'fiscal_doc_id' | 'fiscal_error' | 'fiscal_provider' | 'fiscal_ref' | 'fiscal_doc_type' | 'fiscal_doc_number' | 'fiscal_public_token' | 'fiscal_related_doc_id' | 'external_ref' | 'payments' | 'splits' | 'takeaway_order_id' | 'takeaway_time' | 'takeaway_daily_number' | 'customer_name'>>;
 
 /* «Saldato» sono soldi arrivati. Il residuo di /bills/open sconta anche i
    CLAIMED (l'ospite al checkout): residuo 0 con paid sotto il totale è un
@@ -72,8 +72,18 @@ const isSettled = (bill: BillLike) =>
   bill.residual_cents === 0 && (bill.paid_cents == null || bill.paid_cents >= bill.total_cents);
 
 const billTitle = (bill: BillLike) => euro(bill.total_cents);
+/** «Tavolo 12» oppure «Asporto #4»: dove sta il conto. Un asporto non ha
+ *  tavolo e i suoi covers sono un 1 tecnico, non persone — mai mostrarli. */
+const billPlace = (bill: BillLike) =>
+  bill.takeaway_order_id != null
+    ? `Asporto${bill.takeaway_daily_number != null ? ` #${bill.takeaway_daily_number}` : ''}`
+    : `Tavolo ${bill.table_name ?? '—'}`;
 const billSubtitle = (bill: BillLike) =>
-  `Tavolo ${bill.table_name ?? '—'} · ${bill.covers} copert${bill.covers === 1 ? 'o' : 'i'}`;
+  bill.takeaway_order_id != null
+    ? [billPlace(bill),
+       bill.takeaway_time ? `ritiro ${bill.takeaway_time}` : null,
+       bill.customer_name || null].filter(Boolean).join(' · ')
+    : `${billPlace(bill)} · ${bill.covers} copert${bill.covers === 1 ? 'o' : 'i'}`;
 
 /** The two standing facts about a bill: what is left on it, and whether the
  *  total can still move. Shown beside the title in both containers. */
@@ -167,7 +177,7 @@ export const SettleDialog: React.FC<{
       <div className="w-full max-w-lg overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)]" onClick={e => e.stopPropagation()}>
         <div className="border-b border-[var(--ds-border)] p-5">
           <h3 className="text-[18px] font-semibold text-[var(--ds-text-primary)]">Chiudi conto in cassa</h3>
-          <p className="mt-1 text-[14px] text-[var(--ds-text-muted)]">Tavolo {bill.table_name ?? '—'} · totale {euro(bill.total_cents)}</p>
+          <p className="mt-1 text-[14px] text-[var(--ds-text-muted)]">{billPlace(bill)} · totale {euro(bill.total_cents)}</p>
         </div>
         <div className="space-y-3 p-5">
           <dl className="space-y-1.5 text-[14px]">
@@ -788,7 +798,7 @@ export const InvoiceDialog: React.FC<{
       <div className="flex max-h-[90vh] w-full max-w-md flex-col overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)]" onClick={e => e.stopPropagation()}>
         <div className="border-b border-[var(--ds-border)] p-5">
           <h3 className="text-[16px] font-semibold text-[var(--ds-text-primary)]">Fattura elettronica</h3>
-          <p className="mt-1 text-[13px] text-[var(--ds-text-muted)]">Tavolo {bill.table_name ?? '—'} · {euro(bill.total_cents)} · sostituisce lo scontrino</p>
+          <p className="mt-1 text-[13px] text-[var(--ds-text-muted)]">{billPlace(bill)} · {euro(bill.total_cents)} · sostituisce lo scontrino</p>
         </div>
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-5">
           <label className="relative block">

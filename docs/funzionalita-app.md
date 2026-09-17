@@ -376,6 +376,7 @@ Modulo completo per presa comanda, produzione e coordinamento delle uscite. Si a
 - La riga **«Giornata»** sotto i tab Chiusura/Link: totale incassato e coperti dell'intero giorno, sempre a vista qualunque turno o tab si stia guardando.
 - Se sul giorno restano conti con un residuo, il report li conta e li rimanda alla Cassa ("Apri la Cassa"); il KPI **Residuo conti** in testa alla pagina dice quanto manca all'appello.
 - Un tocco su un conto chiuso apre la sua **scheda** nel pannello, con lo **scontrino elettronico**: emetti su un conto senza documento, riprova un'emissione fallita, annulla, passa a fattura.
+- I conti d'**asporto** si presentano come «Asporto #N» col nome del cliente (in lista e nella scheda, con l'ora di ritiro) invece di «Tav. —», e non entrano nel conteggio dei coperti serviti.
 
 ---
 
@@ -650,6 +651,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-17 | Pagamenti, conto al tavolo e cassa | Nella Chiusura i conti d'asporto si presentano come «Asporto #N» col cliente (in lista e nella scheda, con l'ora di ritiro) invece di «Tav. —»; i loro coperti tecnici non contano più fra i coperti serviti né nella riga «Giornata». |
 | 2026-09-17 | Pagamenti, conto al tavolo e cassa | La pagina pubblica del conto mostra il dettaglio delle righe sotto il totale (quantità, piatto, prezzo), ripiegato con «Mostra tutte» sui conti lunghi; visibile anche quando lo split per piatto non è disponibile. |
 | 2026-09-17 | Pagamenti, conto al tavolo e cassa | La pagina pubblica del conto porta l'identità del ristorante (logo e nome in testata, indirizzo e telefono nel footer) e la firma diventa «by Sympotia»; sul conto di un asporto niente coperti né quote — «Pago tutto il conto» in primo piano. |
 | 2026-09-17 | Asporto | «Ritirato» a conto non incassato chiede conferma: il bottone si arma al primo tocco («Conto non incassato — confermi?») e il secondo tocco conferma il ritiro; a conto chiuso nessun attrito. |
