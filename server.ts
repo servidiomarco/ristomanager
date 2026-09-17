@@ -11374,6 +11374,30 @@ app.post('/tables', authenticate, requirePermission('floorplan:full'), async (re
     }
 });
 
+// L'actor dell'envelope outbox: SOLO riferimenti (id, ruolo, canale) — mai
+// nome o email, la regola PII dell'event log (tappa 4 ibrido, fase 1).
+const outboxActor = (req: any): Record<string, string | number | null> | null =>
+    req.user ? { user_id: req.user.userId, role: String(req.user.role), channel: 'crm' } : null;
+
+// Mutazione singola + evento outbox nella STESSA transazione: la forma
+// minima della regola «evento e mutazione di stato insieme» per le route
+// del dominio sala che erano una sola query. Il chiamante fa outboxKick()
+// dopo, fuori dalla transazione.
+const runWithOutboxTx = async <T>(fn: (client: any) => Promise<T>): Promise<T> => {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const out = await fn(client);
+        await client.query('COMMIT');
+        return out;
+    } catch (err) {
+        await client.query('ROLLBACK').catch(() => { /* noop */ });
+        throw err;
+    } finally {
+        client.release();
+    }
+};
+
 app.put('/tables/:id', authenticate, requirePermission('floorplan:update_status'), async (req, res) => {
     try {
         const { id } = req.params;
@@ -11422,11 +11446,26 @@ app.put('/tables/:id', authenticate, requirePermission('floorplan:update_status'
         console.log('SQL Query:', query);
         console.log('Values:', values);
 
-        const result = await queryWithRetry(query, values);
-        const updatedTable = result.rows[0];
+        // Lo stato del tavolo è dominio servizio: la mutazione e l'evento
+        // nascono nella stessa transazione (l'outbox è il log di replica del
+        // nodo di sala). Il payload porta il riferimento, l'handler ricarica
+        // la riga; exclude_socket_id preserva l'esclusione del mittente che
+        // il broadcast diretto aveva sempre avuto.
+        const socketId = (req.headers['x-socket-id'] as string) || null;
+        const updatedTable = await runWithOutboxTx(async (client) => {
+            const result = await client.query(query, values);
+            const row = result.rows[0];
+            if (row) {
+                await outboxEnqueueInTx(client, req.tenantId!, 'table:updated', `table:${row.id}`,
+                    { table_id: row.id, exclude_socket_id: socketId },
+                    { actor: outboxActor(req) });
+            }
+            return row;
+        });
         if (!updatedTable) {
             return res.status(404).json({ error: 'Table not found' });
         }
+        outboxKick();
 
         console.log('Updated table merged_with:', updatedTable.merged_with);
 
@@ -11445,10 +11484,8 @@ app.put('/tables/:id', authenticate, requirePermission('floorplan:update_status'
             );
         }
 
-        // Broadcast to all connected clients
-        const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastTableUpdated(req.tenantId!, updatedTable, socketId);
-
+        // Il broadcast lo fa l'handler outbox (stessa strada del futuro
+        // replay dal nodo): da qui non si emette più direttamente.
         res.json(updatedTable);
     } catch (err) {
         console.error('Error updating table:', err);
@@ -11538,15 +11575,24 @@ app.post('/table-merges', authenticate, requirePermission('floorplan:full'), asy
         if ((owned.rowCount ?? 0) !== new Set(allIds).size) {
             return res.status(404).json({ error: 'Table not found' });
         }
-        const result = await queryWithRetry(
-            `INSERT INTO table_merges (tenant_id, date, shift, primary_id, merged_ids)
-             VALUES ($5, $1, $2, $3, $4)
-             ON CONFLICT (date, shift, primary_id)
-             DO UPDATE SET merged_ids = EXCLUDED.merged_ids
-             RETURNING id, date, shift, primary_id, merged_ids`,
-            [date, shift, primary_id, merged_ids, req.tenantId!]
-        );
-        const merge = result.rows[0];
+        // Unione = dominio servizio: mutazione ed evento nella stessa
+        // transazione. Il payload È lo snapshot (soli id e date, niente PII):
+        // per il replace idempotente il broadcast del momento giusto è
+        // quello scritto in-tx, non un reload che potrebbe già essere oltre.
+        const merge = await runWithOutboxTx(async (client) => {
+            const result = await client.query(
+                `INSERT INTO table_merges (tenant_id, date, shift, primary_id, merged_ids)
+                 VALUES ($5, $1, $2, $3, $4)
+                 ON CONFLICT (date, shift, primary_id)
+                 DO UPDATE SET merged_ids = EXCLUDED.merged_ids
+                 RETURNING id, date, shift, primary_id, merged_ids`,
+                [date, shift, primary_id, merged_ids, req.tenantId!]
+            );
+            const row = result.rows[0];
+            await outboxEnqueueInTx(client, req.tenantId!, 'tableMerge:created', `tableMerge:${row.id}`, row, { actor: outboxActor(req) });
+            return row;
+        });
+        outboxKick();
 
         if (req.user) {
             LogService.logActivity(
@@ -11562,11 +11608,8 @@ app.post('/table-merges', authenticate, requirePermission('floorplan:full'), asy
             );
         }
 
-        // Broadcast to ALL clients (including originator) so the originating
-        // client's local merge state updates from the socket event without
-        // needing an extra refetch. The client listener upserts idempotently.
-        if (socketService) socketService.broadcastTableMergeCreated(req.tenantId!, merge);
-
+        // Il broadcast (a TUTTI, mittente compreso: il listener client
+        // upserta idempotente) lo fa l'handler outbox.
         res.status(201).json(merge);
     } catch (err) {
         console.error('Error creating table merge:', err);
@@ -11581,16 +11624,25 @@ app.delete('/table-merges', authenticate, requirePermission('floorplan:full'), a
         if (!date || !shift || primary_id == null) {
             return res.status(400).json({ error: 'date, shift and primary_id are required' });
         }
-        const result = await queryWithRetry(
-            `DELETE FROM table_merges
-             WHERE date = $1 AND shift = $2 AND primary_id = $3 AND tenant_id = $4
-             RETURNING id, date, shift, primary_id, merged_ids`,
-            [date, shift, primary_id, req.tenantId!]
-        );
-        if (result.rowCount === 0) {
+        // Come la creazione: la riga cancellata non è più ricaricabile, lo
+        // snapshot in payload è l'unico testimone — ed è già senza PII.
+        const deleted = await runWithOutboxTx(async (client) => {
+            const result = await client.query(
+                `DELETE FROM table_merges
+                 WHERE date = $1 AND shift = $2 AND primary_id = $3 AND tenant_id = $4
+                 RETURNING id, date, shift, primary_id, merged_ids`,
+                [date, shift, primary_id, req.tenantId!]
+            );
+            const row = result.rows[0];
+            if (row) {
+                await outboxEnqueueInTx(client, req.tenantId!, 'tableMerge:deleted', `tableMerge:${row.id}`, row, { actor: outboxActor(req) });
+            }
+            return row;
+        });
+        if (!deleted) {
             return res.status(404).json({ error: 'Merge not found' });
         }
-        const deleted = result.rows[0];
+        outboxKick();
 
         if (req.user) {
             LogService.logActivity(
@@ -11605,8 +11657,6 @@ app.delete('/table-merges', authenticate, requirePermission('floorplan:full'), a
                 { date, shift }
             );
         }
-
-        if (socketService) socketService.broadcastTableMergeDeleted(req.tenantId!, deleted);
 
         res.json(deleted);
     } catch (err) {
@@ -11702,14 +11752,19 @@ app.post('/table-hidden', authenticate, requirePermission('floorplan:full'), asy
             });
         }
 
-        const result = await queryWithRetry(
-            `INSERT INTO table_hidden_overrides (tenant_id, date, shift, table_id)
-             VALUES ($4, $1, $2, $3)
-             ON CONFLICT (date, shift, table_id) DO UPDATE SET date = EXCLUDED.date
-             RETURNING id, date, shift, table_id`,
-            [date, shift, table_id, req.tenantId!]
-        );
-        const hidden = result.rows[0];
+        const hidden = await runWithOutboxTx(async (client) => {
+            const result = await client.query(
+                `INSERT INTO table_hidden_overrides (tenant_id, date, shift, table_id)
+                 VALUES ($4, $1, $2, $3)
+                 ON CONFLICT (date, shift, table_id) DO UPDATE SET date = EXCLUDED.date
+                 RETURNING id, date, shift, table_id`,
+                [date, shift, table_id, req.tenantId!]
+            );
+            const row = result.rows[0];
+            await outboxEnqueueInTx(client, req.tenantId!, 'tableHidden:created', `tableHidden:${row.id}`, row, { actor: outboxActor(req) });
+            return row;
+        });
+        outboxKick();
 
         if (req.user) {
             LogService.logActivity(
@@ -11725,8 +11780,6 @@ app.post('/table-hidden', authenticate, requirePermission('floorplan:full'), asy
             );
         }
 
-        if (socketService) socketService.broadcastTableHiddenCreated(req.tenantId!, hidden);
-
         res.status(201).json(hidden);
     } catch (err) {
         console.error('Error hiding table:', err);
@@ -11741,16 +11794,23 @@ app.delete('/table-hidden', authenticate, requirePermission('floorplan:full'), a
         if (!date || !shift || table_id == null) {
             return res.status(400).json({ error: 'date, shift and table_id are required' });
         }
-        const result = await queryWithRetry(
-            `DELETE FROM table_hidden_overrides
-             WHERE date = $1 AND shift = $2 AND table_id = $3 AND tenant_id = $4
-             RETURNING id, date, shift, table_id`,
-            [date, shift, table_id, req.tenantId!]
-        );
-        if (result.rowCount === 0) {
+        const deleted = await runWithOutboxTx(async (client) => {
+            const result = await client.query(
+                `DELETE FROM table_hidden_overrides
+                 WHERE date = $1 AND shift = $2 AND table_id = $3 AND tenant_id = $4
+                 RETURNING id, date, shift, table_id`,
+                [date, shift, table_id, req.tenantId!]
+            );
+            const row = result.rows[0];
+            if (row) {
+                await outboxEnqueueInTx(client, req.tenantId!, 'tableHidden:deleted', `tableHidden:${row.id}`, row, { actor: outboxActor(req) });
+            }
+            return row;
+        });
+        if (!deleted) {
             return res.status(404).json({ error: 'Hidden override not found' });
         }
-        const deleted = result.rows[0];
+        outboxKick();
 
         if (req.user) {
             LogService.logActivity(
@@ -11765,8 +11825,6 @@ app.delete('/table-hidden', authenticate, requirePermission('floorplan:full'), a
                 { date, shift }
             );
         }
-
-        if (socketService) socketService.broadcastTableHiddenDeleted(req.tenantId!, deleted);
 
         res.json(deleted);
     } catch (err) {
@@ -11861,14 +11919,19 @@ app.post('/room-closed', authenticate, requirePermission('floorplan:full'), asyn
             });
         }
 
-        const result = await queryWithRetry(
-            `INSERT INTO room_closed_overrides (tenant_id, date, shift, room_id)
-             VALUES ($4, $1, $2, $3)
-             ON CONFLICT (date, shift, room_id) DO UPDATE SET date = EXCLUDED.date
-             RETURNING id, date, shift, room_id`,
-            [date, shift, room_id, req.tenantId!]
-        );
-        const closed = result.rows[0];
+        const closed = await runWithOutboxTx(async (client) => {
+            const result = await client.query(
+                `INSERT INTO room_closed_overrides (tenant_id, date, shift, room_id)
+                 VALUES ($4, $1, $2, $3)
+                 ON CONFLICT (date, shift, room_id) DO UPDATE SET date = EXCLUDED.date
+                 RETURNING id, date, shift, room_id`,
+                [date, shift, room_id, req.tenantId!]
+            );
+            const row = result.rows[0];
+            await outboxEnqueueInTx(client, req.tenantId!, 'roomClosed:created', `roomClosed:${row.id}`, row, { actor: outboxActor(req) });
+            return row;
+        });
+        outboxKick();
 
         if (req.user) {
             LogService.logActivity(
@@ -11884,8 +11947,6 @@ app.post('/room-closed', authenticate, requirePermission('floorplan:full'), asyn
             );
         }
 
-        if (socketService) socketService.broadcastRoomClosedCreated(req.tenantId!, closed);
-
         res.status(201).json(closed);
     } catch (err) {
         console.error('Error closing room:', err);
@@ -11900,16 +11961,23 @@ app.delete('/room-closed', authenticate, requirePermission('floorplan:full'), as
         if (!date || !shift || room_id == null) {
             return res.status(400).json({ error: 'date, shift and room_id are required' });
         }
-        const result = await queryWithRetry(
-            `DELETE FROM room_closed_overrides
-             WHERE date = $1 AND shift = $2 AND room_id = $3 AND tenant_id = $4
-             RETURNING id, date, shift, room_id`,
-            [date, shift, room_id, req.tenantId!]
-        );
-        if (result.rowCount === 0) {
+        const deleted = await runWithOutboxTx(async (client) => {
+            const result = await client.query(
+                `DELETE FROM room_closed_overrides
+                 WHERE date = $1 AND shift = $2 AND room_id = $3 AND tenant_id = $4
+                 RETURNING id, date, shift, room_id`,
+                [date, shift, room_id, req.tenantId!]
+            );
+            const row = result.rows[0];
+            if (row) {
+                await outboxEnqueueInTx(client, req.tenantId!, 'roomClosed:deleted', `roomClosed:${row.id}`, row, { actor: outboxActor(req) });
+            }
+            return row;
+        });
+        if (!deleted) {
             return res.status(404).json({ error: 'Room closed override not found' });
         }
-        const deleted = result.rows[0];
+        outboxKick();
 
         if (req.user) {
             LogService.logActivity(
@@ -11924,8 +11992,6 @@ app.delete('/room-closed', authenticate, requirePermission('floorplan:full'), as
                 { date, shift }
             );
         }
-
-        if (socketService) socketService.broadcastRoomClosedDeleted(req.tenantId!, deleted);
 
         res.json(deleted);
     } catch (err) {
@@ -24024,6 +24090,9 @@ app.post('/table-assignment-suggestions/:id/confirm', authenticate, requirePermi
                 [req.tenantId!, eventDate, reservation.shift, suggestion.table_id, suggestion.merge_with_table_ids]
             );
             merge = mergeRes.rows[0];
+            // L'unione è dominio servizio: nell'event log dentro la stessa
+            // transazione, il broadcast lo fa l'handler outbox.
+            await outboxEnqueueInTx(client, req.tenantId!, 'tableMerge:created', `tableMerge:${merge.id}`, merge, { actor: outboxActor(req) });
         }
 
         await client.query(
@@ -24039,9 +24108,9 @@ app.post('/table-assignment-suggestions/:id/confirm', authenticate, requirePermi
                 { table_assignment_ai_suggestion_id: id, table_id: suggestion.table_id, merge_with_table_ids: suggestion.merge_with_table_ids }
             );
         }
+        if (merge) outboxKick();
         if (socketService) {
             socketService.broadcastReservationUpdated(req.tenantId!, updatedReservation);
-            if (merge) socketService.broadcastTableMergeCreated(req.tenantId!, merge);
             // Gli altri terminali collegati devono togliere il chip: senza
             // questo evento resterebbe visibile finché non ricaricano.
             socketService.broadcastToAll(req.tenantId!, 'tableAssignmentSuggestion:resolved', tableAssignmentSuggestionRow({ ...suggestion, status: 'CONFIRMED' }));
@@ -35327,6 +35396,44 @@ const startServer = async () => {
                             const view = await loadOrderView(tenantId, orderId);
                             if (!view) return;
                             socketService?.broadcastToAll(tenantId, 'order:updated', view.order);
+                        });
+                        // Dominio sala (tappa 4 ibrido, fase 1b): il broadcast
+                        // nasce dall'evento outbox, non più dalla route. Il
+                        // tavolo si ricarica (il payload porta il riferimento);
+                        // unioni/nascosti/chiusure viaggiano come snapshot in
+                        // payload — la riga cancellata non è più ricaricabile,
+                        // e sono soli id e date, senza PII.
+                        outboxRegister('table:updated', async (tenantId, payload) => {
+                            const tableId = Number(payload?.table_id);
+                            if (!Number.isFinite(tableId)) return;
+                            const rs = await queryWithRetry('SELECT * FROM tables WHERE id = $1 AND tenant_id = $2', [tableId, tenantId]);
+                            if (!rs.rows[0]) return; // cancellato nel frattempo
+                            const exclude = typeof payload?.exclude_socket_id === 'string' ? payload.exclude_socket_id : undefined;
+                            socketService?.broadcastTableUpdated(tenantId, rs.rows[0], exclude);
+                        });
+                        outboxRegister('tableMerge:created', async (tenantId, payload) => {
+                            if (payload?.id == null) return;
+                            socketService?.broadcastTableMergeCreated(tenantId, payload);
+                        });
+                        outboxRegister('tableMerge:deleted', async (tenantId, payload) => {
+                            if (payload?.id == null) return;
+                            socketService?.broadcastTableMergeDeleted(tenantId, payload);
+                        });
+                        outboxRegister('tableHidden:created', async (tenantId, payload) => {
+                            if (payload?.id == null) return;
+                            socketService?.broadcastTableHiddenCreated(tenantId, payload);
+                        });
+                        outboxRegister('tableHidden:deleted', async (tenantId, payload) => {
+                            if (payload?.id == null) return;
+                            socketService?.broadcastTableHiddenDeleted(tenantId, payload);
+                        });
+                        outboxRegister('roomClosed:created', async (tenantId, payload) => {
+                            if (payload?.id == null) return;
+                            socketService?.broadcastRoomClosedCreated(tenantId, payload);
+                        });
+                        outboxRegister('roomClosed:deleted', async (tenantId, payload) => {
+                            if (payload?.id == null) return;
+                            socketService?.broadcastRoomClosedDeleted(tenantId, payload);
                         });
                         startOutboxDispatcher();
                         // Rinnovo certificati del nodo di sala: parte solo a
