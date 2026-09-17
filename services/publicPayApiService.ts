@@ -15,7 +15,9 @@ export interface PublicSplitView {
 }
 
 export interface PublicBillItem {
-  id: number;
+  /** null = riga solo da mostrare (snapshot senza id, es. Passepartout):
+   *  compare nel dettaglio del conto ma mai nel picker per piatto. */
+  id: number | null;
   name: string;
   qty: number;
   total_cents: number;

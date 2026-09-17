@@ -25,7 +25,9 @@
     "cover_other": "{{count}} coperti",
     "depositPaid": "Acconto già versato",
     "paidLabel": "Pagato {{amount}}",
-    "remaining": "Rimanenti:"
+    "remaining": "Rimanenti:",
+    "showAllItems": "Mostra tutte ({{count}})",
+    "showFewerItems": "Mostra meno"
   },
   "splits": {
     "title": "Quote",

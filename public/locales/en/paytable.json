@@ -25,7 +25,9 @@
     "cover_other": "{{count}} guests",
     "depositPaid": "Deposit already paid",
     "paidLabel": "Paid {{amount}}",
-    "remaining": "Remaining:"
+    "remaining": "Remaining:",
+    "showAllItems": "Show all ({{count}})",
+    "showFewerItems": "Show less"
   },
   "splits": {
     "title": "Shares",

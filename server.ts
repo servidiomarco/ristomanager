@@ -8133,15 +8133,21 @@ app.get('/pay/:token', publicPayLimiter, async (req, res) => runAsPlatform(async
             deposit_credit_cents: depositCreditCents,
             residual_cents: residual,
             per_item_available: perItemAvailable,
-            items: perItemAvailable
-                ? billItems.map((i: any) => ({
-                    id: Number(i.order_item_id),
+            // Le righe escono SEMPRE quando lo snapshot c'è: l'ospite vede cosa
+            // sta pagando anche dove lo split per piatto non è disponibile
+            // (sconto in mezzo, righe da Passepartout senza id). id null =
+            // riga solo da mostrare, mai selezionabile nel picker per piatto.
+            items: billItems.map((i: any) => {
+                const itemId = Number(i.order_item_id);
+                const hasId = Number.isFinite(itemId);
+                return {
+                    id: hasId ? itemId : null,
                     name: i.name,
                     qty: Number(i.qty),
                     total_cents: Number(i.unit_price_cents) * Number(i.qty),
-                    taken: takenItemIds.has(Number(i.order_item_id)),
-                }))
-                : [],
+                    taken: hasId && takenItemIds.has(itemId),
+                };
+            }),
         });
     } catch (err: any) {
         console.error('GET /pay/:token error:', err);
