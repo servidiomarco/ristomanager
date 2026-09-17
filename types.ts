@@ -860,6 +860,9 @@ export interface TakeawayOrderItem {
 
 export interface TakeawayOrder {
   id: number;
+  /** Numero d'ordine del giorno («#12»), progressivo per data di ritiro.
+   *  Null sugli ordini nati prima della feature. */
+  daily_number?: number | null;
   customer_name: string;
   customer_phone: string | null;
   /** YYYY-MM-DD (il parser DATE del pool restituisce già la stringa). */

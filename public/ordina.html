@@ -254,6 +254,8 @@ button:disabled { cursor: not-allowed; }
 }
 .done__badge svg { width: 30px; height: 30px; }
 .done h2 { margin: 0 0 6px; font-size: 24px; }
+/* Il numero d'ordine è ciò che si mostra al banco: il più grande della pagina. */
+.done__number { margin: 10px 0 2px; font-size: 40px; font-weight: 800; letter-spacing: -0.5px; }
 .done p { margin: 0; color: var(--ds-text-secondary); }
 .done__slot { margin-top: 14px; font-size: 20px; font-weight: 800; }
 
@@ -342,6 +344,7 @@ button:disabled { cursor: not-allowed; }
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
             </div>
             <h2>Ordine confermato</h2>
+            <p class="done__number tnum" id="doneNumber" hidden></p>
             <p id="doneText"></p>
             <p class="done__slot tnum" id="doneSlot"></p>
         </div>
@@ -595,7 +598,13 @@ button:disabled { cursor: not-allowed; }
             }
             $('form').hidden = true;
             $('orderbar').hidden = true;
-            $('doneText').textContent = 'Grazie ' + (data.customer_name || '') + ': ti aspettiamo per il ritiro.';
+            if (data.daily_number != null) {
+                $('doneNumber').textContent = 'Ordine #' + data.daily_number;
+                $('doneNumber').hidden = false;
+                $('doneText').textContent = 'Grazie ' + (data.customer_name || '') + ': al ritiro basta questo numero.';
+            } else {
+                $('doneText').textContent = 'Grazie ' + (data.customer_name || '') + ': ti aspettiamo per il ritiro.';
+            }
             $('doneSlot').textContent = longDate(data.pickup_date) + ' · ' + data.pickup_time + ' · ' + euro(data.total_cents);
             $('done').hidden = false;
             window.scrollTo({ top: 0, behavior: 'smooth' });

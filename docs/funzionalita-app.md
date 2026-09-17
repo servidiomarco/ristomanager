@@ -193,6 +193,7 @@ Postazione "alla porta" per la gestione degli arrivi.
 Modulo add-on (venduto a parte, come Recensioni) per gli ordini da ritirare — pizzeria, gastronomia, ristorante. Tutto ruota attorno all'**ora di ritiro**.
 
 - **Board del giorno** (pagina Asporto, gruppo Servizio): ordini in lista per slot di ritiro, con ricerca per nome o telefono e filtro Attivi/Tutti; contatori attivi, da produrre, pronti, ritirati.
+- **Numero d'ordine del giorno** («#12»): progressivo per data di ritiro, assegnato alla creazione su ogni canale (banco, web, telefono) e mai rinumerato — un annullamento non sposta i numeri già comunicati. Compare sulla card e nel dettaglio in board, sull'intestazione della comanda in cucina e in cassa, a caratteri grandi nella conferma della pagina `/ordina` («al ritiro basta questo numero») e nella frase di riepilogo di Sofia. Spostare un ordine a un'altra data gli assegna un numero di quel giorno.
 - **Slot di ritiro con capienza**: la griglia oraria è quella degli orari di apertura (chiusure e slot disabilitati compresi); ogni slot ha una capienza di produzione (quanti ordini regge la cucina), e il banco può scavalcarla caso per caso. «Stop asporto» ferma una singola data e decade da solo.
 - **Presa ordine al banco**: nome e telefono del cliente, slot, piatti dal menu con quantità e nota per la cucina, note dell'ordine; nome e prezzo restano congelati come detti al cliente anche se il menu cambia dopo.
 - **Stati che avanzano da soli**: un ordine confermato diventa «Da produrre» quando ora di ritiro − minuti di preparazione è passata, un «Pronto» oltre l'ora di ritiro diventa «Ritiro in ritardo» — stessi automatismi a orologio di «In arrivo»/«In uscita» delle prenotazioni. Il banco muove solo gli stati veri: in preparazione, pronto, ritirato (con correzioni sempre possibili).
@@ -646,6 +647,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-17 | Asporto | Numero d'ordine del giorno («#12») su ogni canale: in board, sulla comanda in cucina e cassa, a caratteri grandi nella conferma di /ordina e nel riepilogo di Sofia — al ritiro basta dire il numero. |
 | 2026-09-16 | Menu & Banchetti | Le sale chiuse (per turno o estese) restano assegnabili ai banchetti: nel picker tavoli compaiono col badge «Chiusa» invece di sparire, e chiudere una sala non è più bloccato dalle prenotazioni collegate al banchetto. |
 | 2026-09-16 | Nodo di sala (modalità ibrida) | Nuovo modulo (add-on): un nodo sulla rete del locale fa da ripetitore per comande/cucina/passe — a linea caduta gli schermi restano vivi con l'avviso "dati fermi"; toggle e stato in Impostazioni → Sala & Cucina. |
 | 2026-09-15 | Funzionalità trasversali | Nei wizard a passi (banchetti, clienti, personale, prenotazioni, onboarding) la barra dei passi su mobile centra da sola il passo attivo: dopo un «Avanti» si vede subito su quale passo ci si trova. |

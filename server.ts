@@ -24286,6 +24286,25 @@ async function loadTakeawayView(tenantId: number, orderId: number): Promise<any 
     return { ...order.rows[0], items: rows, total_cents: total };
 }
 
+// Numero d'ordine del giorno («#12»): progressivo per (tenant, data di
+// ritiro), assegnato DENTRO la transazione di creazione e persistito — mai
+// derivato a video, così un annullamento non rinumera gli ordini già
+// comunicati ai clienti. L'advisory lock transazionale serializza le
+// assegnazioni concorrenti dello stesso giorno (due ordini web nello stesso
+// istante leggerebbero lo stesso MAX+1); l'indice unico parziale della
+// migration resta la rete di sicurezza. Il lock muore col COMMIT/ROLLBACK.
+async function allocateTakeawayDailyNumber(client: { query: (text: string, params?: any[]) => Promise<{ rows: any[] }> }, tenantId: number, pickupDate: string): Promise<number> {
+    await client.query(
+        `SELECT pg_advisory_xact_lock(hashtextextended('takeaway_daily:' || $1 || ':' || $2, 0))`,
+        [String(tenantId), pickupDate]
+    );
+    const r = await client.query(
+        `SELECT COALESCE(MAX(daily_number), 0) + 1 AS n FROM takeaway_orders WHERE tenant_id = $1 AND pickup_date = $2`,
+        [tenantId, pickupDate]
+    );
+    return Number(r.rows[0].n);
+}
+
 // Valida le righe e congela nome/prezzo dal menu. Prezzo base del piatto:
 // il listino dedicato all'asporto arriva con la scelta menu-asporto, non qui.
 async function buildTakeawayItems(tenantId: number, raw: unknown): Promise<{ error?: string; items?: { dish_id: number; name: string; cents: number; qty: number; note: string | null }[] }> {
@@ -24523,7 +24542,7 @@ app.post('/takeaway/orders/:id/fire', authenticate, requireFeature('takeaway'), 
                      opened_by_user_id, service_date, shift)
                  VALUES ($1, NULL, NULL, 'TAKEAWAY', 1, $2, $3, $4, $5)
                  RETURNING id`,
-                [req.tenantId!, `Asporto ${tw.pickup_time} · ${tw.customer_name}`,
+                [req.tenantId!, `Asporto ${tw.pickup_time}${tw.daily_number != null ? ` #${tw.daily_number}` : ''} · ${tw.customer_name}`,
                  req.user?.userId ?? null, tw.pickup_date, tw.shift]
             );
             const kitchenOrderId = Number(ins.rows[0].id);
@@ -24861,10 +24880,11 @@ async function handleElevenLabsCreateTakeawayOrder(tenantId: number, req: expres
         if (built.error) return fail('invalid_items', built.error);
 
         const orderId = await withTenant(tenantId, async client => {
+            const dailyNumber = await allocateTakeawayDailyNumber(client, tenantId, date);
             const ins = await client.query(
-                `INSERT INTO takeaway_orders (tenant_id, customer_name, customer_phone, pickup_date, pickup_time, shift, status, channel, notes)
-                 VALUES ($1, $2, $3, $4, $5, $6, 'CONFIRMED', 'VOICE', $7) RETURNING id`,
-                [tenantId, name, phone, date, time, slot.shift, notes || null]
+                `INSERT INTO takeaway_orders (tenant_id, customer_name, customer_phone, pickup_date, pickup_time, shift, status, channel, notes, daily_number)
+                 VALUES ($1, $2, $3, $4, $5, $6, 'CONFIRMED', 'VOICE', $7, $8) RETURNING id`,
+                [tenantId, name, phone, date, time, slot.shift, notes || null, dailyNumber]
             );
             const id = Number(ins.rows[0].id);
             for (const item of built.items!) {
@@ -24881,7 +24901,7 @@ async function handleElevenLabsCreateTakeawayOrder(tenantId: number, req: expres
         try { socketService?.broadcastToAll(tenantId, 'takeaway:created', view); } catch (_) {}
         pushSendToRoles(tenantId, ['RECEPTION', 'CASSA', 'MANAGER', 'GENERAL_MANAGER', 'OWNER'], {
             category: 'service',
-            title: `Asporto ${time} — nuovo ordine`,
+            title: `Asporto ${time}${view?.daily_number != null ? ` #${view.daily_number}` : ''} — nuovo ordine`,
             body: `${name} · al telefono con Sofia`,
             url: '/?view=ASPORTO',
             tag: `takeaway-new-${orderId}`,
@@ -24894,11 +24914,14 @@ async function handleElevenLabsCreateTakeawayOrder(tenantId: number, req: expres
         res.status(200).json({
             success: true,
             order_id: orderId,
+            daily_number: view?.daily_number ?? null,
             total_cents: totalCents,
             total_readback: totalReadback,
             date_readback: takeawayDateReadback(date),
             items_readback: readback.join(', '),
-            confirmation_phrase: `Perfetto ${name}: segnato ${readback.join(', ')}, da ritirare ${takeawayDateReadback(date)} alle ${time}. In tutto ${totalReadback}.`,
+            // Il numero chiude la frase: è l'ultima cosa detta, quella che
+            // il cliente si segna per il ritiro.
+            confirmation_phrase: `Perfetto ${name}: segnato ${readback.join(', ')}, da ritirare ${takeawayDateReadback(date)} alle ${time}. In tutto ${totalReadback}.${view?.daily_number != null ? ` Il suo numero d'ordine è il ${view.daily_number}.` : ''}`,
         });
     } catch (err) {
         console.error('[elevenlabs] create-takeaway-order error:', err);
@@ -25084,10 +25107,11 @@ async function handlePublicTakeawayOrderCreate(tenantId: number, req: express.Re
         const notes = typeof body.notes === 'string' ? body.notes.trim().slice(0, 1000) : '';
 
         const orderId = await withTenant(tenantId, async client => {
+            const dailyNumber = await allocateTakeawayDailyNumber(client, tenantId, date);
             const ins = await client.query(
-                `INSERT INTO takeaway_orders (tenant_id, customer_name, customer_phone, pickup_date, pickup_time, shift, status, channel, notes)
-                 VALUES ($1, $2, $3, $4, $5, $6, 'CONFIRMED', 'WEB', $7) RETURNING id`,
-                [tenantId, name, phone, date, time, slot.shift, notes || null]
+                `INSERT INTO takeaway_orders (tenant_id, customer_name, customer_phone, pickup_date, pickup_time, shift, status, channel, notes, daily_number)
+                 VALUES ($1, $2, $3, $4, $5, $6, 'CONFIRMED', 'WEB', $7, $8) RETURNING id`,
+                [tenantId, name, phone, date, time, slot.shift, notes || null, dailyNumber]
             );
             const id = Number(ins.rows[0].id);
             for (const item of built.items!) {
@@ -25107,7 +25131,7 @@ async function handlePublicTakeawayOrderCreate(tenantId: number, req: express.Re
         const pieces = view.items.reduce((sum: number, i: any) => sum + Number(i.qty), 0);
         pushSendToRoles(tenantId, ['RECEPTION', 'CASSA', 'MANAGER', 'GENERAL_MANAGER', 'OWNER'], {
             category: 'service',
-            title: `Asporto ${time} — nuovo ordine`,
+            title: `Asporto ${time}${view?.daily_number != null ? ` #${view.daily_number}` : ''} — nuovo ordine`,
             body: `${name} · ${pieces === 1 ? '1 pezzo' : `${pieces} pezzi`}`,
             url: '/?view=ASPORTO',
             tag: `takeaway-new-${orderId}`,
@@ -25116,6 +25140,7 @@ async function handlePublicTakeawayOrderCreate(tenantId: number, req: express.Re
         res.status(201).json({
             ok: true,
             confirmed: true,
+            daily_number: view.daily_number ?? null,
             pickup_date: view.pickup_date,
             pickup_time: view.pickup_time,
             customer_name: view.customer_name,
@@ -25197,10 +25222,11 @@ app.post('/takeaway/orders', authenticate, requireFeature('takeaway'), requirePe
         if (built.error) return res.status(400).json({ error: 'invalid_items', message: built.error });
 
         const orderId = await withTenant(req.tenantId!, async client => {
+            const dailyNumber = await allocateTakeawayDailyNumber(client, req.tenantId!, date);
             const ins = await client.query(
-                `INSERT INTO takeaway_orders (tenant_id, customer_name, customer_phone, pickup_date, pickup_time, shift, status, channel, notes, created_by_user_id)
-                 VALUES ($1, $2, $3, $4, $5, $6, 'CONFIRMED', 'STAFF', $7, $8) RETURNING id`,
-                [req.tenantId!, name, phone || null, date, time, slot.shift, notes || null, req.user?.userId ?? null]
+                `INSERT INTO takeaway_orders (tenant_id, customer_name, customer_phone, pickup_date, pickup_time, shift, status, channel, notes, created_by_user_id, daily_number)
+                 VALUES ($1, $2, $3, $4, $5, $6, 'CONFIRMED', 'STAFF', $7, $8, $9) RETURNING id`,
+                [req.tenantId!, name, phone || null, date, time, slot.shift, notes || null, req.user?.userId ?? null, dailyNumber]
             );
             const id = Number(ins.rows[0].id);
             for (const item of built.items!) {
@@ -25235,6 +25261,7 @@ app.patch('/takeaway/orders/:id', authenticate, requireFeature('takeaway'), requ
         const fields: string[] = [];
         const params: any[] = [orderId, req.tenantId!];
         const push = (sql: string, value: any) => { params.push(value); fields.push(`${sql} = $${params.length}`); };
+        let dateChangedTo: string | null = null;
 
         if ('customer_name' in body) {
             const name = typeof body.customer_name === 'string' ? body.customer_name.trim().slice(0, 120) : '';
@@ -25260,6 +25287,11 @@ app.patch('/takeaway/orders/:id', authenticate, requireFeature('takeaway'), requ
             push('pickup_date', date);
             push('pickup_time', time);
             push('shift', slot.shift);
+            // Il numero segue la data di ritiro: spostato a un altro giorno,
+            // l'ordine prende un numero di QUEL giorno — il vecchio non si
+            // ricicla (l'indice unico lo permetterebbe, ma un «#12» già detto
+            // a un cliente non deve riapparire su un altro ordine).
+            dateChangedTo = date !== current.rows[0].pickup_date ? date : null;
         }
 
         let builtItems: Awaited<ReturnType<typeof buildTakeawayItems>>['items'] | undefined;
@@ -25272,6 +25304,9 @@ app.patch('/takeaway/orders/:id', authenticate, requireFeature('takeaway'), requ
         if (fields.length === 0 && !builtItems) return res.status(400).json({ error: 'empty_patch', message: 'Nessun campo da aggiornare' });
 
         await withTenant(req.tenantId!, async client => {
+            if (dateChangedTo) {
+                push('daily_number', await allocateTakeawayDailyNumber(client, req.tenantId!, dateChangedTo));
+            }
             if (fields.length > 0) {
                 await client.query(
                     `UPDATE takeaway_orders SET ${fields.join(', ')}, updated_at = now() WHERE id = $1 AND tenant_id = $2`,
@@ -29081,7 +29116,7 @@ async function enqueueCoursePrintsInTx(client: any, tenantId: number, orderId: n
     // «Asporto HH:MM» — l'ora di ritiro è ciò che serve alla partita.
     const ctx = await client.query(
         `SELECT CASE WHEN o.order_type = 'TAKEAWAY' THEN NULL ELSE o.covers END AS covers,
-                CASE WHEN o.order_type = 'TAKEAWAY' THEN 'Asporto ' || COALESCE(tw.pickup_time, '')
+                CASE WHEN o.order_type = 'TAKEAWAY' THEN 'Asporto ' || COALESCE(tw.pickup_time, '') || COALESCE(' #' || tw.daily_number, '')
                      ELSE t.name END AS table_name
          FROM orders o
          LEFT JOIN tables t ON t.id = o.table_id AND t.tenant_id = o.tenant_id
@@ -30478,7 +30513,7 @@ app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req,
                     oi.modifiers, oi.note, oi.status, oi.station_id, oi.weight_grams,
                     oi.fired_at, oi.station_start_at, oi.started_at, oi.ready_at,
                     o.table_id,
-                    CASE WHEN o.order_type = 'TAKEAWAY' THEN 'Asporto ' || tw.pickup_time
+                    CASE WHEN o.order_type = 'TAKEAWAY' THEN 'Asporto ' || tw.pickup_time || COALESCE(' #' || tw.daily_number, '')
                          ELSE t.name END AS table_name,
                     o.opened_at AS order_opened_at,
                     o.covers AS order_covers,
@@ -31006,7 +31041,7 @@ app.get('/kds/expediter', authenticate, requirePermission('orders:expedite'), as
                     oi.status, oi.station_id, oi.queued_at, oi.fired_at,
                     oi.station_start_at, oi.ready_at,
                     o.table_id,
-                    CASE WHEN o.order_type = 'TAKEAWAY' THEN 'Asporto ' || tw.pickup_time
+                    CASE WHEN o.order_type = 'TAKEAWAY' THEN 'Asporto ' || tw.pickup_time || COALESCE(' #' || tw.daily_number, '')
                          ELSE t.name END AS table_name,
                     COALESCE(r.customer_name, tw.customer_name) AS customer_name
              FROM order_items oi

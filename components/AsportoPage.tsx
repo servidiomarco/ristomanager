@@ -453,7 +453,12 @@ const OrderCard: React.FC<{
       }`}
     >
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">{order.customer_name}</div>
+        <div className="truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">
+          {order.daily_number != null && (
+            <span className="mr-1.5 tabular-nums text-[var(--ds-text-muted)]">#{order.daily_number}</span>
+          )}
+          {order.customer_name}
+        </div>
         <div className="mt-0.5 truncate text-[13px] text-[var(--ds-text-muted)]">
           {pieces === 1 ? '1 pezzo' : `${pieces} pezzi`} · {euro(order.total_cents)}
           {order.notes ? ` · ${order.notes}` : ''}
@@ -492,7 +497,12 @@ const DetailPanel: React.FC<{
     <div className="flex flex-col gap-4 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="truncate text-[17px] font-semibold text-[var(--ds-text-primary)]">{order.customer_name}</div>
+          <div className="truncate text-[17px] font-semibold text-[var(--ds-text-primary)]">
+            {order.daily_number != null && (
+              <span className="mr-1.5 tabular-nums text-[var(--ds-text-muted)]">#{order.daily_number}</span>
+            )}
+            {order.customer_name}
+          </div>
           <div className={`mt-0.5 text-[14px] font-medium tabular-nums ${ds.text}`}>
             Ritiro {order.pickup_time} · {dateLabel(order.pickup_date)}
           </div>
