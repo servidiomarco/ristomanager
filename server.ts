@@ -25,6 +25,7 @@ import { COST_USD_SQL, UNPRICED_SQL, USD_EUR } from './services/aiPricing.js';
 import { outboxEnqueueInTx, outboxKick, outboxRegister, startOutboxDispatcher } from './services/outboxService.js';
 import { SERVER_PROFILE, isServiceNode } from './services/topology.js';
 import { scheduleSalaNodeBootstrap } from './services/salaNodeBootstrap.js';
+import { startSalaNodeReplica } from './services/salaNodeReplica.js';
 import { VOICE_CHANNEL, WHATSAPP_CHANNEL, type ToolOutcome } from './services/bookingTools.js';
 import { TENANT_FEATURES, getTenantFeatures, isFeatureEnabledForTenant, invalidateTenantFeaturesCache, clearTenantFeaturesCache, type TenantFeature } from './services/entitlements.js';
 import { provisionTenant, ProvisioningError } from './services/tenantProvisioning.js';
@@ -34904,6 +34905,96 @@ app.get('/sala-node/snapshot', salaNodeAuth, async (req: any, res) => {
     }
 });
 
+// --- Replica cloud→nodo (tappa 4, fase 3) -----------------------------------
+// Il trasferimento è SEMPRE un pull con cursore («dammi da seq N, max 500»):
+// il socket sveglia, non trasporta — sez. 7 del brainstorming. Il recupero
+// dopo un outage è lo stesso identico giro, solo col batch più grosso:
+// nessun percorso speciale di riconciliazione, quindi nessun percorso mai
+// testato. Il nodo tira da qui e applica con l'inbox transazionale
+// (services/salaNodeReplica.ts).
+const SALA_NODE_EVENTS_MAX = 500;
+app.get('/sala-node/events', salaNodeAuth, async (req: any, res) => {
+    try {
+        const tenantId = req.salaNodeTenantId as number;
+        const after = Number(req.query.after);
+        if (!Number.isFinite(after) || after < 0) {
+            return res.status(400).json({ error: 'after deve essere un intero >= 0' });
+        }
+        const limit = Math.min(SALA_NODE_EVENTS_MAX, Math.max(1, Number(req.query.limit) || SALA_NODE_EVENTS_MAX));
+        const rs = await queryWithRetry(
+            `SELECT id, event_id, event, aggregate, payload, command_id, causation_id, actor, schema_ver, created_at
+             FROM outbox_events
+             WHERE tenant_id = $1 AND id > $2
+             ORDER BY id
+             LIMIT $3`,
+            [tenantId, after, limit]
+        );
+        res.json({
+            events: rs.rows.map((r: any) => ({
+                seq: Number(r.id),
+                event_id: r.event_id,
+                type: r.event,
+                aggregate: r.aggregate,
+                payload: r.payload,
+                command_id: r.command_id,
+                causation_id: r.causation_id,
+                actor: r.actor,
+                schema_ver: r.schema_ver,
+                occurred_at: r.created_at,
+            })),
+        });
+    } catch (err: any) {
+        console.error('GET /sala-node/events error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Le righe correnti degli aggregati citati dagli eventi: il log porta
+// riferimenti (regola PII), la replica converge rifetchando lo stato vero.
+// Un id assente nella risposta significa «riga sparita sul cloud»: il nodo
+// la toglie — la convergenza vale nei due sensi.
+const SALA_NODE_ROWS_MAX = 500;
+app.post('/sala-node/rows', salaNodeAuth, async (req: any, res) => {
+    try {
+        const tenantId = req.salaNodeTenantId as number;
+        const ids = (key: string): number[] => {
+            const raw = Array.isArray(req.body?.[key]) ? req.body[key] : [];
+            const parsed = raw.map((n: any) => Number(n)).filter((n: number) => Number.isInteger(n) && n > 0);
+            return [...new Set(parsed)].slice(0, SALA_NODE_ROWS_MAX) as number[];
+        };
+        const tableIds = ids('tables');
+        const reservationIds = ids('reservations');
+        const orderIds = ids('orders');
+        const [tablesRs, reservationsRs, ordersRs, itemsRs, revisionsRs] = await Promise.all([
+            tableIds.length
+                ? queryWithRetry(`SELECT * FROM tables WHERE tenant_id = $1 AND id = ANY($2::int[])`, [tenantId, tableIds])
+                : Promise.resolve({ rows: [] as any[] }),
+            reservationIds.length
+                ? queryWithRetry(`SELECT * FROM reservations WHERE tenant_id = $1 AND id = ANY($2::int[])`, [tenantId, reservationIds])
+                : Promise.resolve({ rows: [] as any[] }),
+            orderIds.length
+                ? queryWithRetry(`SELECT * FROM orders WHERE tenant_id = $1 AND id = ANY($2::int[])`, [tenantId, orderIds])
+                : Promise.resolve({ rows: [] as any[] }),
+            orderIds.length
+                ? queryWithRetry(`SELECT * FROM order_items WHERE tenant_id = $1 AND order_id = ANY($2::int[])`, [tenantId, orderIds])
+                : Promise.resolve({ rows: [] as any[] }),
+            orderIds.length
+                ? queryWithRetry(`SELECT * FROM order_revisions WHERE tenant_id = $1 AND order_id = ANY($2::int[])`, [tenantId, orderIds])
+                : Promise.resolve({ rows: [] as any[] }),
+        ]);
+        res.json({
+            tables: tablesRs.rows,
+            reservations: reservationsRs.rows,
+            orders: ordersRs.rows,
+            order_items: itemsRs.rows,
+            order_revisions: revisionsRs.rows,
+        });
+    } catch (err: any) {
+        console.error('POST /sala-node/rows error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 // Dominio, IP LAN e porta del nodo, dalla card Impostazioni → Nodo di sala.
 // Sentinella "campo presente nel body": assente = non toccare, null/'' =
 // azzera (come /sala/print-routes).
@@ -35748,6 +35839,11 @@ const startServer = async () => {
                     // si abbracciavano in deadlock (visto al primo collaudo
                     // del test e2e). Sul cloud è un no-op.
                     scheduleSalaNodeBootstrap();
+                    // La replica parte insieme: finché il cursore non c'è
+                    // (bootstrap in corso) i suoi giri sono no-op; appena la
+                    // riga appare, drena il log e resta agganciata alla
+                    // sveglia del canale /sala-node. Sul cloud è un no-op.
+                    startSalaNodeReplica();
                 }))
                 .catch((dbError) => {
                     console.error('Database initialization failed:', dbError);
