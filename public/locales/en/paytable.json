@@ -5,6 +5,8 @@
   "header": {
     "title": "The table bill",
     "subtitle": "Pay your share securely",
+    "takeawayTitle": "The takeaway bill",
+    "takeawaySubtitle": "Pay securely",
     "langGroupAria": "Language"
   },
   "loading": {
@@ -58,7 +60,8 @@
   },
   "paidInFull": {
     "title": "Bill settled",
-    "text": "The table has been paid in full."
+    "text": "The table has been paid in full.",
+    "takeawayText": "The order has been paid in full."
   },
   "claimed": {
     "yourShare": "Your share",
@@ -70,7 +73,7 @@
     "holdNotice": "Your share is held for 5 minutes. If you don't pay within this time it will be released automatically."
   },
   "footer": {
-    "text": "Secure payment via Revolut · Powered by Ristomanager"
+    "text": "Secure payment via Revolut · by Sympotia"
   },
   "confirm": {
     "release": "Cancel your request? You can redo it afterwards."

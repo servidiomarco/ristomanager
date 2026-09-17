@@ -23,6 +23,18 @@ export interface PublicBillItem {
   taken: boolean;
 }
 
+/** Identità pubblica del ristorante, stessa forma di /public/takeaway/info.
+ *  logo_url arriva già assoluto (il path in anagrafica è del backend). */
+export interface PublicPayBranding {
+  name: string | null;
+  tagline: string | null;
+  phone: string | null;
+  address: string | null;
+  maps_url: string | null;
+  logo_url: string | null;
+  logo_dark_url: string | null;
+}
+
 export interface PublicBillView {
   bill: {
     total_cents: number;
@@ -30,6 +42,10 @@ export interface PublicBillView {
     currency: string;
     status: 'OPEN' | 'LOCKED';
   };
+  /** Conto di un asporto: niente coperti né split equo/per piatto in pagina.
+   *  Opzionale: il backend deployato può non mandarlo ancora. */
+  takeaway?: boolean;
+  branding?: PublicPayBranding | null;
   splits: PublicSplitView[];
   paid_cents: number;
   claimed_cents: number;

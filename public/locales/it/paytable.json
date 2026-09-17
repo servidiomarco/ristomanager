@@ -5,6 +5,8 @@
   "header": {
     "title": "Il conto del tavolo",
     "subtitle": "Paga la tua parte in sicurezza",
+    "takeawayTitle": "Il conto dell'asporto",
+    "takeawaySubtitle": "Paga in sicurezza",
     "langGroupAria": "Lingua"
   },
   "loading": {
@@ -58,7 +60,8 @@
   },
   "paidInFull": {
     "title": "Conto saldato",
-    "text": "Il tavolo è stato pagato per intero."
+    "text": "Il tavolo è stato pagato per intero.",
+    "takeawayText": "L'ordine è stato pagato per intero."
   },
   "claimed": {
     "yourShare": "La tua quota",
@@ -70,7 +73,7 @@
     "holdNotice": "La quota è riservata per 5 minuti. Se non paghi entro questo tempo verrà rilasciata automaticamente."
   },
   "footer": {
-    "text": "Pagamento sicuro tramite Revolut · Powered by Ristomanager"
+    "text": "Pagamento sicuro tramite Revolut · by Sympotia"
   },
   "confirm": {
     "release": "Annullare la richiesta? Potrai rifarla dopo."
