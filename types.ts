@@ -284,7 +284,9 @@ export interface Reservation {
   payment_status: PaymentStatus;
   deposit_amount?: number;
   total_amount?: number;
-  banquet_menu_id?: number;
+  // null esplicito = scollegato: il PUT distingue «campo assente» (non
+  // toccare) da «null» (togliere il collegamento banchetto).
+  banquet_menu_id?: number | null;
   enable_reminder?: boolean;
   reminder_sent?: boolean;
   arrival_status?: ArrivalStatus;
@@ -858,6 +860,9 @@ export interface TakeawayOrderItem {
 
 export interface TakeawayOrder {
   id: number;
+  /** Numero d'ordine del giorno («#12»), progressivo per data di ritiro.
+   *  Null sugli ordini nati prima della feature. */
+  daily_number?: number | null;
   customer_name: string;
   customer_phone: string | null;
   /** YYYY-MM-DD (il parser DATE del pool restituisce già la stringa). */
@@ -1055,6 +1060,12 @@ export interface User {
     // true finché l'OWNER non completa il wizard di primo accesso (D1):
     // la SPA lo mostra al posto dell'app, solo all'OWNER.
     needs_onboarding?: boolean;
+    // Base pubblica della piattaforma (PUBLIC_BOOKING_BASE_URL del backend,
+    // es. https://prenota.sympotia.com): con questa si compongono i link da
+    // ospiti (/ordina/<slug>, /m/<slug>). Assente o null (env non
+    // configurata, o backend vecchio nella finestra di deploy): si ripiega
+    // su VITE_API_URL — stesso host, solo meno bello da leggere.
+    public_base_url?: string | null;
   };
 }
 

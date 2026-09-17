@@ -456,11 +456,20 @@ const OrderCard: React.FC<{
       type="button"
       onClick={onClick}
       className={`flex w-full items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-3 text-left shadow-[var(--ds-shadow-card)] transition-shadow ${
-        selected ? 'ring-2 ring-[var(--ds-border-focus)]' : 'hover:shadow-[var(--ds-shadow-card-hover)]'
+        // Inchiostro e inset: l'anello ESTERNO si sommava all'ombra della
+        // card e disegnava un doppio contorno sporco agli angoli; e
+        // border-focus è il segno del focus tastiera, non della selezione —
+        // «selezionato = action-bg» come ogni scelta nell'app.
+        selected ? 'ring-2 ring-inset ring-[var(--ds-action-bg)]' : 'hover:shadow-[var(--ds-shadow-card-hover)]'
       }`}
     >
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">{order.customer_name}</div>
+        <div className="truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">
+          {order.daily_number != null && (
+            <span className="mr-1.5 tabular-nums text-[var(--ds-text-muted)]">#{order.daily_number}</span>
+          )}
+          {order.customer_name}
+        </div>
         <div className="mt-0.5 truncate text-[13px] text-[var(--ds-text-muted)]">
           {pieces === 1 ? '1 pezzo' : `${pieces} pezzi`} · {euro(order.total_cents)}
           {order.notes ? ` · ${order.notes}` : ''}
@@ -515,7 +524,12 @@ const DetailPanel: React.FC<{
     <div className="flex flex-col gap-4 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="truncate text-[17px] font-semibold text-[var(--ds-text-primary)]">{order.customer_name}</div>
+          <div className="truncate text-[17px] font-semibold text-[var(--ds-text-primary)]">
+            {order.daily_number != null && (
+              <span className="mr-1.5 tabular-nums text-[var(--ds-text-muted)]">#{order.daily_number}</span>
+            )}
+            {order.customer_name}
+          </div>
           <div className={`mt-0.5 text-[14px] font-medium tabular-nums ${ds.text}`}>
             Ritiro {order.pickup_time} · {dateLabel(order.pickup_date)}
           </div>

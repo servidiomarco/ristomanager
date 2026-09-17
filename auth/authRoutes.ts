@@ -18,6 +18,17 @@ const router = Router();
 // verso password scritte su un post-it.
 const MIN_PASSWORD_LENGTH = 8;
 
+// Base pubblica della piattaforma (prenota.sympotia.com): il frontend ci
+// costruisce i link da mettere in mano agli ospiti (/ordina/<slug>,
+// /m/<slug>) — api.sympotia.com funziona uguale ma è gergo da backend in un
+// SMS o dentro un QR. Viaggia col profilo perché la SPA non legge le env del
+// backend (stesso motivo di is_reports_admin). Null se non configurata: la
+// SPA ripiega su VITE_API_URL, così in locale i link restano su localhost.
+const publicBaseUrl = (): string | null => {
+  const raw = String(process.env.PUBLIC_BOOKING_BASE_URL || '').trim().replace(/\/+$/, '');
+  return raw || null;
+};
+
 // POST /auth/login - User login
 // runAsPlatform (qui e su refresh/forgot/reset): le route PRE-auth risolvono
 // l'identità per email/token su TUTTA la piattaforma — non c'è ancora un
@@ -67,7 +78,7 @@ router.post('/login', (req: Request, res: Response) => runAsPlatform(async () =>
     res.json({
       // is_reports_admin: il frontend non legge le env del backend, quindi
       // l'allowlist della Reportistica viaggia col profilo.
-      user: { ...result.user, is_reports_admin: isReportsAdmin(result.user.email), tenant: { ...result.user.tenant!, features } },
+      user: { ...result.user, is_reports_admin: isReportsAdmin(result.user.email), tenant: { ...result.user.tenant!, features, public_base_url: publicBaseUrl() } },
       permissions,
       accessToken: result.tokens.accessToken,
       refreshToken: result.tokens.refreshToken
@@ -170,7 +181,8 @@ router.get('/me', authenticate, async (req: Request, res: Response) => {
           // Mai il wizard di onboarding a una sessione di piattaforma: se il
           // tenant è a metà setup lo si vede dal pannello, non da qui.
           needs_onboarding: false,
-          features
+          features,
+          public_base_url: publicBaseUrl()
         },
         permissions: ALL_PERMISSION_KEYS
       });
@@ -182,7 +194,7 @@ router.get('/me', authenticate, async (req: Request, res: Response) => {
     // Entitlements commerciali (C1) — stessa forma della risposta di login.
     const features = await getTenantFeatures(req.user.tenantId);
 
-    res.json({ ...user, is_reports_admin: isReportsAdmin(user.email), tenant: user.tenant ? { ...user.tenant, features } : user.tenant, permissions });
+    res.json({ ...user, is_reports_admin: isReportsAdmin(user.email), tenant: user.tenant ? { ...user.tenant, features, public_base_url: publicBaseUrl() } : user.tenant, permissions });
   } catch (error) {
     console.error('Get current user error:', error);
     res.status(500).json({ error: 'Internal server error' });

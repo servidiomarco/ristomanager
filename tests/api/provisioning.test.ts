@@ -145,7 +145,7 @@ describe('provisioning tenant (/admin/tenants, Fase D1)', () => {
         expect(res.status).toBe(200);
         expect(res.body.user.role).toBe('OWNER');
         expect(res.body.user.tenant.slug).toBe(SLUG);
-        expect(res.body.user.tenant.features).toEqual({ voice: false, whatsapp: false, web_booking: false, pay_at_table: false, passepartout: false, reviews: false, takeaway: false });
+        expect(res.body.user.tenant.features).toEqual({ voice: false, whatsapp: false, web_booking: false, pay_at_table: false, passepartout: false, reviews: false, takeaway: false, sala_node: false });
         // La matrice permessi copiata dal tenant 1 deve dare all'OWNER i suoi
         // permessi: senza la copia questo array sarebbe vuoto.
         expect(res.body.permissions).toContain('settings:full');
@@ -162,7 +162,7 @@ describe('provisioning tenant (/admin/tenants, Fase D1)', () => {
             features: { web_booking: true },
         });
         expect(patch.status).toBe(200);
-        expect(patch.body.features).toEqual({ voice: false, whatsapp: false, web_booking: true, pay_at_table: false, passepartout: false, reviews: false, takeaway: false });
+        expect(patch.body.features).toEqual({ voice: false, whatsapp: false, web_booking: true, pay_at_table: false, passepartout: false, reviews: false, takeaway: false, sala_node: false });
 
         const avail = await api().get(`/public/${SLUG}/availability`).query({ date: DATA_FUTURA });
         expect(avail.status).toBe(200);

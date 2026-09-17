@@ -116,6 +116,7 @@ const FEATURE_LABEL: Record<AdminTenantFeature, string> = {
   pay_at_table: 'conto al tavolo',
   passepartout: 'cassa passepartout',
   reviews: 'recensioni',
+  sala_node: 'nodo di sala',
 };
 
 // billing_status arriva da Stripe via webhook; NULL è il tenant storico senza
@@ -554,7 +555,7 @@ const NewTenantModal: React.FC<{
   const [slugTouched, setSlugTouched] = useState(false);
   const [email, setEmail] = useState('');
   const [features, setFeatures] = useState<Record<AdminTenantFeature, boolean>>({
-    voice: false, whatsapp: false, web_booking: false, pay_at_table: false, passepartout: false, reviews: false,
+    voice: false, whatsapp: false, web_booking: false, pay_at_table: false, passepartout: false, reviews: false, sala_node: false,
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -562,7 +563,7 @@ const NewTenantModal: React.FC<{
 
   const reset = () => {
     setName(''); setSlug(''); setSlugTouched(false); setEmail('');
-    setFeatures({ voice: false, whatsapp: false, web_booking: false, pay_at_table: false, passepartout: false, reviews: false });
+    setFeatures({ voice: false, whatsapp: false, web_booking: false, pay_at_table: false, passepartout: false, reviews: false, sala_node: false });
     setError(null); setCreated(null);
   };
 

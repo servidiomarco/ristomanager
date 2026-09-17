@@ -56,7 +56,8 @@ const DEV_BOARD_ADMIN_EMAIL = 'admin@ristomanager.com';
 // venduta a UN ristorante (chi ha la cassa Passepartout), non un canale
 // storico — un payload vecchio senza la chiave non deve accenderla per tutti.
 // 'reviews' segue la stessa regola: add-on venduto a parte, fail-closed.
-export type TenantFeatureKey = 'voice' | 'whatsapp' | 'web_booking' | 'pay_at_table' | 'passepartout' | 'reviews' | 'takeaway';
+// 'sala_node' idem: add-on con hardware dietro, fail-closed.
+export type TenantFeatureKey = 'voice' | 'whatsapp' | 'web_booking' | 'pay_at_table' | 'passepartout' | 'reviews' | 'takeaway' | 'sala_node';
 const VIEW_FEATURES: Partial<Record<ViewState, TenantFeatureKey>> = {
   [ViewState.CONVERSAZIONI]: 'voice',
   [ViewState.MESSAGGI]: 'whatsapp',
@@ -203,6 +204,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (feature === 'passepartout') return features?.passepartout === true;
     if (feature === 'reviews') return features?.reviews === true;
     if (feature === 'takeaway') return features?.takeaway === true;
+    if (feature === 'sala_node') return features?.sala_node === true;
     if (!features) return true;
     return features[feature] !== false;
   }, [user]);

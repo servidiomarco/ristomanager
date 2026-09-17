@@ -59,10 +59,13 @@ describe('auth', () => {
             name: 'Il Vecchio Frantoio',
             // Entitlements commerciali (Fase C1): il tenant 1 è grandfathered,
             // il seed della migration tenant-features li accende tutti.
-            features: { voice: true, whatsapp: true, web_booking: true, pay_at_table: true, passepartout: true, reviews: true, takeaway: true },
+            features: { voice: true, whatsapp: true, web_booking: true, pay_at_table: true, passepartout: true, reviews: true, takeaway: true, sala_node: true },
             // Onboarding (coda D1): i tenant nati prima del wizard sono
             // backfillati a completato.
             needs_onboarding: false,
+            // Base pubblica per i link da ospiti: nei test l'env
+            // PUBLIC_BOOKING_BASE_URL non è configurata, quindi null.
+            public_base_url: null,
         });
 
         // Il claim tenantId sta nel payload del JWT (segmento centrale).

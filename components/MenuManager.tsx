@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Dish, RestaurantMenu, BanquetMenu, BanquetCourse, BanquetStatus, Shift, COMMON_ALLERGENS, VAT_RATES, Customer, Table, TableMerge, Reservation, ArrivalStatus, ReservationStatus, Room } from '../types';
-import { Plus, Search, Tag, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, LayoutGrid, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat, Info, RefreshCw, QrCode, Copy, Languages, Layers, SlidersHorizontal, Share2, MessageCircle, Martini, IceCreamCone, Wine, Wand2 } from 'lucide-react';
+import { Plus, Search, Tag, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, LayoutGrid, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat, Info, RefreshCw, QrCode, Copy, Languages, Layers, SlidersHorizontal, Share2, MessageCircle, Martini, IceCreamCone, Wine, Wand2, DoorClosed } from 'lucide-react';
 import { resizeImageToDataUrl } from '../utils/resizeImage';
 import { getRomeDatePart } from '../utils/reservationTime';
 import { printBanquet } from '../utils/printBanquet';
@@ -11,7 +11,7 @@ import { BanquetCompositionModal } from './BanquetCompositionModal';
 import { BanquetPaymentsModal } from './BanquetPaymentsModal';
 import { DishDetailModal } from './DishDetailModal';
 import { CustomerPickerModal } from './CustomerPickerModal';
-import { getCustomers, getTableMerges, importMenuPassepartout, translateMenu, digitalMenuUrl, getFeatureFlags, updateFeatureFlags, getMenuCategories, saveMenuCategories, saveDishOrder, setDishEnabled, createMenu, renameMenu, deleteMenu, setBanquetStatus, setCategoryMenu, setCategoryBar, setCategoryDessert, setCategoryWine, suggestDishWinePairings, pairMenuWines, createMenuCategory, renameMenuCategory, deleteMenuCategory, getBanquetShareLink, sendBanquetQuoteEmail, sendBanquetQuoteWhatsApp, getModifierGroups, getDishComponents, type AdminModifierGroup, type MenuImportResult, type MenuTranslateResult, type PairWinesResult, type MenuCategory } from '../services/apiService';
+import { getCustomers, getTableMerges, getRoomClosed, importMenuPassepartout, translateMenu, digitalMenuUrl, getFeatureFlags, updateFeatureFlags, getMenuCategories, saveMenuCategories, saveDishOrder, setDishEnabled, createMenu, renameMenu, deleteMenu, setBanquetStatus, setCategoryMenu, setCategoryBar, setCategoryDessert, setCategoryWine, suggestDishWinePairings, pairMenuWines, createMenuCategory, renameMenuCategory, deleteMenuCategory, getBanquetShareLink, sendBanquetQuoteEmail, sendBanquetQuoteWhatsApp, getModifierGroups, getDishComponents, type AdminModifierGroup, type MenuImportResult, type MenuTranslateResult, type PairWinesResult, type MenuCategory } from '../services/apiService';
 import { socketClient } from '../services/socketClient';
 import { getSalaConfig, type SalaStation } from '../services/salaApiService';
 import { MenuVariantsModal } from './MenuVariantsModal';
@@ -199,7 +199,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     autoOpenNewDish,
     onAutoOpenNewDishHandled
 }) => {
-  const { hasPermission, hasFeature } = useAuth();
+  const { hasPermission, hasFeature, user } = useAuth();
   const canViewBanquetPrice = hasPermission('banquet:view_price');
   const canManageBanquetPayments = hasPermission('banquet:manage_payments');
   // Import dalla cassa Passepartout: entitlement del solo ristorante col
@@ -391,7 +391,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const [pairEsito, setPairEsito] = useState<PairWinesResult | null>(null);
   const [pairError, setPairError] = useState<string | null>(null);
   const [linkCopiato, setLinkCopiato] = useState(false);
-  const menuUrl = digitalMenuUrl();
+  const menuUrl = digitalMenuUrl(user?.tenant?.slug, user?.tenant?.public_base_url);
 
   useEffect(() => {
     if (!qrOpen) return;
@@ -1386,6 +1386,24 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       .catch(() => { if (!cancelled) setBanquetMerges([]); });
     return () => { cancelled = true; };
   }, [newBanquet.event_date, newBanquet.shift]);
+
+  // Sale chiuse solo per la data+turno scelti nel form (room_closed_overrides).
+  // Un banchetto può sedere in una sala chiusa al servizio normale — è il
+  // motivo per cui la si chiude — quindi il picker NON le nasconde: le marca
+  // «Chiusa» (vale anche per la chiusura estesa rooms.is_closed) e le lascia
+  // assegnabili. Fail-open: se la fetch fallisce, manca solo il badge.
+  const [pickerClosedRoomIds, setPickerClosedRoomIds] = useState<Set<number>>(new Set());
+  useEffect(() => {
+    const date = newBanquet.event_date;
+    const shift = newBanquet.shift;
+    if (!date || !shift) { setPickerClosedRoomIds(new Set()); return; }
+    let cancelled = false;
+    getRoomClosed(date, shift)
+      .then(overrides => { if (!cancelled) setPickerClosedRoomIds(new Set(overrides.map(o => o.room_id))); })
+      .catch(() => { if (!cancelled) setPickerClosedRoomIds(new Set()); });
+    return () => { cancelled = true; };
+  }, [newBanquet.event_date, newBanquet.shift]);
+  const isPickerRoomClosed = (room: Room) => room.is_closed === true || pickerClosedRoomIds.has(room.id);
 
   // Map of tableId -> occupancy info for the currently selected event_date+shift
   // (excluding the banquet being edited). Used by the table picker in the form.
@@ -3797,10 +3815,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 ) : (
                   <div className="space-y-3">
 
-                    {/* Room tabs */}
+                    {/* Room tabs — anche le sale chiuse: vedi commento su pickerClosedRoomIds */}
                     {(() => {
-                      const openRooms = rooms.filter(r => !r.is_closed);
-                      if (openRooms.length === 0) return null;
+                      if (rooms.length === 0) return null;
                       return (
                         <div>
                           <p className="text-[11px] tracking-[0.02em] font-semibold text-[var(--ds-text-subtle)] mb-2">Sale</p>
@@ -3812,13 +3829,14 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             >
                               Tutte le sale
                             </button>
-                            {openRooms.map(room => (
+                            {rooms.map(room => (
                               <button
                                 key={room.id}
                                 type="button"
                                 onClick={() => setTablePickerRoomFilter(room.id)}
-                                className={`px-4 py-1.5 text-sm font-medium rounded-[var(--ds-radius-control)] whitespace-nowrap transition-colors flex-shrink-0 border ${tablePickerRoomFilter === room.id ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-text-primary)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)]'}`}
+                                className={`inline-flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium rounded-[var(--ds-radius-control)] whitespace-nowrap transition-colors flex-shrink-0 border ${tablePickerRoomFilter === room.id ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-text-primary)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)]'}`}
                               >
+                                {isPickerRoomClosed(room) && <DoorClosed size={14} aria-hidden />}
                                 {room.name}
                               </button>
                             ))}
@@ -3830,10 +3848,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     {/* Tables grouped by room — same UX as Reservations table picker */}
                     <div className="bg-[var(--ds-canvas)] rounded-[var(--ds-radius)] border border-[var(--ds-border)] p-2 sm:p-4 max-h-[400px] overflow-y-auto">
                       {(() => {
-                        const openRooms = rooms.filter(r => !r.is_closed);
                         const displayedRooms = tablePickerRoomFilter === 'ALL'
-                          ? openRooms
-                          : openRooms.filter(r => r.id === tablePickerRoomFilter);
+                          ? rooms
+                          : rooms.filter(r => r.id === tablePickerRoomFilter);
                         if (displayedRooms.length === 0) {
                           return <div className="text-center py-10 text-[var(--ds-text-subtle)] text-sm">Nessuna sala disponibile.</div>;
                         }
@@ -3844,7 +3861,14 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           if (roomTables.length === 0) return null;
                           return (
                             <div key={room.id} className="mb-4 sm:mb-6 last:mb-0">
-                              <h4 className="text-[11px] tracking-[0.02em] font-semibold text-[var(--ds-text-subtle)] mb-2 sticky top-0 bg-[var(--ds-canvas)] py-1 z-10">{room.name}</h4>
+                              <h4 className="flex items-center gap-2 text-[11px] tracking-[0.02em] font-semibold text-[var(--ds-text-subtle)] mb-2 sticky top-0 bg-[var(--ds-canvas)] py-1 z-10">
+                                {room.name}
+                                {isPickerRoomClosed(room) && (
+                                  <span className="inline-flex items-center gap-1 rounded-[var(--ds-radius-control)] border border-[var(--ds-pending-tint)] bg-[var(--ds-pending-tint)] px-2 py-0.5 text-[11px] font-medium text-[var(--ds-pending-text)]">
+                                    <DoorClosed size={11} aria-hidden /> Chiusa
+                                  </span>
+                                )}
+                              </h4>
                               <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2 sm:gap-3">
                                 {roomTables.map(t => {
                                   const isSelected = (newBanquet.table_ids || []).includes(t.id);

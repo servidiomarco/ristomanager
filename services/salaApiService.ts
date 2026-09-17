@@ -1,6 +1,7 @@
 import { authApiService } from './authApiService';
 import { socketClient } from './socketClient';
 import { buildApiError } from './apiError';
+import { routedGetUrl, cloudFallbackUrl, noteRoutedResponse } from './apiRouting';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';
 
@@ -53,8 +54,27 @@ export interface SalaConfig {
   /** Mappa categoria → id partita (solo le categorie mappate). */
   category_stations: Record<string, number>;
   agent: { online: boolean; last_seen_seconds: number | null };
+  /** Nodo di sala (modalità ibrida): stato e configurazione, speculare ad agent. */
+  sala_node: {
+    enabled: boolean;
+    domain: string | null;
+    lan_ip: string | null;
+    port: number;
+    online: boolean;
+    last_seen_seconds: number | null;
+    connected_at: string | null;
+    clients: number | null;
+    cache_entries: number | null;
+    cert_expires_at: string | null;
+  };
   pending_jobs: number;
   failed_jobs: number;
+}
+
+export interface SalaNodeSettingsPayload {
+  domain?: string | null;
+  lan_ip?: string | null;
+  port?: number | null;
 }
 
 const getHeaders = (): HeadersInit => {
@@ -67,7 +87,17 @@ const getHeaders = (): HeadersInit => {
 };
 
 const fetchWithAuth = async (url: string, options: RequestInit = {}, retried = false): Promise<Response> => {
-  const response = await fetch(url, options);
+  let response: Response;
+  try {
+    response = await fetch(url, options);
+  } catch (err) {
+    // Nodo di sala non raggiungibile → retry immediato sul cloud (vedi
+    // apiRouting); errori verso il cloud si propagano com'è sempre stato.
+    const cloudUrl = cloudFallbackUrl(url);
+    if (!cloudUrl) throw err;
+    return fetchWithAuth(cloudUrl, options, retried);
+  }
+  noteRoutedResponse(url, response);
   if (response.status === 401 && !retried) {
     const refreshed = await authApiService.refreshToken();
     if (refreshed) {
@@ -89,7 +119,20 @@ const apiRequest = async <T>(url: string, options: RequestInit = {}): Promise<T>
 };
 
 export const getSalaConfig = (): Promise<SalaConfig> =>
-  apiRequest(`${API_URL}/sala/config`, { headers: getHeaders() });
+  apiRequest(routedGetUrl('/sala/config'), { headers: getHeaders() });
+
+/** Campo assente = non toccare; null/'' = azzera (dominio e IP), port null = 443. */
+export const updateSalaNodeSettings = (payload: SalaNodeSettingsPayload): Promise<{ domain: string | null; lan_ip: string | null; port: number; node_url: string | null }> =>
+  apiRequest(`${API_URL}/sala-node/settings`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify(payload),
+  });
+
+/** Emissione/rinnovo del certificato TLS del nodo: lenta (validazione DNS),
+ *  chi la chiama mostri un'attesa onesta. */
+export const provisionSalaNodeCert = (): Promise<{ domain: string; expires_at: string }> =>
+  apiRequest(`${API_URL}/sala-node/provision-cert`, { method: 'POST', headers: getHeaders() });
 
 /** Campo assente = non toccare; null = torna al default 'preconti'. */
 export const updatePrintRoutes = (routes: Partial<SalaPrintRoutes>): Promise<{ ok: true; print_routes: SalaPrintRoutes }> =>
@@ -141,7 +184,7 @@ export interface SalaProfile {
 }
 
 export const getSalaProfiles = (): Promise<{ profiles: SalaProfile[]; active_profile: string | null }> =>
-  apiRequest(`${API_URL}/sala/profiles`, { headers: getHeaders() });
+  apiRequest(routedGetUrl('/sala/profiles'), { headers: getHeaders() });
 
 /** Salva il setup corrente (fire mode + partite + stampanti) come profilo. */
 export const createSalaProfile = (name: string): Promise<SalaProfile> =>

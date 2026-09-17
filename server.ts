@@ -54,6 +54,8 @@ import {
     comandaToBillPayload,
     PassepartoutBridgeError,
 } from './services/passepartoutBridge.js';
+import { setupSalaNodeBridge, getSalaNodeStatus, disconnectSalaNode } from './services/salaNodeBridge.js';
+import { provisionSalaNodeCert, startSalaNodeCertRenewal, isSalaNodeTlsConfigured, SalaNodeTlsError } from './services/salaNodeTls.js';
 import type { PassepartoutComanda, EsitoChiusuraComanda, PassepartoutArticolo } from './services/passepartoutService.js';
 import { MENU_LANGS, isMenuTranslationConfigured, translateMenuEntries } from './services/menuTranslationService.js';
 import { isWinePairingConfigured, suggestWinePairings } from './services/aiWinePairingService.js';
@@ -151,7 +153,7 @@ import {
     listBookableRooms,
     getCappedRoomIds,
 } from './services/roomOccupancyService.js';
-import { isAllowedOrigin } from './services/corsAllowlist.js';
+import { isAllowedOrigin, allowedOriginHostnamesForTenant } from './services/corsAllowlist.js';
 import {
     getBookingChannelPolicy,
     saveBookingChannelPolicy,
@@ -303,7 +305,7 @@ const tenantTokenCache = new Map<string, { tenantId: number; refreshedAt: number
 const TENANT_TOKEN_TTL_MS = 60_000;
 
 async function resolveTenantByTokenColumn(
-    column: 'webhook_token' | 'print_agent_token',
+    column: 'webhook_token' | 'print_agent_token' | 'sala_node_token',
     token: string
 ): Promise<number | null> {
     // Forma dei token generati (hex di gen_random_bytes): tutto il resto si
@@ -2248,7 +2250,7 @@ app.get('/reservations', authenticate, requirePermission('reservations:view'), a
 
 app.post('/reservations', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
-        const { customer_name, reservation_time, shift, guests, children, table_id, notes, note_selections, email, phone, payment_status, arrival_status, reservation_status, duration_minutes, consent_marketing, consent_data_health } = req.body;
+        const { customer_name, reservation_time, shift, guests, children, table_id, notes, note_selections, email, phone, payment_status, arrival_status, reservation_status, duration_minutes, consent_marketing, consent_data_health, banquet_menu_id } = req.body;
         const childrenCount = Math.max(0, Math.min(Number(children) || 0, Number(guests) || 0));
         const noteSelectionsJson = sanitizeNoteSelections(note_selections);
         // GDPR consents (optional). Stamp consent_updated_at whenever the client
@@ -2315,7 +2317,23 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
             }
         }
 
-        if (await isTableInClosedRoom(req.tenantId!, effectiveTableId)) {
+        // Prenotazione collegata a un banchetto: l'evento può legittimamente
+        // sedere in una sala chiusa al servizio normale (è il motivo per cui
+        // la si chiude), quindi il gate sala-chiusa qui sotto non scatta.
+        // Il menù dev'essere del tenant: il solo FK accetterebbe l'id di un
+        // banchetto altrui.
+        let banquetMenuId: number | null = null;
+        if (banquet_menu_id != null && banquet_menu_id !== '') {
+            const parsedBanquetId = Number(banquet_menu_id);
+            if (!Number.isInteger(parsedBanquetId) || parsedBanquetId <= 0) {
+                return res.status(400).json({ error: 'Menù banchetto non valido.' });
+            }
+            const menuCheck = await queryWithRetry('SELECT id FROM banquet_menus WHERE id = $1 AND tenant_id = $2', [parsedBanquetId, req.tenantId!]);
+            if (menuCheck.rowCount === 0) return res.status(400).json({ error: 'Menù banchetto inesistente.' });
+            banquetMenuId = parsedBanquetId;
+        }
+
+        if (banquetMenuId == null && await isTableInClosedRoom(req.tenantId!, effectiveTableId)) {
             return res.status(400).json({ error: 'La sala selezionata è chiusa. Scegli un tavolo in una sala aperta.' });
         }
         if (effectiveTableId != null && reservation_time && shift) {
@@ -2333,8 +2351,8 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
         }
         const result = await queryWithRetry(
             `WITH ins AS (
-                INSERT INTO reservations (customer_name, reservation_time, shift, guests, children, table_id, notes, email, phone, payment_status, arrival_status, reservation_status, duration_minutes, created_by_user_id, consent_marketing, consent_data_health, consent_updated_at, note_selections, tenant_id)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18::jsonb, $19)
+                INSERT INTO reservations (customer_name, reservation_time, shift, guests, children, table_id, notes, email, phone, payment_status, arrival_status, reservation_status, duration_minutes, created_by_user_id, consent_marketing, consent_data_health, consent_updated_at, note_selections, tenant_id, banquet_menu_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18::jsonb, $19, $20)
                 RETURNING *
             )
             SELECT ins.*, u.full_name AS created_by_user_name,
@@ -2378,6 +2396,7 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
                 consentUpdatedAt,
                 noteSelectionsJson,
                 req.tenantId!,
+                banquetMenuId,
             ]
         );
         const newReservation = result.rows[0];
@@ -2455,7 +2474,7 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
 app.put('/reservations/:id', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const { customer_name, reservation_time, shift, guests, children, table_id, notes, note_selections, email, phone, payment_status, arrival_status, reservation_status, duration_minutes, consent_marketing, consent_data_health } = req.body;
+        const { customer_name, reservation_time, shift, guests, children, table_id, notes, note_selections, email, phone, payment_status, arrival_status, reservation_status, duration_minutes, consent_marketing, consent_data_health, banquet_menu_id } = req.body;
         // Consents are non-destructive: only touched when the client sends an
         // explicit boolean. Missing → keep the stored value (COALESCE).
         const consentMarketing = typeof consent_marketing === 'boolean' ? consent_marketing : null;
@@ -2470,7 +2489,30 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
         const rawDuration = duration_minutes == null || duration_minutes === '' ? null : Number(duration_minutes);
         const durationValue: number | null = Number.isFinite(rawDuration) && rawDuration! > 0 ? Math.min(600, Math.max(15, Math.round(rawDuration!))) : null;
         const effectiveDurationForCheck = durationValue ?? (shift === 'LUNCH' ? 90 : 120);
-        if (await isTableInClosedRoom(req.tenantId!, table_id)) {
+        // Come nelle POST: campo assente = non toccare il collegamento
+        // banchetto salvato; null/'' = scollegare; numero = collegare (dopo
+        // verifica che il menù sia del tenant).
+        const banquetProvided = banquet_menu_id !== undefined;
+        let banquetMenuId: number | null = null;
+        if (banquetProvided && banquet_menu_id != null && banquet_menu_id !== '') {
+            const parsedBanquetId = Number(banquet_menu_id);
+            if (!Number.isInteger(parsedBanquetId) || parsedBanquetId <= 0) {
+                return res.status(400).json({ error: 'Menù banchetto non valido.' });
+            }
+            const menuCheck = await queryWithRetry('SELECT id FROM banquet_menus WHERE id = $1 AND tenant_id = $2', [parsedBanquetId, req.tenantId!]);
+            if (menuCheck.rowCount === 0) return res.status(400).json({ error: 'Menù banchetto inesistente.' });
+            banquetMenuId = parsedBanquetId;
+        }
+        // Il gate sala-chiusa non scatta per le prenotazioni di un banchetto:
+        // l'evento siede legittimamente in una sala chiusa al servizio
+        // normale. Se il client non ha mandato il campo, fa fede il
+        // collegamento già salvato.
+        let isBanquetLinked = banquetMenuId != null;
+        if (!isBanquetLinked && !banquetProvided && table_id != null) {
+            const stored = await queryWithRetry('SELECT banquet_menu_id FROM reservations WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
+            isBanquetLinked = stored.rows[0]?.banquet_menu_id != null;
+        }
+        if (!isBanquetLinked && await isTableInClosedRoom(req.tenantId!, table_id)) {
             return res.status(400).json({ error: 'La sala selezionata è chiusa. Scegli un tavolo in una sala aperta.' });
         }
         // Both CANCELLED and DECLINED free the assigned table so it can be
@@ -2505,7 +2547,8 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                     consent_marketing = COALESCE($15, consent_marketing),
                     consent_data_health = COALESCE($16, consent_data_health),
                     consent_updated_at = CASE WHEN ($15 IS NOT NULL OR $16 IS NOT NULL) THEN CURRENT_TIMESTAMP ELSE consent_updated_at END,
-                    note_selections = COALESCE($17::jsonb, note_selections)
+                    note_selections = COALESCE($17::jsonb, note_selections),
+                    banquet_menu_id = CASE WHEN $19::boolean THEN $20::integer ELSE banquet_menu_id END
                 WHERE id = $14 AND tenant_id = $18
                 RETURNING *
             )
@@ -2552,6 +2595,8 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                 consentDataHealth,
                 noteSelectionsJson,
                 req.tenantId!,
+                banquetProvided,
+                banquetMenuId,
             ]
         );
         const updatedReservation = result.rows[0];
@@ -7491,6 +7536,11 @@ app.get('/company-lookup/:piva', authenticate, requirePermission('payments:full'
 app.post('/webhook/t/:tenantToken/openapi-fiscale', express.urlencoded({ extended: false }), async (req, res) => {
     const tenantId = await resolveWebhookTenantOr404(req, res);
     if (tenantId == null) return;
+    // DENTRO il contesto tenant, come ogni altro webhook: senza, con
+    // app.rls_strict acceso la SELECT su fiscal_documents vede zero righe e
+    // l'esito SDI (anche un REJECTED) muore in un "unknown_ref" silenzioso.
+    // Trovato certificando con TEST_STRICT_RLS=1 il 16/09.
+    await runWithTenantContext(tenantId, async () => {
     try {
         // method JSON → l'entità è il body; method POST → JSON incodato nel
         // campo 'data' (default del sistema di callback Openapi).
@@ -7539,6 +7589,7 @@ app.post('/webhook/t/:tenantToken/openapi-fiscale', express.urlencoded({ extende
         console.error('POST /webhook/openapi-fiscale error:', err?.message);
         res.json({ ok: true, ignored: 'error' });
     }
+    });
 });
 
 // Emissione fattura elettronica (SDI) su un conto CHIUSO o su una singola
@@ -11737,7 +11788,11 @@ app.post('/room-closed', authenticate, requirePermission('floorplan:full'), asyn
 
         // Block if any active reservation is on a table of this room for the
         // given date+shift. Uses the same "active" semantics as public/rooms:
-        // CANCELLED and DECLINED don't count.
+        // CANCELLED and DECLINED don't count. Le prenotazioni collegate a un
+        // banchetto nemmeno: chiudere la sala al servizio normale ATTORNO al
+        // banchetto è proprio il flusso previsto (sala riservata all'evento),
+        // e conta anche il caso inverso — banchetto assegnato prima, chiusura
+        // dopo.
         const reservationCheck = await queryWithRetry(
             `SELECT res.id, res.customer_name
              FROM reservations res
@@ -11746,6 +11801,7 @@ app.post('/room-closed', authenticate, requirePermission('floorplan:full'), asyn
                AND t.room_id = $1
                AND res.shift = $2
                AND DATE(res.reservation_time AT TIME ZONE 'Europe/Rome') = $3
+               AND res.banquet_menu_id IS NULL
                AND COALESCE(res.reservation_status, 'CONFIRMED') NOT IN ('CANCELLED', 'DECLINED')`,
             [room_id, shift, date, req.tenantId!]
         );
@@ -22709,8 +22765,8 @@ app.post('/voice-calls/sync', authenticate, requireFeature('voice'), voiceCallsA
 // directly — the endpoints they gate are low-volume (a handful per minute
 // at most), so caching isn't worth the complexity.
 
-type FeatureFlagKey = 'public_bookings_enabled' | 'voice_agent_enabled' | 'voice_bookings_suspended' | 'voice_double_seating_enabled' | 'pay_at_table_enabled' | 'table_orders_enabled' | 'ai_messages_enabled' | 'ai_wine_pairing_enabled' | 'digital_menu_enabled' | 'passe_enabled' | 'review_requests_enabled' | 'takeaway_online_enabled' | 'takeaway_voice_enabled';
-const FEATURE_FLAG_KEYS: FeatureFlagKey[] = ['public_bookings_enabled', 'voice_agent_enabled', 'voice_bookings_suspended', 'voice_double_seating_enabled', 'pay_at_table_enabled', 'table_orders_enabled', 'ai_messages_enabled', 'ai_wine_pairing_enabled', 'digital_menu_enabled', 'passe_enabled', 'review_requests_enabled', 'takeaway_online_enabled', 'takeaway_voice_enabled'];
+type FeatureFlagKey = 'public_bookings_enabled' | 'voice_agent_enabled' | 'voice_bookings_suspended' | 'voice_double_seating_enabled' | 'pay_at_table_enabled' | 'table_orders_enabled' | 'ai_messages_enabled' | 'ai_wine_pairing_enabled' | 'digital_menu_enabled' | 'passe_enabled' | 'review_requests_enabled' | 'takeaway_online_enabled' | 'takeaway_voice_enabled' | 'sala_node_enabled';
+const FEATURE_FLAG_KEYS: FeatureFlagKey[] = ['public_bookings_enabled', 'voice_agent_enabled', 'voice_bookings_suspended', 'voice_double_seating_enabled', 'pay_at_table_enabled', 'table_orders_enabled', 'ai_messages_enabled', 'ai_wine_pairing_enabled', 'digital_menu_enabled', 'passe_enabled', 'review_requests_enabled', 'takeaway_online_enabled', 'takeaway_voice_enabled', 'sala_node_enabled'];
 
 async function getFeatureFlag(tenantId: number, key: FeatureFlagKey, fallback: boolean): Promise<boolean> {
     try {
@@ -22767,6 +22823,10 @@ const FEATURE_FLAG_DEFAULTS: Record<FeatureFlagKey, boolean> = {
     // titolare accende il canale dalla card Asporto — i tool rispondono
     // con la frase di cortesia finché è spento.
     takeaway_voice_enabled: false,
+    // Off by default: la modalità ibrida si accende dalla card Nodo di sala
+    // quando il nodo è installato e raggiungibile; accesa senza nodo i client
+    // farebbero probe a vuoto a ogni avvio.
+    sala_node_enabled: false,
 };
 
 app.get('/settings/features', authenticate, async (req, res) => {
@@ -22792,6 +22852,11 @@ app.get('/settings/features', authenticate, async (req, res) => {
         if (!(await isFeatureEnabledForTenant(req.tenantId!, 'takeaway'))) {
             flags.takeaway_online_enabled = false;
             flags.takeaway_voice_enabled = false;
+        }
+        // Stessa regola per il nodo di sala: senza l'add-on venduto la
+        // modalità ibrida non esiste, qualunque cosa dica app_settings.
+        if (!(await isFeatureEnabledForTenant(req.tenantId!, 'sala_node'))) {
+            flags.sala_node_enabled = false;
         }
         res.json(flags);
     } catch (err) {
@@ -24221,6 +24286,25 @@ async function loadTakeawayView(tenantId: number, orderId: number): Promise<any 
     return { ...order.rows[0], items: rows, total_cents: total };
 }
 
+// Numero d'ordine del giorno («#12»): progressivo per (tenant, data di
+// ritiro), assegnato DENTRO la transazione di creazione e persistito — mai
+// derivato a video, così un annullamento non rinumera gli ordini già
+// comunicati ai clienti. L'advisory lock transazionale serializza le
+// assegnazioni concorrenti dello stesso giorno (due ordini web nello stesso
+// istante leggerebbero lo stesso MAX+1); l'indice unico parziale della
+// migration resta la rete di sicurezza. Il lock muore col COMMIT/ROLLBACK.
+async function allocateTakeawayDailyNumber(client: { query: (text: string, params?: any[]) => Promise<{ rows: any[] }> }, tenantId: number, pickupDate: string): Promise<number> {
+    await client.query(
+        `SELECT pg_advisory_xact_lock(hashtextextended('takeaway_daily:' || $1 || ':' || $2, 0))`,
+        [String(tenantId), pickupDate]
+    );
+    const r = await client.query(
+        `SELECT COALESCE(MAX(daily_number), 0) + 1 AS n FROM takeaway_orders WHERE tenant_id = $1 AND pickup_date = $2`,
+        [tenantId, pickupDate]
+    );
+    return Number(r.rows[0].n);
+}
+
 // Valida le righe e congela nome/prezzo dal menu. Prezzo base del piatto:
 // il listino dedicato all'asporto arriva con la scelta menu-asporto, non qui.
 async function buildTakeawayItems(tenantId: number, raw: unknown): Promise<{ error?: string; items?: { dish_id: number; name: string; cents: number; qty: number; note: string | null }[] }> {
@@ -24458,7 +24542,7 @@ app.post('/takeaway/orders/:id/fire', authenticate, requireFeature('takeaway'), 
                      opened_by_user_id, service_date, shift)
                  VALUES ($1, NULL, NULL, 'TAKEAWAY', 1, $2, $3, $4, $5)
                  RETURNING id`,
-                [req.tenantId!, `Asporto ${tw.pickup_time} · ${tw.customer_name}`,
+                [req.tenantId!, `Asporto ${tw.pickup_time}${tw.daily_number != null ? ` #${tw.daily_number}` : ''} · ${tw.customer_name}`,
                  req.user?.userId ?? null, tw.pickup_date, tw.shift]
             );
             const kitchenOrderId = Number(ins.rows[0].id);
@@ -24796,10 +24880,11 @@ async function handleElevenLabsCreateTakeawayOrder(tenantId: number, req: expres
         if (built.error) return fail('invalid_items', built.error);
 
         const orderId = await withTenant(tenantId, async client => {
+            const dailyNumber = await allocateTakeawayDailyNumber(client, tenantId, date);
             const ins = await client.query(
-                `INSERT INTO takeaway_orders (tenant_id, customer_name, customer_phone, pickup_date, pickup_time, shift, status, channel, notes)
-                 VALUES ($1, $2, $3, $4, $5, $6, 'CONFIRMED', 'VOICE', $7) RETURNING id`,
-                [tenantId, name, phone, date, time, slot.shift, notes || null]
+                `INSERT INTO takeaway_orders (tenant_id, customer_name, customer_phone, pickup_date, pickup_time, shift, status, channel, notes, daily_number)
+                 VALUES ($1, $2, $3, $4, $5, $6, 'CONFIRMED', 'VOICE', $7, $8) RETURNING id`,
+                [tenantId, name, phone, date, time, slot.shift, notes || null, dailyNumber]
             );
             const id = Number(ins.rows[0].id);
             for (const item of built.items!) {
@@ -24816,7 +24901,7 @@ async function handleElevenLabsCreateTakeawayOrder(tenantId: number, req: expres
         try { socketService?.broadcastToAll(tenantId, 'takeaway:created', view); } catch (_) {}
         pushSendToRoles(tenantId, ['RECEPTION', 'CASSA', 'MANAGER', 'GENERAL_MANAGER', 'OWNER'], {
             category: 'service',
-            title: `Asporto ${time} — nuovo ordine`,
+            title: `Asporto ${time}${view?.daily_number != null ? ` #${view.daily_number}` : ''} — nuovo ordine`,
             body: `${name} · al telefono con Sofia`,
             url: '/?view=ASPORTO',
             tag: `takeaway-new-${orderId}`,
@@ -24829,11 +24914,14 @@ async function handleElevenLabsCreateTakeawayOrder(tenantId: number, req: expres
         res.status(200).json({
             success: true,
             order_id: orderId,
+            daily_number: view?.daily_number ?? null,
             total_cents: totalCents,
             total_readback: totalReadback,
             date_readback: takeawayDateReadback(date),
             items_readback: readback.join(', '),
-            confirmation_phrase: `Perfetto ${name}: segnato ${readback.join(', ')}, da ritirare ${takeawayDateReadback(date)} alle ${time}. In tutto ${totalReadback}.`,
+            // Il numero chiude la frase: è l'ultima cosa detta, quella che
+            // il cliente si segna per il ritiro.
+            confirmation_phrase: `Perfetto ${name}: segnato ${readback.join(', ')}, da ritirare ${takeawayDateReadback(date)} alle ${time}. In tutto ${totalReadback}.${view?.daily_number != null ? ` Il suo numero d'ordine è il ${view.daily_number}.` : ''}`,
         });
     } catch (err) {
         console.error('[elevenlabs] create-takeaway-order error:', err);
@@ -25019,10 +25107,11 @@ async function handlePublicTakeawayOrderCreate(tenantId: number, req: express.Re
         const notes = typeof body.notes === 'string' ? body.notes.trim().slice(0, 1000) : '';
 
         const orderId = await withTenant(tenantId, async client => {
+            const dailyNumber = await allocateTakeawayDailyNumber(client, tenantId, date);
             const ins = await client.query(
-                `INSERT INTO takeaway_orders (tenant_id, customer_name, customer_phone, pickup_date, pickup_time, shift, status, channel, notes)
-                 VALUES ($1, $2, $3, $4, $5, $6, 'CONFIRMED', 'WEB', $7) RETURNING id`,
-                [tenantId, name, phone, date, time, slot.shift, notes || null]
+                `INSERT INTO takeaway_orders (tenant_id, customer_name, customer_phone, pickup_date, pickup_time, shift, status, channel, notes, daily_number)
+                 VALUES ($1, $2, $3, $4, $5, $6, 'CONFIRMED', 'WEB', $7, $8) RETURNING id`,
+                [tenantId, name, phone, date, time, slot.shift, notes || null, dailyNumber]
             );
             const id = Number(ins.rows[0].id);
             for (const item of built.items!) {
@@ -25042,7 +25131,7 @@ async function handlePublicTakeawayOrderCreate(tenantId: number, req: express.Re
         const pieces = view.items.reduce((sum: number, i: any) => sum + Number(i.qty), 0);
         pushSendToRoles(tenantId, ['RECEPTION', 'CASSA', 'MANAGER', 'GENERAL_MANAGER', 'OWNER'], {
             category: 'service',
-            title: `Asporto ${time} — nuovo ordine`,
+            title: `Asporto ${time}${view?.daily_number != null ? ` #${view.daily_number}` : ''} — nuovo ordine`,
             body: `${name} · ${pieces === 1 ? '1 pezzo' : `${pieces} pezzi`}`,
             url: '/?view=ASPORTO',
             tag: `takeaway-new-${orderId}`,
@@ -25051,6 +25140,7 @@ async function handlePublicTakeawayOrderCreate(tenantId: number, req: express.Re
         res.status(201).json({
             ok: true,
             confirmed: true,
+            daily_number: view.daily_number ?? null,
             pickup_date: view.pickup_date,
             pickup_time: view.pickup_time,
             customer_name: view.customer_name,
@@ -25132,10 +25222,11 @@ app.post('/takeaway/orders', authenticate, requireFeature('takeaway'), requirePe
         if (built.error) return res.status(400).json({ error: 'invalid_items', message: built.error });
 
         const orderId = await withTenant(req.tenantId!, async client => {
+            const dailyNumber = await allocateTakeawayDailyNumber(client, req.tenantId!, date);
             const ins = await client.query(
-                `INSERT INTO takeaway_orders (tenant_id, customer_name, customer_phone, pickup_date, pickup_time, shift, status, channel, notes, created_by_user_id)
-                 VALUES ($1, $2, $3, $4, $5, $6, 'CONFIRMED', 'STAFF', $7, $8) RETURNING id`,
-                [req.tenantId!, name, phone || null, date, time, slot.shift, notes || null, req.user?.userId ?? null]
+                `INSERT INTO takeaway_orders (tenant_id, customer_name, customer_phone, pickup_date, pickup_time, shift, status, channel, notes, created_by_user_id, daily_number)
+                 VALUES ($1, $2, $3, $4, $5, $6, 'CONFIRMED', 'STAFF', $7, $8, $9) RETURNING id`,
+                [req.tenantId!, name, phone || null, date, time, slot.shift, notes || null, req.user?.userId ?? null, dailyNumber]
             );
             const id = Number(ins.rows[0].id);
             for (const item of built.items!) {
@@ -25170,6 +25261,7 @@ app.patch('/takeaway/orders/:id', authenticate, requireFeature('takeaway'), requ
         const fields: string[] = [];
         const params: any[] = [orderId, req.tenantId!];
         const push = (sql: string, value: any) => { params.push(value); fields.push(`${sql} = $${params.length}`); };
+        let dateChangedTo: string | null = null;
 
         if ('customer_name' in body) {
             const name = typeof body.customer_name === 'string' ? body.customer_name.trim().slice(0, 120) : '';
@@ -25195,6 +25287,11 @@ app.patch('/takeaway/orders/:id', authenticate, requireFeature('takeaway'), requ
             push('pickup_date', date);
             push('pickup_time', time);
             push('shift', slot.shift);
+            // Il numero segue la data di ritiro: spostato a un altro giorno,
+            // l'ordine prende un numero di QUEL giorno — il vecchio non si
+            // ricicla (l'indice unico lo permetterebbe, ma un «#12» già detto
+            // a un cliente non deve riapparire su un altro ordine).
+            dateChangedTo = date !== current.rows[0].pickup_date ? date : null;
         }
 
         let builtItems: Awaited<ReturnType<typeof buildTakeawayItems>>['items'] | undefined;
@@ -25207,6 +25304,9 @@ app.patch('/takeaway/orders/:id', authenticate, requireFeature('takeaway'), requ
         if (fields.length === 0 && !builtItems) return res.status(400).json({ error: 'empty_patch', message: 'Nessun campo da aggiornare' });
 
         await withTenant(req.tenantId!, async client => {
+            if (dateChangedTo) {
+                push('daily_number', await allocateTakeawayDailyNumber(client, req.tenantId!, dateChangedTo));
+            }
             if (fields.length > 0) {
                 await client.query(
                     `UPDATE takeaway_orders SET ${fields.join(', ')}, updated_at = now() WHERE id = $1 AND tenant_id = $2`,
@@ -25586,6 +25686,11 @@ app.put('/settings/entitlements', authenticate, requirePermission('settings:full
         // Il toggle deve valere subito, non allo scadere del TTL: chi spegne
         // un add-on si aspetta che il canale chiuda alla richiesta successiva.
         invalidateTenantFeaturesCache(req.tenantId!);
+        // Nodo di sala spento: il nodo si stacca subito dal flusso eventi
+        // (l'auto-reconnect verrà rifiutato dall'handshake finché resta off).
+        if (updates.some(u => u.feature === 'sala_node' && !u.enabled)) {
+            disconnectSalaNode(req.tenantId!);
+        }
         res.json(await getTenantFeatures(req.tenantId!));
     } catch (err) {
         console.error('PUT /settings/entitlements error:', err);
@@ -25601,11 +25706,12 @@ app.put('/settings/entitlements', authenticate, requirePermission('settings:full
 app.get('/settings/webhook-info', authenticate, requirePermission('settings:full'), async (req, res) => {
     try {
         const r = await queryWithRetry(
-            'SELECT webhook_token, print_agent_token, slug FROM tenants WHERE id = $1',
+            'SELECT webhook_token, print_agent_token, sala_node_token, slug FROM tenants WHERE id = $1',
             [req.tenantId!]
         );
         const webhookToken: string | null = r.rows[0]?.webhook_token ?? null;
         const printAgentToken: string | null = r.rows[0]?.print_agent_token ?? null;
+        const salaNodeToken: string | null = r.rows[0]?.sala_node_token ?? null;
         const tenantSlug: string | null = r.rows[0]?.slug ?? null;
         // Domini custom del tenant (Fase C3): mostrati accanto all'URL di
         // prenotazione così chi configura il DNS vede cosa punta già qui.
@@ -25621,6 +25727,7 @@ app.get('/settings/webhook-info', authenticate, requirePermission('settings:full
         res.json({
             webhook_token: webhookToken,
             print_agent_token: printAgentToken,
+            sala_node_token: salaNodeToken,
             webhook_base_url: webhookBase,
             booking_url: tenantSlug ? `${base}/prenota/${tenantSlug}` : null,
             domains: domainsRes.rows,
@@ -25976,6 +26083,10 @@ app.patch('/admin/tenants/:id', platformAdminAuth, async (req, res) => {
             // cache-ata: senza invalidazione una sospensione lascerebbe la
             // pagina pubblica viva fino allo scadere del TTL.
             tenantSlugCache.delete(String(exists.rows[0].slug));
+            // Sospensione = anche il nodo di sala si stacca subito: senza
+            // questo resterebbe agganciato al flusso eventi fino alla
+            // scadenza dei JWT dei client.
+            if (status === 'suspended') disconnectSalaNode(tenantId);
             for (const [domain, entry] of tenantDomainCache) {
                 if (entry.hit.tenantId === tenantId) tenantDomainCache.delete(domain);
             }
@@ -29027,7 +29138,7 @@ async function enqueueCoursePrintsInTx(client: any, tenantId: number, orderId: n
     // «Asporto HH:MM» — l'ora di ritiro è ciò che serve alla partita.
     const ctx = await client.query(
         `SELECT CASE WHEN o.order_type = 'TAKEAWAY' THEN NULL ELSE o.covers END AS covers,
-                CASE WHEN o.order_type = 'TAKEAWAY' THEN 'Asporto ' || COALESCE(tw.pickup_time, '')
+                CASE WHEN o.order_type = 'TAKEAWAY' THEN 'Asporto ' || COALESCE(tw.pickup_time, '') || COALESCE(' #' || tw.daily_number, '')
                      ELSE t.name END AS table_name
          FROM orders o
          LEFT JOIN tables t ON t.id = o.table_id AND t.tenant_id = o.tenant_id
@@ -30424,7 +30535,7 @@ app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req,
                     oi.modifiers, oi.note, oi.status, oi.station_id, oi.weight_grams,
                     oi.fired_at, oi.station_start_at, oi.started_at, oi.ready_at,
                     o.table_id,
-                    CASE WHEN o.order_type = 'TAKEAWAY' THEN 'Asporto ' || tw.pickup_time
+                    CASE WHEN o.order_type = 'TAKEAWAY' THEN 'Asporto ' || tw.pickup_time || COALESCE(' #' || tw.daily_number, '')
                          ELSE t.name END AS table_name,
                     o.opened_at AS order_opened_at,
                     o.covers AS order_covers,
@@ -30952,7 +31063,7 @@ app.get('/kds/expediter', authenticate, requirePermission('orders:expedite'), as
                     oi.status, oi.station_id, oi.queued_at, oi.fired_at,
                     oi.station_start_at, oi.ready_at,
                     o.table_id,
-                    CASE WHEN o.order_type = 'TAKEAWAY' THEN 'Asporto ' || tw.pickup_time
+                    CASE WHEN o.order_type = 'TAKEAWAY' THEN 'Asporto ' || tw.pickup_time || COALESCE(' #' || tw.daily_number, '')
                          ELSE t.name END AS table_name,
                     COALESCE(r.customer_name, tw.customer_name) AS customer_name
              FROM order_items oi
@@ -34228,6 +34339,205 @@ async function getPrintRoutes(tenantId: number): Promise<Record<PrintRouteFn, st
     return { preconto: val(PRINT_ROUTE_KEYS.preconto), qr: val(PRINT_ROUTE_KEYS.qr) };
 }
 
+// --- Nodo di sala (tappa 3 ibrido: relay + cache sulla LAN) -----------------
+// Il nodo è un processo sul PC di sala, non un utente: si autentica col
+// token per-tenant (tenants.sala_node_token) come l'agente di stampa. Il
+// canale eventi è il namespace Socket.IO /sala-node (salaNodeBridge); questi
+// endpoint HTTP servono il provisioning (credenziali, certificato TLS) e la
+// configurazione lato client (URL del nodo + interruttore).
+
+// Il token da solo non basta: il nodo di un tenant sospeso, o senza l'add-on
+// venduto, non deve né scaricare credenziali né restare agganciato al flusso
+// eventi in attesa che i JWT scadano. Stessa condizione per l'HTTP qui sotto
+// e per l'handshake del bridge socket.
+const salaNodeTenantAuthorized = async (tenantId: number): Promise<boolean> => {
+    // La lettura dell'entitlement DENTRO il contesto tenant: qui siamo PRIMA
+    // del runWithTenantContext di salaNodeAuth (e nell'handshake del bridge
+    // un contesto non c'è proprio), e con app.rls_strict acceso una query su
+    // tenant_features fuori contesto vede zero righe → add-on "spento" →
+    // 403 eterno col token giusto. Stessa lezione del print agent (21/08),
+    // trovata di nuovo al collaudo in produzione del 16/09 — e in più la
+    // lettura a vuoto avvelena la cache degli entitlement per 60s.
+    if (!(await runWithTenantContext(tenantId, () => isFeatureEnabledForTenant(tenantId, 'sala_node')))) return false;
+    try {
+        const rs = await runAsPlatform(() => queryWithRetry('SELECT status FROM tenants WHERE id = $1', [tenantId]));
+        return rs.rows[0]?.status === 'active';
+    } catch (err: any) {
+        // Blip del DB: si nega. Il nodo ritenta da solo (backoff/reconnect),
+        // meglio un aggancio in ritardo che un tenant sospeso servito.
+        console.error('[sala-node] verifica stato tenant fallita:', err?.message || err);
+        return false;
+    }
+};
+
+const salaNodeAuth = async (req: any, res: any, next: any) => {
+    const provided = String(req.headers['x-sala-node-token'] ?? '');
+    if (!provided) {
+        return res.status(401).json({ error: 'Unauthorized' });
+    }
+    const tenantId = await resolveTenantByTokenColumn('sala_node_token', provided);
+    if (tenantId == null) {
+        return res.status(401).json({ error: 'Unauthorized' });
+    }
+    if (!(await salaNodeTenantAuthorized(tenantId))) {
+        return res.status(403).json({ error: 'tenant_suspended_or_module_off' });
+    }
+    req.salaNodeTenantId = tenantId;
+    // next() DENTRO il contesto tenant: con app.rls_strict acceso una query
+    // fuori contesto vede zero righe (stessa lezione del print agent, 21/08).
+    return runWithTenantContext(req.salaNodeTenantId, () => next());
+};
+
+// Chiavi app_settings della configurazione nodo (testo/int, non boolean:
+// l'interruttore vive in /settings/features come sala_node_enabled).
+const SALA_NODE_DOMAIN_KEY = 'sala_node_domain';
+const SALA_NODE_LAN_IP_KEY = 'sala_node_lan_ip';
+const SALA_NODE_PORT_KEY = 'sala_node_port';
+
+async function getSalaNodeSettings(tenantId: number): Promise<{ domain: string | null; lan_ip: string | null; port: number }> {
+    const rs = await queryWithRetry(
+        `SELECT key, text_value, int_value FROM app_settings WHERE tenant_id = $1 AND key = ANY($2)`,
+        [tenantId, [SALA_NODE_DOMAIN_KEY, SALA_NODE_LAN_IP_KEY, SALA_NODE_PORT_KEY]]
+    );
+    const byKey = new Map(rs.rows.map((r: any) => [r.key, r]));
+    const domain = byKey.get(SALA_NODE_DOMAIN_KEY)?.text_value || null;
+    const lanIp = byKey.get(SALA_NODE_LAN_IP_KEY)?.text_value || null;
+    const rawPort = Number(byKey.get(SALA_NODE_PORT_KEY)?.int_value);
+    return {
+        domain,
+        lan_ip: lanIp,
+        port: Number.isInteger(rawPort) && rawPort > 0 && rawPort <= 65535 ? rawPort : 443,
+    };
+}
+
+function salaNodeUrl(settings: { domain: string | null; port: number }): string | null {
+    if (!settings.domain) return null;
+    return settings.port === 443 ? `https://${settings.domain}` : `https://${settings.domain}:${settings.port}`;
+}
+
+// Bootstrap del nodo: segreto JWT (per verificare i client in locale, anche
+// a linea caduta), allowlist CORS del tenant e certificato TLS. Il nodo la
+// chiama all'avvio e ogni 12h; l'ultima copia la tiene su disco, così un
+// riavvio durante un outage riparte comunque.
+app.get('/sala-node/credentials', salaNodeAuth, async (req: any, res) => {
+    try {
+        const tenantId = req.salaNodeTenantId as number;
+        const settings = await getSalaNodeSettings(tenantId);
+        const [origins, certRs] = await Promise.all([
+            allowedOriginHostnamesForTenant(tenantId),
+            settings.domain
+                ? queryWithRetry(
+                    `SELECT cert_pem, key_pem, expires_at FROM sala_node_certs WHERE tenant_id = $1 AND domain = $2`,
+                    [tenantId, settings.domain]
+                )
+                : Promise.resolve({ rows: [] as any[] }),
+        ]);
+        const cert = certRs.rows[0] ?? null;
+        res.json({
+            tenant_id: tenantId,
+            domain: settings.domain,
+            port: settings.port,
+            jwt_secret: AuthService.getAccessTokenSecret(),
+            allowed_origins: origins,
+            cert: cert
+                ? { cert_pem: cert.cert_pem, key_pem: cert.key_pem, expires_at: cert.expires_at }
+                : null,
+        });
+    } catch (err: any) {
+        console.error('GET /sala-node/credentials error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Configurazione per la SPA: dove sta il nodo e se la modalità ibrida è
+// accesa. enabled = flag operativo AND entitlement AND dominio configurato —
+// il client non deve conoscere le tre condizioni una per una.
+app.get('/sala-node/client-config', authenticate, async (req, res) => {
+    try {
+        const [flag, entitled, settings] = await Promise.all([
+            getFeatureFlag(req.tenantId!, 'sala_node_enabled', false),
+            isFeatureEnabledForTenant(req.tenantId!, 'sala_node'),
+            getSalaNodeSettings(req.tenantId!),
+        ]);
+        const nodeUrl = salaNodeUrl(settings);
+        res.json({
+            enabled: Boolean(flag && entitled && nodeUrl),
+            node_url: nodeUrl,
+        });
+    } catch (err: any) {
+        console.error('GET /sala-node/client-config error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Dominio, IP LAN e porta del nodo, dalla card Impostazioni → Nodo di sala.
+// Sentinella "campo presente nel body": assente = non toccare, null/'' =
+// azzera (come /sala/print-routes).
+app.put('/sala-node/settings', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        const body = req.body ?? {};
+        const upserts: Array<{ key: string; text: string | null; int: number | null }> = [];
+        if ('domain' in body) {
+            const raw = body.domain == null ? '' : String(body.domain).trim().toLowerCase();
+            if (raw && !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(raw)) {
+                return res.status(400).json({ error: 'invalid_domain' });
+            }
+            upserts.push({ key: SALA_NODE_DOMAIN_KEY, text: raw || null, int: null });
+        }
+        if ('lan_ip' in body) {
+            const raw = body.lan_ip == null ? '' : String(body.lan_ip).trim();
+            if (raw && !/^\d{1,3}(\.\d{1,3}){3}$/.test(raw)) {
+                return res.status(400).json({ error: 'invalid_lan_ip' });
+            }
+            upserts.push({ key: SALA_NODE_LAN_IP_KEY, text: raw || null, int: null });
+        }
+        if ('port' in body) {
+            const raw = body.port == null ? 443 : Number(body.port);
+            if (!Number.isInteger(raw) || raw <= 0 || raw > 65535) {
+                return res.status(400).json({ error: 'invalid_port' });
+            }
+            upserts.push({ key: SALA_NODE_PORT_KEY, text: null, int: raw });
+        }
+        if (upserts.length === 0) {
+            return res.status(400).json({ error: 'no_updates' });
+        }
+        for (const u of upserts) {
+            await queryWithRetry(
+                `INSERT INTO app_settings (tenant_id, key, text_value, int_value, updated_at)
+                 VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+                 ON CONFLICT (tenant_id, key) DO UPDATE
+                   SET text_value = EXCLUDED.text_value, int_value = EXCLUDED.int_value, updated_at = CURRENT_TIMESTAMP`,
+                [req.tenantId!, u.key, u.text, u.int]
+            );
+        }
+        const settings = await getSalaNodeSettings(req.tenantId!);
+        res.json({ ...settings, node_url: salaNodeUrl(settings) });
+    } catch (err: any) {
+        console.error('PUT /sala-node/settings error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Emissione/rinnovo manuale del certificato TLS del nodo (primo giro dal
+// bottone in card; poi ci pensa il rinnovo giornaliero). Sincrona e lenta:
+// la validazione DNS-01 prende decine di secondi.
+app.post('/sala-node/provision-cert', authenticate, requirePermission('settings:full'), async (req, res) => {
+    if (!isSalaNodeTlsConfigured()) {
+        return res.status(503).json({ error: 'tls_not_configured' });
+    }
+    try {
+        const result = await provisionSalaNodeCert(req.tenantId!);
+        res.json(result);
+    } catch (err: any) {
+        if (err instanceof SalaNodeTlsError) {
+            const status = err.code === 'no_domain' ? 400 : 502;
+            return res.status(status).json({ error: err.code, message: err.message });
+        }
+        console.error('POST /sala-node/provision-cert error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 app.get('/sala/config', authenticate, async (req, res) => {
     try {
         const [fireMode, stations, printers, jobs, printRoutes, categories, catMap] = await Promise.all([
@@ -34251,6 +34561,24 @@ app.get('/sala/config', authenticate, async (req, res) => {
                 online: printAgentLastSeen != null && Date.now() - printAgentLastSeen < 30_000,
                 last_seen_seconds: printAgentLastSeen != null ? Math.round((Date.now() - printAgentLastSeen) / 1000) : null,
             },
+            // Stato del nodo di sala, speculare ad agent: la card Impostazioni
+            // mostra da UN punto solo se il nodo è vivo e quanti client serve.
+            sala_node: await (async () => {
+                const settings = await getSalaNodeSettings(req.tenantId!);
+                const cert = settings.domain
+                    ? await queryWithRetry(
+                        `SELECT expires_at FROM sala_node_certs WHERE tenant_id = $1 AND domain = $2`,
+                        [req.tenantId!, settings.domain]
+                    )
+                    : { rows: [] as any[] };
+                return {
+                    enabled: await getFeatureFlag(req.tenantId!, 'sala_node_enabled', false)
+                        && await isFeatureEnabledForTenant(req.tenantId!, 'sala_node'),
+                    ...settings,
+                    ...getSalaNodeStatus(req.tenantId!),
+                    cert_expires_at: cert.rows[0]?.expires_at ?? null,
+                };
+            })(),
             pending_jobs: jobCount('PENDING'),
             failed_jobs: jobCount('FAILED'),
         });
@@ -34792,6 +35120,15 @@ const startServer = async () => {
                     setupPassepartoutBridge(socketService.getIO());
                     console.log('✅ Passepartout agent bridge attivo su /pp-agent');
                 }
+                // Sempre attivo (a differenza del pp-agent non dipende da un
+                // env): il token è per-tenant a DB, e senza nodo collegato il
+                // mirror costa una lookup su una Map vuota.
+                setupSalaNodeBridge(
+                    socketService.getIO(),
+                    (token) => resolveTenantByTokenColumn('sala_node_token', token),
+                    salaNodeTenantAuthorized,
+                );
+                console.log('✅ Nodo di sala: bridge attivo su /sala-node');
             } catch (socketError) {
                 console.error('Socket.IO initialization failed:', socketError);
             }
@@ -34829,6 +35166,10 @@ const startServer = async () => {
                             socketService?.broadcastToAll(tenantId, 'order:updated', view.order);
                         });
                         startOutboxDispatcher();
+                        // Rinnovo certificati del nodo di sala: parte solo a
+                        // migration riuscite (la sua tabella deve esistere) e
+                        // solo se Cloudflare è configurato.
+                        startSalaNodeCertRenewal();
                     } catch (migErr) {
                         console.error('❌ Database migrations failed:', migErr);
                     }

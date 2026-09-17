@@ -158,7 +158,7 @@ export const SettleDialog: React.FC<{
   };
 
   const field =
-    'h-12 w-full rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-3 text-right text-[17px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]';
+    'h-12 w-full rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-3 text-right text-[17px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]';
 
   return createPortal(
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-[var(--ds-backdrop)] p-4" onClick={busy ? undefined : onCancel}>
@@ -335,8 +335,8 @@ export const SettleDialog: React.FC<{
               : `Ammanco ${euro(shortfall)}: il conto resterà parziale.`}
           </p>
         </div>
-        <div className="flex items-center justify-end gap-2 border-t border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-4 py-3">
-          <button type="button" onClick={onCancel} disabled={busy} className="inline-flex h-11 items-center rounded-[var(--ds-radius-control)] px-4 text-[15px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-hover)] disabled:opacity-40">Annulla</button>
+        <div className="flex items-center justify-end gap-2 border-t border-[var(--ds-border)] bg-[var(--ds-surface)] px-4 py-3">
+          <button type="button" onClick={onCancel} disabled={busy} className="inline-flex h-11 items-center rounded-[var(--ds-radius-control)] px-4 text-[15px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-40">Annulla</button>
           <button
             type="button"
             onClick={confirm}
@@ -778,7 +778,7 @@ export const InvoiceDialog: React.FC<{
   };
 
   const field =
-    'h-11 w-full rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-3 text-[14px] text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]';
+    'h-11 w-full rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-3 text-[14px] text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]';
   const label = 'mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]';
   const set = (k: keyof typeof buyer) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setBuyer(prev => ({ ...prev, [k]: e.target.value }));
@@ -876,8 +876,8 @@ export const InvoiceDialog: React.FC<{
           </div>
           {error && <p className="text-[13px] text-[var(--ds-critical-text)]">{error}</p>}
         </div>
-        <div className="flex items-center justify-end gap-2 border-t border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-4 py-3">
-          <button type="button" onClick={onCancel} disabled={busy} className="inline-flex h-11 items-center rounded-[var(--ds-radius-control)] px-4 text-[15px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-hover)] disabled:opacity-40">Annulla</button>
+        <div className="flex items-center justify-end gap-2 border-t border-[var(--ds-border)] bg-[var(--ds-surface)] px-4 py-3">
+          <button type="button" onClick={onCancel} disabled={busy} className="inline-flex h-11 items-center rounded-[var(--ds-radius-control)] px-4 text-[15px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-40">Annulla</button>
           <button
             type="button"
             onClick={submit}
@@ -1127,7 +1127,7 @@ export const FiscalCard: React.FC<{
                   value={rtNumber}
                   onChange={e => setRtNumber(e.target.value)}
                   disabled={busy}
-                  className="h-10 w-44 rounded-[var(--ds-radius-control)] border border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-3.5 text-[13px] text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]"
+                  className="h-10 w-44 rounded-[var(--ds-radius-control)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-3.5 text-[13px] text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]"
                 />
                 <button
                   type="button"

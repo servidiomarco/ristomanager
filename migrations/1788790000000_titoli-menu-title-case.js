@@ -42,6 +42,10 @@ export const up = (pgm) => {
             out_s := regexp_replace(out_s, '\\mStg\\M',  'STG',  'g');
             out_s := regexp_replace(out_s, '\\mAoc\\M',  'AOC',  'g');
             out_s := regexp_replace(out_s, '\\mAop\\M',  'AOP',  'g');
+            -- Aggiunta con unita-di-misura-minuscole: sui DB già migrati non
+            -- cambia nulla (la sistemazione dei dati sta in quella migration),
+            -- ma un replay vergine deve produrre gli stessi byte del JS.
+            out_s := regexp_replace(out_s, '\\mIpa\\M',  'IPA',  'g');
             RETURN out_s;
         END
         $fn$ LANGUAGE plpgsql;

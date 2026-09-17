@@ -77,6 +77,9 @@ describe('asporto — ciclo dell\'ordine', () => {
         expect(res.body.items[0].name_snapshot).toBe('Pizza Asporto Test');
         expect(res.body.items[0].unit_price_cents).toBe(850);
         expect(res.body.total_cents).toBe(1700);
+        // Primo ordine del giorno: numero 1. Il progressivo è per data di
+        // ritiro, non globale.
+        expect(res.body.daily_number).toBe(1);
     });
 
     it('rifiuta uno slot fuori dalla griglia di apertura', async () => {
@@ -181,6 +184,29 @@ describe('asporto — ciclo dell\'ordine', () => {
         expect(res.body.shift).toBe('LUNCH');
         expect(res.body.pickup_time).toBe('13:00');
         expect(res.body.total_cents).toBe(2550);
+        // Solo l'ora è cambiata: il numero del giorno resta quello.
+        expect(res.body.daily_number).toBe(1);
+    });
+
+    it('spostato a un altro giorno, l\'ordine prende un numero di quel giorno', async () => {
+        const res = await api().patch(`/takeaway/orders/${orderId}`).set(bearer(token)).send({
+            pickup_date: '2027-04-15',
+            pickup_time: '19:30',
+        });
+        expect(res.status).toBe(200);
+        expect(res.body.pickup_date).toBe('2027-04-15');
+        // Primo ordine del 15: riparte da 1, e il vecchio numero non si
+        // ricicla su quel 14 aprile (resta bruciato).
+        expect(res.body.daily_number).toBe(1);
+
+        // Rientro sul giorno di lavoro dei test: numero NUOVO del 14 (i
+        // numeri già assegnati non si riusano mai).
+        const back = await api().patch(`/takeaway/orders/${orderId}`).set(bearer(token)).send({
+            pickup_date: DATA_ASPORTO,
+            pickup_time: '13:00',
+        });
+        expect(back.status).toBe(200);
+        expect(back.body.daily_number).toBeGreaterThan(1);
     });
 });
 
@@ -368,7 +394,9 @@ describe('asporto — KDS senza confini di turno', () => {
             expect(lunch.status).toBe(200);
             const mine = lunch.body.items.filter((i: any) => i.order_id === kid);
             expect(mine.length).toBeGreaterThan(0);
-            expect(mine[0].table_name).toBe('Asporto 21:30');
+            // L'etichetta porta anche il numero del giorno («Asporto 21:30 #8»):
+            // il numero dipende da quanti ordini i test hanno già creato.
+            expect(mine[0].table_name).toMatch(/^Asporto 21:30 #\d+$/);
 
             const dinner = await api().get('/kds/queue').set(bearer(token))
                 .query({ date: DATA_ASPORTO, shift: 'DINNER' });
@@ -500,6 +528,9 @@ describe('asporto — pubblico (/ordina, fase 2)', () => {
         });
         expect(ok.status).toBe(201);
         expect(ok.body).toMatchObject({ ok: true, confirmed: true, pickup_time: '20:30', total_cents: 1700 });
+        // La conferma porta il numero del giorno: è ciò che il cliente
+        // mostra o dice al banco al ritiro.
+        expect(typeof ok.body.daily_number).toBe('number');
 
         const list = await api().get('/takeaway/orders').set(bearer(token)).query({ date: DATA_ASPORTO });
         const mine = list.body.orders.find((o: any) => o.customer_name === 'Cliente Web');

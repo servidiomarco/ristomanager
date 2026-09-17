@@ -3,6 +3,7 @@ import { socketClient } from './socketClient';
 import { authApiService } from './authApiService';
 import { buildApiError } from './apiError';
 import { offlineQueue } from './offlineQueue';
+import { routedGetUrl } from './apiRouting';
 
 // Use import.meta.env for Vite frontend environment variables
 const API_URL = import.meta.env.VITE_API_URL || "https://ristomanager-production.up.railway.app";
@@ -460,8 +461,14 @@ export const importMenuPassepartout = async (): Promise<MenuImportResult> => {
   });
 };
 
-/** URL pubblico del menu digitale (pagina servita dal backend, come /prenota). */
-export const digitalMenuUrl = (): string => `${API_URL}/menu`;
+/** URL pubblico del menu digitale (pagina servita dal backend, come /prenota).
+ *  Con lo slug usa la forma /m/<slug>: senza, withPublicTenant risolve il
+ *  tenant dal dominio e ripiega sul tenant 1 — su un altro ristorante il QR
+ *  aprirebbe il menu del Frantoio. `publicBase` è la base per gli ospiti dal
+ *  profilo (user.tenant.public_base_url, prenota.sympotia.com): assente, si
+ *  ripiega su VITE_API_URL — stesso server, nome tecnico. */
+export const digitalMenuUrl = (slug?: string, publicBase?: string | null): string =>
+  slug ? `${publicBase || API_URL}/m/${slug}` : `${API_URL}/menu`;
 
 /** Categoria del menu con stato e ordine (le preferenze vivono sul server,
  *  le categorie restano stringhe libere sui piatti). */
@@ -1218,6 +1225,8 @@ export interface FeatureFlags {
   passe_enabled: boolean;
   /** Richiesta di recensione Google dopo la visita (Impostazioni → Recensioni). */
   review_requests_enabled: boolean;
+  /** Modalità ibrida: comande/cucina servite dal nodo di sala sulla LAN. */
+  sala_node_enabled: boolean;
 }
 
 export const getFeatureFlags = async (): Promise<FeatureFlags> => {
@@ -1833,8 +1842,8 @@ export const completeOnboarding = async (): Promise<void> => {
 // Autenticate col JWT PLATFORM_ADMIN via il normale bearer di getHeaders():
 // il server prova prima il JWT, l'env token resta per gli script.
 
-export type AdminTenantFeature = 'voice' | 'whatsapp' | 'web_booking' | 'pay_at_table' | 'passepartout' | 'reviews';
-export const ADMIN_TENANT_FEATURES: AdminTenantFeature[] = ['voice', 'whatsapp', 'web_booking', 'pay_at_table', 'passepartout', 'reviews'];
+export type AdminTenantFeature = 'voice' | 'whatsapp' | 'web_booking' | 'pay_at_table' | 'passepartout' | 'reviews' | 'sala_node';
+export const ADMIN_TENANT_FEATURES: AdminTenantFeature[] = ['voice', 'whatsapp', 'web_booking', 'pay_at_table', 'passepartout', 'reviews', 'sala_node'];
 
 export interface AdminTenant {
   id: number;
@@ -2089,8 +2098,12 @@ export const getKitchenServiceSummary = async (
   if (params?.date) qs.set('date', params.date);
   if (params?.shift) qs.set('shift', params.shift);
   const query = qs.toString();
+  // Instradata via nodo di sala in modalità ibrida (unica GET di questo file
+  // nella whitelist del nodo): senza il retry-su-cloud dei servizi sala — se
+  // il nodo cade, il circuito lo apre comunque il poll gemello del KDS e il
+  // giro successivo (60s) passa dal cloud.
   return apiRequest<KitchenServiceSummary>(
-    `${API_URL}/kitchen/service-summary${query ? `?${query}` : ''}`,
+    routedGetUrl(`/kitchen/service-summary${query ? `?${query}` : ''}`),
     { headers: getHeaders(false) },
   );
 };

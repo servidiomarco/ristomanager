@@ -26,26 +26,27 @@
 14. [Pagamenti, conto al tavolo e cassa](#pagamenti-conto-al-tavolo-e-cassa)
 15. [Fiscalità: scontrino, fattura elettronica, proforma](#fiscalità-scontrino-fattura-elettronica-proforma)
 16. [Integrazione cassa Passepartout](#integrazione-cassa-passepartout)
-17. [Stampa termica e print agent](#stampa-termica-e-print-agent)
-18. [Messaggi: WhatsApp e SMS](#messaggi-whatsapp-e-sms)
-19. [Email](#email)
-20. [Chat staff](#chat-staff)
-21. [Notifiche](#notifiche)
-22. [Recensioni Google](#recensioni-google)
-23. [Clienti (CRM / rubrica)](#clienti-crm--rubrica)
-24. [Attività / to-do](#attività--to-do)
-25. [Personale (turni e presenze)](#personale-turni-e-presenze)
-26. [Inventario](#inventario)
-27. [Lista della spesa e fornitori](#lista-della-spesa-e-fornitori)
-28. [HACCP](#haccp)
-29. [Funzioni AI](#funzioni-ai)
-30. [Impostazioni](#impostazioni)
-31. [Utenti, ruoli e permessi](#utenti-ruoli-e-permessi)
-32. [Privacy e GDPR](#privacy-e-gdpr)
-33. [Piattaforma SaaS: multi-tenant, moduli e abbonamenti](#piattaforma-saas-multi-tenant-moduli-e-abbonamenti)
-34. [Funzionalità trasversali](#funzionalità-trasversali)
-35. [Integrazioni esterne](#integrazioni-esterne)
-36. [Registro aggiornamenti](#registro-aggiornamenti)
+17. [Nodo di sala (modalità ibrida)](#nodo-di-sala-modalità-ibrida)
+18. [Stampa termica e print agent](#stampa-termica-e-print-agent)
+19. [Messaggi: WhatsApp e SMS](#messaggi-whatsapp-e-sms)
+20. [Email](#email)
+21. [Chat staff](#chat-staff)
+22. [Notifiche](#notifiche)
+23. [Recensioni Google](#recensioni-google)
+24. [Clienti (CRM / rubrica)](#clienti-crm--rubrica)
+25. [Attività / to-do](#attività--to-do)
+26. [Personale (turni e presenze)](#personale-turni-e-presenze)
+27. [Inventario](#inventario)
+28. [Lista della spesa e fornitori](#lista-della-spesa-e-fornitori)
+29. [HACCP](#haccp)
+30. [Funzioni AI](#funzioni-ai)
+31. [Impostazioni](#impostazioni)
+32. [Utenti, ruoli e permessi](#utenti-ruoli-e-permessi)
+33. [Privacy e GDPR](#privacy-e-gdpr)
+34. [Piattaforma SaaS: multi-tenant, moduli e abbonamenti](#piattaforma-saas-multi-tenant-moduli-e-abbonamenti)
+35. [Funzionalità trasversali](#funzionalità-trasversali)
+36. [Integrazioni esterne](#integrazioni-esterne)
+37. [Registro aggiornamenti](#registro-aggiornamenti)
 
 ---
 
@@ -192,6 +193,7 @@ Postazione "alla porta" per la gestione degli arrivi.
 Modulo add-on (venduto a parte, come Recensioni) per gli ordini da ritirare — pizzeria, gastronomia, ristorante. Tutto ruota attorno all'**ora di ritiro**.
 
 - **Board del giorno** (pagina Asporto, gruppo Servizio): ordini in lista per slot di ritiro, con ricerca per nome o telefono e filtro Attivi/Tutti; contatori attivi, da produrre, pronti, ritirati.
+- **Numero d'ordine del giorno** («#12»): progressivo per data di ritiro, assegnato alla creazione su ogni canale (banco, web, telefono) e mai rinumerato — un annullamento non sposta i numeri già comunicati. Compare sulla card e nel dettaglio in board, sull'intestazione della comanda in cucina e in cassa, a caratteri grandi nella conferma della pagina `/ordina` («al ritiro basta questo numero») e nella frase di riepilogo di Sofia. Spostare un ordine a un'altra data gli assegna un numero di quel giorno.
 - **Slot di ritiro con capienza**: la griglia oraria è quella degli orari di apertura (chiusure e slot disabilitati compresi); ogni slot ha una capienza di produzione (quanti ordini regge la cucina), e il banco può scavalcarla caso per caso. «Stop asporto» ferma una singola data e decade da solo.
 - **Presa ordine al banco**: nome e telefono del cliente, slot, piatti dal menu con quantità e nota per la cucina, note dell'ordine; nome e prezzo restano congelati come detti al cliente anche se il menu cambia dopo.
 - **Stati che avanzano da soli**: un ordine confermato diventa «Da produrre» quando ora di ritiro − minuti di preparazione è passata, un «Pronto» oltre l'ora di ritiro diventa «Ritiro in ritardo» — stessi automatismi a orologio di «In arrivo»/«In uscita» delle prenotazioni. Il banco muove solo gli stati veri: in preparazione, pronto, ritirato (con correzioni sempre possibili).
@@ -270,6 +272,7 @@ Due voci in sidebar: **Menu** (i piatti, organizzati in menu) e **Banchetti** (g
 - Calendario eventi e filtri temporali (questa settimana, questo mese, più avanti, passati).
 - **Promemoria automatici in cucina a 72, 48 e 24 ore** dall'evento, a priorità crescente, che si spostano da soli se la data cambia.
 - Stampa della scheda evento; colore identificativo per evento visibile su tutte le superfici.
+- **Le sale chiuse restano assegnabili al banchetto**: nel passo «Tavoli assegnati» (e nel modale prenotazioni, se la prenotazione è collegata a un banchetto) le sale chiuse — per il turno o in via estesa — compaiono con il badge «Chiusa» invece di sparire. È il flusso «sala riservata all'evento»: si chiude la sala al servizio normale e la si assegna al banchetto, in qualunque ordine (le prenotazioni del banchetto non bloccano più la chiusura della sala).
 
 ---
 
@@ -398,6 +401,15 @@ Per i ristoranti con cassa **Passepartout Menù** (modulo dedicato):
 - Anteprima della comanda attiva su un tavolo della cassa e **importazione del conto** nel CRM.
 - **Chiusura del conto in cassa dal CRM**: scontrino e saldo partono verso il gestionale; ritentabile se la cassa era irraggiungibile.
 - Collegamento sicuro cloud↔ristorante tramite un piccolo agente installato sulla LAN (nessuna porta aperta verso l'esterno), con stato di connessione visibile.
+
+---
+
+## Nodo di sala (modalità ibrida)
+
+- **Un piccolo server sulla rete del locale** (add-on, hardware fornito) che fa da ripetitore per comande, cucina, passe e conti aperti: gli schermi parlano col nodo, il nodo col cloud.
+- **Se cade la linea internet il servizio non si ferma**: i monitor restano vivi sull'ultima copia buona, con un avviso "dati fermi alle HH:MM" — la sala sa di essere in modalità isola. Al ritorno della linea tutto si riallinea da solo.
+- Le **scritture** (nuove comande, incassi) passano sempre dal cloud: a linea caduta il palmare lo dice chiaramente, e il rinvio è sicuro (nessun piatto duplicato).
+- Si attiva e disattiva da **Impostazioni → Sala & Cucina → Nodo di sala** (interruttore, dominio e IP del nodo, stato online e dispositivi collegati). Certificato e credenziali li distribuisce il cloud: il nodo si installa e si dimentica.
 
 ---
 
@@ -636,6 +648,10 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 | Data | Sezione | Modifica |
 |---|---|---|
 | 2026-09-17 | Asporto | «Ritirato» a conto non incassato chiede conferma: il bottone si arma al primo tocco («Conto non incassato — confermi?») e il secondo tocco conferma il ritiro; a conto chiuso nessun attrito. |
+| 2026-09-17 | Menu & Banchetti | Rifinitura del Title Case dei titoli: le unità di misura dopo una quantità restano minuscole («33 cl», «½ l», «0,5 kg») e «IPA» è riconosciuta come sigla; i titoli esistenti sono sistemati dalla migration. |
+| 2026-09-17 | Asporto | Numero d'ordine del giorno («#12») su ogni canale: in board, sulla comanda in cucina e cassa, a caratteri grandi nella conferma di /ordina e nel riepilogo di Sofia — al ritiro basta dire il numero. |
+| 2026-09-16 | Menu & Banchetti | Le sale chiuse (per turno o estese) restano assegnabili ai banchetti: nel picker tavoli compaiono col badge «Chiusa» invece di sparire, e chiudere una sala non è più bloccato dalle prenotazioni collegate al banchetto. |
+| 2026-09-16 | Nodo di sala (modalità ibrida) | Nuovo modulo (add-on): un nodo sulla rete del locale fa da ripetitore per comande/cucina/passe — a linea caduta gli schermi restano vivi con l'avviso "dati fermi"; toggle e stato in Impostazioni → Sala & Cucina. |
 | 2026-09-15 | Funzionalità trasversali | Nei wizard a passi (banchetti, clienti, personale, prenotazioni, onboarding) la barra dei passi su mobile centra da sola il passo attivo: dopo un «Avanti» si vede subito su quale passo ci si trova. |
 | 2026-09-15 | Menu & Banchetti | Nel wizard del banchetto ogni uscita ha un campo di ricerca piatti: filtra la lista per nome o categoria, resta visibile mentre si scorre. |
 | 2026-09-15 | Asporto | Ordini d'asporto al telefono con Sofia: tool voce con match dei piatti per nome e stesse regole di slot/capienza, dietro l'interruttore «Ordini al telefono» (spento di default); configurazione dei tool documentata nel manuale dell'agente. |

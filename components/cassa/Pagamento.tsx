@@ -127,7 +127,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
     }, { invoiceIntent: doc === 'Fattura' });
   };
 
-  const field = 'h-12 w-full rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-3 text-right text-[17px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]';
+  const field = 'h-12 w-full rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-3 text-right text-[17px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]';
 
   // I due gruppi «canale» e «documento+conferma» vivono nella colonna destra
   // in pagina, in una terza colonna dentro il modal: stessi nodi, un solo
