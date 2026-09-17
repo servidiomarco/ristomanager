@@ -62,19 +62,25 @@ describe('outbox eventi comanda', () => {
         });
         expect(dish.status).toBe(201);
 
-        const add = await api().post(`/orders/${orderId}/items`).set(bearer(token)).send({
-            items: [{ dish_id: dish.body.id, qty: 1 }],
-        });
+        const add = await api().post(`/orders/${orderId}/items`).set(bearer(token))
+            .set('Idempotency-Key', 'outbox-cmd-test-1')
+            .send({
+                items: [{ dish_id: dish.body.id, qty: 1 }],
+            });
         expect(add.status).toBe(201);
 
         // L'evento esiste (era nella stessa transazione delle righe)...
         const scritti = await db.query(
-            `SELECT payload FROM outbox_events WHERE aggregate = $1 AND event = 'order:updated'`,
+            `SELECT payload, command_id, actor FROM outbox_events WHERE aggregate = $1 AND event = 'order:updated'`,
             [`order:${orderId}`]
         );
         expect(scritti.rows.length).toBeGreaterThanOrEqual(1);
         // ...il payload porta riferimenti, mai dati anagrafici (regola PII).
         expect(scritti.rows[0].payload).toEqual({ order_id: orderId });
+        // Fase 1c: la Idempotency-Key del comando client è il command_id
+        // dell'envelope — la dedup end-to-end del protocollo di replica.
+        expect(scritti.rows[0].command_id).toBe('outbox-cmd-test-1');
+        expect(scritti.rows[0].actor.user_id).toBeTypeOf('number');
 
         // ...e viene consegnato.
         const consegnati = await attesaConsegna('aggregate = $1', [`order:${orderId}`]);

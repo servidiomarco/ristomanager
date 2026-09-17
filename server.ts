@@ -2536,7 +2536,16 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
         // Capture the previous reservation_status in the same statement so we
         // can detect transitions (e.g. → CANCELLED) without an extra round-trip
         // and without a race with concurrent updates.
-        const result = await queryWithRetry(
+        //
+        // Tappa 4 fase 1c: la mutazione entra nel log di replica NELLA stessa
+        // transazione — evento SOLO-LOG (nessun handler: il dispatcher lo
+        // marca consegnato senza effetti), il broadcast resta diretto qui
+        // sotto com'è sempre stato. reservation:updated è un tipo 'split'
+        // (inbound cloud + arrivi/assegnazioni servizio sulla stessa route):
+        // il broadcast passerà dall'outbox quando verrà sdoppiato, prima
+        // che la fase 4 sposti l'autorità sul nodo.
+        const result = await runWithOutboxTx(async (txClient) => {
+            const updRes = await txClient.query(
             `WITH old AS (
                 SELECT reservation_status AS prev_status, table_id AS prev_table_id,
                        reservation_time AS prev_reservation_time, guests AS prev_guests
@@ -2598,7 +2607,14 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                 banquetProvided,
                 banquetMenuId,
             ]
-        );
+            );
+            if (updRes.rows[0]) {
+                await outboxEnqueueInTx(txClient, req.tenantId!, 'reservation:updated', `reservation:${id}`,
+                    { reservation_id: Number(id) }, outboxContext(req));
+            }
+            return updRes;
+        });
+        outboxKick();
         const updatedReservation = result.rows[0];
         const previousStatus: string | null = updatedReservation?.prev_status ?? null;
         const previousTableId: number | null = updatedReservation?.prev_table_id ?? null;
@@ -2861,7 +2877,16 @@ app.delete('/reservations/:id', authenticate, requirePermission('reservations:fu
         const existing = await queryWithRetry('SELECT customer_name FROM reservations WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
         const resourceName = existing.rows[0]?.customer_name;
 
-        await queryWithRetry('DELETE FROM reservations WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
+        // Fase 1c: cancellazione nel log di replica, stessa transazione.
+        // Solo-log (vedi PUT): il broadcast resta diretto qui sotto.
+        await runWithOutboxTx(async (txClient) => {
+            const del = await txClient.query('DELETE FROM reservations WHERE id = $1 AND tenant_id = $2 RETURNING id', [id, req.tenantId!]);
+            if (del.rows[0]) {
+                await outboxEnqueueInTx(txClient, req.tenantId!, 'reservation:deleted', `reservation:${id}`,
+                    { reservation_id: Number(id) }, outboxContext(req));
+            }
+        });
+        outboxKick();
 
         // Log activity
         if (req.user) {
@@ -2947,6 +2972,13 @@ app.post('/reservations/:id/swap-table', authenticate, requirePermission('reserv
             [aId, bId, a.table_id, b.table_id, req.tenantId!]
         );
 
+        // Fase 1c: lo scambio tavoli è un atto di servizio puro — nel log di
+        // replica per entrambe le prenotazioni, nella transazione già aperta.
+        // Solo-log: il broadcast resta diretto dopo il COMMIT.
+        const swapCtx = outboxContext(req);
+        await outboxEnqueueInTx(client, req.tenantId!, 'reservation:updated', `reservation:${aId}`, { reservation_id: aId }, swapCtx);
+        await outboxEnqueueInTx(client, req.tenantId!, 'reservation:updated', `reservation:${bId}`, { reservation_id: bId }, swapCtx);
+
         const enriched = await client.query(
             `SELECT r.*, u.full_name AS created_by_user_name,
                     c.is_vip AS customer_is_vip,
@@ -2974,6 +3006,7 @@ app.post('/reservations/:id/swap-table', authenticate, requirePermission('reserv
         );
 
         await client.query('COMMIT');
+        outboxKick();
 
         const updatedA = enriched.rows.find((r: any) => r.id === aId);
         const updatedB = enriched.rows.find((r: any) => r.id === bId);
@@ -11379,6 +11412,17 @@ app.post('/tables', authenticate, requirePermission('floorplan:full'), async (re
 const outboxActor = (req: any): Record<string, string | number | null> | null =>
     req.user ? { user_id: req.user.userId, role: String(req.user.role), channel: 'crm' } : null;
 
+// Il contesto pieno dell'envelope: actor + command_id. Il command_id è la
+// Idempotency-Key del client quando la manda (comande) — è ciò che permette
+// al protocollo di replica di dedupare i comandi end-to-end (sez. 7).
+const outboxContext = (req: any): { commandId: string | null; actor: Record<string, string | number | null> | null } => {
+    const key = req.headers?.['idempotency-key'];
+    return {
+        commandId: typeof key === 'string' && key ? key.slice(0, 80) : null,
+        actor: outboxActor(req),
+    };
+};
+
 // Mutazione singola + evento outbox nella STESSA transazione: la forma
 // minima della regola «evento e mutazione di stato insieme» per le route
 // del dominio sala che erano una sola query. Il chiamante fa outboxKick()
@@ -11458,7 +11502,7 @@ app.put('/tables/:id', authenticate, requirePermission('floorplan:update_status'
             if (row) {
                 await outboxEnqueueInTx(client, req.tenantId!, 'table:updated', `table:${row.id}`,
                     { table_id: row.id, exclude_socket_id: socketId },
-                    { actor: outboxActor(req) });
+                    outboxContext(req));
             }
             return row;
         });
@@ -11589,7 +11633,7 @@ app.post('/table-merges', authenticate, requirePermission('floorplan:full'), asy
                 [date, shift, primary_id, merged_ids, req.tenantId!]
             );
             const row = result.rows[0];
-            await outboxEnqueueInTx(client, req.tenantId!, 'tableMerge:created', `tableMerge:${row.id}`, row, { actor: outboxActor(req) });
+            await outboxEnqueueInTx(client, req.tenantId!, 'tableMerge:created', `tableMerge:${row.id}`, row, outboxContext(req));
             return row;
         });
         outboxKick();
@@ -11635,7 +11679,7 @@ app.delete('/table-merges', authenticate, requirePermission('floorplan:full'), a
             );
             const row = result.rows[0];
             if (row) {
-                await outboxEnqueueInTx(client, req.tenantId!, 'tableMerge:deleted', `tableMerge:${row.id}`, row, { actor: outboxActor(req) });
+                await outboxEnqueueInTx(client, req.tenantId!, 'tableMerge:deleted', `tableMerge:${row.id}`, row, outboxContext(req));
             }
             return row;
         });
@@ -11761,7 +11805,7 @@ app.post('/table-hidden', authenticate, requirePermission('floorplan:full'), asy
                 [date, shift, table_id, req.tenantId!]
             );
             const row = result.rows[0];
-            await outboxEnqueueInTx(client, req.tenantId!, 'tableHidden:created', `tableHidden:${row.id}`, row, { actor: outboxActor(req) });
+            await outboxEnqueueInTx(client, req.tenantId!, 'tableHidden:created', `tableHidden:${row.id}`, row, outboxContext(req));
             return row;
         });
         outboxKick();
@@ -11803,7 +11847,7 @@ app.delete('/table-hidden', authenticate, requirePermission('floorplan:full'), a
             );
             const row = result.rows[0];
             if (row) {
-                await outboxEnqueueInTx(client, req.tenantId!, 'tableHidden:deleted', `tableHidden:${row.id}`, row, { actor: outboxActor(req) });
+                await outboxEnqueueInTx(client, req.tenantId!, 'tableHidden:deleted', `tableHidden:${row.id}`, row, outboxContext(req));
             }
             return row;
         });
@@ -11928,7 +11972,7 @@ app.post('/room-closed', authenticate, requirePermission('floorplan:full'), asyn
                 [date, shift, room_id, req.tenantId!]
             );
             const row = result.rows[0];
-            await outboxEnqueueInTx(client, req.tenantId!, 'roomClosed:created', `roomClosed:${row.id}`, row, { actor: outboxActor(req) });
+            await outboxEnqueueInTx(client, req.tenantId!, 'roomClosed:created', `roomClosed:${row.id}`, row, outboxContext(req));
             return row;
         });
         outboxKick();
@@ -11970,7 +12014,7 @@ app.delete('/room-closed', authenticate, requirePermission('floorplan:full'), as
             );
             const row = result.rows[0];
             if (row) {
-                await outboxEnqueueInTx(client, req.tenantId!, 'roomClosed:deleted', `roomClosed:${row.id}`, row, { actor: outboxActor(req) });
+                await outboxEnqueueInTx(client, req.tenantId!, 'roomClosed:deleted', `roomClosed:${row.id}`, row, outboxContext(req));
             }
             return row;
         });
@@ -24092,7 +24136,7 @@ app.post('/table-assignment-suggestions/:id/confirm', authenticate, requirePermi
             merge = mergeRes.rows[0];
             // L'unione è dominio servizio: nell'event log dentro la stessa
             // transazione, il broadcast lo fa l'handler outbox.
-            await outboxEnqueueInTx(client, req.tenantId!, 'tableMerge:created', `tableMerge:${merge.id}`, merge, { actor: outboxActor(req) });
+            await outboxEnqueueInTx(client, req.tenantId!, 'tableMerge:created', `tableMerge:${merge.id}`, merge, outboxContext(req));
         }
 
         await client.query(
@@ -24804,7 +24848,7 @@ app.post('/takeaway/orders/:id/bill', authenticate, requireFeature('takeaway'), 
                      WHERE id = $1`,
                     [tw.kitchen_order_id, req.user?.userId ?? null]
                 );
-                await outboxEnqueueInTx(client, req.tenantId!, 'order:updated', `order:${tw.kitchen_order_id}`, { order_id: tw.kitchen_order_id });
+                await outboxEnqueueInTx(client, req.tenantId!, 'order:updated', `order:${tw.kitchen_order_id}`, { order_id: tw.kitchen_order_id }, outboxContext(req));
             }
             return { billId, reused: false };
         });
@@ -30250,7 +30294,7 @@ app.post('/orders/:id/items', authenticate, requirePermission('orders:take'), as
         // L'evento fa parte della transazione: o righe + evento, o niente.
         // Il broadcast lo fa il dispatcher dell'outbox (kick sotto), così un
         // processo morto fra COMMIT e notifica non lascia la cucina cieca.
-        await outboxEnqueueInTx(client, req.tenantId!, 'order:updated', `order:${orderId}`, { order_id: orderId });
+        await outboxEnqueueInTx(client, req.tenantId!, 'order:updated', `order:${orderId}`, { order_id: orderId }, outboxContext(req));
         await client.query('COMMIT');
         client.release();
 
@@ -30530,7 +30574,7 @@ app.post('/orders/:id/send', authenticate, requirePermission('orders:take'), asy
         // L'invio (e l'eventuale lancio automatico) viaggia con la stessa
         // transazione che cambia gli stati: la cucina non può restare cieca
         // su un invio committato.
-        await outboxEnqueueInTx(client, req.tenantId!, 'order:updated', `order:${orderId}`, { order_id: orderId });
+        await outboxEnqueueInTx(client, req.tenantId!, 'order:updated', `order:${orderId}`, { order_id: orderId }, outboxContext(req));
         await client.query('COMMIT');
         client.release();
 
@@ -30622,7 +30666,7 @@ app.post('/orders/:id/courses/:n/recall', authenticate, requirePermission('order
             if (recalled === 0) {
                 await client.query('ROLLBACK');
             } else {
-                await outboxEnqueueInTx(client, req.tenantId!, 'order:updated', `order:${orderId}`, { order_id: orderId });
+                await outboxEnqueueInTx(client, req.tenantId!, 'order:updated', `order:${orderId}`, { order_id: orderId }, outboxContext(req));
                 await client.query('COMMIT');
             }
         } catch (err) {
@@ -30705,7 +30749,7 @@ app.post('/orders/:id/courses/:n/unfire', authenticate, requireAnyPermission('or
                     // motivo del fuoco (una chiamata annullata di cui la
                     // partita non sa niente è un'uscita cucinata a vuoto).
                     await enqueueCoursePrintsInTx(client, req.tenantId!, orderId, courseNo, unfired, { label: 'ANNULLO CHIAMATA' });
-                    await outboxEnqueueInTx(client, req.tenantId!, 'order:updated', `order:${orderId}`, { order_id: orderId });
+                    await outboxEnqueueInTx(client, req.tenantId!, 'order:updated', `order:${orderId}`, { order_id: orderId }, outboxContext(req));
                     await client.query('COMMIT');
                 }
             }
@@ -31696,7 +31740,7 @@ app.post('/orders/:id/courses/:n/serve', authenticate, requireAnyPermission('ord
             }
         }
 
-        await outboxEnqueueInTx(client, req.tenantId!, 'order:updated', `order:${orderId}`, { order_id: orderId });
+        await outboxEnqueueInTx(client, req.tenantId!, 'order:updated', `order:${orderId}`, { order_id: orderId }, outboxContext(req));
         await client.query('COMMIT');
         client.release();
 
@@ -32262,7 +32306,7 @@ app.post('/orders/:id/close', authenticate, requirePermission('orders:take'), as
                  WHERE id = $1`,
                 [orderId, req.user?.userId ?? null]
             );
-            await outboxEnqueueInTx(client, req.tenantId!, 'order:updated', `order:${orderId}`, { order_id: orderId });
+            await outboxEnqueueInTx(client, req.tenantId!, 'order:updated', `order:${orderId}`, { order_id: orderId }, outboxContext(req));
             await client.query('COMMIT');
             client.release();
             outboxKick();
@@ -32328,7 +32372,7 @@ app.post('/orders/:id/close', authenticate, requirePermission('orders:take'), as
         );
         // La chiusura viaggia con la transazione: sala e cassa non possono
         // restare con una comanda che risulta ancora aperta.
-        await outboxEnqueueInTx(client, req.tenantId!, 'order:updated', `order:${orderId}`, { order_id: orderId });
+        await outboxEnqueueInTx(client, req.tenantId!, 'order:updated', `order:${orderId}`, { order_id: orderId }, outboxContext(req));
         await client.query('COMMIT');
         client.release();
 
