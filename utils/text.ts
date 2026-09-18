@@ -113,3 +113,37 @@ export const getInitials = (name?: string | null): string => {
   const last = parts.length > 1 ? parts[parts.length - 1][0] || '' : '';
   return (first + last).toUpperCase();
 };
+
+// Chiave di confronto fra telefoni: il numero NAZIONALE, non le ultime 10
+// cifre. right-10 sbaglia sui cellulari storici a 9 cifre ("+39 330 581013"
+// → "9330581013": pesca la 9 del prefisso e non combacia mai col
+// "330581013" salvato in rubrica — caso Pisciotta 2026-09-18, thread
+// WhatsApp sdoppiato in due conversazioni). Il prefisso italiano si toglie
+// solo quando la lunghezza lo rende inequivocabile: 11 cifre = 39+9, 12 =
+// 39+10; un nazionale che inizia per 39 (prefisso 393…, 10 cifre) resta
+// intatto. Stessa logica di PHONE_MATCH_KEY_SQL in server.ts: cambiarla qui
+// significa cambiarla anche là.
+export function phoneMatchKey(input: string | null | undefined): string {
+  const d = String(input ?? '').replace(/\D/g, '');
+  if (d.startsWith('00')) return phoneMatchKey(d.slice(2));
+  if ((d.length === 11 || d.length === 12) && d.startsWith('39')) return d.slice(2);
+  return d;
+}
+
+// Le forme in cui la stessa utenza può stare in una colonna "cifre nude"
+// (to/from_phone_digits): nazionale, col 39, col 0039. Un confronto
+// `= ANY(...)` su queste tre usa gli indici pieni delle colonne, dove
+// right(..., 10) non è indicizzato.
+export function phoneDigitsVariants(input: string | null | undefined): string[] {
+  const key = phoneMatchKey(input);
+  return key ? [key, `39${key}`, `0039${key}`] : [];
+}
+
+// Varianti per i confronti su right(..., 10) (gli indici last10 di rubrica e
+// prenotazioni): per i numeri da 10 cifre in su le due forme coincidono, per
+// i cellulari storici a 9 la seconda copre le righe salvate col prefisso.
+export function phoneLast10Variants(input: string | null | undefined): string[] {
+  const key = phoneMatchKey(input);
+  if (!key) return [];
+  return [...new Set([key.slice(-10), `39${key}`.slice(-10)])];
+}

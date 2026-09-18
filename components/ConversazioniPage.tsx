@@ -18,7 +18,7 @@ import {
 } from '../services/voiceCallsApiService';
 import { Reservation } from '../types';
 import { useToast } from '../contexts/ToastContext';
-import { toTitleCase } from '../utils/text';
+import { toTitleCase, phoneMatchKey } from '../utils/text';
 import {
   SplitPane, PaneHeader, PanePlaceholder, StatusPill, CountBadge, SearchField, EmptyState, SectionHeader,
   Avatar, SwipeRow, useFirstRunHint, SegmentedControl, FormCard, Callout,
@@ -896,7 +896,7 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
     const groups: VoiceCallSummary[][] = [];
     const byPhone = new Map<string, VoiceCallSummary[]>();
     for (const c of pendingCalls) {
-      const key = (c.phone || '').replace(/\D/g, '').slice(-10);
+      const key = phoneMatchKey(c.phone);
       if (!key) { groups.push([c]); continue; }
       const existing = byPhone.get(key);
       if (existing) { existing.push(c); continue; }
