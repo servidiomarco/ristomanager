@@ -127,11 +127,48 @@ parola da spiegare a un investitore.
 | **Larder** | la dispensa | nulla trovato |
 | **Pantry** | la dispensa | nulla di primario, ma il food-tech e il grocery lo usano molto |
 
-**Supper** è il più vicino a Toast: parola di casa, due sillabe, un italiano la
-legge al primo colpo, e nessun gestionale la usa. **Larder** è più distintivo e
-più bello, ma dice il **retro** — la dispensa — mentre il cuore del prodotto è
-la sala: il nome punterebbe sul magazzino, che qui è la funzione minore.
-**Pantry** ha lo stesso difetto ed è più affollato.
+**Supper** è il più vicino a Toast, ed è **pulito sul lato marchi**: le uniche
+registrazioni trovate sono due americane e tutte e due cancellate (SUPPER
+SOLUTIONS, e — istruttivo — SUPER SUB SUPPERS). Nessun gestionale lo usa.
+
+**Ma non passa la prova di dettatura in italiano, ed è lo stesso motivo per cui
+è stata bocciata Sympotia.** L'italiano non ha il suono /ʌ/: un italiano che
+dice «Supper» dice **«Super»**, e *super* è una delle parole più generiche
+della rete — il traffico da errore non arriva da nessuna parte e la SERP non
+sarà mai tua. Non aiuta che «supper» non sia nemmeno una parola che un
+ristoratore italiano conosce: *toast* funziona in Italia perché il toast
+esiste nei bar italiani, *supper* no.
+
+Il che rende Supper una scelta legittima ma **su quale mercato è ottimizzato il
+marchio**: in UK e Irlanda è un ottimo nome, al telefono in Italia è «Super».
+Con i primi cinquanta clienti italiani, il conto non torna.
+
+**Larder** è più distintivo e non ha nessun vicino italiano, ma dice il
+**retro** — la dispensa — mentre il cuore del prodotto è la sala: il nome
+punterebbe sul magazzino, che qui è la funzione minore. **Pantry** ha lo stesso
+difetto ed è più affollato.
+
+### Tessera — la risposta al gusto di «Tabula»
+
+Se quello che piaceva di Tabula era il registro — latino, calmo, credibile,
+l'oggetto e non la scena — il nome giusto di quella famiglia è **Tessera**, e
+ha una storia che nessun altro nome di queste tre rose può reggere.
+
+La **tessera hospitalis** era il gettone dell'ospitalità romana: alla partenza
+l'oste lo spezzava in due e ne dava metà al suo ospite. Le due metà restavano
+nelle due famiglie **per generazioni**, perché i discendenti potessero
+riconoscersi e rinnovare il legame. Un CRM che ricorda l'ospite da una visita
+all'altra **è letteralmente quell'oggetto**: è la cosa che permette a un oste
+di riconoscere chi torna.
+
+**Le crepe, tutte e tre**: in Italia «tessera» si legge prima di tutto come
+*tessera sanitaria* o *tessera fedeltà* — mondana, non romana. Sono tre
+sillabe, quindi rompe il filtro «una o due» di questo brief. E sul lato marchi
+va guardata: Tessera Holding si è rinominata **Xperi** nel 2017 (il marchio
+tech è stato ritirato ma le registrazioni possono sopravvivere presso le
+affiliate), esiste Tessera Therapeutics nel biotech, e **Tessitura** è un CRM
+di biglietteria per il settore culturale — foneticamente vicino e in un vicinato
+merceologico non lontanissimo.
 
 ### Conio astratto (registro Nory)
 
@@ -147,11 +184,22 @@ interessa, sono tre punti di partenza, non tre candidati verificati.
 
 La corsia non italiana è la più affollata di tutte: **Vesta** (256 marchi, più
 un marchio in classe 9 per software), **Grata** (35 M$, acquisita da Datasite),
-**Tabula** (contabilità autonoma, YC 2024, Berlino), **Convive** (Convive
-Brands, 70+ ristoranti a New York), **Linen** (il software di gestione biancheria
-per hotel occupa la parola), **Porter** (Porter & Sail, Porter food ordering
-negli hotel, Porter Hospitality), **Gast** (in Germania «gast-» è il prefisso
-standard del software alberghiero: Gastware, Gastfreund, gastrodat, gastromatic).
+**Convive** (Convive Brands, 70+ ristoranti a New York), **Linen** (il software
+di gestione biancheria per hotel occupa la parola), **Porter** (Porter & Sail,
+Porter food ordering negli hotel, Porter Hospitality), **Gast** (in Germania
+«gast-» è il prefisso standard del software alberghiero: Gastware, Gastfreund,
+gastrodat, gastromatic), **Repast** (il toolkit di simulazione della University
+of Chicago).
+
+**Tabula va letta per intero, perché è il caso peggiore della lista.**
+`tabula.de` è un SaaS B2B europeo vivo e finanziato — contabilità AI, YC S24,
+Berlino, 4,7 M$ da LocalGlobe — **nelle nostre stesse classi 9/42 e nel nostro
+stesso continente**. Sopra ci sono Tabula Rasa HealthCare (11 marchi
+registrati) e Tabular, comprata da Databricks. Con SYMPOSIA il problema era una
+parola *diversa* in classi *diverse* (9+38, audiovisivo medicale); con Tabula
+sarebbe la **stessa parola** nelle **stesse classi**, contro una startup che ha
+appena raccolto e che il marchio lo difenderà. Adottarla significherebbe rifare
+il problema da cui stiamo uscendo, peggiorato.
 
 E una che vale come promemoria: **Fika** — la pausa svedese, perfetta sulla
 carta — un italiano la legge *fica*. Il mercato di casa va controllato anche
