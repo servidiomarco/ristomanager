@@ -9861,7 +9861,12 @@ app.post('/messages/agent/proposals/:id/confirm', authenticate, requirePermissio
             return res.status(400).json({ error: 'Strumento non eseguibile', tool: prop.tool });
         }
 
-        const outcome = await esegui(req.tenantId!, args, WHATSAPP_CHANNEL);
+        // name_confirmed: la proposta la esegue un operatore che l'ha appena
+        // letta e approvata — la conferma umana vale come chiarimento, quindi
+        // il gate name_mismatch di bookingTools non deve bloccarla. Se il nome
+        // differisce dal titolare del numero resta la nota "Numero in
+        // rubrica: ..." sulla prenotazione.
+        const outcome = await esegui(req.tenantId!, prop.tool === 'create_reservation' ? { ...args, name_confirmed: true } : args, WHATSAPP_CHANNEL);
         const riuscito = outcome.body?.success === true;
         await queryWithRetry(
             `UPDATE agent_proposals
@@ -35803,6 +35808,7 @@ bookingTools.configureBookingTools({
     recordVoiceCall,
     recordCallbackRequest,
     upsertCustomerFromReservation,
+    findCustomerByPhone,
     isPhoneBlacklisted,
     getBlacklistPolicy,
 
