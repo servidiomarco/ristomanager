@@ -1,10 +1,19 @@
 # Nodo di sala — installazione e gestione
 
-Il nodo di sala è il processo LAN della modalità ibrida: relay Socket.IO +
-cache di lettura per comande/cucina/passe. Vive accanto agli altri due agenti
-del ristorante (print agent, agente Passepartout) sul PC Windows di sala.
+Il nodo di sala vive sul PC Windows del ristorante, accanto a print agent e
+agente Passepartout. Due generazioni:
+
+- **Tappa 3 (questa cartella)**: relay Socket.IO + cache di lettura —
+  letture e realtime dalla LAN, scritture sempre al cloud.
+- **Tappa 4 (il full-server)**: LO STESSO `server.ts` del cloud, avviato con
+  `SERVER_PROFILE=service-node` e un Postgres locale — si bootstrappa dal
+  cloud (snapshot + cursore), resta in replica bidirezionale, e con
+  l'interruttore «Servizio completo sul nodo» prende l'autorità delle
+  battiture di sala. Sostituisce il relay sulla STESSA porta: i client non
+  si accorgono del cambio. Installazione: sezione «Tappa 4» in fondo.
+
 Architettura e razionale: `docs/brainstorming-installazione-ibrida.md` nel
-repo marketing (sez. 3–7); questa cartella è la tappa 3.
+repo marketing (sez. 3–7).
 
 ## Prerequisiti
 
@@ -81,3 +90,83 @@ scriverla in card.
   guardare nei log Railway `[sala-node] nodo connesso/disconnesso`; se non
   ci sono tentativi, sul PC il processo non gira (l'auto-reconnect è
   infinito: se girasse si ricollegherebbe da solo).
+
+
+## Tappa 4 — il full-server al posto del relay
+
+Prerequisiti in più rispetto alla tappa 3:
+
+1. **PostgreSQL per Windows** (≥ 15) sul PC, con l'utente `postgres`
+   SUPERUSER (serve a `session_replication_role` nel carico dello snapshot
+   e nell'applier della replica). Installer ufficiale EDB, servizio
+   automatico, password annotata. Poi il database:
+
+   ```
+   "C:\Program Files\PostgreSQL\17\bin\psql" -U postgres -c "CREATE DATABASE ristonodo"
+   ```
+
+2. Dipendenze del server nel checkout (una volta, con la linea su):
+
+   ```bat
+   cd /d C:\ristomanager-agents\app
+   git pull
+   npm ci
+   npm run build:server
+   ```
+
+`C:\ristomanager-agents\run-sala-node4.cmd` (ASCII PURO, come sempre):
+
+```bat
+@echo off
+cd /d C:\ristomanager-agents\app
+set SERVER_PROFILE=service-node
+set DATABASE_URL=postgresql://postgres:<password>@localhost:5432/ristonodo
+set SALA_NODE_CLOUD_URL=https://ristomanager-production.up.railway.app
+set SALA_NODE_TOKEN=<token dal CRM>
+set SALA_NODE_STATE_DIR=C:\ristomanager-agents\sala-node-state
+set PORT=8443
+set JWT_SECRET=<lo stesso del cloud - gia' nelle credenziali del relay>
+set JWT_REFRESH_SECRET=<idem>
+node dist\server.js
+```
+
+Nota JWT: il nodo verifica i token dei client col segreto condiviso — gli
+stessi due valori del cloud (Railway → variables). Senza, i palmari
+riceverebbero 401 sul nodo.
+
+Lo scambio (fuori servizio):
+
+```powershell
+Stop-ScheduledTask "RistoManager Sala Node"
+Disable-ScheduledTask "RistoManager Sala Node"
+$action = New-ScheduledTaskAction -Execute "C:\ristomanager-agents\run-sala-node4.cmd"
+$trigger = New-ScheduledTaskTrigger -AtStartup
+$settings = New-ScheduledTaskSettingsSet -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
+Register-ScheduledTask "RistoManager Sala Node 4" -Action $action -Trigger $trigger -Settings $settings -User "SYSTEM" -RunLevel Highest
+Start-ScheduledTask "RistoManager Sala Node 4"
+```
+
+La regola firewall della porta resta quella della tappa 3. Il TLS se lo
+carica da solo (certificato dal cloud, cache in SALA_NODE_STATE_DIR: un
+riavvio a linea giù riparte in HTTPS comunque).
+
+### Verifiche tappa 4
+
+1. Il log del nodo, in ordine: migrazioni ok → `🔒 TLS del nodo attivo` →
+   `[bootstrap] ✅ proiezioni caricate, cursore 'cloud' a N` →
+   `[replica] uplink connesso al cloud`.
+2. `https://sala.<slug>.sympotia.com:8443/health` dal palmare → 200.
+3. Card Impostazioni: «nodo online»; la riga «Servizio completo sul nodo»
+   dice «pronto: repliche allineate» entro qualche secondo.
+4. Interruttore autorità ON → comanda di prova dal palmare → compare anche
+   sul back-office (fuori LAN) entro pochi secondi.
+5. Prova outage FUORI servizio: WAN giù → si batte una comanda → i monitor
+   LAN la vedono; WAN su → entro pochi secondi compare anche sul cloud e la
+   card torna «repliche allineate».
+
+### Tornare indietro
+
+Interruttore autorità OFF dalla card (aspetta il drenaggio), poi
+`Stop-ScheduledTask "RistoManager Sala Node 4"` e riattivare la task della
+tappa 3. Il downgrade è il failover: senza nodo i client tornano al cloud
+da soli (circuito + probe).
