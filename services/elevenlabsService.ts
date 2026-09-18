@@ -899,7 +899,7 @@ export async function createVoiceReservation(
     const phone = normalizeItalianPhone(input.phone);
     const notes = input.notes
         ? `[Voce] ${input.notes}`
-        : '[Voce] Prenotazione creata da agent vocale ElevenLabs';
+        : '[Voce] Prenotazione presa da Sofia';
     const children = Math.max(0, Math.min(Number(input.children) || 0, input.guests));
     const reservationDate = input.reservation_time.slice(0, 10);
 
