@@ -4,7 +4,7 @@
 
 Il prompt sotto è stato scritto per risolvere il caso reale del **16 luglio 2026**: Sofia ha detto a un cliente "prenotazione confermata, riceverà WhatsApp" ma non ha mai invocato `create-reservation`. Le regole `SEMPRE/MAI` in cima al prompt sono la difesa principale contro questo bug.
 
-> **Allineamento 2026-09-18.** Questo blocco è la copia del prompt in produzione, con due ritocchi sulle zone (step 4 del flusso e la regola sull'aria condizionata) introdotti insieme al fix server "zone chiuse" (PR #630): a sale chiuse la frase di `check_availability` nomina già l'unica zona offribile. La sezione ORDINI D'ASPORTO non è nel blocco: è in appendice, da aggiungere in coda al prompt solo quando si accende «Ordini al telefono».
+> **Allineamento 2026-09-18.** Questo blocco è la copia del prompt in produzione (aggiornato via API insieme alle PR #630 e #632): la zona si nomina solo se la chiede il cliente, e una zona con le sale chiuse si dice «chiusa» (campi `indoor_closed`/`outdoor_closed`), mai «al completo». La sezione ORDINI D'ASPORTO non è nel blocco: è in appendice, da aggiungere in coda al prompt solo quando si accende «Ordini al telefono».
 
 ---
 
