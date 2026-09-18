@@ -6,6 +6,15 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
+    // Build-time app version: 7-char short SHA from whichever host is doing
+    // the SPA build — Vercel (frontend at crm.vecchiofrantoio.com) exposes
+    // VERCEL_GIT_COMMIT_SHA, Railway RAILWAY_GIT_COMMIT_SHA. Falls back to
+    // 'dev' locally so the banner never fires (useAppVersion early-returns).
+    const appVersion = (
+        process.env.VERCEL_GIT_COMMIT_SHA
+        || process.env.RAILWAY_GIT_COMMIT_SHA
+        || ''
+    ).slice(0, 7) || 'dev';
     return {
       server: {
         port: 5173,
@@ -43,23 +52,27 @@ export default defineConfig(({ mode }) => {
         // In dev niente SW (index.tsx registra solo in PROD): un SW sotto
         // HMR serve shell stantie e confonde più di quanto aiuti.
         devOptions: { enabled: false },
-      })],
+      }), {
+        // version.json accanto a index.html: è la fonte del banner «Nuova
+        // versione». Il banner DEVE confrontarsi con la versione del
+        // frontend pubblicato (stessa origin, stesso deploy atomico del
+        // bundle), non con /version del backend Railway: i due deploy non
+        // finiscono insieme, e nella finestra in cui Railway era già nuovo
+        // ma Vercel no il banner ricompariva subito dopo ogni «Ricarica»
+        // perché il reload riscaricava per forza il bundle vecchio.
+        name: 'emit-version-json',
+        apply: 'build',
+        generateBundle() {
+          this.emitFile({
+            type: 'asset',
+            fileName: 'version.json',
+            source: JSON.stringify({ version: appVersion }),
+          });
+        },
+      }],
       define: {
-        // Build-time app version. Read from whichever host is doing the SPA
-        // build: Vercel (frontend at crm.vecchiofrantoio.com) exposes
-        // VERCEL_GIT_COMMIT_SHA, Railway (backend, or if the SPA is ever
-        // built there) exposes RAILWAY_GIT_COMMIT_SHA. We bake the 7-char
-        // short SHA into the bundle so the client can compare it against
-        // the /version endpoint and prompt the user to reload when a newer
-        // deploy is live. Falls back to 'dev' locally so the banner never
-        // fires (useAppVersion early-returns on 'dev').
-        __APP_VERSION__: JSON.stringify(
-          (
-            process.env.VERCEL_GIT_COMMIT_SHA
-            || process.env.RAILWAY_GIT_COMMIT_SHA
-            || ''
-          ).slice(0, 7) || 'dev'
-        ),
+        // Stessa versione cotta nel bundle, da confrontare con version.json.
+        __APP_VERSION__: JSON.stringify(appVersion),
       },
       resolve: {
         alias: {
