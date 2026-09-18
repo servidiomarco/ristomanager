@@ -17,7 +17,7 @@ import { socketClient } from '../services/socketClient';
 import { runAgent, confirmProposal, discardProposal, extractBooking, type AgentProposal, type ExtractedBooking } from '../services/aiMessagesApiService';
 import { listMedia, attachFromLibrary, type MediaFile } from '../services/mediaApiService';
 import { getFeatureFlags } from '../services/apiService';
-import { toTitleCase } from '../utils/text';
+import { toTitleCase, phoneMatchKey } from '../utils/text';
 import { Shift, type Reservation } from '../types';
 import {
   SearchField, StatusPill, Callout, SegmentedControl, SplitPane, SectionHeader,
@@ -141,7 +141,10 @@ const displayName = (c: ConversationSummary): string =>
 
 // Ultime 10 cifre di un telefono: i thread sono già chiavati così e le
 // prenotazioni arrivano con formati misti (+39…, 3…, 0985…).
-const lastTen = (s: string | null | undefined): string => (s || '').replace(/\D/g, '').slice(-10);
+// Chiave canonica del thread: numero nazionale (phoneMatchKey), la stessa
+// che il server usa per raggruppare — right-10 sdoppiava i cellulari
+// storici a 9 cifre (caso Pisciotta 2026-09-18).
+const lastTen = (s: string | null | undefined): string => phoneMatchKey(s);
 
 const reservationStatusPill = (status: string | null | undefined): { label: string; tone: PillTone } | null => {
   switch (status) {
@@ -344,7 +347,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
     const digitsMatch = (msg: InboxMessage): string | null => {
       const raw = msg.direction === 'inbound' ? msg.from_phone_digits : msg.to_phone_digits;
       if (!raw) return null;
-      return String(raw).slice(-10);
+      return phoneMatchKey(String(raw));
     };
 
     // Anche la cache riceve il messaggio (qualunque thread, non solo quello

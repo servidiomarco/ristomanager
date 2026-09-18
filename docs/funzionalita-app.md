@@ -435,7 +435,7 @@ Per i ristoranti con cassa **Passepartout Menù** (modulo dedicato):
 ## Messaggi: WhatsApp e SMS
 
 **Inbox unificata**
-- Conversazioni WhatsApp e SMS in un'unica vista a due pannelli, raggruppate per numero; filtri Tutti / Da rispondere / Prenotazioni; allegati (foto, documenti); letto/non letto.
+- Conversazioni WhatsApp e SMS in un'unica vista a due pannelli, raggruppate per numero — **lo stesso thread qualunque sia la forma del numero** (con o senza +39, anche per i cellulari storici a 9 cifre): la risposta del cliente finisce nella sua chat, mai in una conversazione nuova; filtri Tutti / Da rispondere / Prenotazioni; allegati (foto, documenti); letto/non letto.
 - **Risposta manuale o suggerita dall'AI**: il suggerimento si legge, si corregge e si invia con un tocco — l'AI non invia mai nulla da sola, e sa dire "non lo so" invece di inventare.
 - **Crea prenotazione dalla conversazione** (con collegamento bidirezionale conversazione↔prenotazione) e badge dello stato prenotazione nel thread.
 
@@ -657,6 +657,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-18 | Messaggi: WhatsApp e SMS | I numeri con e senza +39 sono lo stesso thread anche per i cellulari storici a 9 cifre: la risposta del cliente non apre più una conversazione doppia (chiave nazionale del numero su lista, chat, letto e aggancio prenotazione); stessa correzione sul riconoscimento del chiamante di Sofia, sull'aggancio rubrica delle prenotazioni (niente clienti doppioni da un +39 in più), su blacklist e anti-doppio-invio della pagina pubblica. |
 | 2026-09-18 | Funzionalità trasversali | Il banner «Nuova versione disponibile» non ricompare più dopo «Ricarica»: ora si confronta con la versione del frontend pubblicato (non più col backend), quindi appare solo quando ricaricare porta davvero l'aggiornamento. |
 | 2026-09-18 | Agente vocale "Sofia" | Il nome sulla prenotazione è protetto dalla rubrica: numero già registrato con un altro nome ⇒ Sofia chiede se è per il titolare o per un'altra persona prima di salvare; il nome detto a metà si completa da rubrica, l'intestatario diverso porta in nota il titolare del numero (vale anche per le proposte WhatsApp approvate dallo staff, senza domanda). |
 | 2026-09-18 | Agente vocale "Sofia" | Le zone con le sale chiuse spariscono dal dialogo: con una sola zona aperta Sofia non chiede «interno o esterno?» e non nomina le zone (la prenotazione va nella zona aperta); solo al cliente che chiede esplicitamente la zona chiusa risponde «al momento le sale all'esterno sono chiuse» — mai «tutto prenotato», riservato alle zone aperte ma piene. |

@@ -4,7 +4,7 @@ import { queryWithRetry } from '../db.js';
 import { outboxEnqueueInTx, withOutboxTx } from './outboxService.js';
 import { Shift, ReservationSource } from '../types.js';
 import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime.js';
-import { spokenFirstName } from '../utils/text.js';
+import { spokenFirstName, phoneLast10Variants } from '../utils/text.js';
 import { getAvailableSlots } from '../utils/slots.js';
 import { getCappedRoomIds, pickSelfServiceTable, isTableStillAssignable } from './roomOccupancyService.js';
 
@@ -362,15 +362,9 @@ export function normalizeItalianPhone(input: string): string {
     return digits.startsWith('+') ? digits : '+' + digits;
 }
 
-/**
- * Last 10 digits of a phone number — the suffix shared by "+39 366 1234567",
- * "3661234567" and "0039366…". Lookups on `reservations.phone` must use this
- * (never string equality): the staff types numbers in local format, the
- * caller id arrives in E.164, and the two never compare equal verbatim.
- */
-export function lastTenDigits(input: string): string {
-    return String(input ?? '').replace(/\D/g, '').slice(-10);
-}
+// lastTenDigits è stata ritirata: right-10 sbaglia sui cellulari storici a
+// 9 cifre (la 9 del prefisso 39 entra nel suffisso). I confronti telefonici
+// passano da phoneMatchKey / phoneLast10Variants in utils/text.ts.
 
 /**
  * Pre-render an Italian-language digit-by-digit readback for a phone number.
@@ -448,15 +442,18 @@ export interface CustomerLookupResult {
  */
 export async function findCustomerByPhone(tenantId: number, phone: string): Promise<CustomerLookupResult> {
     if (!phone) return { exists: false };
-    const digits = phone.replace(/\D/g, '');
-    if (!digits) return { exists: false };
-    const last10 = digits.slice(-10);
+    // Sonde multiple sull'indice last10: sui cellulari storici a 9 cifre il
+    // right-10 di "+39 330 581013" pesca la 9 del prefisso e non trova mai
+    // il "330581013" in rubrica — il cliente esiste ma Sofia non lo
+    // riconosce (caso Pisciotta 2026-09-18).
+    const last10 = phoneLast10Variants(phone);
+    if (last10.length === 0) return { exists: false };
 
     const result = await queryWithRetry(
         `SELECT id, name
          FROM customers
          WHERE tenant_id = $2
-           AND right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = $1
+           AND right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = ANY($1::text[])
          ORDER BY id ASC
          LIMIT 1`,
         [last10, tenantId]
@@ -476,7 +473,7 @@ export async function findCustomerByPhone(tenantId: number, phone: string): Prom
             `SELECT reservation_time
              FROM reservations
              WHERE tenant_id = $2
-               AND right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = $1
+               AND right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = ANY($1::text[])
                AND COALESCE(reservation_status, 'CONFIRMED') <> 'CANCELLED'
                AND reservation_time < CURRENT_TIMESTAMP
              ORDER BY reservation_time DESC
@@ -1012,13 +1009,13 @@ async function findVoiceReservationMatches(
     const timeFilter = input.time ? ` AND to_char(reservation_time, 'HH24:MI') = $4` : '';
     const order = ' ORDER BY reservation_time ASC';
 
-    const last10 = lastTenDigits(input.phone);
-    if (last10) {
+    const last10 = phoneLast10Variants(input.phone);
+    if (last10.length > 0) {
         const params: any[] = [last10, input.date, tenantId];
         if (input.time) params.push(input.time);
         const byPhone = await queryWithRetry(`${columns}
             WHERE tenant_id = $3
-              AND right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = $1
+              AND right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = ANY($1::text[])
               AND DATE(reservation_time) = $2::date${timeFilter}${order}
         `, params);
         if (byPhone.rows.length > 0) return byPhone.rows;

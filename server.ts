@@ -184,7 +184,7 @@ import {
     type BlacklistPolicyMap,
     type BlacklistSource,
 } from './services/blacklistPolicy.js';
-import { toTitleCase, toMenuTitleCase } from './utils/text.js';
+import { toTitleCase, toMenuTitleCase, phoneMatchKey, phoneDigitsVariants, phoneLast10Variants } from './utils/text.js';
 import { clampModifierN, signedModifierLabel, signedModifierDelta } from './utils/modifierScale.js';
 import { BAR_COURSE_NO, DESSERT_COURSE_NO, isOffSequenceCourse } from './utils/courses.js';
 import { getRomeDatePart, getRomeTimePart } from './utils/reservationTime.js';
@@ -8694,7 +8694,13 @@ app.get('/messages/conversations', authenticate, requirePermission('reservations
                   AND sent_at > now() - interval '12 months'
             ),
             keyed AS (
-                SELECT *, right(digits, 10) AS phone_key
+                SELECT *,
+                       -- Chiave nazionale, non right-10: sui cellulari storici
+                       -- a 9 cifre right-10 pesca la 9 del prefisso 39 e
+                       -- sdoppia il thread (caso Pisciotta 2026-09-18).
+                       -- Stessa logica di phoneMatchKey/PHONE_MATCH_KEY_SQL.
+                       CASE WHEN length(digits) IN (11, 12) AND left(digits, 2) = '39'
+                            THEN substr(digits, 3) ELSE digits END AS phone_key
                 FROM pairs
                 WHERE length(digits) >= 8
             ),
@@ -8737,7 +8743,10 @@ app.get('/messages/conversations', authenticate, requirePermission('reservations
             LEFT JOIN LATERAL (
                 SELECT customer_name FROM reservations
                 WHERE tenant_id = $1
-                  AND right(regexp_replace(COALESCE(phone,''), '\D', '', 'g'), 10) = l.phone_key
+                  -- Due sonde sull'indice last10: la seconda copre le righe
+                  -- salvate col prefisso quando il nazionale ha 9 cifre.
+                  AND right(regexp_replace(COALESCE(phone,''), '\D', '', 'g'), 10)
+                      IN (right(l.phone_key, 10), right('39' || l.phone_key, 10))
                 ORDER BY reservation_time DESC
                 LIMIT 1
             ) r ON true
@@ -8774,7 +8783,7 @@ app.get('/messages/unread-count', authenticate, requirePermission('reservations:
 
 app.get('/messages/conversations/:phoneDigits', authenticate, requirePermission('reservations:view'), async (req, res) => {
     try {
-        const key = String(req.params.phoneDigits).replace(/\D/g, '').slice(-10);
+        const key = phoneMatchKey(String(req.params.phoneDigits));
         if (!key) return res.status(400).json({ error: 'Invalid phone_digits' });
         // LIMIT sul DESC, poi ri-ordinato ASC per la UI: il vecchio
         // `ORDER BY sent_at ASC LIMIT 500` prendeva i 500 messaggi più VECCHI
@@ -8787,12 +8796,12 @@ app.get('/messages/conversations/:phoneDigits', authenticate, requirePermission(
                 FROM outbound_messages
                 WHERE tenant_id = $2
                   AND channel IN ('sms','whatsapp')
-                  AND (right(to_phone_digits, 10) = $1::text
-                       OR right(from_phone_digits, 10) = $1::text)
+                  AND (to_phone_digits = ANY($1::text[])
+                       OR from_phone_digits = ANY($1::text[]))
                 ORDER BY sent_at DESC
                 LIMIT 500
              ) t ORDER BY sent_at ASC`,
-            [key, req.tenantId!]
+            [phoneDigitsVariants(key), req.tenantId!]
         );
         res.json({ messages: result.rows });
     } catch (err) {
@@ -8871,7 +8880,7 @@ app.get('/messages/:id/media/:index', authenticate, requirePermission('reservati
 
 app.post('/messages/conversations/:phoneDigits/read', authenticate, requirePermission('reservations:view'), async (req, res) => {
     try {
-        const key = String(req.params.phoneDigits).replace(/\D/g, '').slice(-10);
+        const key = phoneMatchKey(String(req.params.phoneDigits));
         if (!key) return res.status(400).json({ error: 'Invalid phone_digits' });
         const updated = await queryWithRetry(
             `UPDATE outbound_messages
@@ -8880,9 +8889,9 @@ app.post('/messages/conversations/:phoneDigits/read', authenticate, requirePermi
                AND direction = 'inbound'
                AND read_at IS NULL
                AND channel IN ('sms','whatsapp')
-               AND right(from_phone_digits, 10) = $1::text
+               AND from_phone_digits = ANY($1::text[])
              RETURNING id`,
-            [key, req.tenantId!]
+            [phoneDigitsVariants(key), req.tenantId!]
         );
         // Broadcast so every open CRM tab (this operator and any other) can
         // decrement its nav badge without a re-fetch.
@@ -8907,7 +8916,7 @@ app.post('/messages/conversations/:phoneDigits/read', authenticate, requirePermi
 // reservation_id. Requires reservations:full (it's a write on the booking).
 app.patch('/messages/conversations/:phoneDigits/link', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
-        const phoneKey = String(req.params.phoneDigits || '').replace(/\D/g, '').slice(-10);
+        const phoneKey = phoneMatchKey(String(req.params.phoneDigits || ''));
         if (phoneKey.length < 8) return res.status(400).json({ error: 'Invalid phone' });
 
         const rid = typeof req.body?.reservation_id === 'number'
@@ -8928,8 +8937,9 @@ app.patch('/messages/conversations/:phoneDigits/link', authenticate, requirePerm
              SET reservation_id = $1
              WHERE tenant_id = $2
                AND channel IN ('sms','whatsapp')
-               AND right(COALESCE(from_phone_digits, to_phone_digits), 10) = $3`,
-            [rid, req.tenantId!, phoneKey]
+               AND (from_phone_digits = ANY($3::text[])
+                    OR to_phone_digits = ANY($3::text[]))`,
+            [rid, req.tenantId!, phoneDigitsVariants(phoneKey)]
         );
         if (result.rowCount === 0) return res.status(404).json({ error: 'Conversation not found' });
         res.json({ ok: true, reservation_id: rid, updated: result.rowCount });
@@ -9555,7 +9565,7 @@ app.post('/messages/suggest-reply', authenticate, requirePermission('reservation
         if (!isAiConfigured()) {
             return res.status(503).json({ error: 'not_configured', message: 'ANTHROPIC_API_KEY non configurata sul backend' });
         }
-        const key = String(req.body?.phone_digits ?? '').replace(/\D/g, '').slice(-10);
+        const key = phoneMatchKey(String(req.body?.phone_digits ?? ''));
         if (!key) return res.status(400).json({ error: 'phone_digits mancante' });
 
         const [msgs, kb] = await Promise.all([
@@ -9564,10 +9574,10 @@ app.post('/messages/suggest-reply', authenticate, requirePermission('reservation
                    FROM outbound_messages
                   WHERE tenant_id = $2
                     AND channel IN ('sms','whatsapp')
-                    AND (right(to_phone_digits, 10) = $1::text OR right(from_phone_digits, 10) = $1::text)
+                    AND (to_phone_digits = ANY($1::text[]) OR from_phone_digits = ANY($1::text[]))
                   ORDER BY sent_at DESC
                   LIMIT 15`,
-                [key, req.tenantId!]
+                [phoneDigitsVariants(key), req.tenantId!]
             ),
             queryWithRetry(
                 `SELECT title, content FROM ai_knowledge_entries WHERE tenant_id = $1 AND is_active ORDER BY sort_order, id`,
@@ -9654,7 +9664,7 @@ app.post('/messages/agent/run', authenticate, requirePermission('reservations:fu
         if (!whatsappAgent.isAgentConfigured()) {
             return res.status(503).json({ error: 'not_configured', message: 'ANTHROPIC_API_KEY non configurata sul backend' });
         }
-        const key = String(req.body?.phone_digits ?? '').replace(/\D/g, '').slice(-10);
+        const key = phoneMatchKey(String(req.body?.phone_digits ?? ''));
         if (!key) return res.status(400).json({ error: 'phone_digits mancante' });
 
         const [msgs, kb, soglia] = await Promise.all([
@@ -9663,8 +9673,8 @@ app.post('/messages/agent/run', authenticate, requirePermission('reservations:fu
                    FROM outbound_messages
                   WHERE tenant_id = $2
                     AND channel IN ('sms','whatsapp')
-                    AND (right(to_phone_digits, 10) = $1::text OR right(from_phone_digits, 10) = $1::text)
-                  ORDER BY sent_at DESC LIMIT 15`, [key, req.tenantId!]),
+                    AND (to_phone_digits = ANY($1::text[]) OR from_phone_digits = ANY($1::text[]))
+                  ORDER BY sent_at DESC LIMIT 15`, [phoneDigitsVariants(key), req.tenantId!]),
             queryWithRetry(`SELECT title, content FROM ai_knowledge_entries WHERE tenant_id = $1 AND is_active ORDER BY sort_order, id`, [req.tenantId!]),
             getVoiceLargeGroupThreshold(req.tenantId!),
         ]);
@@ -9759,7 +9769,7 @@ app.post('/messages/agent/extract-booking', authenticate, requirePermission('res
         if (!whatsappAgent.isAgentConfigured()) {
             return res.status(503).json({ error: 'not_configured', message: 'ANTHROPIC_API_KEY non configurata sul backend' });
         }
-        const key = String(req.body?.phone_digits ?? '').replace(/\D/g, '').slice(-10);
+        const key = phoneMatchKey(String(req.body?.phone_digits ?? ''));
         if (!key) return res.status(400).json({ error: 'phone_digits mancante' });
 
         const msgs = await queryWithRetry(
@@ -9767,8 +9777,8 @@ app.post('/messages/agent/extract-booking', authenticate, requirePermission('res
                FROM outbound_messages
               WHERE tenant_id = $2
                 AND channel IN ('sms','whatsapp')
-                AND (right(to_phone_digits, 10) = $1::text OR right(from_phone_digits, 10) = $1::text)
-              ORDER BY sent_at DESC LIMIT 15`, [key, req.tenantId!]);
+                AND (to_phone_digits = ANY($1::text[]) OR from_phone_digits = ANY($1::text[]))
+              ORDER BY sent_at DESC LIMIT 15`, [phoneDigitsVariants(key), req.tenantId!]);
         const messages = msgs.rows.reverse();
         if (messages.length === 0) return res.status(404).json({ error: 'Conversazione vuota' });
 
@@ -9908,7 +9918,7 @@ app.post('/messages/send', authenticate, requireFeature('whatsapp'), requirePerm
             return res.status(400).json({ error: 'Servono un telefono e almeno un testo o un allegato' });
         }
         const desiredChannel: 'whatsapp' | 'sms' = channel === 'sms' ? 'sms' : 'whatsapp';
-        const key = String(phone).replace(/\D/g, '').slice(-10);
+        const key = phoneMatchKey(String(phone));
         if (!key) return res.status(400).json({ error: 'invalid phone' });
 
         if (desiredChannel === 'whatsapp') {
@@ -9917,8 +9927,8 @@ app.post('/messages/send', authenticate, requireFeature('whatsapp'), requirePerm
                  FROM outbound_messages
                  WHERE tenant_id = $2
                    AND direction = 'inbound' AND channel = 'whatsapp'
-                   AND right(from_phone_digits, 10) = $1::text`,
-                [key, req.tenantId!]
+                   AND from_phone_digits = ANY($1::text[])`,
+                [phoneDigitsVariants(key), req.tenantId!]
             );
             const lastInbound = win.rows[0]?.last_inbound_at as Date | null;
             const withinWindow = !!lastInbound
@@ -10320,7 +10330,7 @@ app.get('/payments/:id/messages', authenticate, requirePermission('payments:view
         const checkoutUrl: string | null = row.checkout_url;
 
         const digits = phone ? String(phone).replace(/\D/g, '') : '';
-        const suffix = digits.length >= 8 ? digits.slice(-10) : null;
+        const suffix = digits.length >= 8 ? phoneDigitsVariants(digits) : null;
 
         const conditions: string[] = [];
         const params: any[] = [];
@@ -10330,7 +10340,7 @@ app.get('/payments/:id/messages', authenticate, requirePermission('payments:view
         }
         if (suffix) {
             params.push(suffix);
-            conditions.push(`right(to_phone_digits, 10) = $${params.length}`);
+            conditions.push(`to_phone_digits = ANY($${params.length}::text[])`);
         }
         if (email) {
             params.push(email);
@@ -13969,9 +13979,9 @@ const upsertCustomerFromReservation = async (
         const existing = await queryWithRetry(
             `SELECT id, language FROM customers
              WHERE tenant_id = $2
-               AND regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $1
+               AND regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = ANY($1::text[])
              LIMIT 1`,
-            [phoneDigits, tenantId]
+            [phoneDigitsVariants(phoneDigits), tenantId]
         );
         if (existing.rows.length > 0) {
             const row = existing.rows[0];
@@ -14031,9 +14041,9 @@ const isPhoneBlacklisted = async (tenantId: number, phone: string): Promise<bool
             `SELECT 1 FROM customers
              WHERE tenant_id = $2
                AND is_blacklisted = true
-               AND right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = right($1, 10)
+               AND right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = ANY($1::text[])
              LIMIT 1`,
-            [digits, tenantId]
+            [phoneLast10Variants(digits), tenantId]
         );
         return result.rows.length > 0;
     } catch (err) {
@@ -20794,12 +20804,7 @@ function describeInboundMedia(media?: Array<{ content_type?: string }> | null): 
 // italiano si toglie solo quando la lunghezza lo rende inequivocabile:
 // 11 cifre = 39 + 9, 12 cifre = 39 + 10. Un nazionale che inizia per 39
 // (prefisso 393…, 10 cifre) resta intatto.
-function phoneMatchKey(input: string | null | undefined): string {
-    const d = String(input ?? '').replace(/\D/g, '');
-    if (d.startsWith('00')) return phoneMatchKey(d.slice(2));
-    if ((d.length === 11 || d.length === 12) && d.startsWith('39')) return d.slice(2);
-    return d;
-}
+// phoneMatchKey vive in utils/text.ts (condiviso con l'inbox del frontend).
 
 // Espressione SQL equivalente a phoneMatchKey, per confrontare in query una
 // colonna telefono senza doverla normalizzare a monte.
@@ -22870,7 +22875,7 @@ app.get('/voice-calls/:id/messages', authenticate, requireFeature('voice'), voic
 
         const digits = String(phone).replace(/\D/g, '');
         if (digits.length < 8) return res.json({ items: [] });
-        const suffix = digits.slice(-10);
+        const suffix = phoneDigitsVariants(digits);
 
         const result = await queryWithRetry(
             `SELECT id, provider, channel, to_phone, body, status, provider_sid,
@@ -22878,7 +22883,7 @@ app.get('/voice-calls/:id/messages', authenticate, requireFeature('voice'), voic
                     error_code, error_message
              FROM outbound_messages
              WHERE tenant_id = $2
-               AND right(to_phone_digits, 10) = $1
+               AND to_phone_digits = ANY($1::text[])
              ORDER BY sent_at DESC
              LIMIT 50`,
             [suffix, req.tenantId!]
@@ -28433,7 +28438,7 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
         // preso l'ultimo posto, il retry non deve morire su "slot esaurito".
         // Confronto telefoni sulle ultime 10 cifre: l'input arriva con o senza
         // prefisso, a DB e' normalizzato E.164.
-        const dupPhoneDigits = phone ? phone.replace(/\D/g, '').slice(-10) : null;
+        const dupPhoneDigits = phone && phoneLast10Variants(phone).length ? phoneLast10Variants(phone) : null;
         const dupEmailLower = email ? email.toLowerCase() : null;
         const dup = await queryWithRetry(
             `SELECT r.id, r.reservation_status, ro.name AS room_name
@@ -28445,8 +28450,8 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
                AND r.reservation_status <> 'CANCELLED'
                AND r.created_at > NOW() - INTERVAL '30 minutes'
                AND (
-                    ($2::text IS NOT NULL AND r.phone IS NOT NULL
-                     AND RIGHT(regexp_replace(r.phone, '\D', '', 'g'), 10) = $2::text)
+                    ($2::text[] IS NOT NULL AND r.phone IS NOT NULL
+                     AND RIGHT(regexp_replace(r.phone, '\D', '', 'g'), 10) = ANY($2::text[]))
                  OR ($3::text IS NOT NULL AND lower(r.email) = $3::text)
                )
              ORDER BY r.id DESC LIMIT 1`,
