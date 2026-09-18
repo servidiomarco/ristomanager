@@ -25,6 +25,8 @@ import { COST_USD_SQL, UNPRICED_SQL, USD_EUR } from './services/aiPricing.js';
 import { outboxEnqueueInTx, outboxKick, outboxRegister, startOutboxDispatcher } from './services/outboxService.js';
 import { SERVER_PROFILE, isServiceNode } from './services/topology.js';
 import { scheduleSalaNodeBootstrap } from './services/salaNodeBootstrap.js';
+import { loadNodeTlsMaterial, startNodeTlsRefresh } from './services/salaNodeLocalTls.js';
+import { createServer as createHttpsServer, type Server as HttpsServer } from 'https';
 import { startSalaNodeReplica } from './services/salaNodeReplica.js';
 import { VOICE_CHANNEL, WHATSAPP_CHANNEL, type ToolOutcome } from './services/bookingTools.js';
 import { TENANT_FEATURES, getTenantFeatures, isFeatureEnabledForTenant, invalidateTenantFeaturesCache, clearTenantFeaturesCache, type TenantFeature } from './services/entitlements.js';
@@ -204,7 +206,10 @@ app.set('trust proxy', 1);
 const port = process.env.PORT || 3000;
 
 // Create HTTP server from Express app
-const httpServer = createServer(app);
+// Profilo service-node: il listener può essere HTTPS (certificato del
+// cloud, cache su disco) — si decide in startServer, dove si può attendere.
+// Sul cloud resta l'HTTP di sempre: il TLS lo termina il proxy Railway.
+let httpServer: ReturnType<typeof createServer> | HttpsServer;
 
 // Socket service instance (initialized in startServer)
 let socketService: SocketService | undefined;
@@ -35845,12 +35850,25 @@ const startServer = async () => {
         const portNumber = Number(port);
         console.log(`Starting server on port ${portNumber}...`);
 
+        if (isServiceNode) {
+            const tls = await loadNodeTlsMaterial();
+            if (tls) {
+                httpServer = createHttpsServer({ cert: tls.cert_pem, key: tls.key_pem }, app);
+                startNodeTlsRefresh(httpServer as HttpsServer, tls);
+                console.log(`🔒 TLS del nodo attivo${tls.expires_at ? ` (scade ${tls.expires_at})` : ''}`);
+            } else {
+                httpServer = createServer(app);
+                console.warn('⚠️  Nodo senza certificato TLS (cloud muto e cache vuota): si parte in HTTP — i palmari NON si collegheranno finché non arriva il certificato');
+            }
+        } else {
+            httpServer = createServer(app);
+        }
         httpServer.listen(portNumber, '0.0.0.0', () => {
             console.log(`✅ Server listening on port ${portNumber}`);
 
             // Initialize Socket.IO
             try {
-                socketService = new SocketService(httpServer);
+                socketService = new SocketService(httpServer as ReturnType<typeof createServer>);
                 console.log('✅ Socket.IO initialized');
                 if (isPassepartoutAgentConfigured() && !isServiceNode) {
                     setupPassepartoutBridge(socketService.getIO());
