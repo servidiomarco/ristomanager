@@ -350,6 +350,83 @@ Quindi la scelta non è fra nomi, è fra **quale dei tre vincoli allentare**:
 
 ---
 
+## Quinto giro — conio puro, dieci nomi progettati
+
+Vincolo scelto: si allenta «ci riconosco il prodotto». È la corsia di Nory —
+il significato lo porta il prodotto, non il dizionario — ed è l'unica con
+spazio libero davanti.
+
+**Come sono costruiti.** Ognuno parte da una radice vera del mestiere
+dell'ospitalità (latina o greca) e viene deformato finché **non è più una
+parola** in nessuna delle cinque lingue del filtro. Alfabeto ristretto alle
+lettere che si leggono uguali in italiano e in inglese: niente *y, j, w, h, x*,
+niente *ce/ci*, *ge/gi*, *sce/sci*, *gl*, *gn*, *th*. Due o tre sillabe. Nove
+finiscono per vocale, uno no — di proposito.
+
+**Il vantaggio vero di questa corsia**, che le altre non hanno: su un conio il
+`.com` ha una probabilità concreta di essere **libero**, non da ricomprare a
+cinque cifre. Ed è l'unico tipo di marchio che si difende davvero.
+
+| # | Nome | Radice e storia | Stato |
+|:-:|---|---|---|
+| 1 | **Senia** | gr. *xenia*, la legge sacra dell'ospitalità: l'obbligo di accogliere lo straniero. Riscritta senza la *x* | nulla trovato |
+| 2 | **Taven** | lat. *taberna*, con forma anglosassone: **l'unico che non finisce per vocale**, il più «Nory» della rosa | nulla trovato |
+| 3 | **Nostera** | gr. *nostos*, il ritorno a casa (la radice di *nostalgia*): l'ospite che torna, che è ciò che un CRM registra | nulla trovato |
+| 4 | **Mesara** | lat. *mensa*, la tavola | nulla trovato |
+| 5 | **Limera** | lat. *limen*, la soglia: il punto esatto in cui l'ospite viene accolto | nulla trovato |
+| 6 | **Vestara** | *Vesta*, il focolare e la dea che lo custodiva | nulla di esatto |
+| 7 | **Mansia** | lat. *mansio*, la stazione di posta dove il viaggiatore si fermava a dormire (radice di *maison*) | nulla trovato |
+| 8 | **Domera** | lat. *domus*, la casa | nulla trovato |
+| 9 | **Salvera** | lat. *salve*, il saluto sulla porta | nulla trovato |
+| 10 | **Tessara** | lat. *tessera hospitalis*, il gettone spezzato fra oste e ospite | **non pulito, vedi sotto** |
+
+### I tre che porterei avanti
+
+**Senia** — corto, morbido, caldo, e la radice è l'ospitalità stessa, non un
+suo oggetto. È quello che assomiglia di più a Nory come suono e come peso.
+
+**Taven** — il più «SaaS» della rosa: due sillabe, finisce in consonante, sta
+bene accanto a *platform* o *OS*, e chi sente pensa comunque a *tavern* senza
+che nessuno glielo debba dire. Rischio: in inglese qualcuno ci aggiungerà la r.
+
+**Nostera** — la storia migliore per questo prodotto specifico (chi torna), ma
+tre sillabe e un vicinato da guardare.
+
+### Le crepe, una per nome
+
+- **Senia** — La Sénia è un comune catalano; *sènia* in catalano è la ruota del
+  pozzo. Settore lontanissimo, ma la SERP spagnola ne parla.
+- **Taven** — finisce in consonante: rompe di proposito la regola, ma un
+  italiano potrebbe scriverlo «Taven» e dirlo «Tàven» mentre un inglese dice
+  «Téiven». Da ascoltare ad alta voce prima di decidere.
+- **Nostera** — **Nosto** è un SaaS finlandese di personalizzazione e-commerce
+  (32,8 M$, 2.500 brand, partner Shopify). «Nostera» è lontano abbastanza;
+  la forma corta **Nosta** invece **va esclusa**, è a una lettera.
+- **Mesara** — Messara è una piana di Creta, ma con due *s*: non collide.
+- **Limera** — da controllare la famiglia *Lumen / Lumera* in TMview.
+- **Vestara** — il vicinato *Vestal / Vestel / Vestra* è rumoroso, e **Vestel è
+  elettronica di consumo, classe 9**.
+- **Mansia** — in italiano l'orecchio ci sente **«mansione»**: rischia di
+  leggere come software HR.
+- **Domera** — pulito ma freddo: non evoca niente nemmeno a chi conosce il
+  latino.
+- **Salvera** — in italiano ci si sente «salvare»: può leggere backup o
+  sicurezza.
+- **Tessara** — **l'unico già usato**: Tessara Therapeutics (biotech) e Tessara
+  PTY (post-raccolta uva da tavola). Classi lontane dalle nostre e forse
+  conviverebbe, ma il nome è occupato. Lo tengo in lista solo perché la storia
+  — il gettone dell'ospitalità spezzato in due — resta la più bella del
+  dossier. È il primo da portare in TMview, e il primo da lasciar cadere.
+
+### Cosa questo screening NON dice
+
+Su un conio la ricerca web restituisce «nulla trovato» quasi per definizione:
+è il risultato atteso, non una conferma. **Per questi dieci nomi il controllo
+vero è solo WHOIS + TMview + UIBM**, e da questa sessione nessuno dei tre è
+raggiungibile. Prima di affezionarsi a uno, vanno passati tutti e tre.
+
+---
+
 ## Cosa fare adesso, in ordine
 
 1. **Prova di dettatura su Posto, Passo e Mescita** *insieme a* Sympotia, alle
