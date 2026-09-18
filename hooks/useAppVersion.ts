@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
 
-const API_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';
 const POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
 // Persist the dismissed version so the banner doesn't reappear on every mount
@@ -26,9 +25,10 @@ interface AppVersionState {
 }
 
 /**
- * Polls the server's build version and flags the UI when it diverges from the
- * one baked into the current bundle. Used by <AppVersionBanner /> to tell the
- * operator that a new deploy is live and they should reload to pick it up.
+ * Polls the deployed frontend's build version (version.json, same origin and
+ * same atomic deploy as the bundle) and flags the UI when it diverges from
+ * the one baked into the current bundle. Used by <AppVersionBanner /> to tell
+ * the operator that a new deploy is live and a reload will pick it up.
  *
  * Poll cadence: every 5 minutes, plus on tab re-focus (visibilitychange) so
  * a PWA that woke up from background catches an overnight deploy immediately.
@@ -42,7 +42,15 @@ export function useAppVersion(): AppVersionState {
 
     const check = useCallback(async () => {
         try {
-            const res = await fetch(`${API_URL}/version`, { cache: 'no-store' });
+            // version.json è emesso dalla build Vite accanto a index.html e
+            // servito dalla STESSA origin del bundle (Vercel), nello stesso
+            // deploy atomico. Non si interroga /version del backend Railway:
+            // i due deploy non finiscono insieme, e nella finestra «Railway
+            // nuovo, Vercel non ancora» il banner ricompariva subito dopo
+            // ogni «Ricarica» — il reload non poteva che riscaricare il
+            // bundle vecchio. Così invece il banner compare solo quando il
+            // reload porterà davvero la versione nuova.
+            const res = await fetch('/version.json', { cache: 'no-store' });
             if (!res.ok) return;
             const data = await res.json();
             if (data && typeof data.version === 'string') {
@@ -96,8 +104,15 @@ export function useAppVersion(): AppVersionState {
             try {
                 if ('serviceWorker' in navigator) {
                     const reg = await navigator.serviceWorker.getRegistration();
-                    if (reg?.waiting) {
-                        reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+                    if (reg) {
+                        // Chiedi subito al browser di scaricare l'eventuale
+                        // sw.js nuovo: senza update() il check partirebbe
+                        // solo con la navigazione stessa e il reload
+                        // potrebbe ripartire col precache vecchio.
+                        try { await reg.update(); } catch { /* offline ecc. */ }
+                        if (reg.waiting) {
+                            reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+                        }
                     }
                 }
             } catch { /* best-effort */ }

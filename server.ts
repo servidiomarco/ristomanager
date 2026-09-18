@@ -574,14 +574,13 @@ app.get('/ready', async (_req, res) => {
   }
 });
 
-// Public build version. The Vite bundle bakes the same short SHA in via
-// `__APP_VERSION__`; the client polls this endpoint and shows an "update
-// available" banner when they diverge — usually because the browser is still
-// running a bundle from before the last deploy. `Cache-Control: no-store`
-// ensures the poll always sees the live process, not a cached response.
-// The banner check runs every 5 minutes plus on visibility change / focus.
+// Public build version of the BACKEND, for ops/diagnostics (curl check).
+// NOT the source of the "Nuova versione" banner anymore: the SPA polls its
+// own origin's version.json (emitted by the Vite build, same atomic deploy
+// as the bundle), because Railway and Vercel don't finish deploying at the
+// same moment — comparing the bundle against this endpoint made the banner
+// reappear right after every "Ricarica" during that window.
 // Endpoint is public — no auth needed, it's just the current build SHA.
-// Response body is intentionally minimal to keep the poll cheap.
 app.get('/version', (_req, res) => {
     const version = (process.env.RAILWAY_GIT_COMMIT_SHA || '').slice(0, 7) || 'dev';
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
