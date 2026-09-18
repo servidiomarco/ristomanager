@@ -180,6 +180,31 @@ describe('stream inverso nodo→cloud', () => {
         }, 'unione del nodo risalita sul cloud');
     });
 
+    it("l'interruttore autorità si accende ad allineamento raggiunto e si spegne col drenaggio (4b)", async () => {
+        // L'ibrido va acceso (l'interruttore lo esige) — si rimette dopo.
+        const flags = await api().get('/settings/features').set(bearer(token));
+        const hybridPrima = flags.body.sala_node_enabled === true;
+        await api().put('/settings/features').set(bearer(token)).send({ sala_node_enabled: true });
+        try {
+            // L'allineamento arriva da solo (i due consumatori girano).
+            await finoA(async () => {
+                const o = await api().get('/sala-node/authority').set(bearer(token));
+                return o.body.node_online === true && o.body.aligned === true;
+            }, 'repliche allineate nei due sensi');
+
+            const on = await api().post('/sala-node/authority').set(bearer(token)).send({ enabled: true });
+            expect(on.status).toBe(200);
+            expect(on.body.enabled).toBe(true);
+
+            // Lo spegnimento drena (qui è già tutto importato) e restituisce.
+            const off = await api().post('/sala-node/authority').set(bearer(token)).send({ enabled: false });
+            expect(off.status).toBe(200);
+            expect(off.body.enabled).toBe(false);
+        } finally {
+            await api().put('/settings/features').set(bearer(token)).send({ sala_node_enabled: hybridPrima });
+        }
+    });
+
     it("niente eco: l'evento importato dal nodo non riscende al nodo come nuovo", async () => {
         // Lo stream in discesa manda solo origin='local': l'evento del
         // tavolo (nato sul nodo, importato dal cloud) non deve tornare.

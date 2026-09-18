@@ -154,6 +154,21 @@ export function disconnectSalaNode(tenantId: number): void {
     console.log(`[sala-node] nodo del tenant ${tenantId} staccato (sospensione o add-on spento)`);
 }
 
+/** Chiede al nodo (se agganciato) lo stato della sua replica — i numeri
+ *  dei cancelli dell'interruttore autorità (4b). null = nodo non
+ *  raggiungibile o risposta malformata. */
+export async function askNodeStatus(tenantId: number): Promise<{ applied_cloud_seq: number; local_head: number } | null> {
+    const entry = nodesByTenant.get(tenantId);
+    if (!entry || !entry.socket.connected) return null;
+    try {
+        const res: any = await entry.socket.timeout(5_000).emitWithAck('node:status', {});
+        if (res?.error || !Number.isFinite(Number(res?.applied_cloud_seq)) || !Number.isFinite(Number(res?.local_head))) return null;
+        return { applied_cloud_seq: Number(res.applied_cloud_seq), local_head: Number(res.local_head) };
+    } catch {
+        return null;
+    }
+}
+
 const NODE_ONLINE_WINDOW_MS = 30_000;
 
 export function getSalaNodeStatus(tenantId: number) {

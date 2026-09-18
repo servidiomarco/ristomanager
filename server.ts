@@ -57,7 +57,7 @@ import {
     comandaToBillPayload,
     PassepartoutBridgeError,
 } from './services/passepartoutBridge.js';
-import { setupSalaNodeBridge, getSalaNodeStatus, disconnectSalaNode } from './services/salaNodeBridge.js';
+import { setupSalaNodeBridge, getSalaNodeStatus, disconnectSalaNode, askNodeStatus } from './services/salaNodeBridge.js';
 import { provisionSalaNodeCert, startSalaNodeCertRenewal, isSalaNodeTlsConfigured, SalaNodeTlsError } from './services/salaNodeTls.js';
 import type { PassepartoutComanda, EsitoChiusuraComanda, PassepartoutArticolo } from './services/passepartoutService.js';
 import { MENU_LANGS, isMenuTranslationConfigured, translateMenuEntries } from './services/menuTranslationService.js';
@@ -22996,7 +22996,11 @@ app.post('/voice-calls/sync', authenticate, requireFeature('voice'), voiceCallsA
 // directly — the endpoints they gate are low-volume (a handful per minute
 // at most), so caching isn't worth the complexity.
 
-type FeatureFlagKey = 'public_bookings_enabled' | 'voice_agent_enabled' | 'voice_bookings_suspended' | 'voice_double_seating_enabled' | 'pay_at_table_enabled' | 'table_orders_enabled' | 'ai_messages_enabled' | 'ai_wine_pairing_enabled' | 'digital_menu_enabled' | 'passe_enabled' | 'review_requests_enabled' | 'takeaway_online_enabled' | 'takeaway_voice_enabled' | 'sala_node_enabled';
+// sala_node_authority_enabled sta nell'UNIONE ma NON in FEATURE_FLAG_KEYS:
+// non è un interruttore qualunque — si muove solo da POST /sala-node/
+// authority, che verifica i cancelli (nodo online, allineato, drenato).
+// Fuori dalla lista, il PUT generico non può fliparlo per sbaglio.
+type FeatureFlagKey = 'public_bookings_enabled' | 'voice_agent_enabled' | 'voice_bookings_suspended' | 'voice_double_seating_enabled' | 'pay_at_table_enabled' | 'table_orders_enabled' | 'ai_messages_enabled' | 'ai_wine_pairing_enabled' | 'digital_menu_enabled' | 'passe_enabled' | 'review_requests_enabled' | 'takeaway_online_enabled' | 'takeaway_voice_enabled' | 'sala_node_enabled' | 'sala_node_authority_enabled';
 const FEATURE_FLAG_KEYS: FeatureFlagKey[] = ['public_bookings_enabled', 'voice_agent_enabled', 'voice_bookings_suspended', 'voice_double_seating_enabled', 'pay_at_table_enabled', 'table_orders_enabled', 'ai_messages_enabled', 'ai_wine_pairing_enabled', 'digital_menu_enabled', 'passe_enabled', 'review_requests_enabled', 'takeaway_online_enabled', 'takeaway_voice_enabled', 'sala_node_enabled'];
 
 async function getFeatureFlag(tenantId: number, key: FeatureFlagKey, fallback: boolean): Promise<boolean> {
@@ -23010,7 +23014,9 @@ async function getFeatureFlag(tenantId: number, key: FeatureFlagKey, fallback: b
     }
 }
 
-const FEATURE_FLAG_DEFAULTS: Record<FeatureFlagKey, boolean> = {
+// L'autorità (sala_node_authority_enabled) è esclusa: non passa dal GET/PUT
+// generico dei flag — vive nelle route /sala-node/authority coi suoi cancelli.
+const FEATURE_FLAG_DEFAULTS: Record<Exclude<FeatureFlagKey, 'sala_node_authority_enabled'>, boolean> = {
     public_bookings_enabled: false,
     voice_agent_enabled: true,
     voice_bookings_suspended: false,
@@ -34841,9 +34847,13 @@ app.get('/sala-node/client-config', authenticate, async (req, res) => {
             getSalaNodeSettings(req.tenantId!),
         ]);
         const nodeUrl = salaNodeUrl(settings);
+        const authority = await getFeatureFlag(req.tenantId!, 'sala_node_authority_enabled', false);
         res.json({
             enabled: Boolean(flag && entitled && nodeUrl),
             node_url: nodeUrl,
+            // Fase 4: quando è true le scritture del dominio sala vanno al
+            // nodo (routing client, 4c). Mascherata dalle stesse condizioni.
+            authority_enabled: Boolean(authority && flag && entitled && nodeUrl),
         });
     } catch (err: any) {
         console.error('GET /sala-node/client-config error:', err);
@@ -35076,6 +35086,119 @@ app.post('/sala-node/rows', salaNodeAuth, async (req: any, res) => {
         });
     } catch (err: any) {
         console.error('POST /sala-node/rows error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// --- L'interruttore «Servizio completo sul nodo» (tappa 4, fase 4b) --------
+// L'autorità del dominio servizio passa al nodo SOLO da qui, mai dal PUT
+// generico dei flag: spostare l'autorità su un nodo spento o indietro col
+// log sarebbe l'incidente del 17/09 al quadrato. I cancelli:
+// - accensione: ibrido acceso, nodo online, repliche ALLINEATE nei due
+//   sensi (il nodo ha applicato tutto il log del cloud, il cloud tutto
+//   quello del nodo).
+// - spegnimento: è un drenaggio, non un click secco — si aspetta che il
+//   cloud abbia importato ogni evento locale del nodo, poi l'autorità
+//   torna. A nodo offline l'interruttore è congelato (l'autorità sta dove
+//   sta); force=true è l'uscita d'emergenza esplicita, che può perdere
+//   gli eventi non drenati.
+
+async function salaNodeAuthorityOverview(tenantId: number) {
+    const [enabled, flag, entitled] = await Promise.all([
+        getFeatureFlag(tenantId, 'sala_node_authority_enabled', false),
+        getFeatureFlag(tenantId, 'sala_node_enabled', false),
+        isFeatureEnabledForTenant(tenantId, 'sala_node'),
+    ]);
+    const hybridOn = Boolean(flag && entitled);
+    const status = getSalaNodeStatus(tenantId);
+    const node = status.online ? await askNodeStatus(tenantId) : null;
+    const cloudHead = Number((await queryWithRetry(
+        `SELECT COALESCE(MAX(id), 0)::bigint AS h FROM outbox_events WHERE tenant_id = $1 AND origin = 'local'`,
+        [tenantId]
+    )).rows[0].h);
+    const cloudApplied = Number((await queryWithRetry(
+        `SELECT applied_seq FROM replication_cursor WHERE tenant_id = $1 AND stream = 'node'`,
+        [tenantId]
+    )).rows[0]?.applied_seq ?? 0);
+    return {
+        enabled,
+        hybrid_on: hybridOn,
+        node_online: Boolean(status.online),
+        // Allineato = i due cursori hanno raggiunto le due teste.
+        aligned: node != null && node.applied_cloud_seq >= cloudHead && cloudApplied >= node.local_head,
+        cloud_head: cloudHead,
+        node_applied_cloud_seq: node?.applied_cloud_seq ?? null,
+        node_local_head: node?.local_head ?? null,
+        cloud_applied_node_seq: cloudApplied,
+    };
+}
+
+app.get('/sala-node/authority', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        res.json(await salaNodeAuthorityOverview(req.tenantId!));
+    } catch (err: any) {
+        console.error('GET /sala-node/authority error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/sala-node/authority', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        const desired = req.body?.enabled;
+        const force = req.body?.force === true;
+        if (typeof desired !== 'boolean') return res.status(400).json({ error: 'enabled must be boolean' });
+        const setFlag = async (value: boolean) => {
+            await queryWithRetry(
+                `INSERT INTO app_settings (tenant_id, key, value, updated_at)
+                 VALUES ($1, 'sala_node_authority_enabled', $2, CURRENT_TIMESTAMP)
+                 ON CONFLICT (tenant_id, key) DO UPDATE
+                   SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP`,
+                [req.tenantId!, value]
+            );
+            // I client rileggono la config del nodo su features:updated:
+            // è il segnale che il routing (4c) deve cambiare strada.
+            try { socketService?.broadcastToAll(req.tenantId!, 'features:updated', { sala_node_authority_enabled: value }); } catch (_) {}
+        };
+
+        const overview = await salaNodeAuthorityOverview(req.tenantId!);
+        if (desired === overview.enabled) return res.json(await salaNodeAuthorityOverview(req.tenantId!));
+
+        if (desired) {
+            if (!overview.hybrid_on) return res.status(409).json({ error: 'hybrid_off', message: 'Prima accendi la modalità ibrida' });
+            if (!overview.node_online) return res.status(409).json({ error: 'node_offline', message: 'Il nodo non è collegato' });
+            if (!overview.aligned && !force) {
+                return res.status(409).json({ error: 'not_aligned', message: 'Le repliche non sono allineate', detail: overview });
+            }
+            await setFlag(true);
+            return res.json(await salaNodeAuthorityOverview(req.tenantId!));
+        }
+
+        // Spegnimento: drenaggio prima di restituire l'autorità.
+        if (!overview.node_online && !force) {
+            return res.status(409).json({
+                error: 'node_offline_frozen',
+                message: "Il nodo è offline: l'autorità resta dov'è finché la linea non torna (force per forzare, si possono perdere le battiture non replicate)",
+            });
+        }
+        if (overview.node_online) {
+            // Si aspetta che il consumatore in salita raggiunga la testa del
+            // nodo: il poll dell'upstream gira ogni pochi secondi, qui si
+            // controlla per al massimo ~8s prima di rispondere «riprova».
+            const deadline = Date.now() + 8_000;
+            for (;;) {
+                const now = await salaNodeAuthorityOverview(req.tenantId!);
+                if (now.node_local_head != null && now.cloud_applied_node_seq >= now.node_local_head) break;
+                if (Date.now() > deadline) {
+                    if (force) break;
+                    return res.status(409).json({ error: 'drain_pending', message: 'Il cloud sta ancora importando le battiture del nodo: riprova tra qualche secondo', detail: now });
+                }
+                await new Promise(r => setTimeout(r, 500));
+            }
+        }
+        await setFlag(false);
+        return res.json(await salaNodeAuthorityOverview(req.tenantId!));
+    } catch (err: any) {
+        console.error('POST /sala-node/authority error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
