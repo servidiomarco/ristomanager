@@ -42,15 +42,22 @@ interface ReplicaEvent {
 // lo snapshot viaggia nell'evento (unioni/nascosti/chiusure, fase 1b);
 // 'delete' = si toglie per riferimento. Un tipo assente qui si salta.
 type Convergence =
-    | { mode: 'fetch'; kind: 'tables' | 'reservations' | 'orders'; idFrom: string }
+    | { mode: 'fetch'; kind: 'tables' | 'reservations' | 'orders' | 'takeaways'; idFrom: string }
     | { mode: 'payload'; table: string }
     | { mode: 'delete'; table: string; idFrom: string };
 
 const CONVERGENCE: Record<string, Convergence> = {
     'table:updated': { mode: 'fetch', kind: 'tables', idFrom: 'table_id' },
+    'reservation:created': { mode: 'fetch', kind: 'reservations', idFrom: 'reservation_id' },
     'reservation:updated': { mode: 'fetch', kind: 'reservations', idFrom: 'reservation_id' },
     'reservation:deleted': { mode: 'delete', table: 'reservations', idFrom: 'reservation_id' },
+    'order:created': { mode: 'fetch', kind: 'orders', idFrom: 'order_id' },
     'order:updated': { mode: 'fetch', kind: 'orders', idFrom: 'order_id' },
+    // La cancellazione converge per rifetch come tutto il resto: la riga
+    // non c'è più → si toglie comanda e figli con lo stesso codice.
+    'order:deleted': { mode: 'fetch', kind: 'orders', idFrom: 'order_id' },
+    'takeaway:created': { mode: 'fetch', kind: 'takeaways', idFrom: 'takeaway_order_id' },
+    'takeaway:updated': { mode: 'fetch', kind: 'takeaways', idFrom: 'takeaway_order_id' },
     'tableMerge:created': { mode: 'payload', table: 'table_merges' },
     'tableMerge:deleted': { mode: 'delete', table: 'table_merges', idFrom: 'id' },
     'tableHidden:created': { mode: 'payload', table: 'table_hidden_overrides' },
@@ -112,8 +119,8 @@ const bumpSequence = async (client: any, table: string): Promise<void> => {
 
 const applyBatch = async (tenantId: number, events: ReplicaEvent[]): Promise<void> => {
     // Prima il rifetch (fuori transazione: è rete), poi l'applicazione.
-    const wanted: Record<'tables' | 'reservations' | 'orders', Set<number>> = {
-        tables: new Set(), reservations: new Set(), orders: new Set(),
+    const wanted: Record<'tables' | 'reservations' | 'orders' | 'takeaways', Set<number>> = {
+        tables: new Set(), reservations: new Set(), orders: new Set(), takeaways: new Set(),
     };
     for (const ev of events) {
         const conv = CONVERGENCE[ev.type];
@@ -122,19 +129,27 @@ const applyBatch = async (tenantId: number, events: ReplicaEvent[]): Promise<voi
             if (Number.isInteger(id) && id > 0) wanted[conv.kind].add(id);
         }
     }
-    const rows = (wanted.tables.size || wanted.reservations.size || wanted.orders.size)
+    const rows = (wanted.tables.size || wanted.reservations.size || wanted.orders.size || wanted.takeaways.size)
         ? await cloudPost('/sala-node/rows', {
             tables: [...wanted.tables],
             reservations: [...wanted.reservations],
             orders: [...wanted.orders],
+            takeaways: [...wanted.takeaways],
         })
-        : { tables: [], reservations: [], orders: [], order_items: [], order_revisions: [] };
+        : { tables: [], reservations: [], orders: [], order_items: [], order_revisions: [], takeaway_orders: [], takeaway_order_items: [] };
     const byId = (list: any[]): Map<number, any> => new Map((list ?? []).map((r: any) => [Number(r.id), r]));
     const fetched = {
         tables: byId(rows.tables),
         reservations: byId(rows.reservations),
         orders: byId(rows.orders),
+        takeaways: byId(rows.takeaway_orders),
     };
+    const takeawayItemsByOrder = new Map<number, any[]>();
+    for (const item of rows.takeaway_order_items ?? []) {
+        const list = takeawayItemsByOrder.get(Number(item.takeaway_order_id)) ?? [];
+        list.push(item);
+        takeawayItemsByOrder.set(Number(item.takeaway_order_id), list);
+    }
     const itemsByOrder = new Map<number, any[]>();
     for (const item of rows.order_items ?? []) {
         const list = itemsByOrder.get(Number(item.order_id)) ?? [];
@@ -197,6 +212,24 @@ const applyBatch = async (tenantId: number, events: ReplicaEvent[]): Promise<voi
                     );
                 }
                 touched.add('orders'); touched.add('order_items'); touched.add('order_revisions');
+                continue;
+            }
+            if (conv.kind === 'takeaways') {
+                const tw = fetched.takeaways.get(id);
+                await client.query(`DELETE FROM takeaway_order_items WHERE takeaway_order_id = $1`, [id]);
+                if (!tw) {
+                    await client.query(`DELETE FROM takeaway_orders WHERE id = $1`, [id]);
+                    continue;
+                }
+                await upsertRow(client, 'takeaway_orders', tw);
+                const twItems = takeawayItemsByOrder.get(id) ?? [];
+                if (twItems.length) {
+                    await client.query(
+                        `INSERT INTO takeaway_order_items SELECT * FROM jsonb_populate_recordset(NULL::takeaway_order_items, $1::jsonb)`,
+                        [JSON.stringify(twItems)]
+                    );
+                }
+                touched.add('takeaway_orders'); touched.add('takeaway_order_items');
                 continue;
             }
             const table = conv.kind; // 'tables' | 'reservations': nome tabella = kind

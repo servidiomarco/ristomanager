@@ -77,6 +77,25 @@ export const outboxEnqueueInTx = async (
     );
 };
 
+/** Transazione con evento outbox dentro: la forma minima di «evento e
+ *  mutazione insieme» per i moduli fuori da server.ts (che ha il gemello
+ *  runWithOutboxTx). Il chiamante può fare outboxKick() dopo, o lasciare
+ *  la consegna al giro periodico (3s). */
+export const withOutboxTx = async <T>(fn: (client: { query: (sql: string, params?: any[]) => Promise<any> }) => Promise<T>): Promise<T> => {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const out = await fn(client);
+        await client.query('COMMIT');
+        return out;
+    } catch (err) {
+        await client.query('ROLLBACK').catch(() => { /* noop */ });
+        throw err;
+    } finally {
+        client.release();
+    }
+};
+
 export const outboxRegister = (event: string, handler: OutboxHandler): void => {
     handlers.set(event, handler);
 };

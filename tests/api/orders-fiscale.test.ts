@@ -408,8 +408,12 @@ describe('scontrino di cassa (RT esterno)', () => {
         expect(voided.body.error).toContain('registratore');
 
         // Compare nel registro Fiscalità come scontrino, provider dichiarato.
-        const today = new Date().toISOString().slice(0, 10);
-        const reg = await api().get(`/reports/fiscal-registry?from=${today}&to=${today}&doc_type=RECEIPT`).set(bearer(token));
+        // Finestra di tre giorni: a cavallo della mezzanotte il giorno UTC,
+        // quello di Roma e il giorno di servizio possono essere tre date
+        // diverse — il documento si cerca comunque per id.
+        const ieri = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+        const domani = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+        const reg = await api().get(`/reports/fiscal-registry?from=${ieri}&to=${domani}&doc_type=RECEIPT`).set(bearer(token));
         const inReg = reg.body.documents.find((d: any) => d.id === row.fiscal_doc_id);
         expect(inReg).toBeTruthy();
         expect(inReg.provider).toBe('external_rt');

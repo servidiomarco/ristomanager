@@ -46,6 +46,16 @@ describe('prenotazioni nel log di replica', () => {
         await db.end();
     });
 
+    it("la nascita lascia reservation:created in transazione (fase 3b)", async () => {
+        const resv = await creaPrenotazione('Log Nascita', '2027-04-05T19:30:00.000Z');
+        const rows = await db.query(
+            `SELECT payload FROM outbox_events WHERE event = 'reservation:created' AND aggregate = $1`,
+            [`reservation:${resv.id}`]
+        );
+        expect(rows.rows.length).toBe(1);
+        expect(rows.rows[0].payload).toEqual({ reservation_id: resv.id });
+    });
+
     it("la modifica (l'arrivo in reception) lascia l'evento in transazione, per riferimento", async () => {
         const resv = await creaPrenotazione('Log Arrivo', '2027-04-06T19:30:00.000Z');
 
@@ -109,7 +119,7 @@ describe('prenotazioni nel log di replica', () => {
         for (let i = 0; i < 50; i++) {
             const r = await db.query(
                 `SELECT COUNT(*)::int AS n FROM outbox_events
-                 WHERE aggregate = $1 AND delivered_at IS NOT NULL`,
+                 WHERE aggregate = $1 AND event = 'reservation:deleted' AND delivered_at IS NOT NULL`,
                 [`reservation:${resv.id}`]
             );
             consegnato = r.rows[0].n;

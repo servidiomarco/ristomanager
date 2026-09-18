@@ -148,6 +148,61 @@ describe('replica cloud→nodo', () => {
         }, 'divisione replicata');
     });
 
+    it('una prenotazione appena creata appare sul nodo senza bisogno di altri eventi (3b)', async () => {
+        const resv = await api().post('/reservations').set(bearer(token)).send({
+            customer_name: 'Replica Nascita',
+            phone: '340 555 4411',
+            reservation_time: '2027-05-08T20:00:00.000Z',
+            shift: 'DINNER',
+            guests: 3,
+        });
+        expect(resv.status).toBe(201);
+        await finoA(async () => {
+            const r = await nodeDb!.query('SELECT guests FROM reservations WHERE id = $1', [resv.body.id]);
+            return r.rows[0]?.guests === 3;
+        }, 'prenotazione nata e replicata');
+    });
+
+    it('una comanda disfatta sparisce anche dal nodo (3b)', async () => {
+        const room = await api().post('/rooms').set(bearer(token)).send({ name: 'Sala Replica D', width: 600, height: 400 });
+        const table = await api().post('/tables').set(bearer(token)).send({ name: 'RD1', shape: 'SQUARE', seats: 2, x: 400, y: 200, room_id: room.body.id, status: 'FREE' });
+        const order = await api().post('/orders').set(bearer(token)).send({ table_id: table.body.id });
+        expect(order.status).toBe(201);
+        const orderId = order.body.order.id;
+        // order:created è nel log: la comanda vuota (DRAFT) arriva sul nodo.
+        await finoA(async () => {
+            const r = await nodeDb!.query('SELECT 1 FROM orders WHERE id = $1', [orderId]);
+            return r.rows.length === 1;
+        }, 'comanda nata e replicata');
+        const del = await api().delete(`/orders/${orderId}`).set(bearer(token));
+        expect(del.status).toBe(200);
+        await finoA(async () => {
+            const r = await nodeDb!.query('SELECT 1 FROM orders WHERE id = $1', [orderId]);
+            return r.rows.length === 0;
+        }, 'comanda disfatta anche sul nodo');
+    });
+
+    it("un asporto creato dal banco converge con le sue righe (3b)", async () => {
+        const dish = await api().post('/dishes').set(bearer(token)).send({
+            name: 'Fritto Asporto Replica', description: null, price: 12, category: 'ANTIPASTI', allergens: null,
+        });
+        expect(dish.status).toBe(201);
+        const tw = await api().post('/takeaway/orders').set(bearer(token)).send({
+            customer_name: 'Asporto Replica',
+            pickup_date: '2027-05-09',
+            pickup_time: '19:30',
+            force: true,
+            items: [{ dish_id: dish.body.id, qty: 2 }],
+        });
+        expect(tw.status).toBe(201);
+        await finoA(async () => {
+            const o = await nodeDb!.query('SELECT 1 FROM takeaway_orders WHERE id = $1', [tw.body.id]);
+            if (o.rows.length === 0) return false;
+            const items = await nodeDb!.query('SELECT qty FROM takeaway_order_items WHERE takeaway_order_id = $1', [tw.body.id]);
+            return items.rows.length === 1 && Number(items.rows[0].qty) === 2;
+        }, 'asporto replicato con le righe');
+    });
+
     it('una prenotazione nata DOPO il bootstrap appare al primo evento che la tocca', async () => {
         const resv = await api().post('/reservations').set(bearer(token)).send({
             customer_name: 'Replica Convergenza',
