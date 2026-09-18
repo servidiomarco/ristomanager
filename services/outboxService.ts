@@ -22,7 +22,11 @@
 import pool, { runAsPlatform } from '../db.js';
 import { requireRegisteredEvent } from './eventRegistry.js';
 
-type OutboxHandler = (tenantId: number, payload: any) => Promise<void>;
+/** meta.origin: 'local' = prodotto qui, 'replica' = importato dall'altro
+ *  lato dell'ibrido. I handler che ri-broadcastano eventi a broadcast
+ *  diretto (reservation:*, takeaway:*) devono agire SOLO su 'replica', o
+ *  i client locali riceverebbero tutto due volte. */
+type OutboxHandler = (tenantId: number, payload: any, meta?: { origin: string; event: string; event_id: string }) => Promise<void>;
 
 /** Contesto opzionale dell'envelope (sez. 7 del protocollo): chi e cosa ha
  *  prodotto l'evento. Tutto per riferimento, mai anagrafiche. */
@@ -96,6 +100,34 @@ export const withOutboxTx = async <T>(fn: (client: { query: (sql: string, params
     }
 };
 
+/** Importa nell'outbox locale un evento PRODOTTO DALL'ALTRO LATO, nella
+ *  transazione dell'applier: così i broadcast partono dai handler con
+ *  l'atomicità di sempre, e l'evento resta nel log locale col suo
+ *  event_id globale. ON CONFLICT DO NOTHING = la dedup dell'at-least-once.
+ *  origin='replica': non verrà MAI rispedito da dove è venuto. */
+export const outboxImportInTx = async (
+    client: { query: (sql: string, params?: any[]) => Promise<any> },
+    tenantId: number,
+    ev: { event_id: string; type: string; aggregate: string; payload: any; command_id?: string | null; causation_id?: string | null; actor?: any; schema_ver?: number },
+): Promise<void> => {
+    await client.query(
+        `INSERT INTO outbox_events (tenant_id, event, aggregate, payload, schema_ver, command_id, causation_id, actor, event_id, origin)
+         VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8::jsonb, $9, 'replica')
+         ON CONFLICT (event_id) DO NOTHING`,
+        [
+            tenantId,
+            ev.type,
+            ev.aggregate,
+            ev.payload != null ? JSON.stringify(ev.payload) : null,
+            ev.schema_ver ?? 1,
+            ev.command_id ?? null,
+            ev.causation_id ?? null,
+            ev.actor != null ? JSON.stringify(ev.actor) : null,
+            ev.event_id,
+        ]
+    );
+};
+
 export const outboxRegister = (event: string, handler: OutboxHandler): void => {
     handlers.set(event, handler);
 };
@@ -112,7 +144,7 @@ const sweep = async (): Promise<void> => runAsPlatform(async () => {
         try {
             await client.query('BEGIN');
             const batch = await client.query(
-                `SELECT id, tenant_id, event, payload FROM outbox_events
+                `SELECT id, tenant_id, event, payload, origin, event_id FROM outbox_events
                  WHERE delivered_at IS NULL AND attempts < $1
                  ORDER BY id
                  LIMIT $2
@@ -122,7 +154,7 @@ const sweep = async (): Promise<void> => runAsPlatform(async () => {
             for (const row of batch.rows) {
                 const handler = handlers.get(row.event);
                 try {
-                    if (handler) await handler(Number(row.tenant_id), row.payload);
+                    if (handler) await handler(Number(row.tenant_id), row.payload, { origin: row.origin, event: row.event, event_id: row.event_id });
                     await client.query(
                         `UPDATE outbox_events SET delivered_at = CURRENT_TIMESTAMP WHERE id = $1`,
                         [row.id]

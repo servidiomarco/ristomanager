@@ -34998,7 +34998,7 @@ app.get('/sala-node/events', salaNodeAuth, async (req: any, res) => {
         const rs = await queryWithRetry(
             `SELECT id, event_id, event, aggregate, payload, command_id, causation_id, actor, schema_ver, created_at
              FROM outbox_events
-             WHERE tenant_id = $1 AND id > $2
+             WHERE tenant_id = $1 AND id > $2 AND origin = 'local'
              ORDER BY id
              LIMIT $3`,
             [tenantId, after, limit]
@@ -35815,6 +35815,55 @@ const startServer = async () => {
                             if (payload?.id == null) return;
                             socketService?.broadcastRoomClosedDeleted(tenantId, payload);
                         });
+                        // Fase 4a — ri-broadcast degli eventi IMPORTATI
+                        // dall'altro lato (origin='replica'): i tipi che le
+                        // route broadcastano ancora in diretta (prenotazioni,
+                        // asporto, nascita/disfatta comanda) qui partono dal
+                        // dispatcher SOLO per gli importati — sui 'local' il
+                        // broadcast l'ha già fatto la route, e raddoppiarlo
+                        // significherebbe doppi toast sui client.
+                        outboxRegister('reservation:created', async (tenantId, payload, meta) => {
+                            if (meta?.origin !== 'replica') return;
+                            const id = Number(payload?.reservation_id);
+                            if (!Number.isFinite(id)) return;
+                            const rs = await queryWithRetry('SELECT * FROM reservations WHERE id = $1 AND tenant_id = $2', [id, tenantId]);
+                            if (rs.rows[0]) socketService?.broadcastReservationCreated(tenantId, rs.rows[0]);
+                        });
+                        const rebroadcastReservationUpdate = async (tenantId: number, payload: any, meta?: { origin: string }) => {
+                            if (meta?.origin !== 'replica') return;
+                            const id = Number(payload?.reservation_id);
+                            if (!Number.isFinite(id)) return;
+                            const rs = await queryWithRetry('SELECT * FROM reservations WHERE id = $1 AND tenant_id = $2', [id, tenantId]);
+                            if (rs.rows[0]) socketService?.broadcastReservationUpdated(tenantId, rs.rows[0]);
+                        };
+                        outboxRegister('reservation:updated', rebroadcastReservationUpdate);
+                        outboxRegister('reservation:deleted', async (tenantId, payload, meta) => {
+                            if (meta?.origin !== 'replica') return;
+                            const id = Number(payload?.reservation_id);
+                            if (Number.isFinite(id)) socketService?.broadcastReservationDeleted(tenantId, id);
+                        });
+                        outboxRegister('order:created', async (tenantId, payload, meta) => {
+                            if (meta?.origin !== 'replica') return;
+                            const orderId = Number(payload?.order_id);
+                            if (!Number.isFinite(orderId)) return;
+                            const view = await loadOrderView(tenantId, orderId);
+                            if (view) socketService?.broadcastToAll(tenantId, 'order:created', view.order);
+                        });
+                        outboxRegister('order:deleted', async (tenantId, payload, meta) => {
+                            if (meta?.origin !== 'replica') return;
+                            const orderId = Number(payload?.order_id);
+                            if (Number.isFinite(orderId)) socketService?.broadcastToAll(tenantId, 'order:deleted', { order_id: orderId });
+                        });
+                        const rebroadcastTakeaway = (eventName: 'takeaway:created' | 'takeaway:updated') =>
+                            async (tenantId: number, payload: any, meta?: { origin: string }) => {
+                                if (meta?.origin !== 'replica') return;
+                                const id = Number(payload?.takeaway_order_id);
+                                if (!Number.isFinite(id)) return;
+                                const view = await loadTakeawayView(tenantId, id).catch(() => null);
+                                if (view) socketService?.broadcastToAll(tenantId, eventName, view);
+                            };
+                        outboxRegister('takeaway:created', rebroadcastTakeaway('takeaway:created'));
+                        outboxRegister('takeaway:updated', rebroadcastTakeaway('takeaway:updated'));
                         startOutboxDispatcher();
                         // Rinnovo certificati del nodo di sala: parte solo a
                         // migration riuscite (la sua tabella deve esistere) e
