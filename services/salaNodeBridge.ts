@@ -21,6 +21,7 @@
 // (riavvio del nodo = riconnessione pulita, stesso contratto del pp-agent).
 
 import type { Server as SocketIOServer, Socket } from 'socket.io';
+import { startNodeUpstream } from './salaNodeUpstream.js';
 
 interface NodeStats {
     clients: number;
@@ -34,6 +35,8 @@ interface NodeConnection {
     connectedAt: Date;
     lastSeen: number;
     stats: NodeStats | null;
+    /** Ferma il consumatore dello stream inverso (fase 4a). */
+    stopUpstream: () => void;
 }
 
 const nodesByTenant = new Map<number, NodeConnection>();
@@ -68,6 +71,7 @@ export function setupSalaNodeBridge(io: SocketIOServer, resolveToken: TokenResol
         const tenantId = Number((socket as any).salaNodeTenantId);
         const previous = nodesByTenant.get(tenantId);
         if (previous && previous.socket.id !== socket.id) {
+            previous.stopUpstream();
             try { previous.socket.disconnect(true); } catch (_) {}
         }
         nodesByTenant.set(tenantId, {
@@ -75,6 +79,9 @@ export function setupSalaNodeBridge(io: SocketIOServer, resolveToken: TokenResol
             connectedAt: new Date(),
             lastSeen: Date.now(),
             stats: null,
+            // Lo stream inverso parte con l'aggancio: il cloud tira gli
+            // eventi locali del nodo finché il socket vive (fase 4a).
+            stopUpstream: startNodeUpstream(tenantId, socket),
         });
         console.log(`[sala-node] nodo connesso per tenant ${tenantId}: ${socket.id}`);
 
@@ -93,6 +100,7 @@ export function setupSalaNodeBridge(io: SocketIOServer, resolveToken: TokenResol
         socket.on('disconnect', (reason) => {
             const entry = nodesByTenant.get(tenantId);
             if (entry?.socket.id === socket.id) {
+                entry.stopUpstream();
                 nodesByTenant.delete(tenantId);
             }
             console.log(`[sala-node] nodo disconnesso per tenant ${tenantId} (${reason})`);
@@ -140,6 +148,7 @@ export function mirrorToSalaNode(
 export function disconnectSalaNode(tenantId: number): void {
     const entry = nodesByTenant.get(tenantId);
     if (!entry) return;
+    entry.stopUpstream();
     try { entry.socket.disconnect(true); } catch (_) {}
     nodesByTenant.delete(tenantId);
     console.log(`[sala-node] nodo del tenant ${tenantId} staccato (sospensione o add-on spento)`);
