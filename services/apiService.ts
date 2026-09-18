@@ -3,7 +3,7 @@ import { socketClient } from './socketClient';
 import { authApiService } from './authApiService';
 import { buildApiError } from './apiError';
 import { offlineQueue } from './offlineQueue';
-import { routedGetUrl, cloudFallbackUrl, noteRoutedResponse, fetchNodeAware } from './apiRouting';
+import { routedGetUrl, routeWriteUrl, cloudFallbackUrl, noteRoutedResponse, fetchNodeAware } from './apiRouting';
 
 // Use import.meta.env for Vite frontend environment variables
 const API_URL = import.meta.env.VITE_API_URL || "https://ristomanager-production.up.railway.app";
@@ -37,6 +37,9 @@ const fetchWithAuth = async (
   options: RequestInit = {},
   retried = false
 ): Promise<Response> => {
+  // Fase 4c: con l'autorità in sala le scritture whitelisted (tavoli,
+  // unioni, chiusure) vanno al nodo — no-op per tutto il resto del file.
+  url = routeWriteUrl(url, (options.method as string) || 'GET');
   let response: Response;
   try {
     response = await fetchNodeAware(url, options);

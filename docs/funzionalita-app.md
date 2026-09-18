@@ -417,7 +417,7 @@ Per i ristoranti con cassa **Passepartout Menù** (modulo dedicato):
 - **L'app riparte anche senza internet**: la schermata vive in una copia sul dispositivo (PWA), quindi un refresh o una riapertura a linea caduta non finisce più in pagina bianca — l'app si apre e parla col nodo di sala per quello che il nodo sa servire.
 - Le **scritture** (nuove comande, incassi) passano sempre dal cloud: a linea caduta il palmare lo dice chiaramente, e il rinvio è sicuro (nessun piatto duplicato).
 - Si attiva e disattiva da **Impostazioni → Sala & Cucina → Nodo di sala** (interruttore, dominio e IP del nodo, stato online e dispositivi collegati). Certificato e credenziali li distribuisce il cloud: il nodo si installa e si dimentica.
-- **«Servizio completo sul nodo»** (secondo interruttore della card): l'autorità delle battiture di sala passa al nodo — si lavora anche senza internet, e al ritorno della linea tutto si riallinea da solo. L'interruttore è protetto: si accende solo a nodo collegato e repliche allineate (la card mostra lo stato), lo spegnimento aspetta che il cloud abbia importato ogni battitura del nodo, e a nodo offline resta congelato — l'autorità sta dove sta finché la linea non torna.
+- **«Servizio completo sul nodo»** (secondo interruttore della card): comande, cucina, tavoli e board asporto scrivono direttamente sul nodo — l'autorità delle battiture passa in sala — si lavora anche senza internet, e al ritorno della linea tutto si riallinea da solo. L'interruttore è protetto: si accende solo a nodo collegato e repliche allineate (la card mostra lo stato), lo spegnimento aspetta che il cloud abbia importato ogni battitura del nodo, e a nodo offline resta congelato — l'autorità sta dove sta finché la linea non torna.
 
 ---
 
@@ -655,6 +655,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-18 | Nodo di sala (modalità ibrida) | Col «Servizio completo sul nodo» acceso, le battiture di sala (comande, cucina, stato tavoli, unioni, board asporto) scrivono direttamente sul nodo e si riallineano al cloud da sole; conti, cassa e prenotazioni restano al cloud. |
 | 2026-09-18 | Nodo di sala (modalità ibrida) | Nuovo interruttore «Servizio completo sul nodo» nella card: l'autorità delle battiture passa al nodo, con cancelli di sicurezza (si accende solo a repliche allineate, si spegne col drenaggio, congelato a nodo offline). |
 | 2026-09-17 | Nodo di sala (modalità ibrida) | La shell dell'app è installata sul dispositivo (PWA): refresh e riapertura funzionano anche senza internet — prima un reload a linea caduta finiva in pagina bianca. |
 | 2026-09-17 | Nodo di sala (modalità ibrida) | Nodo che non risponde ≠ linea caduta: se il nodo tace l'app passa al cloud in pochi secondi (letture, realtime e riepilogo cucina) invece di restare appesa, e torna sul nodo solo quando un controllo di salute lo vede di nuovo vivo. |

@@ -2,7 +2,7 @@ import { authApiService } from './authApiService';
 import { socketClient } from './socketClient';
 import type { CourseStatus, OrderWithItems } from '../types';
 import { buildApiError } from './apiError';
-import { routedGetUrl, cloudFallbackUrl, noteRoutedResponse, fetchNodeAware } from './apiRouting';
+import { routedGetUrl, routeWriteUrl, cloudFallbackUrl, noteRoutedResponse, fetchNodeAware } from './apiRouting';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';
 
@@ -63,6 +63,9 @@ const getHeaders = (idempotencyKey?: string): HeadersInit => {
 };
 
 const fetchWithAuth = async (url: string, options: RequestInit = {}, retried = false): Promise<Response> => {
+  // Fase 4c: con l'autorità in sala le scritture whitelisted vanno al nodo
+  // (no-op puro per tutto il resto). Il catch qui sotto è già il fallback.
+  url = routeWriteUrl(url, (options.method as string) || 'GET');
   let response: Response;
   try {
     response = await fetchNodeAware(url, options);

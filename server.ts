@@ -34920,6 +34920,9 @@ const SNAPSHOT_TABLES: SnapshotTableSpec[] = [
     { name: 'customers' },
     // Impostazioni per-tenant (MAI la chiave ACME: è un segreto del cloud).
     { name: 'app_settings', where: `key <> 'sala_node_acme_account_key'` },
+    // I domini del tenant: la allowlist CORS del nodo li legge dal SUO
+    // database — senza, il server del nodo rifiuterebbe i client CRM.
+    { name: 'tenant_domains' },
     // Stato del servizio, finestrato: il nodo serve la sala, non lo storico
     // (i report restano sul cloud). 60 giorni coprono anche la ripresa di
     // una comanda appesa di un servizio passato.

@@ -34,6 +34,10 @@ const NODE_FETCH_TIMEOUT_MS = 8_000;
 interface NodeConfig {
     enabled: boolean;
     node_url: string | null;
+    /** Fase 4: l'autorità delle battiture di sala è sul nodo — le SCRITTURE
+     *  whitelisted vanno lì. Deciso dal cloud (interruttore in card, coi
+     *  suoi cancelli), il client esegue e basta. */
+    authority_enabled: boolean;
 }
 
 type RoutingChangeCallback = () => void;
@@ -60,10 +64,10 @@ const loadConfig = (): NodeConfig => {
     try {
         const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || '');
         if (typeof parsed?.enabled === 'boolean' && (parsed.node_url === null || typeof parsed.node_url === 'string')) {
-            return parsed;
+            return { ...parsed, authority_enabled: parsed.authority_enabled === true };
         }
     } catch { /* config assente o corrotta: si parte spenti */ }
-    return { enabled: false, node_url: null };
+    return { enabled: false, node_url: null, authority_enabled: false };
 };
 
 let config: NodeConfig = loadConfig();
@@ -113,6 +117,49 @@ export const routedGetUrl = (path: string): string => {
         return `${config.node_url}${path}`;
     }
     return `${CLOUD_API_URL}${path}`;
+};
+
+// --- Le SCRITTURE del dominio sala (fase 4c) --------------------------------
+// Con l'autorità sul nodo (interruttore 4b), le scritture whitelisted
+// nascono LÌ — sempre, non solo offline: il percorso critico si esercita a
+// ogni servizio. Tutto il resto (conti, cassa, prenotazioni, CRM) resta al
+// cloud finché le fasi 5+ non li sdoppiano. Il fallback è lo stesso delle
+// letture: nodo che non risponde → cloudFallbackUrl ritenta sul cloud e il
+// circuito si apre — «il downgrade è il failover», e resta convergente
+// perché anche la scrittura sul cloud riscende in replica.
+const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+const WRITE_ROUTABLE: Array<{ path: RegExp; method?: RegExp }> = [
+    // Comande e cucina: il cuore dell'autorità di servizio.
+    { path: /^\/orders(\/.*)?$/ },
+    { path: /^\/kds\/.+$/ },
+    // Stato del tavolo: SOLO il PUT — la DELETE è pianta (autorità cloud).
+    { path: /^\/tables\/\d+$/, method: /^PUT$/ },
+    { path: /^\/table-merges$/ },
+    { path: /^\/table-hidden$/ },
+    { path: /^\/room-closed$/ },
+    // Asporto: la board (stato, lancio, righe) è servizio; la nascita resta
+    // al cloud (tipo split, arriva online e al telefono).
+    { path: /^\/takeaway\/orders\/\d+$/, method: /^PATCH$/ },
+    { path: /^\/takeaway\/orders\/\d+\/(status|fire)$/ },
+];
+// La chiusura comanda apre e salda il CONTO: i conti sono autorità cloud
+// fino alla fase 5 — una chiusura battuta sul nodo creerebbe un incasso
+// che il protocollo non sa ancora riportare su.
+const WRITE_EXCLUDED = [/^\/orders\/\d+\/close$/];
+
+/** Riscrive un URL di SCRITTURA verso il nodo quando l'autorità è in sala.
+ *  Chiamata in testa ai fetchWithAuth dei servizi: per le URL del cloud non
+ *  whitelisted (o a autorità spenta) è un no-op puro. */
+export const routeWriteUrl = (url: string, method?: string): string => {
+    const m = (method || 'GET').toUpperCase();
+    if (!WRITE_METHODS.has(m)) return url;
+    if (!config.authority_enabled || !nodeActive()) return url;
+    if (!url.startsWith(CLOUD_API_URL)) return url;
+    const rest = url.slice(CLOUD_API_URL.length);
+    const pathname = rest.split('?')[0];
+    if (WRITE_EXCLUDED.some(r => r.test(pathname))) return url;
+    const hit = WRITE_ROUTABLE.some(r => r.path.test(pathname) && (!r.method || r.method.test(m)));
+    return hit ? `${config.node_url}${rest}` : url;
 };
 
 /** URL del socket: nodo se attivo, altrimenti cloud. */
@@ -198,11 +245,13 @@ export const refreshNodeConfig = async (): Promise<void> => {
         fresh = {
             enabled: body?.enabled === true,
             node_url: typeof body?.node_url === 'string' ? body.node_url.replace(/\/+$/, '') : null,
+            authority_enabled: body?.authority_enabled === true,
         };
     } catch {
         return; // cloud irraggiungibile: la config persistita resta valida
     }
-    const changed = fresh.enabled !== config.enabled || fresh.node_url !== config.node_url;
+    const changed = fresh.enabled !== config.enabled || fresh.node_url !== config.node_url
+        || fresh.authority_enabled !== config.authority_enabled;
     config = fresh;
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(config)); } catch { /* storage pieno */ }
     if (config.enabled && config.node_url) {

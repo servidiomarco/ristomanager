@@ -69,6 +69,9 @@ describe('snapshot del nodo di sala', () => {
 
         const tables = res.body.tables;
         expect(tables.rooms.some((r: any) => r.id === roomId)).toBe(true);
+        // Fase 4c: i domini del tenant viaggiano nello snapshot — la
+        // allowlist CORS del nodo li legge dal suo database.
+        expect(tables).toHaveProperty('tenant_domains');
         // Dentro la finestra sì, fuori no.
         const ids = tables.reservations.map((r: any) => r.id);
         expect(ids).toContain(recenteId);
