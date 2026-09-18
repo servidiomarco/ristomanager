@@ -636,41 +636,55 @@ export async function findAvailability(tenantId: number, input: AvailabilityInpu
     const { date, shift, guests, location_preference } = input;
     const cappedRooms = await getCappedRoomIds(tenantId, date, shift);
 
+    // Oltre ai liberi (`free`) contiamo i tavoli OFFRIBILI per zona (`total`):
+    // sale aperte quel giorno, con tavoli adatti al gruppo, prenotati o meno.
+    // total = 0 vuol dire che la zona quel giorno NON ESISTE per il cliente
+    // (sale chiuse, o nessun tavolo abbastanza grande): l'agente non deve
+    // nominarla, e il messaggio non deve dire "tutto prenotato" — non c'è
+    // niente da prenotare. Il cap web ($4) resta nel solo `free`: una sala
+    // sopra il limite è "piena", non "chiusa".
     const breakdown = await queryWithRetry(`
-        SELECT r.location AS location, COUNT(*)::int AS free
-        FROM tables t
-        JOIN rooms r ON t.room_id = r.id AND r.tenant_id = t.tenant_id
-        WHERE t.tenant_id = $5
-          AND r.is_closed = false
-          AND NOT (r.id = ANY($4::int[]))
-          AND r.id NOT IN (
-              SELECT room_id FROM room_closed_overrides WHERE date = $2 AND shift = $3 AND tenant_id = $5
-          )
-          AND t.id NOT IN (
-              SELECT table_id FROM table_hidden_overrides WHERE date = $2 AND shift = $3 AND tenant_id = $5
-          )
-          AND t.seats >= $1
-          AND NOT EXISTS (
-              SELECT 1 FROM reservations res
-              WHERE res.table_id = t.id
-                AND res.tenant_id = $5
-                AND DATE(res.reservation_time) = $2
-                AND res.shift = $3
-                AND COALESCE(res.reservation_status, 'CONFIRMED') <> 'CANCELLED'
-          )
-          AND NOT EXISTS (
-              SELECT 1 FROM table_merges tm
-              WHERE tm.date = $2 AND tm.shift = $3 AND tm.tenant_id = $5
-                AND (tm.primary_id = t.id OR t.id = ANY(tm.merged_ids))
-          )
-        GROUP BY r.location
+        SELECT z.location AS location,
+               COUNT(*)::int AS total,
+               SUM(CASE WHEN z.is_free THEN 1 ELSE 0 END)::int AS free
+        FROM (
+            SELECT r.location AS location,
+                   (NOT (r.id = ANY($4::int[]))
+                    AND NOT EXISTS (
+                        SELECT 1 FROM reservations res
+                        WHERE res.table_id = t.id
+                          AND res.tenant_id = $5
+                          AND DATE(res.reservation_time) = $2
+                          AND res.shift = $3
+                          AND COALESCE(res.reservation_status, 'CONFIRMED') <> 'CANCELLED'
+                    )) AS is_free
+            FROM tables t
+            JOIN rooms r ON t.room_id = r.id AND r.tenant_id = t.tenant_id
+            WHERE t.tenant_id = $5
+              AND r.is_closed = false
+              AND r.id NOT IN (
+                  SELECT room_id FROM room_closed_overrides WHERE date = $2 AND shift = $3 AND tenant_id = $5
+              )
+              AND t.id NOT IN (
+                  SELECT table_id FROM table_hidden_overrides WHERE date = $2 AND shift = $3 AND tenant_id = $5
+              )
+              AND t.seats >= $1
+              AND NOT EXISTS (
+                  SELECT 1 FROM table_merges tm
+                  WHERE tm.date = $2 AND tm.shift = $3 AND tm.tenant_id = $5
+                    AND (tm.primary_id = t.id OR t.id = ANY(tm.merged_ids))
+              )
+        ) z
+        GROUP BY z.location
     `, [guests, date, shift, cappedRooms, tenantId]);
 
     let freeIndoor = 0;
     let freeOutdoor = 0;
+    let totalIndoor = 0;
+    let totalOutdoor = 0;
     for (const row of breakdown.rows) {
-        if (row.location === 'INDOOR') freeIndoor = row.free;
-        else if (row.location === 'OUTDOOR') freeOutdoor = row.free;
+        if (row.location === 'INDOOR') { freeIndoor = row.free; totalIndoor = row.total; }
+        else if (row.location === 'OUTDOOR') { freeOutdoor = row.free; totalOutdoor = row.total; }
     }
     const freeTotal = freeIndoor + freeOutdoor;
 
@@ -679,8 +693,17 @@ export async function findAvailability(tenantId: number, input: AvailabilityInpu
             : location_preference === 'OUTDOOR' ? freeOutdoor
             : freeTotal;
         if (preferredFree > 0) {
+            // La zona entra nella frase anche SENZA preferenza quando è l'unica
+            // offribile: se le sale esterne sono chiuse, Sofia deve dire subito
+            // "abbiamo posto all'interno" e non chiedere mai "interno o
+            // esterno?" su una zona che quel giorno non esiste. Il prompt lo
+            // prescrive già (step 3), ma la frase pronta rende il comportamento
+            // indipendente dalla disciplina del modello.
             const where = location_preference === 'INDOOR' ? " all'interno"
-                : location_preference === 'OUTDOOR' ? ' all\'esterno' : '';
+                : location_preference === 'OUTDOOR' ? ' all\'esterno'
+                : freeOutdoor === 0 ? " all'interno"
+                : freeIndoor === 0 ? ' all\'esterno'
+                : '';
             return {
                 available: true,
                 free_tables_count: freeTotal,
@@ -689,7 +712,10 @@ export async function findAvailability(tenantId: number, input: AvailabilityInpu
                 message: `Sì, abbiamo disponibilità${where} per ${guests} persone.`
             };
         }
-        // Preferred zone full but the other has space — let the agent propose it.
+        // Preferred zone has no table — let the agent propose the other one.
+        // "Tutto prenotato" solo se la zona era davvero offribile: a sale
+        // chiuse (total 0) la verità è che quel giorno la zona non si vende.
+        const preferredTotal = location_preference === 'INDOOR' ? totalIndoor : totalOutdoor;
         const altWhere = location_preference === 'INDOOR' ? "all'esterno" : "all'interno";
         const requestedWhere = location_preference === 'INDOOR' ? "all'interno" : "all'esterno";
         return {
@@ -697,7 +723,9 @@ export async function findAvailability(tenantId: number, input: AvailabilityInpu
             free_tables_count: freeTotal,
             free_indoor: freeIndoor,
             free_outdoor: freeOutdoor,
-            message: `Mi dispiace, ${requestedWhere} è tutto prenotato, ma ${altWhere} abbiamo posto. Le va bene?`
+            message: preferredTotal === 0
+                ? `Mi dispiace, quel giorno non è possibile prenotare ${requestedWhere}, ma ${altWhere} abbiamo posto. Le va bene?`
+                : `Mi dispiace, ${requestedWhere} è tutto prenotato, ma ${altWhere} abbiamo posto. Le va bene?`
         };
     }
 

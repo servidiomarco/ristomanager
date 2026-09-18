@@ -160,6 +160,7 @@ Agente conversazionale AI (ElevenLabs) che **risponde al telefono del ristorante
 - Per modificare o cancellare ritrova la prenotazione dal **numero del chiamante**; se non corrisponde (si chiama da un altro telefono), la cerca per **nome e data**, accenti inclusi, o accetta il numero dettato a voce.
 - Applica le regole di casa: date bloccate, soglia gruppi grandi oltre la quale passa la chiamata a un operatore (default 8), caparra automatica (annuncia importo e condizioni con i numeri veri delle Impostazioni), eventuale secondo giro sullo stesso tavolo se abilitato.
 - La verifica di disponibilità **controlla anche l'orario richiesto** contro la griglia degli orari prenotabili: se il cliente chiede un orario che quel giorno non esiste, Sofia lo sa subito e propone i **due orari più vicini** (non l'elenco completo recitato a voce).
+- **Non propone mai una zona chiusa**: se per quel giorno le sale di una zona (interno o esterno) sono chiuse, Sofia dice subito «abbiamo posto all'interno» invece di chiedere «preferisce interno o esterno?»; e se il cliente chiede proprio la zona chiusa, gli risponde che quel giorno non è prenotabile — non un falso «è tutto prenotato» — proponendo l'altra.
 - Quando promette una richiamata (gruppo grande, problema tecnico, prenotazione non trovata) **salva un promemoria strutturato**: nome, numero, motivo e dettagli compaiono in Chiamate come "Da richiamare" e parte una notifica push allo staff.
 - Ogni prenotazione presa da Sofia nasce marcata **"da rivedere"**: lo staff la vede evidenziata e la valida.
 
@@ -655,6 +656,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-18 | Agente vocale "Sofia" | Le zone con le sale chiuse spariscono dal dialogo: a disponibilità in una sola zona Sofia la nomina subito («abbiamo posto all'interno») invece di chiedere «interno o esterno?», e al cliente che chiede la zona chiusa dice che quel giorno non è prenotabile — non «è tutto prenotato» — proponendo l'altra. |
 | 2026-09-18 | Nodo di sala (modalità ibrida) | Col «Servizio completo sul nodo» acceso, le battiture di sala (comande, cucina, stato tavoli, unioni, board asporto) scrivono direttamente sul nodo e si riallineano al cloud da sole; conti, cassa e prenotazioni restano al cloud. |
 | 2026-09-18 | Nodo di sala (modalità ibrida) | Nuovo interruttore «Servizio completo sul nodo» nella card: l'autorità delle battiture passa al nodo, con cancelli di sicurezza (si accende solo a repliche allineate, si spegne col drenaggio, congelato a nodo offline). |
 | 2026-09-17 | Nodo di sala (modalità ibrida) | La shell dell'app è installata sul dispositivo (PWA): refresh e riapertura funzionano anche senza internet — prima un reload a linea caduta finiva in pagina bianca. |
