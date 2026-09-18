@@ -44,7 +44,7 @@ arrivano i primi cinquanta clienti.
 
 ---
 
-## Rosa A — taglio internazionale (il brief attuale)
+## Rosa A — taglio internazionale, radice italiana (il secondo brief)
 
 | Nome | Cosa dice | Sillabe | Screening web |
 |---|---|:-:|---|
@@ -104,7 +104,62 @@ come *platform* o *OS* senza stonare.
 
 ---
 
-## Rosa B — taglio italiano e caldo (il brief precedente)
+## Rosa C — nessuna radice italiana
+
+Terzo brief: un nome che non venga dall'italiano. Ho battuto tre corsie —
+latino neutro, parola inglese concreta, conio astratto alla Nory — e il
+risultato onesto è che **questa corsia rende meno delle altre due**, per un
+motivo che vale la pena mettere per iscritto prima dei nomi.
+
+Toast e Nory sono aziende anglofone che nominano per compratori anglofoni. I
+tuoi primi cinquanta clienti sono italiani, e l'unica cosa che un concorrente
+non può clonare è che il prodotto è nato dentro un ristorante italiano — che
+nell'ospitalità, all'estero, è un asset e non un accento da nascondere. Un nome
+inglese neutro compra la patina SaaS e vende quell'asset. Detto questo, la
+corsia ha un guadagno reale: **zero attrito fonetico in export**, e nessuna
+parola da spiegare a un investitore.
+
+### Parola inglese concreta (registro Toast)
+
+| Nome | Cosa dice | Screening web |
+|---|---|---|
+| **Supper** | il pasto della sera | solo un'app Spotify omonima e «Supp» (turni in ospitalità): nessun gestionale |
+| **Larder** | la dispensa | nulla trovato |
+| **Pantry** | la dispensa | nulla di primario, ma il food-tech e il grocery lo usano molto |
+
+**Supper** è il più vicino a Toast: parola di casa, due sillabe, un italiano la
+legge al primo colpo, e nessun gestionale la usa. **Larder** è più distintivo e
+più bello, ma dice il **retro** — la dispensa — mentre il cuore del prodotto è
+la sala: il nome punterebbe sul magazzino, che qui è la funzione minore.
+**Pantry** ha lo stesso difetto ed è più affollato.
+
+### Conio astratto (registro Nory)
+
+Nory non vuol dire niente e Resy è «reservations» tagliato finché non è più una
+parola. Lo stesso metodo sulla lingua del mestiere dà **Tavi** (da *tavola*),
+**Convi** (da *convivium*), **Ospi** (da *ospite*): due sillabe, alfabeto che si
+legge uguale in italiano e in inglese, nessun significato da difendere. Non li
+metto in tabella perché **su nomi così corti lo screening web non dice niente**:
+decide il WHOIS e il registro marchi, e da qui non li raggiungo. Se la corsia ti
+interessa, sono tre punti di partenza, non tre candidati verificati.
+
+### Perché gli altri sono caduti
+
+La corsia non italiana è la più affollata di tutte: **Vesta** (256 marchi, più
+un marchio in classe 9 per software), **Grata** (35 M$, acquisita da Datasite),
+**Tabula** (contabilità autonoma, YC 2024, Berlino), **Convive** (Convive
+Brands, 70+ ristoranti a New York), **Linen** (il software di gestione biancheria
+per hotel occupa la parola), **Porter** (Porter & Sail, Porter food ordering
+negli hotel, Porter Hospitality), **Gast** (in Germania «gast-» è il prefisso
+standard del software alberghiero: Gastware, Gastfreund, gastrodat, gastromatic).
+
+E una che vale come promemoria: **Fika** — la pausa svedese, perfetta sulla
+carta — un italiano la legge *fica*. Il mercato di casa va controllato anche
+quando il nome arriva da fuori.
+
+---
+
+## Rosa B — taglio italiano e caldo (il primo brief)
 
 Non la cancello: se il posizionamento tornasse «premium italiano» invece che
 «SaaS internazionale», questi restano i nomi migliori. Sono più lunghi e più
@@ -164,9 +219,9 @@ Elencati perché non tornino nella prossima sessione.
 
 ## Cosa fare adesso, in ordine
 
-1. **Prova di dettatura su Brindo, Posto e Passo** *insieme a* Sympotia, alle
-   stesse 10 persone, mescolati. Se Sympotia regge 8 su 10, il secondo parere
-   vale meno dei numeri e il nome resta.
+1. **Prova di dettatura su Brindo, Posto, Passo e Supper** *insieme a*
+   Sympotia, alle stesse 10 persone, mescolati. Se Sympotia regge 8 su 10, il
+   secondo parere vale meno dei numeri e il nome resta.
 2. **WHOIS** dei `.com` dei sopravvissuti (non verificabile da qui). Su nomi di
    due sillabe il `.com` è la variabile che decide: aspettarsi che siano
    occupati e valutare il costo di acquisto, non solo la registrazione.
