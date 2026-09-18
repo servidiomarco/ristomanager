@@ -8,7 +8,8 @@ import {
   getSalaProfiles, createSalaProfile, updateSalaProfile,
   activateSalaProfile, detachSalaProfile, deleteSalaProfile,
   updatePrintRoutes, updateSalaNodeSettings, provisionSalaNodeCert,
-  type SalaConfig, type FireMode, type SalaProfile,
+  getSalaNodeAuthority, setSalaNodeAuthority,
+  type SalaConfig, type FireMode, type SalaProfile, type SalaNodeAuthority,
 } from '../services/salaApiService';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -45,9 +46,31 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
   const [nodeDraft, setNodeDraft] = useState({ domain: '', lan_ip: '', port: '443' });
   const nodeDraftSeeded = useRef(false);
   const [certBusy, setCertBusy] = useState(false);
+  // L'interruttore «Servizio completo sul nodo» (tappa 4): lo stato arriva
+  // dalla sua route coi cancelli — la card lo mostra, non lo decide.
+  const [authority, setAuthority] = useState<SalaNodeAuthority | null>(null);
+  const [authBusy, setAuthBusy] = useState(false);
 
   const showToastRef = useRef(showToast);
   useEffect(() => { showToastRef.current = showToast; });
+
+  // Lo stato autorità si rilegge quando l'ibrido è acceso e il nodo online:
+  // richiede una RPC verso il nodo, quindi non sta nel polling di
+  // /sala/config — un giro ogni 15s mentre la card è aperta basta.
+  useEffect(() => {
+    if (!hasFeature('sala_node')) return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const a = await getSalaNodeAuthority();
+        if (!cancelled) setAuthority(a);
+      } catch { /* senza permesso o errore: la riga resta muta */ }
+    };
+    void tick();
+    const id = setInterval(() => void tick(), 15_000);
+    return () => { cancelled = true; clearInterval(id); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const reload = useCallback(async () => {
     try {
@@ -580,6 +603,71 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
                   />
                 </button>
               </div>
+              <div className="flex items-center gap-3 px-3 py-2.5">
+                <div className="flex-1 min-w-0">
+                  <span className="text-[13px] font-medium text-[var(--ds-text-primary)]">Servizio completo sul nodo</span>
+                  <p className="text-[12px] text-[var(--ds-text-muted)]">
+                    Le battiture di sala nascono sul nodo e si riallineano al cloud da sole: si lavora anche senza internet.
+                  </p>
+                  <p className="text-[12px] mt-0.5">
+                    {!flags.sala_node_enabled ? (
+                      <span className="text-[var(--ds-text-muted)]">prima accendi la modalità ibrida</span>
+                    ) : authority == null ? (
+                      <span className="text-[var(--ds-text-muted)]">verifica in corso…</span>
+                    ) : authority.enabled ? (
+                      <span className="text-[var(--ds-seated-text)]">autorità in sala{authority.aligned ? ' · repliche allineate' : ' · riallineamento in corso'}</span>
+                    ) : !authority.node_online ? (
+                      <span className="text-[var(--ds-critical-text)]">nodo offline: interruttore congelato</span>
+                    ) : authority.aligned ? (
+                      <span className="text-[var(--ds-seated-text)]">pronto: repliche allineate</span>
+                    ) : (
+                      <span className="text-[var(--ds-pending-text)]">
+                        repliche in ritardo di {Math.max(
+                          authority.cloud_head - (authority.node_applied_cloud_seq ?? 0),
+                          (authority.node_local_head ?? 0) - authority.cloud_applied_node_seq,
+                        )} eventi
+                      </span>
+                    )}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={authority?.enabled === true}
+                  disabled={
+                    !canEdit || authBusy || !flags.sala_node_enabled || authority == null
+                    // Per accendere servono nodo online e repliche allineate;
+                    // per spegnere basta il nodo online (il server drena).
+                    || (!authority.enabled && !(authority.node_online && authority.aligned))
+                    || (authority.enabled && !authority.node_online)
+                  }
+                  title={authority && !authority.node_online ? "Il nodo è offline: l'autorità resta dov'è finché la linea non torna" : undefined}
+                  onClick={async () => {
+                    if (!authority) return;
+                    setAuthBusy(true);
+                    try {
+                      const next = await setSalaNodeAuthority(!authority.enabled);
+                      setAuthority(next);
+                      showToast(next.enabled ? 'Autorità di servizio al nodo' : 'Autorità di servizio al cloud', 'success');
+                    } catch (err: any) {
+                      showToast(err?.message || 'Operazione non riuscita', 'error');
+                      try { setAuthority(await getSalaNodeAuthority()); } catch { /* la prossima lettura periodica sistema */ }
+                    } finally {
+                      setAuthBusy(false);
+                    }
+                  }}
+                  className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
+                    authority?.enabled ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-surface-row)] border border-[var(--ds-border)]'
+                  }`}
+                >
+                  <span
+                    aria-hidden="true"
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${
+                      authority?.enabled ? 'translate-x-5' : 'translate-x-0.5'
+                    } translate-y-0.5`}
+                  />
+                </button>
+              </div>
               <div className="flex items-center gap-3 px-3 py-2">
                 <div className="flex-1 min-w-0 text-[13px]">
                   <span className="font-medium text-[var(--ds-text-primary)]">Certificato TLS</span>
@@ -631,7 +719,7 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
               )}
             </div>
             <p className="text-[12px] text-[var(--ds-text-muted)] mt-1.5">
-              Il dominio punta all'IP del nodo in LAN; certificato e credenziali li distribuisce il cloud. Le scritture passano sempre dal cloud.
+              Il dominio punta all'IP del nodo in LAN; certificato e credenziali li distribuisce il cloud. Col servizio completo spento le scritture passano dal cloud; acceso, nascono sul nodo e si riallineano da sole.
             </p>
           </section>
         )}

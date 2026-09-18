@@ -100,6 +100,25 @@ const serveNodePull = async (req: any, ack: (res: any) => void): Promise<void> =
     }
 };
 
+/** Lo stato di replica del nodo, per i cancelli dell'interruttore (4b):
+ *  fin dove ho applicato lo stream del cloud, e fin dove arriva il mio
+ *  log locale (che il cloud deve aver drenato prima di riprendersi
+ *  l'autorità). */
+const serveNodeStatus = async (_req: any, ack: (res: any) => void): Promise<void> => {
+    try {
+        await runAsPlatform(async () => {
+            const cur = await pool.query(`SELECT applied_seq FROM replication_cursor WHERE stream = 'cloud' LIMIT 1`);
+            const head = await pool.query(`SELECT COALESCE(MAX(id), 0)::bigint AS h FROM outbox_events WHERE origin = 'local'`);
+            ack({
+                applied_cloud_seq: Number(cur.rows[0]?.applied_seq ?? 0),
+                local_head: Number(head.rows[0].h),
+            });
+        });
+    } catch (err: any) {
+        ack({ error: err?.message || String(err) });
+    }
+};
+
 const serveNodeRows = async (req: any, ack: (res: any) => void): Promise<void> => {
     try {
         await runAsPlatform(async () => {
@@ -178,6 +197,7 @@ export const startSalaNodeReplica = (): void => {
     // Lo stream inverso: il cloud tira da qui, sempre pull con cursore.
     socket.on('node:pull', (req, ack) => { if (typeof ack === 'function') void serveNodePull(req, ack); });
     socket.on('node:rows', (req, ack) => { if (typeof ack === 'function') void serveNodeRows(req, ack); });
+    socket.on('node:status', (req, ack) => { if (typeof ack === 'function') void serveNodeStatus(req, ack); });
     let connErrLogged = 0;
     socket.on('connect_error', (err) => {
         if (Date.now() - connErrLogged > 60_000) {

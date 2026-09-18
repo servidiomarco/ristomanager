@@ -134,6 +134,32 @@ export const updateSalaNodeSettings = (payload: SalaNodeSettingsPayload): Promis
 export const provisionSalaNodeCert = (): Promise<{ domain: string; expires_at: string }> =>
   apiRequest(`${API_URL}/sala-node/provision-cert`, { method: 'POST', headers: getHeaders() });
 
+/** Lo stato dell'interruttore «Servizio completo sul nodo» (tappa 4):
+ *  autorità, allineamento delle due repliche e teste dei log. */
+export interface SalaNodeAuthority {
+  enabled: boolean;
+  hybrid_on: boolean;
+  node_online: boolean;
+  aligned: boolean;
+  cloud_head: number;
+  node_applied_cloud_seq: number | null;
+  node_local_head: number | null;
+  cloud_applied_node_seq: number;
+}
+
+export const getSalaNodeAuthority = (): Promise<SalaNodeAuthority> =>
+  apiRequest(`${API_URL}/sala-node/authority`, { headers: getHeaders() });
+
+/** L'interruttore vero: il server verifica i cancelli (nodo online,
+ *  repliche allineate, drenaggio allo spegnimento) e risponde 409 con la
+ *  ragione quando non si può — il chiamante la mostra, non la aggira. */
+export const setSalaNodeAuthority = (enabled: boolean, force = false): Promise<SalaNodeAuthority> =>
+  apiRequest(`${API_URL}/sala-node/authority`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ enabled, force }),
+  });
+
 /** Campo assente = non toccare; null = torna al default 'preconti'. */
 export const updatePrintRoutes = (routes: Partial<SalaPrintRoutes>): Promise<{ ok: true; print_routes: SalaPrintRoutes }> =>
   apiRequest(`${API_URL}/sala/print-routes`, {
