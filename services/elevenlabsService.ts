@@ -518,6 +518,13 @@ export interface AvailabilityResult {
     free_tables_count: number;
     free_indoor: number;
     free_outdoor: number;
+    // Zona senza NESSUN tavolo offribile quel giorno (sale chiuse, o nessun
+    // tavolo adatto al gruppo) — distinta da "piena". L'agente la annuncia
+    // solo se il cliente la chiede, e con "le sale ... sono chiuse", mai con
+    // "siamo al completo" (chiamata Gervasi 2026-09-18: l'agente ha inventato
+    // "non abbiamo posti all'esterno" su sale semplicemente chiuse).
+    indoor_closed: boolean;
+    outdoor_closed: boolean;
     alternative_shift?: Shift;
     // Doppio turno: primo slot del turno in cui un tavolo adatto si libera
     // (HH:MM). Presente solo a turno pieno con voice_double_seating_enabled.
@@ -687,44 +694,52 @@ export async function findAvailability(tenantId: number, input: AvailabilityInpu
         else if (row.location === 'OUTDOOR') { freeOutdoor = row.free; totalOutdoor = row.total; }
     }
     const freeTotal = freeIndoor + freeOutdoor;
+    // "Chiusa" = zero tavoli offribili quel giorno, prenotati o meno.
+    const indoorClosed = totalIndoor === 0;
+    const outdoorClosed = totalOutdoor === 0;
 
     if (freeTotal > 0) {
         const preferredFree = location_preference === 'INDOOR' ? freeIndoor
             : location_preference === 'OUTDOOR' ? freeOutdoor
             : freeTotal;
         if (preferredFree > 0) {
-            // La zona entra nella frase anche SENZA preferenza quando è l'unica
-            // offribile: se le sale esterne sono chiuse, Sofia deve dire subito
-            // "abbiamo posto all'interno" e non chiedere mai "interno o
-            // esterno?" su una zona che quel giorno non esiste. Il prompt lo
-            // prescrive già (step 3), ma la frase pronta rende il comportamento
-            // indipendente dalla disciplina del modello.
+            // La zona si nomina SOLO se l'ha chiesta il cliente. Senza
+            // preferenza la frase resta generica anche quando una zona è
+            // chiusa: nominare l'interno non richiesto ha fatto improvvisare
+            // all'agente "Preferite l'interno o vi va bene così?" (chiamata
+            // Gervasi 2026-09-18). Il divieto di chiedere la zona a zona unica
+            // sta nel prompt (free_indoor/free_outdoor) e nei campi
+            // indoor_closed/outdoor_closed qui sotto.
             const where = location_preference === 'INDOOR' ? " all'interno"
                 : location_preference === 'OUTDOOR' ? ' all\'esterno'
-                : freeOutdoor === 0 ? " all'interno"
-                : freeIndoor === 0 ? ' all\'esterno'
                 : '';
             return {
                 available: true,
                 free_tables_count: freeTotal,
                 free_indoor: freeIndoor,
                 free_outdoor: freeOutdoor,
+                indoor_closed: indoorClosed,
+                outdoor_closed: outdoorClosed,
                 message: `Sì, abbiamo disponibilità${where} per ${guests} persone.`
             };
         }
         // Preferred zone has no table — let the agent propose the other one.
         // "Tutto prenotato" solo se la zona era davvero offribile: a sale
-        // chiuse (total 0) la verità è che quel giorno la zona non si vende.
-        const preferredTotal = location_preference === 'INDOOR' ? totalIndoor : totalOutdoor;
+        // chiuse la verità da dire è che le sale sono chiuse, non che sono
+        // piene (la chiusura è stagionale, il cliente capisce "chiuse").
+        const preferredClosed = location_preference === 'INDOOR' ? indoorClosed : outdoorClosed;
         const altWhere = location_preference === 'INDOOR' ? "all'esterno" : "all'interno";
         const requestedWhere = location_preference === 'INDOOR' ? "all'interno" : "all'esterno";
+        const requestedRooms = location_preference === 'INDOOR' ? "le sale all'interno" : "le sale all'esterno";
         return {
             available: false,
             free_tables_count: freeTotal,
             free_indoor: freeIndoor,
             free_outdoor: freeOutdoor,
-            message: preferredTotal === 0
-                ? `Mi dispiace, quel giorno non è possibile prenotare ${requestedWhere}, ma ${altWhere} abbiamo posto. Le va bene?`
+            indoor_closed: indoorClosed,
+            outdoor_closed: outdoorClosed,
+            message: preferredClosed
+                ? `Al momento ${requestedRooms} sono chiuse, ma ${altWhere} abbiamo posto. Le va bene?`
                 : `Mi dispiace, ${requestedWhere} è tutto prenotato, ma ${altWhere} abbiamo posto. Le va bene?`
         };
     }
@@ -740,6 +755,8 @@ export async function findAvailability(tenantId: number, input: AvailabilityInpu
                 free_tables_count: 0,
                 free_indoor: 0,
                 free_outdoor: 0,
+                indoor_closed: indoorClosed,
+                outdoor_closed: outdoorClosed,
                 second_seating_from: secondSeating,
                 message: `Mi dispiace, per quella fascia siamo al completo, ma dalle ${secondSeating} si libera un tavolo per ${guests}. Può andare bene?`
             };
@@ -789,6 +806,8 @@ export async function findAvailability(tenantId: number, input: AvailabilityInpu
             free_tables_count: 0,
             free_indoor: 0,
             free_outdoor: 0,
+            indoor_closed: indoorClosed,
+            outdoor_closed: outdoorClosed,
             alternative_shift: otherShift,
             message: `Mi dispiace, per quella fascia siamo al completo. Posso proporle ${altLabel} dello stesso giorno?`
         };
@@ -799,6 +818,8 @@ export async function findAvailability(tenantId: number, input: AvailabilityInpu
         free_tables_count: 0,
         free_indoor: 0,
         free_outdoor: 0,
+        indoor_closed: indoorClosed,
+        outdoor_closed: outdoorClosed,
         message: 'Mi dispiace, per quel giorno siamo al completo. Possiamo provare un altro giorno?'
     };
 }

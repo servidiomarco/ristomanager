@@ -78,7 +78,7 @@ describe('zone chiuse sul canale voce (check_availability)', () => {
         expect(res.body.message).not.toContain("all'esterno");
     });
 
-    it('sale esterne chiuse: la frase nomina subito l\'interno', async () => {
+    it('sale esterne chiuse, nessuna preferenza: frase generica (zona mai nominata), outdoor_closed acceso', async () => {
         const chiusa = await api().patch(`/rooms/${salaEsternaId}`).set(bearer(token)).send({ is_closed: true });
         expect(chiusa.status).toBe(200);
 
@@ -86,15 +86,20 @@ describe('zone chiuse sul canale voce (check_availability)', () => {
         expect(res.status).toBe(200);
         expect(res.body.available).toBe(true);
         expect(res.body.free_outdoor).toBe(0);
-        expect(res.body.message).toContain("all'interno");
+        expect(res.body.outdoor_closed).toBe(true);
+        expect(res.body.indoor_closed).toBe(false);
+        // La zona non richiesta non entra nella frase: nominarla ha già fatto
+        // improvvisare all'agente domande senza senso (chiamata Gervasi 18/09).
+        expect(res.body.message).not.toContain("all'interno");
         expect(res.body.message).not.toContain("all'esterno");
     });
 
-    it('cliente chiede l\'esterno a sale chiuse: "non è possibile", non "tutto prenotato"', async () => {
+    it('cliente chiede l\'esterno a sale chiuse: "le sale sono chiuse", non "tutto prenotato"', async () => {
         const res = await disponibilita({ location_preference: 'OUTDOOR' });
         expect(res.status).toBe(200);
         expect(res.body.available).toBe(false);
-        expect(res.body.message).toContain("non è possibile prenotare all'esterno");
+        expect(res.body.outdoor_closed).toBe(true);
+        expect(res.body.message).toContain("le sale all'esterno sono chiuse");
         expect(res.body.message).toContain("all'interno abbiamo posto");
         expect(res.body.message).not.toContain('tutto prenotato');
     });
@@ -115,6 +120,7 @@ describe('zone chiuse sul canale voce (check_availability)', () => {
         const res = await disponibilita({ location_preference: 'OUTDOOR' });
         expect(res.status).toBe(200);
         expect(res.body.available).toBe(false);
+        expect(res.body.outdoor_closed).toBe(false);
         expect(res.body.message).toContain("all'esterno è tutto prenotato");
         expect(res.body.message).toContain("all'interno abbiamo posto");
     });
