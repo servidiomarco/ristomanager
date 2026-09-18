@@ -114,6 +114,8 @@ export interface BookingToolsDeps {
     recordVoiceCall: (tenantId: number, p: any) => Promise<any>;
     recordCallbackRequest: (tenantId: number, p: any) => Promise<any>;
     upsertCustomerFromReservation: (tenantId: number, name: string, phone: string, a: any, b: any, language?: string | null) => Promise<string | null>;
+    /** Rubrica per numero (last-10-digits, stessa regola dell'upsert). */
+    findCustomerByPhone: (tenantId: number, phone: string) => Promise<{ exists: boolean; customer_name?: string }>;
     /** Card #27 — true se il numero appartiene a un cliente in blacklist. */
     isPhoneBlacklisted: (tenantId: number, phone: string) => Promise<boolean>;
     /** Comportamento della blacklist per fonte, deciso dal tenant. */
@@ -323,6 +325,10 @@ export interface CreateReservationParams {
     children?: any;
     notes?: any;
     location_preference?: any;
+    /** Il numero del chiamante è già in rubrica con un ALTRO nome e il
+     *  cliente ha chiarito che la prenotazione è davvero per un'altra
+     *  persona: bypassa il controllo name_mismatch. */
+    name_confirmed?: any;
     conversation_id?: string;
     /** Card #32 — lingua rilevata dal canale: payload ElevenLabs per la voce
      *  (se disponibile), nessuna per WhatsApp (si usa il prefisso telefonico). */
@@ -393,6 +399,50 @@ export async function createReservation(
         return fail('customer_blacklisted', 'Mi dispiace, al momento non posso registrare questa prenotazione. Il ristorante resta a disposizione per assisterla direttamente.');
     }
 
+    // Chi chiama da un numero già in rubrica di norma È quel cliente: se il
+    // nome dettato non c'entra col nome registrato, il salvataggio si ferma e
+    // l'agente deve chiarire PRIMA di scrivere un intestatario sbagliato
+    // (chiamata Taddeo 2026-09-18: numero in rubrica come "Taddeo Sergio",
+    // prenotazione salvata come "Caddéo Taddeo" da un nome mal trascritto).
+    // Nome dettato ⊆ nome in rubrica ("Taddeo" per "Taddeo Sergio", o le
+    // stesse parole in altro ordine) → si salva il nome di rubrica, completo.
+    // name_confirmed: true = il cliente ha chiarito che è per un'altra
+    // persona: si salva il nome dettato, con il titolare del numero in nota.
+    const nameConfirmed = p.name_confirmed === true
+        || String(p.name_confirmed ?? '').trim().toLowerCase() === 'true';
+    let effectiveName = customerName;
+    let registeredNameNote: string | undefined;
+    try {
+        const registered = await d.findCustomerByPhone(tenantId, phoneRaw);
+        const regName = (registered.customer_name || '').trim();
+        if (registered.exists && regName) {
+            const nameTokens = (s: string) => new Set(
+                s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().split(/[^a-z]+/).filter(Boolean)
+            );
+            const given = nameTokens(customerName);
+            const reg = nameTokens(regName);
+            if (given.size > 0 && [...given].every(t => reg.has(t))) {
+                effectiveName = regName;
+            } else if (!nameConfirmed) {
+                console.warn(`${channel.logPrefix} create-reservation name mismatch`, {
+                    given: customerName, registered: regName, conversation_id: conversationId,
+                });
+                return fail('name_mismatch',
+                    `Questo numero risulta già registrato a nome ${regName}. La prenotazione è per ${regName} o per un'altra persona?`,
+                    {
+                        registered_name: regName,
+                        hint: 'Se il cliente conferma il nome in rubrica, richiama il tool con quel nome. Se la prenotazione è davvero per un\'altra persona, richiama il tool con gli stessi dati e name_confirmed: true.',
+                    });
+            } else {
+                registeredNameNote = `Numero in rubrica: ${regName}`;
+            }
+        }
+    } catch (err) {
+        // La rubrica non deve mai bloccare una prenotazione: senza lookup si
+        // salva il nome dettato, come prima di questo controllo.
+        console.warn(`${channel.logPrefix} rubrica lookup failed (non-blocking):`, (err as Error)?.message || err);
+    }
+
     const normalizedDate = d.parseFlexibleDate(p.date);
     if (!normalizedDate) {
         console.warn(`${channel.logPrefix} create-reservation rejected: unparseable date`, { received: p.date });
@@ -453,20 +503,23 @@ export async function createReservation(
 
     try {
         console.log(`${channel.logPrefix} create-reservation start`, {
-            customer_name: customerName, raw_date: p.date, raw_time: p.time,
+            customer_name: effectiveName, spoken_name: customerName, raw_date: p.date, raw_time: p.time,
             normalized_date: normalizedDate, normalized_time: normalizedTime,
             shift: rawShift, guests, children, conversation_id: conversationId,
             location_preference: locationPreference, phone_source: phoneSource,
             deposit_required: depositRequired,
         });
+        // La nota "Numero in rubrica: ..." accompagna solo i bypass
+        // name_confirmed: la sala deve sapere chi è il titolare del numero.
+        const finalNotes = [notes, registeredNameNote].filter(Boolean).join(' · ') || undefined;
         const created = await d.createVoiceReservation(tenantId, {
-            customer_name: customerName,
+            customer_name: effectiveName,
             phone: phoneRaw,
             reservation_time: reservationTime,
             shift: rawShift as Shift,
             guests: Math.trunc(guests),
             children,
-            notes,
+            notes: finalNotes,
             conversation_id: conversationId,
             location_preference: locationPreference,
             deposit_required: depositRequired,
@@ -540,7 +593,7 @@ export async function createReservation(
         // cliente nuovo compare la prima volta nel sistema. Card #32: se il
         // cliente ha già una lingua nota e questa prenotazione non ne aveva
         // una, la eredita; altrimenti (o se combaciano) non serve altro.
-        const resolvedLanguage = await d.upsertCustomerFromReservation(tenantId, customerName, phoneRaw, null, null, detectedLanguage);
+        const resolvedLanguage = await d.upsertCustomerFromReservation(tenantId, effectiveName, phoneRaw, null, null, detectedLanguage);
         if (resolvedLanguage && resolvedLanguage !== detectedLanguage) {
             d.queryWithRetry(
                 `UPDATE reservations SET language = $1 WHERE id = $2 AND tenant_id = $3`,
