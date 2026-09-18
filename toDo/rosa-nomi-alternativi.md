@@ -290,6 +290,66 @@ Elencati perché non tornino nella prossima sessione.
 
 ---
 
+## Quarto giro — di nuovo non italiano, con il vincolo di casa
+
+Il 18/09, a valle di due obiezioni: *Posto* non fa riconoscere il prodotto, e
+soprattutto **era un nome italiano dopo che era stato chiesto di non usarne**.
+La seconda è una deviazione mia: la risposta «primo mercato Italia» spiegava
+perché *Supper* non va, non autorizzava a tornare all'italiano.
+
+Il brief corretto è quindi la congiunzione dei due vincoli: **non italiano, ma
+un italiano lo deve scrivere sentendolo al telefono.**
+
+### Cos'è caduto in questo giro
+
+| Nome | Perché |
+|---|---|
+| **Taberna** | `taberna.ai`: piattaforma B2B di customer experience. Software, e pure sul `.ai` |
+| **Prosit** | tre aziende italiane della birra: Prosit Italia (Verona), Prosit S.r.l. (Serrungarina), Birreria Prosit (Treviso). Stesso paese, stessa filiera: è Brindo un'altra volta |
+| **Posada** | Posadas, gruppo alberghiero messicano quotato, 100+ hotel |
+| **Convia** | Convia Inc (energy management) e il marchio NORAPLAN CONVIA |
+| **Hospita** | libero, ma il prefisso *hospi-* è denso di sanità (Hospira, Hospify, HOSPITRAC): legge medicale |
+| **Patera** | in spagnolo *patera* è il barcone dei migranti |
+| **Copia** | in italiano vuol dire «copia» |
+| **Mensa** | la società del QI, e in italiano è la mensa aziendale |
+
+### La tensione strutturale, detta una volta per tutte
+
+Dopo quattro giri il quadro è chiaro, e vale più di qualunque altro nome:
+
+**Non italiano + scrivibile da un italiano al telefono + ci riconosci il
+prodotto: questi tre non stanno insieme.** Una parola che un italiano riconosce
+subito come «ristorante» è quasi sempre italiana. Una parola non italiana con
+quel significato è quasi sempre già presa — questo giro lo dimostra riga per
+riga. Quello che resta libero è quasi sempre una parola in cui **non si
+riconosce niente**.
+
+E qui sta il punto che sblocca tutto: **in Nory non si riconosce niente
+nemmeno adesso.** Nory era Skueeze, non vuol dire nulla, e il significato gliel'ha
+dato il prodotto — dopo. Chiedere a un nome di essere insieme libero, straniero
+e auto-esplicativo è chiedergli una cosa che nemmeno i due riferimenti che ti
+piacciono hanno mai fatto.
+
+Quindi la scelta non è fra nomi, è fra **quale dei tre vincoli allentare**:
+
+1. **Allenti «ci riconosco il prodotto»** → si va di conio, alla Nory. È la
+   strada con più spazio libero, e l'unica in cui il nome è davvero tuo.
+2. **Allenti «non italiano»** → tornano Mescita e Premura, che sono i nomi più
+   difendibili di tutto il dossier.
+3. **Allenti «lo scrive un italiano»** → torna Supper, e il primo mercato
+   diventa l'anglosfera. Ma il primo mercato l'hai già deciso.
+
+### Cosa resta in piedi, non italiano
+
+| Nome | Cosa dice | Stato |
+|---|---|---|
+| **Tessera** | il gettone dell'ospitalità romana spezzato fra oste e ospite | libero da software, ma in Italia legge «tessera sanitaria»; da controllare Tessitura e le registrazioni ex Tessera/Xperi |
+| **Tessara** | la stessa storia, scritta in modo da **non essere più la parola italiana** | conio: da qui non verificabile, serve WHOIS + TMview |
+| **Larder** | la dispensa | pulito, ma nomina il retro mentre il prodotto è la sala |
+| **Supper** | il pasto della sera | pulito sui marchi, ma al telefono in Italia è «Super» |
+
+---
+
 ## Cosa fare adesso, in ordine
 
 1. **Prova di dettatura su Posto, Passo e Mescita** *insieme a* Sympotia, alle
