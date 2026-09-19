@@ -130,6 +130,8 @@ export interface BookingToolsDeps {
     getAutoDepositPolicy: (tenantId: number) => Promise<{ enabled: boolean; minGuests: number; perPersonCents: number }>;
     depositDefaultPerPersonCents: number;
     createPaymentOrder: (tenantId: number, p: any) => Promise<any>;
+    /** Valuta del ristorante: gli ordini e le righe la registrano uguale. */
+    getTenantCurrency: (tenantId: number) => Promise<string>;
     queryWithRetry: (sql: string, params?: any[]) => Promise<any>;
     buildDepositRequestMessage: (...a: any[]) => string;
     buildBookingDepositRequestTemplate: (...a: any[]) => any;
@@ -595,9 +597,10 @@ export async function createReservation(
                 : depositGuestsLabelIt;
             const orderDescription = `Caparra prenotazione #${created.id} - ${depositGuestsLabelIt} ${depositDateLabel} ${normalizedTime}`;
             try {
+                const depositCurrency = await d.getTenantCurrency(tenantId);
                 const order = await d.createPaymentOrder(tenantId, {
                     amount: depositAmountCents,
-                    currency: 'EUR',
+                    currency: depositCurrency,
                     description: orderDescription,
                     reference: `reservation:${created.id}`,
                     flow: 'deposit',
@@ -606,13 +609,14 @@ export async function createReservation(
                     `INSERT INTO payment_requests
                         (tenant_id, reservation_id, amount_cents, currency, description, status, provider,
                          provider_order_id, checkout_url, metadata)
-                     VALUES ($9, $1, $2, 'EUR', $3, $4, $5, $6, $7, $8)
+                     VALUES ($9, $1, $2, $10, $3, $4, $5, $6, $7, $8)
                      RETURNING *`,
                     [
                         created.id, depositAmountCents, orderDescription, order.status, order.provider,
                         order.id, order.checkoutUrl,
                         JSON.stringify({ ...order.metadata, source: `${channel.id}_auto_deposit` }),
                         tenantId,
+                        depositCurrency,
                     ]
                 );
                 depositCheckoutUrl = order.checkoutUrl;

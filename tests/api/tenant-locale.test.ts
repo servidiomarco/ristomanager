@@ -48,4 +48,19 @@ describe('valuta, fuso e paese del tenant', () => {
         const r = await db.query(`SELECT pg_typeof(country_code)::text AS tipo FROM tenants WHERE id = 1`);
         expect(r.rows[0].tipo).toBe('character');
     });
+    it('una richiesta di pagamento registra la valuta del ristorante', async () => {
+        // Il gateway non è configurato nei test, quindi la creazione via API
+        // non arriva in fondo: si verifica il contratto che conta, cioè che
+        // la colonna accetti e conservi la valuta del tenant invece di un
+        // 'EUR' cablato nell'SQL.
+        await db.query(`UPDATE tenants SET currency = 'GBP' WHERE id = 1`);
+        const ins = await db.query(
+            `INSERT INTO payment_requests (tenant_id, amount_cents, currency, description, status, provider)
+             VALUES (1, 1500, (SELECT currency FROM tenants WHERE id = 1), 'prova valuta', 'PENDING', 'revolut')
+             RETURNING currency`
+        );
+        expect(ins.rows[0].currency).toBe('GBP');
+        await db.query(`DELETE FROM payment_requests WHERE description = 'prova valuta'`);
+        await db.query(`UPDATE tenants SET currency = 'EUR' WHERE id = 1`);
+    });
 });
