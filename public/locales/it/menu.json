@@ -5,12 +5,7 @@
   "coversDesc": "Coperti (più → meno)",
   "newMenuPlaceholder": "Nuovo menu (es. Ferragosto, Pasqua)",
   "renameMenu": "Rinomina menu",
-  "deleteMenu": "Elimina menu",
-  "qrAndTranslations": "QR e traduzioni del menu per gli ospiti",
-  "syncPassepartout": "Allinea i piatti al catalogo della cassa Passepartout",
   "searchDishOrIngredient": "Cerca piatto o ingrediente...",
-  "sortCategories": "Ordina e accendi/spegni le categorie",
-  "variantGroups": "Gruppi di varianti: cotture, aggiunte, sovrapprezzi",
   "edit": "Modifica",
   "delete": "Elimina",
   "moveUp": "Sposta su",
@@ -84,5 +79,20 @@
       "hint": "compaiono nelle stampe per cucina e sala"
     }
   },
-  "banquetStepsAria": "Passi del menu banchetto"
+  "banquetStepsAria": "Passi del menu banchetto",
+  "manageQrHint": "QR al tavolo e traduzioni",
+  "importFromTill": "Importa da cassa",
+  "importFromTillHint": "Allinea a Passepartout",
+  "manageCategoriesHint": "Ordine e accensione",
+  "manageVariantsHint": "Cotture, aggiunte, sovrapprezzi",
+  "menuToShow": "Menu da visualizzare",
+  "menuWord": "Menu",
+  "renameNamed": "Rinomina «{{nome}}»",
+  "deleteNamed": "Elimina «{{nome}}»",
+  "manageMenuAria": "Gestisci il menu",
+  "manage": "Gestisci",
+  "searchBanquetAria": "Cerca banchetto",
+  "menuManagement": "Gestione menu",
+  "newMenu": "Nuovo menu",
+  "newBanquet": "Nuovo banchetto"
 }

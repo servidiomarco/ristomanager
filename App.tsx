@@ -518,6 +518,7 @@ const App: React.FC = () => {
   const [autoOpenNewUser, setAutoOpenNewUser] = useState(false);
   const [autoOpenNewProduct, setAutoOpenNewProduct] = useState(false);
   const [autoOpenNewShoppingItem, setAutoOpenNewShoppingItem] = useState(false);
+  const [autoOpenNewTakeaway, setAutoOpenNewTakeaway] = useState(false);
   const [autoOpenWalkIn, setAutoOpenWalkIn] = useState(false);
   const [autoOpenNewAttivita, setAutoOpenNewAttivita] = useState(false);
   const [showCreateSheet, setShowCreateSheet] = useState(false);
@@ -2121,6 +2122,7 @@ const App: React.FC = () => {
     [
       { label: t('entity.booking'), Icon: Calendar, show: hasPermission('reservations:full'), run: () => { setNewReservationKind('standard'); setAutoOpenNewReservation(true); } },
       { label: 'Walk-in', Icon: Zap, show: canAccessView(ViewState.RECEPTION), run: () => { setView(ViewState.RECEPTION); setAutoOpenWalkIn(true); } },
+      { label: t('entity.takeawayOrder'), Icon: ShoppingBag, show: canAccessView(ViewState.ASPORTO) && hasPermission('takeaway:manage'), run: () => { setView(ViewState.ASPORTO); setAutoOpenNewTakeaway(true); } },
       { label: t('entity.banquet'), Icon: PartyPopper, show: hasPermission('menu:full'), run: () => { setView(ViewState.BANCHETTI); setAutoOpenNewBanquet(true); } },
       { label: t('entity.dish'), Icon: UtensilsCrossed, show: hasPermission('menu:full'), run: () => { setView(ViewState.MENU); setAutoOpenNewDish(true); } },
     ],
@@ -2568,6 +2570,16 @@ const App: React.FC = () => {
                </div>
              )}
            </div>
+
+           {/* Slot di testata per Asporto. La board ci porta dentro il suo
+               navigatore del giorno e lo stop con un portal: la testata
+               presta solo lo spazio e resta senza una riga di asporto,
+               così il giorno e lo stop hanno un padrone solo — la pagina.
+               Il gruppo qui sopra è spento su questa vista (turno e canali
+               sono roba di prenotazioni) e questo ne prende il posto. */}
+           {view === ViewState.ASPORTO && (
+             <div id="asporto-header-slot" className="hidden lg:flex items-center gap-2 flex-1 min-w-0" />
+           )}
 
            {/* Right cluster — order is deliberate: Live · Search · Bell · Plus */}
            <div className={`ml-auto flex items-center gap-2 flex-shrink-0 pl-2 ${view === ViewState.PLATFORM ? '!hidden' : ''}`}>
@@ -3067,7 +3079,17 @@ const App: React.FC = () => {
 
         {view === ViewState.ASPORTO && (
           <CardErrorBoundary label={t('nav.items.takeaway')}>
-            <AsportoPage dishes={dishes} isInitialLoading={isInitialDataLoading} />
+            <AsportoPage
+              dishes={dishes}
+              isInitialLoading={isInitialDataLoading}
+              autoOpenNew={autoOpenNewTakeaway}
+              onAutoOpenNewHandled={() => setAutoOpenNewTakeaway(false)}
+              globalDate={globalDateStr}
+              onGlobalDateChange={(dateOnly) => {
+                const [y, m, d] = dateOnly.split('-').map(Number);
+                if (y && m && d) setGlobalDate(new Date(y, m - 1, d));
+              }}
+            />
           </CardErrorBoundary>
         )}
 
@@ -3600,6 +3622,13 @@ const App: React.FC = () => {
                 {[
                   { key: 'reservation', icon: <Calendar className="h-7 w-7" />, label: t('entity.booking'), action: () => { setNewReservationKind('standard'); setAutoOpenNewReservation(true); setShowCreateSheet(false); } },
                   { key: 'walkin', icon: <UserCheck className="h-7 w-7" />, label: 'Walk-in', action: () => { setNewReservationKind('walkin'); setAutoOpenNewReservation(true); setShowCreateSheet(false); } },
+                  // «Piatto» mancava, e il menu "+" del desktop ce l'ha sempre
+                  // avuto: finché la pagina Menu teneva il suo bottone in testata
+                  // la lacuna non si vedeva: tolto quello, sul telefono non
+                  // restava NESSUNA strada per creare un piatto.
+                  ...(hasPermission('menu:full')
+                    ? [{ key: 'dish', icon: <UtensilsCrossed className="h-7 w-7" />, label: 'Piatto', action: () => { setView(ViewState.MENU); setAutoOpenNewDish(true); setShowCreateSheet(false); } }]
+                    : []),
                   { key: 'shopping', icon: <ShoppingCart className="h-7 w-7" />, label: 'Spesa', action: () => { setView(ViewState.LISTA_DELLA_SPESA); setAutoOpenNewShoppingItem(true); setShowCreateSheet(false); } },
                   { key: 'customer', icon: <BookUser className="h-7 w-7" />, label: t('entity.customer'), action: () => { setView(ViewState.CLIENTI); setAutoOpenNewCustomer(true); setShowCreateSheet(false); } },
                 ].map((tile, i) => (

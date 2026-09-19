@@ -160,7 +160,8 @@
     "task": "Task",
     "product": "Product",
     "customer": "Guest",
-    "staff": "Staff member"
+    "staff": "Staff member",
+    "takeawayOrder": "Takeaway order"
   },
   "toast": {
     "bookingConfirmed": "Booking confirmed",

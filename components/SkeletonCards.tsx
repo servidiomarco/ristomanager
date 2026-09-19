@@ -149,6 +149,33 @@ export const SkeletonPaymentList: React.FC<{ count?: number; className?: string 
     </div>
 );
 
+// Review-request row: name line, meta line below, status pill right. Flat with
+// a bottom rule rather than a card of its own — the real rows live inside one
+// card with divide-y, so a bordered tile here would promise the wrong shape.
+export const SkeletonReviewRow: React.FC<{ className?: string }> = ({ className }) => (
+    <div
+        aria-hidden="true"
+        className={`flex w-full items-center gap-3 border-b border-[var(--ds-border)] px-4 py-3 motion-safe:animate-pulse ${className ?? ''}`}
+    >
+        <div className="min-w-0 flex-1">
+            <div className="mb-2 h-4 w-32 rounded bg-[var(--ds-surface-row)]" />
+            <div className="h-3 w-44 rounded bg-[var(--ds-surface-row)]" />
+        </div>
+        <div className="h-5 w-20 flex-shrink-0 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)]" />
+    </div>
+);
+
+export const SkeletonReviewList: React.FC<{ count?: number; className?: string }> = ({
+    count = 6,
+    className,
+}) => (
+    <div className={className} aria-hidden="true">
+        {Array.from({ length: count }).map((_, i) => (
+            <SkeletonReviewRow key={i} />
+        ))}
+    </div>
+);
+
 // Customer-style card: name line (+ optional badges), city line, phone + email
 // rows, optional preference chips. Rendered in a 1/2/3-column responsive grid
 // by SkeletonCustomerGrid to match the real Clienti page.

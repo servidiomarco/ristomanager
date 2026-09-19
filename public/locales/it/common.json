@@ -160,7 +160,8 @@
     "task": "Attività",
     "product": "Prodotto",
     "customer": "Cliente",
-    "staff": "Dipendente"
+    "staff": "Dipendente",
+    "takeawayOrder": "Ordine d’asporto"
   },
   "toast": {
     "bookingConfirmed": "Prenotazione confermata",

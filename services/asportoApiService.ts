@@ -45,6 +45,9 @@ export interface TakeawayConfig {
   online_enabled: boolean;
   /** Interruttore degli ordini presi da Sofia al telefono (takeaway_voice_enabled). */
   voice_enabled: boolean;
+  /** 'global': la board segue la data dell'app (la stessa di Prenotazioni e
+   *  Sala, scelta dalla testata). 'own': il banco tiene il suo giorno. */
+  date_mode: 'global' | 'own';
 }
 
 const getHeaders = (): HeadersInit => {

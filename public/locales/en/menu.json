@@ -5,12 +5,7 @@
   "coversDesc": "Covers (most → fewest)",
   "newMenuPlaceholder": "New menu (e.g. Christmas, Easter)",
   "renameMenu": "Rename menu",
-  "deleteMenu": "Delete menu",
-  "qrAndTranslations": "QR code and menu translations for guests",
-  "syncPassepartout": "Sync dishes with the Passepartout till catalogue",
   "searchDishOrIngredient": "Search a dish or ingredient…",
-  "sortCategories": "Reorder and switch categories on or off",
-  "variantGroups": "Variant groups: cooking, extras, surcharges",
   "edit": "Edit",
   "delete": "Delete",
   "moveUp": "Move up",
@@ -84,5 +79,20 @@
       "hint": "they appear on the kitchen and floor printouts"
     }
   },
-  "banquetStepsAria": "Event menu steps"
+  "banquetStepsAria": "Event menu steps",
+  "manageQrHint": "Table QR code and translations",
+  "importFromTill": "Import from the till",
+  "importFromTillHint": "Sync with Passepartout",
+  "manageCategoriesHint": "Order and visibility",
+  "manageVariantsHint": "Cooking, extras, surcharges",
+  "menuToShow": "Menu to show",
+  "menuWord": "Menu",
+  "renameNamed": "Rename «{{nome}}»",
+  "deleteNamed": "Delete «{{nome}}»",
+  "manageMenuAria": "Manage the menu",
+  "manage": "Manage",
+  "searchBanquetAria": "Search an event",
+  "menuManagement": "Menu management",
+  "newMenu": "New menu",
+  "newBanquet": "New event"
 }

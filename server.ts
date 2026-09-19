@@ -24633,14 +24633,20 @@ const TAKEAWAY_PREP_MINUTES_DEFAULT = 20;
 // text_value = data ISO: lo «stop asporto» vale per UNA data (di solito
 // stasera) e decade da solo — niente interruttore da ricordarsi di riaprire.
 const TAKEAWAY_STOP_DATE_KEY = 'takeaway_stop_date';
+// text_value = 'global' | 'own'. Se la board segue la data dell'app, il
+// giorno si cambia una volta sola dalla testata e vale per prenotazioni,
+// sala e asporto insieme; 'own' tiene il giorno del banco per conto suo,
+// com'era prima che il navigatore salisse in testata.
+const TAKEAWAY_DATE_MODE_KEY = 'takeaway_date_mode';
+const TAKEAWAY_DATE_MODE_DEFAULT: 'global' | 'own' = 'own';
 
 const TAKEAWAY_STATUSES = ['REQUESTED', 'CONFIRMED', 'IN_PREPARATION', 'READY', 'PICKED_UP', 'NO_SHOW', 'CANCELLED'] as const;
 
-async function getTakeawaySettings(tenantId: number): Promise<{ capacityPerSlot: number; prepMinutes: number; stopDate: string | null }> {
+async function getTakeawaySettings(tenantId: number): Promise<{ capacityPerSlot: number; prepMinutes: number; stopDate: string | null; dateMode: 'global' | 'own' }> {
     try {
         const result = await queryWithRetry(
             'SELECT key, int_value, text_value FROM app_settings WHERE tenant_id = $1 AND key = ANY($2)',
-            [tenantId, [TAKEAWAY_CAPACITY_KEY, TAKEAWAY_PREP_MINUTES_KEY, TAKEAWAY_STOP_DATE_KEY]]
+            [tenantId, [TAKEAWAY_CAPACITY_KEY, TAKEAWAY_PREP_MINUTES_KEY, TAKEAWAY_STOP_DATE_KEY, TAKEAWAY_DATE_MODE_KEY]]
         );
         const byKey = new Map<string, any>(result.rows.map((r: any) => [r.key, r]));
         const intOr = (key: string, fallback: number) => {
@@ -24648,14 +24654,16 @@ async function getTakeawaySettings(tenantId: number): Promise<{ capacityPerSlot:
             return Number.isFinite(n) && n > 0 ? Math.trunc(n) : fallback;
         };
         const stopRaw = byKey.get(TAKEAWAY_STOP_DATE_KEY)?.text_value;
+        const modeRaw = byKey.get(TAKEAWAY_DATE_MODE_KEY)?.text_value;
         return {
             capacityPerSlot: intOr(TAKEAWAY_CAPACITY_KEY, TAKEAWAY_CAPACITY_DEFAULT),
             prepMinutes: intOr(TAKEAWAY_PREP_MINUTES_KEY, TAKEAWAY_PREP_MINUTES_DEFAULT),
             stopDate: typeof stopRaw === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(stopRaw) ? stopRaw : null,
+            dateMode: modeRaw === 'global' || modeRaw === 'own' ? modeRaw : TAKEAWAY_DATE_MODE_DEFAULT,
         };
     } catch (err) {
         console.error('[takeaway] lettura impostazioni fallita, uso i default:', (err as any)?.message || err);
-        return { capacityPerSlot: TAKEAWAY_CAPACITY_DEFAULT, prepMinutes: TAKEAWAY_PREP_MINUTES_DEFAULT, stopDate: null };
+        return { capacityPerSlot: TAKEAWAY_CAPACITY_DEFAULT, prepMinutes: TAKEAWAY_PREP_MINUTES_DEFAULT, stopDate: null, dateMode: TAKEAWAY_DATE_MODE_DEFAULT };
     }
 }
 
@@ -24826,6 +24834,7 @@ app.get('/takeaway/config', authenticate, requireFeature('takeaway'), requirePer
             capacity_per_slot: s.capacityPerSlot,
             prep_minutes: s.prepMinutes,
             stop_date: s.stopDate,
+            date_mode: s.dateMode,
             online_enabled: await getFeatureFlag(req.tenantId!, 'takeaway_online_enabled', false),
             voice_enabled: await getFeatureFlag(req.tenantId!, 'takeaway_voice_enabled', false),
         });
@@ -24875,6 +24884,18 @@ app.put('/takeaway/config', authenticate, requireFeature('takeaway'), requirePer
                 [req.tenantId!, TAKEAWAY_STOP_DATE_KEY, raw]
             );
         }
+        if ('date_mode' in body) {
+            if (body.date_mode !== 'global' && body.date_mode !== 'own') {
+                return res.status(400).json({ error: 'invalid_value', message: "date_mode deve essere 'global' o 'own'" });
+            }
+            await queryWithRetry(
+                `INSERT INTO app_settings (tenant_id, key, text_value, updated_at)
+                 VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+                 ON CONFLICT (tenant_id, key) DO UPDATE
+                   SET text_value = EXCLUDED.text_value, updated_at = CURRENT_TIMESTAMP`,
+                [req.tenantId!, TAKEAWAY_DATE_MODE_KEY, body.date_mode]
+            );
+        }
         // L'interruttore della pagina /ordina passa da qui e non da
         // PUT /settings/features: accendere il canale è una decisione di
         // servizio (takeaway:manage), come lo stop.
@@ -24907,6 +24928,7 @@ app.put('/takeaway/config', authenticate, requireFeature('takeaway'), requirePer
             capacity_per_slot: s.capacityPerSlot,
             prep_minutes: s.prepMinutes,
             stop_date: s.stopDate,
+            date_mode: s.dateMode,
             online_enabled: await getFeatureFlag(req.tenantId!, 'takeaway_online_enabled', false),
             voice_enabled: await getFeatureFlag(req.tenantId!, 'takeaway_voice_enabled', false),
         };

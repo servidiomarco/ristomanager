@@ -11,7 +11,7 @@ import { BillFigures, billStateLabel } from './prenotazione/BillFigures';
 import { PaymentRequestRow } from './prenotazione/PaymentRequestRow';
 import { MessaggiPanel } from './prenotazione/MessaggiPanel';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, RoomClosedOverride, Customer, PaymentRequest, TableBillWithSplits, TableBill, NoteSelection, TableAssignmentSuggestion } from '../types';
-import { Banknote, Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, ListFilter, Map as MapIcon, List, MessageCircle, Mail, Armchair, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal, DoorClosed, CornerDownLeft, ArrowDownLeft, ArrowUpRight, Reply, Receipt, QrCode, Maximize2, Minimize2 } from 'lucide-react';
+import { Banknote, Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, ListFilter, Map as MapIcon, List, MessageCircle, Mail, Armchair, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal, DoorClosed, CornerDownLeft, ArrowDownLeft, ArrowUpRight, Reply, Receipt, QrCode, Maximize2, Minimize2 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { sendWhatsAppConfirmation, sendEmailConfirmation, sendCustomEmail, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getRoomClosed, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, revokePaymentRequest, getReservationMessages, sendReservationReminder, OutboundMessage, getLegalSettings, getFeatureFlags, getOpeningHours, OpeningHoursRow, getActivePaymentProvider, getChannelSettings, RoomOccupancyCap, getTableAssignmentSuggestions, confirmTableAssignmentSuggestion, dismissTableAssignmentSuggestion } from '../services/apiService';
 import { billsApiService, printBill } from '../services/billsApiService';
@@ -869,7 +869,6 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     return () => window.removeEventListener('keydown', onKey);
   }, [isMapFullscreen]);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
-  const [showSortModal, setShowSortModal] = useState(false);
   // Mobile-only: sheet with per-shift channel toggles (voice + web). The
   // desktop header already carries these icons inline (BookingChannelsBar),
   // but there's no room in the mobile header — so we tuck them behind an
@@ -1596,6 +1595,20 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     setFilterSource('ALL');
     setSortBy('created-asc');
   };
+
+  /* Sort lives inside the filter sheet — there is no separate sort control.
+     One list, rendered by both copies of the sheet (desktop column and
+     mobile/tablet), so the two can't drift apart. */
+  const sortOptions = [
+    { value: 'created-asc' as const, label: tv('sort.createdAsc') },
+    { value: 'created-desc' as const, label: tv('sort.createdDesc') },
+    { value: 'time-asc' as const, label: tv('sort.timeAsc') },
+    { value: 'time-desc' as const, label: tv('sort.timeDesc') },
+    { value: 'name-asc' as const, label: tv('sort.nameAsc') },
+    { value: 'name-desc' as const, label: tv('sort.nameDesc') },
+    { value: 'guests-asc' as const, label: tv('sort.guestsAsc') },
+    { value: 'guests-desc' as const, label: tv('sort.guestsDesc') },
+  ];
 
   // --- Grouped reservation list for split-view ---
   // Groups: waiting (in attesa), arrived (arrivati, no table), seated (seduti, has table), completed (departed)
@@ -3847,10 +3860,6 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         ) : undefined}
       />
 
-      <button type="button" onClick={() => setShowSortModal(true)} className={dsIconButton} aria-label={tv('toolbar.sort')} title={tv('toolbar.sort')}>
-        <ArrowUpDown className="h-4 w-4" />
-      </button>
-
       <button
         type="button"
         onClick={() => setShowFiltersPanel(true)}
@@ -3967,42 +3976,6 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         {renderGroupedCards()}
       </div>
 
-      {/* Sort modal — slides up within list column on desktop */}
-      {showSortModal && (
-        <div className="absolute inset-0 z-50 flex items-end" onClick={() => setShowSortModal(false)}>
-          <div className="absolute inset-0 bg-black/30" />
- <div className="relative w-full bg-[var(--ds-surface)] rounded-t-[var(--ds-radius)] shadow-[var(--ds-shadow-raised)] pb-6 duration-200"onClick={e => e.stopPropagation()}>
-            <div className="flex justify-center pt-3 pb-2">
-              <div className="w-8 h-1 rounded-full bg-[var(--ds-text-subtle)]" />
-            </div>
-            <div className="px-5 pb-2">
-              <h3 className="text-base font-semibold text-[var(--ds-text-primary)]">{tv('sort.title')}</h3>
-            </div>
-            <div className="px-3">
-              {[
-                { value: 'created-asc' as const, label: tv('sort.createdAsc') },
-                { value: 'created-desc' as const, label: tv('sort.createdDesc') },
-                { value: 'time-asc' as const, label: tv('sort.timeAsc') },
-                { value: 'time-desc' as const, label: tv('sort.timeDesc') },
-                { value: 'name-asc' as const, label: tv('sort.nameAsc') },
-                { value: 'name-desc' as const, label: tv('sort.nameDesc') },
-                { value: 'guests-asc' as const, label: tv('sort.guestsAsc') },
-                { value: 'guests-desc' as const, label: tv('sort.guestsDesc') },
-              ].map(opt => (
-                <button key={opt.value} type="button"
-                  onClick={() => { setSortBy(opt.value); setShowSortModal(false); }}
-                  className={`w-full flex items-center justify-between px-4 py-2.5 text-sm rounded-[var(--ds-radius)] transition-colors ${
-                    sortBy === opt.value ? 'bg-[var(--ds-surface-row)] font-medium text-[var(--ds-text-primary)]' : 'text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)]'
-                  }`}>
-                  {opt.label}
-                  {sortBy === opt.value && <Check className="h-4 w-4 text-[var(--ds-text-primary)]" />}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Filter modal — slides up within list column on desktop */}
       {showFiltersPanel && (
         <div className="absolute inset-0 z-50 flex items-end" onClick={() => setShowFiltersPanel(false)}>
@@ -4011,86 +3984,107 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             <div className="flex justify-center pt-3 pb-2">
               <div className="w-8 h-1 rounded-full bg-[var(--ds-text-subtle)]" />
             </div>
-            <div className="px-5 pb-3 flex items-center justify-between">
-              <h3 className="text-base font-semibold text-[var(--ds-text-primary)]">{tv('filters.title')}</h3>
-              {activeFilterCount > 0 && (
-                <button type="button" onClick={resetFilters} className="flex items-center gap-1.5 text-xs font-medium text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]">
-                  <RotateCcw className="h-3.5 w-3.5" /> Reimposta
-                </button>
-              )}
-            </div>
-            <div className="px-5 space-y-4">
+            <div className="max-h-[65vh] overflow-y-auto overscroll-contain px-5 pb-2 pt-2">
+              {/* Sort first, then the filters: one funnel opens both. */}
               <div>
-                <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">{tv('filters.room')}</label>
-                <div className="flex flex-wrap gap-2">
-                  <button type="button" onClick={() => setFilterRoomId('ALL')}
-                    className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
-                      filterRoomId === 'ALL'
-                        ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
-                        : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
-                    }`}>{tv('filters.allRooms')}</button>
-                  {rooms.filter(rm => !rm.is_closed).map(rm => (
-                    <button key={rm.id} type="button" onClick={() => setFilterRoomId(rm.id)}
-                      className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
-                        filterRoomId === rm.id
-                          ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
-                          : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
-                      }`}>{rm.name}</button>
+                <label htmlFor="reservations-sort-desktop" className="mb-2 block text-base font-semibold text-[var(--ds-text-primary)]">{tv('sort.title')}</label>
+                <select
+                  id="reservations-sort-desktop"
+                  className={dsSelect}
+                  value={sortBy}
+                  onChange={e => setSortBy(e.target.value as typeof sortBy)}
+                >
+                  {sortOptions.map(opt => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
                   ))}
-                </div>
+                </select>
               </div>
-              <div>
-                <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">{tv('filters.paymentStatus')}</label>
-                <div className="flex flex-wrap gap-2">
-                  {[
-                    { value: 'ALL', label: tv('filters.all') },
-                    { value: PaymentStatus.PENDING, label: tv('filters.paymentPending') },
-                    { value: PaymentStatus.PAID_DEPOSIT, label: tv('filters.paymentDeposit') },
-                    { value: PaymentStatus.PAID_FULL, label: tv('filters.paymentPaid') },
-                  ].map(opt => (
-                    <button key={opt.value} type="button" onClick={() => setFilterStatus(opt.value)}
-                      className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
-                        filterStatus === opt.value
-                          ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
-                          : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
-                      }`}>{opt.label}</button>
-                  ))}
+
+              {/* mt-7 is the gap between the two sections — they are peers, and
+                  without it the dropdown reads as the first filter. */}
+              <div className="mt-7">
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="text-base font-semibold text-[var(--ds-text-primary)]">{tv('filters.title')}</h3>
+                  {activeFilterCount > 0 && (
+                    <button type="button" onClick={resetFilters} className="flex items-center gap-1.5 text-xs font-medium text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]">
+                      <RotateCcw className="h-3.5 w-3.5" /> {tv('filters.reset')}
+                    </button>
+                  )}
                 </div>
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">{tv('filters.channel')}</label>
-                <div className="flex flex-wrap gap-2">
-                  {[
-                    { value: 'ALL', label: tv('filters.all') },
-                    { value: ReservationSource.MANUAL, label: tv('filters.channelManual') },
-                    { value: ReservationSource.GOOGLE, label: tv('filters.channelWeb') },
-                    { value: ReservationSource.VOICE, label: tv('filters.channelVoice') },
-                    { value: ReservationSource.WHATSAPP, label: tv('filters.channelWhatsapp') },
-                  ].map(opt => (
-                    <button key={opt.value} type="button" onClick={() => setFilterSource(opt.value)}
-                      className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
-                        filterSource === opt.value
-                          ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
-                          : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
-                      }`}>{opt.label}</button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">{tv('filters.other')}</label>
-                <div className="flex flex-wrap gap-2">
-                  <button type="button" onClick={() => setFilterHasAllergens(v => !v)}
-                    className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${filterHasAllergens ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
-                    {tv('filters.allergens')}
-                  </button>
-                  <button type="button" onClick={() => setFilterHasNotes(v => !v)}
-                    className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${filterHasNotes ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
-                    {tv('filters.withNotes')}
-                  </button>
-                  <button type="button" onClick={() => setFilterNoTable(v => !v)}
-                    className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${filterNoTable ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
-                    {tv('filters.noTable')}
-                  </button>
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">{tv('filters.room')}</label>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={() => setFilterRoomId('ALL')}
+                        className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
+                          filterRoomId === 'ALL'
+                            ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
+                            : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
+                        }`}>{tv('filters.allRooms')}</button>
+                      {rooms.filter(rm => !rm.is_closed).map(rm => (
+                        <button key={rm.id} type="button" onClick={() => setFilterRoomId(rm.id)}
+                          className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
+                            filterRoomId === rm.id
+                              ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
+                              : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
+                          }`}>{rm.name}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">{tv('filters.paymentStatus')}</label>
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        { value: 'ALL', label: tv('filters.all') },
+                        { value: PaymentStatus.PENDING, label: tv('filters.paymentPending') },
+                        { value: PaymentStatus.PAID_DEPOSIT, label: tv('filters.paymentDeposit') },
+                        { value: PaymentStatus.PAID_FULL, label: tv('filters.paymentPaid') },
+                      ].map(opt => (
+                        <button key={opt.value} type="button" onClick={() => setFilterStatus(opt.value)}
+                          className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
+                            filterStatus === opt.value
+                              ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
+                              : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
+                          }`}>{opt.label}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">{tv('filters.channel')}</label>
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        { value: 'ALL', label: tv('filters.all') },
+                        { value: ReservationSource.MANUAL, label: tv('filters.channelManual') },
+                        { value: ReservationSource.GOOGLE, label: tv('filters.channelWeb') },
+                        { value: ReservationSource.VOICE, label: tv('filters.channelVoice') },
+                        { value: ReservationSource.WHATSAPP, label: tv('filters.channelWhatsapp') },
+                      ].map(opt => (
+                        <button key={opt.value} type="button" onClick={() => setFilterSource(opt.value)}
+                          className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
+                            filterSource === opt.value
+                              ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
+                              : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
+                          }`}>{opt.label}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">{tv('filters.other')}</label>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={() => setFilterHasAllergens(v => !v)}
+                        className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${filterHasAllergens ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
+                        {tv('filters.allergens')}
+                      </button>
+                      <button type="button" onClick={() => setFilterHasNotes(v => !v)}
+                        className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${filterHasNotes ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
+                        {tv('filters.withNotes')}
+                      </button>
+                      <button type="button" onClick={() => setFilterNoTable(v => !v)}
+                        className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${filterNoTable ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
+                        {tv('filters.noTable')}
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -4681,42 +4675,6 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             ))}
           </div>
 
-          {/* Sort modal — slide up (mobile/tablet) */}
-          {showSortModal && (
-            <div className="fixed inset-0 z-50 flex items-end" onClick={() => setShowSortModal(false)}>
-              <div className="absolute inset-0 bg-black/30" />
- <div className="relative w-full bg-[var(--ds-surface)] rounded-t-[var(--ds-radius)] shadow-[var(--ds-shadow-raised)] pb-8 duration-200"onClick={e => e.stopPropagation()}>
-                <div className="flex justify-center pt-3 pb-2">
-                  <div className="w-8 h-1 rounded-full bg-[var(--ds-text-subtle)]" />
-                </div>
-                <div className="px-5 pb-2">
-                  <h3 className="text-base font-semibold text-[var(--ds-text-primary)]">{tv('sort.title')}</h3>
-                </div>
-                <div className="px-3">
-                  {[
-                    { value: 'created-asc' as const, label: tv('sort.createdAsc') },
-                    { value: 'created-desc' as const, label: tv('sort.createdDesc') },
-                    { value: 'time-asc' as const, label: tv('sort.timeAsc') },
-                    { value: 'time-desc' as const, label: tv('sort.timeDesc') },
-                    { value: 'name-asc' as const, label: tv('sort.nameAsc') },
-                    { value: 'name-desc' as const, label: tv('sort.nameDesc') },
-                    { value: 'guests-asc' as const, label: tv('sort.guestsAsc') },
-                    { value: 'guests-desc' as const, label: tv('sort.guestsDesc') },
-                  ].map(opt => (
-                    <button key={opt.value} type="button"
-                      onClick={() => { setSortBy(opt.value); setShowSortModal(false); }}
-                      className={`w-full flex items-center justify-between px-4 py-3 text-sm rounded-[var(--ds-radius)] transition-colors ${
-                        sortBy === opt.value ? 'bg-[var(--ds-surface-row)] font-medium text-[var(--ds-text-primary)]' : 'text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)]'
-                      }`}>
-                      {opt.label}
-                      {sortBy === opt.value && <Check className="h-4 w-4 text-[var(--ds-text-primary)]" />}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* Filter modal — slide up (mobile/tablet) */}
           {showFiltersPanel && (
             <div className="fixed inset-0 z-50 flex items-end" onClick={() => setShowFiltersPanel(false)}>
@@ -4725,86 +4683,107 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 <div className="flex justify-center pt-3 pb-2">
                   <div className="w-8 h-1 rounded-full bg-[var(--ds-text-subtle)]" />
                 </div>
-                <div className="px-5 pb-3 flex items-center justify-between">
-                  <h3 className="text-base font-semibold text-[var(--ds-text-primary)]">{tv('filters.title')}</h3>
-                  {activeFilterCount > 0 && (
-                    <button type="button" onClick={resetFilters} className="flex items-center gap-1.5 text-xs font-medium text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]">
-                      <RotateCcw className="h-3.5 w-3.5" /> Reimposta
-                    </button>
-                  )}
-                </div>
-                <div className="px-5 space-y-4">
+                <div className="max-h-[65vh] overflow-y-auto overscroll-contain px-5 pb-2 pt-2">
+                  {/* Sort first, then the filters: one funnel opens both. */}
                   <div>
-                    <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">{tv('filters.room')}</label>
-                    <div className="flex flex-wrap gap-2">
-                      <button type="button" onClick={() => setFilterRoomId('ALL')}
-                        className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
-                          filterRoomId === 'ALL'
-                            ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
-                            : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
-                        }`}>{tv('filters.allRooms')}</button>
-                      {rooms.filter(rm => !rm.is_closed).map(rm => (
-                        <button key={rm.id} type="button" onClick={() => setFilterRoomId(rm.id)}
-                          className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
-                            filterRoomId === rm.id
-                              ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
-                              : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
-                          }`}>{rm.name}</button>
+                    <label htmlFor="reservations-sort-mobile" className="mb-2 block text-base font-semibold text-[var(--ds-text-primary)]">{tv('sort.title')}</label>
+                    <select
+                      id="reservations-sort-mobile"
+                      className={dsSelect}
+                      value={sortBy}
+                      onChange={e => setSortBy(e.target.value as typeof sortBy)}
+                    >
+                      {sortOptions.map(opt => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
                       ))}
-                    </div>
+                    </select>
                   </div>
-                  <div>
-                    <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">{tv('filters.paymentStatus')}</label>
-                    <div className="flex flex-wrap gap-2">
-                      {[
-                        { value: 'ALL', label: tv('filters.all') },
-                        { value: PaymentStatus.PENDING, label: tv('filters.paymentPending') },
-                        { value: PaymentStatus.PAID_DEPOSIT, label: tv('filters.paymentDeposit') },
-                        { value: PaymentStatus.PAID_FULL, label: tv('filters.paymentPaid') },
-                      ].map(opt => (
-                        <button key={opt.value} type="button" onClick={() => setFilterStatus(opt.value)}
-                          className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
-                            filterStatus === opt.value
-                              ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
-                              : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
-                          }`}>{opt.label}</button>
-                      ))}
+
+                  {/* mt-7 is the gap between the two sections — they are peers, and
+                      without it the dropdown reads as the first filter. */}
+                  <div className="mt-7">
+                    <div className="mb-3 flex items-center justify-between">
+                      <h3 className="text-base font-semibold text-[var(--ds-text-primary)]">{tv('filters.title')}</h3>
+                      {activeFilterCount > 0 && (
+                        <button type="button" onClick={resetFilters} className="flex items-center gap-1.5 text-xs font-medium text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]">
+                          <RotateCcw className="h-3.5 w-3.5" /> {tv('filters.reset')}
+                        </button>
+                      )}
                     </div>
-                  </div>
-                  <div>
-                    <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">{tv('filters.channel')}</label>
-                    <div className="flex flex-wrap gap-2">
-                      {[
-                        { value: 'ALL', label: tv('filters.all') },
-                        { value: ReservationSource.MANUAL, label: tv('filters.channelManual') },
-                        { value: ReservationSource.GOOGLE, label: tv('filters.channelWeb') },
-                        { value: ReservationSource.VOICE, label: tv('filters.channelVoice') },
-                        { value: ReservationSource.WHATSAPP, label: tv('filters.channelWhatsapp') },
-                      ].map(opt => (
-                        <button key={opt.value} type="button" onClick={() => setFilterSource(opt.value)}
-                          className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
-                            filterSource === opt.value
-                              ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
-                              : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
-                          }`}>{opt.label}</button>
-                      ))}
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">{tv('filters.other')}</label>
-                    <div className="flex flex-wrap gap-2">
-                      <button type="button" onClick={() => setFilterHasAllergens(v => !v)}
-                        className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${filterHasAllergens ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
-                        {tv('filters.allergens')}
-                      </button>
-                      <button type="button" onClick={() => setFilterHasNotes(v => !v)}
-                        className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${filterHasNotes ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
-                        {tv('filters.withNotes')}
-                      </button>
-                      <button type="button" onClick={() => setFilterNoTable(v => !v)}
-                        className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${filterNoTable ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
-                        {tv('filters.noTable')}
-                      </button>
+                    <div className="space-y-4">
+                      <div>
+                        <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">{tv('filters.room')}</label>
+                        <div className="flex flex-wrap gap-2">
+                          <button type="button" onClick={() => setFilterRoomId('ALL')}
+                            className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
+                              filterRoomId === 'ALL'
+                                ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
+                                : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
+                            }`}>{tv('filters.allRooms')}</button>
+                          {rooms.filter(rm => !rm.is_closed).map(rm => (
+                            <button key={rm.id} type="button" onClick={() => setFilterRoomId(rm.id)}
+                              className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
+                                filterRoomId === rm.id
+                                  ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
+                                  : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
+                              }`}>{rm.name}</button>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">{tv('filters.paymentStatus')}</label>
+                        <div className="flex flex-wrap gap-2">
+                          {[
+                            { value: 'ALL', label: tv('filters.all') },
+                            { value: PaymentStatus.PENDING, label: tv('filters.paymentPending') },
+                            { value: PaymentStatus.PAID_DEPOSIT, label: tv('filters.paymentDeposit') },
+                            { value: PaymentStatus.PAID_FULL, label: tv('filters.paymentPaid') },
+                          ].map(opt => (
+                            <button key={opt.value} type="button" onClick={() => setFilterStatus(opt.value)}
+                              className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
+                                filterStatus === opt.value
+                                  ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
+                                  : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
+                              }`}>{opt.label}</button>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">{tv('filters.channel')}</label>
+                        <div className="flex flex-wrap gap-2">
+                          {[
+                            { value: 'ALL', label: tv('filters.all') },
+                            { value: ReservationSource.MANUAL, label: tv('filters.channelManual') },
+                            { value: ReservationSource.GOOGLE, label: tv('filters.channelWeb') },
+                            { value: ReservationSource.VOICE, label: tv('filters.channelVoice') },
+                            { value: ReservationSource.WHATSAPP, label: tv('filters.channelWhatsapp') },
+                          ].map(opt => (
+                            <button key={opt.value} type="button" onClick={() => setFilterSource(opt.value)}
+                              className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
+                                filterSource === opt.value
+                                  ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
+                                  : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
+                              }`}>{opt.label}</button>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">{tv('filters.other')}</label>
+                        <div className="flex flex-wrap gap-2">
+                          <button type="button" onClick={() => setFilterHasAllergens(v => !v)}
+                            className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${filterHasAllergens ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
+                            {tv('filters.allergens')}
+                          </button>
+                          <button type="button" onClick={() => setFilterHasNotes(v => !v)}
+                            className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${filterHasNotes ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
+                            {tv('filters.withNotes')}
+                          </button>
+                          <button type="button" onClick={() => setFilterNoTable(v => !v)}
+                            className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${filterNoTable ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
+                            {tv('filters.noTable')}
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
