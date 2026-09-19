@@ -1,0 +1,32 @@
+{
+  "meta": {
+    "title": "Scontrino digitale",
+    "titleProforma": "Proforma"
+  },
+  "header": {
+    "langGroupAria": "Lingua"
+  },
+  "notFound": "Documento non trovato. Controlla il link o chiedi al ristorante.",
+  "loadingAria": "Carico",
+  "vatLabel": "P.IVA {{vat}}",
+  "docType": {
+    "proforma": "Proforma — non è un documento fiscale",
+    "copy": "Copia del documento commerciale di vendita o prestazione"
+  },
+  "voided": "documento annullato",
+  "voidedOn": "documento annullato il {{date}}",
+  "payments": {
+    "cash": "Contanti",
+    "electronic": "Pagamento elettronico",
+    "ticket": "Buoni pasto"
+  },
+  "total": "Totale",
+  "docNumber": "Documento n. {{number}}",
+  "docDate": "del {{date}}",
+  "table": "Tavolo {{name}}",
+  "footer": {
+    "proforma": "Proforma: non sostituisce lo scontrino o la fattura.",
+    "copy": "Copia informativa: il documento fiscale è il corrispettivo trasmesso telematicamente all'Agenzia delle Entrate."
+  },
+  "print": "Stampa o salva"
+}

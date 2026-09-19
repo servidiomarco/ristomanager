@@ -1,0 +1,69 @@
+{
+  "meta": {
+    "title": "Ordina d'asporto",
+    "titleWithName": "Ordina d'asporto — {{name}}"
+  },
+  "maintenance": {
+    "title": "Ordini online non disponibili",
+    "hint": "In questo momento non riceviamo ordini d'asporto dal sito. Chiamaci e prepariamo tutto per te."
+  },
+  "header": {
+    "title": "Ordina d'asporto",
+    "sub": "Scegli i piatti, passa a ritirarli all'ora che preferisci.",
+    "langGroupAria": "Lingua",
+    "directions": "Indicazioni"
+  },
+  "pickup": {
+    "title": "Quando ritiri",
+    "hint": "Gli orari tengono conto dei tempi di cucina.",
+    "dayGroupAria": "Giorno di ritiro",
+    "today": "oggi",
+    "stopNotice": "Per questa data l'asporto è fermo: scegli un altro giorno.",
+    "lunch": "Pranzo",
+    "dinner": "Cena",
+    "lunchAria": "Orari del pranzo",
+    "dinnerAria": "Orari della cena",
+    "slotsEmpty": "Nessun orario disponibile per questo giorno."
+  },
+  "menu": {
+    "title": "Cosa ordini",
+    "hint": "I prezzi sono quelli del menu.",
+    "loading": "Carico il menu…",
+    "unavailable": "Menu non disponibile al momento.",
+    "other": "Altro",
+    "addAria": "Aggiungi {{name}}",
+    "removeAria": "Togli {{name}}"
+  },
+  "fields": {
+    "title": "I tuoi dati",
+    "name": "Nome",
+    "phone": "Telefono",
+    "notes": "Note per la cucina",
+    "notesPlaceholder": "Allergie, citofono, preferenze…"
+  },
+  "bar": {
+    "none": "Nessun piatto",
+    "dish_one": "{{count}} piatto",
+    "dish_other": "{{count}} piatti",
+    "pickupAt": " · ritiro {{time}}"
+  },
+  "actions": {
+    "submit": "Ordina"
+  },
+  "errors": {
+    "slot_full": "L'orario scelto si è appena riempito: scegline un altro.",
+    "slot_too_soon": "La cucina non fa in tempo per questo orario: scegline uno più avanti.",
+    "takeaway_stopped": "Per questa data l'asporto è fermo: scegli un altro giorno.",
+    "invalid_slot": "L'orario scelto non è più disponibile: scegline un altro.",
+    "invalid_phone": "Controlla il numero di telefono.",
+    "rate_limited": "Troppe richieste: riprova tra qualche minuto.",
+    "generic": "Qualcosa è andato storto: riprova.",
+    "network": "Rete assente o instabile: riprova."
+  },
+  "done": {
+    "title": "Ordine confermato",
+    "orderNumber": "Ordine #{{number}}",
+    "textWithNumber": "Grazie {{name}}: al ritiro basta questo numero.",
+    "text": "Grazie {{name}}: ti aspettiamo per il ritiro."
+  }
+}
