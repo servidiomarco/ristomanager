@@ -84,6 +84,32 @@ for (const file of namespaces) {
     }
 }
 
+
+/* Una chiamata di traduzione dentro un attributo fra virgolette NON è codice:
+ * è testo. «title={t('x')}» mostra la traduzione, «title="{t('x')}"» mostra
+ * al cliente la stringa «{t('x')}». Il typecheck non può accorgersene — una
+ * stringa fra virgolette è valida — e i test non guardano il frontend: è
+ * successo davvero, su 67 attributi in 13 file, e in produzione si vedeva.
+ */
+const cercaAttributiRotti = (dir) => {
+    const trovati = [];
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) { trovati.push(...cercaAttributiRotti(p)); continue; }
+        if (!e.name.endsWith('.tsx')) continue;
+        const righe = fs.readFileSync(p, 'utf8').split('\n');
+        righe.forEach((riga, i) => {
+            if (/="\s*\{\s*\w+\(/.test(riga)) trovati.push(`${p}:${i + 1}`);
+        });
+    }
+    return trovati;
+};
+
+const attributiRotti = ['components', 'App.tsx'].flatMap(p =>
+    fs.existsSync(p) ? (fs.statSync(p).isDirectory() ? cercaAttributiRotti(p)
+        : (/="\s*\{\s*\w+\(/.test(fs.readFileSync(p, 'utf8')) ? [p] : [])) : []);
+for (const t of attributiRotti) errori.push(`${t}: chiamata dentro un attributo fra virgolette — va in graffe, altrimenti il cliente legge il codice`);
+
 if (errori.length > 0) {
     console.error('Dizionari fuori sincrono:\n' + errori.map(e => `  - ${e}`).join('\n'));
     process.exit(1);

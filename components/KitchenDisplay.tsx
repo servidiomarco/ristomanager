@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { isBarCourse, isDessertCourse, isOffSequenceCourse, ordinal } from '../utils/courses';
 import { Bell, BellOff, BellRing, Check, ChevronRight, CookingPot, Loader2, MessagesSquare, Pencil, Play, Search, TriangleAlert, Users, WifiOff, X } from 'lucide-react';
 import { useNow } from '../hooks/useNow';
@@ -148,6 +149,7 @@ const inferShift = (d: Date): 'LUNCH' | 'DINNER' =>
   d.getHours() < DINNER_START_HOUR ? 'LUNCH' : 'DINNER';
 
 export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, globalShiftFilter, passeEnabled = true }) => {
+  const { t } = useTranslation('comande', { useSuspense: false });
   const now = useNow(15_000);
   const [stationId, setStationId] = useState<number | null>(() => {
     const saved = localStorage.getItem(STATION_KEY);
@@ -788,7 +790,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
           <SearchField
             value={search}
             onChange={setSearch}
-            placeholder="Cerca tavolo, cliente o piatto…"
+            placeholder={t('searchKitchen')}
             ariaLabel="Cerca una comanda"
             inputRef={searchRef}
           />
@@ -1170,7 +1172,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
             </div>
           );
           return rows.length === 0 ? (
-            <p className="text-[16px] text-[var(--ds-text-muted)]">Niente in coda per questo piatto.</p>
+            <p className="text-[16px] text-[var(--ds-text-muted)]">{t('emptyQueue')}</p>
           ) : (
             // Due colonne affiancate: il fuoco a sinistra, il futuro a destra.
             <div className="grid grid-cols-2 gap-6">
@@ -1274,7 +1276,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
         <ModalShell
           open={summaryOpen}
           onClose={() => setSummaryOpen(false)}
-          title="Note del servizio"
+          title={t('serviceNotes')}
           subtitle={`${summary.shift === 'LUNCH' ? 'Pranzo' : 'Cena'} · ${summary.reservations} prenotazion${summary.reservations === 1 ? 'e' : 'i'}`}
           size="md"
           closeOnEscape
@@ -1317,7 +1319,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
       <ModalShell
         open={picking}
         onClose={() => setPicking(false)}
-        title="Partita di questo schermo"
+        title={t('stationOfScreen')}
         subtitle="Resta impostata anche dopo un riavvio del tablet."
         size="sm"
         closeOnEscape
@@ -1549,6 +1551,7 @@ const CourseSection: React.FC<{
   onFlashDish?: (name: string) => void;
   onEditWeight?: (item: KdsItem) => void;
 }> = ({ col, now, stationNames, modifierNotes, onAdvance, onCallWaiter, called, onServeCourse, onFlashDish, onEditWeight }) => {
+  const { t } = useTranslation('comande', { useSuspense: false });
   const start = col.items[0]?.station_start_at ?? col.firedAt;
   const elapsed = minutesSince(start, now);
   const allReady = col.items.every(i => i.status === 'READY');
@@ -1799,8 +1802,8 @@ const CourseSection: React.FC<{
           <button
             type="button"
             onClick={() => onServeCourse(col)}
-            title="Segna l'uscita servita"
-            aria-label="Segna l'uscita servita"
+            title={t('markServed')}
+            aria-label={t('markServed')}
             className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-seated-solid)] text-white transition-colors hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             <Check size={18} aria-hidden />
@@ -2067,6 +2070,7 @@ const TimelinePane: React.FC<{
   customerName: string | null;
   onClose: () => void;
 }> = ({ orderId, tableName, customerName, onClose }) => {
+  const { t } = useTranslation('comande', { useSuspense: false });
   const [events, setEvents] = useState<OrderTimelineEvent[] | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -2111,7 +2115,7 @@ const TimelinePane: React.FC<{
         <button
           type="button"
           onClick={onClose}
-          aria-label="Chiudi la storia"
+          aria-label={t('closeHistory')}
           className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
         >
           <X size={16} aria-hidden />
@@ -2119,7 +2123,7 @@ const TimelinePane: React.FC<{
       </div>
 
       {failed ? (
-        <p className="mt-4 text-[14px] text-[var(--ds-critical-text)]">Storia non caricata: riprova.</p>
+        <p className="mt-4 text-[14px] text-[var(--ds-critical-text)]">{t('historyFailed')}</p>
       ) : events == null ? (
         <div className="mt-4 flex items-center gap-2 text-[14px] text-[var(--ds-text-muted)]">
           <Loader2 size={16} className="animate-spin" aria-hidden /> Carico la storia…

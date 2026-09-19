@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { chime } from '../utils/chime';
 import { signedModifierLabel, signedModifierDelta } from '../utils/modifierScale';
 import {
@@ -118,6 +119,7 @@ interface OrderPadProps {
 }
 
 export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, dishes: allDishes, menus, tables, rooms = [], reservations, globalDate, globalShiftFilter, onImmersive, initialTableId, onInitialTableConsumed, brand: padBrand }) => {
+  const { t } = useTranslation('comande', { useSuspense: false });
   const { isConnected } = useSocket();
   // L'orologio della pastiglia Live. Un tick al minuto: l'ora al minuto non
   // ha bisogno di più, e un secondo di intervallo ridisegnerebbe la griglia
@@ -938,7 +940,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
     addToast('Righe non inviate svuotate', 'success', {
       icon: Trash2,
       action: {
-        label: 'Annulla',
+        label: t('cancel'),
         onClick: () => {
           if (openOrderIdRef.current !== orderIdAtClear) {
             addToast('Comanda cambiata, righe non ripristinate', 'info');
@@ -1934,7 +1936,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
       <ModalShell
         open={closing}
         onClose={() => setClosing(false)}
-        title="Chiudere la comanda?"
+        title={t('closeOrder')}
         size="sm"
         closeOnEscape
         bodyClassName="space-y-3 p-5 sm:p-6"
@@ -2017,8 +2019,8 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
       <ModalShell
         open={transferOpen}
         onClose={() => setTransferOpen(false)}
-        title="Sposta su quale tavolo?"
-        subtitle="Comanda e conto si spostano insieme. Le quote già pagate restano attaccate al conto."
+        title={t('moveToTable')}
+        subtitle={t('moveHint')}
         size="sm"
         closeOnEscape
         bodyClassName="p-5 sm:p-6"
@@ -2230,7 +2232,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
             <button
               type="button"
               onClick={leaveTable}
-              aria-label="Torna alla scelta del tavolo"
+              aria-label={t('backToTables')}
               className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             >
               <ArrowLeft size={20} aria-hidden />
@@ -2351,7 +2353,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
         <ModalShell
           open={coursePickOpen}
           onClose={() => setCoursePickOpen(false)}
-          title="Uscita in composizione"
+          title={t('courseInProgress')}
           size="sm"
           closeOnEscape
           bodyClassName="p-5 sm:p-6"
@@ -2398,7 +2400,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
           l'eyebrow «Uscita» sparisce e i margini si stringono — le pastiglie
           ordinali (1ª, 2ª…) si spiegano da sole. */}
       <div className={`flex-shrink-0 ${density === 'compact' ? 'mt-2' : 'mt-4'}`}>
-        {density !== 'compact' && <SectionHeader>Uscita</SectionHeader>}
+        {density !== 'compact' && <SectionHeader>{t('course')}</SectionHeader>}
         <div className={density === 'compact' ? '' : 'mt-1'}>
           <CourseChips order={order} cart={cart} course={course} onCourse={setCourse} showBar={showBar} showDessert={showDessert} />
         </div>
@@ -2446,7 +2448,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
   );
 };
 
-const ErrorBar: React.FC<{ message: string; onDismiss: () => void }> = ({ message, onDismiss }) => (
+const ErrorBar: React.FC<{ message: string; onDismiss: () => void }> = ({ message, onDismiss }) => {
+  const { t } = useTranslation('comande', { useSuspense: false });
+  return (
   <Callout
     tone="critical"
     icon={TriangleAlert}
@@ -2454,7 +2458,7 @@ const ErrorBar: React.FC<{ message: string; onDismiss: () => void }> = ({ messag
       <button
         type="button"
         onClick={onDismiss}
-        aria-label="Chiudi l'errore"
+        aria-label={t('closeError')}
         className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-critical-text)] transition-[filter] hover:brightness-90"
       >
         <X size={16} />
@@ -2463,5 +2467,6 @@ const ErrorBar: React.FC<{ message: string; onDismiss: () => void }> = ({ messag
   >
     {message}
   </Callout>
-);
+  );
+};
 

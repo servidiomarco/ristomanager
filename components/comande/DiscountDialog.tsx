@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Loader2 } from 'lucide-react';
 import { ModalShell, SegmentedControl, dsButton, dsInput } from '../ds';
 
@@ -24,6 +25,7 @@ export const DiscountDialog: React.FC<{
   onClear: () => void;
   onConfirm: (p: { discount_type: 'PERCENT' | 'AMOUNT'; discount_value: number; reason: string }) => void;
 }> = ({ currentReason, hasDiscount, busy, title, reasonRequired = true, onCancel, onClear, onConfirm }) => {
+  const { t } = useTranslation('comande', { useSuspense: false });
   const [type, setType] = useState<'PERCENT' | 'AMOUNT'>('PERCENT');
   const [value, setValue] = useState('');
   const [reason, setReason] = useState(currentReason ?? '');
@@ -36,7 +38,7 @@ export const DiscountDialog: React.FC<{
       open
       onClose={onCancel}
       title={title ?? 'Sconto sulla comanda'}
-      subtitle="Resta a registro con il tuo nome: serve a spiegare la differenza a fine servizio."
+      subtitle={t('discountOnRecord')}
       size="sm"
       closeOnEscape
       bodyClassName="space-y-3 p-5 sm:p-6"

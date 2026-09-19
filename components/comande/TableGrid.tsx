@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Loader2, RotateCcw, SlidersHorizontal, UtensilsCrossed } from 'lucide-react';
 import type { Room } from '../../types';
 import { EmptyState, SearchField, SegmentedControl } from '../ds';
@@ -51,6 +52,7 @@ export const TableGrid: React.FC<TableGridProps> = ({
   paged = false, rooms = [], room = null, onRoom,
   wide = false, brand, live,
 }) => {
+  const { t } = useTranslation('comande', { useSuspense: false });
   const searchRef = useRef<HTMLInputElement | null>(null);
   const [funnelOpen, setFunnelOpen] = useState(false);
 
@@ -104,7 +106,7 @@ export const TableGrid: React.FC<TableGridProps> = ({
   };
 
   const filterOptions = [
-    { value: 'ALL' as TableFilter, label: 'Tutti', badge: rows.length, badgeTone: 'neutral' as const },
+    { value: 'ALL' as TableFilter, label: t('all'), badge: rows.length, badgeTone: 'neutral' as const },
     ...TABLE_GROUPS.map(g => ({
       value: g.state as TableFilter,
       label: g.chip,
@@ -141,7 +143,7 @@ export const TableGrid: React.FC<TableGridProps> = ({
                   onChange={onQuery}
                   inputRef={searchRef}
                   onKeyDown={onSearchKey}
-                  placeholder="Vai al tavolo…"
+                  placeholder={t('goToTable')}
                   ariaLabel="Cerca un tavolo"
                   className="min-w-0 flex-1"
                   recessed
@@ -158,7 +160,7 @@ export const TableGrid: React.FC<TableGridProps> = ({
                     onClick={() => setFunnelOpen(o => !o)}
                     aria-haspopup="dialog"
                     aria-expanded={funnelOpen}
-                    aria-label="Filtra per stato"
+                    aria-label={t('filterByStatus')}
                     className="relative inline-flex h-11 w-11 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
                     <SlidersHorizontal size={18} aria-hidden />
@@ -173,7 +175,7 @@ export const TableGrid: React.FC<TableGridProps> = ({
                           passato a un tavolo. */}
                       <button
                         type="button"
-                        aria-label="Chiudi i filtri"
+                        aria-label={t('closeFilters')}
                         className="fixed inset-0 z-40 cursor-default"
                         onClick={() => setFunnelOpen(false)}
                       />
@@ -185,7 +187,7 @@ export const TableGrid: React.FC<TableGridProps> = ({
                           scelta — così un filtro si usa uguale ovunque. */}
                       <div
                         role="dialog"
-                        aria-label="Filtra i tavoli per stato"
+                        aria-label={t('filterTablesByStatus')}
                         className="absolute right-0 top-[52px] z-50 w-[320px] rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-raised)]"
                       >
                         <div className="flex items-center justify-between">
@@ -234,7 +236,7 @@ export const TableGrid: React.FC<TableGridProps> = ({
                   value={activeRoom == null ? 'ALL' : String(activeRoom)}
                   onChange={(next) => onRoom?.(next === 'ALL' ? -1 : Number(next))}
                   options={[
-                    { value: 'ALL', label: 'Tutte', badge: rows.length, badgeTone: 'neutral' as const },
+                    { value: 'ALL', label: t('allRooms'), badge: rows.length, badgeTone: 'neutral' as const },
                     ...roomTabs.map(rm => ({
                       value: String(rm.id),
                       label: rm.name,
@@ -267,7 +269,7 @@ export const TableGrid: React.FC<TableGridProps> = ({
               onChange={onQuery}
               inputRef={searchRef}
               onKeyDown={onSearchKey}
-              placeholder="Vai al tavolo…"
+              placeholder={t('goToTable')}
               ariaLabel="Cerca un tavolo"
               className="w-full lg:mt-3"
             />

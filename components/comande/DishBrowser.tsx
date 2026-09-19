@@ -1,4 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Apple, ArrowLeft, Beef, Beer, Cake, CakeSlice, ChefHat, ChevronDown, ChevronRight, Coffee,
   CornerDownRight, Croissant, CupSoda, Drumstick, Fish, GlassWater, Ham, Image as ImageIcon,
@@ -161,6 +162,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
   barCategories, dessertCategories, course,
   draftLinesFor, onBumpLine, onTapLine, onLineCourseTap,
 }) => {
+  const { t } = useTranslation('comande', { useSuspense: false });
   // Categoria «fuori uscita»: non della sezione che l'uscita in composizione
   // sta servendo. Solo per Bar e Dolci — le uscite numerate sono di cucina e
   // insieme, quindi lì non si attenua niente.
@@ -647,7 +649,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
               // le sezioni sono semplicemente diverse fra loro. Stringhe
               // intere: Tailwind estrae i nomi staticamente.
               const chrome: Record<string, { icon: typeof ChefHat; label: string; chip: string }> = {
-                cucina: { icon: ChefHat, label: 'Cucina', chip: 'bg-[var(--ds-cat-6-tint)] text-[var(--ds-cat-6-text)]' },
+                cucina: { icon: ChefHat, label: t('kitchen'), chip: 'bg-[var(--ds-cat-6-tint)] text-[var(--ds-cat-6-text)]' },
                 bar: { icon: Wine, label: 'Bar', chip: 'bg-[var(--ds-cat-2-tint)] text-[var(--ds-cat-2-text)]' },
                 dolci: { icon: Cake, label: 'Dolci', chip: 'bg-[var(--ds-cat-4-tint)] text-[var(--ds-cat-4-text)]' },
               };
@@ -808,7 +810,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
           <SearchField
             value={query}
             onChange={onQuery}
-            placeholder="Cerca un piatto in tutto il menù…"
+            placeholder={t('searchDishAll')}
             ariaLabel="Cerca un piatto"
             className="flex-shrink-0"
           />
@@ -821,7 +823,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
             <SearchField
               value={query}
               onChange={onQuery}
-              placeholder="Cerca un piatto"
+              placeholder={t('searchDish')}
               ariaLabel="Cerca un piatto"
               className="flex-shrink-0"
             />

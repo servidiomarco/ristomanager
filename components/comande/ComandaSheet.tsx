@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ListOrdered, RefreshCw, Users, UtensilsCrossed } from 'lucide-react';
 import type { Dish, OrderItem, OrderWithItems } from '../../types';
 import { EmptyState, SectionHeader, Sheet, SegmentedControl } from '../ds';
@@ -71,6 +72,7 @@ export const ComandaSheet: React.FC<ComandaSheetProps> = ({
   onDragLine, onDragItem, onDragCourse,
   openedBy, onSend, onSendAll, onRepeat, onRepeatAll, showBar, showDessert, fullPage, tableName,
 }) => {
+  const { t } = useTranslation('comande', { useSuspense: false });
   const [tab, setTab] = useState<SheetTab>('course');
 
   // Chi ha preso la comanda, per la testata a tutta pagina: sempre — non
@@ -86,14 +88,14 @@ export const ComandaSheet: React.FC<ComandaSheetProps> = ({
     <div
       className="inline-flex flex-shrink-0 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] p-1"
       role="tablist"
-      aria-label="Come leggere la comanda"
+      aria-label={t('howToRead')}
     >
       <button
         type="button"
         role="tab"
         aria-selected={tab === 'course'}
-        aria-label="Per uscita"
-        title="Per uscita"
+        aria-label={t('byCourse')}
+        title={t('byCourse')}
         onClick={() => setTab('course')}
         className={`inline-flex h-9 w-11 items-center justify-center rounded-[var(--ds-radius-control)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
           tab === 'course'
@@ -107,8 +109,8 @@ export const ComandaSheet: React.FC<ComandaSheetProps> = ({
         type="button"
         role="tab"
         aria-selected={tab === 'table'}
-        aria-label="Tutto il tavolo"
-        title="Tutto il tavolo"
+        aria-label={t('wholeTable')}
+        title={t('wholeTable')}
         onClick={() => setTab('table')}
         className={`inline-flex h-9 w-11 items-center justify-center rounded-[var(--ds-radius-control)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
           tab === 'table'
@@ -189,8 +191,8 @@ export const ComandaSheet: React.FC<ComandaSheetProps> = ({
           onChange={setTab}
           ariaLabel="Come leggere la comanda"
           options={[
-            { value: 'course', label: 'Per uscita' },
-            { value: 'table', label: 'Tutto il tavolo' },
+            { value: 'course', label: t('byCourse') },
+            { value: 'table', label: t('wholeTable') },
           ]}
         />
       )}
@@ -219,7 +221,7 @@ export const ComandaSheet: React.FC<ComandaSheetProps> = ({
           onDragCourse={onDragCourse}
         />
       ) : lines.length === 0 ? (
-        <EmptyState icon={UtensilsCrossed}>Il tavolo non ha ancora ordinato niente.</EmptyState>
+        <EmptyState icon={UtensilsCrossed}>{t('tableEmpty')}</EmptyState>
       ) : (
         <div className="flex flex-col gap-4">
           {groups.map(g => (
