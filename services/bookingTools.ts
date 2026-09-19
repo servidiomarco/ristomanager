@@ -536,8 +536,14 @@ export async function createReservation(
             depositAmountCents = Math.trunc(guests) * (depositPolicy?.perPersonCents ?? d.depositDefaultPerPersonCents);
             const [yyyy, mm, dd] = normalizedDate.split('-');
             const depositDateLabel = `${dd}/${mm}/${yyyy}`;
-            const depositGuestsLabel = `${Math.trunc(guests)} ${Math.trunc(guests) === 1 ? 'persona' : 'persone'}`;
-            const orderDescription = `Caparra prenotazione #${created.id} - ${depositGuestsLabel} ${depositDateLabel} ${normalizedTime}`;
+            // Label italiana per la description interna (staff + gateway),
+            // variante nella lingua dell'ospite per i testi che gli arrivano
+            // — come nel gemello web (public booking) di server.ts.
+            const depositGuestsLabelIt = `${Math.trunc(guests)} ${Math.trunc(guests) === 1 ? 'persona' : 'persone'}`;
+            const depositGuestsLabel = detectedLanguage === 'en'
+                ? `${Math.trunc(guests)} ${Math.trunc(guests) === 1 ? 'guest' : 'guests'}`
+                : depositGuestsLabelIt;
+            const orderDescription = `Caparra prenotazione #${created.id} - ${depositGuestsLabelIt} ${depositDateLabel} ${normalizedTime}`;
             try {
                 const order = await d.createPaymentOrder(tenantId, {
                     amount: depositAmountCents,
@@ -565,11 +571,13 @@ export async function createReservation(
 
                 const smsText = d.buildDepositRequestMessage(
                     d.toTitleCase(created.customer_name), depositGuestsLabel, depositDateLabel,
-                    normalizedTime, depositAmountCents, order.checkoutUrl, depositPolicy?.perPersonCents
+                    normalizedTime, depositAmountCents, order.checkoutUrl, depositPolicy?.perPersonCents,
+                    detectedLanguage
                 );
                 const whatsappTemplate = d.buildBookingDepositRequestTemplate(
                     d.toTitleCase(created.customer_name), depositGuestsLabel, depositDateLabel,
-                    normalizedTime, depositAmountCents, order.checkoutUrl
+                    normalizedTime, depositAmountCents, order.checkoutUrl,
+                    detectedLanguage, Math.trunc(guests)
                 );
                 d.sendBookingConfirmation(tenantId, created.phone, smsText, created.id, { whatsappTemplate }).catch((err: any) =>
                     console.error(`${channel.logPrefix} deposit link send failed:`, err?.message || err)
