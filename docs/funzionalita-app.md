@@ -657,6 +657,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-19 | Funzionalità trasversali | Con la lingua inglese la **navigazione** dell'app è in inglese: menu laterale e i suoi gruppi, barra inferiore del telefono, foglio «Altro», «Esci». Le singole schermate seguiranno una per una; quelle non ancora tradotte restano in italiano. |
 | 2026-09-19 | Impostazioni; Funzionalità trasversali | L'app del personale impara a parlare inglese: si sceglie la **lingua dell'interfaccia** in Impostazioni → Profilo (italiano, inglese, o «come il ristorante»), è per account e segue l'operatore su ogni dispositivo. Questa versione porta l'impianto e l'interruttore — la card della lingua è già tradotta, le altre schermate seguiranno una per una; ciò che non è ancora tradotto resta in italiano, mai a metà. |
 | 2026-09-19 | Agente vocale "Sofia"; Asporto | Nelle chiamate in inglese il backend risponde in inglese: frasi di conferma/annullo/modifica, messaggi d'errore, date lette al cliente e riepilogo dell'ordine d'asporto arrivano all'agente già in inglese — Sofia li legge invece di tradurli al volo (le risposte italiane restano identiche; il prompt dell'agente tratta ora la traduzione al volo come solo ripiego). |
 | 2026-09-19 | Messaggi: WhatsApp e SMS | Il suggerimento di risposta AI segue la lingua del cliente: su una conversazione in inglese la bozza proposta allo staff esce in inglese (stessa regola dell'agente WhatsApp), non più sempre in italiano. |

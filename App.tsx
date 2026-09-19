@@ -157,17 +157,21 @@ const isPlatformScopedToken = (): boolean =>
 type NavGroupId = 'servizio' | 'comunicazioni' | 'operazioni' | 'gestione' | 'sistema';
 
 // Eyebrow headings, in render order. Proper case by design — never all caps.
-const NAV_GROUPS: { id: NavGroupId; label: string }[] = [
-  { id: 'servizio', label: 'Servizio' },
-  { id: 'comunicazioni', label: 'Comunicazioni' },
-  { id: 'operazioni', label: 'Operazioni' },
-  { id: 'gestione', label: 'Gestione' },
-  { id: 'sistema', label: 'Sistema' },
+// `label` resta l'italiano cablato e fa da valore di ripiego: `labelKey` è la
+// chiave nel dizionario `common`, risolta al render con t(labelKey, label).
+const NAV_GROUPS: { id: NavGroupId; label: string; labelKey: string }[] = [
+  { id: 'servizio', label: 'Servizio', labelKey: 'nav.groups.service' },
+  { id: 'comunicazioni', label: 'Comunicazioni', labelKey: 'nav.groups.communications' },
+  { id: 'operazioni', label: 'Operazioni', labelKey: 'nav.groups.operations' },
+  { id: 'gestione', label: 'Gestione', labelKey: 'nav.groups.management' },
+  { id: 'sistema', label: 'Sistema', labelKey: 'nav.groups.system' },
 ];
 
 type NavItem = {
   kind: 'link' | 'theme';
   label: string;
+  /** Chiave in `common` per la voce tradotta; `label` è il ripiego italiano. */
+  labelKey: string;
   Icon: React.ComponentType<{ size?: number; className?: string }>;
   group: NavGroupId | null;        // null = ungrouped, pinned to the top (Dashboard)
   isTab: boolean;                  // true = already in the mobile bottom tab bar → hidden from "Altro"
@@ -178,54 +182,54 @@ type NavItem = {
 
 const NAV_ITEMS: NavItem[] = [
   // Ungrouped (top)
-  { kind: 'link', label: 'Dashboard', Icon: LayoutDashboard, group: null, isTab: true, view: ViewState.DASHBOARD, sidebarCollapse: false },
+  { kind: 'link', label: 'Dashboard', labelKey: 'nav.items.dashboard', Icon: LayoutDashboard, group: null, isTab: true, view: ViewState.DASHBOARD, sidebarCollapse: false },
 
   // Servizio
-  { kind: 'link', label: 'Prenotazioni', Icon: Calendar, group: 'servizio', isTab: true, view: ViewState.RESERVATIONS, sidebarCollapse: true },
-  { kind: 'link', label: 'Reception', Icon: ConciergeBell, group: 'servizio', isTab: false, view: ViewState.RECEPTION, sidebarCollapse: true },
-  { kind: 'link', label: 'Asporto', Icon: ShoppingBag, group: 'servizio', isTab: false, view: ViewState.ASPORTO, sidebarCollapse: true },
-  { kind: 'link', label: 'Sale & Tavoli', Icon: Grid, group: 'servizio', isTab: false, view: ViewState.FLOOR_PLAN, sidebarCollapse: true },
-  { kind: 'link', label: 'Menu', Icon: UtensilsCrossed, group: 'servizio', isTab: false, view: ViewState.MENU, sidebarCollapse: false },
-  { kind: 'link', label: 'Banchetti', Icon: PartyPopper, group: 'servizio', isTab: false, view: ViewState.BANCHETTI, sidebarCollapse: false },
-  { kind: 'link', label: 'Comande', Icon: ClipboardList, group: 'servizio', isTab: false, view: ViewState.COMANDE, sidebarCollapse: true },
-  { kind: 'link', label: 'Cassa', Icon: Calculator, group: 'servizio', isTab: false, view: ViewState.CASSA, sidebarCollapse: true },
-  { kind: 'link', label: 'Cucina', Icon: CookingPot, group: 'servizio', isTab: false, view: ViewState.CUCINA, sidebarCollapse: true },
-  { kind: 'link', label: 'Passe', Icon: BellRing, group: 'servizio', isTab: false, view: ViewState.PASSE, sidebarCollapse: true },
+  { kind: 'link', label: 'Prenotazioni', labelKey: 'nav.items.reservations', Icon: Calendar, group: 'servizio', isTab: true, view: ViewState.RESERVATIONS, sidebarCollapse: true },
+  { kind: 'link', label: 'Reception', labelKey: 'nav.items.reception', Icon: ConciergeBell, group: 'servizio', isTab: false, view: ViewState.RECEPTION, sidebarCollapse: true },
+  { kind: 'link', label: 'Asporto', labelKey: 'nav.items.takeaway', Icon: ShoppingBag, group: 'servizio', isTab: false, view: ViewState.ASPORTO, sidebarCollapse: true },
+  { kind: 'link', label: 'Sale & Tavoli', labelKey: 'nav.items.rooms', Icon: Grid, group: 'servizio', isTab: false, view: ViewState.FLOOR_PLAN, sidebarCollapse: true },
+  { kind: 'link', label: 'Menu', labelKey: 'nav.items.menu', Icon: UtensilsCrossed, group: 'servizio', isTab: false, view: ViewState.MENU, sidebarCollapse: false },
+  { kind: 'link', label: 'Banchetti', labelKey: 'nav.items.banquets', Icon: PartyPopper, group: 'servizio', isTab: false, view: ViewState.BANCHETTI, sidebarCollapse: false },
+  { kind: 'link', label: 'Comande', labelKey: 'nav.items.orders', Icon: ClipboardList, group: 'servizio', isTab: false, view: ViewState.COMANDE, sidebarCollapse: true },
+  { kind: 'link', label: 'Cassa', labelKey: 'nav.items.cash', Icon: Calculator, group: 'servizio', isTab: false, view: ViewState.CASSA, sidebarCollapse: true },
+  { kind: 'link', label: 'Cucina', labelKey: 'nav.items.kitchen', Icon: CookingPot, group: 'servizio', isTab: false, view: ViewState.CUCINA, sidebarCollapse: true },
+  { kind: 'link', label: 'Passe', labelKey: 'nav.items.passe', Icon: BellRing, group: 'servizio', isTab: false, view: ViewState.PASSE, sidebarCollapse: true },
 
   // Comunicazioni — all four are isTab, so the whole group drops out of the
   // mobile "Altro" sheet. The three channels live behind the Comunicazioni
   // bottom tab; Notifiche is the top-bar bell on every breakpoint. The sidebar
   // ignores isTab, so desktop still lists them individually.
-  { kind: 'link', label: 'Chiamate', Icon: Phone, group: 'comunicazioni', isTab: true, view: ViewState.CONVERSAZIONI, sidebarCollapse: false },
-  { kind: 'link', label: 'Messaggi', Icon: MessageCircle, group: 'comunicazioni', isTab: true, view: ViewState.MESSAGGI, sidebarCollapse: false },
-  { kind: 'link', label: 'Email', Icon: Mail, group: 'comunicazioni', isTab: true, view: ViewState.EMAIL, sidebarCollapse: false },
-  { kind: 'link', label: 'Chat staff', Icon: MessagesSquare, group: 'comunicazioni', isTab: true, view: ViewState.CHAT_STAFF, sidebarCollapse: false },
-  { kind: 'link', label: 'Notifiche', Icon: Bell, group: 'comunicazioni', isTab: true, view: ViewState.NOTIFICHE, sidebarCollapse: false },
-  { kind: 'link', label: 'Recensioni', Icon: Star, group: 'comunicazioni', isTab: false, view: ViewState.RECENSIONI, sidebarCollapse: false },
+  { kind: 'link', label: 'Chiamate', labelKey: 'nav.items.calls', Icon: Phone, group: 'comunicazioni', isTab: true, view: ViewState.CONVERSAZIONI, sidebarCollapse: false },
+  { kind: 'link', label: 'Messaggi', labelKey: 'nav.items.messages', Icon: MessageCircle, group: 'comunicazioni', isTab: true, view: ViewState.MESSAGGI, sidebarCollapse: false },
+  { kind: 'link', label: 'Email', labelKey: 'nav.items.email', Icon: Mail, group: 'comunicazioni', isTab: true, view: ViewState.EMAIL, sidebarCollapse: false },
+  { kind: 'link', label: 'Chat staff', labelKey: 'nav.items.staffChat', Icon: MessagesSquare, group: 'comunicazioni', isTab: true, view: ViewState.CHAT_STAFF, sidebarCollapse: false },
+  { kind: 'link', label: 'Notifiche', labelKey: 'nav.items.notifications', Icon: Bell, group: 'comunicazioni', isTab: true, view: ViewState.NOTIFICHE, sidebarCollapse: false },
+  { kind: 'link', label: 'Recensioni', labelKey: 'nav.items.reviews', Icon: Star, group: 'comunicazioni', isTab: false, view: ViewState.RECENSIONI, sidebarCollapse: false },
 
   // Operazioni
-  { kind: 'link', label: 'Attività', Icon: ListChecks, group: 'operazioni', isTab: false, view: ViewState.ATTIVITA, sidebarCollapse: false },
-  { kind: 'link', label: 'Inventario', Icon: Boxes, group: 'operazioni', isTab: false, view: ViewState.INVENTARIO },
-  { kind: 'link', label: 'Lista della Spesa', Icon: ShoppingCart, group: 'operazioni', isTab: false, view: ViewState.LISTA_DELLA_SPESA, sidebarCollapse: false },
-  { kind: 'link', label: 'HACCP', Icon: ShieldCheck, group: 'operazioni', isTab: false, view: ViewState.HACCP, sidebarCollapse: false },
-  { kind: 'link', label: 'Pagamenti', Icon: CreditCard, group: 'operazioni', isTab: false, view: ViewState.PAGAMENTI, sidebarCollapse: false },
-  { kind: 'link', label: 'Fiscalità', Icon: Landmark, group: 'gestione', isTab: false, view: ViewState.FISCALITA, sidebarCollapse: false },
+  { kind: 'link', label: 'Attività', labelKey: 'nav.items.tasks', Icon: ListChecks, group: 'operazioni', isTab: false, view: ViewState.ATTIVITA, sidebarCollapse: false },
+  { kind: 'link', label: 'Inventario', labelKey: 'nav.items.inventory', Icon: Boxes, group: 'operazioni', isTab: false, view: ViewState.INVENTARIO },
+  { kind: 'link', label: 'Lista della Spesa', labelKey: 'nav.items.shoppingList', Icon: ShoppingCart, group: 'operazioni', isTab: false, view: ViewState.LISTA_DELLA_SPESA, sidebarCollapse: false },
+  { kind: 'link', label: 'HACCP', labelKey: 'nav.items.haccp', Icon: ShieldCheck, group: 'operazioni', isTab: false, view: ViewState.HACCP, sidebarCollapse: false },
+  { kind: 'link', label: 'Pagamenti', labelKey: 'nav.items.payments', Icon: CreditCard, group: 'operazioni', isTab: false, view: ViewState.PAGAMENTI, sidebarCollapse: false },
+  { kind: 'link', label: 'Fiscalità', labelKey: 'nav.items.fiscal', Icon: Landmark, group: 'gestione', isTab: false, view: ViewState.FISCALITA, sidebarCollapse: false },
 
   // Gestione
-  { kind: 'link', label: 'Reportistica', Icon: BarChart3, group: 'gestione', isTab: false, view: ViewState.REPORTISTICA, sidebarCollapse: false },
-  { kind: 'link', label: 'Clienti', Icon: BookUser, group: 'gestione', isTab: false, view: ViewState.CLIENTI, sidebarCollapse: false },
-  { kind: 'link', label: 'Personale', Icon: UsersRound, group: 'gestione', isTab: false, view: ViewState.STAFF, sidebarCollapse: false },
-  { kind: 'link', label: 'Utenti', Icon: Users, group: 'gestione', isTab: false, view: ViewState.USERS, sidebarCollapse: false, requiresUserManagement: true },
+  { kind: 'link', label: 'Reportistica', labelKey: 'nav.items.reports', Icon: BarChart3, group: 'gestione', isTab: false, view: ViewState.REPORTISTICA, sidebarCollapse: false },
+  { kind: 'link', label: 'Clienti', labelKey: 'nav.items.customers', Icon: BookUser, group: 'gestione', isTab: false, view: ViewState.CLIENTI, sidebarCollapse: false },
+  { kind: 'link', label: 'Personale', labelKey: 'nav.items.staff', Icon: UsersRound, group: 'gestione', isTab: false, view: ViewState.STAFF, sidebarCollapse: false },
+  { kind: 'link', label: 'Utenti', labelKey: 'nav.items.users', Icon: Users, group: 'gestione', isTab: false, view: ViewState.USERS, sidebarCollapse: false, requiresUserManagement: true },
 
   // Sistema
   // Visibile solo al ruolo PLATFORM_ADMIN (gate per ruolo in canAccessView)
-  { kind: 'link', label: 'Piattaforma', Icon: Building2, group: 'sistema', isTab: false, view: ViewState.PLATFORM, sidebarCollapse: false },
-  { kind: 'link', label: 'Impostazioni', Icon: Settings, group: 'sistema', isTab: false, view: ViewState.SETTINGS, sidebarCollapse: false },
+  { kind: 'link', label: 'Piattaforma', labelKey: 'nav.items.platform', Icon: Building2, group: 'sistema', isTab: false, view: ViewState.PLATFORM, sidebarCollapse: false },
+  { kind: 'link', label: 'Impostazioni', labelKey: 'nav.items.settings', Icon: Settings, group: 'sistema', isTab: false, view: ViewState.SETTINGS, sidebarCollapse: false },
   // Visibili solo all'account admin (gate email-based in canAccessView)
-  { kind: 'link', label: 'Consumi AI', Icon: Gauge, group: 'sistema', isTab: false, view: ViewState.MONITORING, sidebarCollapse: false },
-  { kind: 'link', label: 'Development', Icon: Kanban, group: 'sistema', isTab: false, view: ViewState.DEVELOPMENT, sidebarCollapse: false },
-  { kind: 'link', label: 'Roadmap', Icon: Milestone, group: 'sistema', isTab: false, view: ViewState.ROADMAP, sidebarCollapse: false },
-  { kind: 'theme', label: 'Modalità scura', Icon: Moon, group: 'sistema', isTab: false },
+  { kind: 'link', label: 'Consumi AI', labelKey: 'nav.items.aiUsage', Icon: Gauge, group: 'sistema', isTab: false, view: ViewState.MONITORING, sidebarCollapse: false },
+  { kind: 'link', label: 'Development', labelKey: 'nav.items.development', Icon: Kanban, group: 'sistema', isTab: false, view: ViewState.DEVELOPMENT, sidebarCollapse: false },
+  { kind: 'link', label: 'Roadmap', labelKey: 'nav.items.roadmap', Icon: Milestone, group: 'sistema', isTab: false, view: ViewState.ROADMAP, sidebarCollapse: false },
+  { kind: 'theme', label: 'Modalità scura', labelKey: 'nav.items.darkMode', Icon: Moon, group: 'sistema', isTab: false },
 ];
 
 // The Comunicazioni channels, in the order the mobile switcher shows them.
@@ -2281,9 +2285,9 @@ const App: React.FC = () => {
         <nav id="sidebar-nav" ref={navFadeRef} className="flex-1 min-h-0 overflow-y-auto scroll-fade-y scrollbar-hover py-2 space-y-0.5 px-3">
           {NAV_ITEMS.filter(item => item.group === null && canSeeNavItem(item)).map(item => (
             <SidebarItem
-              key={item.label}
+              key={item.labelKey}
               icon={<item.Icon size={20} />}
-              label={item.label}
+              label={t(item.labelKey, item.label)}
               active={item.view !== undefined && view === item.view}
               onClick={() => selectNavItem(item)}
               collapsed={sidebarCollapsed}
@@ -2309,14 +2313,14 @@ const App: React.FC = () => {
                   <div aria-hidden className="mx-auto my-2 h-px w-6 bg-[var(--ds-border)]" />
                 ) : (
                   <div className="px-3 pt-4 pb-1 text-[13px] font-medium text-[var(--ds-text-muted)]">
-                    {group.label}
+                    {t(group.labelKey, group.label)}
                   </div>
                 )}
                 {items.map(item => (
                   item.kind === 'theme' ? (
                     sidebarCollapsed ? (
                       <button
-                        key={item.label}
+                        key={item.labelKey}
                         type="button"
                         onClick={toggleTheme}
                         title={theme === 'dark' ? 'Tema chiaro' : 'Tema scuro'}
@@ -2327,7 +2331,7 @@ const App: React.FC = () => {
                       </button>
                     ) : (
                       <button
-                        key={item.label}
+                        key={item.labelKey}
                         type="button"
                         onClick={toggleTheme}
                         aria-label={theme === 'dark' ? 'Passa a tema chiaro' : 'Passa a tema scuro'}
@@ -2342,7 +2346,7 @@ const App: React.FC = () => {
                               un toggle da 44px, quindi con la sidebar a 250px
                               il flex la stringeva e "Modalità scura" andava a
                               capo. */}
-                          <span className="font-medium text-[15px] tracking-[-0.01em] whitespace-nowrap">{item.label}</span>
+                          <span className="font-medium text-[15px] tracking-[-0.01em] whitespace-nowrap">{t(item.labelKey, item.label)}</span>
                         </span>
                         <span
                           aria-hidden
@@ -2356,9 +2360,9 @@ const App: React.FC = () => {
                     )
                   ) : (
                     <SidebarItem
-                      key={item.label}
+                      key={item.labelKey}
                       icon={<item.Icon size={20} />}
-                      label={item.label}
+                      label={t(item.labelKey, item.label)}
                       active={item.view !== undefined && view === item.view}
                       onClick={() => selectNavItem(item)}
                       collapsed={sidebarCollapsed}
@@ -2396,8 +2400,8 @@ const App: React.FC = () => {
               <button
                 onClick={logout}
                 className="p-2 text-[var(--ds-text-muted)] hover:text-[var(--ds-critical-solid)] rounded-[var(--ds-radius)] transition-colors"
-                title="Esci"
-                aria-label="Esci"
+                title={t('nav.logout', 'Esci')}
+                aria-label={t('nav.logout', 'Esci')}
               >
                 <LogOut size={16} />
               </button>
@@ -2423,8 +2427,8 @@ const App: React.FC = () => {
               <button
                 onClick={logout}
                 className="p-1.5 text-[var(--ds-text-muted)] hover:text-[var(--ds-critical-solid)] rounded-[var(--ds-radius)] transition-colors"
-                title="Esci"
-                aria-label="Esci"
+                title={t('nav.logout', 'Esci')}
+                aria-label={t('nav.logout', 'Esci')}
               >
                 <LogOut size={16} />
               </button>
@@ -2645,7 +2649,7 @@ const App: React.FC = () => {
                     onClick={() => setShowCreateMenu(v => !v)}
                     aria-haspopup="menu"
                     aria-expanded={showCreateMenu}
-                    aria-label="Crea nuovo"
+                    aria-label={t('nav.createNew', 'Crea nuovo')}
                     className="inline-flex items-center justify-center h-11 w-11 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] transition-colors"
                   >
                     <Plus className="h-5 w-5 transition-transform duration-200" style={{ transform: showCreateMenu ? 'rotate(45deg)' : 'none' }} />
@@ -2654,7 +2658,7 @@ const App: React.FC = () => {
                   {showCreateMenu && (
                     <div
                       role="menu"
-                      aria-label="Crea nuovo"
+                      aria-label={t('nav.createNew', 'Crea nuovo')}
  className="absolute right-0 top-full mt-2 w-60 p-1.5 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] z-30"
                     >
                       {visibleCreateClusters.map((cluster, ci) => (
@@ -2669,6 +2673,8 @@ const App: React.FC = () => {
                               className="w-full flex items-center gap-3 px-3 h-11 rounded-[var(--ds-radius)] text-sm font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] transition-colors text-left"
                             >
                               <item.Icon className="h-[18px] w-[18px] text-[var(--ds-text-muted)]" />
+                              {/* Menu «Crea nuovo»: voci proprie, non NAV_ITEMS —
+                                  si traducono con la vista che le possiede. */}
                               <span>{item.label}</span>
                             </button>
                           ))}
@@ -3563,7 +3569,7 @@ const App: React.FC = () => {
             {view !== ViewState.PLATFORM && canAccessView(ViewState.RESERVATIONS) && (
               <BottomNavItem
                 icon={<Calendar size={20} />}
-                label="Prenotazioni"
+                label={t('nav.items.reservations', 'Prenotazioni')}
                 active={view === ViewState.RESERVATIONS}
                 onClick={() => setView(ViewState.RESERVATIONS)}
               />
@@ -3575,7 +3581,7 @@ const App: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setShowCreateSheet(v => !v)}
-                aria-label="Crea nuovo"
+                aria-label={t('nav.createNew', 'Crea nuovo')}
                 className="h-14 w-14 -translate-y-4 rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] shadow-[var(--ds-shadow-raised)] flex items-center justify-center active:scale-95 transition-all ring-4 ring-[var(--ds-canvas)]"
               >
                 <Plus className="h-6 w-6 transition-transform duration-200" style={{ transform: showCreateSheet ? 'rotate(45deg)' : 'rotate(0deg)' }} />
@@ -3586,7 +3592,7 @@ const App: React.FC = () => {
             {view !== ViewState.PLATFORM && commsTargetView !== undefined && (
               <BottomNavItem
                 icon={<MessagesSquare size={20} />}
-                label="Comunicazioni"
+                label={t('nav.groups.communications', 'Comunicazioni')}
                 active={isCommsView}
                 badge={commsBadgeTotal}
                 onClick={() => setView(commsTargetView)}
@@ -3595,7 +3601,7 @@ const App: React.FC = () => {
             {altroNavItems.length > 0 && (
               <BottomNavItem
                 icon={<MoreHorizontal size={20} />}
-                label="Altro"
+                label={t('nav.more', 'Altro')}
                 active={showMoreMenu || altroNavItems.some(item => view === item.view)}
                 onClick={() => setShowMoreMenu(true)}
               />
@@ -3645,7 +3651,7 @@ const App: React.FC = () => {
 
         {/* "Altro" bottom sheet — mobile */}
         {showMoreMenu && (
-          <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true" aria-label="Altro">
+          <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true" aria-label={t('nav.more', 'Altro')}>
             <div
               className="absolute inset-0 bg-[var(--ds-backdrop)]"
               onClick={() => setShowMoreMenu(false)}
@@ -3656,8 +3662,8 @@ const App: React.FC = () => {
                   <div className="w-10 h-1 rounded-full bg-[var(--ds-border-strong)]" />
                 </div>
                 <div className="px-4 pb-2 pt-1 flex items-center justify-between">
-                  <h3 className="text-[20px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)]">Altro</h3>
-                  <button onClick={() => setShowMoreMenu(false)} className="h-9 w-9 inline-flex items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors" aria-label="Chiudi">
+                  <h3 className="text-[20px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)]">{t('nav.more', 'Altro')}</h3>
+                  <button onClick={() => setShowMoreMenu(false)} className="h-9 w-9 inline-flex items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors" aria-label={t('actions.close', 'Chiudi')}>
                     <X className="h-[18px] w-[18px]" />
                   </button>
                 </div>
@@ -3684,7 +3690,7 @@ const App: React.FC = () => {
                   return (
                     <React.Fragment key={group.id}>
                       <div className="px-3 pt-4 pb-1 text-[13px] font-medium text-[var(--ds-text-muted)]">
-                        {group.label}
+                        {t(group.labelKey, group.label)}
                       </div>
                       {items.map(item => {
                         const badge =
@@ -3697,12 +3703,12 @@ const App: React.FC = () => {
                           : 0;
                         return (
                         <button
-                          key={item.label}
+                          key={item.labelKey}
                           onClick={() => { setShowMoreMenu(false); if (item.view !== undefined) setView(item.view); }}
                           className={`w-full flex items-center gap-3 px-3 h-12 rounded-[var(--ds-radius)] transition-colors ${item.view !== undefined && view === item.view ? 'bg-[var(--ds-surface-row)]' : ''}`}
                         >
                           <item.Icon className="h-5 w-5 text-[var(--ds-text-secondary)]" />
-                          <span className="text-[15px] font-medium tracking-[-0.01em] text-[var(--ds-text-primary)]">{item.label}</span>
+                          <span className="text-[15px] font-medium tracking-[-0.01em] text-[var(--ds-text-primary)]">{t(item.labelKey, item.label)}</span>
                           {badge > 0 && (
                             <span className="ml-auto min-w-[20px] h-5 px-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] text-[11px] font-semibold tabular-nums flex items-center justify-center">
                               {badge > 99 ? '99+' : badge}
@@ -3719,12 +3725,12 @@ const App: React.FC = () => {
               <div className="px-2 pb-6 pt-2 mt-2 border-t border-[var(--ds-border)]">
                 {NAV_ITEMS.filter(item => item.group === 'sistema' && item.kind === 'link' && canSeeNavItem(item)).map(item => (
                   <button
-                    key={item.label}
+                    key={item.labelKey}
                     onClick={() => { setShowMoreMenu(false); if (item.view !== undefined) setView(item.view); }}
                     className={`w-full flex items-center gap-3 px-3 h-12 rounded-[var(--ds-radius)] transition-colors ${item.view !== undefined && view === item.view ? 'bg-[var(--ds-surface-row)]' : ''}`}
                   >
                     <item.Icon className="h-5 w-5 text-[var(--ds-text-secondary)]" />
-                    <span className="text-[15px] font-medium tracking-[-0.01em] text-[var(--ds-text-primary)]">{item.label}</span>
+                    <span className="text-[15px] font-medium tracking-[-0.01em] text-[var(--ds-text-primary)]">{t(item.labelKey, item.label)}</span>
                     <ChevronRight className="ml-auto h-4 w-4 text-[var(--ds-text-subtle)]" />
                   </button>
                 ))}
@@ -3750,7 +3756,7 @@ const App: React.FC = () => {
                   className="w-full flex items-center gap-3 px-3 h-12 rounded-[var(--ds-radius)] text-[var(--ds-critical-text)] transition-colors"
                 >
                   <LogOut className="h-5 w-5" />
-                  <span className="text-[15px] font-medium tracking-[-0.01em]">Esci</span>
+                  <span className="text-[15px] font-medium tracking-[-0.01em]">{t('nav.logout', 'Esci')}</span>
                 </button>
               </div>
               </div>

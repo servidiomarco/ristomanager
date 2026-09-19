@@ -1,4 +1,54 @@
 {
+  "nav": {
+    "groups": {
+      "service": "Servizio",
+      "communications": "Comunicazioni",
+      "operations": "Operazioni",
+      "management": "Gestione",
+      "system": "Sistema"
+    },
+    "items": {
+      "dashboard": "Dashboard",
+      "reservations": "Prenotazioni",
+      "reception": "Reception",
+      "takeaway": "Asporto",
+      "rooms": "Sale & Tavoli",
+      "menu": "Menu",
+      "banquets": "Banchetti",
+      "orders": "Comande",
+      "cash": "Cassa",
+      "kitchen": "Cucina",
+      "passe": "Passe",
+      "calls": "Chiamate",
+      "messages": "Messaggi",
+      "email": "Email",
+      "staffChat": "Chat staff",
+      "notifications": "Notifiche",
+      "reviews": "Recensioni",
+      "tasks": "Attività",
+      "inventory": "Inventario",
+      "shoppingList": "Lista della Spesa",
+      "haccp": "HACCP",
+      "payments": "Pagamenti",
+      "fiscal": "Fiscalità",
+      "reports": "Reportistica",
+      "customers": "Clienti",
+      "staff": "Personale",
+      "users": "Utenti",
+      "platform": "Piattaforma",
+      "settings": "Impostazioni",
+      "aiUsage": "Consumi AI",
+      "development": "Development",
+      "roadmap": "Roadmap",
+      "darkMode": "Modalità scura"
+    },
+    "more": "Altro",
+    "createNew": "Crea nuovo",
+    "logout": "Esci"
+  },
+  "actions": {
+    "close": "Chiudi"
+  },
   "profile": {
     "languageLabel": "Lingua dell'interfaccia",
     "languageHint": "La lingua dell'app per il tuo account, su ogni dispositivo.",
