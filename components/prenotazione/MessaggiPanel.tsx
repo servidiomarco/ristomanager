@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { BellRing, Loader2, Mail, Send } from 'lucide-react';
 import type { OutboundMessage } from '../../services/apiService';
 import { EmptyState, StatusPill, LinkifiedText } from '../ds';
@@ -23,13 +24,17 @@ const channelMeta = (channel: OutboundMessage['channel']): { label: string; tone
   return { label: 'Email', tone: 'neutral' };
 };
 
-const outcome = (msg: OutboundMessage): { label: string; tone: PillTone } => {
+// Esiti: chiavi invece di parole. La t arriva dal componente (sotto).
+const outcome = (msg: OutboundMessage): { labelKey: string; label: string; tone: PillTone } => {
   const s = (msg.status || '').toLowerCase();
-  if (msg.direction === 'inbound') return { label: msg.in_reply_to ? 'Risposta' : 'Entrata', tone: 'positive' };
-  if (s === 'delivered' || s === 'read') return { label: 'Consegnato', tone: 'positive' };
-  if (s === 'sent' || s === 'queued' || s === 'accepted' || s === 'sending') return { label: 'Inviato', tone: 'info' };
-  if (s === 'failed' || s === 'undelivered') return { label: 'Fallito', tone: 'critical' };
-  return { label: s || 'In coda', tone: 'neutral' };
+  if (msg.direction === 'inbound') return msg.in_reply_to
+    ? { labelKey: 'messages.reply', label: 'Risposta', tone: 'positive' }
+    : { labelKey: 'messages.inbound', label: 'Entrata', tone: 'positive' };
+  if (s === 'delivered' || s === 'read') return { labelKey: 'messages.delivered', label: 'Consegnato', tone: 'positive' };
+  if (s === 'sent' || s === 'queued' || s === 'accepted' || s === 'sending') return { labelKey: 'messages.sent', label: 'Inviato', tone: 'info' };
+  if (s === 'failed' || s === 'undelivered') return { labelKey: 'messages.failed', label: 'Fallito', tone: 'critical' };
+  // Stato sconosciuto dal provider: si mostra grezzo, non c'è da tradurre.
+  return { labelKey: s ? '' : 'messages.queued', label: s || 'In coda', tone: 'neutral' };
 };
 
 const when = (iso: string): string => {
@@ -57,6 +62,7 @@ export const MessaggiPanel: React.FC<{
   reminderSending?: boolean;
   reminderSent?: boolean;
 }> = ({ messages, loading, phone, email, onNewEmail, onSendConfirmation, onSendReminder, reminderSending, reminderSent }) => {
+  const { t } = useTranslation('prenotazioni', { useSuspense: false });
   const [filter, setFilter] = useState<Filter>('all');
 
   const counts = useMemo(() => {
@@ -151,6 +157,7 @@ export const MessaggiPanel: React.FC<{
           {shown.map(msg => {
             const ch = channelMeta(msg.channel);
             const out = outcome(msg);
+            const outLabel = out.labelKey ? t(out.labelKey, out.label) : out.label;
             const failed = out.tone === 'critical';
             const inbound = msg.direction === 'inbound';
             return (
@@ -162,7 +169,7 @@ export const MessaggiPanel: React.FC<{
               >
                 <div className="mb-2 flex flex-wrap items-center gap-2">
                   <StatusPill tone={ch.tone}>{ch.label}</StatusPill>
-                  {inbound && <StatusPill tone="positive">{out.label}</StatusPill>}
+                  {inbound && <StatusPill tone="positive">{outLabel}</StatusPill>}
                   <span className="text-[13px] tabular-nums text-[var(--ds-text-muted)]">{when(msg.sent_at)}</span>
                   {!inbound && (
                     <span className={`ml-auto text-[13px] font-medium ${
@@ -170,7 +177,7 @@ export const MessaggiPanel: React.FC<{
                       : out.tone === 'positive' ? 'text-[var(--ds-seated-text)]'
                       : 'text-[var(--ds-text-muted)]'
                     }`}>
-                      {out.label}
+                      {outLabel}
                     </span>
                   )}
                 </div>
