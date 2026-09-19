@@ -1,0 +1,17 @@
+{
+  "stopToday": "Ferma asporto per questo giorno",
+  "stopped": "Asporto fermo per questa data",
+  "all": "Tutti",
+  "ordersNotLoaded": "Ordini non caricati",
+  "confirm": "Conferma",
+  "ready": "Pronto",
+  "total": "Totale",
+  "customer": "Cliente",
+  "pickup": "Ritiro",
+  "stoppedDot": "Asporto fermo per questa data.",
+  "order": "Ordine",
+  "kitchenNote": "Nota per la cucina",
+  "searchDish": "Cerca un piatto",
+  "notes": "Note",
+  "loadingSlots": "Carico gli orari…"
+}

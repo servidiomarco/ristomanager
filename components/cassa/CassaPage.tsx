@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { Customer, Dish, RestaurantMenu, OrderItem, OrderWithItems, Reservation, Room, Table } from '../../types';
 import { ArrivalStatus, PaymentStatus, ReservationSource, ReservationStatus } from '../../types';
 import type { CashSessionView, CashTransactionsView } from '../../types';
@@ -72,6 +73,7 @@ type Screen = 'queue' | 'tables' | 'table' | 'payment' | 'split' | 'esito' | 'tr
 export const CassaPage: React.FC<CassaPageProps> = ({
   dishes: allDishes, menus, tables, rooms, reservations, globalDate, globalShiftFilter, onImmersive, onOpenInComande, onOpenPagamenti,
 }) => {
+  const { t } = useTranslation('cassa', { useSuspense: false });
   const [screen, setScreen] = useState<Screen>('queue');
   const [roomId, setRoomId] = useState<string>('ALL');
   const [tablesView, setTablesView] = useState<'griglia' | 'piantina'>('griglia');
@@ -973,7 +975,7 @@ export const CassaPage: React.FC<CassaPageProps> = ({
 
       {payingBill && billDiscountOpen && (
         <DiscountDialog
-          title="Sconto sul conto"
+          title={t('billDiscount')}
           currentReason={payingBill.discount_reason ?? null}
           hasDiscount={payingBill.discount_type != null}
           reasonRequired={false}

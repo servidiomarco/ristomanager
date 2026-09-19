@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ArrowLeft, Loader2, QrCode, Send } from 'lucide-react';
 import { chime } from '../../utils/chime';
 import { billsApiService } from '../../services/billsApiService';
@@ -61,6 +62,7 @@ interface PagamentoProps {
 export const Pagamento: React.FC<PagamentoProps> = ({
   bill, busy, error, fiscalReady, quotaCents, quotaItemUnits = null, onBack, onSettle, onSplit, onShowQr, onEdit, onDiscount, embedded = false, paymentPulse = 0,
 }) => {
+  const { t } = useTranslation('cassa', { useSuspense: false });
   const residual = bill.residual_cents;
   // Feedback "pagamento ricevuto": lampeggio one-shot + suono + vibrazione al
   // salire del pulse (non al primo render — solo agli incassi successivi).
@@ -151,7 +153,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
   const canaleEDocumento = (
     <>
       {/* Il secondo gruppo: apre un canale, non registra denaro. */}
-      <h2 className="mt-5 text-[13px] font-semibold text-[var(--ds-text-muted)]">Chiedi al cliente</h2>
+      <h2 className="mt-5 text-[13px] font-semibold text-[var(--ds-text-muted)]">{t('askCustomer')}</h2>
       <p className="mt-1 text-[12px] text-[var(--ds-text-muted)]">
         Il conto resta aperto: il residuo scende quando l'ospite paga.
       </p>
@@ -193,7 +195,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
           value={doc}
           onChange={setDoc}
           options={[
-            { value: 'Scontrino', label: 'Scontrino' },
+            { value: 'Scontrino', label: t('receipt') },
             { value: 'Proforma', label: 'Proforma' },
             { value: 'Fattura', label: 'Fattura' },
           ]}
@@ -323,12 +325,12 @@ export const Pagamento: React.FC<PagamentoProps> = ({
           <dl className="mt-3 space-y-1.5 text-[14px]">
             {discountShown > 0 && (
               <div className="flex justify-between gap-2">
-                <dt className="text-[var(--ds-critical-text)]">Sconto</dt>
+                <dt className="text-[var(--ds-critical-text)]">{t('discount')}</dt>
                 <dd className="tabular-nums text-[var(--ds-critical-text)]">−{euro(discountShown)}</dd>
               </div>
             )}
             <div className="flex justify-between gap-2">
-              <dt className="text-[var(--ds-text-secondary)]">Totale conto</dt>
+              <dt className="text-[var(--ds-text-secondary)]">{t('billTotal')}</dt>
               <dd className="tabular-nums text-[var(--ds-text-primary)]">{euro(bill.total_cents)}</dd>
             </div>
           </dl>
@@ -342,7 +344,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
             )}
             {staffPaid > 0 && (
               <div className="flex justify-between gap-2">
-                <span className="text-[var(--ds-text-secondary)]">Incassato in cassa</span>
+                <span className="text-[var(--ds-text-secondary)]">{t('takenAtTill')}</span>
                 <span className="tabular-nums text-[var(--ds-text-secondary)]">{euro(staffPaid)}</span>
               </div>
             )}
@@ -353,7 +355,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
               </div>
             )}
             <div className="flex justify-between gap-2 border-t border-[var(--ds-border)] pt-1.5 font-semibold">
-              <span className="text-[var(--ds-text-primary)]">Già pagato</span>
+              <span className="text-[var(--ds-text-primary)]">{t('alreadyPaid')}</span>
               <span className="tabular-nums text-[var(--ds-text-primary)]">{euro(alreadyPaid)}</span>
             </div>
           </div>
