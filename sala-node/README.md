@@ -75,6 +75,14 @@ scriverla in card.
 
 ## Guasti noti
 
+- **Chrome blocca le chiamate al nodo («provisional headers», richiesta
+  senza risposta)**: è il Local Network Access — un sito pubblico che parla
+  con un IP di LAN richiede il permesso dell'utente. Sul dispositivo:
+  lucchetto → Impostazioni sito → «Accesso alla rete locale» → Consenti per
+  app.sympotia.com, poi ricaricare. Va fatto UNA volta per dispositivo
+  (Android/Chrome uguale; Safari/iOS oggi non applica il blocco). Per i
+  Chrome più vecchi il nodo risponde già Access-Control-Allow-Private-Network.
+
 - **Router con protezione DNS-rebinding**: il record A pubblico risponde un
   IP privato e alcuni router lo filtrano. Sintomo: il dominio non risolve
   dalla LAN ma `nslookup` da fuori funziona. Fix: whitelist di
