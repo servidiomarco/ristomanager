@@ -1,0 +1,68 @@
+{
+  "toolbar": {
+    "searchPlaceholder": "Search by name or phone",
+    "sort": "Sort",
+    "filters": "Filters",
+    "print": "Print",
+    "channelOptions": "Booking channel options"
+  },
+  "sort": {
+    "title": "Sort by",
+    "createdAsc": "Booked first → last",
+    "createdDesc": "Booked last → first",
+    "timeAsc": "Time (earliest → latest)",
+    "timeDesc": "Time (latest → earliest)",
+    "nameAsc": "Name A → Z",
+    "nameDesc": "Name Z → A",
+    "guestsAsc": "Covers (fewest → most)",
+    "guestsDesc": "Covers (most → fewest)"
+  },
+  "filters": {
+    "title": "Filters",
+    "room": "Room",
+    "allRooms": "All",
+    "paymentStatus": "Payment status",
+    "all": "All",
+    "paymentPending": "Outstanding",
+    "paymentDeposit": "Deposit",
+    "paymentPaid": "Paid",
+    "channel": "Channel",
+    "channelManual": "Staff",
+    "channelWeb": "Web",
+    "channelVoice": "Voice agent",
+    "channelWhatsapp": "WhatsApp",
+    "other": "Other",
+    "allergens": "Allergens",
+    "withNotes": "With notes",
+    "noTable": "No table"
+  },
+  "channel": {
+    "whatsapp": "Channel: WhatsApp",
+    "web": "Channel: Web",
+    "voice": "Channel: Voice agent",
+    "phone": "Channel: Phone",
+    "phoneShort": "Phone"
+  },
+  "badge": {
+    "vip": "VIP guest",
+    "blacklist": "Blacklisted guest"
+  },
+  "actions": {
+    "edit": "Edit",
+    "cancel": "Cancel",
+    "new": "New booking"
+  },
+  "shift": {
+    "lunch": "Lunch",
+    "dinner": "Dinner"
+  },
+  "stats": {
+    "covers": "covers",
+    "reservations": "bookings",
+    "noTable": "no table"
+  },
+  "empty": {
+    "lunch": "No bookings for lunch on this date.",
+    "dinner": "No bookings for dinner on this date."
+  }
+}
