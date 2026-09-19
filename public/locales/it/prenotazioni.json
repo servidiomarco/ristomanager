@@ -98,5 +98,41 @@
     "occupied": "Occupato",
     "tooSmall": "Capienza insuff.",
     "banquet": "Evento / Banchetto"
+  },
+  "payments": {
+    "tableBill": "Conto al tavolo",
+    "loading": "Caricamento…",
+    "noBill": "Nessun conto attivo.",
+    "requestDeposit": "Richiedi un acconto",
+    "sendVia": "Invia il link tramite",
+    "email": "Email",
+    "whatsapp": "WhatsApp",
+    "sms": "SMS",
+    "amount": "Importo",
+    "description": "Descrizione",
+    "descriptionPlaceholder": "Es. acconto cena del 15/08",
+    "sendLink": "Invia link"
+  },
+  "billState": {
+    "paid": "Saldato",
+    "partial": "Saldato in parte",
+    "unpaid": "Da saldare"
+  },
+  "paymentStatus": {
+    "pending": "In attesa",
+    "authorised": "Autorizzato",
+    "completed": "Pagato",
+    "cancelled": "Annullato",
+    "failed": "Fallito",
+    "expired": "Scaduto",
+    "refunded": "Rimborsato"
+  },
+  "messages": {
+    "inbound": "Entrata",
+    "reply": "Risposta",
+    "delivered": "Consegnato",
+    "sent": "Inviato",
+    "failed": "Fallito",
+    "queued": "In coda"
   }
 }

@@ -60,8 +60,8 @@ export const BillFigures: React.FC<{
 export const billStateLabel = (
   totalCents: number,
   paidCents: number,
-): { label: string; tone: 'positive' | 'pending' | 'neutral' } => {
-  if (totalCents > 0 && paidCents >= totalCents) return { label: 'Saldato', tone: 'positive' };
-  if (paidCents > 0) return { label: 'Saldato in parte', tone: 'pending' };
-  return { label: 'Da saldare', tone: 'neutral' };
+): { labelKey: string; fallback: string; tone: 'positive' | 'pending' | 'neutral' } => {
+  if (totalCents > 0 && paidCents >= totalCents) return { labelKey: 'billState.paid', fallback: 'Saldato', tone: 'positive' };
+  if (paidCents > 0) return { labelKey: 'billState.partial', fallback: 'Saldato in parte', tone: 'pending' };
+  return { labelKey: 'billState.unpaid', fallback: 'Da saldare', tone: 'neutral' };
 };
