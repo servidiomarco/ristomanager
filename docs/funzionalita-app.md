@@ -658,6 +658,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-19 | Dashboard e Attività | Con la lingua inglese parlano inglese anche la Dashboard (saluto, deck «Adesso in sala», spesa, personale in servizio) e la pagina Attività. Le date seguono la lingua scelta. |
 | 2026-09-19 | Anagrafiche | Con la lingua inglese parlano inglese anche Clienti, Personale e Inventario: schede, turni e assenze, aree e categorie, con i giorni della settimana presi dalla lingua. |
 | 2026-09-19 | Menu & Banchetti | Con la lingua inglese la pagina **Menu** è in inglese: piatti e categorie, varianti e vini abbinati, composizione dei menù banchetto, menu digitale. |
 | 2026-09-19 | Pagamenti, conto al tavolo e cassa; Asporto | Con la lingua inglese anche **Cassa e Asporto** sono in inglese: conto e divisione quote, pagamento e scontrino, fondo e chiusura, transazioni; board asporto, presa ordine e stati. |

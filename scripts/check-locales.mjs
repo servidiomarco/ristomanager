@@ -110,6 +110,44 @@ const attributiRotti = ['components', 'App.tsx'].flatMap(p =>
         : (/="\s*\{\s*\w+\(/.test(fs.readFileSync(p, 'utf8')) ? [p] : [])) : []);
 for (const t of attributiRotti) errori.push(`${t}: chiamata dentro un attributo fra virgolette — va in graffe, altrimenti il cliente legge il codice`);
 
+/* Ogni chiave chiesta da un componente deve esistere e valere una stringa.
+ *
+ * i18next non fallisce su una chiave che non c'è: restituisce la chiave stessa,
+ * e lo schermo mostra «noneAssignedToYou» al posto della frase. Peggio ancora
+ * una chiave che esiste ma è un ramo di mappa — è successo con «priority», che
+ * era insieme l'etichetta del campo e la mappa Alta/Media/Bassa: la seconda
+ * definizione vince e t('priority') torna un oggetto. Il typecheck non vede
+ * nulla in nessuno dei due casi.
+ *
+ * Si controllano solo i file che dichiarano una namespace sola: dove ce ne
+ * sono due il prefisso «ns:» decide, e non vale la pena inseguirlo.
+ */
+const chiaviMancanti = [];
+const scansiona = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) { scansiona(p); continue; }
+        if (!e.name.endsWith('.tsx')) continue;
+        const testo = fs.readFileSync(p, 'utf8');
+        const ns = [...new Set([...testo.matchAll(/useTranslation\(\s*'([\w-]+)'/g)].map(m => m[1]))];
+        if (ns.length !== 1) continue;
+        const file = path.join(BASE, RIFERIMENTO, `${ns[0]}.json`);
+        if (!fs.existsSync(file)) continue;
+        const dizionario = JSON.parse(fs.readFileSync(file, 'utf8'));
+        const valore = (chiave) => chiave.split('.').reduce((o, k) => (o == null ? undefined : o[k]), dizionario);
+        for (const m of testo.matchAll(/\bt\(\s*'([\w.]+)'/g)) {
+            const chiave = m[1];
+            // Una chiave al plurale non esiste da sola: vale per le sue due forme.
+            const v = valore(chiave) ?? valore(`${chiave}_other`);
+            const riga = testo.slice(0, m.index).split('\n').length;
+            if (v === undefined) chiaviMancanti.push(`${p}:${riga}: "${chiave}" non esiste in ${ns[0]}.json`);
+            else if (typeof v !== 'string') chiaviMancanti.push(`${p}:${riga}: "${chiave}" in ${ns[0]}.json è una mappa, non una stringa`);
+        }
+    }
+};
+if (fs.existsSync('components')) scansiona('components');
+errori.push(...chiaviMancanti);
+
 if (errori.length > 0) {
     console.error('Dizionari fuori sincrono:\n' + errori.map(e => `  - ${e}`).join('\n'));
     process.exit(1);
