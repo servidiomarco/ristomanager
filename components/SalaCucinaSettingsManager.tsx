@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { displayLocale } from '../utils/formatLocale';
 import { Bell, BellOff, CookingPot, ChevronDown, Loader2, Monitor, Printer, Plus, Trash2, Wifi, WifiOff, Receipt } from 'lucide-react';
 import { getFeatureFlags, updateFeatureFlags, FeatureFlags } from '../services/apiService';
 import {
@@ -19,14 +21,15 @@ interface Props {
 
 // Il fire mode spiegato in italiano di sala, non in enum: chi configura è il
 // gestore, e la differenza fra i tre modi decide come lavora la cucina.
-const FIRE_MODE_LABELS: { value: FireMode; title: string; hint: string }[] = [
-  { value: 'AUTO_ALL',   title: 'Tutto subito',       hint: 'Ogni uscita parte in cucina appena il cameriere invia. Senza passe.' },
-  { value: 'AUTO_FIRST', title: 'Prima uscita subito', hint: 'La 1ª parte da sola, le successive aspettano il lancio dal Passe.' },
-  { value: 'AUTO_NEXT',  title: 'A consumo',          hint: 'La successiva parte da sola quando segni servita la precedente.' },
-  { value: 'MANUAL',     title: 'Tutto dal passe',    hint: 'Nessuna uscita parte da sola: le lancia tutte l\'expediter dal Passe.' },
+const FIRE_MODE_LABELS: { value: FireMode; key: string; title: string; hint: string }[] = [
+  { value: 'AUTO_ALL',   key: 'fireAll',    title: 'Tutto subito',        hint: 'Ogni uscita parte in cucina appena il cameriere invia. Senza passe.' },
+  { value: 'AUTO_FIRST', key: 'fireFirst',  title: 'Prima uscita subito', hint: 'La 1ª parte da sola, le successive aspettano il lancio dal Passe.' },
+  { value: 'AUTO_NEXT',  key: 'fireNext',   title: 'A consumo',           hint: 'La successiva parte da sola quando segni servita la precedente.' },
+  { value: 'MANUAL',     key: 'fireManual', title: 'Tutto dal passe',     hint: 'Nessuna uscita parte da sola: le lancia tutte l\'expediter dal Passe.' },
 ];
 
 export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
+  const { t } = useTranslation('salacucina', { useSuspense: false });
   const { hasPermission, hasFeature } = useAuth();
   const canEdit = hasPermission('settings:full');
 
@@ -80,7 +83,7 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
       setProfiles(p.profiles);
       setActiveProfile(p.active_profile);
     } catch (err: any) {
-      showToastRef.current(err?.message || 'Errore nel caricamento', 'error');
+      showToastRef.current(err?.message || t('loadError'), 'error');
     } finally {
       setLoading(false);
     }
@@ -115,7 +118,7 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
       if (okMsg) showToast(okMsg, 'success');
       await reload();
     } catch (err: any) {
-      showToast(err?.message || 'Operazione non riuscita', 'error');
+      showToast(err?.message || t('actionFailed'), 'error');
     } finally {
       setSaving(false);
     }
@@ -124,7 +127,7 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
   if (loading || !flags || !config) {
     return (
       <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] px-4 py-3 flex items-center gap-2 text-[13px] text-[var(--ds-text-muted)]">
-        <Loader2 className="h-4 w-4 animate-spin" /> Caricamento…
+        <Loader2 className="h-4 w-4 animate-spin" /> {t('loading')}
       </div>
     );
   }
@@ -146,7 +149,7 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
 
   const toggleModule = () => act(
     async () => { setFlags(await updateFeatureFlags({ table_orders_enabled: !enabled })); },
-    `Gestione sala: ${!enabled ? 'attiva' : 'disattivata'}`
+    (!enabled ? t('moduleOnToast') : t('moduleOffToast'))
   );
 
   return (
@@ -158,17 +161,17 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
             <CookingPot className="w-5 h-5" />
           </div>
           <div className="min-w-0">
-            <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">Sala &amp; Cucina</h4>
-            <p className="text-[13px] text-[var(--ds-text-muted)] truncate">Comande, partite, monitor, passe e stampanti.</p>
+            <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">{t('cardTitle')}</h4>
+            <p className="text-[13px] text-[var(--ds-text-muted)] truncate">{t('cardSubtitle')}</p>
           </div>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           <span className={`text-[12px] font-medium ${enabled ? 'text-[var(--ds-seated-text)]' : 'text-[var(--ds-text-subtle)]'}`}>
-            {enabled ? 'Attivo' : 'Disattivato'}
+            {enabled ? t('statusOn') : t('statusOff')}
           </span>
           <button
             type="button" role="switch" aria-checked={enabled}
-            aria-label={`${enabled ? 'Disattiva' : 'Attiva'} gestione sala`}
+            aria-label={enabled ? t('toggleOffAria') : t('toggleOnAria')}
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleModule(); }}
             disabled={!canEdit || saving}
             className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
@@ -186,7 +189,7 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
         {/* ---- Profilo di configurazione ---- */}
         <section>
           <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-2">
-            Profilo di configurazione
+            {t('profilesHeading')}
           </h5>
           <div className="rounded-[var(--ds-radius)] border border-[var(--ds-border)] divide-y divide-[var(--ds-border)]">
             {profiles.map(pr => {
@@ -195,28 +198,28 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
                 <div key={pr.id} className="flex items-center gap-3 px-3 py-2">
                   <span className="flex-1 min-w-0 text-[13px] font-medium text-[var(--ds-text-primary)] truncate">
                     {pr.name}
-                    {isActive && <span className="ml-2 text-[12px] font-semibold text-[var(--ds-seated-text)] tracking-wide">attivo</span>}
+                    {isActive && <span className="ml-2 text-[12px] font-semibold text-[var(--ds-seated-text)] tracking-wide">{t('profileActiveBadge')}</span>}
                   </span>
                   {isActive ? (
                     <button type="button" disabled={!canEdit || saving}
-                      onClick={() => act(() => detachSalaProfile(), `Profilo "${pr.name}" scollegato — la configurazione resta`)}
+                      onClick={() => act(() => detachSalaProfile(), t('profileDetachedToast', { nome: pr.name }))}
                       className="text-[12px] px-2 py-1 rounded-[var(--ds-radius)] border border-[var(--ds-border)] disabled:opacity-50">
-                      scollega
+                      {t('detach')}
                     </button>
                   ) : (
                     <button type="button" disabled={!canEdit || saving}
-                      onClick={() => act(() => activateSalaProfile(pr.id), `Profilo "${pr.name}" applicato`)}
+                      onClick={() => act(() => activateSalaProfile(pr.id), t('profileAppliedToast', { nome: pr.name }))}
                       className="text-[12px] px-2.5 py-1 rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] disabled:opacity-50">
-                      attiva
+                      {t('activate')}
                     </button>
                   )}
-                  <button type="button" disabled={!canEdit || saving} title="Sovrascrive il profilo col setup corrente"
-                    onClick={() => act(() => updateSalaProfile(pr.id), `Profilo "${pr.name}" aggiornato col setup corrente`)}
+                  <button type="button" disabled={!canEdit || saving} title={t('profileOverwriteTitle')}
+                    onClick={() => act(() => updateSalaProfile(pr.id), t('profileUpdatedToast', { nome: pr.name }))}
                     className="text-[12px] text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] disabled:opacity-50">
-                    aggiorna
+                    {t('update')}
                   </button>
-                  <button type="button" disabled={!canEdit || saving} aria-label={`Elimina profilo ${pr.name}`}
-                    onClick={() => act(() => deleteSalaProfile(pr.id), 'Profilo eliminato')}
+                  <button type="button" disabled={!canEdit || saving} aria-label={t('deleteProfileAria', { nome: pr.name })}
+                    onClick={() => act(() => deleteSalaProfile(pr.id), t('profileDeletedToast'))}
                     className="text-[var(--ds-critical-text)] disabled:opacity-50"><Trash2 size={14} /></button>
                 </div>
               );
@@ -224,38 +227,37 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
             {canEdit && (
               <div className="flex items-center gap-2 px-3 py-2">
                 <input value={newProfile} onChange={e => setNewProfile(e.target.value)}
-                  placeholder="Salva il setup corrente come…"
+                  placeholder={t('saveSetupPlaceholder')}
                   className="flex-1 text-[13px] rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5" />
                 <button type="button" disabled={!newProfile.trim() || saving}
-                  onClick={() => act(() => createSalaProfile(newProfile.trim()), 'Profilo salvato').then(() => setNewProfile(''))}
+                  onClick={() => act(() => createSalaProfile(newProfile.trim()), t('profileSavedToast')).then(() => setNewProfile(''))}
                   className="text-[13px] px-2.5 py-1.5 rounded-[var(--ds-radius)] border border-[var(--ds-border)] flex items-center gap-1 disabled:opacity-50">
-                  <Plus size={13} /> Salva
+                  <Plus size={13} /> {t('save')}
                 </button>
               </div>
             )}
           </div>
           <p className="text-[12px] text-[var(--ds-text-muted)] mt-1.5">
-            Un profilo è uno snapshot di modalità di lancio, partite e stampanti. "Attiva" lo applica
-            in blocco; "scollega" toglie solo il legame, senza toccare la configurazione corrente.
+            {t('profilesNote')}
           </p>
         </section>
 
         {/* ---- Lancio uscite ---- */}
         <section>
           <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-2">
-            Lancio delle uscite
+            {t('fireHeading')}
           </h5>
           <div className="grid sm:grid-cols-3 gap-2">
             {FIRE_MODE_LABELS.map(m => (
               <button key={m.value} type="button" disabled={!canEdit || saving}
-                onClick={() => act(() => setFireMode(m.value), `Lancio uscite: ${m.title.toLowerCase()}`)}
+                onClick={() => act(() => setFireMode(m.value), t('fireModeToast', { mode: t(`${m.key}Title`, m.title).toLowerCase() }))}
                 className={`text-left px-3 py-2.5 rounded-[var(--ds-radius)] border text-[13px] transition-colors disabled:opacity-60 ${
                   config.fire_mode === m.value
                     ? 'border-[var(--ds-text-primary)]/50 bg-[var(--ds-surface-row)]'
                     : 'border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)]'
                 }`}>
-                <div className="font-medium text-[var(--ds-text-primary)]">{m.title}</div>
-                <div className="text-[12px] text-[var(--ds-text-muted)] leading-snug mt-0.5">{m.hint}</div>
+                <div className="font-medium text-[var(--ds-text-primary)]">{t(`${m.key}Title`, m.title)}</div>
+                <div className="text-[12px] text-[var(--ds-text-muted)] leading-snug mt-0.5">{t(`${m.key}Hint`, m.hint)}</div>
               </button>
             ))}
           </div>
@@ -264,24 +266,21 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
         {/* ---- Passe ---- */}
         <section>
           <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-2">
-            Passe
+            {t('passHeading')}
           </h5>
           <div className="flex items-start justify-between gap-3 rounded-[var(--ds-radius)] border border-[var(--ds-border)] px-3 py-2.5">
             <div className="min-w-0">
-              <div className="text-[13px] font-medium text-[var(--ds-text-primary)]">Postazione passe</div>
+              <div className="text-[13px] font-medium text-[var(--ds-text-primary)]">{t('passStation')}</div>
               <p className="text-[12px] text-[var(--ds-text-muted)] leading-snug mt-0.5">
-                Attiva: lanci e serviti passano dalla pagina Passe (expediter).
-                Disattivata: la pagina sparisce, i tempi li batte la sala col
-                Chiama sulla comanda, e sulla card pronta del monitor cucina
-                compaiono la campanella (avvisa la sala) e la spunta (servita).
+                {t('passNote')}
               </p>
             </div>
             <button
               type="button" role="switch" aria-checked={flags.passe_enabled !== false}
-              aria-label={`${flags.passe_enabled !== false ? 'Disattiva' : 'Attiva'} il passe`}
+              aria-label={flags.passe_enabled !== false ? t('passOffAria') : t('passOnAria')}
               onClick={() => act(
                 async () => { setFlags(await updateFeatureFlags({ passe_enabled: flags.passe_enabled === false })); },
-                `Passe: ${flags.passe_enabled === false ? 'attivo' : 'disattivato — i tempi alla sala, avviso e servito al monitor cucina'}`
+                (flags.passe_enabled === false ? t('passOnToast') : t('passOffToast'))
               )}
               disabled={!canEdit || saving}
               className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50 ${
@@ -297,7 +296,7 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
         {/* ---- Partite ---- */}
         <section>
           <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-2">
-            Centri di produzione (partite)
+            {t('stationsHeading')}
           </h5>
           <div className="rounded-[var(--ds-radius)] border border-[var(--ds-border)] divide-y divide-[var(--ds-border)]">
             {config.stations.map(s => (
@@ -310,10 +309,10 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
                     disabled={!canEdit || saving}
                     onChange={e => act(
                       () => updateStation(s.id, { printer: e.target.value || null }),
-                      e.target.value ? `${s.name} → stampante "${e.target.value}"` : `${s.name}: solo schermo`
+                      e.target.value ? t('stationPrinterToast', { partita: s.name, stampante: e.target.value }) : t('stationScreenOnlyToast', { partita: s.name })
                     )}
                     className="text-[13px] rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1 disabled:opacity-60">
-                    <option value="">Solo schermo</option>
+                    <option value="">{t('screenOnly')}</option>
                     {thermal.filter(p => p.is_active).map(p => (
                       <option key={p.id} value={p.name}>schermo + {p.name}</option>
                     ))}
@@ -325,17 +324,17 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
                 <button
                   type="button" role="switch" aria-checked={s.auto_ready}
                   disabled={!canEdit || saving}
-                  title="Le righe di questa partita si segnano pronte da sole al lancio"
+                  title={t('autoReadyTitle')}
                   onClick={() => act(
                     () => updateStation(s.id, { auto_ready: !s.auto_ready }),
-                    s.auto_ready ? `${s.name}: pronto dal monitor` : `${s.name}: pronto automatico al lancio`
+                    s.auto_ready ? t('readyFromScreenToast', { partita: s.name }) : t('autoReadyToast', { partita: s.name })
                   )}
                   className={`text-[12px] px-2 py-0.5 rounded-[var(--ds-radius-control)] border transition-colors disabled:opacity-50 ${
                     s.auto_ready
                       ? 'border-transparent bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'
                       : 'border-[var(--ds-border)] text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]'
                   }`}>
-                  pronto auto
+                  {t('autoReady')}
                 </button>
                 {/* Solo con una termica: il flag riguarda la carta, a schermo
                     le altre partite ci sono già nel piede della card. */}
@@ -343,58 +342,58 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
                   <button
                     type="button" role="switch" aria-checked={s.full_course}
                     disabled={!canEdit || saving}
-                    title="La comanda stampata porta in coda, in piccolo, anche i piatti delle altre partite della stessa uscita"
+                    title={t('fullCourseTitle')}
                     onClick={() => act(
                       () => updateStation(s.id, { full_course: !s.full_course }),
-                      s.full_course ? `${s.name}: in comanda solo i propri piatti` : `${s.name}: in comanda anche il resto dell'uscita`
+                      s.full_course ? t('ownDishesOnlyToast', { partita: s.name }) : t('fullCourseToast', { partita: s.name })
                     )}
                     className={`text-[12px] px-2 py-0.5 rounded-[var(--ds-radius-control)] border transition-colors disabled:opacity-50 ${
                       s.full_course
                         ? 'border-transparent bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'
                         : 'border-[var(--ds-border)] text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]'
                     }`}>
-                    uscita intera
+                    {t('fullCourse')}
                   </button>
                 )}
                 <button type="button" disabled={!canEdit || saving}
                   onClick={() => act(() => updateStation(s.id, { is_active: !s.is_active }))}
                   className="text-[12px] text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] disabled:opacity-50">
-                  {s.is_active ? 'disattiva' : 'riattiva'}
+                  {s.is_active ? t('deactivate') : t('reactivate')}
                 </button>
               </div>
             ))}
             {canEdit && (
               <div className="flex items-center gap-2 px-3 py-2">
                 <input value={newStation} onChange={e => setNewStation(e.target.value)}
-                  placeholder="Nuova partita (es. Pizzeria)"
+                  placeholder={t('newStationPlaceholder')}
                   className="flex-1 text-[13px] rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5" />
                 <button type="button" disabled={!newStation.trim() || saving}
-                  onClick={() => act(() => createStation({ name: newStation.trim() }), 'Partita creata').then(() => setNewStation(''))}
+                  onClick={() => act(() => createStation({ name: newStation.trim() }), t('stationCreatedToast')).then(() => setNewStation(''))}
                   className="text-[13px] px-2.5 py-1.5 rounded-[var(--ds-radius)] border border-[var(--ds-border)] flex items-center gap-1 disabled:opacity-50">
-                  <Plus size={13} /> Aggiungi
+                  <Plus size={13} /> {t('add')}
                 </button>
               </div>
             )}
           </div>
           <p className="text-[12px] text-[var(--ds-text-muted)] mt-1.5">
-            "Solo schermo" = la partita lavora dal monitor Cucina. Con una stampante, al lancio dell'uscita esce anche la comanda di carta.
-            «Pronto auto» = la partita non ha un monitor: le sue righe si segnano pronte da sole al lancio e l'uscita non resta ad aspettarle.
-            «Uscita intera» = la carta porta in coda, in piccolo, anche i piatti delle altre partite della stessa uscita — per chi impiatta guardando cosa esce insieme.
+            {t('stationsNoteA')}
+            {t('stationsNoteB')}
+            {t('stationsNoteC')}
           </p>
         </section>
 
         {/* ---- Categorie → partite ---- */}
         <section>
           <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-2">
-            Partita per categoria di menu
+            {t('categoriesHeading')}
           </h5>
           {/* Il buco si deve vedere qui, prima del servizio: un piatto di
               categoria scoperta parte e non compare su nessun monitor. */}
           {uncovered.length > 0 && (
             <div className="rounded-[var(--ds-radius)] bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] px-3 py-2 mb-2 text-[13px]">
               {uncovered.length === 1
-                ? <>La categoria <span className="font-semibold">{uncovered[0]}</span> è senza partita: i suoi piatti non compaiono su nessun monitor di cucina.</>
-                : <>{uncovered.length} categorie senza partita ({uncovered.join(', ')}): i loro piatti non compaiono su nessun monitor di cucina.</>}
+                ? <>{t('uncoveredOneA')} <span className="font-semibold">{uncovered[0]}</span> {t('uncoveredOneB')}</>
+                : <>{t('uncoveredMany', { n: uncovered.length, elenco: uncovered.join(', ') })}</>}
             </div>
           )}
           <div className="rounded-[var(--ds-radius)] border border-[var(--ds-border)] divide-y divide-[var(--ds-border)]">
@@ -407,11 +406,11 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
                   onChange={e => act(
                     () => setCategoryStation(cat, e.target.value ? Number(e.target.value) : null),
                     e.target.value
-                      ? `${cat} → ${config.stations.find(s => s.id === Number(e.target.value))?.name ?? 'partita'}`
-                      : `${cat}: senza partita`
+                      ? `${cat} → ${config.stations.find(s => s.id === Number(e.target.value))?.name ?? t('stationFallback')}`
+                      : t('categoryNoStationToast', { categoria: cat })
                   )}
                   className="text-[13px] rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1 disabled:opacity-60">
-                  <option value="">Senza partita</option>
+                  <option value="">{t('noStation')}</option>
                   {config.stations.filter(s => s.is_active).map(s => (
                     <option key={s.id} value={s.id}>{s.name}</option>
                   ))}
@@ -419,12 +418,11 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
               </div>
             ))}
             {config.categories.length === 0 && (
-              <p className="px-3 py-3 text-[13px] text-[var(--ds-text-muted)]">Nessuna categoria in anagrafica piatti.</p>
+              <p className="px-3 py-3 text-[13px] text-[var(--ds-text-muted)]">{t('noCategories')}</p>
             )}
           </div>
           <p className="text-[12px] text-[var(--ds-text-muted)] mt-1.5">
-            I piatti senza partita assegnata seguono la loro categoria — anche quelli creati in futuro.
-            Vale per le comande inviate da qui in poi; un'assegnazione esplicita sul singolo piatto vince sempre.
+            {t('categoriesNote')}
           </p>
         </section>
 
@@ -432,15 +430,15 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
         <section>
           <div className="flex items-center justify-between mb-2">
             <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)]">
-              Stampanti termiche
+              {t('printersHeading')}
             </h5>
             <span className={`text-[12px] flex items-center gap-1.5 ${config.agent.online ? 'text-[var(--ds-seated-text)]' : 'text-[var(--ds-critical-text)]'}`}>
               {config.agent.online ? <Wifi size={13} /> : <WifiOff size={13} />}
               {config.agent.online
-                ? 'agente di stampa online'
+                ? t('agentOnline')
                 : config.agent.last_seen_seconds != null
                   ? `agente offline da ${config.agent.last_seen_seconds}s`
-                  : 'agente mai visto'}
+                  : t('agentNeverSeen')}
               {config.pending_jobs > 0 && ` · ${config.pending_jobs} in coda`}
               {config.failed_jobs > 0 && ` · ${config.failed_jobs} falliti`}
             </span>
@@ -458,7 +456,7 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
                     cucina («la comanda si deve sentire»), spento al banco. */}
                 <button type="button" disabled={!canEdit || saving || !p.is_active}
                   aria-pressed={p.buzzer}
-                  title={p.buzzer ? 'Cicalino alla stampa acceso: tocca per spegnerlo' : 'Cicalino alla stampa spento: tocca per accenderlo'}
+                  title={p.buzzer ? t('buzzerOnTitle') : t('buzzerOffTitle')}
                   onClick={() => act(() => updatePrinter(p.id, { buzzer: !p.buzzer }))}
                   className={`inline-flex h-8 w-8 items-center justify-center rounded-[var(--ds-radius-control)] transition-colors disabled:opacity-50 ${
                     p.buzzer
@@ -472,41 +470,41 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
                     setTestingId(p.id);
                     try {
                       await testPrinter(p.id);
-                      showToast(`Prova inviata a "${p.name}" — controlla la stampante`, 'success');
-                    } catch (err: any) { showToast(err?.message || 'Invio non riuscito', 'error'); }
+                      showToast(t('testSentToast', { stampante: p.name }), 'success');
+                    } catch (err: any) { showToast(err?.message || t('sendFailed'), 'error'); }
                     finally { setTestingId(null); }
                   }}
                   className="text-[12px] px-2 py-1 rounded-[var(--ds-radius)] border border-[var(--ds-border)] disabled:opacity-50">
-                  {testingId === p.id ? 'invio…' : 'stampa prova'}
+                  {testingId === p.id ? t('sending') : t('testPrint')}
                 </button>
                 <button type="button" disabled={!canEdit || saving}
                   onClick={() => act(() => updatePrinter(p.id, { is_active: !p.is_active }))}
                   className="text-[12px] text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] disabled:opacity-50">
-                  {p.is_active ? 'disattiva' : 'riattiva'}
+                  {p.is_active ? t('deactivate') : t('reactivate')}
                 </button>
-                <button type="button" disabled={!canEdit || saving} aria-label={`Elimina ${p.name}`}
-                  onClick={() => act(() => deletePrinter(p.id), 'Stampante eliminata')}
+                <button type="button" disabled={!canEdit || saving} aria-label={t('deletePrinterAria', { nome: p.name })}
+                  onClick={() => act(() => deletePrinter(p.id), t('printerDeletedToast'))}
                   className="text-[var(--ds-critical-text)] disabled:opacity-50"><Trash2 size={14} /></button>
               </div>
             ))}
             {thermal.length === 0 && (
-              <p className="px-3 py-3 text-[13px] text-[var(--ds-text-muted)]">Nessuna stampante censita.</p>
+              <p className="px-3 py-3 text-[13px] text-[var(--ds-text-muted)]">{t('noPrinters')}</p>
             )}
             {canEdit && (
               <div className="flex flex-wrap items-center gap-2 px-3 py-2">
                 <input value={newPrinter.name} onChange={e => setNewPrinter(v => ({ ...v, name: e.target.value }))}
-                  placeholder="nome (es. cucina)" className="w-32 text-[13px] rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5" />
+                  placeholder={t('printerNamePlaceholder')} className="w-32 text-[13px] rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5" />
                 <input value={newPrinter.host} onChange={e => setNewPrinter(v => ({ ...v, host: e.target.value }))}
-                  placeholder="IP (es. 192.168.1.30)" className="w-40 text-[13px] rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5" />
+                  placeholder={t('printerIpPlaceholder')} className="w-40 text-[13px] rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5" />
                 <input value={newPrinter.port} onChange={e => setNewPrinter(v => ({ ...v, port: e.target.value }))}
-                  placeholder="porta" className="w-20 text-[13px] rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5" />
+                  placeholder={t('portPlaceholder')} className="w-20 text-[13px] rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5" />
                 <button type="button" disabled={!newPrinter.name.trim() || !newPrinter.host.trim() || saving}
                   onClick={() => act(
                     () => createPrinter({ name: newPrinter.name.trim(), host: newPrinter.host.trim(), port: Number(newPrinter.port) || 9100 }),
-                    'Stampante aggiunta'
+                    t('printerAddedToast')
                   ).then(() => setNewPrinter({ name: '', host: '', port: '9100' }))}
                   className="text-[13px] px-2.5 py-1.5 rounded-[var(--ds-radius)] border border-[var(--ds-border)] flex items-center gap-1 disabled:opacity-50">
-                  <Plus size={13} /> Aggiungi
+                  <Plus size={13} /> {t('add')}
                 </button>
               </div>
             )}
@@ -516,12 +514,12 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
         {/* ---- Instradamento conto ---- */}
         <section>
           <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-2">
-            Instradamento stampe del conto
+            {t('billRoutingHeading')}
           </h5>
           <div className="rounded-[var(--ds-radius)] border border-[var(--ds-border)] divide-y divide-[var(--ds-border)]">
             {([
-              { fn: 'preconto' as const, label: 'Preconto', hint: 'dettaglio righe con QR in fondo' },
-              { fn: 'qr' as const, label: 'Foglietto QR', hint: 'solo codice, da appoggiare al tavolo' },
+              { fn: 'preconto' as const, label: t('proformaLabel'), hint: t('proformaHint') },
+              { fn: 'qr' as const, label: t('qrSlipLabel'), hint: t('qrSlipHint') },
             ]).map(({ fn, label, hint }) => (
               <div key={fn} className="flex items-center gap-3 px-3 py-2">
                 <div className="flex-1 min-w-0">
@@ -535,11 +533,11 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
                     disabled={!canEdit || saving}
                     onChange={e => act(
                       () => updatePrintRoutes({ [fn]: e.target.value === 'preconti' ? null : e.target.value }),
-                      `${label} → stampante "${e.target.value}"`
+                      t('billRouteToast', { documento: label, stampante: e.target.value })
                     )}
                     className="text-[13px] rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1 disabled:opacity-60">
                     {!thermal.some(pr => pr.is_active && pr.name === 'preconti') && (
-                      <option value="preconti">preconti (predefinita)</option>
+                      <option value="preconti">{t('preconyDefaultOption')}</option>
                     )}
                     {thermal.filter(pr => pr.is_active).map(pr => (
                       <option key={pr.id} value={pr.name}>
@@ -552,7 +550,7 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
             ))}
           </div>
           <p className="text-[12px] text-[var(--ds-text-muted)] mt-1.5">
-            Le comande delle partite si instradano qui sopra, centro per centro. Qui scegli dove escono i documenti del conto al tavolo.
+            {t('billRoutingNote')}
           </p>
         </section>
 
@@ -561,24 +559,24 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
           <section>
             <div className="flex items-center justify-between mb-2">
               <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)]">
-                Nodo di sala
+                {t('nodeHeading')}
               </h5>
               <span className={`text-[12px] flex items-center gap-1.5 ${config.sala_node.online ? 'text-[var(--ds-seated-text)]' : 'text-[var(--ds-critical-text)]'}`}>
                 {config.sala_node.online ? <Wifi size={13} /> : <WifiOff size={13} />}
                 {config.sala_node.online
-                  ? 'nodo online'
+                  ? t('nodeOnline')
                   : config.sala_node.last_seen_seconds != null
-                    ? `nodo offline da ${config.sala_node.last_seen_seconds}s`
-                    : 'nodo mai visto'}
+                    ? t('nodeOffline', { secondi: config.sala_node.last_seen_seconds })
+                    : t('nodeNeverSeen')}
                 {config.sala_node.online && config.sala_node.clients != null && ` · ${config.sala_node.clients} dispositivi`}
               </span>
             </div>
             <div className="rounded-md border border-[var(--ds-border)] divide-y divide-[var(--ds-border)]">
               <div className="flex items-center gap-3 px-3 py-2.5">
                 <div className="flex-1 min-w-0">
-                  <span className="text-[13px] font-medium text-[var(--ds-text-primary)]">Modalità ibrida</span>
+                  <span className="text-[13px] font-medium text-[var(--ds-text-primary)]">{t('hybridMode')}</span>
                   <p className="text-[12px] text-[var(--ds-text-muted)]">
-                    Comande, cucina e passe passano dal nodo sulla rete del locale: gli schermi restano vivi anche a linea caduta.
+                    {t('hybridModeNote')}
                   </p>
                 </div>
                 <button
@@ -586,10 +584,10 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
                   role="switch"
                   aria-checked={flags.sala_node_enabled === true}
                   disabled={!canEdit || saving || !config.sala_node.domain}
-                  title={!config.sala_node.domain ? 'Prima configura il dominio del nodo' : undefined}
+                  title={!config.sala_node.domain ? t('configureDomainFirst') : undefined}
                   onClick={() => act(
                     async () => { setFlags(await updateFeatureFlags({ sala_node_enabled: flags.sala_node_enabled !== true })); },
-                    `Modalità ibrida: ${flags.sala_node_enabled !== true ? 'attiva' : 'disattivata'}`
+                    (flags.sala_node_enabled !== true ? t('hybridOnToast') : t('hybridOffToast'))
                   )}
                   className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
                     flags.sala_node_enabled ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-surface-row)] border border-[var(--ds-border)]'
@@ -605,27 +603,27 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
               </div>
               <div className="flex items-center gap-3 px-3 py-2.5">
                 <div className="flex-1 min-w-0">
-                  <span className="text-[13px] font-medium text-[var(--ds-text-primary)]">Servizio completo sul nodo</span>
+                  <span className="text-[13px] font-medium text-[var(--ds-text-primary)]">{t('fullServiceOnNode')}</span>
                   <p className="text-[12px] text-[var(--ds-text-muted)]">
-                    Le battiture di sala nascono sul nodo e si riallineano al cloud da sole: si lavora anche senza internet.
+                    {t('fullServiceNote')}
                   </p>
                   <p className="text-[12px] mt-0.5">
                     {!flags.sala_node_enabled ? (
-                      <span className="text-[var(--ds-text-muted)]">prima accendi la modalità ibrida</span>
+                      <span className="text-[var(--ds-text-muted)]">{t('enableHybridFirst')}</span>
                     ) : authority == null ? (
-                      <span className="text-[var(--ds-text-muted)]">verifica in corso…</span>
+                      <span className="text-[var(--ds-text-muted)]">{t('checking')}</span>
                     ) : authority.enabled ? (
-                      <span className="text-[var(--ds-seated-text)]">autorità in sala{authority.aligned ? ' · repliche allineate' : ' · riallineamento in corso'}</span>
+                      <span className="text-[var(--ds-seated-text)]">{t('authorityOnSite')}{authority.aligned ? ' · repliche allineate' : ' · riallineamento in corso'}</span>
                     ) : !authority.node_online ? (
-                      <span className="text-[var(--ds-critical-text)]">nodo offline: interruttore congelato</span>
+                      <span className="text-[var(--ds-critical-text)]">{t('nodeOfflineFrozen')}</span>
                     ) : authority.aligned ? (
-                      <span className="text-[var(--ds-seated-text)]">pronto: repliche allineate</span>
+                      <span className="text-[var(--ds-seated-text)]">{t('readyAligned')}</span>
                     ) : (
                       <span className="text-[var(--ds-pending-text)]">
                         repliche in ritardo di {Math.max(
                           authority.cloud_head - (authority.node_applied_cloud_seq ?? 0),
                           (authority.node_local_head ?? 0) - authority.cloud_applied_node_seq,
-                        )} eventi
+                        )} {t('eventsWord')}
                       </span>
                     )}
                   </p>
@@ -641,16 +639,16 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
                     || (!authority.enabled && !(authority.node_online && authority.aligned))
                     || (authority.enabled && !authority.node_online)
                   }
-                  title={authority && !authority.node_online ? "Il nodo è offline: l'autorità resta dov'è finché la linea non torna" : undefined}
+                  title={authority && !authority.node_online ? "{t('authorityFrozenTitle')}" : undefined}
                   onClick={async () => {
                     if (!authority) return;
                     setAuthBusy(true);
                     try {
                       const next = await setSalaNodeAuthority(!authority.enabled);
                       setAuthority(next);
-                      showToast(next.enabled ? 'Autorità di servizio al nodo' : 'Autorità di servizio al cloud', 'success');
+                      showToast(next.enabled ? t('authorityToNodeToast') : t('authorityToCloudToast'), 'success');
                     } catch (err: any) {
-                      showToast(err?.message || 'Operazione non riuscita', 'error');
+                      showToast(err?.message || t('actionFailed'), 'error');
                       try { setAuthority(await getSalaNodeAuthority()); } catch { /* la prossima lettura periodica sistema */ }
                     } finally {
                       setAuthBusy(false);
@@ -670,37 +668,37 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
               </div>
               <div className="flex items-center gap-3 px-3 py-2">
                 <div className="flex-1 min-w-0 text-[13px]">
-                  <span className="font-medium text-[var(--ds-text-primary)]">Certificato TLS</span>
+                  <span className="font-medium text-[var(--ds-text-primary)]">{t('tlsCertificate')}</span>
                   <span className="text-[12px] text-[var(--ds-text-muted)] ml-2">
                     {config.sala_node.cert_expires_at
-                      ? `scade il ${new Date(config.sala_node.cert_expires_at).toLocaleDateString('it-IT')}`
-                      : 'non ancora emesso'}
+                      ? t('certExpires', { data: new Date(config.sala_node.cert_expires_at).toLocaleDateString(displayLocale()) })
+                      : t('certNotIssued')}
                   </span>
                 </div>
                 {canEdit && (
                   <button type="button" disabled={saving || certBusy || !config.sala_node.domain}
-                    title={!config.sala_node.domain ? 'Prima configura il dominio del nodo' : undefined}
+                    title={!config.sala_node.domain ? t('configureDomainFirst') : undefined}
                     onClick={async () => {
                       setCertBusy(true);
                       try {
                         const r = await provisionSalaNodeCert();
-                        showToast(`Certificato emesso per ${r.domain}`, 'success');
+                        showToast(t('certIssuedToast', { dominio: r.domain }), 'success');
                         await reload();
                       } catch (err: any) {
-                        showToast(err?.message || 'Emissione non riuscita', 'error');
+                        showToast(err?.message || t('certIssueFailed'), 'error');
                       } finally { setCertBusy(false); }
                     }}
                     className="text-[12px] px-2 py-1 rounded-md border border-[var(--ds-border)] disabled:opacity-50">
-                    {certBusy ? 'emissione… (circa un minuto)' : config.sala_node.cert_expires_at ? 'rinnova' : 'emetti certificato'}
+                    {certBusy ? t('certIssuing') : config.sala_node.cert_expires_at ? t('renew') : t('issueCert')}
                   </button>
                 )}
               </div>
               {canEdit && (
                 <div className="flex flex-wrap items-center gap-2 px-3 py-2">
                   <input value={nodeDraft.domain} onChange={e => setNodeDraft(v => ({ ...v, domain: e.target.value }))}
-                    placeholder="dominio (es. sala.vecchiofrantoio.sympotia.com)" className="w-72 text-[13px] rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5" />
+                    placeholder={t('nodeDomainPlaceholder')} className="w-72 text-[13px] rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5" />
                   <input value={nodeDraft.lan_ip} onChange={e => setNodeDraft(v => ({ ...v, lan_ip: e.target.value }))}
-                    placeholder="IP LAN (es. 192.168.1.60)" className="w-40 text-[13px] rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5" />
+                    placeholder={t('nodeLanIpPlaceholder')} className="w-40 text-[13px] rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5" />
                   <input value={nodeDraft.port} onChange={e => setNodeDraft(v => ({ ...v, port: e.target.value }))}
                     placeholder="porta" className="w-20 text-[13px] rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5" />
                   <button type="button" disabled={saving}
@@ -710,16 +708,16 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
                         lan_ip: nodeDraft.lan_ip.trim() || null,
                         port: Number(nodeDraft.port) || 443,
                       }),
-                      'Configurazione del nodo salvata'
+                      t('nodeConfigSavedToast')
                     )}
                     className="text-[13px] px-2.5 py-1.5 rounded-md border border-[var(--ds-border)] disabled:opacity-50">
-                    Salva
+                    {t('save')}
                   </button>
                 </div>
               )}
             </div>
             <p className="text-[12px] text-[var(--ds-text-muted)] mt-1.5">
-              Il dominio punta all'IP del nodo in LAN; certificato e credenziali li distribuisce il cloud. Col servizio completo spento le scritture passano dal cloud; acceso, nascono sul nodo e si riallineano da sole.
+              {t('nodeNote')}
             </p>
           </section>
         )}
@@ -727,7 +725,7 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
         {/* ---- Fiscale (Fase 2) ---- */}
         <section>
           <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-2">
-            Stampante fiscale
+            {t('fiscalHeading')}
           </h5>
           <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] border border-[var(--ds-border)] px-3 py-2.5 flex items-start gap-2.5">
             <Receipt size={15} className="mt-0.5 text-[var(--ds-text-muted)] flex-shrink-0" />
@@ -737,11 +735,10 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
                   {fiscal.map(p => <div key={p.id}><strong>{p.name}</strong> · {p.host}:{p.port}{p.notes ? ` — ${p.notes}` : ''}</div>)}
                 </div>
               ) : (
-                <div className="text-[var(--ds-text-primary)]">Nessun registratore telematico censito.</div>
+                <div className="text-[var(--ds-text-primary)]">{t('noFiscalDevice')}</div>
               )}
               <p className="text-[12px] text-[var(--ds-text-muted)] mt-1">
-                Lo scontrino resta al gestionale di cassa: il collegamento diretto arriva con la Fase 2
-                (integrazione Passepartout). Da qui il CRM non invia mai nulla alla fiscale.
+                {t('fiscalNote')}
               </p>
             </div>
           </div>
@@ -749,7 +746,7 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
 
         {!canEdit && (
           <p className="text-[12px] text-[var(--ds-text-subtle)] italic">
-            Solo gli amministratori possono modificare queste impostazioni.
+            {t('adminsOnly')}
           </p>
         )}
       </div>

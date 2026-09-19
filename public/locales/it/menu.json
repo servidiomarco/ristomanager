@@ -61,5 +61,28 @@
   "deleteCategory": "Elimina Categoria",
   "sortBy": "Ordina per",
   "editBanquet": "Modifica banchetto",
-  "pickDayWithEvents": "Seleziona un giorno con eventi per vedere i dettagli."
+  "pickDayWithEvents": "Seleziona un giorno con eventi per vedere i dettagli.",
+  "banquetStep": {
+    "event": {
+      "label": "Evento e cliente",
+      "hint": "nome interno, data, turno e chi lo ha richiesto"
+    },
+    "covers": {
+      "label": "Coperti e tariffa",
+      "hint": "un prezzo bambini separa il calcolo"
+    },
+    "menu": {
+      "label": "Composizione menù",
+      "hint": "clicca un piatto per aggiungerlo all'uscita attiva"
+    },
+    "tables": {
+      "label": "Tavoli assegnati",
+      "hint": "i tavoli occupati nello stesso turno sono disabilitati"
+    },
+    "notes": {
+      "label": "Note operative",
+      "hint": "compaiono nelle stampe per cucina e sala"
+    }
+  },
+  "banquetStepsAria": "Passi del menu banchetto"
 }

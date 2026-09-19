@@ -61,5 +61,28 @@
   "deleteCategory": "Delete category",
   "sortBy": "Sort by",
   "editBanquet": "Edit event",
-  "pickDayWithEvents": "Pick a day with events to see the details."
+  "pickDayWithEvents": "Pick a day with events to see the details.",
+  "banquetStep": {
+    "event": {
+      "label": "Event and guest",
+      "hint": "internal name, date, service and who asked for it"
+    },
+    "covers": {
+      "label": "Covers and rate",
+      "hint": "a separate price for children changes the sum"
+    },
+    "menu": {
+      "label": "Menu composition",
+      "hint": "click a dish to add it to the active course"
+    },
+    "tables": {
+      "label": "Tables assigned",
+      "hint": "tables taken in the same service are disabled"
+    },
+    "notes": {
+      "label": "Service notes",
+      "hint": "they appear on the kitchen and floor printouts"
+    }
+  },
+  "banquetStepsAria": "Event menu steps"
 }
