@@ -1,4 +1,54 @@
 {
+  "nav": {
+    "groups": {
+      "service": "Service",
+      "communications": "Communications",
+      "operations": "Operations",
+      "management": "Management",
+      "system": "System"
+    },
+    "items": {
+      "dashboard": "Dashboard",
+      "reservations": "Bookings",
+      "reception": "Reception",
+      "takeaway": "Takeaway",
+      "rooms": "Rooms & Tables",
+      "menu": "Menu",
+      "banquets": "Events",
+      "orders": "Orders",
+      "cash": "Till",
+      "kitchen": "Kitchen",
+      "passe": "Pass",
+      "calls": "Calls",
+      "messages": "Messages",
+      "email": "Email",
+      "staffChat": "Staff chat",
+      "notifications": "Notifications",
+      "reviews": "Reviews",
+      "tasks": "Tasks",
+      "inventory": "Inventory",
+      "shoppingList": "Shopping list",
+      "haccp": "HACCP",
+      "payments": "Payments",
+      "fiscal": "Tax",
+      "reports": "Reports",
+      "customers": "Customers",
+      "staff": "Staff",
+      "users": "Users",
+      "platform": "Platform",
+      "settings": "Settings",
+      "aiUsage": "AI usage",
+      "development": "Development",
+      "roadmap": "Roadmap",
+      "darkMode": "Dark mode"
+    },
+    "more": "More",
+    "createNew": "Create new",
+    "logout": "Sign out"
+  },
+  "actions": {
+    "close": "Close"
+  },
   "profile": {
     "languageLabel": "Interface language",
     "languageHint": "The app language for your account, on every device.",
