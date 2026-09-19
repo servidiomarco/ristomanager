@@ -82,7 +82,7 @@ interface AuthContextType {
   canManageUsers: () => boolean;
   canViewLogs: () => boolean;
   getAccessToken: () => string | null;
-  updatePreferences: (prefs: { preferred_landing_view?: string | null; preferred_orderpad_layout?: string | null; preferred_design_style?: string | null }) => Promise<void>;
+  updatePreferences: (prefs: { preferred_landing_view?: string | null; preferred_orderpad_layout?: string | null; preferred_design_style?: string | null; language?: string | null }) => Promise<void>;
   /** Profilo self-service: nome e telefono propri. */
   updateProfile: (data: { full_name?: string; phone?: string | null }) => Promise<void>;
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
@@ -249,7 +249,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return authApiService.getAccessToken();
   }, []);
 
-  const updatePreferences = useCallback(async (prefs: { preferred_landing_view?: string | null; preferred_orderpad_layout?: string | null; preferred_design_style?: string | null }) => {
+  const updatePreferences = useCallback(async (prefs: { preferred_landing_view?: string | null; preferred_orderpad_layout?: string | null; preferred_design_style?: string | null; language?: string | null }) => {
     const updated = await authApiService.updatePreferences(prefs);
     setUser(updated);
   }, []);

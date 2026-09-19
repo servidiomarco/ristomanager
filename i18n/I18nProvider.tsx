@@ -6,9 +6,9 @@ interface I18nProviderProps {
     children: React.ReactNode;
 }
 
-// Non montato in App.tsx: la SPA autenticata non traduce ancora nulla.
-// Card dev board #35 lo avvolge intorno alla sola radice pubblica /pay/:token
-// (index.tsx), la prima schermata React a usare davvero react-i18next.
+// Avvolge TUTTE le radici React (index.tsx): le pagine pubbliche
+// (/pay, /scontrino, /preventivo) e ora anche la SPA autenticata, dove la
+// lingua segue l'operatore (users.language, applicata in App.tsx).
 export default function I18nProvider({ children }: I18nProviderProps) {
     return <I18nextProvider i18n={i18n}>{children}</I18nextProvider>;
 }

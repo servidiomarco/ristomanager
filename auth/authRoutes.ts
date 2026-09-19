@@ -203,19 +203,20 @@ router.get('/me', authenticate, async (req: Request, res: Response) => {
 
 // PUT /auth/me/preferences - Update current user's own preferences
 // Self-service: any authenticated user can update *their own* preferences only.
-// Exposes preferred_landing_view, preferred_orderpad_layout and
-// preferred_design_style; a field left out of the body stays as it is,
-// null clears it.
+// Exposes preferred_landing_view, preferred_orderpad_layout,
+// preferred_design_style and language; a field left out of the body stays as
+// it is, null clears it.
 router.put('/me/preferences', authenticate, async (req: Request, res: Response) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: 'Not authenticated' });
     }
 
-    const { preferred_landing_view, preferred_orderpad_layout, preferred_design_style } = req.body as {
+    const { preferred_landing_view, preferred_orderpad_layout, preferred_design_style, language } = req.body as {
       preferred_landing_view?: string | null;
       preferred_orderpad_layout?: string | null;
       preferred_design_style?: string | null;
+      language?: string | null;
     };
 
     // Validate against the ViewState enum so this stays in sync with the
@@ -237,10 +238,18 @@ router.put('/me/preferences', authenticate, async (req: Request, res: Response) 
       return res.status(400).json({ error: 'Invalid preferred_design_style' });
     }
 
+    // Lingua dell'interfaccia: catalogo chiuso alle lingue che la SPA ha
+    // davvero (SUPPORTED_LANGUAGES di i18n/config.ts). null = si eredita il
+    // default del ristorante.
+    if (language !== null && language !== undefined && language !== 'it' && language !== 'en') {
+      return res.status(400).json({ error: 'Invalid language' });
+    }
+
     const updated = await AuthService.updatePreferences(req.user.userId, {
       ...(preferred_landing_view !== undefined ? { preferred_landing_view } : {}),
       ...(preferred_orderpad_layout !== undefined ? { preferred_orderpad_layout } : {}),
       ...(preferred_design_style !== undefined ? { preferred_design_style } : {}),
+      ...(language !== undefined ? { language } : {}),
     });
 
     if (!updated) {
