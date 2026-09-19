@@ -1,0 +1,68 @@
+{
+  "toolbar": {
+    "searchPlaceholder": "Cerca per nome o telefono",
+    "sort": "Ordina",
+    "filters": "Filtri",
+    "print": "Stampa",
+    "channelOptions": "Opzioni canali di prenotazione"
+  },
+  "sort": {
+    "title": "Ordina per",
+    "createdAsc": "Prenotata prima → dopo",
+    "createdDesc": "Prenotata dopo → prima",
+    "timeAsc": "Orario (prima → dopo)",
+    "timeDesc": "Orario (dopo → prima)",
+    "nameAsc": "Nome A → Z",
+    "nameDesc": "Nome Z → A",
+    "guestsAsc": "Coperti (meno → più)",
+    "guestsDesc": "Coperti (più → meno)"
+  },
+  "filters": {
+    "title": "Filtri",
+    "room": "Sala",
+    "allRooms": "Tutte",
+    "paymentStatus": "Stato pagamento",
+    "all": "Tutti",
+    "paymentPending": "Sospeso",
+    "paymentDeposit": "Acconto",
+    "paymentPaid": "Saldato",
+    "channel": "Canale",
+    "channelManual": "Utente",
+    "channelWeb": "Web",
+    "channelVoice": "Agente vocale",
+    "channelWhatsapp": "WhatsApp",
+    "other": "Altro",
+    "allergens": "Allergeni",
+    "withNotes": "Con note",
+    "noTable": "Senza tavolo"
+  },
+  "channel": {
+    "whatsapp": "Canale: WhatsApp",
+    "web": "Canale: Web",
+    "voice": "Canale: Agente vocale",
+    "phone": "Canale: Telefono",
+    "phoneShort": "Telefono"
+  },
+  "badge": {
+    "vip": "Cliente VIP",
+    "blacklist": "Cliente in blacklist"
+  },
+  "actions": {
+    "edit": "Modifica",
+    "cancel": "Annulla",
+    "new": "Nuova prenotazione"
+  },
+  "shift": {
+    "lunch": "Pranzo",
+    "dinner": "Cena"
+  },
+  "stats": {
+    "covers": "coperti",
+    "reservations": "pren.",
+    "noTable": "senza tav."
+  },
+  "empty": {
+    "lunch": "Nessuna prenotazione per il turno di Pranzo in questa data.",
+    "dinner": "Nessuna prenotazione per il turno di Cena in questa data."
+  }
+}

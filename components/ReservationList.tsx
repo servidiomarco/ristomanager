@@ -177,31 +177,33 @@ const renderOperatorBadge = (res: Reservation): React.ReactNode => {
 const ATTR_BADGE =
   'inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]';
 
-const renderChannelIcon = (res: Reservation): React.ReactNode => {
+// Helper di modulo: non può usare un hook, quindi la traduzione arriva
+// dal chiamante (che ce l'ha). Senza, restano le parole italiane.
+const renderChannelIcon = (res: Reservation, tv: (k: string) => string): React.ReactNode => {
   const source = res.source || ReservationSource.MANUAL;
   if (source === ReservationSource.WHATSAPP) {
     return (
-      <span className={`${ATTR_BADGE} bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]`} title="WhatsApp" aria-label="Canale: WhatsApp">
+      <span className={`${ATTR_BADGE} bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]`} title="WhatsApp" aria-label={tv('channel.whatsapp')}>
         <MessageCircle className="h-3.5 w-3.5" />
       </span>
     );
   }
   if (source === ReservationSource.GOOGLE) {
     return (
-      <span className={ATTR_BADGE} title="Web" aria-label="Canale: Web">
+      <span className={ATTR_BADGE} title={tv('filters.channelWeb')} aria-label={tv('channel.web')}>
         <Globe className="h-3.5 w-3.5" />
       </span>
     );
   }
   if (source === ReservationSource.VOICE) {
     return (
-      <span className={ATTR_BADGE} title="Agente vocale" aria-label="Canale: Agente vocale">
+      <span className={ATTR_BADGE} title={tv('filters.channelVoice')} aria-label={tv('channel.voice')}>
         <Mic className="h-3.5 w-3.5" />
       </span>
     );
   }
   return (
-    <span className={ATTR_BADGE} title="Telefono" aria-label="Canale: Telefono">
+    <span className={ATTR_BADGE} title={tv('channel.phoneShort')} aria-label={tv('channel.phone')}>
       <Phone className="h-3.5 w-3.5" />
     </span>
   );
@@ -568,6 +570,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // Etichette di stato nella lingua dell'operatore: intestazioni dei gruppi,
   // pastiglie, toast e selettore leggono tutti da qui.
   const { t } = useTranslation('common', { useSuspense: false });
+  // Namespace della vista: caricata alla prima apertura di Prenotazioni.
+  const { t: tv } = useTranslation('prenotazioni', { useSuspense: false });
   const stateLabel = useReservationStateLabel();
   const { hasPermission } = useAuth();
   const canViewBanquetPrice = hasPermission('banquet:view_price');
@@ -3435,7 +3439,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     // their own row under it below sm — so phone and desktop can't drift.
     const attrGlyphs = (
       <>
-        {renderChannelIcon(res)}
+        {renderChannelIcon(res, tv)}
         {renderConfirmationIcon(res)}
         {renderReminderIcon(res)}
         {matchedNoteIcons.map(m => {
@@ -3512,11 +3516,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             {/* Who */}
             <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
               {res.customer_is_vip && (
-                <Star className="h-4 w-4 flex-shrink-0 fill-[var(--ds-pending-solid)] text-[var(--ds-pending-solid)]" aria-label="Cliente VIP" />
+                <Star className="h-4 w-4 flex-shrink-0 fill-[var(--ds-pending-solid)] text-[var(--ds-pending-solid)]" aria-label={tv('badge.vip')} />
               )}
               {res.customer_is_blacklisted && (
-                <span title={res.customer_blacklist_reason || 'Cliente in blacklist'}>
-                  <Ban className="h-4 w-4 flex-shrink-0 text-[var(--ds-critical-text)]" aria-label="Cliente in blacklist" />
+                <span title={res.customer_blacklist_reason || tv('badge.blacklist')}>
+                  <Ban className="h-4 w-4 flex-shrink-0 text-[var(--ds-critical-text)]" aria-label={tv('badge.blacklist')} />
                 </span>
               )}
               <p className={`truncate text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)] ${group.key === 'cancelled' ? 'line-through' : ''}`}>
@@ -3628,8 +3632,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               type="button"
               onClick={(e) => { e.stopPropagation(); handleEditClick(res); }}
               className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]"
-              aria-label="Modifica"
-              title="Modifica"
+              aria-label={tv('actions.edit')}
+              title={tv('actions.edit')}
             >
               <Edit2 className="h-4 w-4" />
             </button>
@@ -3637,8 +3641,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               type="button"
               onClick={(e) => { e.stopPropagation(); handleDeleteClick(res.id, res.customer_name); }}
               className="ml-auto inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)]"
-              aria-label="Annulla"
-              title="Annulla"
+              aria-label={tv('actions.cancel')}
+              title={tv('actions.cancel')}
             >
               <Trash2 className="h-4 w-4" />
             </button>
@@ -3676,10 +3680,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             <div>
               <h3 className="text-base font-semibold text-[var(--ds-text-primary)] inline-flex items-center gap-1.5">
                 {res.customer_is_vip && (
-                  <Star className="h-4 w-4 text-[var(--ds-pending-solid)] fill-[var(--ds-pending-solid)] flex-shrink-0" aria-label="Cliente VIP" />
+                  <Star className="h-4 w-4 text-[var(--ds-pending-solid)] fill-[var(--ds-pending-solid)] flex-shrink-0" aria-label={tv('badge.vip')} />
                 )}
                 {res.customer_is_blacklisted && (
-                  <Ban className="h-4 w-4 flex-shrink-0 text-[var(--ds-critical-text)]" aria-label="Cliente in blacklist" />
+                  <Ban className="h-4 w-4 flex-shrink-0 text-[var(--ds-critical-text)]" aria-label={tv('badge.blacklist')} />
                 )}
                 {toTitleCase(res.customer_name)}
                 {(() => {
@@ -3835,7 +3839,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         onChange={setSearchTerm}
         inputRef={searchInputRef}
         onKeyDown={handleSearchKeyDown}
-        placeholder="Cerca per nome o telefono"
+        placeholder={tv('toolbar.searchPlaceholder')}
         ariaLabel="Cerca prenotazioni"
         className="min-w-0 flex-1"
         hint={searchTerm && quickArriveCandidates.length === 1 ? (
@@ -3843,15 +3847,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         ) : undefined}
       />
 
-      <button type="button" onClick={() => setShowSortModal(true)} className={dsIconButton} aria-label="Ordina" title="Ordina">
+      <button type="button" onClick={() => setShowSortModal(true)} className={dsIconButton} aria-label={tv('toolbar.sort')} title={tv('toolbar.sort')}>
         <ArrowUpDown className="h-4 w-4" />
       </button>
 
       <button
         type="button"
         onClick={() => setShowFiltersPanel(true)}
-        aria-label="Filtri"
-        title="Filtri"
+        aria-label={tv('toolbar.filters')}
+        title={tv('toolbar.filters')}
         className={activeFilterCount > 0
           ? 'relative inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] shadow-[var(--ds-shadow-card)] transition-colors'
           : `relative ${dsIconButton}`}
@@ -3864,7 +3868,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         )}
       </button>
 
-      <button type="button" onClick={() => setIsPrintModalOpen(true)} className={dsIconButton} aria-label="Stampa" title="Stampa">
+      <button type="button" onClick={() => setIsPrintModalOpen(true)} className={dsIconButton} aria-label={tv('toolbar.print')} title={tv('toolbar.print')}>
         <Printer className="h-4 w-4" />
       </button>
 
@@ -3872,8 +3876,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         type="button"
         onClick={() => setShowChannelsSheet(true)}
         className={`${dsIconButton} lg:hidden`}
-        aria-label="Opzioni canali di prenotazione"
-        title="Opzioni canali di prenotazione"
+        aria-label={tv('toolbar.channelOptions')}
+        title={tv('toolbar.channelOptions')}
       >
         <SlidersHorizontal className="h-4 w-4" />
       </button>
@@ -3901,11 +3905,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           icon={selectedShift === Shift.LUNCH ? Sun : Sunset}
           action={canEdit ? (
             <button type="button" onClick={() => handleOpenNew()} className={dsButton.primary}>
-              <Plus className="h-4 w-4" aria-hidden /> Nuova prenotazione
+              <Plus className="h-4 w-4" aria-hidden /> {tv('actions.new')}
             </button>
           ) : undefined}
         >
-          Nessuna prenotazione per il turno di {selectedShift === Shift.LUNCH ? 'Pranzo' : 'Cena'} in questa data.
+          {selectedShift === Shift.LUNCH ? tv('empty.lunch') : tv('empty.dinner')}
         </EmptyState>
       );
     }
@@ -3972,18 +3976,18 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               <div className="w-8 h-1 rounded-full bg-[var(--ds-text-subtle)]" />
             </div>
             <div className="px-5 pb-2">
-              <h3 className="text-base font-semibold text-[var(--ds-text-primary)]">Ordina per</h3>
+              <h3 className="text-base font-semibold text-[var(--ds-text-primary)]">{tv('sort.title')}</h3>
             </div>
             <div className="px-3">
               {[
-                { value: 'created-asc' as const, label: 'Prenotata prima → dopo' },
-                { value: 'created-desc' as const, label: 'Prenotata dopo → prima' },
-                { value: 'time-asc' as const, label: 'Orario (prima → dopo)' },
-                { value: 'time-desc' as const, label: 'Orario (dopo → prima)' },
-                { value: 'name-asc' as const, label: 'Nome A → Z' },
-                { value: 'name-desc' as const, label: 'Nome Z → A' },
-                { value: 'guests-asc' as const, label: 'Coperti (meno → più)' },
-                { value: 'guests-desc' as const, label: 'Coperti (più → meno)' },
+                { value: 'created-asc' as const, label: tv('sort.createdAsc') },
+                { value: 'created-desc' as const, label: tv('sort.createdDesc') },
+                { value: 'time-asc' as const, label: tv('sort.timeAsc') },
+                { value: 'time-desc' as const, label: tv('sort.timeDesc') },
+                { value: 'name-asc' as const, label: tv('sort.nameAsc') },
+                { value: 'name-desc' as const, label: tv('sort.nameDesc') },
+                { value: 'guests-asc' as const, label: tv('sort.guestsAsc') },
+                { value: 'guests-desc' as const, label: tv('sort.guestsDesc') },
               ].map(opt => (
                 <button key={opt.value} type="button"
                   onClick={() => { setSortBy(opt.value); setShowSortModal(false); }}
@@ -4008,7 +4012,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               <div className="w-8 h-1 rounded-full bg-[var(--ds-text-subtle)]" />
             </div>
             <div className="px-5 pb-3 flex items-center justify-between">
-              <h3 className="text-base font-semibold text-[var(--ds-text-primary)]">Filtri</h3>
+              <h3 className="text-base font-semibold text-[var(--ds-text-primary)]">{tv('filters.title')}</h3>
               {activeFilterCount > 0 && (
                 <button type="button" onClick={resetFilters} className="flex items-center gap-1.5 text-xs font-medium text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]">
                   <RotateCcw className="h-3.5 w-3.5" /> Reimposta
@@ -4017,14 +4021,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             </div>
             <div className="px-5 space-y-4">
               <div>
-                <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">Sala</label>
+                <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">{tv('filters.room')}</label>
                 <div className="flex flex-wrap gap-2">
                   <button type="button" onClick={() => setFilterRoomId('ALL')}
                     className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
                       filterRoomId === 'ALL'
                         ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
                         : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
-                    }`}>Tutte</button>
+                    }`}>{tv('filters.allRooms')}</button>
                   {rooms.filter(rm => !rm.is_closed).map(rm => (
                     <button key={rm.id} type="button" onClick={() => setFilterRoomId(rm.id)}
                       className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
@@ -4036,13 +4040,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 </div>
               </div>
               <div>
-                <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">Stato pagamento</label>
+                <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">{tv('filters.paymentStatus')}</label>
                 <div className="flex flex-wrap gap-2">
                   {[
-                    { value: 'ALL', label: 'Tutti' },
-                    { value: PaymentStatus.PENDING, label: 'Sospeso' },
-                    { value: PaymentStatus.PAID_DEPOSIT, label: 'Acconto' },
-                    { value: PaymentStatus.PAID_FULL, label: 'Saldato' },
+                    { value: 'ALL', label: tv('filters.all') },
+                    { value: PaymentStatus.PENDING, label: tv('filters.paymentPending') },
+                    { value: PaymentStatus.PAID_DEPOSIT, label: tv('filters.paymentDeposit') },
+                    { value: PaymentStatus.PAID_FULL, label: tv('filters.paymentPaid') },
                   ].map(opt => (
                     <button key={opt.value} type="button" onClick={() => setFilterStatus(opt.value)}
                       className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
@@ -4054,14 +4058,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 </div>
               </div>
               <div>
-                <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">Canale</label>
+                <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">{tv('filters.channel')}</label>
                 <div className="flex flex-wrap gap-2">
                   {[
-                    { value: 'ALL', label: 'Tutti' },
-                    { value: ReservationSource.MANUAL, label: 'Utente' },
-                    { value: ReservationSource.GOOGLE, label: 'Web' },
-                    { value: ReservationSource.VOICE, label: 'Agente vocale' },
-                    { value: ReservationSource.WHATSAPP, label: 'WhatsApp' },
+                    { value: 'ALL', label: tv('filters.all') },
+                    { value: ReservationSource.MANUAL, label: tv('filters.channelManual') },
+                    { value: ReservationSource.GOOGLE, label: tv('filters.channelWeb') },
+                    { value: ReservationSource.VOICE, label: tv('filters.channelVoice') },
+                    { value: ReservationSource.WHATSAPP, label: tv('filters.channelWhatsapp') },
                   ].map(opt => (
                     <button key={opt.value} type="button" onClick={() => setFilterSource(opt.value)}
                       className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
@@ -4073,19 +4077,19 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 </div>
               </div>
               <div>
-                <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">Altro</label>
+                <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">{tv('filters.other')}</label>
                 <div className="flex flex-wrap gap-2">
                   <button type="button" onClick={() => setFilterHasAllergens(v => !v)}
                     className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${filterHasAllergens ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
-                    Allergeni
+                    {tv('filters.allergens')}
                   </button>
                   <button type="button" onClick={() => setFilterHasNotes(v => !v)}
                     className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${filterHasNotes ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
-                    Con note
+                    {tv('filters.withNotes')}
                   </button>
                   <button type="button" onClick={() => setFilterNoTable(v => !v)}
                     className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${filterNoTable ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
-                    Senza tavolo
+                    {tv('filters.noTable')}
                   </button>
                 </div>
               </div>
@@ -4330,7 +4334,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         <StatStrip
           className="flex-shrink-0"
           stats={[
-            { value: totalGuestsForDayShift, label: 'coperti' },
+            { value: totalGuestsForDayShift, label: tv('stats.covers') },
             {
               value: reservationCountForDayShift,
               label: reservationCountForDayShift === 1 ? 'prenotazione' : 'prenotazioni',
@@ -4620,8 +4624,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             />
             <div className="flex h-11 flex-shrink-0 items-center gap-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] p-1 shadow-[var(--ds-shadow-card)]">
               {[
-                { shift: Shift.LUNCH, label: 'Pranzo', Icon: Sun },
-                { shift: Shift.DINNER, label: 'Cena', Icon: Sunset },
+                { shift: Shift.LUNCH, label: tv('shift.lunch'), Icon: Sun },
+                { shift: Shift.DINNER, label: tv('shift.dinner'), Icon: Sunset },
               ].map(({ shift, label, Icon }) => (
                 <button
                   key={label}
@@ -4649,11 +4653,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             <StatStrip
               className="mb-3"
               stats={[
-                { value: totalGuestsForDayShift, label: 'coperti' },
-                { value: reservationCountForDayShift, label: 'pren.' },
+                { value: totalGuestsForDayShift, label: tv('stats.covers') },
+                { value: reservationCountForDayShift, label: tv('stats.reservations') },
                 ...(unassignedCountForDayShift > 0 ? [{
                   value: unassignedCountForDayShift,
-                  label: 'senza tav.',
+                  label: tv('stats.noTable'),
                   tone: 'pending' as const,
                   tint: true,
                   onClick: () => setShowUnassignedModal(true),
@@ -4686,18 +4690,18 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   <div className="w-8 h-1 rounded-full bg-[var(--ds-text-subtle)]" />
                 </div>
                 <div className="px-5 pb-2">
-                  <h3 className="text-base font-semibold text-[var(--ds-text-primary)]">Ordina per</h3>
+                  <h3 className="text-base font-semibold text-[var(--ds-text-primary)]">{tv('sort.title')}</h3>
                 </div>
                 <div className="px-3">
                   {[
-                    { value: 'created-asc' as const, label: 'Prenotata prima → dopo' },
-                    { value: 'created-desc' as const, label: 'Prenotata dopo → prima' },
-                    { value: 'time-asc' as const, label: 'Orario (prima → dopo)' },
-                    { value: 'time-desc' as const, label: 'Orario (dopo → prima)' },
-                    { value: 'name-asc' as const, label: 'Nome A → Z' },
-                    { value: 'name-desc' as const, label: 'Nome Z → A' },
-                    { value: 'guests-asc' as const, label: 'Coperti (meno → più)' },
-                    { value: 'guests-desc' as const, label: 'Coperti (più → meno)' },
+                    { value: 'created-asc' as const, label: tv('sort.createdAsc') },
+                    { value: 'created-desc' as const, label: tv('sort.createdDesc') },
+                    { value: 'time-asc' as const, label: tv('sort.timeAsc') },
+                    { value: 'time-desc' as const, label: tv('sort.timeDesc') },
+                    { value: 'name-asc' as const, label: tv('sort.nameAsc') },
+                    { value: 'name-desc' as const, label: tv('sort.nameDesc') },
+                    { value: 'guests-asc' as const, label: tv('sort.guestsAsc') },
+                    { value: 'guests-desc' as const, label: tv('sort.guestsDesc') },
                   ].map(opt => (
                     <button key={opt.value} type="button"
                       onClick={() => { setSortBy(opt.value); setShowSortModal(false); }}
@@ -4722,7 +4726,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   <div className="w-8 h-1 rounded-full bg-[var(--ds-text-subtle)]" />
                 </div>
                 <div className="px-5 pb-3 flex items-center justify-between">
-                  <h3 className="text-base font-semibold text-[var(--ds-text-primary)]">Filtri</h3>
+                  <h3 className="text-base font-semibold text-[var(--ds-text-primary)]">{tv('filters.title')}</h3>
                   {activeFilterCount > 0 && (
                     <button type="button" onClick={resetFilters} className="flex items-center gap-1.5 text-xs font-medium text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]">
                       <RotateCcw className="h-3.5 w-3.5" /> Reimposta
@@ -4731,14 +4735,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 </div>
                 <div className="px-5 space-y-4">
                   <div>
-                    <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">Sala</label>
+                    <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">{tv('filters.room')}</label>
                     <div className="flex flex-wrap gap-2">
                       <button type="button" onClick={() => setFilterRoomId('ALL')}
                         className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
                           filterRoomId === 'ALL'
                             ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
                             : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
-                        }`}>Tutte</button>
+                        }`}>{tv('filters.allRooms')}</button>
                       {rooms.filter(rm => !rm.is_closed).map(rm => (
                         <button key={rm.id} type="button" onClick={() => setFilterRoomId(rm.id)}
                           className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
@@ -4750,13 +4754,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     </div>
                   </div>
                   <div>
-                    <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">Stato pagamento</label>
+                    <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">{tv('filters.paymentStatus')}</label>
                     <div className="flex flex-wrap gap-2">
                       {[
-                        { value: 'ALL', label: 'Tutti' },
-                        { value: PaymentStatus.PENDING, label: 'Sospeso' },
-                        { value: PaymentStatus.PAID_DEPOSIT, label: 'Acconto' },
-                        { value: PaymentStatus.PAID_FULL, label: 'Saldato' },
+                        { value: 'ALL', label: tv('filters.all') },
+                        { value: PaymentStatus.PENDING, label: tv('filters.paymentPending') },
+                        { value: PaymentStatus.PAID_DEPOSIT, label: tv('filters.paymentDeposit') },
+                        { value: PaymentStatus.PAID_FULL, label: tv('filters.paymentPaid') },
                       ].map(opt => (
                         <button key={opt.value} type="button" onClick={() => setFilterStatus(opt.value)}
                           className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
@@ -4768,14 +4772,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     </div>
                   </div>
                   <div>
-                    <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">Canale</label>
+                    <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">{tv('filters.channel')}</label>
                     <div className="flex flex-wrap gap-2">
                       {[
-                        { value: 'ALL', label: 'Tutti' },
-                        { value: ReservationSource.MANUAL, label: 'Utente' },
-                        { value: ReservationSource.GOOGLE, label: 'Web' },
-                        { value: ReservationSource.VOICE, label: 'Agente vocale' },
-                        { value: ReservationSource.WHATSAPP, label: 'WhatsApp' },
+                        { value: 'ALL', label: tv('filters.all') },
+                        { value: ReservationSource.MANUAL, label: tv('filters.channelManual') },
+                        { value: ReservationSource.GOOGLE, label: tv('filters.channelWeb') },
+                        { value: ReservationSource.VOICE, label: tv('filters.channelVoice') },
+                        { value: ReservationSource.WHATSAPP, label: tv('filters.channelWhatsapp') },
                       ].map(opt => (
                         <button key={opt.value} type="button" onClick={() => setFilterSource(opt.value)}
                           className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
@@ -4787,19 +4791,19 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     </div>
                   </div>
                   <div>
-                    <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">Altro</label>
+                    <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">{tv('filters.other')}</label>
                     <div className="flex flex-wrap gap-2">
                       <button type="button" onClick={() => setFilterHasAllergens(v => !v)}
                         className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${filterHasAllergens ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
-                        Allergeni
+                        {tv('filters.allergens')}
                       </button>
                       <button type="button" onClick={() => setFilterHasNotes(v => !v)}
                         className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${filterHasNotes ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
-                        Con note
+                        {tv('filters.withNotes')}
                       </button>
                       <button type="button" onClick={() => setFilterNoTable(v => !v)}
                         className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${filterNoTable ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
-                        Senza tavolo
+                        {tv('filters.noTable')}
                       </button>
                     </div>
                   </div>
