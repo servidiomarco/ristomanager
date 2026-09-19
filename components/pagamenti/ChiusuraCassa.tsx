@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { AlertCircle } from 'lucide-react';
 import type { CashClosureBillRow, CashClosureReport } from '../../types';
 import { Callout, FormCard, StatusPill } from '../ds';
+import { ChiusuraFiscale } from './ChiusuraFiscale';
 import { formatEuro } from './paymentsView';
 
 /* ── Chiusura di cassa ────────────────────────────────────────────────────
@@ -326,6 +327,10 @@ export const ChiusuraCassa: React.FC<{
           )}
         </div>
       </FormCard>
+
+      {/* La giornata fiscale è di calendario, non di turno: la card ignora il
+          filtro della topbar apposta. */}
+      <ChiusuraFiscale date={report.date} />
     </div>
   );
 };
