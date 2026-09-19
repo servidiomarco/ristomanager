@@ -29217,17 +29217,27 @@ app.get(['/privacy', '/informativa-privacy', '/privacy/:slug'], async (req, res)
     }
 });
 
-// Traduzioni del widget /prenota (Card dev board #33, IT/EN). Servite
-// esplicitamente come i loghi qui sopra, per lo stesso motivo: non tutta
-// public/ va esposta. Non passano da withPublicTenant perché non dipendono
-// dal ristorante — è testo di interfaccia, non contenuto configurabile.
-// Percorso e formato (`/locales/{{lng}}/{{ns}}.json`) sono la convenzione di
-// i18next-http-backend apposta — è la stessa che legge i18n/config.ts: la
-// SPA, quando una schermata migrerà a react-i18next, punta già qui.
-app.get('/locales/:lang/prenota.json', (req, res) => {
-    if (req.params.lang !== 'it' && req.params.lang !== 'en') return res.status(404).end();
+// Traduzioni delle pagine pubbliche del backend (Card dev board #33, IT/EN).
+// Servite esplicitamente come i loghi qui sopra, per lo stesso motivo: non
+// tutta public/ va esposta. Non passano da withPublicTenant perché non
+// dipendono dal ristorante — è testo di interfaccia, non contenuto
+// configurabile. Percorso e formato (`/locales/{{lng}}/{{ns}}.json`) sono la
+// convenzione di i18next-http-backend apposta — è la stessa che legge
+// i18n/config.ts: la SPA, quando una schermata migrerà a react-i18next,
+// punta già qui. La whitelist elenca SOLO le namespace lette dalle pagine
+// servite da questo server (prenota.html, ordina.html): le altre (paytable,
+// …) viaggiano con la build Vite su Vercel e qui non servono.
+// Il parametro cattura il nome file intero (`prenota.json`): con Express 5
+// il suffisso letterale dopo un parametro (`:ns.json`) non è affidabile, e
+// la whitelist sul nome completo chiude comunque ogni path traversal.
+const PUBLIC_LOCALE_LANGS = new Set(['it', 'en']);
+const PUBLIC_LOCALE_FILES = new Set(['prenota.json', 'ordina.json']);
+app.get('/locales/:lang/:file', (req, res) => {
+    if (!PUBLIC_LOCALE_LANGS.has(req.params.lang) || !PUBLIC_LOCALE_FILES.has(req.params.file)) {
+        return res.status(404).end();
+    }
     res.set('Cache-Control', 'public, max-age=300');
-    res.sendFile(path.join(process.cwd(), 'public', 'locales', req.params.lang, 'prenota.json'));
+    res.sendFile(path.join(process.cwd(), 'public', 'locales', req.params.lang, req.params.file));
 });
 
 // Pagina di prenotazione per slug (Fase C3): stesso HTML di /prenota — è il
