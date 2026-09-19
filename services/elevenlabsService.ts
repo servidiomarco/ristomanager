@@ -365,16 +365,10 @@ export function parseFlexibleTime(input: unknown): string | null {
  * usually transcribes digits, but we still strip whitespace and prepend +39
  * if a leading country code is missing.
  */
-export function normalizeItalianPhone(input: string): string {
-    if (!input) return '';
-    const digits = input.replace(/\D/g, '');
-    if (digits.startsWith('00')) return '+' + digits.slice(2);
-    if (digits.startsWith('39') && digits.length >= 11) return '+' + digits;
-    if (digits.length === 10 && (digits.startsWith('3') || digits.startsWith('0'))) {
-        return '+39' + digits;
-    }
-    return digits.startsWith('+') ? digits : '+' + digits;
-}
+// Spostata in utils/phone.ts quando «senza prefisso = italiano» ha smesso
+// di essere una verità: qui resta il re-export per i chiamanti di sempre.
+import { normalizeItalianPhone } from '../utils/phone.js';
+export { normalizeItalianPhone };
 
 // lastTenDigits è stata ritirata: right-10 sbaglia sui cellulari storici a
 // 9 cifre (la 9 del prefisso 39 entra nel suffisso). I confronti telefonici

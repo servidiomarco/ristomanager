@@ -31,6 +31,7 @@ import { startSalaNodeReplica } from './services/salaNodeReplica.js';
 import { VOICE_CHANNEL, WHATSAPP_CHANNEL, type ToolOutcome } from './services/bookingTools.js';
 import { TENANT_FEATURES, getTenantFeatures, isFeatureEnabledForTenant, invalidateTenantFeaturesCache, clearTenantFeaturesCache, type TenantFeature } from './services/entitlements.js';
 import { clearTenantLocaleCache, getTenantLocale } from './services/tenantLocale.js';
+import { normalizePhoneE164 } from './utils/phone.js';
 import { provisionTenant, ProvisioningError } from './services/tenantProvisioning.js';
 import {
     createCheckoutSession,
@@ -21170,8 +21171,10 @@ async function sendTwilioWhatsApp(
 
     // Twilio expects "whatsapp:+E164" on both ends. Normalize Italian numbers
     // that arrive without the country prefix (10 digits starting with 3/0),
+    // Un numero locale senza prefisso è del paese del ristorante, non per
+    // forza italiano: il prefisso di casa arriva da tenantLocale.
     // otherwise Twilio rejects "+3289630012" as an invalid Belgian number.
-    const formattedTo = `whatsapp:${normalizeItalianPhone(String(to))}`;
+    const formattedTo = `whatsapp:${normalizePhoneE164(String(to), (await getTenantLocale(tenantId)).dialCode)}`;
     const formattedFrom = FROM.startsWith('whatsapp:') ? FROM : `whatsapp:${FROM.startsWith('+') ? FROM : `+${FROM}`}`;
 
     console.log(`[Twilio] Sending message to ${formattedTo} from ${formattedFrom}${template ? ` (template ${template.contentSid})` : ''}`);
@@ -21294,7 +21297,7 @@ async function sendTwilioSms(tenantId: number, to: string, text: string, reserva
     // Normalize to E.164 assuming Italian numbers when the country code is
     // missing — a phone like "3289630012" would otherwise be sent as
     // "+3289630012" and Twilio rejects it as an invalid Belgian number.
-    const formattedTo = normalizeItalianPhone(String(to));
+    const formattedTo = normalizePhoneE164(String(to), (await getTenantLocale(tenantId)).dialCode);
     const body = new URLSearchParams({ To: formattedTo, Body: text });
 
     let senderDescription: string;
@@ -29353,7 +29356,7 @@ app.post('/debug/whatsapp-test', authenticate, requireFeature('whatsapp'), requi
             });
         }
 
-        const formattedTo = `whatsapp:${normalizeItalianPhone(String(to))}`;
+        const formattedTo = `whatsapp:${normalizePhoneE164(String(to), (await getTenantLocale(req.tenantId!)).dialCode)}`;
         const formattedFrom = FROM.startsWith('whatsapp:') ? FROM : `whatsapp:${FROM.startsWith('+') ? FROM : `+${FROM}`}`;
         const auth = Buffer.from(`${ACCOUNT_SID}:${AUTH_TOKEN}`).toString('base64');
         const body = new URLSearchParams({ From: formattedFrom, To: formattedTo, Body: text });
