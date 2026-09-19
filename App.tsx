@@ -253,20 +253,21 @@ const SALA_VIEWS: ViewState[] = [ViewState.COMANDE, ViewState.CASSA, ViewState.C
    `guard` nasconde il blocco a chi non ha i permessi delle sue card. */
 const SETTINGS_GROUPS: {
   id: string;
+  labelKey: string;
   label: string;
   Icon: React.ComponentType<{ size?: number; className?: string }>;
   guard?: 'admin' | 'pay_at_table' | 'reviews' | 'takeaway';
 }[] = [
-  { id: 'imp-profilo', label: 'Profilo', Icon: UserCheck },
-  { id: 'imp-ristorante', label: 'Ristorante', Icon: Clock },
-  { id: 'imp-prenotazioni', label: 'Prenotazioni', Icon: Calendar },
-  { id: 'imp-asporto', label: 'Asporto', Icon: ShoppingBag, guard: 'takeaway' },
-  { id: 'imp-pagamenti', label: 'Pagamenti', Icon: CreditCard },
-  { id: 'imp-fiscalita', label: 'Fiscalità', Icon: Landmark, guard: 'pay_at_table' },
-  { id: 'imp-comunicazioni', label: 'Comunicazioni', Icon: MessagesSquare },
-  { id: 'imp-recensioni', label: 'Recensioni', Icon: Star, guard: 'reviews' },
-  { id: 'imp-ai', label: 'AI', Icon: Sparkles },
-  { id: 'imp-amministrazione', label: 'Amministrazione', Icon: Users, guard: 'admin' },
+  { id: 'imp-profilo', labelKey: 'settings.tabProfile', label: 'Profilo', Icon: UserCheck },
+  { id: 'imp-ristorante', labelKey: 'settings.tabRestaurant', label: 'Ristorante', Icon: Clock },
+  { id: 'imp-prenotazioni', labelKey: 'nav.items.reservations', label: 'Prenotazioni', Icon: Calendar },
+  { id: 'imp-asporto', labelKey: 'nav.items.takeaway', label: 'Asporto', Icon: ShoppingBag, guard: 'takeaway' },
+  { id: 'imp-pagamenti', labelKey: 'nav.items.payments', label: 'Pagamenti', Icon: CreditCard },
+  { id: 'imp-fiscalita', labelKey: 'nav.items.fiscal', label: 'Fiscalità', Icon: Landmark, guard: 'pay_at_table' },
+  { id: 'imp-comunicazioni', labelKey: 'nav.groups.communications', label: 'Comunicazioni', Icon: MessagesSquare },
+  { id: 'imp-recensioni', labelKey: 'nav.items.reviews', label: 'Recensioni', Icon: Star, guard: 'reviews' },
+  { id: 'imp-ai', labelKey: 'settings.tabAi', label: 'AI', Icon: Sparkles },
+  { id: 'imp-amministrazione', labelKey: 'settings.tabAdmin', label: 'Amministrazione', Icon: Users, guard: 'admin' },
 ];
 
 /* ── Impostazioni ─────────────────────────────────────────────────────────
@@ -890,8 +891,8 @@ const App: React.FC = () => {
         onClick={() => setComandeNavHidden(false)}
         aria-expanded={false}
         aria-controls="sidebar-nav"
-        title="Apri menu"
-        aria-label="Apri menu"
+        title={t('aria.openMenu')}
+        aria-label={t('aria.openMenu')}
         className="pressable inline-flex h-11 w-8 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
       >
         <ChevronDown size={16} />
@@ -1108,11 +1109,11 @@ const App: React.FC = () => {
   const channelLabelForReservation = (res: Reservation): string => {
     switch (res.source) {
       case ReservationSource.WHATSAPP: return 'WhatsApp';
-      case ReservationSource.VOICE: return 'Agente vocale';
+      case ReservationSource.VOICE: return t('entity.voiceAgent');
       case ReservationSource.GOOGLE: return 'Web';
       case ReservationSource.MANUAL:
       default:
-        return toTitleCase((res.created_by_user_name || '').trim()) || 'Utente';
+        return toTitleCase((res.created_by_user_name || '').trim()) || t('entity.user');
     }
   };
 
@@ -1135,32 +1136,32 @@ const App: React.FC = () => {
     let type: Notification['type'] = 'info';
     switch (kind) {
       case 'created':
-        title = `Nuova prenotazione · ${source}`;
+        title = t('toast.newBookingFrom', { fonte: source });
         message = `${name} · ${res.guests} ospiti · ${when}`;
         type = 'info';
         break;
       case 'confirmed':
-        title = 'Prenotazione confermata';
+        title = t('toast.bookingConfirmed');
         message = `${name} · ${res.guests} ospiti · ${when}`;
         type = 'success';
         break;
       case 'declined':
-        title = 'Prenotazione rifiutata';
+        title = t('toast.bookingDeclined');
         message = `${name} · ${when}`;
         type = 'warning';
         break;
       case 'cancelled':
-        title = 'Prenotazione annullata';
+        title = t('toast.bookingCancelled');
         message = `${name} · ${when}`;
         type = 'warning';
         break;
       case 'noshow':
-        title = 'Prenotazione no show';
+        title = t('toast.bookingNoShow');
         message = `${name} · ${when}`;
         type = 'warning';
         break;
       case 'deleted':
-        title = 'Prenotazione eliminata';
+        title = t('toast.bookingDeleted');
         message = `${name} · ${when}`;
         type = 'warning';
         break;
@@ -1214,7 +1215,7 @@ const App: React.FC = () => {
         const channel = channelLabelForReservation(r);
         additions.push({
           id: `hydrate-${r.id}-${r.created_at}`,
-          title: `Nuova prenotazione · ${channel}`,
+          title: t('toast.newBookingFrom', { fonte: channel }),
           message: `${name} · ${when}`,
           type: 'info',
           reservationId: r.id,
@@ -1319,9 +1320,9 @@ const App: React.FC = () => {
         const m = (await res.text()).match(/assets\/index-[A-Za-z0-9_-]+\.js/);
         if (!m || runningSrc.includes(m[0]) || promptedFor === m[0]) return;
         promptedFor = m[0];
-        addToast("C'è una versione aggiornata dell'app", 'info', {
+        addToast("{t('toast.newVersion')}", 'info', {
           duration: 15000,
-          action: { label: 'Ricarica', onClick: () => window.location.reload() },
+          action: { label: t('actions.reload'), onClick: () => window.location.reload() },
         });
       } catch { /* offline: si riprova al prossimo rientro */ }
     };
@@ -1469,7 +1470,7 @@ const App: React.FC = () => {
         }
         return [...prev, reservation];
       });
-      addToast(`Nuova prenotazione: ${toTitleCase(reservation.customer_name)}`, 'info');
+      addToast(t('toast.newBookingNamed', { nome: toTitleCase(reservation.customer_name) }), 'info');
       addReservationNotification(reservation, 'created');
     });
 
@@ -1478,7 +1479,7 @@ const App: React.FC = () => {
       setReservations(prev =>
         prev.map(r => r.id === reservation.id ? reservation : r)
       );
-      addToast(`Prenotazione aggiornata: ${toTitleCase(reservation.customer_name)}`, 'info');
+      addToast(t('toast.bookingUpdatedNamed', { nome: toTitleCase(reservation.customer_name) }), 'info');
       if (previous) {
         const kind = classifyReservationUpdate(previous, reservation);
         if (kind) addReservationNotification(reservation, kind);
@@ -1491,7 +1492,7 @@ const App: React.FC = () => {
       // Unica voce per l'eliminazione: le prenotazioni broadcastano anche al
       // mittente (riga autoritativa lato server), quindi questo toast arriva
       // pure a chi ha eliminato — niente doppione nel handler locale.
-      addToast(deleted ? `Prenotazione eliminata: ${toTitleCase(deleted.customer_name)}` : 'Prenotazione eliminata', 'info');
+      addToast(deleted ? t('toast.bookingDeletedNamed', { nome: toTitleCase(deleted.customer_name) }) : t('toast.bookingDeleted'), 'info');
       if (deleted) addReservationNotification(deleted, 'deleted');
     });
 
@@ -1634,7 +1635,7 @@ const App: React.FC = () => {
       if (disconnectToastShownRef.current) {
         // Stessa replaceKey dell'avviso di caduta: il ripristino lo
         // sostituisce invece di lasciarlo appeso (gli errori persistono).
-        addToast('Connessione ristabilita', 'success', { replaceKey: 'connessione' });
+        addToast(t('toast.connectionRestored'), 'success', { replaceKey: 'connessione' });
         disconnectToastShownRef.current = false;
       }
 
@@ -1646,18 +1647,18 @@ const App: React.FC = () => {
       // Flush offline queue if there are pending operations
       if (!offlineQueue.isEmpty()) {
         const queueSize = offlineQueue.size();
-        addToast(`Sincronizzazione di ${queueSize} operazioni in sospeso...`, 'info');
+        addToast(t('toast.syncing', { n: queueSize }), 'info');
 
         const result = await offlineQueue.flush();
 
         if (result.success > 0) {
-          addToast(`✓ ${result.success} operazioni sincronizzate con successo`, 'success');
+          addToast(t('toast.syncedOk', { n: result.success }), 'success');
         }
         if (result.failed > 0) {
-          addToast(`⚠ ${result.failed} operazioni non riuscite`, 'error');
+          addToast(t('toast.syncFailed', { n: result.failed }), 'error');
         }
         if (result.dropped > 0) {
-          addToast(`${result.dropped} operazioni troppo vecchie non sono state rigiocate`, 'info');
+          addToast(t('toast.syncDropped', { n: result.dropped }), 'info');
         }
 
         // Refresh again after the flush so the UI reflects the server state
@@ -1675,7 +1676,7 @@ const App: React.FC = () => {
         clearTimeout(disconnectToastTimerRef.current);
       }
       disconnectToastTimerRef.current = window.setTimeout(() => {
-        addToast('Connessione persa - le modifiche verranno sincronizzate al ripristino', 'error', { replaceKey: 'connessione' });
+        addToast(t('toast.connectionLost'), 'error', { replaceKey: 'connessione' });
         disconnectToastShownRef.current = true;
         disconnectToastTimerRef.current = null;
       }, 2500);
@@ -1747,7 +1748,7 @@ const App: React.FC = () => {
     try {
       const returnedTable = await createTable(newTable);
       setTables(prev => [...prev, returnedTable]);
-      addToast('Nuovo tavolo aggiunto alla sala', 'success');
+      addToast(t('toast.tableAdded'), 'success');
     } catch (error) {
       console.error("Error adding table:", error);
       addToast('Error adding table', 'error');
@@ -1758,7 +1759,7 @@ const App: React.FC = () => {
     try {
       await deleteTable(tableId);
       setTables(prev => prev.filter(t => t.id !== tableId));
-      addToast('Tavolo eliminato', 'success');
+      addToast(t('toast.tableDeleted'), 'success');
     } catch (error) {
       console.error("Error deleting table:", error);
       addToast('Error deleting table', 'error');
@@ -1769,7 +1770,7 @@ const App: React.FC = () => {
   // raw tables are not modified, so the merge is scoped to that one service.
   const handleMergeTables = async (tableIds: number[], date: string, shift: Shift) => {
     if (tableIds.length < 2) {
-      addToast('Seleziona almeno 2 tavoli da unire', 'error');
+      addToast(t('toast.selectTwoTables'), 'error');
       return;
     }
 
@@ -1778,7 +1779,7 @@ const App: React.FC = () => {
         .map(id => tables.find(t => t.id === id))
         .filter((t): t is Table => !!t);
       if (selectedTables.length !== tableIds.length) {
-        addToast('Tavolo non trovato', 'error');
+        addToast(t('toast.tableNotFound'), 'error');
         return;
       }
 
@@ -1787,20 +1788,20 @@ const App: React.FC = () => {
 
       const combinedName = selectedTables.map(t => t.name).join('+');
       const totalSeats = selectedTables.reduce((sum, t) => sum + t.seats, 0);
-      addToast(`Tavoli uniti: ${combinedName} (${totalSeats} coperti)`, 'success');
+      addToast(t('toast.tablesMerged', { nome: combinedName, coperti: totalSeats }), 'success');
     } catch (error) {
       console.error('Error merging tables:', error);
-      addToast("Errore durante l'unione dei tavoli", 'error');
+      addToast("{t('toast.tablesMergeError')}", 'error');
     }
   };
 
   const handleSplitTable = async (primaryId: number, date: string, shift: Shift) => {
     try {
       await deleteTableMerge(date, shift, primaryId);
-      addToast('Tavoli divisi con successo', 'success');
+      addToast(t('toast.tablesSplit'), 'success');
     } catch (error) {
       console.error('Error splitting table:', error);
-      addToast('Errore durante la divisione dei tavoli', 'error');
+      addToast(t('toast.tablesSplitError'), 'error');
     }
   };
 
@@ -1808,7 +1809,7 @@ const App: React.FC = () => {
     try {
       const newRoom = await createRoom({ name: roomName, width: 800, height: 600 });
       setRooms(prev => [...prev, newRoom]);
-      addToast(`Sala "${roomName}" creata`, 'success');
+      addToast(t('toast.roomCreated', { nome: roomName }), 'success');
     } catch (error) {
       console.error("Error adding room:", error);
       addToast('Error adding room', 'error');
@@ -1819,7 +1820,7 @@ const App: React.FC = () => {
     try {
       await deleteRoom(roomId);
       setRooms(prev => prev.filter(r => r.id !== roomId));
-      addToast('Sala eliminata', 'success');
+      addToast(t('toast.roomDeleted'), 'success');
     } catch (error) {
       console.error("Error deleting room:", error);
       addToast('Error deleting room', 'error');
@@ -1830,10 +1831,10 @@ const App: React.FC = () => {
     try {
       const updated = await setRoomClosed(roomId, isClosed);
       setRooms(prev => prev.map(r => r.id === roomId ? updated : r));
-      addToast(isClosed ? `Sala "${updated.name}" chiusa` : `Sala "${updated.name}" riaperta`, 'success');
+      addToast(isClosed ? t('toast.roomClosed', { nome: updated.name }) : t('toast.roomReopened', { nome: updated.name }), 'success');
     } catch (error: any) {
       console.error("Error toggling room closed:", error);
-      addToast(error?.message || 'Errore aggiornamento sala', 'error');
+      addToast(error?.message || t('toast.roomUpdateError'), 'error');
     }
   };
 
@@ -1847,7 +1848,7 @@ const App: React.FC = () => {
     try {
         const created = await createDish(dish);
         setDishes(prev => (prev.some(d => d.id === created.id) ? prev : [...prev, created]));
-        addToast('Piatto aggiunto al menu', 'success');
+        addToast(t('toast.dishAdded'), 'success');
     } catch (error) {
         console.error("Error adding dish:", error);
         addToast('Error adding dish', 'error');
@@ -1858,7 +1859,7 @@ const App: React.FC = () => {
     try {
         const updated = await updateDish(id, dish);
         setDishes(prev => prev.map(d => (d.id === id ? { ...d, ...updated } : d)));
-        addToast('Piatto aggiornato', 'success');
+        addToast(t('toast.dishUpdated'), 'success');
     } catch (error) {
         console.error("Error updating dish:", error);
         addToast('Error updating dish', 'error');
@@ -1869,7 +1870,7 @@ const App: React.FC = () => {
     try {
         await deleteDish(id);
         setDishes(prev => prev.filter(d => d.id !== id));
-        addToast('Piatto rimosso', 'success');
+        addToast(t('toast.dishRemoved'), 'success');
     } catch (error) {
         console.error("Error deleting dish:", error);
         addToast('Error deleting dish', 'error');
@@ -1880,10 +1881,10 @@ const App: React.FC = () => {
     try {
         await createBanquetMenu(menu);
         // Socket.IO will handle adding to state via banquet:created event
-        addToast('Menu banchetto creato', 'success');
+        addToast(t('toast.eventMenuCreated'), 'success');
     } catch (error: any) {
         console.error("Error adding banquet menu:", error);
-        addToast(error?.message || 'Errore creazione menu banchetto', 'error');
+        addToast(error?.message || t('toast.eventMenuCreateError'), 'error');
         throw error;
     }
     };
@@ -1892,10 +1893,10 @@ const App: React.FC = () => {
     try {
         await updateBanquetMenu(id, menu);
         // Socket.IO will handle updating state via banquet:updated event
-        addToast('Menu banchetto aggiornato', 'success');
+        addToast(t('toast.eventMenuUpdated'), 'success');
     } catch (error: any) {
         console.error("Error updating banquet menu:", error);
-        addToast(error?.message || 'Errore aggiornamento menu banchetto', 'error');
+        addToast(error?.message || t('toast.eventMenuUpdateError'), 'error');
         throw error;
     }
   };
@@ -1904,7 +1905,7 @@ const App: React.FC = () => {
     try {
         await deleteBanquetMenu(id);
         // Socket.IO will handle removing from state via banquet:deleted event
-        addToast('Menu banchetto eliminato', 'success');
+        addToast(t('toast.eventMenuDeleted'), 'success');
     } catch (error) {
         console.error("Error deleting banquet menu:", error);
         addToast('Error deleting banquet menu', 'error');
@@ -1921,7 +1922,7 @@ const App: React.FC = () => {
       // mittente): niente doppione qui.
     } catch (error: any) {
       console.error("Error updating reservation:", error);
-      addToast(error?.message || 'Errore aggiornamento prenotazione', 'error');
+      addToast(error?.message || t('toast.bookingUpdateError'), 'error');
       throw error;
     }
   };
@@ -1986,7 +1987,7 @@ const App: React.FC = () => {
       return returnedRes;
     } catch (error: any) {
       console.error("Error adding reservation:", error);
-      addToast(error?.message || 'Errore creazione prenotazione', 'error');
+      addToast(error?.message || t('toast.bookingCreateError'), 'error');
       throw error;
     }
   };
@@ -2008,7 +2009,7 @@ const App: React.FC = () => {
   if (authLoading) {
     return (
       <div className="min-h-screen bg-[var(--ds-canvas)] flex items-center justify-center">
-        <Loader label="Caricamento..." />
+        <Loader label={t('loading')} />
       </div>
     );
   }
@@ -2038,14 +2039,14 @@ const App: React.FC = () => {
       // Ruolo di piattaforma: nella UI di un tenant compare solo se un
       // platform admin sta impersonando — l'etichetta serve a non mostrare
       // la costante grezza.
-      [UserRole.PLATFORM_ADMIN]: 'Admin piattaforma',
-      [UserRole.OWNER]: 'Proprietario',
+      [UserRole.PLATFORM_ADMIN]: t('role.PLATFORM_ADMIN'),
+      [UserRole.OWNER]: t('role.OWNER'),
       [UserRole.GENERAL_MANAGER]: 'General Manager',
       [UserRole.MANAGER]: 'Manager',
       [UserRole.RECEPTION]: 'Reception',
-      [UserRole.WAITER]: 'Cameriere',
-      [UserRole.KITCHEN]: 'Cucina',
-      [UserRole.CASSA]: 'Cassa'
+      [UserRole.WAITER]: t('role.WAITER'),
+      [UserRole.KITCHEN]: t('role.KITCHEN'),
+      [UserRole.CASSA]: t('role.CASSA')
     };
     return roleNames[role] || role;
   };
@@ -2118,23 +2119,23 @@ const App: React.FC = () => {
   const runCreateAction = (run: () => void) => { setShowCreateMenu(false); run(); };
   const createMenuClusters: { label: string; Icon: React.ComponentType<{ size?: number; className?: string }>; show: boolean; run: () => void }[][] = [
     [
-      { label: 'Prenotazione', Icon: Calendar, show: hasPermission('reservations:full'), run: () => { setNewReservationKind('standard'); setAutoOpenNewReservation(true); } },
+      { label: t('entity.booking'), Icon: Calendar, show: hasPermission('reservations:full'), run: () => { setNewReservationKind('standard'); setAutoOpenNewReservation(true); } },
       { label: 'Walk-in', Icon: Zap, show: canAccessView(ViewState.RECEPTION), run: () => { setView(ViewState.RECEPTION); setAutoOpenWalkIn(true); } },
-      { label: 'Banchetto', Icon: PartyPopper, show: hasPermission('menu:full'), run: () => { setView(ViewState.BANCHETTI); setAutoOpenNewBanquet(true); } },
-      { label: 'Piatto', Icon: UtensilsCrossed, show: hasPermission('menu:full'), run: () => { setView(ViewState.MENU); setAutoOpenNewDish(true); } },
+      { label: t('entity.banquet'), Icon: PartyPopper, show: hasPermission('menu:full'), run: () => { setView(ViewState.BANCHETTI); setAutoOpenNewBanquet(true); } },
+      { label: t('entity.dish'), Icon: UtensilsCrossed, show: hasPermission('menu:full'), run: () => { setView(ViewState.MENU); setAutoOpenNewDish(true); } },
     ],
     [
-      { label: 'Spesa', Icon: ShoppingCart, show: canAccessView(ViewState.LISTA_DELLA_SPESA), run: () => { setView(ViewState.LISTA_DELLA_SPESA); setAutoOpenNewShoppingItem(true); } },
-      { label: 'Attività', Icon: ListChecks, show: canAccessView(ViewState.ATTIVITA), run: () => { setView(ViewState.ATTIVITA); setAutoOpenNewAttivita(true); } },
+      { label: t('entity.shopping'), Icon: ShoppingCart, show: canAccessView(ViewState.LISTA_DELLA_SPESA), run: () => { setView(ViewState.LISTA_DELLA_SPESA); setAutoOpenNewShoppingItem(true); } },
+      { label: t('entity.task'), Icon: ListChecks, show: canAccessView(ViewState.ATTIVITA), run: () => { setView(ViewState.ATTIVITA); setAutoOpenNewAttivita(true); } },
       // Prodotto sta con la spesa e le attività, non con le anagrafiche: è
       // roba di magazzino, la si crea nella stessa mezz'ora in cui si segna
       // cosa manca. In fondo all'elenco era l'unica voce di quel gruppo.
-      { label: 'Prodotto', Icon: Boxes, show: hasPermission('inventory:full'), run: () => { setView(ViewState.INVENTARIO); setAutoOpenNewProduct(true); } },
+      { label: t('entity.product'), Icon: Boxes, show: hasPermission('inventory:full'), run: () => { setView(ViewState.INVENTARIO); setAutoOpenNewProduct(true); } },
     ],
     [
-      { label: 'Cliente', Icon: BookUser, show: hasPermission('customers:full'), run: () => { setView(ViewState.CLIENTI); setAutoOpenNewCustomer(true); } },
-      { label: 'Dipendente', Icon: UsersRound, show: hasPermission('staff:full'), run: () => { setView(ViewState.STAFF); setAutoOpenNewStaff(true); } },
-      { label: 'Utente', Icon: Users, show: canManageUsers(), run: () => { setView(ViewState.USERS); setAutoOpenNewUser(true); } },
+      { label: t('entity.customer'), Icon: BookUser, show: hasPermission('customers:full'), run: () => { setView(ViewState.CLIENTI); setAutoOpenNewCustomer(true); } },
+      { label: t('entity.staff'), Icon: UsersRound, show: hasPermission('staff:full'), run: () => { setView(ViewState.STAFF); setAutoOpenNewStaff(true); } },
+      { label: t('entity.user'), Icon: Users, show: canManageUsers(), run: () => { setView(ViewState.USERS); setAutoOpenNewUser(true); } },
     ],
   ];
   const visibleCreateClusters = createMenuClusters
@@ -2151,7 +2152,7 @@ const App: React.FC = () => {
           del platform admin e ricarica. */}
       <ImpersonationBanner />
       {/* Skip link for keyboard users */}
-      <a href="#main" className="skip-link">Salta al contenuto</a>
+      <a href="#main" className="skip-link">{t('aria.skipToContent')}</a>
 
       {/* Role Permissions Modal */}
       {showRolePermissions && canManageUsers() && (
@@ -2191,7 +2192,7 @@ const App: React.FC = () => {
             : `${sidebarCollapsed ? 'w-[76px]' : 'w-[250px]'} m-4 mr-0 opacity-100`
         } overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] flex-col transition-[width,margin,opacity] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none z-20 relative`}
         aria-hidden={comandeNavStubbed}
-        aria-label="Navigazione principale"
+        aria-label={t('aria.mainNav')}
       >
         {/* Intestazione — logo e comando apri/chiudi sulla stessa riga, come
             fanno gli editor a pannelli: il toggle sta dove sta il marchio,
@@ -2271,8 +2272,8 @@ const App: React.FC = () => {
             onClick={view === ViewState.COMANDE ? () => setComandeNavHidden(true) : toggleSidebar}
             aria-expanded={view === ViewState.COMANDE ? true : !sidebarCollapsed}
             aria-controls="sidebar-nav"
-            title={view === ViewState.COMANDE ? 'Nascondi menu' : sidebarCollapsed ? 'Apri menu' : 'Chiudi menu'}
-            aria-label={view === ViewState.COMANDE ? 'Nascondi menu' : sidebarCollapsed ? 'Apri menu' : 'Chiudi menu'}
+            title={view === ViewState.COMANDE ? t('aria.hideMenu') : sidebarCollapsed ? t('aria.openMenu') : t('aria.closeMenu')}
+            aria-label={view === ViewState.COMANDE ? t('aria.hideMenu') : sidebarCollapsed ? t('aria.openMenu') : t('aria.closeMenu')}
             className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${sidebarCollapsed ? '' : 'ml-auto'}`}
           >
             {/* In Comande il verso conta: il chevron su rimette via il menu da
@@ -2323,7 +2324,7 @@ const App: React.FC = () => {
                         key={item.labelKey}
                         type="button"
                         onClick={toggleTheme}
-                        title={theme === 'dark' ? 'Tema chiaro' : 'Tema scuro'}
+                        title={theme === 'dark' ? t('aria.lightTheme') : t('aria.darkTheme')}
                         aria-label={theme === 'dark' ? 'Passa a tema chiaro' : 'Passa a tema scuro'}
                         className="group w-full flex items-center justify-center px-3 h-10 rounded-[var(--ds-radius)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] transition-colors"
                       >
@@ -2392,8 +2393,8 @@ const App: React.FC = () => {
               <button
                 onClick={() => setShowProfilo(true)}
                 className="w-10 h-10 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] flex items-center justify-center text-[var(--ds-action-fg)] font-medium text-[13px] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                title="Il tuo account"
-                aria-label="Il tuo account"
+                title={t('aria.yourAccount')}
+                aria-label={t('aria.yourAccount')}
               >
                 {user?.full_name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || 'U'}
               </button>
@@ -2413,14 +2414,14 @@ const App: React.FC = () => {
               <button
                 onClick={() => setShowProfilo(true)}
                 className="flex flex-1 min-w-0 items-center gap-3 text-left rounded-[var(--ds-radius)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                title="Il tuo account"
-                aria-label="Il tuo account"
+                title={t('aria.yourAccount')}
+                aria-label={t('aria.yourAccount')}
               >
                 <div className="w-10 h-10 shrink-0 rounded-full bg-[var(--ds-action-bg)] flex items-center justify-center text-[var(--ds-action-fg)] font-medium text-[13px]">
                   {user?.full_name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || 'U'}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-[15px] font-semibold text-[var(--ds-text-primary)] tracking-[-0.01em] truncate">{user?.full_name || 'Utente'}</p>
+                  <p className="text-[15px] font-semibold text-[var(--ds-text-primary)] tracking-[-0.01em] truncate">{user?.full_name || t('entity.user')}</p>
                   <p className="text-[13px] text-[var(--ds-text-muted)] truncate">{user?.role ? getRoleDisplayName(user.role) : ''}</p>
                 </div>
               </button>
@@ -2532,9 +2533,9 @@ const App: React.FC = () => {
                  track at surface-row, active segment raised on surface. */}
              <div className="flex items-center bg-[var(--ds-surface-row)] rounded-[var(--ds-radius-control)] p-1 gap-0.5 flex-shrink-0">
                {([
-                 { key: 'LUNCH', label: 'Pranzo', icon: <Sun className="h-3.5 w-3.5" /> },
-                 { key: 'DINNER', label: 'Cena', icon: <Sunset className="h-3.5 w-3.5" /> },
-                 { key: 'ALL', label: 'Tutti', icon: null as React.ReactNode },
+                 { key: 'LUNCH', label: t('shift.lunch'), icon: <Sun className="h-3.5 w-3.5" /> },
+                 { key: 'DINNER', label: t('shift.dinner'), icon: <Sunset className="h-3.5 w-3.5" /> },
+                 { key: 'ALL', label: t('shift.all'), icon: null as React.ReactNode },
                ] as const).filter(opt => opt.key !== 'ALL' || view === ViewState.DASHBOARD).map(opt => (
                  <button
                    key={opt.key}
@@ -2592,8 +2593,8 @@ const App: React.FC = () => {
               <button
                  onClick={() => setPaletteOpen(true)}
                  className="h-11 w-11 inline-flex items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors"
-                 aria-label="Cerca (⌘K)"
-                 title="Cerca prenotazioni o clienti (⌘K)"
+                 aria-label={t('aria.search')}
+                 title={t('aria.searchTitle')}
               >
                  <Search className="h-[18px] w-[18px]" />
               </button>
@@ -2616,7 +2617,7 @@ const App: React.FC = () => {
                       ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                       : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
                   }`}
-                  aria-label={notificationsUnreadCount > 0 ? `Notifiche, ${notificationsUnreadCount} non lette` : 'Notifiche'}
+                  aria-label={notificationsUnreadCount > 0 ? t('aria.notificationsUnread', { n: notificationsUnreadCount }) : t('nav.items.notifications')}
                   title="Notifiche"
                 >
                   <Bell className="h-[18px] w-[18px]" />
@@ -2714,7 +2715,7 @@ const App: React.FC = () => {
               <SegmentedControl
                 value={view}
                 onChange={next => setView(next)}
-                ariaLabel="Tipo di comunicazione"
+                ariaLabel={t('aria.commsChannel')}
                 iconOnly
                 options={commsChannels.map(c => ({
                   value: c.view,
@@ -2978,7 +2979,7 @@ const App: React.FC = () => {
         )}
 
         {view === ViewState.COMANDE && (
-          <CardErrorBoundary label="Comande">
+          <CardErrorBoundary label={t('nav.items.orders')}>
             <OrderPad
               isInitialLoading={isInitialDataLoading}
               dishes={dishes}
@@ -2997,19 +2998,19 @@ const App: React.FC = () => {
         )}
 
         {view === ViewState.CASSA && (
-          <CardErrorBoundary label="Cassa">
+          <CardErrorBoundary label={t('nav.items.cash')}>
             <CassaPage dishes={dishes} menus={menus} tables={tables} rooms={rooms} reservations={reservations} globalDate={globalDate} globalShiftFilter={globalShiftFilter} onImmersive={setImmersive} onOpenInComande={(tableId) => { setPendingComandeTableId(tableId); setView(ViewState.COMANDE); }} onOpenPagamenti={canAccessView(ViewState.PAGAMENTI) ? () => setView(ViewState.PAGAMENTI) : undefined} />
           </CardErrorBoundary>
         )}
 
         {view === ViewState.CUCINA && (
-          <CardErrorBoundary label="Cucina">
+          <CardErrorBoundary label={t('nav.items.kitchen')}>
             <KitchenDisplay globalDate={globalDate} globalShiftFilter={globalShiftFilter} passeEnabled={passeEnabled} />
           </CardErrorBoundary>
         )}
 
         {view === ViewState.PASSE && (
-          <CardErrorBoundary label="Passe">
+          <CardErrorBoundary label={t('nav.items.passe')}>
             <ExpediterDisplay />
           </CardErrorBoundary>
         )}
@@ -3019,7 +3020,7 @@ const App: React.FC = () => {
         )}
 
         {view === ViewState.FISCALITA && (
-          <CardErrorBoundary label="Fiscalità">
+          <CardErrorBoundary label={t('nav.items.fiscal')}>
             <FiscalitaPage />
           </CardErrorBoundary>
         )}
@@ -3033,7 +3034,7 @@ const App: React.FC = () => {
         )}
 
         {view === ViewState.RECENSIONI && (
-          <CardErrorBoundary label="Recensioni">
+          <CardErrorBoundary label={t('nav.items.reviews')}>
             <RecensioniPage />
           </CardErrorBoundary>
         )}
@@ -3065,7 +3066,7 @@ const App: React.FC = () => {
         )}
 
         {view === ViewState.ASPORTO && (
-          <CardErrorBoundary label="Asporto">
+          <CardErrorBoundary label={t('nav.items.takeaway')}>
             <AsportoPage dishes={dishes} isInitialLoading={isInitialDataLoading} />
           </CardErrorBoundary>
         )}
@@ -3080,7 +3081,7 @@ const App: React.FC = () => {
         )}
 
         {view === ViewState.SETTINGS && (
-          <CardErrorBoundary label="Impostazioni">
+          <CardErrorBoundary label={t('nav.items.settings')}>
           {/* Scorrimento della pagina, non del contenitore: è quello che tiene
               il contenuto sopra la barra di navigazione flottante del telefono
               invece di lasciarlo passare dietro e ricomparire sotto. La colonna
@@ -3102,21 +3103,21 @@ const App: React.FC = () => {
                   className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-3.5 text-[13px] font-medium text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 >
                   <g.Icon size={14} className="flex-shrink-0" />
-                  {g.label}
+                  {t(g.labelKey, g.label)}
                 </button>
               ))}
             </div>
 
             {/* Preferenze personali: valgono per chi è collegato (e per questo
                 dispositivo, nel caso delle push), non per il ristorante. */}
-            <SettingsSection id="imp-profilo" label="Profilo">
+            <SettingsSection id="imp-profilo" label={t('settings.tabProfile')}>
               <div className="space-y-3">
               <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
                 <label htmlFor="preferred-landing" className="mb-1 block text-[15px] font-semibold text-[var(--ds-text-primary)]">
-                  Pagina di partenza
+                  {t('settings.landingPage')}
                 </label>
                 <p className="mb-3 text-[13px] text-[var(--ds-text-muted)]">
-                  La sezione che si apre dopo il login.
+                  {t('settings.landingPageHint')}
                 </p>
                 <select
                   id="preferred-landing"
@@ -3125,51 +3126,22 @@ const App: React.FC = () => {
                     const v = e.target.value || null;
                     try {
                       await updatePreferences({ preferred_landing_view: v });
-                      addToast(v ? 'Pagina di partenza aggiornata' : 'Pagina di partenza ripristinata', 'success');
+                      addToast(v ? t('settings.landingPageSaved') : t('settings.landingPageReset'), 'success');
                     } catch (err: any) {
-                      addToast(err?.message || 'Errore aggiornamento preferenze', 'error');
+                      addToast(err?.message || t('profile.prefsError'), 'error');
                     }
                   }}
                   className={`${dsSelect} sm:max-w-sm`}
                 >
-                  <option value="">Predefinita (prima sezione disponibile)</option>
+                  <option value="">{t('settings.landingPageDefault')}</option>
+                  {/* I nomi delle sezioni li tiene già NAV_ITEMS, con la loro chiave di
+                      traduzione: ripeterli qui erano due elenchi da tenere allineati a mano,
+                      e infatti divergevano già («Lista della Spesa» nel menu, «Lista della
+                      spesa» qui). */}
                   {getAccessibleViews().map(v => {
-                    const labels: Record<ViewState, string> = {
-                      [ViewState.DASHBOARD]: 'Dashboard',
-                      [ViewState.RESERVATIONS]: 'Prenotazioni',
-                      [ViewState.RECEPTION]: 'Reception',
-                      [ViewState.ASPORTO]: 'Asporto',
-                      [ViewState.CHAT_STAFF]: 'Chat staff',
-                      [ViewState.FLOOR_PLAN]: 'Sale & Tavoli',
-                      [ViewState.MENU]: 'Menu',
-                      [ViewState.BANCHETTI]: 'Banchetti',
-                      [ViewState.COMANDE]: 'Comande',
-                      [ViewState.CASSA]: 'Cassa',
-                      [ViewState.CUCINA]: 'Cucina',
-                      [ViewState.PASSE]: 'Passe',
-                      [ViewState.STAFF]: 'Personale',
-                      [ViewState.CLIENTI]: 'Clienti',
-                      [ViewState.INVENTARIO]: 'Inventario',
-                      [ViewState.LISTA_DELLA_SPESA]: 'Lista della spesa',
-                      [ViewState.HACCP]: 'HACCP',
-                      [ViewState.CONVERSAZIONI]: 'Chiamate',
-                      [ViewState.MESSAGGI]: 'Messaggi',
-                      [ViewState.EMAIL]: 'Email',
-                      [ViewState.NOTIFICHE]: 'Notifiche',
-                      [ViewState.PAGAMENTI]: 'Pagamenti',
-                      [ViewState.REPORTISTICA]: 'Reportistica',
-                      [ViewState.FISCALITA]: 'Fiscalità',
-                      [ViewState.ATTIVITA]: 'Attività',
-                      [ViewState.USERS]: 'Utenti',
-                      [ViewState.SETTINGS]: 'Impostazioni',
-                      [ViewState.MONITORING]: 'Consumi AI',
-                      [ViewState.DEVELOPMENT]: 'Development',
-                      [ViewState.ROADMAP]: 'Roadmap',
-                      [ViewState.RECENSIONI]: 'Recensioni',
-                      [ViewState.PLATFORM]: 'Piattaforma',
-                    };
+                    const voce = NAV_ITEMS.find(n => n.view === v);
                     return (
-                      <option key={v} value={v}>{labels[v]}</option>
+                      <option key={v} value={v}>{voce ? t(voce.labelKey, voce.label) : v}</option>
                     );
                   })}
                 </select>
@@ -3180,10 +3152,10 @@ const App: React.FC = () => {
                   dispositivo: la scelta segue l'operatore su ogni palmare. */}
               <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
                 <label htmlFor="preferred-orderpad-layout" className="mb-1 block text-[15px] font-semibold text-[var(--ds-text-primary)]">
-                  Comande sul palmare
+                  {t('settings.orderpadLayout')}
                 </label>
                 <p className="mb-3 text-[13px] text-[var(--ds-text-muted)]">
-                  La forma del menu quando si batte una comanda. Vale su ogni palmare.
+                  {t('settings.orderpadLayoutHint')}
                 </p>
                 <select
                   id="preferred-orderpad-layout"
@@ -3192,15 +3164,15 @@ const App: React.FC = () => {
                     const v = e.target.value || null;
                     try {
                       await updatePreferences({ preferred_orderpad_layout: v });
-                      addToast('Layout comande aggiornato', 'success');
+                      addToast(t('settings.orderpadLayoutSaved'), 'success');
                     } catch (err: any) {
-                      addToast(err?.message || 'Errore aggiornamento preferenze', 'error');
+                      addToast(err?.message || t('profile.prefsError'), 'error');
                     }
                   }}
                   className={`${dsSelect} sm:max-w-sm`}
                 >
-                  <option value="">Classico</option>
-                  <option value="pages">A pagine, come la cassa</option>
+                  <option value="">{t('settings.layoutClassic')}</option>
+                  <option value="pages">{t('settings.layoutPaged')}</option>
                 </select>
               </div>
               {/* Stile dell'interfaccia: 'squadrato' è il redesign dei raggi
@@ -3210,10 +3182,10 @@ const App: React.FC = () => {
                   come il layout comande: segue l'operatore ovunque. */}
               <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
                 <label htmlFor="preferred-design-style" className="mb-1 block text-[15px] font-semibold text-[var(--ds-text-primary)]">
-                  Stile dell'interfaccia
+                  {t('settings.designStyle')}
                 </label>
                 <p className="mb-3 text-[13px] text-[var(--ds-text-muted)]">
-                  La forma di scatole e bottoni, su tutte le pagine.
+                  {t('settings.designStyleHint')}
                 </p>
                 <select
                   id="preferred-design-style"
@@ -3222,15 +3194,15 @@ const App: React.FC = () => {
                     const v = e.target.value || null;
                     try {
                       await updatePreferences({ preferred_design_style: v });
-                      addToast('Stile aggiornato', 'success');
+                      addToast(t('settings.designStyleSaved'), 'success');
                     } catch (err: any) {
-                      addToast(err?.message || 'Errore aggiornamento preferenze', 'error');
+                      addToast(err?.message || t('profile.prefsError'), 'error');
                     }
                   }}
                   className={`${dsSelect} sm:max-w-sm`}
                 >
-                  <option value="">Classico, angoli morbidi</option>
-                  <option value="squadrato">Squadrato, angoli netti</option>
+                  <option value="">{t('settings.designClassic')}</option>
+                  <option value="squadrato">{t('settings.designSquared')}</option>
                 </select>
               </div>
               {/* Lingua dell'interfaccia: per account come le due card qui
@@ -3269,26 +3241,26 @@ const App: React.FC = () => {
 
             {/* Il ristorante in quanto luogo: quando è aperto, cosa è chiuso,
                 le routine di servizio, sala e cucina, l'identità legale. */}
-            <SettingsSection id="imp-ristorante" label="Ristorante">
+            <SettingsSection id="imp-ristorante" label={t('settings.tabRestaurant')}>
               <div className="space-y-3">
                 <SettingsDisclosure
                   icon={Clock}
-                  title="Orari settimanali e chiusure"
-                  description="Gestisci servizi (pranzo/cena), giorni di chiusura e date speciali."
+                  title={t('settings.openingHours')}
+                  description={t('settings.openingHoursHint')}
                 >
                   <OpeningHoursManager showToast={addToast} />
                 </SettingsDisclosure>
                 <SettingsDisclosure
                   icon={DoorClosed}
-                  title="Sale chiuse e tavoli nascosti"
-                  description="Programma o rimuovi chiusure per turno di sale e tavoli."
+                  title={t('settings.closures')}
+                  description={t('settings.closuresHint')}
                 >
                   <ScheduledClosuresManager showToast={addToast} />
                 </SettingsDisclosure>
                 {/* Promemoria automatici (una tantum, giornalieri, settimanali,
                     mensili), incluso il "Promemoria pane". */}
                 <RemindersManager showToast={addToast} />
-                <CardErrorBoundary label="Sala & Cucina">
+                <CardErrorBoundary label={t('settings.floorAndKitchen')}>
                   <SalaCucinaSettingsManager showToast={addToast} />
                 </CardErrorBoundary>
                 {/* Identità del tenant + documenti legali generati. */}
@@ -3299,21 +3271,21 @@ const App: React.FC = () => {
             {/* Tutto ciò che governa come nascono e si comportano le
                 prenotazioni: canali di ingresso, risposte all'ospite, opzioni
                 del modal, caparra, blacklist, logica tavoli. */}
-            <SettingsSection id="imp-prenotazioni" label="Prenotazioni">
+            <SettingsSection id="imp-prenotazioni" label={t('nav.items.reservations')}>
               <div className="space-y-3">
                 {/* Solo il canale web: la scheda di Sofia sta nella sezione AI. */}
                 <FeatureTogglesManager showToast={addToast} only="web" />
                 <SettingsDisclosure
                   icon={MessagesSquare}
-                  title="Canali di risposta"
-                  description="Con quale strumento rispondere all'ospite per ogni fonte di prenotazione: ordine di priorità e fallback tra email, WhatsApp e SMS."
+                  title={t('settings.replyChannels')}
+                  description={t('settings.replyChannelsHint')}
                 >
                   <BookingChannelsManager showToast={addToast} />
                 </SettingsDisclosure>
                 <SettingsDisclosure
                   icon={StickyNote}
-                  title="Note rapide prenotazione"
-                  description="Chip suggeriti nel modal di prenotazione. Ogni nota può avere un'icona che appare nella card. Trascina per riordinare."
+                  title={t('settings.quickNotes')}
+                  description={t('settings.quickNotesHint')}
                 >
                   <ReservationNotesManager showToast={addToast} />
                 </SettingsDisclosure>
@@ -3321,8 +3293,8 @@ const App: React.FC = () => {
                 <SettingsDisclosure
                   icon={AlertTriangle}
                   iconTone="pending"
-                  title="Intolleranze"
-                  description="Chip suggeriti nella sezione Intolleranze del modal prenotazione. Trascina per riordinare."
+                  title={t('settings.allergens')}
+                  description={t('settings.allergensHint')}
                 >
                   <ReservationAllergensManager showToast={addToast} />
                 </SettingsDisclosure>
@@ -3333,8 +3305,8 @@ const App: React.FC = () => {
                   <SettingsDisclosure
                     icon={CreditCard}
                     iconTone="positive"
-                    title="Caparra automatica"
-                    description="Per le prenotazioni web sopra una certa soglia di coperti invia un link Revolut per la caparra (€10/persona) via SMS."
+                    title={t('settings.autoDeposit')}
+                    description={t('settings.autoDepositHint')}
                   >
                     <AutoDepositManager showToast={addToast} />
                   </SettingsDisclosure>
@@ -3346,7 +3318,7 @@ const App: React.FC = () => {
                   icon={Ban}
                   iconTone="pending"
                   title="Blacklist"
-                  description="Per ogni fonte decidi se un numero in blacklist viene bloccato o entra con l'avviso allo staff."
+                  description={t('settings.blacklistHint')}
                 >
                   <BlacklistPolicyManager showToast={addToast} />
                 </SettingsDisclosure>
@@ -3357,15 +3329,15 @@ const App: React.FC = () => {
                 minuti di preparazione, stop per data. Visibile solo col
                 modulo venduto. */}
             {hasFeature('takeaway') && (
-              <SettingsSection id="imp-asporto" label="Asporto">
-                <CardErrorBoundary label="Impostazioni asporto">
+              <SettingsSection id="imp-asporto" label={t('nav.items.takeaway')}>
+                <CardErrorBoundary label={t('settings.takeaway')}>
                   <TakeawaySettingsCard showToast={addToast} />
                 </CardErrorBoundary>
               </SettingsSection>
             )}
 
             {/* Gateway e regole dei pagamenti. */}
-            <SettingsSection id="imp-pagamenti" label="Pagamenti">
+            <SettingsSection id="imp-pagamenti" label={t('nav.items.payments')}>
               <div className="space-y-3">
                 <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
                   <div className="flex min-h-[40px] items-center justify-between gap-3">
@@ -3373,12 +3345,12 @@ const App: React.FC = () => {
                       <SettingsIcon icon={CreditCard} />
                       <div className="min-w-0">
                         <h4 className="text-[15px] font-semibold text-[var(--ds-text-primary)]">Stripe Connect</h4>
-                        <p className="text-[13px] text-[var(--ds-text-muted)]">Gateway di pagamento</p>
+                        <p className="text-[13px] text-[var(--ds-text-muted)]">{t('settings.paymentGateway')}</p>
                       </div>
                     </div>
                     <StatusPill tone="positive" className="flex-shrink-0">
                       <span className="h-1.5 w-1.5 rounded-full bg-[var(--ds-seated-solid)]" aria-hidden />
-                      Attivo (simulato)
+                      {t('settings.activeSimulated')}
                     </StatusPill>
                   </div>
                 </div>
@@ -3391,7 +3363,7 @@ const App: React.FC = () => {
                 {/* Add-on commerciale: senza pay_at_table nel piano la card
                     non compare (e il server maschera comunque il flag). */}
                 {hasFeature('pay_at_table') && (
-                  <CardErrorBoundary label="Conto al tavolo">
+                  <CardErrorBoundary label={t('settings.payAtTable')}>
                     <PayAtTableSettingsManager showToast={addToast} />
                   </CardErrorBoundary>
                 )}
@@ -3399,8 +3371,8 @@ const App: React.FC = () => {
                     sistema che finiscono su ogni comanda. A zero non compaiono. */}
                 <SettingsDisclosure
                   icon={ConciergeBell}
-                  title="Coperto e servizio"
-                  description="Coperto fisso a persona e servizio percentuale sui piatti, come righe del conto."
+                  title={t('settings.coverAndService')}
+                  description={t('settings.coverAndServiceHint')}
                 >
                   <ChargeSettingsManager showToast={addToast} />
                 </SettingsDisclosure>
@@ -3409,8 +3381,8 @@ const App: React.FC = () => {
                 <SettingsDisclosure
                   icon={CreditCard}
                   iconTone="pending"
-                  title="Scadenza link di pagamento"
-                  description="Annulla da solo i link non pagati dopo una soglia di ore e avvisa il cliente che la prenotazione non è confermata."
+                  title={t('settings.linkExpiry')}
+                  description={t('settings.linkExpiryHint')}
                 >
                   <PaymentLinkExpiryManager showToast={addToast} />
                 </SettingsDisclosure>
@@ -3422,9 +3394,9 @@ const App: React.FC = () => {
                 tavolo nel piano, perché l'emissione parte dalla sua
                 chiusura (stesso gate del chip in SETTINGS_GROUPS). */}
             {hasFeature('pay_at_table') && (
-              <SettingsSection id="imp-fiscalita" label="Fiscalità">
+              <SettingsSection id="imp-fiscalita" label={t('nav.items.fiscal')}>
                 <div className="space-y-3">
-                  <CardErrorBoundary label="Fiscalità">
+                  <CardErrorBoundary label={t('nav.items.fiscal')}>
                     <FiscalSettingsManager showToast={addToast} />
                   </CardErrorBoundary>
                   {/* L'aliquota vive sul piatto: qui solo la strada per
@@ -3432,8 +3404,8 @@ const App: React.FC = () => {
                   {canAccessView(ViewState.MENU) && (
                     <SettingsNavCard
                       icon={Percent}
-                      title="Aliquote IVA"
-                      description="L'aliquota si imposta piatto per piatto nel menù (default 10%). Coperto e servizio al 10%."
+                      title={t('settings.vatRates')}
+                      description={t('settings.vatRatesHint')}
                       onClick={() => setView(ViewState.MENU)}
                     />
                   )}
@@ -3444,18 +3416,18 @@ const App: React.FC = () => {
             {/* I canali con cui il ristorante scrive e riceve: email in
                 uscita e in entrata, allegati. Le risposte AI ai messaggi
                 stanno nella sezione AI. */}
-            <SettingsSection id="imp-comunicazioni" label="Comunicazioni">
+            <SettingsSection id="imp-comunicazioni" label={t('nav.groups.communications')}>
               <div className="space-y-3">
-                <CardErrorBoundary label="Server Email (SMTP)">
+                <CardErrorBoundary label={t('settings.smtp')}>
                   <SmtpIntegrationCard showToast={addToast} />
                 </CardErrorBoundary>
-                <CardErrorBoundary label="Ricezione Email (IMAP)">
+                <CardErrorBoundary label={t('settings.imap')}>
                   <ImapIntegrationCard showToast={addToast} />
                 </CardErrorBoundary>
                 <CardErrorBoundary label="Media">
                   <MediaLibraryManager showToast={addToast} />
                 </CardErrorBoundary>
-                <CardErrorBoundary label="Chat staff">
+                <CardErrorBoundary label={t('nav.items.staffChat')}>
                   <StaffChatPresetsCard showToast={addToast} />
                 </CardErrorBoundary>
               </div>
@@ -3465,8 +3437,8 @@ const App: React.FC = () => {
                 visita e — col profilo collegato — risposte dalla pagina
                 Recensioni. Visibile solo col modulo venduto. */}
             {hasFeature('reviews') && (
-              <SettingsSection id="imp-recensioni" label="Recensioni">
-                <CardErrorBoundary label="Richiesta di recensione">
+              <SettingsSection id="imp-recensioni" label={t('nav.items.reviews')}>
+                <CardErrorBoundary label={t('settings.reviewRequest')}>
                   <ReviewSettingsCard showToast={addToast} />
                 </CardErrorBoundary>
               </SettingsSection>
@@ -3478,12 +3450,12 @@ const App: React.FC = () => {
             <SettingsSection id="imp-ai" label="AI">
               <div className="space-y-3">
                 <FeatureTogglesManager showToast={addToast} only="voice" />
-                <CardErrorBoundary label="Messaggi con AI">
+                <CardErrorBoundary label={t('settings.aiMessages')}>
                   <AiMessagesSettingsManager showToast={addToast} />
                 </CardErrorBoundary>
                 {/* Istruzioni testuali per una futura assegnazione tavoli
                     guidata da AI; oggi il testo è solo salvato. */}
-                <CardErrorBoundary label="Prompt logica tavoli per AI">
+                <CardErrorBoundary label={t('settings.aiTablePrompt')}>
                   <TableAssignmentAiPromptCard showToast={addToast} />
                 </CardErrorBoundary>
               </div>
@@ -3492,20 +3464,20 @@ const App: React.FC = () => {
             {/* Utenti, ruoli e log: visibile solo a chi può usarne
                 almeno una card. */}
             {(canManageUsers() || canViewLogs()) && (
-              <SettingsSection id="imp-amministrazione" label="Amministrazione">
+              <SettingsSection id="imp-amministrazione" label={t('settings.tabAdmin')}>
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                   {canManageUsers() && (
                     <>
                       <SettingsNavCard
                         icon={Users}
-                        title="Gestione utenti"
-                        description="Crea, modifica, elimina utenti"
+                        title={t('settings.userManagement')}
+                        description={t('settings.userManagementHint')}
                         onClick={() => setView(ViewState.USERS)}
                       />
                       <SettingsNavCard
                         icon={ShieldCheck}
-                        title="Permessi ruoli"
-                        description="Configura i permessi per ogni ruolo"
+                        title={t('settings.rolePermissions')}
+                        description={t('settings.rolePermissionsHint')}
                         onClick={() => setShowRolePermissions(true)}
                       />
                     </>
@@ -3513,8 +3485,8 @@ const App: React.FC = () => {
                   {canViewLogs() && (
                     <SettingsNavCard
                       icon={FileText}
-                      title="Log attività"
-                      description="Operazioni degli utenti"
+                      title={t('settings.activityLog')}
+                      description={t('settings.activityLogHint')}
                       onClick={() => setShowActivityLogs(true)}
                     />
                   )}
@@ -3546,7 +3518,7 @@ const App: React.FC = () => {
             immersive ? 'hidden' : ''
           }`}
           style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)' }}
-          aria-label="Navigazione mobile"
+          aria-label={t('aria.mobileNav')}
         >
           <div className="flex items-stretch py-2 px-2 gap-1">
             {view !== ViewState.PLATFORM && canAccessView(ViewState.DASHBOARD) && (
@@ -3626,10 +3598,10 @@ const App: React.FC = () => {
             >
               <div className="p-5 grid grid-cols-2 gap-4 justify-items-center">
                 {[
-                  { key: 'reservation', icon: <Calendar className="h-7 w-7" />, label: 'Prenotazione', action: () => { setNewReservationKind('standard'); setAutoOpenNewReservation(true); setShowCreateSheet(false); } },
+                  { key: 'reservation', icon: <Calendar className="h-7 w-7" />, label: t('entity.booking'), action: () => { setNewReservationKind('standard'); setAutoOpenNewReservation(true); setShowCreateSheet(false); } },
                   { key: 'walkin', icon: <UserCheck className="h-7 w-7" />, label: 'Walk-in', action: () => { setNewReservationKind('walkin'); setAutoOpenNewReservation(true); setShowCreateSheet(false); } },
                   { key: 'shopping', icon: <ShoppingCart className="h-7 w-7" />, label: 'Spesa', action: () => { setView(ViewState.LISTA_DELLA_SPESA); setAutoOpenNewShoppingItem(true); setShowCreateSheet(false); } },
-                  { key: 'customer', icon: <BookUser className="h-7 w-7" />, label: 'Cliente', action: () => { setView(ViewState.CLIENTI); setAutoOpenNewCustomer(true); setShowCreateSheet(false); } },
+                  { key: 'customer', icon: <BookUser className="h-7 w-7" />, label: t('entity.customer'), action: () => { setView(ViewState.CLIENTI); setAutoOpenNewCustomer(true); setShowCreateSheet(false); } },
                 ].map((tile, i) => (
                   <button
                     key={tile.key}
@@ -3678,7 +3650,7 @@ const App: React.FC = () => {
                   {user?.full_name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || 'U'}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-[15px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)] truncate">{user?.full_name || 'Utente'}</p>
+                  <p className="text-[15px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)] truncate">{user?.full_name || t('entity.user')}</p>
                   <p className="text-[13px] text-[var(--ds-text-muted)] truncate">{user?.role ? getRoleDisplayName(user.role) : ''}</p>
                 </div>
                 <ChevronRight className="h-4 w-4 shrink-0 text-[var(--ds-text-subtle)]" />
@@ -3741,7 +3713,7 @@ const App: React.FC = () => {
                   className="w-full flex items-center gap-3 px-3 h-12 rounded-[var(--ds-radius)] transition-colors"
                 >
                   {theme === 'dark' ? <Sun className="h-5 w-5 text-[var(--ds-text-secondary)]" /> : <Moon className="h-5 w-5 text-[var(--ds-text-secondary)]" />}
-                  <span className="text-[15px] font-medium tracking-[-0.01em] text-[var(--ds-text-primary)]">Modalità scura</span>
+                  <span className="text-[15px] font-medium tracking-[-0.01em] text-[var(--ds-text-primary)]">{t('nav.items.darkMode')}</span>
                   <span
                     aria-hidden
                     className={`ml-auto relative inline-flex h-[26px] w-11 shrink-0 items-center rounded-[var(--ds-radius-control)] transition-colors ${theme === 'dark' ? 'bg-[var(--ds-action-bg)]' : 'bg-[var(--ds-border-strong)]'}`}
