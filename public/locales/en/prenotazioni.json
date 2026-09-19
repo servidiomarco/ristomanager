@@ -1,7 +1,6 @@
 {
   "toolbar": {
     "searchPlaceholder": "Search by name or phone",
-    "sort": "Sort",
     "filters": "Filters",
     "print": "Print",
     "channelOptions": "Booking channel options"
@@ -18,7 +17,8 @@
     "guestsDesc": "Covers (most → fewest)"
   },
   "filters": {
-    "title": "Filters",
+    "title": "Filter by",
+    "reset": "Reset",
     "room": "Room",
     "allRooms": "All",
     "paymentStatus": "Payment status",

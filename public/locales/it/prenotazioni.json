@@ -1,7 +1,6 @@
 {
   "toolbar": {
     "searchPlaceholder": "Cerca per nome o telefono",
-    "sort": "Ordina",
     "filters": "Filtri",
     "print": "Stampa",
     "channelOptions": "Opzioni canali di prenotazione"
@@ -18,7 +17,8 @@
     "guestsDesc": "Coperti (più → meno)"
   },
   "filters": {
-    "title": "Filtri",
+    "title": "Filtra per",
+    "reset": "Reimposta",
     "room": "Sala",
     "allRooms": "Tutte",
     "paymentStatus": "Stato pagamento",
