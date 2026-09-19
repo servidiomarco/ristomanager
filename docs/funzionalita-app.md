@@ -658,6 +658,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-19 | Messaggi: WhatsApp e SMS; Pagamenti, conto al tavolo e cassa | Gli importi nei messaggi all'ospite sono scritti nella moneta del ristorante (link del conto e dell'asporto, richiesta e conferma caparra, avviso di rimborso). Per i ristoranti italiani la scrittura resta identica a prima, «€ 15,00». |
 | 2026-09-19 | Pagamenti, conto al tavolo e cassa | I pagamenti nascono nella **valuta del ristorante**, non più in euro per definizione: link del conto, acconti richiesti a mano e caparre automatiche (sito, Sofia, WhatsApp) addebitano e registrano la moneta del locale. Per i ristoranti italiani non cambia nulla. |
 | 2026-09-19 | Funzionalità trasversali | Ogni ristorante porta con sé **valuta, fuso orario e paese** (per ora tutti in Italia: euro, ora di Roma). È la base per i clienti esteri — da sola non cambia nulla di quello che si vede, ma è ciò che permetterà a un locale a Londra di lavorare in sterline e con il proprio orario. |
 | 2026-09-19 | Prenotazioni; Pagamenti, conto al tavolo e cassa | Con la lingua inglese la scheda della prenotazione è in inglese anche nei passi **Pagamenti** (conto al tavolo, stato del conto, richiesta acconto e scelta del canale) e **Comunicazione** (esiti dei messaggi inviati: consegnato, inviato, fallito, in coda). |

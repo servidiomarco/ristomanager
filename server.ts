@@ -5644,6 +5644,7 @@ app.post('/reservations/:id/bill/notify', authenticate, requirePermission('payme
             return res.status(400).json({ error: 'La prenotazione non ha un numero di telefono' });
         }
         const guestLanguage = resolveGuestLanguage(reservation);
+        const tenantCurrency = (await getTenantLocale(req.tenantId!)).currency;
 
         const billRow = await queryWithRetry(
             `SELECT id, total_cents, covers, share_token, status
@@ -5669,7 +5670,8 @@ app.post('/reservations/:id/bill/notify', authenticate, requirePermission('payme
             Number(bill.total_cents),
             Number(bill.covers) || 1,
             publicUrl,
-            guestLanguage
+            guestLanguage,
+            tenantCurrency
         );
 
         try {
@@ -10030,9 +10032,36 @@ app.post('/messages/send', authenticate, requireFeature('whatsapp'), requirePerm
 // PAYMENT LINK REQUESTS (Revolut hosted checkout)
 // ============================================
 
-// Format an amount in minor units as an Italian euro string ("€ 15,00").
+// Un importo in centesimi, scritto come lo scrive il paese del ristorante.
+//
+// Per l'euro l'uscita è IDENTICA a quella di sempre — "€ 15,00", simbolo
+// davanti e virgola decimale: è la stringa che i clienti italiani leggono da
+// due anni in SMS, WhatsApp ed email, e non deve cambiare di un carattere.
+// Per questo la composizione resta a mano invece di passare a
+// Intl.NumberFormat, che per l'italiano produrrebbe "15,00 €" (simbolo in
+// coda) e cambierebbe ogni messaggio già in produzione.
+//
+// Le altre monete seguono la loro convenzione: simbolo attaccato e punto
+// decimale per sterlina e dollaro, codice davanti dove un simbolo non c'è.
+const MONEY_FORMAT: Record<string, { symbol: string; decimal: ',' | '.'; spaced: boolean }> = {
+    EUR: { symbol: '€',   decimal: ',', spaced: true },
+    GBP: { symbol: '£',   decimal: '.', spaced: false },
+    USD: { symbol: '$',   decimal: '.', spaced: false },
+    CHF: { symbol: 'CHF', decimal: '.', spaced: true },
+    AED: { symbol: 'AED', decimal: '.', spaced: true },
+};
+
+function formatMoneyMinor(cents: number, currency: string = 'EUR'): string {
+    const code = String(currency || 'EUR').toUpperCase();
+    const fmt = MONEY_FORMAT[code] ?? { symbol: code, decimal: '.' as const, spaced: true };
+    const amount = (cents / 100).toFixed(2).replace('.', fmt.decimal);
+    return `${fmt.symbol}${fmt.spaced ? ' ' : ''}${amount}`;
+}
+
+/** @deprecated Resta per i punti che non conoscono ancora il tenant: dove lo
+ *  conoscono si usa formatMoneyMinor con la valuta del ristorante. */
 function formatEuroMinor(cents: number): string {
-    return `€ ${(cents / 100).toFixed(2).replace('.', ',')}`;
+    return formatMoneyMinor(cents, 'EUR');
 }
 
 // Base URL where the SPA is served (the pay-at-table page lives at
@@ -10050,8 +10079,8 @@ function payAtTableBaseUrl(): string {
 // flow yet — keep it short so a single SMS segment covers it.
 // Card #34 (cluster pagamenti): ramo inglese su isEnglishGuest come i
 // messaggi di prenotazione. Senza language si resta sull'italiano storico.
-function buildTableBillLinkMessage(customerName: string, amountCents: number, covers: number, url: string, language?: string | null): string {
-    const amount = formatEuroMinor(amountCents);
+function buildTableBillLinkMessage(customerName: string, amountCents: number, covers: number, url: string, language?: string | null, currency?: string): string {
+    const amount = formatMoneyMinor(amountCents, currency);
     if (isEnglishGuest(language)) {
         const coversLabel = covers === 1 ? '1 guest' : `${covers} guests`;
         return `Hi ${toTitleCase(customerName)}, here is the link to pay your table bill (${coversLabel} · total ${amount}): ${url}\nThank you!`;
@@ -10062,8 +10091,8 @@ function buildTableBillLinkMessage(customerName: string, amountCents: number, co
 
 // La variante asporto: niente coperti (sull'asporto sarebbero un dato
 // falso), al loro posto l'ora di ritiro. Corto: un segmento SMS.
-function buildTakeawayBillLinkMessage(customerName: string, amountCents: number, pickupTime: string | null, url: string, language?: string | null): string {
-    const amount = formatEuroMinor(amountCents);
+function buildTakeawayBillLinkMessage(customerName: string, amountCents: number, pickupTime: string | null, url: string, language?: string | null, currency?: string): string {
+    const amount = formatMoneyMinor(amountCents, currency);
     if (isEnglishGuest(language)) {
         const when = pickupTime ? ` at ${pickupTime}` : '';
         return `Hi ${toTitleCase(customerName)}, here is the link to pay for your takeaway order${when} (total ${amount}): ${url}\nThank you!`;
@@ -10077,8 +10106,8 @@ function buildTakeawayBillLinkMessage(customerName: string, amountCents: number,
 // WhatsApp isn't available. La `description` è testo scritto dallo staff (ed
 // è anche la description dell'ordine sul gateway): resta com'è in entrambe
 // le lingue, si traduce solo la cornice.
-function buildPaymentMessage(customerName: string, amountCents: number, url: string, description?: string | null, language?: string | null): string {
-    const amount = formatEuroMinor(amountCents);
+function buildPaymentMessage(customerName: string, amountCents: number, url: string, description?: string | null, language?: string | null, currency?: string): string {
+    const amount = formatMoneyMinor(amountCents, currency);
     const desc = (description || '').trim();
     if (isEnglishGuest(language)) {
         const intro = `Hi ${toTitleCase(customerName)}, to complete your reservation at ${businessIdentity().name} we need a deposit of ${amount}.`;
@@ -10147,10 +10176,11 @@ function buildDepositRequestMessage(
     amountCents: number,
     checkoutUrl: string,
     perPersonCents: number = DEPOSIT_DEFAULTS.perPersonCents,
-    language?: string | null
+    language?: string | null,
+    currency?: string
 ): string {
-    const amount = formatEuroMinor(amountCents);
-    const perPerson = formatEuroMinor(perPersonCents);
+    const amount = formatMoneyMinor(amountCents, currency);
+    const perPerson = formatMoneyMinor(perPersonCents, currency);
     // Niente link alle condizioni qui: l'SMS resta su due segmenti e il
     // cliente le trova sulla pagina di prenotazione (l'email invece lo porta,
     // dove non costa nulla).
@@ -10169,13 +10199,14 @@ function buildDepositConfirmationMessage(
     guests: number | null | undefined,
     amountCents: number,
     roomName?: string | null,
-    language?: string | null
+    language?: string | null,
+    currency?: string
 ): string {
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime));
     const fullName = toTitleCase(customerName);
     const guestsNum = Math.max(1, Math.trunc(Number(guests) || 1));
     const room = (roomName ?? '').trim();
-    const amount = formatEuroMinor(amountCents);
+    const amount = formatMoneyMinor(amountCents, currency);
     if (isEnglishGuest(language)) {
         const greeting = fullName ? `Hi ${fullName}` : 'Hi';
         const guestsLabel = guestsNum === 1 ? 'guest' : 'guests';
@@ -10202,10 +10233,11 @@ function buildRefundNotificationMessage(
     customerName: string | null | undefined,
     amountCents: number,
     reservationTime?: string | Date | null,
-    language?: string | null
+    language?: string | null,
+    currency?: string
 ): string {
     const fullName = toTitleCase(customerName);
-    const amount = formatEuroMinor(amountCents);
+    const amount = formatMoneyMinor(amountCents, currency);
     if (isEnglishGuest(language)) {
         const greeting = fullName ? `Hi ${fullName}` : 'Hi';
         let when = '';
@@ -10566,7 +10598,7 @@ app.post('/payments/requests', authenticate, requirePermission('reservations:ful
             guestLanguage,
             Number(reservation.guests) || null
         );
-        const message = buildPaymentMessage(reservation.customer_name, amountCents, order.checkoutUrl, orderDescription, guestLanguage);
+        const message = buildPaymentMessage(reservation.customer_name, amountCents, order.checkoutUrl, orderDescription, guestLanguage, tenantCurrency);
 
         const deliver = async (): Promise<{ channel: string | null; sid: string | null }> => {
             if (channel === 'email') {
@@ -10949,7 +10981,8 @@ async function applyPaymentOrderTransition(
                         reservation.guests,
                         row.amount_cents,
                         roomName,
-                        guestLanguage
+                        guestLanguage,
+                        (await getTenantLocale(Number(row.tenant_id) || PUBLIC_TENANT_ID)).currency
                     );
                     // Transizione invocata sia da webhook sia da riconciliatore:
                     // niente JWT in mano, il tenant è quello della payment_request.
@@ -11458,7 +11491,8 @@ app.post('/payments/:id/refund', authenticate, requirePermission('payments:full'
                         reservation.customer_name,
                         payment.amount_cents,
                         reservation.reservation_time,
-                        resolveGuestLanguage(reservation)
+                        resolveGuestLanguage(reservation),
+                        (await getTenantLocale(req.tenantId!)).currency
                     );
                     // No Meta-approved template exists for refunds, so this
                     // goes out as SMS (sendBookingConfirmation only attempts
@@ -25124,8 +25158,9 @@ app.post('/takeaway/orders/:id/bill/notify', authenticate, requireFeature('takea
         // telefono è l'informazione in mano — stesso fallback documentato in
         // utils/language.ts per lo storico prenotazioni.
         const guestLanguage = detectLanguageFromPhonePrefix(tw.customer_phone);
+        const takeawayCurrency = (await getTenantLocale(req.tenantId!)).currency;
         const message = buildTakeawayBillLinkMessage(
-            tw.customer_name, Number(bill.total_cents), tw.pickup_time, publicUrl, guestLanguage
+            tw.customer_name, Number(bill.total_cents), tw.pickup_time, publicUrl, guestLanguage, takeawayCurrency
         );
 
         try {
@@ -28870,11 +28905,12 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
         let depositCheckoutUrl: string | null = null;
         let depositAmountCents = 0;
         const depositPolicy = depositRequired ? await getAutoDepositPolicy(tenantId) : null;
+        // Serve sia all'ordine sia al messaggio che lo annuncia: una lettura sola.
+        const depositCurrency = (await getTenantLocale(tenantId)).currency;
         if (depositRequired) {
             depositAmountCents = guestsNum * (depositPolicy?.perPersonCents ?? DEPOSIT_DEFAULTS.perPersonCents);
             const orderDescription = `Caparra prenotazione #${created.id} - ${guestsLabel} ${dateLabel} ${time}`;
             try {
-                const depositCurrency = (await getTenantLocale(tenantId)).currency;
                 const order = await createPaymentOrder(tenantId, {
                     amount: depositAmountCents,
                     currency: depositCurrency,
@@ -28923,7 +28959,8 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
                 depositAmountCents,
                 depositCheckoutUrl,
                 depositPolicy?.perPersonCents,
-                language
+                language,
+                depositCurrency
               )
             : confirmedNow
                 ? buildConfirmationMessage(customer_name, created.reservation_time, guestsNum, ackRoomName, language)
