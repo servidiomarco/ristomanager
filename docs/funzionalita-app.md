@@ -657,6 +657,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-19 | Messaggi: WhatsApp e SMS | Il suggerimento di risposta AI segue la lingua del cliente: su una conversazione in inglese la bozza proposta allo staff esce in inglese (stessa regola dell'agente WhatsApp), non più sempre in italiano. |
 | 2026-09-18 | Messaggi: WhatsApp e SMS | I numeri con e senza +39 sono lo stesso thread anche per i cellulari storici a 9 cifre: la risposta del cliente non apre più una conversazione doppia (chiave nazionale del numero su lista, chat, letto e aggancio prenotazione); stessa correzione sul riconoscimento del chiamante di Sofia, sull'aggancio rubrica delle prenotazioni (niente clienti doppioni da un +39 in più), su blacklist e anti-doppio-invio della pagina pubblica. |
 | 2026-09-18 | Funzionalità trasversali | Il banner «Nuova versione disponibile» non ricompare più dopo «Ricarica»: ora si confronta con la versione del frontend pubblicato (non più col backend), quindi appare solo quando ricaricare porta davvero l'aggiornamento. |
 | 2026-09-18 | Agente vocale "Sofia" | Il nome sulla prenotazione è protetto dalla rubrica: numero già registrato con un altro nome ⇒ Sofia chiede se è per il titolare o per un'altra persona prima di salvare; il nome detto a metà si completa da rubrica, l'intestatario diverso porta in nota il titolare del numero (vale anche per le proposte WhatsApp approvate dallo staff, senza domanda). |
