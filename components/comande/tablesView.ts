@@ -129,26 +129,33 @@ export const staleOrderLabel = (order: OpenOrderSummary): string => {
   return `appesa dal ${d}/${m}`;
 };
 
+/** La riga di una comanda aperta: «134,00 € · 2ª in cucina», «62,00 € ·
+ *  appesa da ieri». Estratta da tableStatusLine perché la chiede anche il
+ *  modal del tavolo in pianta sala, che una TableRow non ce l'ha. */
+export const openOrderLine = (order: OpenOrderSummary | null | undefined): string => {
+  // Il campo può non esserci: frontend e backend si deployano separati, e
+  // fra i due c'è sempre una finestra in cui il nuovo parla col vecchio.
+  // Senza questa guardia la tessera scriveva «NaN €».
+  const money = typeof order?.total_cents === 'number' ? euro(order.total_cents) : null;
+  // L'appesa dice DA QUANDO pende, non a che punto è l'uscita: lo stato di
+  // cucina di ieri sera è storia, il conto da chiudere è la notizia.
+  if (order?.stale) {
+    const label = staleOrderLabel(order);
+    return money ? `${money} · ${label}` : label;
+  }
+  // Comanda aperta e ancora intonsa: nessuna uscita di cui dire lo stato.
+  const course = order?.course;
+  const what = course ? `${ordinal(course.course_no)} ${COURSE_BADGE[course.status].text}` : 'comanda aperta';
+  return money ? `${money} · ${what}` : what;
+};
+
 /** «134,00 € · 2ª in cucina», «62,00 € · da incassare», «21:30», «libero». */
 export const tableStatusLine = (row: TableRow): string => {
   if (row.state === 'bill') {
     return typeof row.billCents === 'number' ? `${euro(row.billCents)} · da incassare` : 'da incassare';
   }
   if (row.state === 'order') {
-    // Il campo può non esserci: frontend e backend si deployano separati, e
-    // fra i due c'è sempre una finestra in cui il nuovo parla col vecchio.
-    // Senza questa guardia la tessera scriveva «NaN €».
-    const money = typeof row.order?.total_cents === 'number' ? euro(row.order.total_cents) : null;
-    // L'appesa dice DA QUANDO pende, non a che punto è l'uscita: lo stato di
-    // cucina di ieri sera è storia, il conto da chiudere è la notizia.
-    if (row.order?.stale) {
-      const label = staleOrderLabel(row.order);
-      return money ? `${money} · ${label}` : label;
-    }
-    // Comanda aperta e ancora intonsa: nessuna uscita di cui dire lo stato.
-    const course = row.order?.course;
-    const what = course ? `${ordinal(course.course_no)} ${COURSE_BADGE[course.status].text}` : 'comanda aperta';
-    return money ? `${money} · ${what}` : what;
+    return openOrderLine(row.order);
   }
   if (row.state === 'booked' && row.reservation) {
     return getRomeTimePart(row.reservation.reservation_time);

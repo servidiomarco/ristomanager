@@ -92,8 +92,13 @@ interface OrderPadProps {
    *  rispondeva ma con `tables` ancora vuoto: un flash di «Nessun tavolo in
    *  questo stato» prima dei tavoli veri (visto da telefono, 14/09). */
   isInitialLoading?: boolean;
-  /** Tavolo da aprire subito (arrivando da Cassa · «Apri in Comande»). */
-  initialTableId?: number | null;
+  /** Tavolo da aprire subito (arrivando da Cassa · «Apri in Comande», o dalla
+   *  pianta sala di Prenotazioni). Chi arriva da un walk-in appena registrato
+   *  porta con sé prenotazione e coperti: lo stato `reservations` di questo
+   *  componente potrebbe non averli ancora, e i coperti ripiegherebbero sui
+   *  posti del tavolo. `forceCreate` serve al tavolo che ha un conto da
+   *  incassare di una tavolata precedente: lì la comanda nuova è voluta. */
+  initialTable?: { tableId: number; reservationId?: number; covers?: number; forceCreate?: boolean } | null;
   onInitialTableConsumed?: () => void;
   dishes: Dish[];
   /** I menu del ristorante: qui serve solo Alla carta, per battere in
@@ -117,7 +122,7 @@ interface OrderPadProps {
   brand?: React.ReactNode;
 }
 
-export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, dishes: allDishes, menus, tables, rooms = [], reservations, globalDate, globalShiftFilter, onImmersive, initialTableId, onInitialTableConsumed, brand: padBrand }) => {
+export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, dishes: allDishes, menus, tables, rooms = [], reservations, globalDate, globalShiftFilter, onImmersive, initialTable, onInitialTableConsumed, brand: padBrand }) => {
   const { isConnected } = useSocket();
   // L'orologio della pastiglia Live. Un tick al minuto: l'ora al minuto non
   // ha bisogno di più, e un secondo di intervallo ridisegnerebbe la griglia
@@ -443,13 +448,16 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
   const isTodayRome = selectedDateRome === getRomeDatePart(new Date());
 
   useEffect(() => {
-    if (initialTableId == null) return;
-    loadTable(initialTableId);
+    if (!initialTable) return;
+    loadTable(initialTable.tableId, initialTable);
     onInitialTableConsumed?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialTableId]);
+  }, [initialTable]);
 
-  const loadTable = useCallback(async (id: number, opts?: { forceCreate?: boolean }) => {
+  const loadTable = useCallback(async (
+    id: number,
+    opts?: { forceCreate?: boolean; reservationId?: number; covers?: number },
+  ) => {
     setBusy(true); setError(null);
     try {
       let view = await ordersApiService.getOrderByTable(id, serviceQuery);
@@ -483,9 +491,12 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
         // I coperti arrivano dalla prenotazione; per un walk-in la stima
         // migliore sono i posti del tavolo. Uno è quasi sempre sbagliato, e
         // il numero conta: alimenterà lo split equo del conto (PR 6).
-        const covers = res?.guests ?? tables.find(t => t.id === id)?.seats;
+        // Chi ci manda qui dalla pianta sala i coperti li ha appena chiesti
+        // all'operatore: quelli vincono, e non dipendono dal fatto che la
+        // prenotazione walk-in sia già arrivata in questo stato.
+        const covers = opts?.covers ?? res?.guests ?? tables.find(t => t.id === id)?.seats;
         view = await ordersApiService.openOrder(
-          { table_id: id, reservation_id: res?.id, covers },
+          { table_id: id, reservation_id: opts?.reservationId ?? res?.id, covers },
           newIdempotencyKey(),
         );
         // `reused` = la comanda esisteva già (creata da un altro palmare che

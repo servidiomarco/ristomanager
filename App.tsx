@@ -719,8 +719,14 @@ const App: React.FC = () => {
   // la vista monta.
   const [pendingStaffChatThread, setPendingStaffChatThread] = useState<string | null>(null);
 
-  // Cassa · «Apri in Comande»: il tavolo da aprire appena la vista monta.
-  const [pendingComandeTableId, setPendingComandeTableId] = useState<number | null>(null);
+  // «Apri in Comande»: il tavolo da aprire appena la vista monta. Arriva da
+  // Cassa (solo il tavolo) e dalla pianta sala di Prenotazioni, che ci mette
+  // anche prenotazione e coperti appena registrati — dedurli dallo stato
+  // `reservations` sarebbe una corsa con l'append ottimistico, e un walk-in
+  // da 2 nascerebbe con i posti del tavolo.
+  const [pendingComande, setPendingComande] = useState<
+    { tableId: number; reservationId?: number; covers?: number; forceCreate?: boolean } | null
+  >(null);
 
   // Email and Notifiche unread badges — poll on view change + on focus, no
   // socket wiring for now (both endpoints are cheap).
@@ -2799,6 +2805,12 @@ const App: React.FC = () => {
                 onDateChange={setGlobalDate}
                 onShiftFilterChange={setGlobalShiftFilter}
                 isInitialLoading={isInitialDataLoading}
+                /* Modulo Sala & Cucina spento o cameriere senza `orders:take`:
+                   la prop non arriva, e in pagina non compare né la card né il
+                   bottone — nessuna sonda, nessun 403. */
+                onOpenComanda={tableOrdersEnabled === true && hasPermission('orders:take')
+                  ? (target) => { setPendingComande(target); setView(ViewState.COMANDE); }
+                  : undefined}
             />
         )}
 
@@ -2964,8 +2976,8 @@ const App: React.FC = () => {
               globalDate={globalDate}
               globalShiftFilter={globalShiftFilter}
               onImmersive={setImmersive}
-              initialTableId={pendingComandeTableId}
-              onInitialTableConsumed={() => setPendingComandeTableId(null)}
+              initialTable={pendingComande}
+              onInitialTableConsumed={() => setPendingComande(null)}
               brand={comandeNavStubbed ? comandeBrand : undefined}
             />
           </CardErrorBoundary>
@@ -2973,7 +2985,7 @@ const App: React.FC = () => {
 
         {view === ViewState.CASSA && (
           <CardErrorBoundary label="Cassa">
-            <CassaPage dishes={dishes} menus={menus} tables={tables} rooms={rooms} reservations={reservations} globalDate={globalDate} globalShiftFilter={globalShiftFilter} onImmersive={setImmersive} onOpenInComande={(tableId) => { setPendingComandeTableId(tableId); setView(ViewState.COMANDE); }} onOpenPagamenti={canAccessView(ViewState.PAGAMENTI) ? () => setView(ViewState.PAGAMENTI) : undefined} />
+            <CassaPage dishes={dishes} menus={menus} tables={tables} rooms={rooms} reservations={reservations} globalDate={globalDate} globalShiftFilter={globalShiftFilter} onImmersive={setImmersive} onOpenInComande={(tableId) => { setPendingComande({ tableId }); setView(ViewState.COMANDE); }} onOpenPagamenti={canAccessView(ViewState.PAGAMENTI) ? () => setView(ViewState.PAGAMENTI) : undefined} />
           </CardErrorBoundary>
         )}
 
