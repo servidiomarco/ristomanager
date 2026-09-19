@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   ArrowLeft, ArrowRightLeft, Ban, Check, Grid3x3, LayoutGrid, MoreVertical, Minus, Percent, Plus, Receipt, Rows3, Search, Trash2, Users, Volume2,
 } from 'lucide-react';
@@ -74,6 +75,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
   onBack, onCovers, onBill, onDiscount, onTransfer, onClearDrafts, onDeleteOrder,
   paged, catView = 'list', onCatView, showBack = true, inBar = false,
 }) => {
+  const { t } = useTranslation('comande', { useSuspense: false });
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -113,7 +115,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
       disabled: busy || billDisabled, critical: false,
     }] : []),
     { icon: Percent, label: 'Sconto', onClick: onDiscount, disabled: false, critical: false },
-    { icon: ArrowRightLeft, label: 'Sposta tavolo', onClick: onTransfer, disabled: false, critical: false },
+    { icon: ArrowRightLeft, label: t('moveTable'), onClick: onTransfer, disabled: false, critical: false },
     ...(onToggleDensity ? [{
       icon: Rows3, label: 'Vista compatta', onClick: onToggleDensity,
       disabled: false, critical: false, active: densityCompact === true,
@@ -131,19 +133,19 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
         disabled: false, critical: false, active: catView === 'list',
       },
       {
-        icon: LayoutGrid, label: 'Categorie a bottoni · 3 per riga', onClick: () => onCatView('grid3'),
+        icon: LayoutGrid, label: t('categories3'), onClick: () => onCatView('grid3'),
         disabled: false, critical: false, active: catView === 'grid3',
       },
       {
-        icon: Grid3x3, label: 'Categorie a bottoni · 4 per riga', onClick: () => onCatView('grid4'),
+        icon: Grid3x3, label: t('categories4'), onClick: () => onCatView('grid4'),
         disabled: false, critical: false, active: catView === 'grid4',
       },
     ] : []),
-    { icon: Trash2, label: 'Svuota le righe non inviate', onClick: onClearDrafts, disabled: clearDisabled, critical: true },
+    { icon: Trash2, label: t('clearUnsent'), onClick: onClearDrafts, disabled: clearDisabled, critical: true },
     // In fondo, dopo lo svuota-bozze: è il gesto più pesante del menu — via
     // TUTTA la comanda, righe già in cucina comprese.
     ...(onDeleteOrder ? [{
-      icon: Ban, label: 'Elimina la comanda', onClick: onDeleteOrder,
+      icon: Ban, label: t('deleteOrder'), onClick: onDeleteOrder,
       disabled: false, critical: true,
     }] : []),
   ];
@@ -155,7 +157,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
       onClick={() => setMenuOpen(v => !v)}
       aria-haspopup="menu"
       aria-expanded={menuOpen}
-      aria-label="Altre azioni sulla comanda"
+      aria-label={t('moreActions')}
       // Cerchio incassato, non un glifo nudo: un'icona sospesa nel vuoto legge
       // come decorazione e non come bersaglio. Il grigio vale a entrambe le
       // larghezze perché a entrambe il bottone sta DENTRO la scheda di testata:
@@ -188,7 +190,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
         type="button"
         onClick={() => onCovers(+1)}
         disabled={busy}
-        aria-label="Un coperto in più"
+        aria-label={t('oneMoreCover')}
         className={stepper}
       >
         <Plus size={16} />
@@ -201,7 +203,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
       type="button"
       onClick={onBill}
       disabled={busy || billDisabled}
-      title="Chiudi la comanda e apri il conto"
+      title={t('closeAndBill')}
       className={`inline-flex h-11 items-center justify-center gap-2 rounded-[var(--ds-radius-control)] px-5 text-[15px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
         billDisabled
           ? 'bg-[var(--ds-surface-row)] text-[var(--ds-text-subtle)]'
@@ -245,7 +247,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
     <Sheet
       open={menuOpen && !wide}
       onClose={() => setMenuOpen(false)}
-      title="Comanda"
+      title={t('order')}
       subtitle={`Tav. ${tableName}`}
       ariaLabel="Altre azioni sulla comanda"
       bodyClassName="px-4 py-4"
@@ -316,7 +318,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
               type="button"
               onClick={() => onCovers(+1)}
               disabled={busy}
-              aria-label="Un coperto in più"
+              aria-label={t('oneMoreCover')}
               className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             >
               <Plus size={15} aria-hidden />
@@ -336,7 +338,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
               type="button"
               onClick={onBill}
               disabled={busy || billDisabled}
-              title="Chiudi la comanda e apri il conto"
+              title={t('closeAndBill')}
               className={`inline-flex h-11 items-center justify-center rounded-[var(--ds-radius-control)] px-5 text-[15px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                 billDisabled
                   ? 'bg-[var(--ds-surface-row)] text-[var(--ds-text-subtle)]'
@@ -365,7 +367,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
               <button
                 type="button"
                 onClick={onBack}
-                aria-label="Torna alla scelta del tavolo"
+                aria-label={t('backToTables')}
                 className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               >
                 <ArrowLeft size={20} />
@@ -399,7 +401,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
                 type="button"
                 onClick={() => onCovers(+1)}
                 disabled={busy}
-                aria-label="Un coperto in più"
+                aria-label={t('oneMoreCover')}
                 className="inline-flex h-9 w-9 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               >
                 <Plus size={16} aria-hidden />
@@ -412,7 +414,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
                 type="button"
                 onClick={onBill}
                 disabled={busy || billDisabled}
-                title="Chiudi la comanda e apri il conto"
+                title={t('closeAndBill')}
                 className={`inline-flex h-11 items-center justify-center rounded-[var(--ds-radius-control)] px-5 text-[15px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                   billDisabled
                     ? 'bg-[var(--ds-surface-row)] text-[var(--ds-text-subtle)]'
@@ -462,7 +464,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
               <button
                 type="button"
                 onClick={onSearch}
-                aria-label="Cerca un piatto"
+                aria-label={t('searchDish')}
                 className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               >
                 <Search size={20} aria-hidden />
@@ -493,7 +495,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
           <button
             type="button"
             onClick={onBack}
-            aria-label="Torna alla scelta del tavolo"
+            aria-label={t('backToTables')}
             className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             <ArrowLeft size={20} />
@@ -514,7 +516,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
             <button
               type="button"
               onClick={onSearch}
-              aria-label="Cerca un piatto"
+              aria-label={t('searchDish')}
               className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             >
               <Search size={20} aria-hidden />

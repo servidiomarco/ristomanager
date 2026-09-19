@@ -658,6 +658,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-19 | Comande, Cucina e Passe; Reception | Con la lingua inglese **Comande, Cucina e Passe** sono in inglese (presa comanda, uscite, ricerca piatti, monitor di partita, passe). Corretto anche un difetto della versione precedente: in Reception e mappa sala alcune etichette mostravano il codice invece del testo tradotto. |
 | 2026-09-19 | Reception; Sale & Tavoli | Con la lingua inglese **Reception e Sala** sono in inglese: arrivi e ricerca, mappa sala e filtri, scheda del cliente, scambio di due tavoli, e in Sala il pannello di gestione (sale, blocco tavolo, note, legenda). |
 | 2026-09-19 | Messaggi: WhatsApp e SMS | I numeri senza prefisso vengono letti come numeri del **paese del ristorante**, non più come italiani per definizione: un locale estero può scrivere ai suoi clienti locali. Per i ristoranti italiani nulla cambia (cellulari che iniziano per 39 e zero dei fissi compresi), e un numero già scritto col + resta intatto. |
 | 2026-09-19 | Messaggi: WhatsApp e SMS; Pagamenti, conto al tavolo e cassa | Gli importi nei messaggi all'ospite sono scritti nella moneta del ristorante (link del conto e dell'asporto, richiesta e conferma caparra, avviso di rimborso). Per i ristoranti italiani la scrittura resta identica a prima, «€ 15,00». |

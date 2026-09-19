@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { Ban, Check, ChevronUp, ChevronsUpDown, Loader2, Plus, Send, SendHorizontal } from 'lucide-react';
 import { CourseChips } from './CourseChips';
 import type { OrderItem, OrderWithItems } from '../../types';
@@ -74,6 +75,7 @@ export const CourseList: React.FC<CourseListProps> = ({
   onMoveLine, onMoveItem, onMoveCourse, onDragLine, onDragItem, onDragCourse, showBar, showDessert,
   catIndexOf,
 }) => {
+  const { t } = useTranslation('comande', { useSuspense: false });
   const dnd = useCourseDrag({
     disabled: busy,
     canDropOn: n => !isSent(courseStatus(order, n)),
@@ -209,7 +211,7 @@ export const CourseList: React.FC<CourseListProps> = ({
                 onClick={() => onMoveCourse!(n)}
                 disabled={busy}
                 aria-label={`Sposta la ${courseLabel(n)} su un'altra uscita`}
-                title="Tocca per scegliere l'uscita, trascina per spostare l'uscita intera"
+                title={t('pickCourseHint')}
                 {...grip({ kind: 'course', from: n, count: draftRows.length + serverRows.filter(i => i.status === 'DRAFT').length })}
                 className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] ring-1 ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               >
@@ -251,7 +253,7 @@ export const CourseList: React.FC<CourseListProps> = ({
                 type="button"
                 onClick={() => onUnfire(n)}
                 disabled={busy}
-                title="Annulla la chiamata: l'uscita torna in coda e sparisce dai monitor di cucina"
+                title={t('recallCourse')}
                 className="flex-shrink-0 text-[13px] font-medium text-[var(--ds-text-muted)] underline decoration-dotted transition-opacity hover:opacity-70 disabled:opacity-40"
               >
                 annulla chiamata
@@ -262,7 +264,7 @@ export const CourseList: React.FC<CourseListProps> = ({
                 type="button"
                 onClick={() => onFire(n)}
                 disabled={busy}
-                title="Lancia in cucina le righe rimaste in coda su questa uscita"
+                title={t('fireRemaining')}
                 className="flex-shrink-0 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-3.5 py-1.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
               >
                 Chiama
@@ -275,7 +277,7 @@ export const CourseList: React.FC<CourseListProps> = ({
                     type="button"
                     onClick={() => onFire(n)}
                     disabled={busy}
-                    title="Lancia l'uscita in cucina adesso"
+                    title={t('fireNow')}
                     className="flex-shrink-0 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-3.5 py-1.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
                   >
                     Chiama
@@ -288,7 +290,7 @@ export const CourseList: React.FC<CourseListProps> = ({
                   type="button"
                   onClick={() => onRecall(n)}
                   disabled={busy}
-                  title="Annulla la proposta: l'uscita torna in bozza, la cucina non la vede"
+                  title={t('cancelProposal')}
                   className="flex-shrink-0 text-[13px] font-medium text-[var(--ds-text-muted)] underline decoration-dotted transition-opacity hover:opacity-70 disabled:opacity-40"
                 >
                   torna in bozza
@@ -444,7 +446,9 @@ interface SendFooterProps {
 export const SendFooter: React.FC<SendFooterProps> = ({
   course, courseCount, courseTotal, allCount, allTotal, busy, onSend, onSendAll, onExpand,
   variant = 'compact',
-}) => variant === 'full' ? (
+}) => {
+  const { t } = useTranslation('comande', { useSuspense: false });
+  return variant === 'full' ? (
   /* Nessun riepilogo qui sotto. Il totale sta nella barra della pagina,
      accanto al tavolo, e il dettaglio — coperti, servizio, sconto — nel foglio
      Conto, che è dove si va per incassare. Ripeterlo costava centocinquanta
@@ -487,7 +491,7 @@ export const SendFooter: React.FC<SendFooterProps> = ({
       <button
         type="button"
         onClick={onExpand}
-        aria-label="Apri la comanda"
+        aria-label={t('openOrder')}
         className="-mt-1.5 flex justify-center rounded-[var(--ds-radius-control)] py-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
       >
         <span className="h-1 w-9 rounded-full bg-[var(--ds-border-strong)]" aria-hidden />
@@ -542,7 +546,8 @@ export const SendFooter: React.FC<SendFooterProps> = ({
       </button>
     )}
   </div>
-);
+  );
+};
 
 /* ── CourseColumn ─────────────────────────────────────────────────────────
    La colonna di destra su desktop: intestazione, lista che scorre, azioni in

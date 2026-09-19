@@ -1320,7 +1320,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                   <button
                     onClick={() => { setIsAddingRoom(false); setNewRoomName(''); }}
                     className={`${dsIconButton} shadow-none`}
-                    title="{tv('cancel')}"
+                    title={tv('cancel')}
                   >
                       <X size={16}/>
                   </button>
@@ -1329,7 +1329,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             <button
                 onClick={() => setIsAddingRoom(true)}
                 className={`${dsIconButton} bg-[var(--ds-surface-row)] shadow-none`}
-                title="{tv('addRoom')}"
+                title={tv('addRoom')}
             >
                 <Plus size={16} />
             </button>
@@ -1709,7 +1709,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           {isLoadingMerges && (
               <div className="absolute inset-0 z-30 bg-[var(--ds-canvas)]/70 backdrop-blur-[1px] flex items-center justify-center">
                   <div className="flex items-center gap-2 px-4 py-2 bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)]">
-                      <Loader label="{tv('loadingTables')}" size={40} />
+                      <Loader label={tv('loadingTables')} size={40} />
                   </div>
               </div>
           )}
@@ -1807,7 +1807,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
       <ConfirmDeleteModal
         isOpen={!!deleteRoomConfirm}
-        title="{tv('deleteRoom')}"
+        title={tv('deleteRoom')}
         message="Stai per eliminare la sala:"
         itemName={deleteRoomConfirm?.name}
         onCancel={() => setDeleteRoomConfirm(null)}
@@ -1842,7 +1842,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
       <ConfirmDeleteModal
         isOpen={unhideAllConfirm}
-        title="{tv('reactivateTables')}"
+        title={tv('reactivateTables')}
         message={`Stai per riattivare ${hiddenTableIds.size} ${hiddenTableIds.size === 1 ? 'tavolo nascosto' : 'tavoli nascosti'} per questo turno.`}
         confirmLabel="Riattiva tutti"
         icon={<Eye className="h-5 w-5 text-[var(--ds-seated-fg)]" />}
