@@ -16,6 +16,11 @@ export const DEFAULT_NAMESPACE = 'prenota';
 // in `ns` qui sotto: caricato on-demand da useTranslation('paytable'), così
 // il conto non tira giù prenota.json e viceversa.
 export const PAY_NAMESPACE = 'paytable';
+// Stesso schema per le altre due pagine pubbliche React: scontrino digitale
+// (/scontrino/:token) e preventivo banchetto (/preventivo/:token). Anche
+// questi caricati on-demand da useTranslation, mai in `ns`.
+export const RECEIPT_NAMESPACE = 'receipt';
+export const QUOTE_NAMESPACE = 'quote';
 
 i18n
     .use(Backend)

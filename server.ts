@@ -3333,7 +3333,7 @@ app.post('/reservations/:id/send-custom-email', authenticate, requirePermission(
         }
 
         const result = await queryWithRetry(
-            'SELECT id, customer_name, email FROM reservations WHERE id = $1 AND tenant_id = $2',
+            'SELECT id, customer_name, email, phone, language FROM reservations WHERE id = $1 AND tenant_id = $2',
             [id, req.tenantId!]
         );
         if (result.rows.length === 0) {
@@ -3351,6 +3351,7 @@ app.post('/reservations/:id/send-custom-email', authenticate, requirePermission(
             customerName: reservation.customer_name,
             subject,
             body,
+            language: resolveGuestLanguage(reservation),
         });
 
         const emailStatus = await getSmtpConfigStatus(req.tenantId!).catch(() => null);
@@ -5627,7 +5628,7 @@ app.post('/reservations/:id/bill/notify', authenticate, requirePermission('payme
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid reservation id' });
 
         const resvRow = await queryWithRetry(
-            'SELECT id, customer_name, phone FROM reservations WHERE id = $1 AND tenant_id = $2',
+            'SELECT id, customer_name, phone, language FROM reservations WHERE id = $1 AND tenant_id = $2',
             [id, req.tenantId!]
         );
         if (resvRow.rowCount === 0) return res.status(404).json({ error: 'Reservation not found' });
@@ -5635,6 +5636,7 @@ app.post('/reservations/:id/bill/notify', authenticate, requirePermission('payme
         if (!reservation.phone) {
             return res.status(400).json({ error: 'La prenotazione non ha un numero di telefono' });
         }
+        const guestLanguage = resolveGuestLanguage(reservation);
 
         const billRow = await queryWithRetry(
             `SELECT id, total_cents, covers, share_token, status
@@ -5659,7 +5661,8 @@ app.post('/reservations/:id/bill/notify', authenticate, requirePermission('payme
             reservation.customer_name,
             Number(bill.total_cents),
             Number(bill.covers) || 1,
-            publicUrl
+            publicUrl,
+            guestLanguage
         );
 
         try {
@@ -5668,7 +5671,8 @@ app.post('/reservations/:id/bill/notify', authenticate, requirePermission('payme
                     reservation.customer_name,
                     Number(bill.covers) || 1,
                     Number(bill.total_cents),
-                    bill.share_token
+                    bill.share_token,
+                    guestLanguage
                 ),
             });
             if (req.user) {
@@ -9219,16 +9223,18 @@ app.post('/email/send', authenticate, requirePermission('reservations:full'), as
             ? Math.trunc(Number(reservation_id))
             : null;
         let customerName: string | null = null;
+        let customerLanguage: string | null = null;
         if (reservationId != null) {
             const r = await queryWithRetry(
                 // Un id di un altro tenant equivale a inesistente: l'email
                 // parte comunque, ma senza aggancio alla prenotazione altrui.
-                'SELECT customer_name FROM reservations WHERE id = $1 AND tenant_id = $2', [reservationId, req.tenantId!]
+                'SELECT customer_name, phone, language FROM reservations WHERE id = $1 AND tenant_id = $2', [reservationId, req.tenantId!]
             );
             if (r.rows.length === 0) {
                 reservationId = null;
             } else {
                 customerName = r.rows[0]?.customer_name ?? null;
+                customerLanguage = resolveGuestLanguage(r.rows[0]);
             }
         }
         const inReplyTo = typeof in_reply_to === 'string' && in_reply_to.trim() ? in_reply_to.trim() : null;
@@ -9237,6 +9243,9 @@ app.post('/email/send', authenticate, requirePermission('reservations:full'), as
             customerName: customerName || 'cliente',
             subject: subj,
             body: bod,
+            // Senza prenotazione agganciata non sappiamo la lingua: cornice
+            // italiana, il default storico.
+            language: customerLanguage,
         });
         const sendResult = await sendMail(req.tenantId!, {
             to: toEmail,
@@ -10028,26 +10037,43 @@ function payAtTableBaseUrl(): string {
 // link from the reservation modal. Free-form (SMS or WhatsApp inside the
 // 24h window) because we don't have a Meta-approved template for this
 // flow yet — keep it short so a single SMS segment covers it.
-function buildTableBillLinkMessage(customerName: string, amountCents: number, covers: number, url: string): string {
+// Card #34 (cluster pagamenti): ramo inglese su isEnglishGuest come i
+// messaggi di prenotazione. Senza language si resta sull'italiano storico.
+function buildTableBillLinkMessage(customerName: string, amountCents: number, covers: number, url: string, language?: string | null): string {
     const amount = formatEuroMinor(amountCents);
+    if (isEnglishGuest(language)) {
+        const coversLabel = covers === 1 ? '1 guest' : `${covers} guests`;
+        return `Hi ${toTitleCase(customerName)}, here is the link to pay your table bill (${coversLabel} · total ${amount}): ${url}\nThank you!`;
+    }
     const coversLabel = covers === 1 ? '1 coperto' : `${covers} coperti`;
     return `Ciao ${toTitleCase(customerName)}, ecco il link per pagare al tavolo (${coversLabel} · totale ${amount}): ${url}\nGrazie!`;
 }
 
 // La variante asporto: niente coperti (sull'asporto sarebbero un dato
 // falso), al loro posto l'ora di ritiro. Corto: un segmento SMS.
-function buildTakeawayBillLinkMessage(customerName: string, amountCents: number, pickupTime: string | null, url: string): string {
+function buildTakeawayBillLinkMessage(customerName: string, amountCents: number, pickupTime: string | null, url: string, language?: string | null): string {
     const amount = formatEuroMinor(amountCents);
+    if (isEnglishGuest(language)) {
+        const when = pickupTime ? ` at ${pickupTime}` : '';
+        return `Hi ${toTitleCase(customerName)}, here is the link to pay for your takeaway order${when} (total ${amount}): ${url}\nThank you!`;
+    }
     const when = pickupTime ? ` delle ${pickupTime}` : '';
     return `Ciao ${toTitleCase(customerName)}, ecco il link per pagare il tuo asporto${when} (totale ${amount}): ${url}\nGrazie!`;
 }
 
 // Compose the message we send to the customer with the Revolut checkout link.
 // Kept intentionally short so it fits comfortably inside an SMS segment when
-// WhatsApp isn't available.
-function buildPaymentMessage(customerName: string, amountCents: number, url: string, description?: string | null): string {
+// WhatsApp isn't available. La `description` è testo scritto dallo staff (ed
+// è anche la description dell'ordine sul gateway): resta com'è in entrambe
+// le lingue, si traduce solo la cornice.
+function buildPaymentMessage(customerName: string, amountCents: number, url: string, description?: string | null, language?: string | null): string {
     const amount = formatEuroMinor(amountCents);
     const desc = (description || '').trim();
+    if (isEnglishGuest(language)) {
+        const intro = `Hi ${toTitleCase(customerName)}, to complete your reservation at ${businessIdentity().name} we need a deposit of ${amount}.`;
+        const line = desc ? `${intro}\n${desc}` : intro;
+        return `${line}\nYou can pay securely here: ${url}\n\nThank you!`;
+    }
     const intro = `Ciao ${toTitleCase(customerName)}, per completare la prenotazione presso ${businessIdentity().name} serve un anticipo di ${amount}.`;
     const line = desc ? `${intro}\n${desc}` : intro;
     return `${line}\nPuoi pagare in sicurezza qui: ${url}\n\nGrazie!`;
@@ -10109,13 +10135,17 @@ function buildDepositRequestMessage(
     time: string,
     amountCents: number,
     checkoutUrl: string,
-    perPersonCents: number = DEPOSIT_DEFAULTS.perPersonCents
+    perPersonCents: number = DEPOSIT_DEFAULTS.perPersonCents,
+    language?: string | null
 ): string {
     const amount = formatEuroMinor(amountCents);
     const perPerson = formatEuroMinor(perPersonCents);
     // Niente link alle condizioni qui: l'SMS resta su due segmenti e il
     // cliente le trova sulla pagina di prenotazione (l'email invece lo porta,
     // dove non costa nulla).
+    if (isEnglishGuest(language)) {
+        return `Hi ${toTitleCase(customerName)}, to confirm your reservation for ${guestsLabel} on ${dateLabel} at ${time} we need a deposit of ${amount} (${perPerson} per person).\nPay securely here: ${checkoutUrl}\n\nWe will confirm your table as soon as we receive the payment. Thank you!`;
+    }
     return `Ciao ${toTitleCase(customerName)}, per confermare la prenotazione per ${guestsLabel} il ${dateLabel} alle ${time} serve una caparra di ${amount} (${perPerson} a persona).\nPaga in sicurezza qui: ${checkoutUrl}\n\nAppena riceviamo il pagamento ti confermeremo il tavolo. Grazie!`;
 }
 
@@ -10127,16 +10157,23 @@ function buildDepositConfirmationMessage(
     reservationTime: string | Date,
     guests: number | null | undefined,
     amountCents: number,
-    roomName?: string | null
+    roomName?: string | null,
+    language?: string | null
 ): string {
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime));
     const fullName = toTitleCase(customerName);
-    const greeting = fullName ? `Ciao ${fullName}` : 'Ciao';
     const guestsNum = Math.max(1, Math.trunc(Number(guests) || 1));
-    const persone = guestsNum === 1 ? 'persona' : 'persone';
     const room = (roomName ?? '').trim();
-    const roomPart = room ? ` in ${room}` : '';
     const amount = formatEuroMinor(amountCents);
+    if (isEnglishGuest(language)) {
+        const greeting = fullName ? `Hi ${fullName}` : 'Hi';
+        const guestsLabel = guestsNum === 1 ? 'guest' : 'guests';
+        const roomPart = room ? ` in ${room}` : '';
+        return `${greeting}, we have received your deposit of ${amount}. Your reservation for ${guestsNum} ${guestsLabel} on ${dateLabel} at ${timeLabel}${roomPart} is confirmed. See you soon!`;
+    }
+    const greeting = fullName ? `Ciao ${fullName}` : 'Ciao';
+    const persone = guestsNum === 1 ? 'persona' : 'persone';
+    const roomPart = room ? ` in ${room}` : '';
     return `${greeting}, abbiamo ricevuto la caparra di ${amount}. La tua prenotazione per ${guestsNum} ${persone} il ${dateLabel} alle ${timeLabel}${roomPart} e' confermata. A presto!`;
 }
 
@@ -10153,11 +10190,23 @@ function buildDepositConfirmationMessage(
 function buildRefundNotificationMessage(
     customerName: string | null | undefined,
     amountCents: number,
-    reservationTime?: string | Date | null
+    reservationTime?: string | Date | null,
+    language?: string | null
 ): string {
     const fullName = toTitleCase(customerName);
-    const greeting = fullName ? `Ciao ${fullName}` : 'Ciao';
     const amount = formatEuroMinor(amountCents);
+    if (isEnglishGuest(language)) {
+        const greeting = fullName ? `Hi ${fullName}` : 'Hi';
+        let when = '';
+        if (reservationTime) {
+            const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime));
+            when = ` for the reservation on ${dateLabel} at ${timeLabel}`;
+        }
+        return `${greeting}, we have refunded your deposit of ${amount}${when}. `
+            + `The credit may take a few business days, depending on your bank. `
+            + `If you have any questions just reply to this message. Thank you!`;
+    }
+    const greeting = fullName ? `Ciao ${fullName}` : 'Ciao';
     let when = '';
     if (reservationTime) {
         const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime));
@@ -10428,11 +10477,12 @@ app.post('/payments/requests', authenticate, requirePermission('reservations:ful
         const resvResult = await queryWithRetry(
             // Guardia FK: un reservation_id di un altro tenant cade nel 404
             // prima di creare una richiesta di pagamento agganciata altrove.
-            'SELECT id, customer_name, phone, email, reservation_time, guests FROM reservations WHERE id = $1 AND tenant_id = $2',
+            'SELECT id, customer_name, phone, email, reservation_time, guests, language FROM reservations WHERE id = $1 AND tenant_id = $2',
             [reservationId, req.tenantId!]
         );
         if (resvResult.rowCount === 0) return res.status(404).json({ error: 'Prenotazione non trovata' });
         const reservation = resvResult.rows[0];
+        const guestLanguage = resolveGuestLanguage(reservation);
 
         // Per-channel gate: contact detail present, and (email) SMTP configured.
         // WhatsApp/auto route through sendBookingConfirmation, which itself falls
@@ -10490,16 +10540,20 @@ app.post('/payments/requests', authenticate, requirePermission('reservations:ful
         const resvInstant = new Date(reservation.reservation_time);
         const depositDateLabel = resvInstant.toLocaleDateString('it-IT', { timeZone: 'Europe/Rome', day: '2-digit', month: '2-digit', year: 'numeric' });
         const depositTimeLabel = resvInstant.toLocaleTimeString('it-IT', { timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit', hour12: false });
-        const depositGuestsLabel = `${reservation.guests} ${Number(reservation.guests) === 1 ? 'persona' : 'persone'}`;
+        const depositGuestsLabel = isEnglishGuest(guestLanguage)
+            ? `${reservation.guests} ${Number(reservation.guests) === 1 ? 'guest' : 'guests'}`
+            : `${reservation.guests} ${Number(reservation.guests) === 1 ? 'persona' : 'persone'}`;
         const whatsappTemplate = buildBookingDepositRequestTemplate(
             reservation.customer_name,
             depositGuestsLabel,
             depositDateLabel,
             depositTimeLabel,
             amountCents,
-            order.checkoutUrl
+            order.checkoutUrl,
+            guestLanguage,
+            Number(reservation.guests) || null
         );
-        const message = buildPaymentMessage(reservation.customer_name, amountCents, order.checkoutUrl, orderDescription);
+        const message = buildPaymentMessage(reservation.customer_name, amountCents, order.checkoutUrl, orderDescription, guestLanguage);
 
         const deliver = async (): Promise<{ channel: string | null; sid: string | null }> => {
             if (channel === 'email') {
@@ -10508,6 +10562,7 @@ app.post('/payments/requests', authenticate, requirePermission('reservations:ful
                     amountCents,
                     checkoutUrl: order.checkoutUrl,
                     description: orderDescription,
+                    language: guestLanguage,
                 });
                 const emailStatus = await getSmtpConfigStatus(req.tenantId!).catch(() => null);
                 const emailProvider: 'smtp' | 'resend' = emailStatus?.provider === 'resend' ? 'resend' : 'smtp';
@@ -10848,7 +10903,7 @@ async function applyPaymentOrderTransition(
                 // quella del tenant della payment_request, mai di un altro.
                 const resvRes = await queryWithRetry(
                     `SELECT id, customer_name, phone, reservation_time, guests,
-                            reservation_status, table_id, notes
+                            reservation_status, table_id, notes, language
                      FROM reservations WHERE id = $1 AND tenant_id = $2`,
                     [row.reservation_id, row.tenant_id]
                 );
@@ -10874,12 +10929,14 @@ async function applyPaymentOrderTransition(
                     (reservation.reservation_status === 'PENDING' ||
                      reservation.reservation_status === 'CONFIRMED')) {
                     const roomName = await resolveReservationRoomName(reservation);
+                    const guestLanguage = resolveGuestLanguage(reservation);
                     const message = buildDepositConfirmationMessage(
                         reservation.customer_name,
                         reservation.reservation_time,
                         reservation.guests,
                         row.amount_cents,
-                        roomName
+                        roomName,
+                        guestLanguage
                     );
                     // Transizione invocata sia da webhook sia da riconciliatore:
                     // niente JWT in mano, il tenant è quello della payment_request.
@@ -10888,7 +10945,8 @@ async function applyPaymentOrderTransition(
                             reservation.customer_name,
                             reservation.reservation_time,
                             reservation.guests,
-                            row.amount_cents
+                            row.amount_cents,
+                            guestLanguage
                         ),
                     });
                 }
@@ -11378,7 +11436,7 @@ app.post('/payments/:id/refund', authenticate, requirePermission('payments:full'
             (async () => {
                 try {
                     const resv = await queryWithRetry(
-                        'SELECT customer_name, phone, reservation_time FROM reservations WHERE id = $1 AND tenant_id = $2',
+                        'SELECT customer_name, phone, reservation_time, language FROM reservations WHERE id = $1 AND tenant_id = $2',
                         [payment.reservation_id, req.tenantId!]
                     );
                     const reservation = resv.rows[0];
@@ -11386,7 +11444,8 @@ app.post('/payments/:id/refund', authenticate, requirePermission('payments:full'
                     const message = buildRefundNotificationMessage(
                         reservation.customer_name,
                         payment.amount_cents,
-                        reservation.reservation_time
+                        reservation.reservation_time,
+                        resolveGuestLanguage(reservation)
                     );
                     // No Meta-approved template exists for refunds, so this
                     // goes out as SMS (sendBookingConfirmation only attempts
@@ -15741,13 +15800,20 @@ const banquetQuoteWhatsAppReady = (): boolean =>
 function buildBanquetQuoteTemplate(
     customerName: string | null | undefined,
     eventName: string,
-    dateLabel: string,
-    shareToken: string
+    eventDateIso: string | null,
+    shareToken: string,
+    language?: string | null
 ): WhatsAppTemplateOpts | undefined {
-    const contentSid = process.env.TWILIO_WA_CONTENT_SID_BANQUET_QUOTE;
-    if (!contentSid) return undefined;
+    const picked = pickWhatsAppTemplateSid('TWILIO_WA_CONTENT_SID_BANQUET_QUOTE', language);
+    if (!picked) return undefined;
+    // La data si formatta QUI, sulla lingua della SID scelta: costruirla al
+    // call site produrrebbe un ibrido quando l'ospite è EN ma la SID _EN
+    // manca (regola mai-ibrido di pickWhatsAppTemplateSid).
+    const dateLabel = eventDateIso
+        ? new Date(eventDateIso + 'T00:00:00').toLocaleDateString(picked.english ? 'en-GB' : 'it-IT', { day: 'numeric', month: 'long', year: 'numeric' })
+        : (picked.english ? 'to be agreed' : 'da definire');
     return {
-        contentSid,
+        contentSid: picked.contentSid,
         contentVariables: {
             '1': templateName(customerName),
             '2': eventName,
@@ -15779,7 +15845,7 @@ app.post('/banquet-menus/:id/send-quote-whatsapp', authenticate, requirePermissi
         }
         const rs = await queryWithRetry(
             `SELECT b.name, TO_CHAR(b.event_date, 'YYYY-MM-DD') AS event_date,
-                    c.name AS customer_name, c.phone AS customer_phone
+                    c.name AS customer_name, c.phone AS customer_phone, c.language AS customer_language
              FROM banquet_menus b
              LEFT JOIN customers c ON c.id = b.customer_id AND c.tenant_id = b.tenant_id
              WHERE b.id = $1 AND b.tenant_id = $2`,
@@ -15794,17 +15860,23 @@ app.post('/banquet-menus/:id/send-quote-whatsapp', authenticate, requirePermissi
         const token = await ensureBanquetShareToken(req.tenantId!, id);
         if (!token) return res.status(404).json({ error: 'Banquet not found' });
 
+        // Lingua dalla rubrica, col prefisso del numero di destinazione come
+        // ripiego — il banchetto non passa da una prenotazione.
+        const guestLanguage = normalizeLanguageCode(row.customer_language) ?? detectLanguageFromPhonePrefix(phone);
+        const english = isEnglishGuest(guestLanguage);
         const dateLabel = row.event_date
-            ? new Date(row.event_date + 'T00:00:00').toLocaleDateString('it-IT', { day: 'numeric', month: 'long', year: 'numeric' })
-            : 'da definire';
-        const template = buildBanquetQuoteTemplate(row.customer_name, row.name, dateLabel, token);
+            ? new Date(row.event_date + 'T00:00:00').toLocaleDateString(english ? 'en-GB' : 'it-IT', { day: 'numeric', month: 'long', year: 'numeric' })
+            : (english ? 'to be agreed' : 'da definire');
+        const template = buildBanquetQuoteTemplate(row.customer_name, row.name, row.event_date ?? null, token, guestLanguage);
         if (!template) {
             return res.status(503).json({ error: 'whatsapp_non_configurato', message: "L'invio WhatsApp dal numero del ristorante non è ancora attivo." });
         }
         // Testo di cortesia: finisce nel log messaggi (il contenuto vero lo
         // rende Meta dal template).
         const url = banquetQuoteUrl(token);
-        const text = `Preventivo «${row.name}» (${dateLabel}): ${url}`;
+        const text = english
+            ? `Quote "${row.name}" (${dateLabel}): ${url}`
+            : `Preventivo «${row.name}» (${dateLabel}): ${url}`;
         const result = await sendWhatsAppText(req.tenantId!, normalizeItalianPhone(phone), text, null, template);
         if (req.user) {
             LogService.logActivity(
@@ -15923,7 +15995,8 @@ app.post('/banquet-menus/:id/send-quote-email', authenticate, requirePermission(
         if (!Number.isInteger(id)) return res.status(400).json({ error: 'id non valido' });
         const rs = await queryWithRetry(
             `SELECT b.name, TO_CHAR(b.event_date, 'YYYY-MM-DD') AS event_date, b.guests,
-                    c.name AS customer_name, c.email AS customer_email
+                    c.name AS customer_name, c.email AS customer_email,
+                    c.phone AS customer_phone, c.language AS customer_language
              FROM banquet_menus b
              LEFT JOIN customers c ON c.id = b.customer_id AND c.tenant_id = b.tenant_id
              WHERE b.id = $1 AND b.tenant_id = $2`,
@@ -15944,12 +16017,31 @@ app.post('/banquet-menus/:id/send-quote-email', authenticate, requirePermission(
 
         const identity = businessIdentity(req.tenantId!);
         const name = toTitleCase(row.customer_name);
+        // Lingua dalla rubrica, col prefisso del telefono come ripiego —
+        // il banchetto non passa da una prenotazione.
+        const guestLanguage = normalizeLanguageCode(row.customer_language) ?? detectLanguageFromPhonePrefix(row.customer_phone);
+        const english = isEnglishGuest(guestLanguage);
         const dateLabel = row.event_date
-            ? new Date(row.event_date + 'T00:00:00').toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+            ? new Date(row.event_date + 'T00:00:00').toLocaleDateString(english ? 'en-GB' : 'it-IT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
             : null;
-        const subject = `Preventivo ${row.name} — ${identity.name}`;
-        const text = `${name ? `Ciao ${name},` : 'Ciao,'}\n\necco il preventivo per «${row.name}»${dateLabel ? ` (${dateLabel})` : ''}: menù, tariffe e totale sono qui:\n${url}\n\nPer qualunque modifica siamo a disposizione.\nA presto!\n${identity.name}`;
-        const detailsHtml = `
+        const subject = english
+            ? `Quote ${row.name} — ${identity.name}`
+            : `Preventivo ${row.name} — ${identity.name}`;
+        const text = english
+            ? `${name ? `Hi ${name},` : 'Hi,'}\n\nhere is the quote for "${row.name}"${dateLabel ? ` (${dateLabel})` : ''}: menu, rates and total are here:\n${url}\n\nFor any change, we are at your disposal.\nSee you soon!\n${identity.name}`
+            : `${name ? `Ciao ${name},` : 'Ciao,'}\n\necco il preventivo per «${row.name}»${dateLabel ? ` (${dateLabel})` : ''}: menù, tariffe e totale sono qui:\n${url}\n\nPer qualunque modifica siamo a disposizione.\nA presto!\n${identity.name}`;
+        const detailsHtml = english
+            ? `
+          <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${name ? `Hi ${escapeHtml(name)},` : 'Hi,'}<br>here is the quote for <strong>${escapeHtml(row.name)}</strong>${dateLabel ? ` — ${escapeHtml(dateLabel)}` : ''}${row.guests ? ` · ${Number(row.guests)} guests` : ''}.</p>
+          <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;margin:0 0 16px;"><tr><td align="center">
+            <a href="${escapeHtml(url)}" style="display:inline-block;background:#065f46;color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:12px 28px;border-radius:10px;">Open the quote</a>
+          </td></tr></table>
+          <p class="muted" style="margin:0 0 16px;font-size:13px;line-height:1.6;color:#57534e;">If the button does not work, copy and paste this link into your browser:<br><a href="${escapeHtml(url)}" style="color:#065f46;word-break:break-all;">${escapeHtml(url)}</a></p>
+          <p class="muted" style="margin:0 0 16px;font-size:14px;line-height:1.6;color:#57534e;">For any change to the menu or the number of guests, we are at your disposal.</p>
+          ${contactBlockHtml()}
+          <p style="margin:16px 0 0;font-size:14px;">See you soon!<br><em>${escapeHtml(identity.name)}</em></p>
+        `
+            : `
           <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${name ? `Ciao ${escapeHtml(name)},` : 'Ciao,'}<br>ecco il preventivo per <strong>${escapeHtml(row.name)}</strong>${dateLabel ? ` — ${escapeHtml(dateLabel)}` : ''}${row.guests ? ` · ${Number(row.guests)} coperti` : ''}.</p>
           <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;margin:0 0 16px;"><tr><td align="center">
             <a href="${escapeHtml(url)}" style="display:inline-block;background:#065f46;color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:12px 28px;border-radius:10px;">Apri il preventivo</a>
@@ -15959,7 +16051,7 @@ app.post('/banquet-menus/:id/send-quote-email', authenticate, requirePermission(
           ${contactBlockHtml()}
           <p style="margin:16px 0 0;font-size:14px;">A presto!<br><em>${escapeHtml(identity.name)}</em></p>
         `;
-        const html = wrapEmailHtml(`Il preventivo per ${row.name}`, detailsHtml);
+        const html = wrapEmailHtml(english ? `The quote for ${row.name}` : `Il preventivo per ${row.name}`, detailsHtml, guestLanguage);
 
         const emailStatus = await getSmtpConfigStatus(req.tenantId!).catch(() => null);
         const emailProvider: 'smtp' | 'resend' = emailStatus?.provider === 'resend' ? 'resend' : 'smtp';
@@ -19918,17 +20010,18 @@ function buildBookingDepositConfirmedTemplate(
     customerName: string | null | undefined,
     reservationTime: string | Date,
     guests: number | null | undefined,
-    amountCents: number
+    amountCents: number,
+    language?: string | null
 ): WhatsAppTemplateOpts | undefined {
-    const contentSid = process.env.TWILIO_WA_CONTENT_SID_BOOKING_DEPOSIT_CONFIRMED;
-    if (!contentSid) return undefined;
+    const picked = pickWhatsAppTemplateSid('TWILIO_WA_CONTENT_SID_BOOKING_DEPOSIT_CONFIRMED', language);
+    if (!picked) return undefined;
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime));
     return {
-        contentSid,
+        contentSid: picked.contentSid,
         contentVariables: {
             '1': templateName(customerName),
             '2': formatEuroMinor(amountCents),
-            '3': templateGuestsLabel(guests),
+            '3': templateGuestsLabel(guests, picked.english),
             '4': dateLabel,
             '5': timeLabel,
         },
@@ -20020,39 +20113,39 @@ function buildReviewRequestEmail(params: {
 //     extension; a variable mid-URL (the v1 shape) fails at send with 63028
 //     even when the template is approved. Button uses {{5}} (token only).
 // When both envs are set the CTA one wins.
-function templateCoversLabel(covers: number | null | undefined): string {
+function templateCoversLabel(covers: number | null | undefined, english: boolean = false): string {
     const n = Math.max(1, Math.trunc(Number(covers) || 1));
-    return `${n} ${n === 1 ? 'coperto' : 'coperti'}`;
+    return english ? `${n} ${n === 1 ? 'guest' : 'guests'}` : `${n} ${n === 1 ? 'coperto' : 'coperti'}`;
 }
 function buildTableBillLinkTemplate(
     customerName: string | null | undefined,
     covers: number | null | undefined,
     amountCents: number,
-    shareToken: string
+    shareToken: string,
+    language?: string | null
 ): WhatsAppTemplateOpts | undefined {
     if (!shareToken) return undefined;
     const name = templateName(customerName);
-    const coversLabel = templateCoversLabel(covers);
     const total = formatEuroMinor(amountCents);
-    const ctaSid = process.env.TWILIO_WA_CONTENT_SID_TABLE_BILL_LINK_CTA;
-    if (ctaSid) {
+    const cta = pickWhatsAppTemplateSid('TWILIO_WA_CONTENT_SID_TABLE_BILL_LINK_CTA', language);
+    if (cta) {
         return {
-            contentSid: ctaSid,
+            contentSid: cta.contentSid,
             contentVariables: {
                 '1': name,
-                '2': coversLabel,
+                '2': templateCoversLabel(covers, cta.english),
                 '3': total,
                 '4': shareToken,
             },
         };
     }
-    const cardSid = process.env.TWILIO_WA_CONTENT_SID_TABLE_BILL_LINK;
-    if (!cardSid) return undefined;
+    const card = pickWhatsAppTemplateSid('TWILIO_WA_CONTENT_SID_TABLE_BILL_LINK', language);
+    if (!card) return undefined;
     return {
-        contentSid: cardSid,
+        contentSid: card.contentSid,
         contentVariables: {
             '1': name,
-            '2': coversLabel,
+            '2': templateCoversLabel(covers, card.english),
             '3': total,
             '4': `pay/${shareToken}/qr.png`,
             '5': shareToken,
@@ -20068,12 +20161,14 @@ function buildTakeawayBillLinkTemplate(
     customerName: string | null | undefined,
     pickupTime: string | null | undefined,
     amountCents: number,
-    shareToken: string
+    shareToken: string,
+    language?: string | null
 ): WhatsAppTemplateOpts | undefined {
-    const sid = (process.env.TWILIO_WA_CONTENT_SID_TAKEAWAY_BILL_LINK_CTA || '').trim();
-    if (!sid || !shareToken) return undefined;
+    if (!shareToken) return undefined;
+    const picked = pickWhatsAppTemplateSid('TWILIO_WA_CONTENT_SID_TAKEAWAY_BILL_LINK_CTA', language);
+    if (!picked) return undefined;
     return {
-        contentSid: sid,
+        contentSid: picked.contentSid,
         contentVariables: {
             '1': templateName(customerName),
             '2': pickupTime || '—',
@@ -20110,16 +20205,18 @@ const DEPOSIT_REQUEST_TEMPLATES: Array<{ hosts: Set<string>; envKey: string; tok
         tokenPattern: /\/pay\/([^\/?#]+)/,
     },
 ];
-function resolveDepositRequestTemplate(checkoutUrl: string): { contentSid: string; token: string } | null {
+function resolveDepositRequestTemplate(checkoutUrl: string, language?: string | null): { contentSid: string; token: string; english: boolean } | null {
     try {
         const u = new URL(checkoutUrl);
         const entry = DEPOSIT_REQUEST_TEMPLATES.find(t => t.hosts.has(u.hostname.toLowerCase()));
         if (!entry) return null;
-        const contentSid = process.env[entry.envKey];
-        if (!contentSid) return null;
+        // Stessa regola mai-ibrido di pickWhatsAppTemplateSid, applicata alla
+        // envKey scelta dall'host del checkout.
+        const picked = pickWhatsAppTemplateSid(entry.envKey, language);
+        if (!picked) return null;
         const match = u.pathname.match(entry.tokenPattern);
         if (!match) return null;
-        return { contentSid, token: match[1] };
+        return { contentSid: picked.contentSid, token: match[1], english: picked.english };
     } catch {
         return null;
     }
@@ -20130,15 +20227,23 @@ function buildBookingDepositRequestTemplate(
     dateLabel: string,
     timeLabel: string,
     amountCents: number,
-    checkoutUrl: string
+    checkoutUrl: string,
+    language?: string | null,
+    guestsCount?: number | null
 ): WhatsAppTemplateOpts | undefined {
-    const resolved = resolveDepositRequestTemplate(checkoutUrl);
+    const resolved = resolveDepositRequestTemplate(checkoutUrl, language);
     if (!resolved) return undefined;
+    // La label ospiti si ricostruisce dentro il builder quando esce la SID
+    // inglese: la guestsLabel del chiamante può essere italiana e finirebbe
+    // in un ibrido. Data (gg/mm/aaaa) e ora sono neutre.
+    const guests = resolved.english && guestsCount != null
+        ? templateGuestsLabel(guestsCount, true)
+        : guestsLabel;
     return {
         contentSid: resolved.contentSid,
         contentVariables: {
             '1': templateName(customerName),
-            '2': guestsLabel,
+            '2': guests,
             '3': dateLabel,
             '4': timeLabel,
             '5': formatEuroMinor(amountCents),
@@ -20585,14 +20690,34 @@ function buildDepositRequestEmail(params: {
     amountCents: number;
     checkoutUrl: string;
     description?: string | null;
+    language?: string | null;
 }): { subject: string; text: string; html: string } {
     const identity = businessIdentity();
     const amount = formatEuroMinor(params.amountCents);
     const name = toTitleCase(params.customerName);
     const desc = (params.description || '').trim();
-    const subject = `Acconto prenotazione — ${amount}`;
-    const text = buildPaymentMessage(params.customerName, params.amountCents, params.checkoutUrl, desc || null);
+    const text = buildPaymentMessage(params.customerName, params.amountCents, params.checkoutUrl, desc || null, params.language);
 
+    if (isEnglishGuest(params.language)) {
+        const subject = `Reservation deposit — ${amount}`;
+        // Il link alle condizioni porta alla pagina /prenota#caparra, già
+        // bilingue lato client: nessuna pagina EN separata da mantenere.
+        const detailsHtml = `
+      <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${name ? `Hi ${escapeHtml(name)},` : 'Hi,'}<br>to complete your reservation at ${escapeHtml(identity.name)} we need a deposit of <strong>${escapeHtml(amount)}</strong>.</p>
+      ${desc ? `<p style="margin:0 0 16px;font-size:14px;line-height:1.6;color:#57534e;">${escapeHtml(desc)}</p>` : ''}
+      <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;margin:0 0 16px;"><tr><td align="center">
+        <a href="${escapeHtml(params.checkoutUrl)}" style="display:inline-block;background:#065f46;color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:12px 28px;border-radius:10px;">Pay the deposit — ${escapeHtml(amount)}</a>
+      </td></tr></table>
+      <p class="muted" style="margin:0 0 16px;font-size:13px;line-height:1.6;color:#57534e;">If the button does not work, copy and paste this link into your browser:<br><a href="${escapeHtml(params.checkoutUrl)}" style="color:#065f46;word-break:break-all;">${escapeHtml(params.checkoutUrl)}</a></p>
+      <p class="muted" style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#57534e;">Your reservation is confirmed as soon as we receive the payment. The deposit is deducted from your bill: <a href="${escapeHtml(DEPOSIT_TERMS_URL)}" style="color:#065f46;">how the deposit works and how to cancel</a> — with a full refund if you cancel at least 24 hours ahead.</p>
+      ${contactBlockHtml()}
+      <p style="margin:16px 0 0;font-size:14px;">See you soon!<br><em>${escapeHtml(identity.name)}</em></p>
+    `;
+        const html = wrapEmailHtml(`A deposit of ${amount} for your reservation`, detailsHtml, params.language);
+        return { subject, text, html };
+    }
+
+    const subject = `Acconto prenotazione — ${amount}`;
     const detailsHtml = `
       <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${name ? `Ciao ${escapeHtml(name)},` : 'Ciao,'}<br>per completare la prenotazione presso ${escapeHtml(identity.name)} serve un anticipo di <strong>${escapeHtml(amount)}</strong>.</p>
       ${desc ? `<p style="margin:0 0 16px;font-size:14px;line-height:1.6;color:#57534e;">${escapeHtml(desc)}</p>` : ''}
@@ -20604,7 +20729,7 @@ function buildDepositRequestEmail(params: {
       ${contactBlockHtml()}
       <p style="margin:16px 0 0;font-size:14px;">A presto!<br><em>${escapeHtml(identity.name)}</em></p>
     `;
-    const html = wrapEmailHtml(`Acconto di ${amount} per la tua prenotazione`, detailsHtml);
+    const html = wrapEmailHtml(`Acconto di ${amount} per la tua prenotazione`, detailsHtml, params.language);
     return { subject, text, html };
 }
 
@@ -20617,13 +20742,18 @@ function buildCustomEmail(params: {
     customerName?: string | null;
     subject: string;
     body: string;
+    language?: string | null;
 }): { subject: string; text: string; html: string } {
     const identity = businessIdentity();
     const name = toTitleCase(params.customerName);
     const subject = params.subject.trim();
     const rawBody = params.body.trim();
-    const greeting = name ? `Ciao ${name},` : 'Ciao,';
-    const text = `${greeting}\n\n${rawBody}\n\nGrazie e a presto!\n${identity.name}`;
+    // Il corpo è scritto dallo staff e resta com'è: si localizzano solo
+    // saluto e chiusura, la cornice attorno al testo umano.
+    const english = isEnglishGuest(params.language);
+    const greeting = english ? (name ? `Hi ${name},` : 'Hi,') : (name ? `Ciao ${name},` : 'Ciao,');
+    const closing = english ? 'Thank you, see you soon!' : 'Grazie e a presto!';
+    const text = `${greeting}\n\n${rawBody}\n\n${closing}\n${identity.name}`;
 
     // Preserve author-intended line breaks. Consecutive newlines become
     // paragraph splits (blank <p>), single newlines become <br>. Every chunk
@@ -20636,9 +20766,9 @@ function buildCustomEmail(params: {
     const detailsHtml = `
       <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${escapeHtml(greeting)}</p>
       ${paragraphs}
-      <p style="margin:16px 0 0;font-size:14px;">Grazie e a presto!<br><em>${escapeHtml(identity.name)}</em></p>
+      <p style="margin:16px 0 0;font-size:14px;">${escapeHtml(closing)}<br><em>${escapeHtml(identity.name)}</em></p>
     `;
-    const html = wrapEmailHtml(subject, detailsHtml);
+    const html = wrapEmailHtml(subject, detailsHtml, params.language);
     return { subject, text, html };
 }
 
@@ -24995,8 +25125,12 @@ app.post('/takeaway/orders/:id/bill/notify', authenticate, requireFeature('takea
         }
 
         const publicUrl = `${payAtTableBaseUrl()}/pay/${bill.share_token}`;
+        // takeaway_orders non ha la colonna language: il prefisso del
+        // telefono è l'informazione in mano — stesso fallback documentato in
+        // utils/language.ts per lo storico prenotazioni.
+        const guestLanguage = detectLanguageFromPhonePrefix(tw.customer_phone);
         const message = buildTakeawayBillLinkMessage(
-            tw.customer_name, Number(bill.total_cents), tw.pickup_time, publicUrl
+            tw.customer_name, Number(bill.total_cents), tw.pickup_time, publicUrl, guestLanguage
         );
 
         try {
@@ -25005,7 +25139,7 @@ app.post('/takeaway/orders/:id/bill/notify', authenticate, requireFeature('takea
             // il template del tavolo, che parla di coperti e di tavolo.
             const delivery = await sendBookingConfirmation(req.tenantId!, tw.customer_phone, message, null, {
                 whatsappTemplate: buildTakeawayBillLinkTemplate(
-                    tw.customer_name, tw.pickup_time, Number(bill.total_cents), bill.share_token
+                    tw.customer_name, tw.pickup_time, Number(bill.total_cents), bill.share_token, guestLanguage
                 ),
                 recordConfirmation: false,
             });
@@ -28679,6 +28813,12 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
         const [yyyy, mm, dd] = date.split('-');
         const dateLabel = `${dd}/${mm}/${yyyy}`;
         const guestsLabel = `${guestsNum} ${guestsNum === 1 ? 'persona' : 'persone'}`;
+        // Variante nella lingua dell'ospite per i testi che gli arrivano:
+        // guestsLabel resta italiana per la description interna dell'ordine
+        // di pagamento (testo che legge lo staff, e sul gateway).
+        const guestGuestsLabel = isEnglishGuest(language)
+            ? `${guestsNum} ${guestsNum === 1 ? 'guest' : 'guests'}`
+            : guestsLabel;
         // Sala, mai il tavolo: il numero di tavolo è un dato operativo, lo
         // staff lo sposta di continuo e comunicarlo al cliente crea solo
         // aspettative da smentire all'arrivo.
@@ -28740,17 +28880,18 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
         const ackText = depositCheckoutUrl
             ? buildDepositRequestMessage(
                 toTitleCase(customer_name),
-                guestsLabel,
+                guestGuestsLabel,
                 dateLabel,
                 time,
                 depositAmountCents,
                 depositCheckoutUrl,
-                depositPolicy?.perPersonCents
+                depositPolicy?.perPersonCents,
+                language
               )
             : confirmedNow
                 ? buildConfirmationMessage(customer_name, created.reservation_time, guestsNum, ackRoomName, language)
                 : isEnglishGuest(language)
-                    ? `Hi ${toTitleCase(customer_name)}, we've received your reservation request for ${guestsLabel} on ${dateLabel} at ${time}. We'll get back to you shortly to confirm it. Thank you!`
+                    ? `Hi ${toTitleCase(customer_name)}, we've received your reservation request for ${guestGuestsLabel} on ${dateLabel} at ${time}. We'll get back to you shortly to confirm it. Thank you!`
                     : `Ciao ${toTitleCase(customer_name)}, abbiamo ricevuto la tua richiesta di prenotazione per ${guestsLabel} il ${dateLabel} alle ${time}. Ti ricontatteremo a breve per confermarla. Grazie!`;
 
         // Pick the right WA template for the branch. When either env var is
@@ -28760,11 +28901,13 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
         if (depositCheckoutUrl) {
             waTemplate = buildBookingDepositRequestTemplate(
                 toTitleCase(customer_name),
-                guestsLabel,
+                guestGuestsLabel,
                 dateLabel,
                 time,
                 depositAmountCents,
-                depositCheckoutUrl
+                depositCheckoutUrl,
+                language,
+                guestsNum
             );
         } else if (confirmedNow) {
             waTemplate = buildBookingConfirmedTemplate(customer_name, created.reservation_time, guestsNum, language);
@@ -29074,17 +29217,27 @@ app.get(['/privacy', '/informativa-privacy', '/privacy/:slug'], async (req, res)
     }
 });
 
-// Traduzioni del widget /prenota (Card dev board #33, IT/EN). Servite
-// esplicitamente come i loghi qui sopra, per lo stesso motivo: non tutta
-// public/ va esposta. Non passano da withPublicTenant perché non dipendono
-// dal ristorante — è testo di interfaccia, non contenuto configurabile.
-// Percorso e formato (`/locales/{{lng}}/{{ns}}.json`) sono la convenzione di
-// i18next-http-backend apposta — è la stessa che legge i18n/config.ts: la
-// SPA, quando una schermata migrerà a react-i18next, punta già qui.
-app.get('/locales/:lang/prenota.json', (req, res) => {
-    if (req.params.lang !== 'it' && req.params.lang !== 'en') return res.status(404).end();
+// Traduzioni delle pagine pubbliche del backend (Card dev board #33, IT/EN).
+// Servite esplicitamente come i loghi qui sopra, per lo stesso motivo: non
+// tutta public/ va esposta. Non passano da withPublicTenant perché non
+// dipendono dal ristorante — è testo di interfaccia, non contenuto
+// configurabile. Percorso e formato (`/locales/{{lng}}/{{ns}}.json`) sono la
+// convenzione di i18next-http-backend apposta — è la stessa che legge
+// i18n/config.ts: la SPA, quando una schermata migrerà a react-i18next,
+// punta già qui. La whitelist elenca SOLO le namespace lette dalle pagine
+// servite da questo server (prenota.html, ordina.html): le altre (paytable,
+// …) viaggiano con la build Vite su Vercel e qui non servono.
+// Il parametro cattura il nome file intero (`prenota.json`): con Express 5
+// il suffisso letterale dopo un parametro (`:ns.json`) non è affidabile, e
+// la whitelist sul nome completo chiude comunque ogni path traversal.
+const PUBLIC_LOCALE_LANGS = new Set(['it', 'en']);
+const PUBLIC_LOCALE_FILES = new Set(['prenota.json', 'ordina.json']);
+app.get('/locales/:lang/:file', (req, res) => {
+    if (!PUBLIC_LOCALE_LANGS.has(req.params.lang) || !PUBLIC_LOCALE_FILES.has(req.params.file)) {
+        return res.status(404).end();
+    }
     res.set('Cache-Control', 'public, max-age=300');
-    res.sendFile(path.join(process.cwd(), 'public', 'locales', req.params.lang, 'prenota.json'));
+    res.sendFile(path.join(process.cwd(), 'public', 'locales', req.params.lang, req.params.file));
 });
 
 // Pagina di prenotazione per slug (Fase C3): stesso HTML di /prenota — è il

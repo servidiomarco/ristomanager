@@ -127,6 +127,24 @@ button:disabled { cursor: not-allowed; }
 }
 .header__pill:hover { background: var(--ds-public-header-line); }
 .header__pill svg { width: 15px; height: 15px; flex-shrink: 0; }
+/* Selettore lingua — identico a prenota.html (Card #33). */
+.lang-toggle {
+    display: inline-flex; gap: 2px; padding: 2px;
+    border-radius: 999px;
+    background: var(--ds-public-header-pill);
+    border: 1px solid var(--ds-public-header-line);
+}
+.lang-toggle__btn {
+    min-height: 30px; padding: 0 12px;
+    border: 0; border-radius: 999px;
+    background: transparent; color: inherit;
+    font-size: 12px; font-weight: 600; letter-spacing: 0.02em;
+    opacity: 0.64;
+}
+.lang-toggle__btn[aria-pressed="true"] {
+    background: var(--ds-public-header-line);
+    opacity: 1;
+}
 .header__title {
     margin: 22px 0 0;
     font-size: clamp(28px, 6vw, 40px);
@@ -273,9 +291,13 @@ button:disabled { cursor: not-allowed; }
                 <span class="header__tagline" id="brandTagline"></span>
             </a>
             <div class="header__links" id="headerLinks"></div>
+            <div class="lang-toggle" id="langToggle" role="group" aria-label="Lingua" data-i18n-attr="aria-label:header.langGroupAria">
+                <button type="button" class="lang-toggle__btn" data-lang="it">IT</button>
+                <button type="button" class="lang-toggle__btn" data-lang="en">EN</button>
+            </div>
         </div>
-        <p class="header__title">Ordina d'asporto</p>
-        <p class="header__sub">Scegli i piatti, passa a ritirarli all'ora che preferisci.</p>
+        <p class="header__title" data-i18n="header.title">Ordina d'asporto</p>
+        <p class="header__sub" data-i18n="header.sub">Scegli i piatti, passa a ritirarli all'ora che preferisci.</p>
     </div>
 </header>
 
@@ -284,8 +306,8 @@ button:disabled { cursor: not-allowed; }
     <!-- Manutenzione. Visibile per default: se /public/takeaway/info non
          risponde gli ordini restano chiusi invece di aprirsi per errore. -->
     <section class="card" id="maintenance">
-        <h2 class="card__title">Ordini online non disponibili</h2>
-        <p class="card__hint" style="margin-bottom:0">In questo momento non riceviamo ordini d'asporto dal sito. Chiamaci e prepariamo tutto per te.</p>
+        <h2 class="card__title" data-i18n="maintenance.title">Ordini online non disponibili</h2>
+        <p class="card__hint" style="margin-bottom:0" data-i18n="maintenance.hint">In questo momento non riceviamo ordini d'asporto dal sito. Chiamaci e prepariamo tutto per te.</p>
     </section>
 
     <form id="form" novalidate hidden>
@@ -296,42 +318,42 @@ button:disabled { cursor: not-allowed; }
         </div>
 
         <section class="card">
-            <h2 class="card__title">Quando ritiri</h2>
-            <p class="card__hint">Gli orari tengono conto dei tempi di cucina.</p>
-            <div class="daystrip" id="daystrip" role="group" aria-label="Giorno di ritiro"></div>
+            <h2 class="card__title" data-i18n="pickup.title">Quando ritiri</h2>
+            <p class="card__hint" data-i18n="pickup.hint">Gli orari tengono conto dei tempi di cucina.</p>
+            <div class="daystrip" id="daystrip" role="group" aria-label="Giorno di ritiro" data-i18n-attr="aria-label:pickup.dayGroupAria"></div>
             <div id="slotArea">
-                <div id="stopNotice" class="notice notice--pending" style="margin:14px 0 0" hidden>Per questa data l'asporto è fermo: scegli un altro giorno.</div>
+                <div id="stopNotice" class="notice notice--pending" style="margin:14px 0 0" hidden data-i18n="pickup.stopNotice">Per questa data l'asporto è fermo: scegli un altro giorno.</div>
                 <div id="lunchWrap" hidden>
-                    <p class="shift-label">Pranzo</p>
-                    <div class="slots" id="lunchSlots" role="group" aria-label="Orari del pranzo"></div>
+                    <p class="shift-label" data-i18n="pickup.lunch">Pranzo</p>
+                    <div class="slots" id="lunchSlots" role="group" aria-label="Orari del pranzo" data-i18n-attr="aria-label:pickup.lunchAria"></div>
                 </div>
                 <div id="dinnerWrap" hidden>
-                    <p class="shift-label">Cena</p>
-                    <div class="slots" id="dinnerSlots" role="group" aria-label="Orari della cena"></div>
+                    <p class="shift-label" data-i18n="pickup.dinner">Cena</p>
+                    <div class="slots" id="dinnerSlots" role="group" aria-label="Orari della cena" data-i18n-attr="aria-label:pickup.dinnerAria"></div>
                 </div>
-                <p class="slots-empty" id="slotsEmpty" hidden>Nessun orario disponibile per questo giorno.</p>
+                <p class="slots-empty" id="slotsEmpty" hidden data-i18n="pickup.slotsEmpty">Nessun orario disponibile per questo giorno.</p>
             </div>
         </section>
 
         <section class="card">
-            <h2 class="card__title">Cosa ordini</h2>
-            <p class="card__hint">I prezzi sono quelli del menu.</p>
-            <div id="menuArea"><p class="slots-empty">Carico il menu…</p></div>
+            <h2 class="card__title" data-i18n="menu.title">Cosa ordini</h2>
+            <p class="card__hint" data-i18n="menu.hint">I prezzi sono quelli del menu.</p>
+            <div id="menuArea"><p class="slots-empty" data-i18n="menu.loading">Carico il menu…</p></div>
         </section>
 
         <section class="card">
-            <h2 class="card__title">I tuoi dati</h2>
+            <h2 class="card__title" data-i18n="fields.title">I tuoi dati</h2>
             <div class="field">
-                <label for="fName">Nome</label>
+                <label for="fName" data-i18n="fields.name">Nome</label>
                 <input id="fName" name="customer_name" autocomplete="name" required maxlength="120" />
             </div>
             <div class="field">
-                <label for="fPhone">Telefono</label>
+                <label for="fPhone" data-i18n="fields.phone">Telefono</label>
                 <input id="fPhone" name="customer_phone" type="tel" inputmode="tel" autocomplete="tel" required maxlength="40" />
             </div>
             <div class="field" style="margin-bottom:0">
-                <label for="fNotes">Note per la cucina</label>
-                <textarea id="fNotes" name="notes" maxlength="1000" placeholder="Allergie, citofono, preferenze…"></textarea>
+                <label for="fNotes" data-i18n="fields.notes">Note per la cucina</label>
+                <textarea id="fNotes" name="notes" maxlength="1000" placeholder="Allergie, citofono, preferenze…" data-i18n-attr="placeholder:fields.notesPlaceholder"></textarea>
             </div>
         </section>
 
@@ -343,7 +365,7 @@ button:disabled { cursor: not-allowed; }
             <div class="done__badge" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
             </div>
-            <h2>Ordine confermato</h2>
+            <h2 data-i18n="done.title">Ordine confermato</h2>
             <p class="done__number tnum" id="doneNumber" hidden></p>
             <p id="doneText"></p>
             <p class="done__slot tnum" id="doneSlot"></p>
@@ -355,10 +377,10 @@ button:disabled { cursor: not-allowed; }
 <div class="orderbar" id="orderbar" hidden>
     <div class="orderbar__inner">
         <div class="orderbar__total">
-            <small id="barCount">Nessun piatto</small>
+            <small id="barCount" data-i18n="bar.none">Nessun piatto</small>
             <strong class="tnum" id="barTotal">0 €</strong>
         </div>
-        <button type="button" class="orderbar__btn" id="submitBtn" disabled>Ordina</button>
+        <button type="button" class="orderbar__btn" id="submitBtn" disabled data-i18n="actions.submit">Ordina</button>
     </div>
 </div>
 
@@ -377,6 +399,45 @@ button:disabled { cursor: not-allowed; }
 
     const euro = cents => (cents / 100).toFixed(2).replace('.', ',').replace(/,00$/, '') + ' €';
 
+    // ---- Lingua e traduzioni --------------------------------------------
+    // Stesso motore vanilla di prenota.html (Card #33), ricopiato e non
+    // condiviso: le pagine pubbliche sono autocontenute per progetto (vedi
+    // CLAUDE.md). Risorse in /public/locales/{lng}/ordina.json, servite da
+    // /locales/:lang/ordina.json nel formato di i18next-http-backend, così
+    // un'eventuale migrazione a react-i18next riusa gli stessi file.
+    const dictionaries = { it: {}, en: {} };
+    const pluralRules = { it: new Intl.PluralRules('it-IT'), en: new Intl.PluralRules('en-GB') };
+    async function loadDictionary(lang) {
+        try {
+            const r = await fetch('/locales/' + lang + '/ordina.json');
+            if (r.ok) dictionaries[lang] = await r.json();
+        } catch { /* resta il dizionario vuoto: t() ripiega sulla chiave grezza */ }
+    }
+    const resolveKey = (dict, key) => key.split('.').reduce((o, k) => (o && typeof o === 'object') ? o[k] : undefined, dict);
+    function t(key, vars) {
+        let lookupKey = key;
+        if (vars && typeof vars.count === 'number') {
+            const form = pluralRules[state.language].select(vars.count);
+            lookupKey = resolveKey(dictionaries[state.language], key + '_' + form) !== undefined
+                ? key + '_' + form : key + '_other';
+        }
+        let str = resolveKey(dictionaries[state.language], lookupKey);
+        if (str === undefined) str = resolveKey(dictionaries.it, lookupKey);
+        if (str === undefined) return key;
+        if (vars) str = str.replace(/\{\{(\w+)\}\}/g, (_, name) => (vars[name] !== undefined ? vars[name] : ''));
+        return str;
+    }
+    function applyStaticTranslations() {
+        document.documentElement.lang = state.language;
+        document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.getAttribute('data-i18n')); });
+        document.querySelectorAll('[data-i18n-attr]').forEach(el => {
+            el.getAttribute('data-i18n-attr').split(',').forEach(pair => {
+                const [attr, key] = pair.split(':');
+                el.setAttribute(attr.trim(), t(key.trim()));
+            });
+        });
+    }
+
     // Fuso di Roma, non del telefono: il ritiro è all'ora del ristorante.
     const romeToday = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Rome' });
     const addDays = (iso, n) => {
@@ -384,17 +445,19 @@ button:disabled { cursor: not-allowed; }
         d.setDate(d.getDate() + n);
         return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
     };
-    const GIORNI = ['dom', 'lun', 'mar', 'mer', 'gio', 'ven', 'sab'];
-    const MESI = ['gen', 'feb', 'mar', 'apr', 'mag', 'giu', 'lug', 'ago', 'set', 'ott', 'nov', 'dic'];
+    // Nomi di giorno e mese dal locale della lingua scelta, non più elenchi
+    // cablati in italiano — come in prenota.html (l'orario resta 24h in
+    // entrambe: è una scelta del ristorante, non una traduzione).
+    const dateLocale = () => state.language === 'en' ? 'en-GB' : 'it-IT';
     const dayLabel = iso => {
         const d = new Date(iso + 'T12:00:00');
-        return { dow: iso === romeToday() ? 'oggi' : GIORNI[d.getDay()], num: d.getDate(), month: MESI[d.getMonth()] };
+        return {
+            dow: iso === romeToday() ? t('pickup.today') : d.toLocaleDateString(dateLocale(), { weekday: 'short' }),
+            num: d.getDate(),
+            month: d.toLocaleDateString(dateLocale(), { month: 'short' }),
+        };
     };
-    const longDate = iso => {
-        const d = new Date(iso + 'T12:00:00');
-        const nomi = ['domenica', 'lunedì', 'martedì', 'mercoledì', 'giovedì', 'venerdì', 'sabato'];
-        return nomi[d.getDay()] + ' ' + d.getDate() + ' ' + MESI[d.getMonth()];
-    };
+    const longDate = iso => new Date(iso + 'T12:00:00').toLocaleDateString(dateLocale(), { weekday: 'long', day: 'numeric', month: 'short' });
 
     // Una settimana di scelta basta per l'asporto: chi ordina per fra dieci
     // giorni chiama al telefono.
@@ -405,31 +468,62 @@ button:disabled { cursor: not-allowed; }
         time: null,
         cart: new Map(),           // dish_id -> qty
         dishes: new Map(),         // dish_id -> {name, price_cents}
+        menuData: undefined,       // undefined = non ancora caricato, null = fallito
+        lastOrder: null,           // risposta dell'ordine confermato, per ridisegnare la conferma al cambio lingua
         submitting: false,
+        language: (navigator.language || '').slice(0, 2).toLowerCase() === 'en' ? 'en' : 'it',
     };
 
     /* ── Bootstrap ─────────────────────────────────────────────────────── */
-    const info = await fetch(publicBase + '/info').then(r => r.ok ? r.json() : null).catch(() => null);
+    const [info] = await Promise.all([
+        fetch(publicBase + '/info').then(r => r.ok ? r.json() : null).catch(() => null),
+        loadDictionary('it'),
+        loadDictionary('en'),
+    ]);
+    document.title = t('meta.title');
+    applyStaticTranslations();
 
     // Identità prima della guardia: anche la pagina in manutenzione deve
     // avere il nome giusto in testata.
-    if (info?.branding) {
-        const b = info.branding;
-        document.title = 'Ordina d\'asporto — ' + (b.name || '');
-        $('brandName').textContent = b.name || '';
-        if (b.tagline) $('brandTagline').textContent = b.tagline;
-        if (b.logo_url) {
-            // Se il logo non carica torna il nome: mai l'icona rotta in testata.
-            $('brandLogo').onerror = () => { $('brandLogo').hidden = true; $('brandName').hidden = false; };
-            $('brandLogo').src = b.logo_url; $('brandLogo').alt = b.name || '';
-            $('brandLogo').hidden = false; $('brandName').hidden = true;
-        }
+    const branding = info?.branding || {};
+    const restaurantName = branding.name || '';
+    // Rigenerati a ogni cambio lingua: la pill «Indicazioni» è testo tradotto.
+    function renderHeaderLinks() {
         const links = [];
-        if (b.phone) links.push('<a class="header__pill" href="tel:' + b.phone.replace(/\s/g, '') + '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>' + b.phone + '</a>');
-        if (b.maps_url) links.push('<a class="header__pill" href="' + b.maps_url + '" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>Indicazioni</a>');
+        if (branding.phone) links.push('<a class="header__pill" href="tel:' + branding.phone.replace(/\s/g, '') + '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>' + branding.phone + '</a>');
+        if (branding.maps_url) links.push('<a class="header__pill" href="' + branding.maps_url + '" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>' + t('header.directions') + '</a>');
         $('headerLinks').innerHTML = links.join('');
-        $('footer').textContent = [b.name, b.address].filter(Boolean).join(' · ');
     }
+    if (restaurantName) {
+        document.title = t('meta.titleWithName', { name: restaurantName });
+        $('brandName').textContent = restaurantName;
+    }
+    if (branding.tagline) $('brandTagline').textContent = branding.tagline;
+    if (branding.logo_url) {
+        // Se il logo non carica torna il nome: mai l'icona rotta in testata.
+        $('brandLogo').onerror = () => { $('brandLogo').hidden = true; $('brandName').hidden = false; };
+        $('brandLogo').src = branding.logo_url; $('brandLogo').alt = restaurantName;
+        $('brandLogo').hidden = false; $('brandName').hidden = true;
+    }
+    renderHeaderLinks();
+    if (info?.branding) $('footer').textContent = [branding.name, branding.address].filter(Boolean).join(' · ');
+
+    // ---- Selettore lingua ------------------------------------------------
+    // Come in prenota.html: wired PRIMA del return di manutenzione, la
+    // lingua deve poter cambiare anche su quella pagina.
+    const langButtons = Array.from(document.querySelectorAll('.lang-toggle__btn'));
+    const renderLangToggle = () => {
+        langButtons.forEach(btn => btn.setAttribute('aria-pressed', String(btn.dataset.lang === state.language)));
+    };
+    langButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            if (btn.dataset.lang === state.language) return;
+            state.language = btn.dataset.lang;
+            renderLangToggle();
+            applyLanguage();
+        });
+    });
+    renderLangToggle();
 
     if (!info?.takeawayEnabled) return;
     $('maintenance').remove();
@@ -489,15 +583,26 @@ button:disabled { cursor: not-allowed; }
 
     /* ── Menu ──────────────────────────────────────────────────────────── */
     async function loadMenu() {
-        const data = await fetch(publicBase + '/catalogo').then(r => r.ok ? r.json() : null).catch(() => null);
+        state.menuData = await fetch(publicBase + '/catalogo').then(r => r.ok ? r.json() : null).catch(() => null);
+        renderMenu();
+    }
+
+    // Separato dal fetch: il cambio lingua ridisegna il menu (aria label,
+    // categoria di ripiego) senza rifare la chiamata e senza perdere le
+    // quantità già scelte, riprese da state.cart.
+    function renderMenu() {
+        const data = state.menuData;
+        if (data === undefined) return; // non ancora caricato: resta «Carico il menu…»
         if (!data || !Array.isArray(data.piatti) || data.piatti.length === 0) {
-            $('menuArea').innerHTML = '<p class="slots-empty">Menu non disponibile al momento.</p>';
+            $('menuArea').innerHTML = '<p class="slots-empty">' + t('menu.unavailable') + '</p>';
             return;
         }
         const byCat = new Map();
         for (const p of data.piatti) {
             state.dishes.set(p.id, { name: p.name, price_cents: p.price_cents });
-            const cat = p.category || 'Altro';
+            // Chiave vuota per i piatti senza categoria: l'etichetta di
+            // ripiego si traduce al render, il raggruppamento non cambia.
+            const cat = p.category || '';
             if (!byCat.has(cat)) byCat.set(cat, []);
             byCat.get(cat).push(p);
         }
@@ -506,19 +611,20 @@ button:disabled { cursor: not-allowed; }
 
         const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         $('menuArea').innerHTML = ordered.map((cat, i) =>
-            '<details class="cat"' + (i === 0 ? ' open' : '') + '><summary>' + esc(cat)
+            '<details class="cat"' + (i === 0 ? ' open' : '') + '><summary>' + esc(cat || t('menu.other'))
             + '<svg class="cat__chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></summary>'
-            + byCat.get(cat).map(p =>
-                '<div class="dish"><div class="dish__body">'
+            + byCat.get(cat).map(p => {
+                const qty = state.cart.get(p.id) || 0;
+                return '<div class="dish"><div class="dish__body">'
                 + '<p class="dish__name">' + esc(p.name) + '</p>'
                 + (p.description ? '<p class="dish__desc">' + esc(p.description) + '</p>' : '')
                 + '<p class="dish__price tnum">' + euro(p.price_cents) + '</p>'
                 + '</div><div class="qty" data-dish="' + p.id + '">'
-                + '<button type="button" data-d="-1" aria-label="Togli ' + esc(p.name) + '" disabled>−</button>'
-                + '<output data-zero="true">0</output>'
-                + '<button type="button" data-d="1" aria-label="Aggiungi ' + esc(p.name) + '">+</button>'
-                + '</div></div>'
-            ).join('')
+                + '<button type="button" data-d="-1" aria-label="' + esc(t('menu.removeAria', { name: p.name })) + '"' + (qty === 0 ? ' disabled' : '') + '>−</button>'
+                + '<output data-zero="' + (qty === 0) + '">' + qty + '</output>'
+                + '<button type="button" data-d="1" aria-label="' + esc(t('menu.addAria', { name: p.name })) + '">+</button>'
+                + '</div></div>';
+            }).join('')
             + '</details>'
         ).join('');
 
@@ -550,22 +656,18 @@ button:disabled { cursor: not-allowed; }
     function updateBar() {
         const { total, pieces } = cartTotal();
         $('barTotal').textContent = euro(total);
-        $('barCount').textContent = pieces === 0 ? 'Nessun piatto'
-            : (pieces === 1 ? '1 piatto' : pieces + ' piatti') + (state.time ? ' · ritiro ' + state.time : '');
+        $('barCount').textContent = pieces === 0 ? t('bar.none')
+            : t('bar.dish', { count: pieces }) + (state.time ? t('bar.pickupAt', { time: state.time }) : '');
         $('submitBtn').disabled = state.submitting || pieces === 0 || !state.time
             || !$('fName').value.trim() || !$('fPhone').value.trim();
     }
     $('fName').addEventListener('input', updateBar);
     $('fPhone').addEventListener('input', updateBar);
 
-    const ERRORI = {
-        slot_full: 'L\'orario scelto si è appena riempito: scegline un altro.',
-        slot_too_soon: 'La cucina non fa in tempo per questo orario: scegline uno più avanti.',
-        takeaway_stopped: 'Per questa data l\'asporto è fermo: scegli un altro giorno.',
-        invalid_slot: 'L\'orario scelto non è più disponibile: scegline un altro.',
-        invalid_phone: 'Controlla il numero di telefono.',
-        rate_limited: 'Troppe richieste: riprova tra qualche minuto.',
-    };
+    // Un codice è «noto» se ha una chiave nel dizionario italiano: la lista
+    // dei codici vive nei JSON di /public/locales, non più qui.
+    const errorText = code => (code && resolveKey(dictionaries.it, 'errors.' + code) !== undefined)
+        ? t('errors.' + code) : null;
 
     $('submitBtn').addEventListener('click', async () => {
         if (state.submitting) return;
@@ -588,7 +690,7 @@ button:disabled { cursor: not-allowed; }
             });
             const data = await r.json().catch(() => ({}));
             if (!r.ok) {
-                $('error').textContent = ERRORI[data.error] || data.message || 'Qualcosa è andato storto: riprova.';
+                $('error').textContent = errorText(data.error) || data.message || t('errors.generic');
                 $('error').hidden = false;
                 if (data.error === 'slot_full' || data.error === 'invalid_slot' || data.error === 'slot_too_soon') {
                     state.time = null;
@@ -598,24 +700,49 @@ button:disabled { cursor: not-allowed; }
             }
             $('form').hidden = true;
             $('orderbar').hidden = true;
-            if (data.daily_number != null) {
-                $('doneNumber').textContent = 'Ordine #' + data.daily_number;
-                $('doneNumber').hidden = false;
-                $('doneText').textContent = 'Grazie ' + (data.customer_name || '') + ': al ritiro basta questo numero.';
-            } else {
-                $('doneText').textContent = 'Grazie ' + (data.customer_name || '') + ': ti aspettiamo per il ritiro.';
-            }
-            $('doneSlot').textContent = longDate(data.pickup_date) + ' · ' + data.pickup_time + ' · ' + euro(data.total_cents);
+            state.lastOrder = data;
+            renderDone();
             $('done').hidden = false;
             window.scrollTo({ top: 0, behavior: 'smooth' });
         } catch {
-            $('error').textContent = 'Rete assente o instabile: riprova.';
+            $('error').textContent = t('errors.network');
             $('error').hidden = false;
         } finally {
             state.submitting = false;
             updateBar();
         }
     });
+
+    /* ── Conferma ──────────────────────────────────────────────────────── */
+    // Da state.lastOrder, così il cambio lingua la ridisegna senza perdere
+    // i dati dell'ordine appena fatto.
+    function renderDone() {
+        const data = state.lastOrder;
+        if (!data) return;
+        if (data.daily_number != null) {
+            $('doneNumber').textContent = t('done.orderNumber', { number: data.daily_number });
+            $('doneNumber').hidden = false;
+            $('doneText').textContent = t('done.textWithNumber', { name: data.customer_name || '' });
+        } else {
+            $('doneText').textContent = t('done.text', { name: data.customer_name || '' });
+        }
+        $('doneSlot').textContent = longDate(data.pickup_date) + ' · ' + data.pickup_time + ' · ' + euro(data.total_cents);
+    }
+
+    /* ── Cambio lingua ─────────────────────────────────────────────────── */
+    // Ridisegna ciò che dipende dal testo senza rifare le chiamate di rete,
+    // come in prenota.html: i dati non cambiano con la lingua, solo come li
+    // leggiamo. Dichiarata come function: il selettore in testata è wired
+    // prima, anche per la pagina di manutenzione.
+    function applyLanguage() {
+        applyStaticTranslations();
+        document.title = restaurantName ? t('meta.titleWithName', { name: restaurantName }) : t('meta.title');
+        renderHeaderLinks();
+        renderDays();
+        renderMenu();
+        updateBar();
+        renderDone();
+    }
 
     renderDays();
     loadSlots();
