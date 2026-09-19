@@ -658,6 +658,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-19 | Prenotazioni | Con la lingua inglese anche la **scheda della prenotazione** è in inglese nella sua prima parte: dati del cliente, allergie e intolleranze, note, consensi privacy, scelta del tavolo con la sua legenda. |
 | 2026-09-19 | Prenotazioni | Con la lingua inglese la **lista prenotazioni** è in inglese: ricerca, ordinamenti, filtri (sala, stato pagamento, canale, allergeni/note/senza tavolo), contatori del turno, badge VIP e blacklist, icone di canale e lo stato vuoto. Il modale di dettaglio e i messaggi di conferma seguiranno. |
 | 2026-09-19 | Funzionalità trasversali | Con la lingua inglese anche il **vocabolario degli stati** è in inglese ovunque compaia — pastiglie delle prenotazioni, intestazioni dei gruppi in lista, didascalie e legenda dei tavoli in Reception e in Sala: sono le parole più ripetute dell'app e vengono da un posto solo, come il colore. |
 | 2026-09-19 | Funzionalità trasversali | Con la lingua inglese la **navigazione** dell'app è in inglese: menu laterale e i suoi gruppi, barra inferiore del telefono, foglio «Altro», «Esci». Le singole schermate seguiranno una per una; quelle non ancora tradotte restano in italiano. |

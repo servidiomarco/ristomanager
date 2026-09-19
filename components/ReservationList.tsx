@@ -4874,8 +4874,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               type="button"
               onClick={() => setFormStep(s => Math.max(0, s - 1))}
               disabled={formStep === 0}
-              aria-label="Sezione precedente"
-              title="Sezione precedente"
+              aria-label={tv('modal.prevSection')}
+              title={tv('modal.prevSection')}
               className={dsStepArrow}
             >
               <ChevronLeft className="h-4 w-4" />
@@ -4903,8 +4903,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   type="button"
                   onClick={() => setFormStep(s => Math.min(RESERVATION_STEPS.length - 1, s + 1))}
                   disabled={formStep === RESERVATION_STEPS.length - 1}
-                  aria-label="Sezione successiva"
-                  title="Sezione successiva"
+                  aria-label={tv('modal.nextSection')}
+                  title={tv('modal.nextSection')}
                   className={dsStepArrow}
                 >
                   <ChevronRight className="h-4 w-4" />
@@ -4951,7 +4951,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         <div className="mx-4 sm:mx-5 mt-4 flex items-start gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-pending-tint)] p-4">
                             <Info className="mt-0.5 h-5 w-5 flex-shrink-0 text-[var(--ds-pending-text)]" />
                             <div className="flex-1 min-w-0">
-                                <p className="text-[15px] font-semibold text-[var(--ds-pending-text)]">Bozza non salvata trovata</p>
+                                <p className="text-[15px] font-semibold text-[var(--ds-pending-text)]">{tv('modal.draftFound')}</p>
                                 <p className="mt-0.5 text-[13px] text-[var(--ds-pending-text)]">
                                     Salvata {new Date(draftBanner.savedAt).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}
                                 </p>
@@ -5062,7 +5062,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                 if (current && !options.includes(current)) options.push(current);
                                                 options.sort();
                                                 if (options.length === 0) {
-                                                    return <option value="" disabled>Nessuno slot disponibile</option>;
+                                                    return <option value="" disabled>{tv('modal.noSlots')}</option>;
                                                 }
                                                 return options.map(s => <option key={s} value={s}>{s}</option>);
                                             })()}
@@ -5151,11 +5151,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 weight to the block. Light grey fill + soft border
                                 separates it from the datetime / table pickers above
                                 without adding another card shadow. */}
-                            <FormCard title="Dettagli cliente">
+                            <FormCard title={tv('modal.customerDetails')}>
                             <div className="flex flex-col gap-5">
                             {/* Customer Name with Voice Input */}
                             <div>
-                                <label className="mb-1.5 block text-[14px] font-medium text-[var(--ds-text-secondary)]">Nome cliente</label>
+                                <label className="mb-1.5 block text-[14px] font-medium text-[var(--ds-text-secondary)]">{tv('modal.customerName')}</label>
                                 <div className="flex items-center gap-2">
                                     <div className="flex-1 relative">
                                         <input
@@ -5170,7 +5170,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                             }}
                                             onFocus={() => setActiveSuggestField('name')}
                                             onBlur={() => setTimeout(() => setActiveSuggestField(prev => prev === 'name' ? null : prev), 150)}
-                                            placeholder="Mario Rossi"
+                                            placeholder={tv('modal.namePlaceholder')}
                                             autoComplete="off"
                                         />
                                         {activeSuggestField === 'name' && customerSuggestions.length > 0 && (
@@ -5212,7 +5212,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         type="button"
                                         onClick={() => setIsCustomerPickerOpen(true)}
                                         className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                                        title="Rubrica clienti"
+                                        title={tv('modal.addressBook')}
                                     >
                                         <BookUser className="h-[18px] w-[18px]" />
                                     </button>
@@ -5226,7 +5226,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                     ? 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] animate-pulse motion-reduce:animate-none'
                                                     : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)]'
                                             }`}
-                                            title="Dettatura vocale"
+                                            title={tv('modal.voiceDictation')}
                                         >
                                             <Mic className="h-[18px] w-[18px]" />
                                         </button>
@@ -5268,8 +5268,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                 href={`tel:${formData.phone.replace(/[^\d+]/g, '')}`}
                                                 onMouseDown={e => e.preventDefault()}
                                                 className="absolute right-1.5 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-[var(--ds-radius)] bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] transition-all hover:brightness-95"
-                                                aria-label="Chiama"
-                                                title="Chiama"
+                                                aria-label={tv('modal.call')}
+                                                title={tv('modal.call')}
                                             >
                                                 <Phone className="h-3.5 w-3.5" />
                                             </a>
@@ -5311,13 +5311,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     </div>
                                 </div>
                                 <div>
-                                    <label className="mb-1.5 block text-[14px] font-medium text-[var(--ds-text-secondary)]">Email</label>
+                                    <label className="mb-1.5 block text-[14px] font-medium text-[var(--ds-text-secondary)]">{tv('modal.email')}</label>
                                     <input
                                         type="email"
                                         className={dsInput}
                                         value={formData.email || ''}
                                         onChange={e => setFormData({...formData, email: e.target.value})}
-                                        placeholder="cliente@email.com"
+                                        placeholder={tv('modal.emailPlaceholder')}
                                     />
                                 </div>
                             </div>
@@ -5333,7 +5333,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 if (banquetsForDate.length === 0) return null;
                                 return (
                                     <div>
-                                        <label className="mb-1.5 block text-[14px] font-medium text-[var(--ds-text-secondary)]">Banchetto</label>
+                                        <label className="mb-1.5 block text-[14px] font-medium text-[var(--ds-text-secondary)]">{tv('modal.banquet')}</label>
                                         <div className="relative">
                                             <select
                                                 className={dsSelect}
@@ -5345,7 +5345,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                     banquet_menu_id: e.target.value ? Number(e.target.value) : null
                                                 })}
                                             >
-                                                <option value="">Nessuno</option>
+                                                <option value="">{tv('modal.none')}</option>
                                                 {banquetsForDate.map(m => (
                                                     <option key={m.id} value={m.id}>
                                                         {m.name}{canViewBanquetPrice && ` — €${Number(m.price_per_person).toFixed(2)}/persona`}
@@ -5374,7 +5374,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         <div className="flex items-center gap-3">
                                             <AlertTriangle className={`h-4 w-4 ${(selectedAllergies.length + selectedAllergens.length) > 0 ? 'text-[var(--ds-critical-text)]' : 'text-[var(--ds-text-secondary)]'}`} />
                                             <div className="text-left">
-                                                <span className="text-sm font-medium text-[var(--ds-text-primary)]">Allergie &amp; Intolleranze</span>
+                                                <span className="text-sm font-medium text-[var(--ds-text-primary)]">{tv('modal.allergies')}</span>
                                                 {(selectedAllergies.length + selectedAllergens.length) > 0 && (
                                                     <p className="text-xs text-[var(--ds-text-secondary)]">
                                                         {[selectedAllergies.length > 0 && `${selectedAllergies.length} allergie`, selectedAllergens.length > 0 && `${selectedAllergens.length} intolleranze`].filter(Boolean).join(' · ')}
@@ -5478,7 +5478,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         <div className="flex items-center gap-3">
                                             <StickyNote className={`h-4 w-4 ${(selectedQuickNotes.length > 0 || noteSelections.length > 0 || formData.notes) ? 'text-[var(--ds-text-primary)]' : 'text-[var(--ds-text-secondary)]'}`} />
                                             <div className="text-left">
-                                                <span className="text-sm font-medium text-[var(--ds-text-primary)]">Note</span>
+                                                <span className="text-sm font-medium text-[var(--ds-text-primary)]">{tv('modal.notes')}</span>
                                                 {(selectedQuickNotes.length > 0 || noteSelections.length > 0) && (
                                                     <p className="text-xs text-[var(--ds-text-secondary)]">
                                                         {[
@@ -5545,10 +5545,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
                                             {/* Free text notes */}
                                             <div>
-                                                <label className="mb-1.5 block text-[14px] font-medium text-[var(--ds-text-secondary)]">Altre note</label>
+                                                <label className="mb-1.5 block text-[14px] font-medium text-[var(--ds-text-secondary)]">{tv('modal.otherNotes')}</label>
                                                 <textarea
                                                     className={`${dsTextarea} h-20 resize-none`}
-                                                    placeholder="Richieste speciali..."
+                                                    placeholder={tv('modal.notesPlaceholder')}
                                                     value={formData.notes || ''}
                                                     onChange={e => setFormData({...formData, notes: e.target.value})}
                                                 />
@@ -5562,7 +5562,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     the whole card hides when neither consent applies. */}
                                 {((askHealthConsent && selectedAllergens.length > 0) || marketingEnabled) && (
                                 <div className="mt-3 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] p-3">
-                                    <label className="mb-1.5 block text-[14px] font-medium text-[var(--ds-text-secondary)]">Consensi privacy (GDPR)</label>
+                                    <label className="mb-1.5 block text-[14px] font-medium text-[var(--ds-text-secondary)]">{tv('modal.gdprTitle')}</label>
                                     <div className="space-y-1.5">
                                         {askHealthConsent && selectedAllergens.length > 0 && (
                                         <label className="flex items-start gap-2 text-sm text-[var(--ds-text-primary)] cursor-pointer">
@@ -5572,7 +5572,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                 checked={formData.consent_data_health === true}
                                                 onChange={e => setFormData({ ...formData, consent_data_health: e.target.checked })}
                                             />
-                                            <span>Consenso al trattamento di allergie / intolleranze <span className="text-[var(--ds-text-secondary)]">(dati sanitari, art. 9 GDPR)</span></span>
+                                            <span>{tv('modal.gdprHealth')} <span className="text-[var(--ds-text-secondary)]">(dati sanitari, art. 9 GDPR)</span></span>
                                         </label>
                                         )}
                                         {marketingEnabled && (
@@ -5583,7 +5583,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                 checked={formData.consent_marketing === true}
                                                 onChange={e => setFormData({ ...formData, consent_marketing: e.target.checked })}
                                             />
-                                            <span>Consenso all'invio di comunicazioni commerciali <span className="text-[var(--ds-text-secondary)]">(marketing)</span></span>
+                                            <span>{tv('modal.gdprMarketing')} <span className="text-[var(--ds-text-secondary)]">(marketing)</span></span>
                                         </label>
                                         )}
                                     </div>
@@ -5603,7 +5603,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                              <div className="flex flex-wrap items-center gap-3 pb-4 mb-4 border-b border-[var(--ds-border)]">
                                 <MapPin className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-secondary)]" />
                                 <div className="flex-1">
-                                    <h3 className="text-[15px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">Seleziona tavolo</h3>
+                                    <h3 className="text-[15px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">{tv('modal.selectTable')}</h3>
                                     <p className="text-[14px] text-[var(--ds-text-muted)]">
                                         {formData.shift === Shift.LUNCH ? 'Pranzo' : 'Cena'} — {' '}
                                         <span className="font-semibold text-[var(--ds-seated-text)]">{freeTablesCount} tavoli liberi</span> su {totalTablesInFilter}
@@ -5629,8 +5629,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                 showToast('Tavolo scollegato dalla prenotazione', 'info');
                                             }}
                                             className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-white/15 text-white transition-colors hover:bg-white/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
-                                            title="Scollega il tavolo dalla prenotazione"
-                                            aria-label="Scollega tavolo dalla prenotazione"
+                                            title={tv('modal.unlinkTableTitle')}
+                                            aria-label={tv('modal.unlinkTable')}
                                         >
                                             <X className="h-4 w-4" />
                                         </button>
@@ -5973,12 +5973,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 )}
                              </div>
                              <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mt-4 pt-4 border-t border-[var(--ds-border)] text-[12px] text-[var(--ds-text-secondary)]">
-                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[var(--ds-radius-sm)] bg-[var(--ds-surface)] ring-1 ring-inset ring-[var(--ds-border-strong)]"></span> Libero</div>
-                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[var(--ds-radius-sm)] bg-[var(--ds-seated-tint)] ring-1 ring-inset ring-[var(--ds-seated-solid)]"></span> Consigliato</div>
-                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[var(--ds-radius-sm)] bg-[var(--ds-seated-solid)]"></span> Selezionato</div>
-                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[var(--ds-radius-sm)] bg-[var(--ds-critical-tint)]"></span> Occupato</div>
-                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[var(--ds-radius-sm)] bg-[var(--ds-surface)] opacity-50"></span> Capienza insuff.</div>
-                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[var(--ds-radius-sm)] bg-[var(--ds-arriving-tint)]"></span> Evento / Banchetto</div>
+                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[var(--ds-radius-sm)] bg-[var(--ds-surface)] ring-1 ring-inset ring-[var(--ds-border-strong)]"></span> {tv('legend.free')}</div>
+                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[var(--ds-radius-sm)] bg-[var(--ds-seated-tint)] ring-1 ring-inset ring-[var(--ds-seated-solid)]"></span> {tv('legend.recommended')}</div>
+                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[var(--ds-radius-sm)] bg-[var(--ds-seated-solid)]"></span> {tv('legend.selected')}</div>
+                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[var(--ds-radius-sm)] bg-[var(--ds-critical-tint)]"></span> {tv('legend.occupied')}</div>
+                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[var(--ds-radius-sm)] bg-[var(--ds-surface)] opacity-50"></span> {tv('legend.tooSmall')}</div>
+                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[var(--ds-radius-sm)] bg-[var(--ds-arriving-tint)]"></span> {tv('legend.banquet')}</div>
                              </div>
                              {mergeMode && (
                                  <div className="mt-3 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3.5 py-2 text-[13px] font-medium text-[var(--ds-text-secondary)]">
