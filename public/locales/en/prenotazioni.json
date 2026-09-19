@@ -98,5 +98,41 @@
     "occupied": "Occupied",
     "tooSmall": "Too small",
     "banquet": "Event"
+  },
+  "payments": {
+    "tableBill": "Table bill",
+    "loading": "Loading…",
+    "noBill": "No open bill.",
+    "requestDeposit": "Request a deposit",
+    "sendVia": "Send the link via",
+    "email": "Email",
+    "whatsapp": "WhatsApp",
+    "sms": "SMS",
+    "amount": "Amount",
+    "description": "Description",
+    "descriptionPlaceholder": "E.g. deposit for dinner on 15/08",
+    "sendLink": "Send link"
+  },
+  "billState": {
+    "paid": "Paid",
+    "partial": "Partly paid",
+    "unpaid": "Unpaid"
+  },
+  "paymentStatus": {
+    "pending": "Pending",
+    "authorised": "Authorised",
+    "completed": "Paid",
+    "cancelled": "Cancelled",
+    "failed": "Failed",
+    "expired": "Expired",
+    "refunded": "Refunded"
+  },
+  "messages": {
+    "inbound": "Inbound",
+    "reply": "Reply",
+    "delivered": "Delivered",
+    "sent": "Sent",
+    "failed": "Failed",
+    "queued": "Queued"
   }
 }

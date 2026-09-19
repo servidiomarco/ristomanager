@@ -6001,10 +6001,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         <FormCard>
                           <div className="mb-4 flex flex-wrap items-center gap-2">
                             <Receipt className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
-                            <h4 className="text-[15px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">Conto al tavolo</h4>
+                            <h4 className="text-[15px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">{tv('payments.tableBill')}</h4>
                             {bill && (() => {
                               const state = billStateLabel(bill.bill.total_cents, bill.paid_cents);
-                              return <StatusPill tone={state.tone}>{state.label}</StatusPill>;
+                              return <StatusPill tone={state.tone}>{tv(state.labelKey, state.fallback)}</StatusPill>;
                             })()}
                             {bill && (
                               <span className="ml-auto text-[13px] text-[var(--ds-text-muted)]">
@@ -6015,7 +6015,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
                           {billLoading && !bill && (
                             <div className="flex items-center gap-2 text-[13px] text-[var(--ds-text-muted)]">
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Caricamento…
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" /> {tv('payments.loading')}
                             </div>
                           )}
 
@@ -6099,7 +6099,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                           })()}
 
                           {!billLoading && !bill && !hasPermission('payments:full') && (
-                            <p className="text-[14px] text-[var(--ds-text-muted)]">Nessun conto attivo.</p>
+                            <p className="text-[14px] text-[var(--ds-text-muted)]">{tv('payments.noBill')}</p>
                           )}
 
                           {bill && (
@@ -6134,7 +6134,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                       className={dsButton.secondary}
                                     >
                                       {billActionLoading === 'notify' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                                      Invia link
+                                      {tv('payments.sendLink')}
                                     </button>
                                     <button
                                       type="button"
@@ -6235,7 +6235,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         <FormCard>
                           <div className="mb-4 flex flex-wrap items-center gap-2">
                             <CreditCard className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
-                            <h4 className="text-[15px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">Richiedi un acconto</h4>
+                            <h4 className="text-[15px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">{tv('payments.requestDeposit')}</h4>
                             <span className="ml-auto text-[13px] text-[var(--ds-text-muted)]">
                               {paymentProviderLabel}
                             </span>
@@ -6245,12 +6245,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                               invio. I canali senza recapito sul booking sono mutati
                               (email→nessuna email, WhatsApp/SMS→nessun telefono). */}
                           <div className="mb-4">
-                            <span className="mb-1.5 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Invia il link tramite</span>
+                            <span className="mb-1.5 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{tv('payments.sendVia')}</span>
                             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                               {([
-                                { key: 'email' as const, label: 'Email', icon: Mail, target: formData.email, missing: 'Nessuna email sul contatto' },
-                                { key: 'whatsapp' as const, label: 'WhatsApp', icon: MessageCircle, target: formData.phone, missing: 'Nessun telefono sul contatto' },
-                                { key: 'sms' as const, label: 'SMS', icon: Phone, target: formData.phone, missing: 'Nessun telefono sul contatto' },
+                                { key: 'email' as const, label: tv('payments.email'), icon: Mail, target: formData.email, missing: 'Nessuna email sul contatto' },
+                                { key: 'whatsapp' as const, label: tv('payments.whatsapp'), icon: MessageCircle, target: formData.phone, missing: 'Nessun telefono sul contatto' },
+                                { key: 'sms' as const, label: tv('payments.sms'), icon: Phone, target: formData.phone, missing: 'Nessun telefono sul contatto' },
                               ]).map(({ key, label, icon: Icon, target, missing }) => {
                                 const available = paymentChannelAvailable[key];
                                 const selected = paymentChannel === key && available;
@@ -6287,7 +6287,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                           </div>
 
                           <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,150px)_1fr]">
-                            <Field label="Importo">
+                            <Field label={tv('payments.amount')}>
                               <div className="relative">
                                 <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[15px] text-[var(--ds-text-muted)]">€</span>
                                 <input
@@ -6301,10 +6301,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 />
                               </div>
                             </Field>
-                            <Field label="Descrizione">
+                            <Field label={tv('payments.description')}>
                               <input
                                 type="text"
-                                placeholder="Es. acconto cena del 15/08"
+                                placeholder={tv('payments.descriptionPlaceholder')}
                                 value={paymentDescription}
                                 onChange={e => setPaymentDescription(e.target.value)}
                                 disabled={isCreatingPayment}
@@ -6324,7 +6324,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 : `Genera il link e invia ${paymentChannel === 'email' ? 'via email' : paymentChannel === 'sms' ? 'via SMS' : 'via WhatsApp'}`}
                             >
                               {isCreatingPayment ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                              Invia link
+                              {tv('payments.sendLink')}
                             </button>
                           </div>
 
