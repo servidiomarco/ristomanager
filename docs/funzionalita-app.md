@@ -658,6 +658,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-19 | Impostazioni e shell | Con la lingua inglese parlano inglese il saluto e i messaggi di sistema, le preferenze del profilo (pagina di partenza, layout comande, stile interfaccia) e tutte le etichette delle sezioni di Impostazioni. |
 | 2026-09-19 | Impostazioni | Con la lingua inglese parlano inglese le impostazioni Sala &amp; Cucina (profili, lancio uscite, partite, stampanti, nodo di sala), la card Identità e documenti legali e la scheda Il tuo account. I testi dei documenti legali generati restano in italiano. |
 | 2026-09-19 | Dashboard e Attività | Con la lingua inglese parlano inglese anche la Dashboard (saluto, deck «Adesso in sala», spesa, personale in servizio) e la pagina Attività. Le date seguono la lingua scelta. |
 | 2026-09-19 | Anagrafiche | Con la lingua inglese parlano inglese anche Clienti, Personale e Inventario: schede, turni e assenze, aree e categorie, con i giorni della settimana presi dalla lingua. |
