@@ -28,7 +28,49 @@ export interface Table {
   rotation?: number;
   width_cm?: number | null;
   length_cm?: number | null;
+  // Centro del tavolo in cm-sala (usati solo se la stanza ha un plan);
+  // i legacy x/y in px restano autorevoli per le sale senza pianta.
+  x_cm?: number | null;
+  y_cm?: number | null;
   notes?: string | null;
+}
+
+// Elementi fissi disegnabili sulla pianta. La palette v1 ne espone sei;
+// window/stairs/label sono riservati alle evoluzioni senza rompere il blob.
+export const ROOM_ELEMENT_KINDS = [
+  'wall',
+  'bar',
+  'door',
+  'window',
+  'column',
+  'plant',
+  'cashier',
+  'stairs',
+  'label',
+] as const;
+export type RoomElementKind = (typeof ROOM_ELEMENT_KINDS)[number];
+
+export interface RoomPlanElement {
+  id: string; // uuid generato dal client
+  kind: RoomElementKind;
+  x_cm: number; // top-left, coordinate sala in cm
+  y_cm: number;
+  w_cm: number;
+  h_cm: number;
+  rotation: number; // gradi
+  label?: string;
+}
+
+// Pianta reale della sala. Tutto in centimetri: la scala cm→px è solo di
+// render, mai persistita. null su Room.plan = nessuna planimetria =
+// comportamento storico (layout auto, coordinate px).
+export interface RoomPlan {
+  version: 1;
+  rev: number; // concorrenza ottimistica, guardia in PATCH /rooms/:id
+  width_cm: number;
+  height_cm: number;
+  perimeter?: { x_cm: number; y_cm: number }[]; // assente = rettangolo pieno
+  elements: RoomPlanElement[]; // ordine array = z-order
 }
 
 export interface Room {
@@ -37,6 +79,8 @@ export interface Room {
   width: number;
   height: number;
   is_closed?: boolean;
+  location?: 'INDOOR' | 'OUTDOOR' | null;
+  plan?: RoomPlan | null;
 }
 
 export interface Dish {
