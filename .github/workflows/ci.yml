@@ -25,6 +25,10 @@ jobs:
       - run: npm ci
       - name: Typecheck frontend
         run: npx tsc --noEmit
+      # Il typecheck non vede le chiavi di traduzione: questo controlla che i
+      # dizionari di public/locales restino allineati fra le lingue.
+      - name: Dizionari allineati
+        run: npm run check:locales
       - name: Build frontend
         run: npm run build
       - name: Build server

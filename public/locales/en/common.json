@@ -1,0 +1,11 @@
+{
+  "profile": {
+    "languageLabel": "Interface language",
+    "languageHint": "The app language for your account, on every device.",
+    "languageDefault": "Same as the restaurant",
+    "languageIt": "Italiano",
+    "languageEn": "English",
+    "languageSaved": "Language updated",
+    "prefsError": "Could not update your preferences"
+  }
+}

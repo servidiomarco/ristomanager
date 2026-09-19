@@ -90,6 +90,8 @@ import { paymentsApiService } from './services/paymentsApiService';
 import { emailApiService, emailCache } from './services/emailApiService';
 import { notificationsApiService } from './services/notificationsApiService';
 import { useAuth } from './contexts/AuthContext';
+import { useTranslation } from 'react-i18next';
+import { SUPPORTED_LANGUAGES } from './i18n/config';
 import { sortRooms } from './utils/roomOrder';
 import { toTitleCase } from './utils/text';
 import { getRomeDatePart } from './utils/reservationTime';
@@ -350,6 +352,11 @@ const SettingsNavCard: React.FC<{
 
 const App: React.FC = () => {
   const { user, isAuthenticated, isLoading: authLoading, logout, canAccessView, canManageUsers, hasPermission, hasFeature, getAccessibleViews, canViewLogs, updatePreferences } = useAuth();
+  // `common` è l'unica namespace precaricata: le viste caricheranno la loro
+  // quando verranno tradotte. useSuspense false come sulle pagine pubbliche —
+  // la shell non deve sparire mentre il JSON arriva, il testo non ancora
+  // pronto esce dal fallback italiano.
+  const { t, i18n } = useTranslation('common', { useSuspense: false });
 
   const [view, setView] = useState<ViewState>(ViewState.DASHBOARD);
 
@@ -920,6 +927,18 @@ const App: React.FC = () => {
     if (user?.preferred_design_style === 'squadrato') root.dataset.design = 'squadrato';
     else delete root.dataset.design;
   }, [user?.preferred_design_style]);
+
+  // Lingua dell'interfaccia: scelta dell'operatore, altrimenti il default del
+  // ristorante, altrimenti italiano. Vince sulla lingua salvata dal detector
+  // in localStorage (che sulle pagine pubbliche la sceglie l'ospite: stessa
+  // istanza i18n, stesso dispositivo). Al logout si torna a italiano, così la
+  // pagina di login non eredita l'inglese dell'ultimo operatore.
+  useEffect(() => {
+    const preferita = user?.language ?? user?.tenant?.default_language ?? 'it';
+    const scelta = SUPPORTED_LANGUAGES.includes(preferita as any) ? preferita : 'it';
+    if (i18n.language !== scelta) i18n.changeLanguage(scelta);
+    document.documentElement.lang = scelta;
+  }, [i18n, user?.language, user?.tenant?.default_language]);
 
   // Redirect to first accessible view when user changes or doesn't have access to current view.
   // Also honors a ?view= query param so a notification click that opens a fresh tab lands on
@@ -3206,6 +3225,36 @@ const App: React.FC = () => {
                 >
                   <option value="">Classico, angoli morbidi</option>
                   <option value="squadrato">Squadrato, angoli netti</option>
+                </select>
+              </div>
+              {/* Lingua dell'interfaccia: per account come le due card qui
+                  sopra, quindi segue l'operatore su ogni dispositivo. Vuoto =
+                  si eredita la lingua del ristorante. È la prima card tradotta
+                  della SPA: si legge già nella lingua che imposta. */}
+              <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
+                <label htmlFor="preferred-language" className="mb-1 block text-[15px] font-semibold text-[var(--ds-text-primary)]">
+                  {t('profile.languageLabel')}
+                </label>
+                <p className="mb-3 text-[13px] text-[var(--ds-text-muted)]">
+                  {t('profile.languageHint')}
+                </p>
+                <select
+                  id="preferred-language"
+                  value={user?.language ?? ''}
+                  onChange={async (e) => {
+                    const v = e.target.value || null;
+                    try {
+                      await updatePreferences({ language: v });
+                      addToast(t('profile.languageSaved'), 'success');
+                    } catch (err: any) {
+                      addToast(err?.message || t('profile.prefsError'), 'error');
+                    }
+                  }}
+                  className={`${dsSelect} sm:max-w-sm`}
+                >
+                  <option value="">{t('profile.languageDefault')}</option>
+                  <option value="it">{t('profile.languageIt')}</option>
+                  <option value="en">{t('profile.languageEn')}</option>
                 </select>
               </div>
                 <PushNotificationsCard />
