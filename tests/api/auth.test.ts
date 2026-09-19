@@ -69,6 +69,10 @@ describe('auth', () => {
             // Lingua di default del ristorante: la SPA la usa per gli
             // operatori che non hanno scelto la propria.
             default_language: 'it',
+            // Dove sta il ristorante (tappa valuta/fuso/paese).
+            currency: 'EUR',
+            timezone: 'Europe/Rome',
+            country_code: 'IT',
         });
 
         // Il claim tenantId sta nel payload del JWT (segmento centrale).

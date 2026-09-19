@@ -658,6 +658,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-19 | Funzionalità trasversali | Ogni ristorante porta con sé **valuta, fuso orario e paese** (per ora tutti in Italia: euro, ora di Roma). È la base per i clienti esteri — da sola non cambia nulla di quello che si vede, ma è ciò che permetterà a un locale a Londra di lavorare in sterline e con il proprio orario. |
 | 2026-09-19 | Prenotazioni; Pagamenti, conto al tavolo e cassa | Con la lingua inglese la scheda della prenotazione è in inglese anche nei passi **Pagamenti** (conto al tavolo, stato del conto, richiesta acconto e scelta del canale) e **Comunicazione** (esiti dei messaggi inviati: consegnato, inviato, fallito, in coda). |
 | 2026-09-19 | Prenotazioni | Con la lingua inglese anche la **scheda della prenotazione** è in inglese nella sua prima parte: dati del cliente, allergie e intolleranze, note, consensi privacy, scelta del tavolo con la sua legenda. |
 | 2026-09-19 | Prenotazioni | Con la lingua inglese la **lista prenotazioni** è in inglese: ricerca, ordinamenti, filtri (sala, stato pagamento, canale, allergeni/note/senza tavolo), contatori del turno, badge VIP e blacklist, icone di canale e lo stato vuoto. Il modale di dettaglio e i messaggi di conferma seguiranno. |

@@ -1072,6 +1072,12 @@ export interface User {
     // Letta in modo difensivo (backend vecchio nella finestra di deploy →
     // assente → 'it').
     default_language?: string | null;
+    // Valuta, fuso e paese del ristorante. Letti in modo difensivo: un
+    // backend non ancora aggiornato non li manda, e allora valgono i default
+    // italiani di sempre.
+    currency?: string | null;
+    timezone?: string | null;
+    country_code?: string | null;
     // true finché l'OWNER non completa il wizard di primo accesso (D1):
     // la SPA lo mostra al posto dell'app, solo all'OWNER.
     needs_onboarding?: boolean;

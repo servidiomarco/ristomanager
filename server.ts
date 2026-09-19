@@ -30,6 +30,7 @@ import { createServer as createHttpsServer, type Server as HttpsServer } from 'h
 import { startSalaNodeReplica } from './services/salaNodeReplica.js';
 import { VOICE_CHANNEL, WHATSAPP_CHANNEL, type ToolOutcome } from './services/bookingTools.js';
 import { TENANT_FEATURES, getTenantFeatures, isFeatureEnabledForTenant, invalidateTenantFeaturesCache, clearTenantFeaturesCache, type TenantFeature } from './services/entitlements.js';
+import { clearTenantLocaleCache } from './services/tenantLocale.js';
 import { provisionTenant, ProvisioningError } from './services/tenantProvisioning.js';
 import {
     createCheckoutSession,
@@ -36102,6 +36103,8 @@ const startServer = async () => {
                         // (60s di TTL): si riparte da zero ora che lo stato
                         // a DB è quello vero.
                         clearTenantFeaturesCache();
+                        // Stessa ragione per valuta/fuso/paese del tenant.
+                        clearTenantLocaleCache();
                         // L'outbox parte solo a migration riuscite (la sua
                         // tabella deve esistere). Il primo giro consegna ciò
                         // che un eventuale crash aveva lasciato indietro.
