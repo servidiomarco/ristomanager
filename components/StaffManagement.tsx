@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
 import {
   StaffMember, StaffShift, StaffTimeOff, StaffCategory, StaffType,
@@ -8,6 +9,7 @@ import { staffApiService, CreateStaffInput, CreateTimeOffInput } from '../servic
 import { StaffCompensation } from './StaffCompensation';
 import { useAuth } from '../contexts/AuthContext';
 import { toTitleCase } from '../utils/text';
+import { displayLocale } from '../utils/formatLocale';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { SkeletonStaffColumn } from './SkeletonCards';
 import {
@@ -69,9 +71,6 @@ const TIME_OFF_PILL_TONE: Record<TimeOffType, 'neutral' | 'positive' | 'critical
   [TimeOffType.MALATTIA]: 'critical',
   [TimeOffType.PERMESSO]: 'info'
 };
-
-// Indices match JS Date.getDay(): 0=Sunday, 1=Monday, ..., 6=Saturday
-const WEEKDAY_LABELS = ['Domenica', 'Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato'];
 
 // Format Date as YYYY-MM-DD using local components (avoids UTC timezone shift)
 const formatLocalDate = (date: Date): string => {
@@ -147,6 +146,28 @@ interface StaffManagementProps {
 }
 
 export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, autoOpenNew, onAutoOpenNewHandled }) => {
+  const { t, i18n } = useTranslation('personale', { useSuspense: false });
+
+  /* Le mappe qui sopra restano l'elenco delle chiavi e la versione italiana;
+     il testo mostrato passa sempre di qui. Una costante di modulo non può
+     chiamare un hook, e lasciarne il valore a schermo darebbe una scheda
+     metà inglese e metà italiana. */
+  const categoryLabel = (c: StaffCategory) => t(`category.${c}`, STAFF_CATEGORY_LABELS[c]);
+  const typeLabel = (x: StaffType) => t(`type.${x}`, STAFF_TYPE_LABELS[x]);
+  const typeHint = (x: StaffType) => t(`typeHint.${x}`, STAFF_TYPE_HINTS[x]);
+  const timeOffLabel = (x: TimeOffType) => t(`timeOff.${x}`, TIME_OFF_LABELS[x]);
+
+  /* I giorni della settimana vengono dalla lingua, non da un dizionario:
+     è l'unica lista che il locale conosce già meglio di noi. Il 7 gennaio
+     2024 è una domenica, così l'indice combacia con Date.getDay(). */
+  const weekdayLabels = useMemo(() => {
+    const fmt = new Intl.DateTimeFormat(displayLocale(), { weekday: 'long', timeZone: 'UTC' });
+    return Array.from({ length: 7 }, (_, i) => {
+      const nome = fmt.format(new Date(Date.UTC(2024, 0, 7 + i)));
+      return nome.charAt(0).toUpperCase() + nome.slice(1);
+    });
+  }, [i18n.language]);
+
   // ============================================
   // STATE
   // ============================================
@@ -287,7 +308,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
       setTimeOffs(timeOffData);
     } catch (error) {
       console.error('Error fetching staff data:', error);
-      showToastRef.current('Errore nel caricamento del personale', 'error');
+      showToastRef.current(t('loadError'), 'error');
     } finally {
       setLoading(false);
     }
@@ -558,16 +579,16 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
       if (min === Infinity) continue;
       const days = worst.map(d => fromDateOnly(d).getDate());
       const when = days.length === 1
-        ? `Il ${days[0]}`
+        ? t('coverage.whenOne', { day: days[0] })
         : days.length <= 4
-          ? `Il ${days.slice(0, -1).join(', ')} e il ${days[days.length - 1]}`
-          : `Per ${days.length} giorni`;
-      const where = STAFF_CATEGORY_LABELS[selectedStaff.category].toLowerCase();
-      const service_ = service === Shift.LUNCH ? 'a pranzo' : 'a cena';
+          ? t('coverage.whenFew', { days: days.slice(0, -1).join(', '), last: days[days.length - 1] })
+          : t('coverage.whenMany', { count: days.length });
+      const where = categoryLabel(selectedStaff.category).toLowerCase();
+      const service_ = service === Shift.LUNCH ? t('coverage.atLunch') : t('coverage.atDinner');
       lines.push(
         min === 0
-          ? `${when} non resta nessuno in ${where} ${service_}.`
-          : `${when} la ${where} resta con ${plural(min, 'persona', 'persone')} ${service_}.`
+          ? t('coverage.none', { when, where, service: service_ })
+          : t('coverage.some', { when, where, service: service_, people: plural(min, t('personOne'), t('personMany')) })
       );
     }
     return lines.length > 0 ? lines : null;
@@ -622,7 +643,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
   const handleSaveStaff = async () => {
     if (!staffForm.name.trim() || !staffForm.surname.trim()) {
       setStaffStep(0);
-      showToast('Nome e cognome sono obbligatori', 'error');
+      showToast(t('nameRequired'), 'error');
       return;
     }
     if (isSavingStaff) return;
@@ -632,16 +653,16 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
       if (editingStaff) {
         const updated = await staffApiService.updateStaffMember(editingStaff.id, staffForm);
         setStaffMembers(prev => prev.map(s => s.id === editingStaff.id ? updated : s));
-        showToast('Dipendente aggiornato', 'success');
+        showToast(t('staffUpdated'), 'success');
       } else {
         const created = await staffApiService.createStaffMember(staffForm);
         setStaffMembers(prev => [...prev, created]);
-        showToast('Dipendente aggiunto', 'success');
+        showToast(t('staffAdded'), 'success');
       }
       setShowStaffModal(false);
       resetStaffForm();
     } catch (error) {
-      showToast('Errore nel salvataggio', 'error');
+      showToast(t('saveError'), 'error');
     } finally {
       setIsSavingStaff(false);
     }
@@ -652,9 +673,9 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
       await staffApiService.deleteStaffMember(id);
       setStaffMembers(prev => prev.filter(s => s.id !== id));
       if (selectedStaff?.id === id) setSelectedStaff(null);
-      showToast('Dipendente eliminato', 'success');
+      showToast(t('staffDeleted'), 'success');
     } catch (error) {
-      showToast('Errore nell\'eliminazione', 'error');
+      showToast(t('deleteError'), 'error');
     }
   };
 
@@ -662,9 +683,9 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
     try {
       const updated = await staffApiService.updateStaffMember(staff.id, { isActive: !staff.isActive });
       setStaffMembers(prev => prev.map(s => s.id === staff.id ? updated : s));
-      showToast(updated.isActive ? 'Dipendente riattivato' : 'Dipendente disattivato', 'success');
+      showToast(updated.isActive ? t('staffReactivated') : t('staffDeactivated'), 'success');
     } catch (error) {
-      showToast('Errore nell\'aggiornamento', 'error');
+      showToast(t('updateError'), 'error');
     }
   };
 
@@ -711,7 +732,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
 
     if (shiftsToCreate.length === 0 && shiftsToDelete.length === 0 && shiftsToUpdate.length === 0) {
       if (!shiftForm.lunch && !shiftForm.dinner && existing.length === 0) {
-        showToast('Seleziona almeno un turno (Pranzo o Cena)', 'error');
+        showToast(t('pickAtLeastOneShift'), 'error');
         return;
       }
       setShowShiftModal(false);
@@ -765,7 +786,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
       if (shiftsToUpdate.length > 0) parts.push(`${shiftsToUpdate.length} aggiornat${shiftsToUpdate.length === 1 ? 'o' : 'i'}`);
       showToast(`Turni: ${parts.join(', ')}`, 'success');
     } catch (error) {
-      showToast('Errore nel salvataggio del turno', 'error');
+      showToast(t('shiftSaveError'), 'error');
     } finally {
       setIsSavingShift(false);
     }
@@ -826,7 +847,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
         return [...next, ...created];
       });
     } catch (error) {
-      showToast('Errore nel salvataggio del turno', 'error');
+      showToast(t('shiftSaveError'), 'error');
     } finally {
       setApplyingDay(null);
     }
@@ -848,9 +869,9 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
         approved: true,
       });
       setTimeOffs(prev => [...prev, created]);
-      showToast(`${TIME_OFF_LABELS[type]} registrat${type === TimeOffType.MALATTIA ? 'a' : 'o'}`, 'success');
+      showToast(t(`leaveRecorded.${type}`), 'success');
     } catch (error) {
-      showToast('Errore nel salvataggio', 'error');
+      showToast(t('saveError'), 'error');
     } finally {
       setApplyingDay(null);
     }
@@ -878,7 +899,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
       setShifts(prev => prev.filter(s => !removed.has(s.id)));
       if (singleDayOff) setTimeOffs(prev => prev.filter(t => t.id !== singleDayOff.id));
     } catch (error) {
-      showToast('Errore nella rimozione', 'error');
+      showToast(t('removeError'), 'error');
     } finally {
       setApplyingDay(null);
     }
@@ -906,7 +927,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
       const created = await staffApiService.createTimeOff(timeOffForm);
       setTimeOffs(prev => [...prev, created]);
       setShowTimeOffModal(false);
-      showToast('Assenza registrata', 'success');
+      showToast(t('leaveRecordedShort'), 'success');
     } catch (error: any) {
       console.error('createTimeOff failed', error);
       showToast(`Errore nel salvataggio: ${error?.message || 'sconosciuto'}`, 'error');
@@ -919,9 +940,9 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
     try {
       await staffApiService.deleteTimeOff(id);
       setTimeOffs(prev => prev.filter(t => t.id !== id));
-      showToast('Assenza eliminata', 'success');
+      showToast(t('leaveDeleted'), 'success');
     } catch (error) {
-      showToast('Errore nell\'eliminazione', 'error');
+      showToast(t('deleteError'), 'error');
     }
   };
 
@@ -1041,9 +1062,9 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
     <SegmentedControl<'PERSONALE' | 'COMPENSI'>
       value={area}
       onChange={setArea}
-      ariaLabel="Area del personale"
+      ariaLabel={t('staffArea')}
       options={[
-        { value: 'PERSONALE', label: 'Personale' },
+        { value: 'PERSONALE', label: t('staff') },
         { value: 'COMPENSI', label: 'Compensi' },
       ]}
     />
@@ -1061,15 +1082,15 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
         className={`${dsButton.primary} w-full lg:hidden`}
       >
         <UserPlus className="h-4 w-4" aria-hidden />
-        Nuovo dipendente
+        {t('newStaff')}
       </button>
 
       <div className="flex items-center gap-3">
         <SearchField
           value={searchQuery}
           onChange={setSearchQuery}
-          placeholder="Cerca dipendente"
-          ariaLabel="Cerca dipendente"
+          placeholder={t('searchStaff')}
+          ariaLabel={t('searchStaff')}
           className="min-w-0 flex-1"
         />
         {/* Two filter tracks parked permanently above the list cost more room
@@ -1140,35 +1161,35 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
               className="inline-flex items-center gap-1.5 text-[13px] font-medium text-[var(--ds-text-muted)] transition-colors hover:text-[var(--ds-text-primary)]"
             >
               <RotateCcw className="h-3.5 w-3.5" aria-hidden />
-              Reimposta
+              {t('reset')}
             </button>
           )}
         </div>
         <div className="space-y-4 px-5 sm:px-6">
           <div>
-            <span className="mb-2 block text-[13px] font-semibold text-[var(--ds-text-primary)]">Reparto</span>
+            <span className="mb-2 block text-[13px] font-semibold text-[var(--ds-text-primary)]">{t('department')}</span>
             <div className="flex flex-wrap gap-2">
-              <Chip active={categoryFilter === 'ALL'} onClick={() => setCategoryFilter('ALL')}>Tutti</Chip>
+              <Chip active={categoryFilter === 'ALL'} onClick={() => setCategoryFilter('ALL')}>{t('all')}</Chip>
               <Chip active={categoryFilter === StaffCategory.SALA} onClick={() => setCategoryFilter(StaffCategory.SALA)}>
                 <Users className="h-3.5 w-3.5 flex-shrink-0" aria-hidden />
-                Sala
+                {t('diningRoom')}
               </Chip>
               <Chip active={categoryFilter === StaffCategory.CUCINA} onClick={() => setCategoryFilter(StaffCategory.CUCINA)}>
                 <ChefHat className="h-3.5 w-3.5 flex-shrink-0" aria-hidden />
-                Cucina
+                {t('kitchen')}
               </Chip>
             </div>
           </div>
           <div>
-            <span className="mb-2 block text-[13px] font-semibold text-[var(--ds-text-primary)]">Contratto</span>
+            <span className="mb-2 block text-[13px] font-semibold text-[var(--ds-text-primary)]">{t('contract')}</span>
             <div className="flex flex-wrap gap-2">
               <Chip active={typeFilter === 'ALL'} onClick={() => setTypeFilter('ALL')}>
-                Tutti
+                {t('all')}
                 <span className="tabular-nums opacity-70">{countByType('ALL')}</span>
               </Chip>
               {(Object.keys(STAFF_TYPE_LABELS) as StaffType[]).map(type => (
                 <Chip key={type} active={typeFilter === type} onClick={() => setTypeFilter(type)}>
-                  {STAFF_TYPE_LABELS[type]}
+                  {typeLabel(type)}
                   <span className="tabular-nums opacity-70">{countByType(type)}</span>
                 </Chip>
               ))}
@@ -1184,7 +1205,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
               onChange={(e) => setShowInactive(e.target.checked)}
               className="h-4 w-4 flex-shrink-0 rounded accent-[var(--ds-action-bg)]"
             />
-            <span className="min-w-0 flex-1 text-[14px] text-[var(--ds-text-secondary)]">Mostra inattivi</span>
+            <span className="min-w-0 flex-1 text-[14px] text-[var(--ds-text-secondary)]">{t('showInactive')}</span>
             <span className="flex-shrink-0 text-[14px] tabular-nums text-[var(--ds-text-muted)]">{inactiveCount}</span>
           </label>
         </div>
@@ -1200,13 +1221,13 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
         <EmptyState icon={UserCircle}>
           {searchQuery.trim()
             ? `Nessun dipendente per "${searchQuery.trim()}".`
-            : 'Nessun dipendente con questi filtri.'}
+            : t('noStaffForFilters')}
         </EmptyState>
       ) : (
         listGroups.map(group => (
           <div key={group.category}>
             <SectionHeader meta={String(group.members.length)}>
-              {STAFF_CATEGORY_LABELS[group.category]}
+              {categoryLabel(group.category)}
             </SectionHeader>
             <div className="space-y-2">
               {group.members.map(staff => {
@@ -1236,7 +1257,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                     </span>
                     {!staff.isActive && <StatusPill tone="neutral">Inattivo</StatusPill>}
                     <StatusPill tone={staff.staffType === StaffType.FISSO ? 'neutral' : staff.staffType === StaffType.STAGIONALE ? 'pending' : 'info'}>
-                      {STAFF_TYPE_LABELS[staff.staffType]}
+                      {typeLabel(staff.staffType)}
                     </StatusPill>
                   </button>
                 );
@@ -1287,9 +1308,9 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
           <span
             key={label}
             className={`block truncate rounded-[var(--ds-radius-control)] px-2 py-1 text-center text-[11px] font-medium ${TIME_OFF_CHIP[dayTimeOff.type]}`}
-            title={`${TIME_OFF_LABELS[dayTimeOff.type]} — ${label.toLowerCase()}`}
+            title={`${timeOffLabel(dayTimeOff.type)} — ${label.toLowerCase()}`}
           >
-            {TIME_OFF_LABELS[dayTimeOff.type]}
+            {timeOffLabel(dayTimeOff.type)}
           </span>
         );
       }
@@ -1306,7 +1327,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
         <span
           key={label}
           className={`block truncate rounded-[var(--ds-radius-control)] text-center text-[11px] font-semibold ${tone}`}
-          title={implicit ? `${label} dal contratto (${STAFF_TYPE_LABELS[selectedStaff.staffType]})` : label}
+          title={implicit ? t('fromContract', { label, type: typeLabel(selectedStaff.staffType) }) : label}
         >
           {label}
         </span>
@@ -1319,20 +1340,20 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
     if (fullDayOff) {
       rows = (
         <span className={`block truncate rounded-[var(--ds-radius-control)] px-2 py-1 text-center text-[12px] font-medium ${TIME_OFF_CHIP[dayTimeOff!.type]}`}>
-          {TIME_OFF_LABELS[dayTimeOff!.type]}
+          {timeOffLabel(dayTimeOff!.type)}
         </span>
       );
     } else if (lunch === 'rest' && dinner === 'rest') {
       rows = (
         <span className="block truncate rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-2 py-1 text-center text-[12px] font-medium text-[var(--ds-text-muted)]">
-          Riposo
+          {t('rest')}
         </span>
       );
     } else {
       rows = (
         <>
-          {serviceRow(lunch, 'Pranzo', 'lunch')}
-          {serviceRow(dinner, 'Cena', 'dinner')}
+          {serviceRow(lunch, t('lunch'), 'lunch')}
+          {serviceRow(dinner, t('dinner'), 'dinner')}
         </>
       );
     }
@@ -1357,7 +1378,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
           <span className={`text-[12px] font-semibold tabular-nums ${isToday ? 'text-[var(--ds-text-primary)]' : 'text-[var(--ds-text-secondary)]'}`}>
             {day.getDate()}
           </span>
-          {isToday && <span className="text-[11px] text-[var(--ds-text-muted)]">oggi</span>}
+          {isToday && <span className="text-[11px] text-[var(--ds-text-muted)]">{t('todayShort')}</span>}
           {busy && <Loader2 className="h-3 w-3 animate-spin text-[var(--ds-text-muted)]" aria-hidden />}
         </span>
         {rows}
@@ -1368,7 +1389,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
   /* ── Detail ──────────────────────────────────────────────────────────── */
   const detail = !selectedStaff ? (
     <PanePlaceholder icon={UserCircle}>
-      Seleziona un dipendente per vedere turni e assenze.
+      {t('pickStaff')}
     </PanePlaceholder>
   ) : (
     <div className="flex h-full min-h-0 flex-col">
@@ -1376,7 +1397,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
         onBack={() => setSelectedStaff(null)}
         backLabel="Torna all'elenco"
         title={fullName(selectedStaff)}
-        subtitle={`${defaultRole(selectedStaff)} · ${STAFF_CATEGORY_LABELS[selectedStaff.category]} · ${STAFF_TYPE_LABELS[selectedStaff.staffType]}`}
+        subtitle={`${defaultRole(selectedStaff)} · ${categoryLabel(selectedStaff.category)} · ${typeLabel(selectedStaff.staffType)}`}
         badge={!selectedStaff.isActive ? <StatusPill tone="neutral">Inattivo</StatusPill> : undefined}
         actions={
           <>
@@ -1410,7 +1431,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                     className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-[15px] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)]"
                   >
                     <Edit2 className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
-                    Modifica scheda
+                    {t('editCard')}
                   </button>
                   <button
                     type="button"
@@ -1430,7 +1451,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                     className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-[15px] text-[var(--ds-critical-text)] transition-colors hover:bg-[var(--ds-critical-tint)]"
                   >
                     <Trash2 className="h-4 w-4 flex-shrink-0" aria-hidden />
-                    Elimina dipendente
+                    {t('deleteStaff')}
                   </button>
                 </div>
               )}
@@ -1467,7 +1488,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
         <StatStrip
           layout="stacked"
           stats={[
-            { value: monthStats.shifts, label: 'turni nel mese' },
+            { value: monthStats.shifts, label: t('shiftsInMonth') },
             { value: monthStats.rest, label: 'riposi' },
             { value: monthStats.holiday, label: 'vacanza', tone: monthStats.holiday > 0 ? 'positive' : 'neutral' },
           ]}
@@ -1477,15 +1498,15 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
           value={detailTab}
           onChange={(next: 'TURNI' | 'ASSENZE') => setDetailTab(next)}
           options={[
-            { value: 'TURNI' as const, label: 'Turni', badge: monthStats.shifts, badgeTone: 'neutral' as const },
+            { value: 'TURNI' as const, label: t('shifts'), badge: monthStats.shifts, badgeTone: 'neutral' as const },
             {
               value: 'ASSENZE' as const,
-              label: 'Assenze',
+              label: t('leaves'),
               badge: timeOffs.filter(t => t.staffId === selectedStaff.id).length,
               badgeTone: 'neutral' as const,
             },
           ]}
-          ariaLabel="Sezione della scheda"
+          ariaLabel={t('cardSection')}
         />
 
         {detailTab === 'TURNI' ? (
@@ -1505,16 +1526,16 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                 onClick={goToCurrentMonth}
                 className="inline-flex h-9 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3 text-[14px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)]"
               >
-                Oggi
+                {t('today')}
               </button>
               <div className="ml-auto flex items-center gap-2">
                 <button type="button" onClick={() => handleOpenAddTimeOff()} className={`${dsButton.secondary} px-4`}>
                   <CalendarDays className="h-4 w-4" aria-hidden />
-                  Assenza
+                  {t('leave')}
                 </button>
                 <button type="button" onClick={() => handleOpenAddShift()} className={`${dsButton.primary} px-4`}>
                   <Plus className="h-4 w-4" aria-hidden />
-                  Turno
+                  {t('shift')}
                 </button>
               </div>
             </div>
@@ -1544,20 +1565,20 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                 the automatic one means nothing for an Extra. */}
             <div className="mt-4 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-[13px] text-[var(--ds-text-muted)]">
               <span className="flex items-center gap-1.5">
-                <span className="rounded-[var(--ds-radius-control)] bg-[var(--ds-pending-tint)] px-2 py-0.5 text-[11px] font-semibold text-[var(--ds-pending-text)]">Pranzo</span>
-                <span className="rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-tint)] px-2 py-0.5 text-[11px] font-semibold text-[var(--ds-arriving-text)]">Cena</span>
-                turno assegnato
+                <span className="rounded-[var(--ds-radius-control)] bg-[var(--ds-pending-tint)] px-2 py-0.5 text-[11px] font-semibold text-[var(--ds-pending-text)]">{t('lunch')}</span>
+                <span className="rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-tint)] px-2 py-0.5 text-[11px] font-semibold text-[var(--ds-arriving-text)]">{t('dinner')}</span>
+                {t('assignedShift')}
               </span>
               {hasAutoShifts(selectedStaff) && (
                 <span className="flex items-center gap-1.5">
-                  <span className="rounded-[var(--ds-radius-control)] border border-dashed border-[var(--ds-pending-text)] px-[7px] py-[1px] text-[11px] font-semibold text-[var(--ds-pending-text)] opacity-75">Pranzo</span>
-                  dal contratto
+                  <span className="rounded-[var(--ds-radius-control)] border border-dashed border-[var(--ds-pending-text)] px-[7px] py-[1px] text-[11px] font-semibold text-[var(--ds-pending-text)] opacity-75">{t('lunch')}</span>
+                  {t('fromContractShort')}
                 </span>
               )}
               {(Object.keys(TIME_OFF_LABELS) as TimeOffType[]).map(type => (
                 <span key={type} className="flex items-center gap-1.5">
                   <span className={`h-3 w-3 rounded-[var(--ds-radius-control)] ${TIME_OFF_CHIP[type]}`} aria-hidden />
-                  {TIME_OFF_LABELS[type].toLowerCase()}
+                  {timeOffLabel(type).toLowerCase()}
                 </span>
               ))}
             </div>
@@ -1570,16 +1591,16 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                 action={
                   <button type="button" onClick={() => handleOpenAddTimeOff()} className={dsButton.primary}>
                     <Plus className="h-4 w-4" aria-hidden />
-                    Registra un'assenza
+                    {t('recordLeave')}
                   </button>
                 }
               >
-                Nessuna assenza registrata.
+                {t('noLeaveRecorded')}
               </EmptyState>
             ) : (
               timeOffsByMonth.map(group => (
                 <div key={group.key}>
-                  <SectionHeader meta={plural(group.items.length, 'assenza', 'assenze')}>
+                  <SectionHeader meta={plural(group.items.length, t('leaveOne'), t('leaveMany'))}>
                     <span className="capitalize">{group.label}</span>
                   </SectionHeader>
                   <div className="space-y-2">
@@ -1589,12 +1610,12 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                         className="flex items-center gap-2 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]"
                       >
                         <StatusPill tone={TIME_OFF_PILL_TONE[timeOff.type]}>
-                          {TIME_OFF_LABELS[timeOff.type]}
+                          {timeOffLabel(timeOff.type)}
                         </StatusPill>
                         {timeOff.shift && (
                           <StatusPill tone="neutral">
                             {timeOff.shift === Shift.LUNCH ? <Sun className="h-3 w-3" /> : <Moon className="h-3 w-3" />}
-                            {timeOff.shift === Shift.LUNCH ? 'Pranzo' : 'Cena'}
+                            {timeOff.shift === Shift.LUNCH ? t('lunch') : t('dinner')}
                           </StatusPill>
                         )}
                         <span className="min-w-0 flex-1 truncate text-[15px] text-[var(--ds-text-primary)]">
@@ -1609,10 +1630,10 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                             const dateRange = timeOff.startDate === timeOff.endDate
                               ? new Date(timeOff.startDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })
                               : `${new Date(timeOff.startDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} - ${new Date(timeOff.endDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}`;
-                            setDeleteTimeOffConfirm({ id: timeOff.id, label: `${TIME_OFF_LABELS[timeOff.type]} · ${dateRange}` });
+                            setDeleteTimeOffConfirm({ id: timeOff.id, label: `${timeOffLabel(timeOff.type)} · ${dateRange}` });
                           }}
                           className={rowIconButtonDanger}
-                          aria-label={`Elimina ${TIME_OFF_LABELS[timeOff.type]}`}
+                          aria-label={t('deleteLeaveAria', { label: timeOffLabel(timeOff.type) })}
                         >
                           <Trash2 className="h-4 w-4" />
                         </button>
@@ -1647,7 +1668,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
     ? [
         {
           key: 'both',
-          label: 'Pranzo e cena',
+          label: t('lunchAndDinner'),
           mark: (
             <span className="flex flex-shrink-0 items-center gap-1">
               {swatch('bg-[var(--ds-pending-solid)]')}
@@ -1658,25 +1679,25 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
         },
         {
           key: 'lunch',
-          label: 'Solo pranzo',
+          label: t('lunchOnly'),
           mark: swatch('bg-[var(--ds-pending-solid)]'),
           run: (d: string) => applyDayShifts(d, true, false),
         },
         {
           key: 'dinner',
-          label: 'Solo cena',
+          label: t('dinnerOnly'),
           mark: swatch('bg-[var(--ds-arriving-solid)]'),
           run: (d: string) => applyDayShifts(d, false, true),
         },
         {
           key: 'rest',
-          label: 'Riposo',
+          label: t('timeOff.RIPOSO'),
           mark: swatch('bg-[var(--ds-text-subtle)]'),
           run: (d: string) => applyDayAbsence(d, TimeOffType.RIPOSO),
         },
         {
           key: 'sick',
-          label: 'Malattia',
+          label: t('timeOff.MALATTIA'),
           mark: swatch('bg-[var(--ds-critical-solid)]'),
           run: (d: string) => applyDayAbsence(d, TimeOffType.MALATTIA),
         },
@@ -1684,7 +1705,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
         ...(dayMenuHasSomething
           ? [{
               key: 'clear',
-              label: 'Svuota il giorno',
+              label: t('clearDay'),
               danger: true,
               mark: <X className="h-4 w-4 flex-shrink-0" aria-hidden />,
               run: (d: string) => clearDay(d),
@@ -1692,13 +1713,13 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
           : []),
         {
           key: 'notes',
-          label: 'Turno con note…',
+          label: t('shiftWithNotes'),
           mark: <Edit2 className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />,
           run: (d: string) => handleOpenAddShift(d),
         },
         {
           key: 'range',
-          label: 'Assenza su più giorni…',
+          label: t('multiDayLeave'),
           mark: <CalendarDays className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />,
           run: (d: string) => handleOpenAddTimeOff(d),
         },
@@ -1822,7 +1843,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                 onClick={() => setDayMenu(null)}
                 className={`${dsButton.secondary} mt-3 w-full`}
               >
-                Chiudi
+                {t('close')}
               </button>
             </div>
           </div>
@@ -1834,18 +1855,18 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
       <ModalShell
         open={showStaffModal}
         onClose={() => { setShowStaffModal(false); resetStaffForm(); }}
-        title={editingStaff ? 'Modifica dipendente' : 'Nuovo dipendente'}
-        subtitle="Nome, reparto e tipo di contratto bastano per iniziare"
+        title={editingStaff ? t('editStaff') : t('newStaff')}
+        subtitle={t('minimumFields')}
         size="md"
         subheader={
           <StepNav
             steps={[
-              { label: 'Anagrafica e contratto', icon: User },
-              { label: 'Turno base', icon: CalendarDays },
+              { label: t('detailsAndContract'), icon: User },
+              { label: t('baseShift'), icon: CalendarDays },
             ]}
             current={staffStep}
             onSelect={setStaffStep}
-            ariaLabel="Passi del dipendente"
+            ariaLabel={t('staffSteps')}
           />
         }
         bodyClassName="px-5 pb-5 pt-4 sm:px-6"
@@ -1857,7 +1878,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
               className="inline-flex items-center gap-1.5 text-[15px] font-medium text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]"
             >
               <ChevronLeft className="h-4 w-4" aria-hidden />
-              Anagrafica
+              {t('details')}
             </button>
           ) : undefined
         }
@@ -1868,11 +1889,11 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
               onClick={() => { setShowStaffModal(false); resetStaffForm(); }}
               className={dsButton.secondary}
             >
-              Annulla
+              {t('cancel')}
             </button>
             {staffStep === 0 ? (
               <button type="button" onClick={() => setStaffStep(1)} className={dsButton.primary}>
-                Avanti · Turno base
+                {t('nextBaseShift')}
                 <ChevronRight className="h-4 w-4" aria-hidden />
               </button>
             ) : (
@@ -1883,7 +1904,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                 className={dsButton.primary}
               >
                 {isSavingStaff && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
-                {editingStaff ? 'Salva' : 'Aggiungi dipendente'}
+                {editingStaff ? t('save') : t('addStaff')}
               </button>
             )}
           </>
@@ -1891,9 +1912,9 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
       >
         {staffStep === 0 ? (
           <div className="space-y-4">
-            <FormCard title="Anagrafica" aside="chi è e come si raggiunge" className="space-y-4">
+            <FormCard title="Anagrafica" aside={t('contactAside')} className="space-y-4">
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <Field label="Nome" htmlFor="staff-name" required>
+                <Field label={t('name')} htmlFor="staff-name" required>
                   <input
                     id="staff-name"
                     type="text"
@@ -1916,7 +1937,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                 </Field>
               </div>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <Field label="Telefono" htmlFor="staff-phone">
+                <Field label={t('phone')} htmlFor="staff-phone">
                   <input
                     id="staff-phone"
                     type="tel"
@@ -1926,21 +1947,21 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                     className={dsInput}
                   />
                 </Field>
-                <Field label="Email" htmlFor="staff-email">
+                <Field label={t('email')} htmlFor="staff-email">
                   <input
                     id="staff-email"
                     type="email"
                     value={staffForm.email}
                     onChange={(e) => setStaffForm({ ...staffForm, email: e.target.value })}
-                    placeholder="nome@ristorante.it"
+                    placeholder={t('emailPlaceholder')}
                     className={dsInput}
                   />
                 </Field>
               </div>
             </FormCard>
 
-            <FormCard title="Reparto e ruolo" aside="decide dove appare nell'elenco" className="space-y-4">
-              <Field label="Reparto" required>
+            <FormCard title={t('departmentAndRole')} aside={t('departmentAside')} className="space-y-4">
+              <Field label={t('department')} required>
                 <SegmentedControl
                   value={staffForm.category}
                   onChange={(next: StaffCategory) => setStaffForm({ ...staffForm, category: next })}
@@ -1948,10 +1969,10 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                     { value: StaffCategory.SALA, label: 'Sala', icon: <Users className="h-4 w-4" /> },
                     { value: StaffCategory.CUCINA, label: 'Cucina', icon: <ChefHat className="h-4 w-4" /> },
                   ]}
-                  ariaLabel="Reparto"
+                  ariaLabel={t('department')}
                 />
               </Field>
-              <Field label="Ruolo" htmlFor="staff-role" hint="Come compare sotto il nome nell'elenco">
+              <Field label={t('role')} htmlFor="staff-role" hint={t('roleHint')}>
                 <input
                   id="staff-role"
                   type="text"
@@ -1961,7 +1982,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                   className={dsInput}
                 />
               </Field>
-              <Field label="Tipo di contratto" required>
+              <Field label={t('contractType')} required>
                 {/* Cards, not a select: the difference between the three is what
                     the calendar does on its own, and that has to be readable
                     before the choice, not after a month of empty days. */}
@@ -1981,10 +2002,10 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                         }`}
                       >
                         <span className={`block text-[15px] font-semibold ${active ? 'text-[var(--ds-pending-text)]' : 'text-[var(--ds-text-primary)]'}`}>
-                          {STAFF_TYPE_LABELS[type]}
+                          {typeLabel(type)}
                         </span>
                         <span className={`block text-[13px] ${active ? 'text-[var(--ds-pending-text)]' : 'text-[var(--ds-text-muted)]'}`}>
-                          {STAFF_TYPE_HINTS[type]}
+                          {typeHint(type)}
                         </span>
                       </button>
                     );
@@ -1995,7 +2016,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
           </div>
         ) : (
           <div className="space-y-4">
-            <FormCard title="Contratto" aside="entro quali date valgono i turni" className="space-y-4">
+            <FormCard title={t('contract')} aside={t('contractAside')} className="space-y-4">
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <Field label="Data di assunzione" htmlFor="staff-hire">
                   <input
@@ -2007,9 +2028,9 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                   />
                 </Field>
                 <Field
-                  label="Fine contratto"
+                  label={t('contractEnd')}
                   htmlFor="staff-end"
-                  hint={staffForm.staffType === StaffType.STAGIONALE ? 'Dopo questa data non compaiono più turni automatici' : undefined}
+                  hint={staffForm.staffType === StaffType.STAGIONALE ? t('endDateHint') : undefined}
                 >
                   <input
                     id="staff-end"
@@ -2022,18 +2043,17 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
               </div>
             </FormCard>
 
-            <FormCard title="Turno base" aside="quello che il calendario dà per scontato" className="space-y-4">
+            <FormCard title={t('baseShift')} aside={t('baseShiftAside')} className="space-y-4">
               {staffForm.staffType === StaffType.EXTRA ? (
                 <Callout tone="info">
-                  Un contratto extra non ha turni automatici: ogni servizio si assegna dal calendario.
+                  {t('extraExplainer')}
                 </Callout>
               ) : (
                 <Callout tone="info">
-                  Con un contratto {STAFF_TYPE_LABELS[staffForm.staffType].toLowerCase()} il calendario segna pranzo e cena
-                  tutti i giorni dentro il periodo di contratto, tranne il giorno di riposo e le assenze.
+                  {t('contractExplainer', { type: typeLabel(staffForm.staffType).toLowerCase() })}
                 </Callout>
               )}
-              <Field label="Giorno di riposo settimanale" htmlFor="staff-rest">
+              <Field label={t('weeklyRestDay')} htmlFor="staff-rest">
                 <select
                   id="staff-rest"
                   value={staffForm.weeklyRestDay ?? ''}
@@ -2044,18 +2064,18 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                   className={dsSelect}
                 >
                   <option value="">Nessuno</option>
-                  {WEEKDAY_LABELS.map((label, idx) => (
+                  {weekdayLabels.map((label, idx) => (
                     <option key={idx} value={idx}>{label}</option>
                   ))}
                 </select>
               </Field>
-              <Field label="Note" htmlFor="staff-notes">
+              <Field label={t('notes')} htmlFor="staff-notes">
                 <textarea
                   id="staff-notes"
                   value={staffForm.notes}
                   onChange={(e) => setStaffForm({ ...staffForm, notes: e.target.value })}
                   rows={3}
-                  placeholder="Disponibilità, accordi, contatti di emergenza…"
+                  placeholder={t('notesPlaceholder')}
                   className={dsTextarea}
                 />
               </Field>
@@ -2068,7 +2088,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
       <ModalShell
         open={showShiftModal}
         onClose={() => setShowShiftModal(false)}
-        title={selectedStaff ? `Turno · ${fullName(selectedStaff)}` : 'Turno'}
+        title={selectedStaff ? `${t('shift')} · ${fullName(selectedStaff)}` : t('shift')}
         subtitle={shiftForm.date
           ? fromDateOnly(shiftForm.date).toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
           : undefined}
@@ -2082,14 +2102,14 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
               onClick={() => setShiftForm({ ...shiftForm, lunch: false, dinner: false })}
               className="text-[15px] font-medium text-[var(--ds-critical-text)] hover:opacity-80"
             >
-              Rimuovi turno
+              {t('removeShift')}
             </button>
           ) : undefined
         }
         footer={
           <>
             <button type="button" onClick={() => setShowShiftModal(false)} className={dsButton.secondary}>
-              Annulla
+              {t('cancel')}
             </button>
             <button
               type="button"
@@ -2098,7 +2118,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
               className={dsButton.primary}
             >
               {isSavingShift && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
-              Salva
+              {t('save')}
             </button>
           </>
         }
@@ -2114,7 +2134,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
             />
           </Field>
 
-          <Field label="Turno" hint="Puoi selezionare uno o entrambi i servizi">
+          <Field label={t('shift')} hint={t('shiftHint')}>
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
@@ -2127,7 +2147,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                 }`}
               >
                 <Sun className="h-4 w-4" aria-hidden />
-                Pranzo
+                {t('lunch')}
               </button>
               <button
                 type="button"
@@ -2140,12 +2160,12 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                 }`}
               >
                 <Moon className="h-4 w-4" aria-hidden />
-                Cena
+                {t('dinner')}
               </button>
             </div>
           </Field>
 
-          <Field label="Note" htmlFor="shift-notes">
+          <Field label={t('notes')} htmlFor="shift-notes">
             <input
               id="shift-notes"
               type="text"
@@ -2162,8 +2182,8 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
       <ModalShell
         open={showTimeOffModal}
         onClose={() => setShowTimeOffModal(false)}
-        title={selectedStaff ? `Assenza · ${fullName(selectedStaff)}` : 'Assenza'}
-        subtitle="I turni nel periodo vengono sostituiti"
+        title={selectedStaff ? `${t('leave')} · ${fullName(selectedStaff)}` : t('leave')}
+        subtitle={t('shiftsReplaced')}
         size="sm"
         closeOnEscape
         bodyClassName="px-5 pb-5 pt-1 sm:px-6"
@@ -2175,7 +2195,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
         footer={
           <>
             <button type="button" onClick={() => setShowTimeOffModal(false)} className={dsButton.secondary}>
-              Annulla
+              {t('cancel')}
             </button>
             <button
               type="button"
@@ -2184,7 +2204,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
               className={dsButton.primary}
             >
               {isSavingTimeOff && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
-              Registra
+              {t('record')}
             </button>
           </>
         }
@@ -2206,7 +2226,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                         : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'
                     }`}
                   >
-                    {TIME_OFF_LABELS[type]}
+                    {timeOffLabel(type)}
                   </button>
                 );
               })}
@@ -2214,7 +2234,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
           </Field>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label="Dal" htmlFor="off-start">
+            <Field label={t('from')} htmlFor="off-start">
               <input
                 id="off-start"
                 type="date"
@@ -2244,16 +2264,16 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
             </Field>
           </div>
 
-          <Field label="Solo un turno" hint="Lascia «tutto il giorno» per l'intera giornata">
+          <Field label={t('oneShiftOnly')} hint={t('oneShiftHint')}>
             <SegmentedControl
               value={timeOffForm.shift ?? 'ALL'}
               onChange={(next: string) => setTimeOffForm({ ...timeOffForm, shift: next === 'ALL' ? null : (next as Shift) })}
               options={[
-                { value: 'ALL', label: 'Tutto il giorno' },
-                { value: Shift.LUNCH, label: 'Pranzo' },
-                { value: Shift.DINNER, label: 'Cena' },
+                { value: 'ALL', label: t('wholeDay') },
+                { value: Shift.LUNCH, label: t('lunch') },
+                { value: Shift.DINNER, label: t('dinner') },
               ]}
-              ariaLabel="Turno interessato"
+              ariaLabel={t('affectedShift')}
               equalWidth={false}
             />
           </Field>
@@ -2266,13 +2286,13 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
             </Callout>
           )}
 
-          <Field label="Note" htmlFor="off-notes">
+          <Field label={t('notes')} htmlFor="off-notes">
             <input
               id="off-notes"
               type="text"
               value={timeOffForm.notes ?? ''}
               onChange={(e) => setTimeOffForm({ ...timeOffForm, notes: e.target.value })}
-              placeholder="Note opzionali"
+              placeholder={t('notesOptional')}
               className={dsInput}
             />
           </Field>
@@ -2281,8 +2301,8 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
 
       <ConfirmDeleteModal
         isOpen={!!deleteStaffConfirm}
-        title="Elimina Dipendente"
-        message="Stai per eliminare il dipendente:"
+        title={t('deleteStaff')}
+        message={t('aboutToDeleteStaff')}
         itemName={deleteStaffConfirm ? fullName(deleteStaffConfirm) : undefined}
         onCancel={() => setDeleteStaffConfirm(null)}
         onConfirm={() => {
@@ -2293,8 +2313,8 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
 
       <ConfirmDeleteModal
         isOpen={!!deleteTimeOffConfirm}
-        title="Elimina Assenza"
-        message="Stai per eliminare l'assenza:"
+        title={t('deleteLeave')}
+        message={t('aboutToDeleteLeave')}
         itemName={deleteTimeOffConfirm?.label}
         onCancel={() => setDeleteTimeOffConfirm(null)}
         onConfirm={() => {
