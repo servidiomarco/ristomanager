@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { ArrivalStatus, Reservation, ReservationStatus, Shift } from '../types';
 import type { TableDisplayStatus } from './TableGlyph';
 
@@ -103,21 +104,43 @@ export const getTimedReservationState = (res: Reservation, now: number): Reserva
    ------------------------------------------------------------------------- */
 
 export interface ReservationStateMeta {
+  /** Italiano cablato: è anche il ripiego se il dizionario non è caricato. */
   label: string;
+  /** Chiave nel dizionario `common` — vedi useReservationStateLabel(). */
+  labelKey: string;
   /** The dot pings — reserved for 'arriving', the only animated state. */
   pulse?: boolean;
 }
 
 export const RESERVATION_STATE_META: Record<ReservationStateKey, ReservationStateMeta> = {
-  pending:   { label: 'Da confermare' },
-  waiting:   { label: 'Confermata' },
-  arriving:  { label: 'In arrivo', pulse: true },
-  arrived:   { label: 'Arrivato' },
-  departing: { label: 'In uscita' },
-  freed:     { label: 'Libera' },
-  noshow:    { label: 'No show' },
-  cancelled: { label: 'Annullata' },
-  declined:  { label: 'Non confermata' },
+  pending:   { label: 'Da confermare',  labelKey: 'reservationState.pending' },
+  waiting:   { label: 'Confermata',     labelKey: 'reservationState.waiting' },
+  arriving:  { label: 'In arrivo',      labelKey: 'reservationState.arriving', pulse: true },
+  arrived:   { label: 'Arrivato',       labelKey: 'reservationState.arrived' },
+  departing: { label: 'In uscita',      labelKey: 'reservationState.departing' },
+  freed:     { label: 'Libera',         labelKey: 'reservationState.freed' },
+  noshow:    { label: 'No show',        labelKey: 'reservationState.noshow' },
+  cancelled: { label: 'Annullata',      labelKey: 'reservationState.cancelled' },
+  declined:  { label: 'Non confermata', labelKey: 'reservationState.declined' },
+};
+
+/* Le etichette vivono in una costante di modulo, che non può chiamare un
+   hook: la traduzione si prende al punto di lettura. Due modi, secondo chi
+   legge — l'unico posto dove uno stato riceve un NOME resta comunque questo
+   file, come il colore. */
+
+type TFunc = (key: string, defaultValue: string) => string;
+
+/** Per chi ha già una `t` in mano (componenti con useTranslation, handler). */
+export const reservationStateLabel = (state: ReservationStateKey, t?: TFunc): string => {
+  const meta = RESERVATION_STATE_META[state];
+  return t ? t(meta.labelKey, meta.label) : meta.label;
+};
+
+/** Per i componenti: etichette tradotte, reattive al cambio lingua. */
+export const useReservationStateLabel = (): ((state: ReservationStateKey) => string) => {
+  const { t } = useTranslation('common', { useSuspense: false });
+  return React.useCallback((state: ReservationStateKey) => reservationStateLabel(state, t), [t]);
 };
 
 /* ---------------------------------------------------------------------------
@@ -178,6 +201,7 @@ export const DsStatusChip: React.FC<{
   className?: string;
 }> = ({ state, onClick, title, trailing, className = '' }) => {
   const meta = RESERVATION_STATE_META[state];
+  const stateLabel = useReservationStateLabel();
   const ds = reservationStateDs(state);
   const Tag = onClick ? 'button' : 'span';
   // 'arriving' e' l'unico stato disegnato pieno invece che a tinta: e' la
@@ -197,7 +221,7 @@ export const DsStatusChip: React.FC<{
       } ${className}`}
     >
       <PulseDot dotClass={solid ? 'bg-[var(--ds-arriving-fg)]' : ds.solid} pulse={meta.pulse} />
-      {meta.label}
+      {stateLabel(state)}
       {trailing}
     </Tag>
   );
@@ -246,6 +270,26 @@ export const TABLE_STATUS_LABEL: Record<TableDisplayStatus, string> = {
   arrivato: 'Occupato',
   uscita:   'In uscita',
   noshow:   'No-show',
+};
+
+/* Il tavolo dice le stesse cose della prenotazione con parole sue («Libero»
+   non «Libera»): chiavi separate, stessa meccanica di sopra. */
+export const TABLE_STATUS_LABEL_KEY: Record<TableDisplayStatus, string> = {
+  libera:   'tableStatus.libera',
+  attesa:   'tableStatus.attesa',
+  inarrivo: 'tableStatus.inarrivo',
+  arrivato: 'tableStatus.arrivato',
+  uscita:   'tableStatus.uscita',
+  noshow:   'tableStatus.noshow',
+};
+
+export const tableStatusLabel = (status: TableDisplayStatus, t?: TFunc): string =>
+  t ? t(TABLE_STATUS_LABEL_KEY[status], TABLE_STATUS_LABEL[status]) : TABLE_STATUS_LABEL[status];
+
+/** Per i componenti: etichette dei tavoli tradotte, reattive al cambio lingua. */
+export const useTableStatusLabel = (): ((status: TableDisplayStatus) => string) => {
+  const { t } = useTranslation('common', { useSuspense: false });
+  return React.useCallback((status: TableDisplayStatus) => tableStatusLabel(status, t), [t]);
 };
 
 export function deriveTableDisplayStatus(
