@@ -32,7 +32,7 @@ export {
   dsIconButton,
 } from './ListPrimitives';
 export type { PillTone, CalloutTone, SectionTone, Stat, StatTone } from './ListPrimitives';
-export { MonthGrid, DayPicker, asIsoDay, addDays, startOfMonth, mondayIndex, MONTHS, WEEKDAYS } from './Calendar';
+export { MonthGrid, DayPicker, useCalendarLabels, asIsoDay, addDays, startOfMonth, mondayIndex, MONTHS, WEEKDAYS } from './Calendar';
 export { SwipeRow, useFirstRunHint } from './SwipeRow';
 export type { SwipeAction } from './SwipeRow';
 export { LinkifiedText } from './LinkifiedText';
