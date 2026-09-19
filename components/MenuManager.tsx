@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Dish, RestaurantMenu, BanquetMenu, BanquetCourse, BanquetStatus, Shift, COMMON_ALLERGENS, VAT_RATES, Customer, Table, TableMerge, Reservation, ArrivalStatus, ReservationStatus, Room } from '../types';
-import { Plus, Search, Tag, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, LayoutGrid, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat, Info, RefreshCw, QrCode, Copy, Languages, Layers, SlidersHorizontal, Share2, MessageCircle, Martini, IceCreamCone, Wine, Wand2, DoorClosed } from 'lucide-react';
+import { Plus, Search, Tag, Tags, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, LayoutGrid, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat, Info, RefreshCw, QrCode, Copy, Languages, Layers, SlidersHorizontal, Share2, MessageCircle, Martini, IceCreamCone, Wine, Wand2, DoorClosed } from 'lucide-react';
 import { resizeImageToDataUrl } from '../utils/resizeImage';
 import { getRomeDatePart } from '../utils/reservationTime';
 import { printBanquet } from '../utils/printBanquet';
@@ -1543,6 +1543,78 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     - (categoryIndex.get((b.category ?? '').trim()) ?? Number.MAX_SAFE_INTEGER)
   );
 
+  /* ----- Testata della pagina Menu: due tendine ----------------------------
+     Prima stavano tutte in fila: i menu come pill, «Menu digitale» e «Importa
+     da cassa» accanto alla ricerca, e «Categorie» e «Varianti» infilate NELLA
+     riga delle categorie — due azioni in mezzo ai filtri, tanto che il commento
+     di allora spiegava come vestirle per non farle sembrare una categoria in
+     più. Il problema non era il numero dei controlli ma il fatto che azioni e
+     filtri stessero sulla stessa riga.
+     Adesso: «Alla carta ⌄» tiene tutto ciò che riguarda i menu (scelta,
+     rinomina, elimina, nuovo) e «Gestisci» tutto ciò che si fa AL menu. La riga
+     sotto resta solo filtri, a tutta larghezza — e le categorie, che prima si
+     spartivano metà riga con quei bottoni e andavano a capo tre volte, adesso
+     stanno in due. */
+  const isWideMenuBar = useMediaQuery('(min-width: 640px)');
+
+  const [menuPickerOpen, setMenuPickerOpen] = useState(false);
+  const menuPickerRef = useRef<HTMLDivElement | null>(null);
+  const menuPickerTriggerRef = useRef<HTMLButtonElement | null>(null);
+
+  const [manageOpen, setManageOpen] = useState(false);
+  const manageRef = useRef<HTMLDivElement | null>(null);
+  const manageTriggerRef = useRef<HTMLButtonElement | null>(null);
+
+  // Congedo delle tendine come ovunque nell'app (Inventario, Personale). Il
+  // foglio del telefono no: ha già il suo sfondo che lo chiude.
+  useEffect(() => {
+    if (!menuPickerOpen && !(manageOpen && isWideMenuBar)) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (menuPickerOpen && !menuPickerRef.current?.contains(t) && !menuPickerTriggerRef.current?.contains(t)) setMenuPickerOpen(false);
+      if (manageOpen && isWideMenuBar && !manageRef.current?.contains(t) && !manageTriggerRef.current?.contains(t)) setManageOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      setMenuPickerOpen(false);
+      setManageOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [menuPickerOpen, manageOpen, isWideMenuBar]);
+
+  /* Le voci di «Gestisci», in due gruppi separati da una riga: prima quello che
+     porta il menu fuori di qui (ospiti, cassa), poi come è fatto dentro. Una
+     lista sola per la tendina del desktop e per il foglio del telefono, così le
+     due non possono divergere. Un gruppo che resta vuoto per permessi sparisce
+     con la sua riga; se spariscono tutti, sparisce il bottone. */
+  const manageGroups: { icon: typeof QrCode; label: string; hint: string; meta: string | null; busy?: boolean; onClick: () => void }[][] = [
+    [
+      { icon: QrCode, label: 'Menu digitale', hint: 'QR al tavolo e traduzioni', meta: null, onClick: () => setQrOpen(true) },
+      ...(canImportCassa
+        ? [{ icon: RefreshCw, label: 'Importa da cassa', hint: 'Allinea a Passepartout', meta: null, busy: importing, onClick: handleImportCassa }]
+        : []),
+    ],
+    [
+      ...(canEdit && dishCategories.length > 0
+        ? [{ icon: Tags, label: 'Categorie', hint: 'Ordine e accensione', meta: String(dishCategories.length), onClick: () => setCatsOpen(true) }]
+        : []),
+      ...(canEdit
+        ? [{ icon: Layers, label: 'Varianti', hint: 'Cotture, aggiunte, sovrapprezzi', meta: String(modifierGroups.length), onClick: () => setVariantsOpen(true) }]
+        : []),
+    ],
+  ].filter(g => g.length > 0);
+
+  const runManageAction = (action: { busy?: boolean; onClick: () => void }) => {
+    if (action.busy) return;
+    setManageOpen(false);
+    action.onClick();
+  };
+
   return (
     <div className="p-4 sm:p-6 lg:p-8">
       {/* Tabs + header figures */}
@@ -1552,55 +1624,92 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
             it belongs to the switch. One element for both tabs also keeps the
             two labels identically sized — as separate buttons in separate rows
             they had drifted to different heights and widths. */}
-        <div className="flex flex-col items-start gap-2.5">
-          {/* Pagina Menu: un menu per pill — i due di sistema poi gli
-              stagionali, col "+" in coda. Un menu stagionale selezionato
-              porta con sé rinomina ed elimina; i due di sistema no. */}
+        {/* Su DISHES la colonna è una riga sola di controlli alti 36: si centra
+            contro la ricerca, che ne misura 44, invece di restare incollata in
+            alto come vuole l'items-start del contenitore (che serve a Banchetti,
+            dove questa colonna è una pila). */}
+        <div className={activeTab === 'DISHES' ? 'flex flex-wrap items-center gap-2 sm:self-center' : 'flex flex-col items-start gap-2.5'}>
+          {/* Pagina Menu: una tendina sola per i menu — quale si guarda, e
+              quello che si fa ai menu stagionali. Rinomina ed elimina stanno
+              sulla RIGA del menu, non sulla testata: prima erano due icone
+              accanto alle pill e agivano su «quello selezionato», che va letto
+              altrove; qui il bersaglio è la riga che si sta toccando. I due di
+              sistema non le hanno. */}
           {activeTab === 'DISHES' && (
-            <div className="flex flex-wrap items-center gap-2">
-              {menus.map(m => {
-                const isActive = selectedMenu?.id === m.id;
-                return (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={() => setSelectedMenuId(m.id)}
-                    className={`${DISH_FILTER_BASE} h-9 ${isActive ? DISH_FILTER_ON : DISH_FILTER_OFF}`}
-                  >
-                    {m.name}
-                  </button>
-                );
-              })}
-              {canEdit && (
-                <button
-                  type="button"
-                  onClick={() => { setMenuFormName(''); setMenuFormError(null); setMenuForm({ kind: 'create' }); }}
-                  title="Nuovo menu (es. Ferragosto, Pasqua)"
-                  className={`${DISH_FILTER_BASE} h-9 ${DISH_FILTER_OFF}`}
+            <div className="relative">
+              <button
+                ref={menuPickerTriggerRef}
+                type="button"
+                onClick={() => { setManageOpen(false); setMenuPickerOpen(v => !v); }}
+                aria-haspopup="menu"
+                aria-expanded={menuPickerOpen}
+                title="Menu da visualizzare"
+                className={`${DISH_FILTER_BASE} h-9 max-w-[220px] ${DISH_FILTER_OFF}`}
+              >
+                <span className="min-w-0 truncate">{selectedMenu?.name ?? 'Menu'}</span>
+                <ChevronDown className={`h-4 w-4 flex-shrink-0 transition-transform ${menuPickerOpen ? 'rotate-180' : ''}`} aria-hidden />
+              </button>
+              {menuPickerOpen && (
+                <div
+                  ref={menuPickerRef}
+                  role="menu"
+                  className="absolute left-0 top-full z-30 mt-2 w-[280px] overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] py-1.5 shadow-[var(--ds-shadow-raised)]"
                 >
-                  <Plus className="h-4 w-4" aria-hidden />
-                  Nuovo menu
-                </button>
-              )}
-              {canEdit && selectedMenu && !selectedMenu.system_key && (
-                <span className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => { setMenuFormName(selectedMenu.name); setMenuFormError(null); setMenuForm({ kind: 'rename', menu: selectedMenu }); }}
-                    className={`${dsIconButton} h-9 w-9 bg-[var(--ds-surface-row)] shadow-none`}
-                    title="Rinomina menu"
-                  >
-                    <Edit2 className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setDeleteMenuConfirm(selectedMenu)}
-                    className={`${dsIconButton} h-9 w-9 bg-[var(--ds-surface-row)] shadow-none hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)]`}
-                    title="Elimina menu"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </span>
+                  {menus.map(m => {
+                    const isActive = selectedMenu?.id === m.id;
+                    return (
+                      <div key={m.id} className="flex items-center">
+                        <button
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={isActive}
+                          onClick={() => { setSelectedMenuId(m.id); setMenuPickerOpen(false); }}
+                          className="flex min-h-[44px] min-w-0 flex-1 items-center gap-3 px-4 text-left text-[15px] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)]"
+                        >
+                          <span className="min-w-0 flex-1 truncate">{m.name}</span>
+                          {isActive && <Check className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />}
+                        </button>
+                        {canEdit && !m.system_key && (
+                          <span className="flex flex-shrink-0 items-center pr-1.5">
+                            <button
+                              type="button"
+                              onClick={() => { setMenuPickerOpen(false); setMenuFormName(m.name); setMenuFormError(null); setMenuForm({ kind: 'rename', menu: m }); }}
+                              className={`${dsIconButton} h-11 w-11 bg-transparent shadow-none`}
+                              title={`Rinomina «${m.name}»`}
+                              aria-label={`Rinomina «${m.name}»`}
+                            >
+                              <Edit2 className="h-4 w-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => { setMenuPickerOpen(false); setDeleteMenuConfirm(m); }}
+                              className={`${dsIconButton} h-11 w-11 bg-transparent shadow-none hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)]`}
+                              title={`Elimina «${m.name}»`}
+                              aria-label={`Elimina «${m.name}»`}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {canEdit && (
+                    <>
+                      <div className="my-1.5 border-t border-[var(--ds-border)]" />
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => { setMenuPickerOpen(false); setMenuFormName(''); setMenuFormError(null); setMenuForm({ kind: 'create' }); }}
+                        title="Nuovo menu (es. Ferragosto, Pasqua)"
+                        className="flex min-h-[44px] w-full items-center gap-3 px-4 text-left text-[15px] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)]"
+                      >
+                        <Plus className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
+                        Nuovo menu
+                      </button>
+                    </>
+                  )}
+                </div>
               )}
             </div>
           )}
@@ -1620,16 +1729,17 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           )}
           {/* Phone only, and the breakpoint is not a guess: the global "+" menu
               in the top bar is `hidden md:block`, so below md this is the only
-              route into either form. From md up it would be a second button for
-              a create the header already offers. */}
-          {canEdit && (
+              route into the banquet form. Per i piatti no: la voce «Piatto» è
+              nel foglio "+" della barra in basso, quindi qui sarebbe un secondo
+              bottone per la stessa creazione. */}
+          {canEdit && activeTab === 'BANQUETS' && (
             <button
               type="button"
-              onClick={activeTab === 'BANQUETS' ? handleOpenNewBanquet : handleOpenNewDish}
+              onClick={handleOpenNewBanquet}
               className="inline-flex h-9 items-center justify-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] md:hidden"
             >
               <Plus className="h-4 w-4" aria-hidden />
-              {activeTab === 'BANQUETS' ? 'Nuovo banchetto' : 'Nuovo piatto'}
+              Nuovo banchetto
             </button>
           )}
         </div>
@@ -1651,36 +1761,83 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
             )}
           </div>
         )}
+        {/* Ricerca, «Gestisci» e l'interruttore di vista viaggiano insieme:
+            sul telefono sono la seconda riga, sotto il selettore, invece di
+            sparpagliarsi su due; da sm rientrano nella riga del selettore, con
+            la ricerca subito accanto — si filtra DENTRO il menu appena scelto,
+            e le due cose si leggono di seguito. */}
         {activeTab === 'DISHES' && (
-          <div className="flex items-center gap-2 sm:flex-1 sm:justify-end">
-            <button
-              type="button"
-              onClick={() => setQrOpen(true)}
-              title="QR e traduzioni del menu per gli ospiti"
-              className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-            >
-              <QrCode className="h-4 w-4" aria-hidden />
-              Menu digitale
-            </button>
-            {canImportCassa && (
-              <button
-                type="button"
-                onClick={handleImportCassa}
-                disabled={importing}
-                title="Allinea i piatti al catalogo della cassa Passepartout"
-                className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-              >
-                {importing ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
-                Importa da cassa
-              </button>
-            )}
+          <div className="flex items-center gap-2 sm:flex-1">
             <SearchField
               value={searchTerm}
               onChange={setSearchTerm}
               placeholder="Cerca piatto o ingrediente..."
               ariaLabel="Cerca piatto"
-              className="min-w-0 flex-1 sm:max-w-sm"
+              className="min-w-0 flex-1 sm:w-64 sm:flex-none lg:w-80"
             />
+            <div className="ml-auto flex flex-shrink-0 items-center gap-2">
+            {/* Il conteggio è una lettura, non un filtro: niente «235 piatti»,
+                che la pill «Tutte 235» dice già due righe più sotto. Sparisce
+                sotto lg, dove la riga serve tutta ai controlli. */}
+            <span className="hidden flex-shrink-0 text-[13px] text-[var(--ds-text-muted)] lg:inline">
+              {menuDishes.filter(d => d.allergens.length > 0).length} con allergeni · {menuDishes.filter(d => !d.photo_url).length} senza foto
+            </span>
+            {/* Tutto ciò che si fa AL menu invece che dentro. Tendina col
+                puntatore, foglio sul touch — le stesse voci (regola 13).
+                L'import tiene la sua rotella QUI e non nella voce: la tendina
+                si chiude al tocco, e senza questo l'allineamento alla cassa
+                girerebbe senza che niente lo dica finché non arriva l'esito. */}
+            {manageGroups.length > 0 && (
+              <div className="relative flex-shrink-0">
+                <button
+                  ref={manageTriggerRef}
+                  type="button"
+                  onClick={() => { setMenuPickerOpen(false); setManageOpen(v => !v); }}
+                  aria-haspopup="menu"
+                  aria-expanded={manageOpen}
+                  aria-label="Gestisci il menu"
+                  title="Gestisci il menu"
+                  className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-2.5 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] sm:px-3.5"
+                >
+                  {importing
+                    ? <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin" aria-hidden />
+                    : <SlidersHorizontal className="h-4 w-4 flex-shrink-0" aria-hidden />}
+                  <span className="hidden sm:inline">Gestisci</span>
+                  <ChevronDown className={`hidden h-4 w-4 flex-shrink-0 transition-transform sm:inline ${manageOpen ? 'rotate-180' : ''}`} aria-hidden />
+                </button>
+                {manageOpen && isWideMenuBar && (
+                  <div
+                    ref={manageRef}
+                    role="menu"
+                    className="absolute right-0 top-full z-30 mt-2 w-[264px] overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] py-1.5 shadow-[var(--ds-shadow-raised)]"
+                  >
+                    {manageGroups.map((group, gi) => (
+                      <React.Fragment key={gi}>
+                        {gi > 0 && <div className="my-1.5 border-t border-[var(--ds-border)]" />}
+                        {group.map(a => (
+                          <button
+                            key={a.label}
+                            type="button"
+                            role="menuitem"
+                            onClick={() => runManageAction(a)}
+                            disabled={a.busy}
+                            className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-[15px] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
+                          >
+                            {a.busy
+                              ? <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin text-[var(--ds-text-muted)]" aria-hidden />
+                              : <a.icon className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />}
+                            <span className="min-w-0 flex-1 truncate">{a.label}</span>
+                            {a.meta != null && (
+                              <span className="flex-shrink-0 text-[14px] tabular-nums text-[var(--ds-text-muted)]">{a.meta}</span>
+                            )}
+                          </button>
+                        ))}
+                      </React.Fragment>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
             {/* Icon-only: the two modes are self-evident from the glyphs, and
                 the labels were competing with the search beside them. */}
             <div className="flex flex-shrink-0 items-center gap-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] p-1">
@@ -1705,6 +1862,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 </button>
               ))}
             </div>
+            </div>
           </div>
         )}
       </div>
@@ -1719,63 +1877,44 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 </Callout>
               </div>
             )}
-            <div className="flex flex-col gap-3 md:flex-row md:items-center mb-5">
-              {dishCategories.length > 0 && (
-                <div className="flex flex-1 flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setCategoryFilter(null)}
-                    className={`${DISH_FILTER_BASE} ${categoryFilter === null ? DISH_FILTER_ON : DISH_FILTER_OFF}`}
-                  >
-                    Tutte <span className="tabular-nums opacity-70">{menuDishes.length}</span>
-                  </button>
-                  {dishCategories.map(cat => {
-                    const count = menuDishes.filter(d => d.category === cat).length;
-                    const isActive = categoryFilter === cat;
-                    const isOff = disabledCategories.has(cat);
-                    return (
-                      <button
-                        key={cat}
-                        type="button"
-                        onClick={() => setCategoryFilter(isActive ? null : cat)}
-                        title={isOff ? `${cat} — spenta: non compare su comande e menu digitale` : undefined}
-                        className={`${DISH_FILTER_BASE} ${isActive ? DISH_FILTER_ON : DISH_FILTER_OFF} ${isOff && !isActive ? 'opacity-50 line-through' : ''}`}
-                      >
-                        {cat} <span className="tabular-nums opacity-70">{count}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-              {/* Azione, non filtro: sta fuori dalla fila di pill e usa lo
-                  stesso vestito di "Importa da cassa", così non si confonde
-                  con una categoria in più. */}
-              {canEdit && dishCategories.length > 0 && (
+            {/* Solo filtri: «Categorie», «Varianti» e il conteggio se ne sono
+                andati nella testata. Una riga sola che scorre, mai a capo.
+                Il -my-5 py-5 non è spaziatura: un contenitore che scorre in
+                orizzontale ritaglia ANCHE in verticale (regola 11), e senza
+                quello le pastiglie tengono l'ombra ai lati e la perdono sopra e
+                sotto — che si legge come un controllo piatto voluto, non come
+                un difetto. La bozza va misurata sull'ombra, non a occhio:
+                shadow-card è 0 8px 24px, quindi servono ~20px. Il margine
+                negativo la riassorbe, così la riga resta dove starebbe. */}
+            {dishCategories.length > 0 && (
+              <div className="mb-5">
+              <div className="scrollbar-hide -mx-1 -my-5 flex gap-2 overflow-x-auto px-1 py-5">
                 <button
                   type="button"
-                  onClick={() => setCatsOpen(true)}
-                  title="Ordina e accendi/spegni le categorie"
-                  className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 self-start rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] md:self-center"
+                  onClick={() => setCategoryFilter(null)}
+                  className={`${DISH_FILTER_BASE} ${categoryFilter === null ? DISH_FILTER_ON : DISH_FILTER_OFF}`}
                 >
-                  <SlidersHorizontal className="h-4 w-4" aria-hidden />
-                  Categorie
+                  Tutte <span className="tabular-nums opacity-70">{menuDishes.length}</span>
                 </button>
-              )}
-              {canEdit && (
-                <button
-                  type="button"
-                  onClick={() => setVariantsOpen(true)}
-                  title="Gruppi di varianti: cotture, aggiunte, sovrapprezzi"
-                  className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 self-start rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] md:self-center"
-                >
-                  <Layers className="h-4 w-4" aria-hidden />
-                  Varianti
-                </button>
-              )}
-              <span className="text-[13px] text-[var(--ds-text-muted)] md:flex-shrink-0 md:self-center">
-                {menuDishes.length} piatti · {menuDishes.filter(d => d.allergens.length > 0).length} con allergeni · {menuDishes.filter(d => !d.photo_url).length} senza foto
-              </span>
-            </div>
+                {dishCategories.map(cat => {
+                  const count = menuDishes.filter(d => d.category === cat).length;
+                  const isActive = categoryFilter === cat;
+                  const isOff = disabledCategories.has(cat);
+                  return (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setCategoryFilter(isActive ? null : cat)}
+                      title={isOff ? `${cat} — spenta: non compare su comande e menu digitale` : undefined}
+                      className={`${DISH_FILTER_BASE} ${isActive ? DISH_FILTER_ON : DISH_FILTER_OFF} ${isOff && !isActive ? 'opacity-50 line-through' : ''}`}
+                    >
+                      {cat} <span className="tabular-nums opacity-70">{count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              </div>
+            )}
 
             {filteredDishes.length === 0 ? (
               <EmptyState icon={Utensils}>
@@ -2122,6 +2261,57 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     </div>
                   </aside>
                 )}
+              </div>
+            )}
+
+            {/* Le stesse voci di «Gestisci», nella forma che il touch si
+                aspetta — e nello stesso foglio che apre l'imbuto dei filtri in
+                Prenotazioni: maniglia, titolo, righe. Niente × e niente
+                «Chiudi»: si chiude toccando fuori, come l'altro.
+                Qui la riga porta anche una spiegazione — «Varianti» da solo non
+                dice a nessuno che cosa apre, e sul telefono non c'è il title del
+                puntatore a rimediare. */}
+            {manageOpen && !isWideMenuBar && (
+              <div className="fixed inset-0 z-50 flex items-end" onClick={() => setManageOpen(false)}>
+                <div className="absolute inset-0 bg-[var(--ds-backdrop)]" />
+                <div
+                  className="relative w-full rounded-t-[var(--ds-radius)] bg-[var(--ds-surface)] pb-8 shadow-[var(--ds-shadow-raised)]"
+                  onClick={e => e.stopPropagation()}
+                >
+                  <div className="flex justify-center pt-3 pb-2">
+                    <div className="h-1 w-8 rounded-full bg-[var(--ds-text-subtle)]" />
+                  </div>
+                  <div className="px-5 pb-2">
+                    <h3 className="text-base font-semibold text-[var(--ds-text-primary)]">Gestione menu</h3>
+                  </div>
+                  <div className="max-h-[65vh] overflow-y-auto overscroll-contain px-3">
+                    {manageGroups.map((group, gi) => (
+                      <React.Fragment key={gi}>
+                        {gi > 0 && <div className="mx-4 my-1.5 border-t border-[var(--ds-border)]" />}
+                        {group.map(a => (
+                          <button
+                            key={a.label}
+                            type="button"
+                            onClick={() => runManageAction(a)}
+                            disabled={a.busy}
+                            className="flex min-h-[56px] w-full items-center gap-3 rounded-[var(--ds-radius)] px-4 py-2 text-left transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
+                          >
+                            {a.busy
+                              ? <Loader2 className="h-5 w-5 flex-shrink-0 animate-spin text-[var(--ds-text-muted)]" aria-hidden />
+                              : <a.icon className="h-5 w-5 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />}
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-[15px] text-[var(--ds-text-primary)]">{a.label}</span>
+                              <span className="block truncate text-[13px] text-[var(--ds-text-muted)]">{a.hint}</span>
+                            </span>
+                            {a.meta != null && (
+                              <span className="flex-shrink-0 text-[15px] tabular-nums text-[var(--ds-text-muted)]">{a.meta}</span>
+                            )}
+                          </button>
+                        ))}
+                      </React.Fragment>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
           </>
