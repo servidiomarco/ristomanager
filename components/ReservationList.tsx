@@ -10,10 +10,12 @@ import { BillFigures, billStateLabel } from './prenotazione/BillFigures';
 import { PaymentRequestRow } from './prenotazione/PaymentRequestRow';
 import { MessaggiPanel } from './prenotazione/MessaggiPanel';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, RoomClosedOverride, Customer, PaymentRequest, TableBillWithSplits, TableBill, NoteSelection, TableAssignmentSuggestion } from '../types';
-import { Banknote, Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, ListFilter, Map as MapIcon, List, MessageCircle, Mail, Armchair, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal, DoorClosed, CornerDownLeft, ArrowDownLeft, ArrowUpRight, Reply, Receipt, QrCode, Maximize2, Minimize2 } from 'lucide-react';
+import { Banknote, Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, ListFilter, Map as MapIcon, List, MessageCircle, Mail, Armchair, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal, DoorClosed, CornerDownLeft, ArrowDownLeft, ArrowUpRight, Reply, Receipt, QrCode, Maximize2, Minimize2, ClipboardList } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { sendWhatsAppConfirmation, sendEmailConfirmation, sendCustomEmail, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getRoomClosed, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, revokePaymentRequest, getReservationMessages, sendReservationReminder, OutboundMessage, getLegalSettings, getFeatureFlags, getOpeningHours, OpeningHoursRow, getActivePaymentProvider, getChannelSettings, RoomOccupancyCap, getTableAssignmentSuggestions, confirmTableAssignmentSuggestion, dismissTableAssignmentSuggestion } from '../services/apiService';
 import { billsApiService, printBill } from '../services/billsApiService';
+import { getOpenOrderTables, type OpenOrderSummary } from '../services/ordersApiService';
+import { openOrderLine } from './comande/tablesView';
 import { swrConfig } from '../services/configCache';
 import { CustomerPickerModal } from './CustomerPickerModal';
 import { Loader } from './Loader';
@@ -532,6 +534,10 @@ interface ReservationListProps {
   // and `reservations` is empty we render skeleton cards instead of the
   // "Nessuna prenotazione per questo servizio" empty state.
   isInitialLoading?: boolean;
+  /** Porta il tavolo in Comande. Assente = modulo Sala & Cucina spento o
+   *  operatore senza `orders:take`: la card e i bottoni non esistono, e la
+   *  sonda delle comande aperte non parte nemmeno. */
+  onOpenComanda?: (target: { tableId: number; reservationId?: number; covers?: number; forceCreate?: boolean }) => void;
 }
 
 export const ReservationList: React.FC<ReservationListProps> = ({
@@ -563,6 +569,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   onDateChange,
   onShiftFilterChange,
   isInitialLoading = false,
+  onOpenComanda,
 }) => {
   const { hasPermission } = useAuth();
   const canViewBanquetPrice = hasPermission('banquet:view_price');
@@ -1020,6 +1027,48 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
   // Map-view: assign a free table to an unassigned reservation
   const [assignTableModal, setAssignTableModal] = useState<Table | null>(null);
+  // La comanda aperta sul tavolo del modal, se c'è. `undefined` = non ancora
+  // sondato, `null` = nessuna. Serve solo a scegliere la faccia della card:
+  // il tocco è comunque innocuo, perché OrderPad riapre da sé la comanda che
+  // trova invece di crearne una seconda.
+  //
+  // Il caso non è teorico: getReservationForTable scarta le prenotazioni
+  // DEPARTED, quindi un tavolo appena liberato torna a leggersi libero in
+  // mappa e riapre proprio questo modal — con la sua comanda ancora aperta.
+  const [assignTableOrder, setAssignTableOrder] = useState<OpenOrderSummary | null | undefined>(undefined);
+  // Passaggio coperti prima di aprire la comanda su un tavolo libero. Aperto
+  // = il corpo del modal è quello, non l'elenco prenotazioni.
+  const [walkinDraft, setWalkinDraft] = useState<{ covers: number | undefined; name: string } | null>(null);
+
+  // Sette uscite dal modal (X, backdrop, Annulla, walk-in, nuova
+  // prenotazione, assegna, dividi tavoli): azzerare il passaggio a ognuna
+  // sarebbe sette occasioni di dimenticarlo. Si azzera qui, dove la chiusura
+  // è una sola cosa.
+  useEffect(() => { if (!assignTableModal) setWalkinDraft(null); }, [assignTableModal]);
+
+  // Sonda all'apertura del modal, non un abbonamento: il server non emette un
+  // «order:opened», e l'unico momento in cui il dato serve è quello in cui si
+  // guarda la card. Una chiamata sola (/orders/open), non una per tavolo.
+  // Niente sonda sui conti: /bills/open vuole `payments:view` e il
+  // pay-at-table acceso — due cancelli che un cameriere può non avere, e il
+  // conto lo intercetta comunque OrderPad.
+  useEffect(() => {
+    if (!assignTableModal || !onOpenComanda) { setAssignTableOrder(undefined); return; }
+    const tableId = assignTableModal.id;
+    const date = selectedDate.split('T')[0];
+    const shift = selectedShift === 'ALL' ? undefined : selectedShift;
+    let cancelled = false;
+    setAssignTableOrder(undefined);
+    getOpenOrderTables({ date, shift })
+      .then(res => {
+        if (cancelled) return;
+        setAssignTableOrder(res.orders.find(o => o.table_id === tableId) ?? null);
+      })
+      // Sonda muta = card nella sua faccia neutra. Il tocco resta innocuo:
+      // loadTable riapre la comanda che trova invece di crearne una seconda.
+      .catch(() => { if (!cancelled) setAssignTableOrder(null); });
+    return () => { cancelled = true; };
+  }, [assignTableModal, onOpenComanda, selectedDate, selectedShift]);
   // When a table has multiple non-cancelled reservations (double-seating),
   // clicking the table opens this chooser instead of jumping straight into
   // one specific reservation's edit view.
@@ -1117,6 +1166,17 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const DINNER_TIMES = ['19:30', '20:00', '20:30', '21:00', '21:30', '22:00', '22:30', '23:00', '23:30'];
 
   const getDefaultTime = (shift: Shift) => shift === Shift.LUNCH ? '13:00' : '20:00';
+
+  // Walk-in = «adesso», ma dentro la finestra del turno: registrato alle
+  // 11:18 il tavolo parte all'apertura (13:00), non a metà mattina. Sta qui e
+  // non dentro un handler perché la registrano in tre — il form walk-in, la
+  // card verde della pianta e la nuova comanda al tavolo — e tre copie
+  // darebbero tre orari diversi per lo stesso gesto.
+  const clampToShiftWindow = (d: Date, shift: Shift): string => {
+    const hhmm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    const slots = shift === Shift.LUNCH ? LUNCH_TIMES : DINNER_TIMES;
+    return hhmm < slots[0] ? slots[0] : hhmm > slots[slots.length - 1] ? slots[slots.length - 1] : hhmm;
+  };
 
   const [formData, setFormData] = useState<Partial<Reservation>>({
       customer_name: '',
@@ -2040,13 +2100,6 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         ? walkInShift
         : (prefillShift ?? (selectedShift === 'ALL' ? Shift.DINNER : selectedShift));
       const dateOnly = (!walkIn && prefill?.date) ? prefill.date : selectedDate.split('T')[0];
-      // Walk-in = "adesso", ma dentro la finestra del turno: registrato alle
-      // 11:18 il tavolo parte all'apertura (13:00), non a metà mattina.
-      const clampToShiftWindow = (d: Date, shift: Shift): string => {
-        const hhmm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-        const slots = shift === Shift.LUNCH ? LUNCH_TIMES : DINNER_TIMES;
-        return hhmm < slots[0] ? slots[0] : hhmm > slots[slots.length - 1] ? slots[slots.length - 1] : hhmm;
-      };
       // L'orario estratto dal messaggio può cadere su uno slot disabilitato:
       // il form non deve proporre un orario che non si può prenotare, quindi
       // aggancia lo slot disponibile più vicino e lascia la richiesta
@@ -3792,6 +3845,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 <button onClick={() => { handleEditClick(res); closeDetailDrawer(); }}
                   className="inline-flex items-center gap-1.5 px-3 py-2 rounded-[var(--ds-radius)] text-xs font-medium bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)] transition-colors">
                   <MapPin className="h-3.5 w-3.5" /> Assegna tavolo
+                </button>
+              )}
+              {onOpenComanda && res.table_id != null && (
+                <button onClick={() => { closeDetailDrawer(); onOpenComanda({ tableId: res.table_id!, reservationId: res.id, covers: res.guests }); }}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-[var(--ds-radius)] text-xs font-medium bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)] transition-colors">
+                  <ClipboardList className="h-3.5 w-3.5" /> Apri comanda
                 </button>
               )}
               <button onClick={() => { handleEditClick(res); closeDetailDrawer(); }}
@@ -5657,6 +5716,27 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     >
                                         <Combine className="h-4 w-4" /> {mergeMode ? 'Esci unione' : 'Unisci tavoli'}
                                     </button>
+
+                                    {/* La comanda della tavolata seduta. Qui
+                                        niente passaggio coperti né sonda: la
+                                        prenotazione dà nome e coperti, e se
+                                        sul tavolo c'è un conto aperto è
+                                        giusto che OrderPad mostri quello. */}
+                                    {onOpenComanda && isEditing && formData.table_id != null && (
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                const tableId = formData.table_id!;
+                                                const reservationId = formData.id;
+                                                const covers = formData.guests;
+                                                closeBookingForm();
+                                                onOpenComanda({ tableId, reservationId, covers });
+                                            }}
+                                            className={dsButton.secondary}
+                                        >
+                                            <ClipboardList className="h-4 w-4" /> Apri comanda
+                                        </button>
+                                    )}
                                 </div>
                                 <div className="flex gap-2 items-center">
                                     {/* Show selected tables count and total capacity */}
@@ -7257,6 +7337,40 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               setAssignTableModal(null);
           };
 
+          // Registra la tavolata e porta subito in comanda. Il walk-in si
+          // crea PRIMA: senza, la pianta continuerebbe a dire «libero» un
+          // tavolo che in Comande è occupato, e la comanda nascerebbe senza
+          // nome — proprio il pezzo che un POS esterno non sa fare.
+          const apriComanda = async () => {
+              if (!onOpenComanda || !walkinDraft) return;
+              const covers = walkinDraft.covers ?? 1;
+              const now = new Date();
+              try {
+                  const created = await onAddReservation({
+                      customer_name: walkinDraft.name.trim() || 'Walk-in',
+                      guests: covers,
+                      reservation_time: `${formatLocalDate(now)}T${clampToShiftWindow(now, effectiveShift)}`,
+                      shift: effectiveShift,
+                      table_id: table.id,
+                      payment_status: PaymentStatus.PENDING,
+                      arrival_status: ArrivalStatus.ARRIVED,
+                      reservation_status: ReservationStatus.CONFIRMED,
+                      source: ReservationSource.MANUAL,
+                      enable_reminder: false,
+                      reminder_sent: false,
+                  });
+                  // `forceCreate`: sul tavolo può esserci il conto da
+                  // incassare della tavolata precedente, e OrderPad
+                  // mostrerebbe quello. Qui la tavolata nuova l'abbiamo
+                  // appena registrata: la comanda è voluta.
+                  onOpenComanda({ tableId: table.id, reservationId: created.id, covers, forceCreate: true });
+                  setAssignTableModal(null);
+              } catch {
+                  // Il toast d'errore lo alza già handleAddReservation. Si
+                  // resta nel modal: non si naviga su un fallimento.
+              }
+          };
+
           const isHidden = hiddenTableIds.has(table.id);
           const isMerged = !!(table.merged_with && table.merged_with.length > 0);
 
@@ -7278,7 +7392,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     </p>
                   </div>
                   <div className="flex items-center gap-1 flex-shrink-0">
-                    {canEdit && isMerged && (
+                    {canEdit && isMerged && !walkinDraft && (
                       <button
                         onClick={async () => {
                           try {
@@ -7296,7 +7410,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         <Scissors className="h-5 w-5" />
                       </button>
                     )}
-                    {canEdit && (
+                    {canEdit && !walkinDraft && (
                       <button
                         onClick={async () => {
                           await handleToggleTableHidden(table);
@@ -7322,12 +7436,41 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-3">
+                  {walkinDraft ? (
+                  <div className="px-1 py-2">
+                    <div className="grid gap-4">
+                      <Field label="Coperti" required>
+                        <Stepper
+                          value={walkinDraft.covers}
+                          onChange={next => setWalkinDraft(d => d ? { ...d, covers: next } : d)}
+                          min={1}
+                          required
+                          ariaLabel="Coperti"
+                        />
+                      </Field>
+                      <Field label="Nome">
+                        <input
+                          type="text"
+                          value={walkinDraft.name}
+                          onChange={e => setWalkinDraft(d => d ? { ...d, name: e.target.value } : d)}
+                          placeholder="Walk-in"
+                          className={dsInput}
+                        />
+                      </Field>
+                    </div>
+                  </div>
+                  ) : (
+                  <>
                   <button
                     onClick={async () => {
                         const walkIn: Omit<Reservation, 'id'> = {
                             customer_name: 'Walk-in',
                             guests: Math.min(2, table.seats || 2),
-                            reservation_time: formatLocalDateTime(new Date()),
+                            // Stessa finestra di turno del passaggio qui
+                            // sotto: due card affiancate non possono
+                            // registrare due orari diversi per lo stesso
+                            // gesto (walk-in alle 11:18 = apertura, 13:00).
+                            reservation_time: `${formatLocalDate(new Date())}T${clampToShiftWindow(new Date(), effectiveShift)}`,
                             shift: effectiveShift,
                             table_id: table.id,
                             payment_status: PaymentStatus.PENDING,
@@ -7373,6 +7516,49 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     <ChevronRight className="h-4 w-4 text-[var(--ds-arriving-text)] flex-shrink-0" />
                   </button>
 
+                  {/* La comanda dal tavolo. Neutra di proposito: le due card
+                      tinte restano le azioni primarie di un modal che serve
+                      ad assegnare, e un terzo semaforo le annullerebbe
+                      tutte. Il colore torna solo quando la card porta uno
+                      stato — comanda già aperta o appesa.
+                      Classi scritte per esteso in ogni ramo: Tailwind estrae
+                      i nomi staticamente, un `text-[var(--ds-${x}-text)]`
+                      non arriverebbe mai nel foglio di stile. */}
+                  {onOpenComanda && (
+                    <button
+                      onClick={() => {
+                          if (assignTableOrder) {
+                              onOpenComanda({ tableId: table.id });
+                              setAssignTableModal(null);
+                              return;
+                          }
+                          setWalkinDraft({ covers: 2, name: '' });
+                      }}
+                      disabled={assignTableOrder === undefined}
+                      className="w-full text-left px-3 py-3 mb-2 bg-[var(--ds-surface-row)] hover:bg-[var(--ds-border)] disabled:opacity-60 rounded-[var(--ds-radius)] transition-colors flex items-center gap-3"
+                    >
+                      <div className="w-9 h-9 bg-[var(--ds-surface)] border border-[var(--ds-border-strong)] rounded-[var(--ds-radius)] flex items-center justify-center flex-shrink-0">
+                        <ClipboardList className="h-5 w-5 text-[var(--ds-text-secondary)]" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        {assignTableOrder ? (
+                          <>
+                            <div className="font-semibold text-[var(--ds-seated-text)]">
+                              {assignTableOrder.stale ? 'Comanda appesa' : 'Comanda aperta'}
+                            </div>
+                            <div className="text-xs text-[var(--ds-text-muted)] mt-0.5">{openOrderLine(assignTableOrder)}</div>
+                          </>
+                        ) : (
+                          <>
+                            <div className="font-semibold text-[var(--ds-text-primary)]">Nuova comanda</div>
+                            <div className="text-xs text-[var(--ds-text-muted)] mt-0.5">Occupa il tavolo e prendi subito l'ordine</div>
+                          </>
+                        )}
+                      </div>
+                      <ChevronRight className="h-4 w-4 text-[var(--ds-text-muted)] flex-shrink-0" />
+                    </button>
+                  )}
+
                   {unassigned.length === 0 ? (
                     <div className="text-center py-6 px-4">
                       <p className="text-xs text-[var(--ds-text-muted)]">Nessuna prenotazione senza tavolo per questo turno.</p>
@@ -7415,15 +7601,26 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                       </ul>
                     </>
                   )}
+                  </>
+                  )}
                 </div>
 
-                <div className="p-4 border-t border-[var(--ds-border)]">
+                <div className="p-4 border-t border-[var(--ds-border)] flex items-center gap-2">
                   <button
-                    onClick={() => setAssignTableModal(null)}
-                    className="w-full px-4 py-2 rounded-[var(--ds-radius-control)] border border-[var(--ds-border)] text-[var(--ds-text-primary)] text-sm font-medium hover:bg-[var(--ds-surface-row)]"
+                    onClick={() => walkinDraft ? setWalkinDraft(null) : setAssignTableModal(null)}
+                    className="flex-1 px-4 py-2 rounded-[var(--ds-radius-control)] border border-[var(--ds-border)] text-[var(--ds-text-primary)] text-sm font-medium hover:bg-[var(--ds-surface-row)]"
                   >
-                    Annulla
+                    {walkinDraft ? 'Indietro' : 'Annulla'}
                   </button>
+                  {walkinDraft && (
+                    <button
+                      onClick={apriComanda}
+                      disabled={!walkinDraft.covers}
+                      className={`flex-1 ${dsButton.primary}`}
+                    >
+                      Apri comanda
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
