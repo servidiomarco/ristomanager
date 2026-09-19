@@ -1,0 +1,18 @@
+{
+  "rotateDevice": "Turn your device",
+  "lunch": "Lunch",
+  "dinner": "Dinner",
+  "roomNamePlaceholder": "Room name…",
+  "cancel": "Cancel",
+  "addRoom": "Add new room",
+  "multiSelect": "Multi-select mode",
+  "edit": "Edit",
+  "lock15": "Hold for 15 minutes",
+  "tableDetails": "Table details (size, notes)",
+  "loadingTables": "Loading tables…",
+  "emptyRoom": "Drag or add tables to this room",
+  "deleteRoom": "Delete room",
+  "reactivateTables": "Re-enable every table",
+  "notesPlaceholder": "e.g. Table by the window, lovely for a romantic dinner",
+  "legendTitle": "Status key"
+}

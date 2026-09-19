@@ -1,0 +1,18 @@
+{
+  "rotateDevice": "Ruota il dispositivo",
+  "lunch": "Pranzo",
+  "dinner": "Cena",
+  "roomNamePlaceholder": "Nome sala...",
+  "cancel": "Annulla",
+  "addRoom": "Aggiungi Nuova Sala",
+  "multiSelect": "Modalità Selezione Multipla",
+  "edit": "Modifica",
+  "lock15": "Blocca per 15 minuti",
+  "tableDetails": "Dettagli tavolo (dimensioni, note)",
+  "loadingTables": "Caricamento tavoli…",
+  "emptyRoom": "Trascina o aggiungi tavoli in questa sala",
+  "deleteRoom": "Elimina Sala",
+  "reactivateTables": "Riattiva tutti i tavoli",
+  "notesPlaceholder": "es. Tavolo accanto alla finestra, ottimo per cene romantiche",
+  "legendTitle": "Legenda stato"
+}

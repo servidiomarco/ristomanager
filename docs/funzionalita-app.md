@@ -658,6 +658,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-19 | Reception; Sale & Tavoli | Con la lingua inglese **Reception e Sala** sono in inglese: arrivi e ricerca, mappa sala e filtri, scheda del cliente, scambio di due tavoli, e in Sala il pannello di gestione (sale, blocco tavolo, note, legenda). |
 | 2026-09-19 | Messaggi: WhatsApp e SMS | I numeri senza prefisso vengono letti come numeri del **paese del ristorante**, non più come italiani per definizione: un locale estero può scrivere ai suoi clienti locali. Per i ristoranti italiani nulla cambia (cellulari che iniziano per 39 e zero dei fissi compresi), e un numero già scritto col + resta intatto. |
 | 2026-09-19 | Messaggi: WhatsApp e SMS; Pagamenti, conto al tavolo e cassa | Gli importi nei messaggi all'ospite sono scritti nella moneta del ristorante (link del conto e dell'asporto, richiesta e conferma caparra, avviso di rimborso). Per i ristoranti italiani la scrittura resta identica a prima, «€ 15,00». |
 | 2026-09-19 | Pagamenti, conto al tavolo e cassa | I pagamenti nascono nella **valuta del ristorante**, non più in euro per definizione: link del conto, acconti richiesti a mano e caparre automatiche (sito, Sofia, WhatsApp) addebitano e registrano la moneta del locale. Per i ristoranti italiani non cambia nulla. |
