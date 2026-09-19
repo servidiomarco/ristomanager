@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { ExternalLink, Loader2, UserPlus } from 'lucide-react';
 import type { Reservation } from '../../types';
 import { Avatar, Callout, Sheet, StatusPill } from '../ds';
@@ -32,6 +33,7 @@ interface ClienteVisitaProps {
 export const ClienteVisita: React.FC<ClienteVisitaProps> = ({
   open, tableName, reservation, busy, error, onClose, onAssociate, onRemove, onOpenProfile,
 }) => {
+  const { t } = useTranslation('cassa', { useSuspense: false });
   const hasCustomer = reservation != null;
 
   return (
@@ -39,7 +41,7 @@ export const ClienteVisita: React.FC<ClienteVisitaProps> = ({
       open={open}
       onClose={onClose}
       ariaLabel="Cliente della visita"
-      title="Cliente della visita"
+      title={t('visitCustomer')}
       subtitle={`Tavolo ${tableName} · ${hasCustomer ? 'dalla prenotazione' : 'walk-in'}`}
       bodyClassName="space-y-3 px-4 pb-5 pt-4 sm:px-5"
     >

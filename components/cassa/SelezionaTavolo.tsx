@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ArrowLeft, Loader2, UtensilsCrossed } from 'lucide-react';
 import type { Room } from '../../types';
 import type { ServiceBill } from '../../services/ordersApiService';
@@ -47,6 +48,7 @@ export const SelezionaTavolo: React.FC<SelezionaTavoloProps> = ({
   rows, rooms, billByTable, roomId, onRoom, filter, onFilter,
   query, onQuery, busy, onPick, onBack, view, onView,
 }) => {
+  const { t } = useTranslation('cassa', { useSuspense: false });
   const searchRef = useRef<HTMLInputElement | null>(null);
 
   // «/» porta il cursore nella ricerca, come ovunque nell'app. Ignorata
@@ -95,7 +97,7 @@ export const SelezionaTavolo: React.FC<SelezionaTavoloProps> = ({
   };
 
   const filterOptions = [
-    { value: 'ALL' as TableFilter, label: 'Tutti', badge: inRoom.length, badgeTone: 'neutral' as const },
+    { value: 'ALL' as TableFilter, label: t('all'), badge: inRoom.length, badgeTone: 'neutral' as const },
     ...TABLE_GROUPS.map(g => ({
       value: g.state as TableFilter,
       label: g.chip,
@@ -177,7 +179,7 @@ export const SelezionaTavolo: React.FC<SelezionaTavoloProps> = ({
           onChange={onQuery}
           inputRef={searchRef}
           onKeyDown={onSearchKey}
-          placeholder="Tavolo o nome ospite…"
+          placeholder={t('tableOrGuest')}
           ariaLabel="Cerca un tavolo o un ospite"
           className="mt-3 w-full"
         />

@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { AlertCircle } from 'lucide-react';
 import type { CashClosureBillRow, CashClosureReport } from '../../types';
 import { Callout, FormCard, StatusPill } from '../ds';
@@ -39,9 +40,10 @@ const docKind = (b: CashClosureBillRow): Exclude<DocFilter, 'all'> => {
   return 'receipt';
 };
 
-const DOC_FILTERS: { value: DocFilter; label: string }[] = [
-  { value: 'all', label: 'Tutti' },
-  { value: 'receipt', label: 'Scontrino' },
+// Costante di modulo: porta le chiavi, il componente le traduce.
+const DOC_FILTERS: { value: DocFilter; label: string; labelKey?: string }[] = [
+  { value: 'all', label: 'Tutti', labelKey: 'all' },
+  { value: 'receipt', label: 'Scontrino', labelKey: 'receipt' },
   { value: 'invoice', label: 'Fattura' },
   { value: 'credit_note', label: 'Nota di credito' },
   { value: 'proforma', label: 'Proforma' },
@@ -49,6 +51,7 @@ const DOC_FILTERS: { value: DocFilter; label: string }[] = [
 ];
 
 const docPill = (b: CashClosureBillRow) => {
+  const { t } = useTranslation('cassa', { useSuspense: false });
   const kind = docKind(b);
   // Scontrino uscito dal registratore (Passepartout o battuto a mano nel
   // periodo ponte): nel riscontro serale il numero è quello dell'RT.
@@ -81,6 +84,7 @@ export const ChiusuraCassa: React.FC<{
   selectedId?: number | null;
   onSelectBill?: (id: number) => void;
 }> = ({ report, error, shift, openCount = 0, openResidualCents = 0, onOpenCassa, selectedId, onSelectBill }) => {
+  const { t } = useTranslation('cassa', { useSuspense: false });
   const [docFilter, setDocFilter] = useState<DocFilter>('all');
 
   // Prima il turno della topbar, poi il filtro documento: i conteggi sui
@@ -176,7 +180,7 @@ export const ChiusuraCassa: React.FC<{
               </div>
             ))}
             <div className="flex justify-between border-t border-[var(--ds-border)] pt-1.5 font-semibold text-[var(--ds-text-primary)]">
-              <dt>Totale</dt>
+              <dt>{t('total')}</dt>
               <dd className="tabular-nums">{formatEuro(totalCents)}</dd>
             </div>
             {/* I coperti serviti accanto agli incassi: è il numero che dà il
@@ -251,7 +255,7 @@ export const ChiusuraCassa: React.FC<{
                           : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'
                       }`}
                     >
-                      {f.label} <span className="tabular-nums opacity-70">{count}</span>
+                      {f.labelKey ? t(f.labelKey, f.label) : f.label} <span className="tabular-nums opacity-70">{count}</span>
                     </button>
                   );
                 })}
@@ -313,12 +317,12 @@ export const ChiusuraCassa: React.FC<{
                 </div>
               ))}
               {visibleBills.length === 0 && (
-                <p className="py-2.5 text-[13px] text-[var(--ds-text-muted)]">Nessun conto per questo filtro.</p>
+                <p className="py-2.5 text-[13px] text-[var(--ds-text-muted)]">{t('noBillForFilter')}</p>
               )}
             </>
           )}
           {bills.length === 0 && (
-            <p className="text-[14px] text-[var(--ds-text-muted)]">Nessun conto chiuso in questo giorno.</p>
+            <p className="text-[14px] text-[var(--ds-text-muted)]">{t('noBillClosedToday')}</p>
           )}
         </div>
       </FormCard>

@@ -1,0 +1,17 @@
+{
+  "stopToday": "Stop takeaway for this day",
+  "stopped": "Takeaway stopped for this date",
+  "all": "All",
+  "ordersNotLoaded": "Orders not loaded",
+  "confirm": "Confirm",
+  "ready": "Ready",
+  "total": "Total",
+  "customer": "Guest",
+  "pickup": "Pickup",
+  "stoppedDot": "Takeaway stopped for this date.",
+  "order": "Order",
+  "kitchenNote": "Note for the kitchen",
+  "searchDish": "Search a dish",
+  "notes": "Notes",
+  "loadingSlots": "Loading times…"
+}

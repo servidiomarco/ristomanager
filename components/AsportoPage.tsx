@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Ban,
   Check,
@@ -101,6 +102,7 @@ const draftFromView = (o: TakeawayOrderView): DraftItem[] =>
   }));
 
 export const AsportoPage: React.FC<AsportoPageProps> = ({ dishes, isInitialLoading }) => {
+  const { t } = useTranslation('asporto', { useSuspense: false });
   const [date, setDate] = useState(todayIso());
   const [orders, setOrders] = useState<TakeawayOrderView[]>([]);
   const [prepMinutes, setPrepMinutes] = useState(20);
@@ -306,8 +308,8 @@ export const AsportoPage: React.FC<AsportoPageProps> = ({ dishes, isInitialLoadi
           <button
             type="button"
             onClick={() => asportoApiService.updateConfig({ stop_date: date }).then(c => { setStopDate(c.stop_date); setPrepMinutes(c.prep_minutes); }).catch(() => {})}
-            aria-label="Ferma asporto per questo giorno"
-            title="Ferma asporto per questo giorno"
+            aria-label={t('stopToday')}
+            title={t('stopToday')}
             className={dsIconButton}
           >
             <Ban className="h-4 w-4" />
@@ -325,7 +327,7 @@ export const AsportoPage: React.FC<AsportoPageProps> = ({ dishes, isInitialLoadi
         <Callout
           tone="pending"
           icon={Ban}
-          title="Asporto fermo per questa data"
+          title={t('stopped')}
           action={
             canManage ? (
               <button
@@ -360,7 +362,7 @@ export const AsportoPage: React.FC<AsportoPageProps> = ({ dishes, isInitialLoadi
               ariaLabel="Filtro ordini"
               options={[
                 { value: 'attivi', label: 'Attivi' },
-                { value: 'tutti', label: 'Tutti' },
+                { value: 'tutti', label: t('all') },
               ]}
               equalWidth={false}
             />
@@ -371,7 +373,7 @@ export const AsportoPage: React.FC<AsportoPageProps> = ({ dishes, isInitialLoadi
             {loadError && (
               <Callout
                 tone="critical"
-                title="Ordini non caricati"
+                title={t('ordersNotLoaded')}
                 action={<button type="button" className={dsButton.quiet} onClick={() => fetchDay(date)}>Riprova</button>}
               >
                 Controlla la connessione e riprova.
@@ -491,6 +493,7 @@ const DetailPanel: React.FC<{
   onEdit: () => void;
   onClose: () => void;
 }> = ({ order, state, readOnly, onSetStatus, onFire, onPrepareBill, onEdit }) => {
+  const { t } = useTranslation('asporto', { useSuspense: false });
   const ds = asportoStateDs(state);
   // Ritiro a conto aperto: il server risponde bill_unpaid e il bottone si
   // arma — secondo tocco per confermare, come Revoca/Rimborsa in cassa.
@@ -509,9 +512,9 @@ const DetailPanel: React.FC<{
   // il verbo è «Manda in cucina»: genera la comanda (KDS + stampa) e il
   // ritorno a «Pronto» arriva da solo dal monitor di partita.
   const primary: { label: string; icon: React.ComponentType<{ className?: string }>; action: () => void } | null =
-    state === 'requested' ? { label: 'Conferma', icon: Check, action: () => void onSetStatus('confirmed') }
+    state === 'requested' ? { label: t('confirm'), icon: Check, action: () => void onSetStatus('confirmed') }
     : state === 'confirmed' || state === 'due' ? { label: 'Manda in cucina', icon: ChefHat, action: onFire }
-    : state === 'preparing' ? { label: 'Pronto', icon: Check, action: () => void onSetStatus('ready') }
+    : state === 'preparing' ? { label: t('ready'), icon: Check, action: () => void onSetStatus('ready') }
     : state === 'ready' || state === 'late' ? {
         label: pickupArmed ? 'Conto non incassato — confermi?' : 'Ritirato',
         icon: ShoppingBag,
@@ -559,7 +562,7 @@ const DetailPanel: React.FC<{
           </li>
         ))}
         <li className="flex items-baseline justify-between py-2.5 text-[15px] font-semibold text-[var(--ds-text-primary)]">
-          <span>Totale</span>
+          <span>{t('total')}</span>
           <span className="tabular-nums">{euro(order.total_cents)}</span>
         </li>
       </ul>
@@ -632,6 +635,7 @@ const OrderSheet: React.FC<{
   onClose: () => void;
   onSaved: (view: TakeawayOrderView) => void;
 }> = ({ dishes, initial, defaultDate, onClose, onSaved }) => {
+  const { t } = useTranslation('asporto', { useSuspense: false });
   const [name, setName] = useState(initial?.customer_name ?? '');
   const [phone, setPhone] = useState(initial?.customer_phone ?? '');
   const [pickupDate, setPickupDate] = useState(initial?.pickup_date ?? defaultDate);
@@ -733,7 +737,7 @@ const OrderSheet: React.FC<{
         </>
       }
     >
-      <FormCard title="Cliente">
+      <FormCard title={t('customer')}>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Nome" required>
             <input className={dsInput} value={name} onChange={e => setName(e.target.value)} autoFocus={!initial} />
@@ -744,7 +748,7 @@ const OrderSheet: React.FC<{
         </div>
       </FormCard>
 
-      <FormCard title="Ritiro">
+      <FormCard title={t('pickup')}>
         <div className="space-y-4">
           <Field label="Giorno">
             <input
@@ -755,13 +759,13 @@ const OrderSheet: React.FC<{
             />
           </Field>
           {board?.stopped && (
-            <Callout tone="pending" icon={Ban}>Asporto fermo per questa data.</Callout>
+            <Callout tone="pending" icon={Ban}>{t('stoppedDot')}</Callout>
           )}
           <SlotGrid board={board} value={pickupTime} onChange={setPickupTime} />
         </div>
       </FormCard>
 
-      <FormCard title="Ordine" aside={items.length > 0 ? <span className="tabular-nums text-[14px] font-semibold text-[var(--ds-text-primary)]">{euro(total)}</span> : undefined}>
+      <FormCard title={t('order')} aside={items.length > 0 ? <span className="tabular-nums text-[14px] font-semibold text-[var(--ds-text-primary)]">{euro(total)}</span> : undefined}>
         <div className="space-y-3">
           {items.map((item, idx) => (
             <div key={`${item.dish_id}-${idx}`} className="rounded-[var(--ds-radius-sm)] bg-[var(--ds-surface-row)] p-3">
@@ -786,14 +790,14 @@ const OrderSheet: React.FC<{
               </div>
               <input
                 className={`${dsInput} mt-2`}
-                placeholder="Nota per la cucina"
+                placeholder={t('kitchenNote')}
                 value={item.note}
                 onChange={e => setItems(prev => prev.map((p, i) => (i === idx ? { ...p, note: e.target.value } : p)))}
               />
             </div>
           ))}
           <div>
-            <SearchField value={dishQuery} onChange={setDishQuery} placeholder="Cerca un piatto" recessed />
+            <SearchField value={dishQuery} onChange={setDishQuery} placeholder={t('searchDish')} recessed />
             {pickable.length > 0 && (
               <ul className="mt-2 divide-y divide-[var(--ds-border)] overflow-hidden rounded-[var(--ds-radius-sm)] ring-1 ring-inset ring-[var(--ds-border)]">
                 {pickable.map(dish => (
@@ -815,7 +819,7 @@ const OrderSheet: React.FC<{
         </div>
       </FormCard>
 
-      <FormCard title="Note">
+      <FormCard title={t('notes')}>
         <textarea className={dsTextarea} rows={2} value={notes} onChange={e => setNotes(e.target.value)} />
       </FormCard>
 
@@ -832,7 +836,8 @@ const SlotGrid: React.FC<{
   value: string | null;
   onChange: (time: string) => void;
 }> = ({ board, value, onChange }) => {
-  if (!board) return <div className="text-[13px] text-[var(--ds-text-muted)]">Carico gli orari…</div>;
+  const { t } = useTranslation('asporto', { useSuspense: false });
+  if (!board) return <div className="text-[13px] text-[var(--ds-text-muted)]">{t('loadingSlots')}</div>;
   const groups = [
     { label: 'Pranzo', slots: board.lunch },
     { label: 'Cena', slots: board.dinner },
