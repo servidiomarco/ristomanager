@@ -86,8 +86,10 @@ export const updateReviewSettings = (input: Partial<ReviewSettings>): Promise<Re
     body: JSON.stringify(input),
   });
 
-/** Esito della richiesta post-visita su una prenotazione già valutata. */
-export type ReviewRequestStatus = 'sent' | 'skipped_consent' | 'skipped_no_contact' | 'skipped_recent' | 'failed';
+/** Esito della richiesta post-visita su una prenotazione già valutata.
+ *  'sending' = presa in carico e mai confermata (il processo è caduto fra
+ *  invio ed esito): non verrà ritentata, per non rischiare un doppione. */
+export type ReviewRequestStatus = 'sending' | 'sent' | 'skipped_consent' | 'skipped_no_contact' | 'skipped_recent' | 'failed';
 
 export interface ReviewRequestRow {
   id: number;

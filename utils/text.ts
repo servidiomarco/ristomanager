@@ -121,14 +121,26 @@ export const getInitials = (name?: string | null): string => {
 // WhatsApp sdoppiato in due conversazioni). Il prefisso italiano si toglie
 // solo quando la lunghezza lo rende inequivocabile: 11 cifre = 39+9, 12 =
 // 39+10; un nazionale che inizia per 39 (prefisso 393…, 10 cifre) resta
-// intatto. Stessa logica di PHONE_MATCH_KEY_SQL in server.ts: cambiarla qui
-// significa cambiarla anche là.
+// intatto.
 export function phoneMatchKey(input: string | null | undefined): string {
   const d = String(input ?? '').replace(/\D/g, '');
   if (d.startsWith('00')) return phoneMatchKey(d.slice(2));
   if ((d.length === 11 || d.length === 12) && d.startsWith('39')) return d.slice(2);
   return d;
 }
+
+// Il gemello SQL di phoneMatchKey, per i confronti che devono avvenire nel
+// database. Vive qui e non in server.ts perché le due logiche devono restare
+// identiche: separate, una delle due prima o poi cambia da sola.
+// Attenzione: `col` finisce nell'SQL così com'è — nome di colonna o
+// segnaposto ($1), mai testo che arrivi dal client.
+export const PHONE_MATCH_KEY_SQL = (col: string): string => `
+    CASE
+      WHEN length(regexp_replace(${col}, '[^0-9]', '', 'g')) IN (11, 12)
+       AND left(regexp_replace(${col}, '[^0-9]', '', 'g'), 2) = '39'
+      THEN substr(regexp_replace(${col}, '[^0-9]', '', 'g'), 3)
+      ELSE regexp_replace(${col}, '[^0-9]', '', 'g')
+    END`;
 
 // Le forme in cui la stessa utenza può stare in una colonna "cifre nude"
 // (to/from_phone_digits): nazionale, col 39, col 0039. Un confronto

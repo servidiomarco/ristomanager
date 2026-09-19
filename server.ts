@@ -184,7 +184,13 @@ import {
     type BlacklistPolicyMap,
     type BlacklistSource,
 } from './services/blacklistPolicy.js';
-import { toTitleCase, toMenuTitleCase, phoneMatchKey, phoneDigitsVariants, phoneLast10Variants } from './utils/text.js';
+import { toTitleCase, toMenuTitleCase, phoneMatchKey, phoneDigitsVariants, phoneLast10Variants, PHONE_MATCH_KEY_SQL } from './utils/text.js';
+import {
+    claimReviewRequest,
+    finishReviewRequest,
+    hasRecentReviewRequest,
+    buildGoogleReviewUrl,
+} from './services/reviewRequests.js';
 import { clampModifierN, signedModifierLabel, signedModifierDelta } from './utils/modifierScale.js';
 import { BAR_COURSE_NO, DESSERT_COURSE_NO, isOffSequenceCourse } from './utils/courses.js';
 import { getRomeDatePart, getRomeTimePart } from './utils/reservationTime.js';
@@ -13896,19 +13902,14 @@ const startReviewRequestScheduler = () => {
 
                 const phone = String(row.phone || '').trim();
                 const email = String(row.email || '').trim();
-                // La WHERE ripete review_request_status IS NULL: se un'altra
-                // replica ha marcato nel frattempo, qui non si sovrascrive.
-                const mark = async (status: string, channel: string | null = null, error: string | null = null) => {
-                    await queryWithRetry(
-                        `UPDATE reservations
-                         SET review_request_status = $1,
-                             review_request_channel = $2,
-                             review_request_sent_at = CASE WHEN $1 = 'sent' THEN CURRENT_TIMESTAMP ELSE review_request_sent_at END,
-                             review_request_error = $3
-                         WHERE id = $4 AND tenant_id = $5 AND review_request_status IS NULL`,
-                        [status, channel, error, row.id, tenantId]
-                    );
-                };
+
+                // Presa in carico PRIMA di qualunque invio: da qui in poi la
+                // riga è 'sending' e nessun giro successivo la ripescherà,
+                // qualunque cosa vada storta sotto. È la protezione che
+                // nell'incidente del 18/09 mancava — vedi services/reviewRequests.ts.
+                if (!(await claimReviewRequest(tenantId, row.id))) continue;
+                const mark = (status: Parameters<typeof finishReviewRequest>[2], channel: string | null = null, error: string | null = null) =>
+                    finishReviewRequest(tenantId, row.id, status, channel, error);
 
                 try {
                     if (!phone && !email) {
@@ -13918,16 +13919,17 @@ const startReviewRequestScheduler = () => {
 
                     if (gate.settings.audience === 'consent') {
                         // Consenso sulla prenotazione oppure sulla scheda
-                        // cliente agganciata per telefono (espressione
-                        // indicizzata right-10, come le altre query telefono).
+                        // cliente agganciata per telefono. Chiave condivisa e
+                        // non right-10: sui cellulari storici a 9 cifre quello
+                        // pesca il 9 del prefisso e non combacia mai (caso
+                        // Pisciotta), cioè negherebbe il consenso a chi ce l'ha.
                         let consent = row.consent_marketing === true;
                         if (!consent && phone) {
                             const c = await queryWithRetry(
                                 `SELECT 1 FROM customers
                                  WHERE tenant_id = $1
                                    AND consent_marketing = TRUE
-                                   AND right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10)
-                                     = right(regexp_replace($2, '\\D', '', 'g'), 10)
+                                   AND ${PHONE_MATCH_KEY_SQL("COALESCE(phone, '')")} = ${PHONE_MATCH_KEY_SQL('$2::text')}
                                  LIMIT 1`,
                                 [tenantId, phone]
                             );
@@ -13939,21 +13941,12 @@ const startReviewRequestScheduler = () => {
                         }
                     }
 
-                    if (phone) {
-                        const recent = await queryWithRetry(
-                            `SELECT 1 FROM reservations
-                             WHERE tenant_id = $1
-                               AND review_request_status = 'sent'
-                               AND review_request_sent_at > NOW() - make_interval(days => $2::int)
-                               AND right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10)
-                                 = right(regexp_replace($3, '\\D', '', 'g'), 10)
-                             LIMIT 1`,
-                            [tenantId, REVIEW_REQUEST_COOLDOWN_DAYS, phone]
-                        );
-                        if (recent.rows.length > 0) {
-                            await mark('skipped_recent');
-                            continue;
-                        }
+                    // Cooldown sugli invii VERI (outbound_messages) oltre che
+                    // sulle righe marcate: se il messaggio è uscito, il
+                    // cliente non ne riceve un altro, marcatura o no.
+                    if (phone && await hasRecentReviewRequest(tenantId, phone, REVIEW_REQUEST_COOLDOWN_DAYS)) {
+                        await mark('skipped_recent');
+                        continue;
                     }
 
                     const language = resolveGuestLanguage(row);
@@ -20033,9 +20026,6 @@ function buildBookingDepositConfirmedTemplate(
 // profilo Google (integration_settings.google_place_id). Template WA a due
 // variabili ({{1}} nome, {{2}} link); finché la SID non è impostata il
 // builder torna undefined e il dispatcher scala su SMS/email da solo.
-function buildGoogleReviewUrl(placeId: string): string {
-    return `https://search.google.com/local/writereview?placeid=${encodeURIComponent(placeId)}`;
-}
 function buildReviewRequestMessage(
     customerName: string | null | undefined,
     reviewUrl: string,
@@ -20938,14 +20928,6 @@ function describeInboundMedia(media?: Array<{ content_type?: string }> | null): 
 
 // Espressione SQL equivalente a phoneMatchKey, per confrontare in query una
 // colonna telefono senza doverla normalizzare a monte.
-const PHONE_MATCH_KEY_SQL = (col: string) => `
-    CASE
-      WHEN length(regexp_replace(${col}, '[^0-9]', '', 'g')) IN (11, 12)
-       AND left(regexp_replace(${col}, '[^0-9]', '', 'g'), 2) = '39'
-      THEN substr(regexp_replace(${col}, '[^0-9]', '', 'g'), 3)
-      ELSE regexp_replace(${col}, '[^0-9]', '', 'g')
-    END`;
-
 /**
  * Prenotazione a cui appartiene un messaggio in arrivo da `phone`.
  *

@@ -17,6 +17,7 @@ const PAGE_SIZE = 50;
 const STATUS_META: Record<ReviewRequestStatus, { label: string; tone: PillTone }> = {
     sent: { label: 'Inviata', tone: 'positive' },
     failed: { label: 'Non riuscita', tone: 'critical' },
+    sending: { label: 'Esito non confermato', tone: 'pending' },
     skipped_consent: { label: 'Saltata: senza consenso', tone: 'neutral' },
     skipped_no_contact: { label: 'Saltata: senza recapiti', tone: 'neutral' },
     skipped_recent: { label: 'Saltata: già chiesta di recente', tone: 'neutral' },
