@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
 import {
   ModalShell, FormCard, Field, Stepper, StepNav, SegmentedControl, dsInput, dsSelect, dsTextarea, dsButton, dsStepArrow,
@@ -23,7 +24,7 @@ import { saveDraft, loadDraft, clearDraft, DRAFT_KEYS } from '../services/draftS
 import { applyMerges } from '../utils/tableMerge';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
 import {
-  getReservationState, getTimedReservationState, RESERVATION_STATE_META,
+  getReservationState, getTimedReservationState, RESERVATION_STATE_META, useReservationStateLabel,
   reservationStatePatch, deriveTableDisplayStatus, isSeated,
   DsStatusChip, reservationStateDs,
   isOverdue, extendedDurationMin, OVERDUE_EXTEND_MIN, getEffectiveDurationMin,
@@ -564,6 +565,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   onShiftFilterChange,
   isInitialLoading = false,
 }) => {
+  // Etichette di stato nella lingua dell'operatore: intestazioni dei gruppi,
+  // pastiglie, toast e selettore leggono tutti da qui.
+  const { t } = useTranslation('common', { useSuspense: false });
+  const stateLabel = useReservationStateLabel();
   const { hasPermission } = useAuth();
   const canViewBanquetPrice = hasPermission('banquet:view_price');
   // Main View State
@@ -1692,18 +1697,19 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
     // Labels/dots come from the shared state meta so group headers can never
     // drift from the chips below them ('cancelled' keeps its plural label).
-    const meta = (k: Exclude<ReservationStateKey, 'arriving'>) => RESERVATION_STATE_META[k];
     const dot = (k: Exclude<ReservationStateKey, 'arriving'>) => reservationStateDs(k).solid;
     return [
-      { key: 'pending', label: meta('pending').label, dotClass: dot('pending'), items: pending },
-      { key: 'waiting', label: meta('waiting').label, dotClass: dot('waiting'), items: waiting },
-      { key: 'arrived', label: meta('arrived').label, dotClass: dot('arrived'), items: arrived },
-      { key: 'departing', label: meta('departing').label, dotClass: dot('departing'), items: departing },
-      { key: 'noshow', label: meta('noshow').label, dotClass: dot('noshow'), items: noshow },
-      { key: 'freed', label: meta('freed').label, dotClass: dot('freed'), items: freed },
-      { key: 'cancelled', label: 'Annullate', dotClass: dot('cancelled'), items: cancelled },
+      { key: 'pending', label: stateLabel('pending'), dotClass: dot('pending'), items: pending },
+      { key: 'waiting', label: stateLabel('waiting'), dotClass: dot('waiting'), items: waiting },
+      { key: 'arrived', label: stateLabel('arrived'), dotClass: dot('arrived'), items: arrived },
+      { key: 'departing', label: stateLabel('departing'), dotClass: dot('departing'), items: departing },
+      { key: 'noshow', label: stateLabel('noshow'), dotClass: dot('noshow'), items: noshow },
+      { key: 'freed', label: stateLabel('freed'), dotClass: dot('freed'), items: freed },
+      // Il gruppo va al plurale: è l'unica etichetta che non coincide con
+      // quella della pastiglia singola.
+      { key: 'cancelled', label: t('reservationState.cancelledGroup', 'Annullate'), dotClass: dot('cancelled'), items: cancelled },
     ].filter(g => g.items.length > 0);
-  }, [reservations, selectedDate, selectedShift, filterRoomId, filterStatus, filterArrivalStatus, filterGuestRange, filterHasAllergens, filterHasNotes, filterNoTable, filterSource, searchTerm, displayTables, sortBy, isViewingToday, nowTick]);
+  }, [reservations, selectedDate, selectedShift, filterRoomId, filterStatus, filterArrivalStatus, filterGuestRange, filterHasAllergens, filterHasNotes, filterNoTable, filterSource, searchTerm, displayTables, sortBy, isViewingToday, nowTick, stateLabel, t]);
 
   const totalGroupedCount = groupedReservations.reduce((s, g) => s + g.items.length, 0);
 
@@ -1846,7 +1852,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       patch.duration_minutes = extendedDurationMin(res, nowTick);
     }
     onUpdateReservation({ ...res, ...patch });
-    showToast(`${toTitleCase(res.customer_name)}: stato → ${RESERVATION_STATE_META[state].label}`, 'success');
+    showToast(`${toTitleCase(res.customer_name)}: stato → ${stateLabel(state)}`, 'success');
   };
 
   // --- Overdue-table prompt ------------------------------------------------
@@ -7031,7 +7037,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     >
                       <span className="flex items-center gap-2.5">
                         <span className={`w-2 h-2 rounded-full ${ds.solid}`} />
-                        <span className="text-sm font-medium text-[var(--ds-text-primary)]">{meta.label}</span>
+                        <span className="text-sm font-medium text-[var(--ds-text-primary)]">{stateLabel(opt)}</span>
                       </span>
                       {isCurrent && <Check className="h-4 w-4 text-[var(--ds-text-muted)]" />}
                     </button>

@@ -3,7 +3,7 @@ import { flushSync, createPortal } from 'react-dom';
 import { Table, TableShape, Room, TableStatus, Reservation, ReservationSource, Shift, TableMerge, TableHiddenOverride, RoomClosedOverride, ArrivalStatus, ReservationStatus, BanquetMenu } from '../types';
 import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Sunset, Loader2, Info, RotateCw, Ruler, StickyNote, Eye, EyeOff, DoorClosed, DoorOpen, BookOpen, Mic, ChevronDown } from 'lucide-react';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
-import { deriveTableDisplayStatus, isSeated, TABLE_STATUS_LABEL } from './reservationState';
+import { deriveTableDisplayStatus, isSeated, useTableStatusLabel } from './reservationState';
 import { useNow } from '../hooks/useNow';
 import { Loader } from './Loader';
 import { computeAutoLayout } from '../utils/tableLayout';
@@ -107,6 +107,8 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   globalDate,
   globalShiftFilter: globalShiftFilterProp,
 }) => {
+  // Legenda degli stati tavolo nella lingua dell'operatore.
+  const tableStatus = useTableStatusLabel();
   console.log('🎨 FLOORPLAN COMPONENT RENDERING with', tables.length, 'tables');
 
   const [activeRoomId, setActiveRoomId] = useState<number>(() => {
@@ -1759,7 +1761,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                                 className={`w-3 h-3 rounded-[var(--ds-radius-sm)] border ${s === 'inarrivo' ? 'motion-safe:animate-pulse' : ''}`}
                                 style={{ background: `var(--tg-${s}-bg)`, borderColor: `var(--tg-${s}-stroke)` }}
                             ></div>
-                            {TABLE_STATUS_LABEL[s]}
+                            {tableStatus(s)}
                         </div>
                     ))}
                     <div className="flex items-center gap-2 text-[var(--ds-text-muted)] border-t border-[var(--ds-border)] pt-2 mt-1">

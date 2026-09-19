@@ -57,5 +57,25 @@
     "languageEn": "English",
     "languageSaved": "Language updated",
     "prefsError": "Could not update your preferences"
+  },
+  "reservationState": {
+    "pending": "To confirm",
+    "waiting": "Confirmed",
+    "arriving": "Arriving",
+    "arrived": "Seated",
+    "departing": "Leaving",
+    "freed": "Freed",
+    "noshow": "No show",
+    "cancelled": "Cancelled",
+    "declined": "Declined",
+    "cancelledGroup": "Cancelled"
+  },
+  "tableStatus": {
+    "libera": "Free",
+    "attesa": "Booked",
+    "inarrivo": "Arriving",
+    "arrivato": "Occupied",
+    "uscita": "Leaving",
+    "noshow": "No-show"
   }
 }

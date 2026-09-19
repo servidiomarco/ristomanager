@@ -34,7 +34,7 @@ import {
 import { updateReservation, createReservation, swapReservationTables } from '../services/apiService';
 import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
-import { PulseDot, getReservationState, getTimedReservationState, isSeated, deriveTableDisplayStatus, TABLE_STATUS_LABEL } from './reservationState';
+import { PulseDot, getReservationState, getTimedReservationState, isSeated, deriveTableDisplayStatus, useTableStatusLabel } from './reservationState';
 import { DietaryChips } from './DietaryChips';
 import { stripDietaryNote } from '../utils/dietary';
 import { toTitleCase } from '../utils/text';
@@ -88,6 +88,8 @@ interface ReceptionPageProps {
 }
 
 const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFilter, reservations, tables, rooms, onReservationChangedLocal, isInitialLoading = false, onBack, autoOpenWalkIn, onAutoOpenWalkInHandled }) => {
+  // Etichette di stato del tavolo nella lingua dell'operatore.
+  const tableStatus = useTableStatusLabel();
   const [selectedReservationId, setSelectedReservationId] = useState<number | null>(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'waiting' | 'arrived' | 'noTable'>('all');
@@ -1827,6 +1829,8 @@ const RoomMap: React.FC<RoomMapProps> = ({
   onPickReservation,
   now,
 }) => {
+  // RoomMap è un componente a sé: ha il suo aggancio alle etichette.
+  const tableStatus = useTableStatusLabel();
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerSize, setContainerSize] = useState({ width: 600, height: 600 });
 
@@ -1976,7 +1980,7 @@ const RoomMap: React.FC<RoomMapProps> = ({
                     // Still a seated party, so still the seated family — the
                     // caption carries the difference, not a fifth colour.
                     haloClass = 'ring-2 ring-[var(--ds-seated-text)]';
-                    caption = `${TABLE_STATUS_LABEL.uscita} · ${firstName}`;
+                    caption = `${tableStatus('uscita')} · ${firstName}`;
                     break;
                   case 'noshow':
                     haloClass = 'ring-2 ring-[var(--ds-critical-solid)]';
