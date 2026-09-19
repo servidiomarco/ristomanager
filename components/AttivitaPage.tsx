@@ -1,4 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
+import { displayLocale } from '../utils/formatLocale';
 import { useTodos } from '../contexts/TodosContext';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -57,6 +59,15 @@ const PRIORITY_LABELS: Record<TodoPriority, string> = {
   [TodoPriority.LOW]: 'Bassa',
 };
 
+/* Le tre mappe qui sopra restano l'elenco e la versione italiana; il testo
+   mostrato passa da queste funzioni. Prendono t come parametro invece di
+   leggerlo da un hook perché servono anche alle righe della lista, che sono
+   componenti separati — stesso patto di reservationState.tsx. */
+type TFunc = (key: string, defaultValue?: any) => string;
+export const categoryLabel = (c: TodoCategory, t: TFunc) => t(`category.${c}`, CATEGORY_LABELS[c]);
+export const priorityLabel = (p: TodoPriority, t: TFunc) => t(`priority.${p}`, PRIORITY_LABELS[p]);
+export const teamLabel = (r: UserRole, t: TFunc) => t(`team.${r}`, TEAM_LABELS[r]);
+
 const PRIORITY_DOTS: Record<TodoPriority, string> = {
   [TodoPriority.HIGH]: 'bg-[var(--ds-critical-solid)]',
   [TodoPriority.MEDIUM]: 'bg-[var(--ds-pending-solid)]',
@@ -110,22 +121,22 @@ const addDays = (date: Date, days: number): Date => {
    in Rome is fine but flips a day west of Greenwich. */
 const parseDueDate = (iso: string): Date => new Date(`${iso}T12:00:00`);
 
-const formatDueShort = (iso: string, todayStr: string): string => {
-  if (iso === todayStr) return 'oggi';
-  return parseDueDate(iso).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' });
+const formatDueShort = (iso: string, todayStr: string, t: TFunc): string => {
+  if (iso === todayStr) return t('today');
+  return parseDueDate(iso).toLocaleDateString(displayLocale(), { day: 'numeric', month: 'short' });
 };
 
 const formatDueLong = (iso: string): string =>
-  parseDueDate(iso).toLocaleDateString('it-IT', { day: 'numeric', month: 'short', year: 'numeric' });
+  parseDueDate(iso).toLocaleDateString(displayLocale(), { day: 'numeric', month: 'short', year: 'numeric' });
 
 const daysLate = (iso: string, todayStr: string): number =>
   Math.round((parseDueDate(todayStr).getTime() - parseDueDate(iso).getTime()) / 86400000);
 
-const formatCompleted = (iso: string, todayStr: string): string => {
+const formatCompleted = (iso: string, todayStr: string, t: TFunc): string => {
   const d = new Date(iso);
-  const time = d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
-  if (formatLocalDate(d) === todayStr) return `fatta alle ${time}`;
-  return `fatta il ${d.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} alle ${time}`;
+  const time = d.toLocaleTimeString(displayLocale(), { hour: '2-digit', minute: '2-digit' });
+  if (formatLocalDate(d) === todayStr) return t('doneAt', { time });
+  return t('doneOn', { date: d.toLocaleDateString(displayLocale(), { day: 'numeric', month: 'short' }), time });
 };
 
 /* Four tabs, not two: "Oggi" and "Scadute" used to be figures you read in the
@@ -201,9 +212,10 @@ const rowAction =
    Who owns it. A person wins over a team when both are set, which is what the
    server stores anyway — assigning to one clears the other. */
 const AssigneePill: React.FC<{ todo: TodoItem }> = ({ todo }) => {
+  const { t } = useTranslation('attivita', { useSuspense: false });
   if (todo.assignedToUserName) {
     return (
-      <StatusPill title={`Assegnata a ${todo.assignedToUserName}`}>
+      <StatusPill title={t('assignedTo', { name: todo.assignedToUserName })}>
         <UserCircle className="h-3 w-3 flex-shrink-0" aria-hidden />
         <span className="truncate">{todo.assignedToUserName}</span>
       </StatusPill>
@@ -211,9 +223,9 @@ const AssigneePill: React.FC<{ todo: TodoItem }> = ({ todo }) => {
   }
   if (todo.assignedToTeam && !todo.assignedToUserId) {
     return (
-      <StatusPill title={`Assegnata al team ${TEAM_LABELS[todo.assignedToTeam]}`}>
+      <StatusPill title={t('assignedToTeam', { team: teamLabel(todo.assignedToTeam, t) })}>
         <UsersRound className="h-3 w-3 flex-shrink-0" aria-hidden />
-        <span className="truncate">{TEAM_LABELS[todo.assignedToTeam]}</span>
+        <span className="truncate">{teamLabel(todo.assignedToTeam, t)}</span>
       </StatusPill>
     );
   }
@@ -239,6 +251,7 @@ const TodoRow: React.FC<{
   todo, todayStr, banquetMenus, selectMode, isSelected,
   onToggleComplete, onToggleSelect, onEdit, onDelete, onOpenBanquet,
 }) => {
+  const { t } = useTranslation('attivita', { useSuspense: false });
   const isOverdue = !!(todo.dueDate && todo.dueDate < todayStr && !todo.completed);
   const CategoryIcon = CATEGORY_ICONS[todo.category];
   const linkedBanquets = (todo.linkedBanquetIds ?? [])
@@ -262,7 +275,7 @@ const TodoRow: React.FC<{
           aria-label={
             selectMode
               ? isSelected ? 'Deseleziona' : 'Seleziona'
-              : todo.completed ? 'Segna come da fare' : 'Segna come fatta'
+              : todo.completed ? t('markUndone') : t('markDone')
           }
           aria-pressed={selectMode ? isSelected : undefined}
           className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
@@ -296,13 +309,13 @@ const TodoRow: React.FC<{
                 controls invites tidying work that is already finished. */}
             {!selectMode && !todo.completed && (
               <div className="flex flex-shrink-0 items-center transition-opacity md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100">
-                <button type="button" onClick={onEdit} aria-label="Modifica" className={rowAction}>
+                <button type="button" onClick={onEdit} aria-label={t('edit')} className={rowAction}>
                   <Edit2 className="h-4 w-4" />
                 </button>
                 <button
                   type="button"
                   onClick={onDelete}
-                  aria-label="Elimina"
+                  aria-label={t('delete')}
                   className={`${rowAction} hover:text-[var(--ds-critical-text)]`}
                 >
                   <Trash2 className="h-4 w-4" />
@@ -322,22 +335,22 @@ const TodoRow: React.FC<{
             {todo.completed && todo.completedAt ? (
               <StatusPill tone="positive">
                 <Check className="h-3 w-3 flex-shrink-0" aria-hidden />
-                {formatCompleted(todo.completedAt, todayStr)}
+                {formatCompleted(todo.completedAt, todayStr, t)}
               </StatusPill>
             ) : todo.dueDate ? (
               <StatusPill tone={isOverdue ? 'critical' : 'neutral'}>
                 <Clock className="h-3 w-3 flex-shrink-0" aria-hidden />
-                {formatDueShort(todo.dueDate, todayStr)}
+                {formatDueShort(todo.dueDate, todayStr, t)}
               </StatusPill>
             ) : null}
             <StatusPill>
               <CategoryIcon className="h-3 w-3 flex-shrink-0" aria-hidden />
-              <span className="truncate">{CATEGORY_LABELS[todo.category]}</span>
+              <span className="truncate">{categoryLabel(todo.category, t)}</span>
             </StatusPill>
             {!todo.completed && todo.priority !== TodoPriority.LOW && (
               <StatusPill tone={todo.priority === TodoPriority.HIGH ? 'critical' : 'pending'}>
                 <Flag className="h-3 w-3 flex-shrink-0" aria-hidden />
-                {PRIORITY_LABELS[todo.priority]}
+                {priorityLabel(todo.priority, t)}
               </StatusPill>
             )}
             {/* The reservation link was in the data all along and rendered
@@ -380,6 +393,7 @@ const TodoRow: React.FC<{
 };
 
 export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes, autoOpenNew, onAutoOpenNewHandled }) => {
+  const { t } = useTranslation('attivita', { useSuspense: false });
   const { user } = useAuth();
   const { todos, loading, assignableUsers, addTodo, updateTodo, toggleTodo, deleteTodo } = useTodos();
 
@@ -442,11 +456,11 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
 
     const buckets: { key: string; label: string; items: TodoItem[] }[] = [
       { key: 'overdue', label: 'Scadute', items: [] },
-      { key: 'today', label: 'Oggi', items: [] },
-      { key: 'tomorrow', label: 'Domani', items: [] },
+      { key: 'today', label: t('today'), items: [] },
+      { key: 'tomorrow', label: t('tomorrow'), items: [] },
       { key: 'week', label: 'Questa settimana', items: [] },
       { key: 'future', label: 'Future', items: [] },
-      { key: 'none', label: 'Senza scadenza', items: [] },
+      { key: 'none', label: t('noDueDate'), items: [] },
     ];
 
     for (const t of filtered) {
@@ -479,7 +493,7 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
   const selectTab = (tab: StatusTab) => { setStatusTab(tab); exitSelectMode(); };
 
   const stats: Stat[] = [
-    { value: counts.pending, label: 'Da fare', onClick: () => selectTab('TODO'), title: 'Mostra tutte le attività da fare' },
+    { value: counts.pending, label: t('toDo'), onClick: () => selectTab('TODO'), title: t('showAllToDo') },
     {
       value: counts.overdue,
       label: 'Scadute',
@@ -488,21 +502,21 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
       tone: counts.overdue > 0 ? 'critical' : 'neutral',
       tint: counts.overdue > 0,
       onClick: () => selectTab('OVERDUE'),
-      title: 'Mostra solo le attività scadute',
+      title: t('showOverdue'),
     },
     {
       value: counts.today,
-      label: 'Oggi',
+      label: t('today'),
       tone: counts.today > 0 ? 'pending' : 'neutral',
       onClick: () => selectTab('TODAY'),
-      title: 'Mostra solo le attività in scadenza oggi',
+      title: t('showDueToday'),
     },
     {
       value: counts.done,
       label: 'Fatte',
       tone: counts.done > 0 ? 'positive' : 'neutral',
       onClick: () => selectTab('DONE'),
-      title: 'Mostra le attività completate',
+      title: t('showCompleted'),
     },
   ];
 
@@ -631,7 +645,7 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
     <button type="button" onClick={openAdd} className={dsButton.primary}>
       <Plus className="h-4 w-4" aria-hidden />
       <span className="sm:hidden">Nuova</span>
-      <span className="hidden sm:inline">Nuova attività</span>
+      <span className="hidden sm:inline">{t('newTodo')}</span>
     </button>
   );
 
@@ -642,7 +656,7 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
           {/* No counts line under the title: the strip beside it and the tabs
               below already carry every one of those numbers. */}
           <h1 className="min-w-0 text-[22px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)] sm:text-[26px]">
-            Attività
+            {t('todos')}
           </h1>
           {/* Desktop creates from the header "+" — a second button for the same
               thing on the same screen is just one more object to read. */}
@@ -670,12 +684,12 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
                 // Switching tab drops selection mode with it: a selection made
                 // of rows the list no longer shows is a trap.
                 onChange={selectTab}
-                ariaLabel="Stato attività"
+                ariaLabel={t('todoState')}
                 equalWidth={false}
                 overflow="scroll"
                 options={[
                   { value: 'TODO', label: 'Da fare', badge: counts.pending, badgeTone: 'neutral' },
-                  { value: 'TODAY', label: 'Oggi', badge: counts.today, badgeTone: 'neutral' },
+                  { value: 'TODAY', label: t('today'), badge: counts.today, badgeTone: 'neutral' },
                   { value: 'OVERDUE', label: 'Scadute', badge: counts.overdue, badgeTone: 'neutral' },
                   { value: 'DONE', label: 'Fatte', badge: counts.done, badgeTone: 'neutral' },
                 ]}
@@ -687,10 +701,10 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
               <SegmentedControl<ScopeFilter>
                 value={scope}
                 onChange={setScope}
-                ariaLabel="Ambito attività"
+                ariaLabel={t('todoScope')}
                 options={[
                   { value: 'MINE', label: 'Mie' },
-                  { value: 'ALL', label: 'Tutte' },
+                  { value: 'ALL', label: t('all') },
                 ]}
               />
             </div>
@@ -700,8 +714,8 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
             <SearchField
               value={search}
               onChange={setSearch}
-              placeholder="Cerca attività…"
-              ariaLabel="Cerca attività"
+              placeholder={t('searchTodo')}
+              ariaLabel={t('searchTodo')}
               className="min-w-0 flex-1"
             />
             <button
@@ -728,8 +742,8 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
               type="button"
               onClick={() => (selectMode ? exitSelectMode() : setSelectMode(true))}
               aria-pressed={selectMode}
-              aria-label={selectMode ? 'Annulla selezione' : 'Seleziona attività'}
-              title={selectMode ? 'Annulla selezione' : 'Seleziona attività'}
+              aria-label={selectMode ? t('cancelSelection') : t('selectTodos')}
+              title={selectMode ? t('cancelSelection') : t('selectTodos')}
               className={`inline-flex h-11 flex-shrink-0 items-center justify-center gap-2 rounded-[var(--ds-radius-control)] px-3 text-[15px] font-medium shadow-[var(--ds-shadow-card)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] sm:px-4 ${
                 selectMode
                   ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
@@ -739,7 +753,7 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
               <ListTodo className="h-4 w-4" aria-hidden />
               {/* Label drops below sm, where it would squeeze the search field
                   down to a few characters. */}
-              <span className="hidden sm:inline">{selectMode ? 'Annulla' : 'Seleziona'}</span>
+              <span className="hidden sm:inline">{selectMode ? t('cancel') : t('select')}</span>
             </button>
           </div>
         </div>
@@ -750,8 +764,8 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
               <span className="min-w-0 truncate text-[14px] font-medium text-[var(--ds-action-fg)] tabular-nums">
                 {selected.size === 0
                   ? statusTab === 'DONE'
-                    ? 'Scegli le attività da riaprire'
-                    : 'Scegli le attività da completare'
+                    ? t('pickToReopen')
+                    : t('pickToComplete')
                   : `${selected.size} selezionate`}
               </span>
               <button
@@ -767,12 +781,12 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
                 {statusTab === 'DONE' ? (
                   <>
                     <ListChecks className="h-4 w-4" aria-hidden />
-                    Riporta da fare
+                    {t('markUndone')}
                   </>
                 ) : (
                   <>
                     <Check className="h-4 w-4" aria-hidden />
-                    Completa
+                    {t('complete')}
                   </>
                 )}
               </button>
@@ -784,21 +798,21 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
           ) : filtered.length === 0 ? (
             <EmptyState icon={ListChecks} action={statusTab === 'DONE' ? undefined : newButton}>
               {activeFilterCount > 0 || search.trim()
-                ? 'Nessuna attività con questi filtri'
+                ? t('noneForFilters')
                 : statusTab === 'DONE'
-                ? 'Nessuna attività completata'
+                ? t('noneCompleted')
                 : statusTab === 'OVERDUE'
-                ? 'Nessuna attività scaduta'
+                ? t('noneOverdue')
                 : statusTab === 'TODAY'
-                ? 'Nessuna attività in scadenza oggi'
+                ? t('noneDueToday')
                 : scope === 'MINE'
-                ? 'Nessuna attività assegnata a te'
-                : 'Nessuna attività'}
+                ? t('noneAssignedToYou')
+                : t('none')}
             </EmptyState>
           ) : (
             grouped.map(bucket => {
               const expanded = bucket.key === 'flat' || !collapsedGroups.has(bucket.key);
-              const meta = bucket.items.length === 1 ? '1 attività' : `${bucket.items.length} attività`;
+              const meta = t('todoCount', { count: bucket.items.length });
               return (
                 <div key={bucket.key} className="mb-3 last:mb-0">
                   {/* Scadute keeps the red band the other groups do not get.
@@ -816,7 +830,7 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
                           type="button"
                           onClick={() => toggleGroup(bucket.key)}
                           aria-expanded={expanded}
-                          aria-label={expanded ? 'Comprimi le scadute' : 'Espandi le scadute'}
+                          aria-label={expanded ? t('collapseOverdue') : t('expandOverdue')}
                           className={`inline-flex h-9 w-9 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-critical-text)] transition-transform hover:brightness-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                             expanded ? '' : '-rotate-90'
                           }`}
@@ -829,7 +843,7 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
                       <span className="opacity-85"> · {meta}</span>
                       {oldestOverdueDays > 0 && (
                         <span className="opacity-85">
-                          {' '}— la più vecchia è di {oldestOverdueDays === 1 ? '1 giorno' : `${oldestOverdueDays} giorni`}
+                          {' '}{t('oldestOverdue', { count: oldestOverdueDays })}
                         </span>
                       )}
                     </Callout>
@@ -899,7 +913,7 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
                     className="inline-flex items-center gap-1.5 text-[13px] font-medium text-[var(--ds-text-muted)] transition-colors hover:text-[var(--ds-text-primary)]"
                   >
                     <RotateCcw className="h-3.5 w-3.5" aria-hidden />
-                    Reimposta
+                    {t('reset')}
                   </button>
                 )}
               </div>
@@ -911,19 +925,19 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
                   <span className="mb-2 block text-[13px] font-semibold text-[var(--ds-text-primary)]">Ambito</span>
                   <div className="flex flex-wrap gap-2">
                     <Chip active={scope === 'MINE'} onClick={() => setScope('MINE')}>Mie</Chip>
-                    <Chip active={scope === 'ALL'} onClick={() => setScope('ALL')}>Tutte</Chip>
+                    <Chip active={scope === 'ALL'} onClick={() => setScope('ALL')}>{t('all')}</Chip>
                   </div>
                 </div>
                 <div>
-                  <span className="mb-2 block text-[13px] font-semibold text-[var(--ds-text-primary)]">Priorità</span>
+                  <span className="mb-2 block text-[13px] font-semibold text-[var(--ds-text-primary)]">{t('priorityTitle')}</span>
                   <div className="flex flex-wrap gap-2">
                     <Chip active={priorityFilter === 'ALL'} onClick={() => setPriorityFilter('ALL')}>
-                      Tutte
+                      {t('all')}
                     </Chip>
                     {[TodoPriority.HIGH, TodoPriority.MEDIUM, TodoPriority.LOW].map(p => (
                       <Chip key={p} active={priorityFilter === p} onClick={() => setPriorityFilter(p)}>
                         <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${PRIORITY_DOTS[p]}`} aria-hidden />
-                        {PRIORITY_LABELS[p]}
+                        {priorityLabel(p, t)}
                       </Chip>
                     ))}
                   </div>
@@ -932,14 +946,14 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
                   <span className="mb-2 block text-[13px] font-semibold text-[var(--ds-text-primary)]">Categoria</span>
                   <div className="flex flex-wrap gap-2">
                     <Chip active={categoryFilter === 'ALL'} onClick={() => setCategoryFilter('ALL')}>
-                      Tutte
+                      {t('all')}
                     </Chip>
                     {(Object.keys(CATEGORY_LABELS) as TodoCategory[]).map(c => {
                       const Icon = CATEGORY_ICONS[c];
                       return (
                         <Chip key={c} active={categoryFilter === c} onClick={() => setCategoryFilter(c)}>
                           <Icon className="h-3.5 w-3.5 flex-shrink-0" aria-hidden />
-                          {CATEGORY_LABELS[c]}
+                          {categoryLabel(c, t)}
                         </Chip>
                       );
                     })}
@@ -958,12 +972,12 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
       <ModalShell
         open={showModal}
         onClose={() => { setShowModal(false); resetForm(); }}
-        title={editingTodo ? 'Modifica attività' : 'Nuova attività'}
-        subtitle={`${form.title.trim() || 'Titolo da inserire'} · ${PRIORITY_LABELS[form.priority].toLowerCase()} · ${CATEGORY_LABELS[form.category].toLowerCase()}`}
+        title={editingTodo ? t('editTodo') : t('newTodo')}
+        subtitle={`${form.title.trim() || t('titlePlaceholder')} · ${priorityLabel(form.priority, t).toLowerCase()} · ${categoryLabel(form.category, t).toLowerCase()}`}
         size="lg"
         footerStart={
           !form.title.trim() ? (
-            <span className="text-[var(--ds-critical-text)]">Il titolo è obbligatorio.</span>
+            <span className="text-[var(--ds-critical-text)]">{t('titleRequired')}</span>
           ) : undefined
         }
         footer={
@@ -973,7 +987,7 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
               onClick={() => { setShowModal(false); resetForm(); }}
               className={dsButton.secondary}
             >
-              Annulla
+              {t('cancel')}
             </button>
             <button
               type="button"
@@ -982,14 +996,14 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
               className={dsButton.primary}
             >
               {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-              {editingTodo ? 'Salva' : 'Aggiungi'}
+              {editingTodo ? t('save') : t('add')}
             </button>
           </>
         }
       >
         <div className="grid grid-cols-1 gap-4 p-4 sm:p-6 lg:grid-cols-2">
           <div className="flex min-w-0 flex-col gap-4">
-            <FormCard title="Attività">
+            <FormCard title={t('todo')}>
               <div className="space-y-4">
                 <Field label="Titolo" htmlFor="attivita-titolo" required>
                   <input
@@ -1007,7 +1021,7 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
                     id="attivita-descrizione"
                     value={form.description}
                     onChange={e => setForm({ ...form, description: e.target.value })}
-                    placeholder="Aggiungi dettagli…"
+                    placeholder={t('addDetails')}
                     rows={4}
                     className={`${dsTextarea} resize-none`}
                   />
@@ -1015,15 +1029,15 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
               </div>
             </FormCard>
 
-            <FormCard title="Priorità e categoria" aside="la bassa non mostra etichetta">
+            <FormCard title={t('priorityAndCategory')} aside={t('lowNoLabel')}>
               <div className="space-y-4">
                 <SegmentedControl<TodoPriority>
                   value={form.priority}
                   onChange={priority => setForm({ ...form, priority })}
-                  ariaLabel="Priorità"
+                  ariaLabel={t('priorityTitle')}
                   options={[TodoPriority.HIGH, TodoPriority.MEDIUM, TodoPriority.LOW].map(p => ({
                     value: p,
-                    label: PRIORITY_LABELS[p],
+                    label: priorityLabel(p, t),
                     icon: <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${PRIORITY_DOTS[p]}`} aria-hidden />,
                   }))}
                 />
@@ -1037,7 +1051,7 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
                         onClick={() => setForm({ ...form, category: c })}
                       >
                         <Icon className="h-3.5 w-3.5 flex-shrink-0" aria-hidden />
-                        {CATEGORY_LABELS[c]}
+                        {categoryLabel(c, t)}
                       </Chip>
                     );
                   })}
@@ -1054,22 +1068,22 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
                     active={form.dueDate === todayStr}
                     onClick={() => setForm({ ...form, dueDate: todayStr })}
                   >
-                    Oggi
+                    {t('today')}
                   </Chip>
                   <Chip
                     active={form.dueDate === formatLocalDate(addDays(new Date(), 1))}
                     onClick={() => setForm({ ...form, dueDate: formatLocalDate(addDays(new Date(), 1)) })}
                   >
-                    Domani
+                    {t('tomorrow')}
                   </Chip>
                   <Chip
                     active={form.dueDate === formatLocalDate(addDays(new Date(), 7))}
                     onClick={() => setForm({ ...form, dueDate: formatLocalDate(addDays(new Date(), 7)) })}
                   >
-                    Fra una settimana
+                    {t('inAWeek')}
                   </Chip>
                   <Chip active={form.dueDate === ''} onClick={() => setForm({ ...form, dueDate: '' })}>
-                    Senza scadenza
+                    {t('noDueDate')}
                   </Chip>
                 </div>
                 <input
@@ -1091,7 +1105,7 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
                       onClick={() => setForm({ ...form, assignedToUserId: undefined })}
                     >
                       <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--ds-text-muted)]" aria-hidden />
-                      Nessuno
+                      {t('nobody')}
                     </Chip>
                     {assignableUsers.map(u => (
                       <Chip
@@ -1112,7 +1126,7 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
                       onClick={() => setForm({ ...form, assignedToTeam: undefined })}
                     >
                       <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--ds-text-muted)]" aria-hidden />
-                      Nessun team
+                      {t('noTeam')}
                     </Chip>
                     {(Object.entries(TEAM_LABELS) as [UserRole, string][])
                       .filter(([key]) => canAssignToRole(user?.role, key))
@@ -1144,11 +1158,11 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
                 <Link2 className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
                 <span className="min-w-0 flex-1">
                   <span className="block text-[15px] font-semibold text-[var(--ds-text-primary)]">
-                    Collega a un banchetto
+                    {t('linkToBanquet')}
                   </span>
                   <span className="block text-[13px] text-[var(--ds-text-muted)]">
                     {form.linkedBanquetIds.length === 0
-                      ? 'nessun collegamento'
+                      ? t('noLink')
                       : form.linkedBanquetIds.length === 1
                       ? '1 banchetto collegato'
                       : `${form.linkedBanquetIds.length} banchetti collegati`}
@@ -1166,7 +1180,7 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
               {banquetPickerOpen && (
                 <div className="mt-4 max-h-64 space-y-1.5 overflow-y-auto">
                   {sortedBanquets.length === 0 ? (
-                    <p className="text-[14px] text-[var(--ds-text-muted)]">Nessun banchetto in archivio.</p>
+                    <p className="text-[14px] text-[var(--ds-text-muted)]">{t('noBanquetInArchive')}</p>
                   ) : (
                     sortedBanquets.map(b => {
                       const linked = form.linkedBanquetIds.includes(b.id);
@@ -1204,7 +1218,7 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
                                 linked ? 'text-[var(--ds-arriving-text)] opacity-80' : 'text-[var(--ds-text-muted)]'
                               }`}
                             >
-                              {b.event_date ? formatDueLong(b.event_date) : 'senza data'}
+                              {b.event_date ? formatDueLong(b.event_date) : t('noDate')}
                             </span>
                           </span>
                           {b.guests != null && (
@@ -1229,8 +1243,8 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
 
       <ConfirmDeleteModal
         isOpen={!!deleteConfirm}
-        title="Elimina attività"
-        message="Stai per eliminare l'attività:"
+        title={t('deleteTodo')}
+        message={t('aboutToDeleteTodo')}
         itemName={deleteConfirm?.title}
         onCancel={() => setDeleteConfirm(null)}
         onConfirm={() => {
