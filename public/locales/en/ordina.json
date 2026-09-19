@@ -1,0 +1,69 @@
+{
+  "meta": {
+    "title": "Order takeaway",
+    "titleWithName": "Order takeaway — {{name}}"
+  },
+  "maintenance": {
+    "title": "Online orders unavailable",
+    "hint": "We're not taking takeaway orders through the site right now. Give us a call and we'll get everything ready for you."
+  },
+  "header": {
+    "title": "Order takeaway",
+    "sub": "Pick your dishes and collect them at the time you prefer.",
+    "langGroupAria": "Language",
+    "directions": "Directions"
+  },
+  "pickup": {
+    "title": "When you collect",
+    "hint": "Times allow for kitchen preparation.",
+    "dayGroupAria": "Collection day",
+    "today": "today",
+    "stopNotice": "Takeaway is paused for this date: please pick another day.",
+    "lunch": "Lunch",
+    "dinner": "Dinner",
+    "lunchAria": "Lunch times",
+    "dinnerAria": "Dinner times",
+    "slotsEmpty": "No times available for this day."
+  },
+  "menu": {
+    "title": "Your order",
+    "hint": "Prices are as on the menu.",
+    "loading": "Loading the menu…",
+    "unavailable": "The menu isn't available right now.",
+    "other": "Other",
+    "addAria": "Add {{name}}",
+    "removeAria": "Remove {{name}}"
+  },
+  "fields": {
+    "title": "Your details",
+    "name": "Name",
+    "phone": "Phone",
+    "notes": "Notes for the kitchen",
+    "notesPlaceholder": "Allergies, doorbell, preferences…"
+  },
+  "bar": {
+    "none": "No dishes yet",
+    "dish_one": "{{count}} dish",
+    "dish_other": "{{count}} dishes",
+    "pickupAt": " · pickup {{time}}"
+  },
+  "actions": {
+    "submit": "Order"
+  },
+  "errors": {
+    "slot_full": "That time just filled up: please choose another.",
+    "slot_too_soon": "The kitchen can't make it for that time: please pick a later one.",
+    "takeaway_stopped": "Takeaway is paused for this date: please pick another day.",
+    "invalid_slot": "That time is no longer available: please choose another.",
+    "invalid_phone": "Please check the phone number.",
+    "rate_limited": "Too many requests: please try again in a few minutes.",
+    "generic": "Something went wrong: please try again.",
+    "network": "No connection or unstable network: please try again."
+  },
+  "done": {
+    "title": "Order confirmed",
+    "orderNumber": "Order #{{number}}",
+    "textWithNumber": "Thank you {{name}}: just show this number at pickup.",
+    "text": "Thank you {{name}}: see you at pickup."
+  }
+}
