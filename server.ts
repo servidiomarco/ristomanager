@@ -30,7 +30,7 @@ import { createServer as createHttpsServer, type Server as HttpsServer } from 'h
 import { startSalaNodeReplica } from './services/salaNodeReplica.js';
 import { VOICE_CHANNEL, WHATSAPP_CHANNEL, type ToolOutcome } from './services/bookingTools.js';
 import { TENANT_FEATURES, getTenantFeatures, isFeatureEnabledForTenant, invalidateTenantFeaturesCache, clearTenantFeaturesCache, type TenantFeature } from './services/entitlements.js';
-import { clearTenantLocaleCache } from './services/tenantLocale.js';
+import { clearTenantLocaleCache, getTenantLocale } from './services/tenantLocale.js';
 import { provisionTenant, ProvisioningError } from './services/tenantProvisioning.js';
 import {
     createCheckoutSession,
@@ -8556,9 +8556,12 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
             if (!(await isPaymentConfiguredForFlow(bill.tenant_id, 'bill'))) {
                 throw new Error(`${providerLabel(await getPaymentProviderForFlow(bill.tenant_id, 'bill'))} not configured`);
             }
+            // La valuta è quella del ristorante, non una costante: il
+            // gateway addebita in quella e la riga la registra uguale.
+            const billCurrency = (await getTenantLocale(bill.tenant_id)).currency;
             const order = await createPaymentOrder(bill.tenant_id, {
                 amount,
-                currency: 'EUR',
+                currency: billCurrency,
                 description: `Conto ${billLabel} - quota${claimantLabel ? ' ' + claimantLabel : ''}`,
                 reference: `bill_split:${splitId}`,
                 flow: 'bill',
@@ -8573,7 +8576,7 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
                 `INSERT INTO payment_requests
                     (tenant_id, reservation_id, amount_cents, currency, description, status, provider,
                      provider_order_id, checkout_url, table_bill_split_id, metadata)
-                 VALUES ($10, $1, $2, 'EUR', $3, $4, $5, $6, $7, $8, $9)
+                 VALUES ($10, $1, $2, $11, $3, $4, $5, $6, $7, $8, $9)
                  RETURNING id`,
                 [
                     bill.reservation_id || null,
@@ -8586,6 +8589,7 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
                     splitId,
                     JSON.stringify({ ...order.metadata, bill_split_id: splitId }),
                     bill.tenant_id,
+                    billCurrency,
                 ]
             );
             paymentRequestId = prIns.rows[0].id;
@@ -10508,9 +10512,10 @@ app.post('/payments/requests', authenticate, requirePermission('reservations:ful
         const orderDescription = (typeof description === 'string' && description.trim())
             ? description.trim()
             : `Prenotazione #${reservation.id} - ${reservation.guests} persone`;
+        const tenantCurrency = (await getTenantLocale(req.tenantId!)).currency;
         const order = await createPaymentOrder(req.tenantId!, {
             amount: amountCents,
-            currency: 'EUR',
+            currency: tenantCurrency,
             description: orderDescription,
             reference: `reservation:${reservation.id}`,
             flow: 'deposit',
@@ -10520,7 +10525,7 @@ app.post('/payments/requests', authenticate, requirePermission('reservations:ful
             `INSERT INTO payment_requests
                 (tenant_id, reservation_id, amount_cents, currency, description, status, provider,
                  provider_order_id, checkout_url, created_by_user_id, metadata)
-             VALUES ($10, $1, $2, 'EUR', $3, $4, $5, $6, $7, $8, $9)
+             VALUES ($10, $1, $2, $11, $3, $4, $5, $6, $7, $8, $9)
              RETURNING *`,
             [
                 reservation.id,
@@ -10533,6 +10538,7 @@ app.post('/payments/requests', authenticate, requirePermission('reservations:ful
                 req.user?.userId ?? null,
                 JSON.stringify(order.metadata),
                 req.tenantId!,
+                tenantCurrency,
             ]
         );
         const paymentRequest = inserted.rows[0];
@@ -28868,9 +28874,10 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
             depositAmountCents = guestsNum * (depositPolicy?.perPersonCents ?? DEPOSIT_DEFAULTS.perPersonCents);
             const orderDescription = `Caparra prenotazione #${created.id} - ${guestsLabel} ${dateLabel} ${time}`;
             try {
+                const depositCurrency = (await getTenantLocale(tenantId)).currency;
                 const order = await createPaymentOrder(tenantId, {
                     amount: depositAmountCents,
-                    currency: 'EUR',
+                    currency: depositCurrency,
                     description: orderDescription,
                     reference: `reservation:${created.id}`,
                     flow: 'deposit',
@@ -28879,7 +28886,7 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
                     `INSERT INTO payment_requests
                         (tenant_id, reservation_id, amount_cents, currency, description, status, provider,
                          provider_order_id, checkout_url, metadata)
-                     VALUES ($9, $1, $2, 'EUR', $3, $4, $5, $6, $7, $8)
+                     VALUES ($9, $1, $2, $10, $3, $4, $5, $6, $7, $8)
                      RETURNING *`,
                     [
                         created.id,
@@ -28891,6 +28898,7 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
                         order.checkoutUrl,
                         JSON.stringify({ ...order.metadata, source: 'public_booking_auto_deposit' }),
                         tenantId,
+                        depositCurrency,
                     ]
                 );
                 depositCheckoutUrl = order.checkoutUrl;
@@ -36007,6 +36015,7 @@ bookingTools.configureBookingTools({
     getAutoDepositPolicy,
     depositDefaultPerPersonCents: DEPOSIT_DEFAULTS.perPersonCents,
     createPaymentOrder,
+    getTenantCurrency: async (tenantId: number) => (await getTenantLocale(tenantId)).currency,
     queryWithRetry,
     buildDepositRequestMessage,
     buildBookingDepositRequestTemplate,
