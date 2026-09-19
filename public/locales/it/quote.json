@@ -1,0 +1,40 @@
+{
+  "meta": {
+    "title": "Preventivo",
+    "titleFull": "Preventivo {{name}} — {{business}}"
+  },
+  "header": {
+    "langGroupAria": "Lingua"
+  },
+  "notFound": {
+    "title": "Preventivo non trovato",
+    "hint": "Il link potrebbe essere incompleto. Chiedi al ristorante di inviartelo di nuovo."
+  },
+  "loadingAria": "Caricamento",
+  "status": {
+    "quote": "Preventivo",
+    "confirmed": "Confermato"
+  },
+  "shift": {
+    "lunch": "pranzo",
+    "dinner": "cena"
+  },
+  "covers_one": "{{count}} coperto",
+  "covers_other": "{{count}} coperti",
+  "childrenSuffix_one": " ({{count}} bambino)",
+  "childrenSuffix_other": " ({{count}} bambini)",
+  "allergens": "allergeni: {{list}}",
+  "rates": {
+    "title": "Tariffe",
+    "adults_one": "{{count}} adulto × {{price}}",
+    "adults_other": "{{count}} adulti × {{price}}",
+    "children_one": "{{count}} bambino × {{price}}",
+    "children_other": "{{count}} bambini × {{price}}",
+    "discount": "Sconto",
+    "total": "Totale",
+    "deposit": "Acconto richiesto alla conferma"
+  },
+  "footer": {
+    "notBinding": "Il preventivo non è un impegno: si conferma insieme al ristorante."
+  }
+}

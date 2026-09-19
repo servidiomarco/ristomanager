@@ -1,0 +1,32 @@
+{
+  "meta": {
+    "title": "Digital receipt",
+    "titleProforma": "Proforma"
+  },
+  "header": {
+    "langGroupAria": "Language"
+  },
+  "notFound": "Document not found. Check the link or ask the restaurant.",
+  "loadingAria": "Loading",
+  "vatLabel": "VAT no. (P.IVA) {{vat}}",
+  "docType": {
+    "proforma": "Proforma — not a fiscal document",
+    "copy": "Copy of the commercial sales document (documento commerciale)"
+  },
+  "voided": "document voided",
+  "voidedOn": "document voided on {{date}}",
+  "payments": {
+    "cash": "Cash",
+    "electronic": "Electronic payment",
+    "ticket": "Meal vouchers"
+  },
+  "total": "Total",
+  "docNumber": "Document no. {{number}}",
+  "docDate": "issued {{date}}",
+  "table": "Table {{name}}",
+  "footer": {
+    "proforma": "Proforma: it does not replace the receipt or the invoice.",
+    "copy": "Informative copy: the fiscal document is the record transmitted electronically to the Italian Revenue Agency (Agenzia delle Entrate)."
+  },
+  "print": "Print or save"
+}

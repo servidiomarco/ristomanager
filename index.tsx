@@ -48,9 +48,13 @@ root.render(
         <PublicPayPageEntry />
       </I18nProvider>
     ) : isPublicReceiptRoute ? (
-      <PublicReceiptPage />
+      <I18nProvider>
+        <PublicReceiptPage />
+      </I18nProvider>
     ) : isPublicQuoteRoute ? (
-      <PublicQuotePage />
+      <I18nProvider>
+        <PublicQuotePage />
+      </I18nProvider>
     ) : (
       <AuthProvider>
         <ToastProvider>
