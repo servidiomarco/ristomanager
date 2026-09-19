@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Scale, Save, Loader2, Copy, Check, Download, FileText, Phone, Cookie, ScrollText, ChevronDown,
   ShieldCheck, Megaphone, Upload, X,
@@ -210,7 +211,7 @@ const Field: React.FC<{
 // Legge il file del logo: fino a 400 KB parte com'è (formato conservato);
 // oltre, si ridimensiona a PNG max 640px di lato — il canvas in PNG conserva
 // la trasparenza, che per un logo è tutto.
-const readLogoFile = (file: File): Promise<{ contentType: string; data: string }> =>
+const readLogoFile = (file: File, t: (k: string) => string): Promise<{ contentType: string; data: string }> =>
   new Promise((resolve, reject) => {
     if (file.size <= 400 * 1024) {
       const reader = new FileReader();
@@ -218,7 +219,7 @@ const readLogoFile = (file: File): Promise<{ contentType: string; data: string }
         const raw = String(reader.result || '');
         resolve({ contentType: file.type, data: raw.split(',')[1] || '' });
       };
-      reader.onerror = () => reject(new Error('Lettura del file fallita'));
+      reader.onerror = () => reject(new Error(t('fileReadFailed')));
       reader.readAsDataURL(file);
       return;
     }
@@ -234,11 +235,12 @@ const readLogoFile = (file: File): Promise<{ contentType: string; data: string }
       canvas.getContext('2d')?.drawImage(img, 0, 0, canvas.width, canvas.height);
       resolve({ contentType: 'image/png', data: canvas.toDataURL('image/png').split(',')[1] || '' });
     };
-    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Immagine non leggibile')); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error(t('imageUnreadable'))); };
     img.src = url;
   });
 
 export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
+  const { t } = useTranslation('legale', { useSuspense: false });
   const { hasPermission } = useAuth();
   const canEdit = hasPermission('settings:full');
 
@@ -258,17 +260,17 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
     const file = files?.[0];
     if (!file || !canEdit) return;
     if (!/^image\/(png|jpeg|webp)$/.test(file.type)) {
-      showToast('Usa un PNG, JPG o WebP', 'error');
+      showToast(t('logoFormat'), 'error');
       return;
     }
     setLogoBusy(true);
     try {
-      const { contentType, data: b64 } = await readLogoFile(file);
+      const { contentType, data: b64 } = await readLogoFile(file, t);
       const { logo_url } = await uploadTenantLogo(contentType, b64, variant);
       setData(d => ({ ...d, [logoField(variant)]: logo_url }));
-      showToast('Logo caricato', 'success');
+      showToast(t('logoUploaded'), 'success');
     } catch (err: any) {
-      showToast(err?.message || 'Caricamento del logo non riuscito', 'error');
+      showToast(err?.message || t('logoUploadFailed'), 'error');
     } finally {
       setLogoBusy(false);
       const ref = variant === 'dark' ? logoDarkInputRef : logoInputRef;
@@ -282,9 +284,9 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
     try {
       await removeTenantLogo(variant);
       setData(d => ({ ...d, [logoField(variant)]: '' }));
-      showToast('Logo rimosso', 'success');
+      showToast(t('logoRemoved'), 'success');
     } catch (err: any) {
-      showToast(err?.message || 'Rimozione non riuscita', 'error');
+      showToast(err?.message || t('removeFailed'), 'error');
     } finally {
       setLogoBusy(false);
     }
@@ -300,7 +302,7 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
         const d = await getLegalSettings();
         if (!cancelled) setData({ ...EMPTY, ...d, app_name: d.app_name || 'RistoManager' });
       } catch {
-        if (!cancelled) showToastRef.current('Impossibile caricare le impostazioni legali', 'error');
+        if (!cancelled) showToastRef.current(t('loadFailed'), 'error');
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -318,9 +320,9 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
       const payload: LegalSettings = { ...data, last_updated: new Date().toLocaleDateString('it-IT') };
       const saved = await updateLegalSettings(payload);
       setData({ ...EMPTY, ...saved });
-      showToast('Impostazioni legali salvate', 'success');
+      showToast(t('saved'), 'success');
     } catch (err: any) {
-      showToast(err?.message || 'Errore durante il salvataggio', 'error');
+      showToast(err?.message || t('saveError'), 'error');
     } finally {
       setSaving(false);
     }
@@ -329,8 +331,8 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
   // In "simple" mode only the strict-minimum documents are surfaced; the
   // marketing/cookie/terms extras belong to "advanced".
   const isAdvanced = data.legal_mode !== 'simple';
-  const visibleDocs = isAdvanced ? DOC_TABS : DOC_TABS.filter(t => t.key === 'privacy' || t.key === 'voice');
-  const currentDoc = visibleDocs.find(t => t.key === activeDoc) ?? visibleDocs[0];
+  const visibleDocs = isAdvanced ? DOC_TABS : DOC_TABS.filter(d => d.key === 'privacy' || d.key === 'voice');
+  const currentDoc = visibleDocs.find(d => d.key === activeDoc) ?? visibleDocs[0];
   const generatedText = useMemo(() => currentDoc.gen(data), [currentDoc, data]);
 
   const setMode = (mode: 'simple' | 'advanced') => setData(d => ({ ...d, legal_mode: mode }));
@@ -341,7 +343,7 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1600);
     } catch {
-      showToast('Copia non riuscita', 'error');
+      showToast(t('copyFailed'), 'error');
     }
   };
 
@@ -363,8 +365,8 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
             <Scale className="w-5 h-5" />
           </div>
           <div className="min-w-0">
-            <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">Identità e documenti legali</h4>
-            <p className="text-[13px] text-[var(--ds-text-muted)]">Nome pubblico, logo e contatti mostrati ai clienti; dati del titolare per privacy policy, avviso vocale, cookie policy e termini di servizio.</p>
+            <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">{t('cardTitle')}</h4>
+            <p className="text-[13px] text-[var(--ds-text-muted)]">{t('cardSubtitle')}</p>
           </div>
         </div>
         <ChevronDown className="w-5 h-5 text-[var(--ds-text-muted)] flex-shrink-0 transition-transform group-open:rotate-180" />
@@ -372,18 +374,18 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
 
       <div className="px-4 pb-4 pt-1 border-t border-[var(--ds-border)]">
         {loading ? (
-          <div className="py-10 flex justify-center"><Loader label="Carico…" size={40} /></div>
+          <div className="py-10 flex justify-center"><Loader label={t('loading')} size={40} /></div>
         ) : (
           <>
             {!canEdit && (
               <div className="mb-4 text-[13px] text-[var(--ds-text-muted)] bg-[var(--ds-surface-row)] rounded-[var(--ds-radius)] p-3">
-                Solo in lettura: la modifica richiede il permesso di gestione impostazioni.
+                {t('readOnly')}
               </div>
             )}
 
             {/* ---------- Legal mode toggle ---------- */}
             <div className="mb-6">
-              <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-2">Modalità</h5>
+              <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-2">{t('mode')}</h5>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <button
                   type="button"
@@ -394,10 +396,10 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
                   }`}
                 >
                   <div className="flex items-center gap-2 text-[14px] font-medium text-[var(--ds-text-primary)]">
-                    <ShieldCheck className="h-4 w-4" /> Semplice
+                    <ShieldCheck className="h-4 w-4" /> {t('modeSimple')}
                     {!isAdvanced && <Check className="h-3.5 w-3.5 text-[var(--ds-seated-text)] ml-auto" />}
                   </div>
-                  <p className="text-[12px] text-[var(--ds-text-muted)] mt-1">Solo il minimo richiesto dalla legge. Nessun marketing né trattamenti non strettamente necessari.</p>
+                  <p className="text-[12px] text-[var(--ds-text-muted)] mt-1">{t('modeSimpleHint')}</p>
                 </button>
                 <button
                   type="button"
@@ -408,10 +410,10 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
                   }`}
                 >
                   <div className="flex items-center gap-2 text-[14px] font-medium text-[var(--ds-text-primary)]">
-                    <Megaphone className="h-4 w-4" /> Avanzata
+                    <Megaphone className="h-4 w-4" /> {t('modeAdvanced')}
                     {isAdvanced && <Check className="h-3.5 w-3.5 text-[var(--ds-seated-text)] ml-auto" />}
                   </div>
-                  <p className="text-[12px] text-[var(--ds-text-muted)] mt-1">Include marketing, consensi, cookie analitici e termini di servizio. I clienti senza consenso restano esclusi dai flussi marketing.</p>
+                  <p className="text-[12px] text-[var(--ds-text-muted)] mt-1">{t('modeAdvancedHint')}</p>
                 </button>
               </div>
             </div>
@@ -422,9 +424,9 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
                 <input type="checkbox" checked={data.ask_health_consent} disabled={!canEdit}
                   onChange={e => setBool('ask_health_consent')(e.target.checked)} className="mt-0.5 h-4 w-4 rounded flex-shrink-0" />
                 <span>
-                  Chiedi il consenso al trattamento di allergie / intolleranze in prenotazione
+                  {t('askHealthConsent')}
                   <span className="block text-[12px] text-[var(--ds-text-muted)] mt-0.5">
-                    Se disattivato, la casella dei dati sanitari (art. 9 GDPR) non compare nel modal prenotazione. Utile se le allergie le raccogli solo a voce al tavolo, senza registrarle nel gestionale.
+                    {t('askHealthConsentHint')}
                   </span>
                 </span>
               </label>
@@ -433,33 +435,33 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
             {/* ---------- Form fields ---------- */}
             <div className="space-y-6">
               <div>
-                <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-3">Identità pubblica</h5>
-                <p className="text-[12px] text-[var(--ds-text-subtle)] mb-3">Nome e contatti usati in email, messaggi e pagina di prenotazione. Vuoti = valori attuali del ristorante.</p>
+                <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-3">{t('publicIdentity')}</h5>
+                <p className="text-[12px] text-[var(--ds-text-subtle)] mb-3">{t('publicIdentityHint')}</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
-                  <Field label="Nome pubblico del ristorante" value={data.business_name} onChange={set('business_name')} placeholder="Il Vecchio Frantoio" disabled={!canEdit} />
-                  <Field label="Sottotitolo / tagline" value={data.business_tagline} onChange={set('business_tagline')} placeholder="Cucina Tradizionale" disabled={!canEdit} />
-                  <Field label="Telefono mostrato ai clienti" value={data.public_phone} onChange={set('public_phone')} placeholder="0985 876578" disabled={!canEdit} />
-                  <Field label="WhatsApp mostrato ai clienti" value={data.public_whatsapp} onChange={set('public_whatsapp')} placeholder="+39 389 591 6494" disabled={!canEdit} />
-                  <Field label="Indirizzo del locale" value={data.public_address} onChange={set('public_address')} placeholder="Via dell'Olmo 14, Lucca" disabled={!canEdit} />
-                  <Field label="Link Google Maps (Come raggiungerci)" value={data.maps_url} onChange={set('maps_url')} placeholder="https://maps.app.goo.gl/…" disabled={!canEdit} wide />
+                  <Field label={t('businessName')} value={data.business_name} onChange={set('business_name')} placeholder={t('businessNamePh')} disabled={!canEdit} />
+                  <Field label={t('businessTagline')} value={data.business_tagline} onChange={set('business_tagline')} placeholder={t('businessTaglinePh')} disabled={!canEdit} />
+                  <Field label={t('publicPhone')} value={data.public_phone} onChange={set('public_phone')} placeholder="0985 876578" disabled={!canEdit} />
+                  <Field label={t('publicWhatsapp')} value={data.public_whatsapp} onChange={set('public_whatsapp')} placeholder="+39 389 591 6494" disabled={!canEdit} />
+                  <Field label={t('publicAddress')} value={data.public_address} onChange={set('public_address')} placeholder="Via dell'Olmo 14, Lucca" disabled={!canEdit} />
+                  <Field label={t('mapsUrl')} value={data.maps_url} onChange={set('maps_url')} placeholder="https://maps.app.goo.gl/…" disabled={!canEdit} wide />
                 </div>
 
                 {/* Logo: compare in testa alla pagina di prenotazione online.
                     Salvataggio immediato (route sua), non passa dal Salva. */}
                 <div className="mt-4">
                   <span className="mb-1.5 block text-[13px] font-medium text-[var(--ds-text-secondary)]">
-                    Logo (pagina di prenotazione online e testata dell'app)
+                    {t('logoLabel')}
                   </span>
                   <div className="flex flex-wrap items-center gap-3">
                     {data.logo_url ? (
                       <img
                         src={tenantLogoSrc(data.logo_url)}
-                        alt="Logo del ristorante"
+                        alt={t('logoAlt')}
                         className="h-12 w-auto max-w-[220px] rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] object-contain p-1.5"
                       />
                     ) : (
                       <span className="flex h-12 items-center rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3 text-[13px] text-[var(--ds-text-muted)]">
-                        Nessun logo
+                        {t('noLogo')}
                       </span>
                     )}
                     {canEdit && (
@@ -478,7 +480,7 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
                           className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] border border-[var(--ds-border)] px-3 text-[13px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50"
                         >
                           {logoBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                          {data.logo_url ? 'Sostituisci' : 'Carica logo'}
+                          {data.logo_url ? 'Sostituisci' : t('uploadLogo')}
                         </button>
                         {data.logo_url && (
                           <button
@@ -487,7 +489,7 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
                             disabled={logoBusy}
                             className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 text-[13px] font-medium text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50"
                           >
-                            <X className="h-4 w-4" /> Rimuovi
+                            <X className="h-4 w-4" /> {t('remove')}
                           </button>
                         )}
                       </>
@@ -501,18 +503,18 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
                     su fondo scuro: la si giudica dove verrà usata. */}
                 <div className="mt-4">
                   <span className="mb-1.5 block text-[13px] font-medium text-[var(--ds-text-secondary)]">
-                    Logo per tema scuro (facoltativo)
+                    {t('logoDarkLabel')}
                   </span>
                   <div className="flex flex-wrap items-center gap-3">
                     {data.logo_dark_url ? (
                       <img
                         src={tenantLogoSrc(data.logo_dark_url)}
-                        alt="Logo per tema scuro"
+                        alt={t('logoDarkAlt')}
                         className="h-12 w-auto max-w-[220px] rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] object-contain p-1.5"
                       />
                     ) : (
                       <span className="flex h-12 items-center rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] px-3 text-[13px] text-[var(--ds-action-fg)] opacity-80">
-                        Nessuna variante
+                        {t('noVariant')}
                       </span>
                     )}
                     {canEdit && (
@@ -531,7 +533,7 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
                           className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] border border-[var(--ds-border)] px-3 text-[13px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50"
                         >
                           {logoBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                          {data.logo_dark_url ? 'Sostituisci' : 'Carica variante'}
+                          {data.logo_dark_url ? 'Sostituisci' : t('uploadVariant')}
                         </button>
                         {data.logo_dark_url && (
                           <button
@@ -540,64 +542,64 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
                             disabled={logoBusy}
                             className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 text-[13px] font-medium text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50"
                           >
-                            <X className="h-4 w-4" /> Rimuovi
+                            <X className="h-4 w-4" /> {t('remove')}
                           </button>
                         )}
                       </>
                     )}
                   </div>
                 </div>
-                <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-3">Identità del titolare</h5>
+                <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-3">{t('controllerIdentity')}</h5>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <Field label="Ragione sociale" value={data.company_name} onChange={set('company_name')} placeholder="Ristorante Da Mario S.r.l." disabled={!canEdit} />
-                  <Field label="Nome app / servizio" value={data.app_name} onChange={set('app_name')} placeholder="RistoManager" disabled={!canEdit} />
-                  <Field label="Sede legale" value={data.company_address} onChange={set('company_address')} placeholder="Via Roma 1, 00100 Roma (RM)" disabled={!canEdit} wide />
-                  <Field label="Partita IVA" value={data.vat_number} onChange={set('vat_number')} placeholder="IT01234567890" disabled={!canEdit} />
-                  <Field label="Codice fiscale (facoltativo)" value={data.fiscal_code} onChange={set('fiscal_code')} placeholder="—" disabled={!canEdit} />
+                  <Field label={t('companyName')} value={data.company_name} onChange={set('company_name')} placeholder="Ristorante Da Mario S.r.l." disabled={!canEdit} />
+                  <Field label={t('appName')} value={data.app_name} onChange={set('app_name')} placeholder="RistoManager" disabled={!canEdit} />
+                  <Field label={t('companyAddress')} value={data.company_address} onChange={set('company_address')} placeholder="Via Roma 1, 00100 Roma (RM)" disabled={!canEdit} wide />
+                  <Field label={t('vatNumber')} value={data.vat_number} onChange={set('vat_number')} placeholder="IT01234567890" disabled={!canEdit} />
+                  <Field label={t('fiscalCode')} value={data.fiscal_code} onChange={set('fiscal_code')} placeholder="—" disabled={!canEdit} />
                 </div>
               </div>
 
               <div>
-                <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-3">Contatti privacy e DPO</h5>
+                <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-3">{t('privacyContacts')}</h5>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <Field label="E-mail per richieste privacy" value={data.privacy_email} onChange={set('privacy_email')} placeholder="privacy@ristorante.it" disabled={!canEdit} />
-                  <Field label="Telefono" value={data.privacy_phone} onChange={set('privacy_phone')} placeholder="+39 06 1234567" disabled={!canEdit} />
-                  <Field label="DPO — nome (facoltativo)" value={data.dpo_name} onChange={set('dpo_name')} placeholder="Eliminare se non nominato" disabled={!canEdit} />
-                  <Field label="DPO — contatto (facoltativo)" value={data.dpo_contact} onChange={set('dpo_contact')} placeholder="dpo@ristorante.it" disabled={!canEdit} />
-                  <Field label="Sito / canale di prenotazione online" value={data.website_url} onChange={set('website_url')} placeholder="https://www.ristorante.it" disabled={!canEdit} wide />
+                  <Field label={t('privacyEmail')} value={data.privacy_email} onChange={set('privacy_email')} placeholder={t('privacyEmailPh')} disabled={!canEdit} />
+                  <Field label={t('phone')} value={data.privacy_phone} onChange={set('privacy_phone')} placeholder="+39 06 1234567" disabled={!canEdit} />
+                  <Field label={t('dpoName')} value={data.dpo_name} onChange={set('dpo_name')} placeholder={t('dpoNamePh')} disabled={!canEdit} />
+                  <Field label={t('dpoContact')} value={data.dpo_contact} onChange={set('dpo_contact')} placeholder="dpo@ristorante.it" disabled={!canEdit} />
+                  <Field label={t('websiteUrl')} value={data.website_url} onChange={set('website_url')} placeholder="https://www.ristorante.it" disabled={!canEdit} wide />
                 </div>
               </div>
 
               <div>
-                <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-3">Fornitori e conservazione</h5>
+                <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-3">{t('processorsRetention')}</h5>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <Field label="Responsabili / fornitori (uno per riga)" value={data.data_processors} onChange={set('data_processors')} textarea wide disabled={!canEdit}
+                  <Field label={t('dataProcessors')} value={data.data_processors} onChange={set('data_processors')} textarea wide disabled={!canEdit}
                     placeholder={'Railway (hosting)\nElevenLabs (assistente vocale)\nMeta/WhatsApp (messaggistica)\nProvider SMTP (e-mail)'} />
-                  <Field label="Conservazione dati cliente" value={data.retention_customer} onChange={set('retention_customer')} placeholder="24 mesi dall'ultima interazione" disabled={!canEdit} />
-                  <Field label="Conservazione registrazioni chiamate" value={data.retention_calls} onChange={set('retention_calls')} placeholder="6 mesi" disabled={!canEdit} />
-                  <Field label="Conservazione dati marketing" value={data.retention_marketing} onChange={set('retention_marketing')} placeholder="fino a revoca del consenso" disabled={!canEdit} />
-                  <Field label="Nota trasferimenti extra-UE (facoltativa)" value={data.extra_eu_note} onChange={set('extra_eu_note')} textarea wide disabled={!canEdit}
-                    placeholder="Lascia vuoto per usare il testo standard su DPF / Clausole Contrattuali Standard." />
+                  <Field label={t('retentionCustomer')} value={data.retention_customer} onChange={set('retention_customer')} placeholder={t('retentionCustomerPh')} disabled={!canEdit} />
+                  <Field label={t('retentionCalls')} value={data.retention_calls} onChange={set('retention_calls')} placeholder={t('retentionCallsPh')} disabled={!canEdit} />
+                  <Field label={t('retentionMarketing')} value={data.retention_marketing} onChange={set('retention_marketing')} placeholder={t('retentionMarketingPh')} disabled={!canEdit} />
+                  <Field label={t('extraEuNote')} value={data.extra_eu_note} onChange={set('extra_eu_note')} textarea wide disabled={!canEdit}
+                    placeholder={t('extraEuNotePh')} />
                 </div>
               </div>
 
               <div>
-                <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-3">Avviso vocale, cookie e termini</h5>
+                <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-3">{t('voiceCookieTerms')}</h5>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <Field label="Nome pronunciato nell'avviso vocale" value={data.voice_business_name} onChange={set('voice_business_name')} placeholder="Ristorante Da Mario" disabled={!canEdit} />
-                  <Field label="Legge applicabile / foro (facoltativo)" value={data.governing_law} onChange={set('governing_law')} placeholder="Lascia vuoto per il testo standard (legge italiana)" disabled={!canEdit} />
+                  <Field label={t('voiceBusinessName')} value={data.voice_business_name} onChange={set('voice_business_name')} placeholder="Ristorante Da Mario" disabled={!canEdit} />
+                  <Field label={t('governingLaw')} value={data.governing_law} onChange={set('governing_law')} placeholder={t('governingLawPh')} disabled={!canEdit} />
                 </div>
                 <div className="mt-3 space-y-2">
                   <label className="flex items-center gap-2.5 text-[14px] text-[var(--ds-text-primary)] cursor-pointer">
                     <input type="checkbox" checked={data.records_calls} disabled={!canEdit}
                       onChange={e => setBool('records_calls')(e.target.checked)} className="h-4 w-4 rounded" />
-                    Le chiamate vengono registrate e trascritte
+                    {t('recordsCalls')}
                   </label>
                   {isAdvanced && (
                     <label className="flex items-center gap-2.5 text-[14px] text-[var(--ds-text-primary)] cursor-pointer">
                       <input type="checkbox" checked={data.uses_analytics_cookies} disabled={!canEdit}
                         onChange={e => setBool('uses_analytics_cookies')(e.target.checked)} className="h-4 w-4 rounded" />
-                      Il sito usa cookie analitici / di terze parti
+                      {t('usesAnalyticsCookies')}
                     </label>
                   )}
                 </div>
@@ -608,16 +610,16 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
                   <button onClick={handleSave} disabled={saving}
                     className="inline-flex items-center gap-2 px-4 py-2 rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[14px] font-medium hover:opacity-90 disabled:opacity-50">
                     {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                    {saving ? 'Salvataggio…' : 'Salva'}
+                    {saving ? t('saving') : t('save')}
                   </button>
-                  {data.last_updated && <span className="text-[12px] text-[var(--ds-text-muted)]">Ultimo aggiornamento: {data.last_updated}</span>}
+                  {data.last_updated && <span className="text-[12px] text-[var(--ds-text-muted)]">{t('lastUpdated')} {data.last_updated}</span>}
                 </div>
               )}
             </div>
 
             {/* ---------- Generated documents preview ---------- */}
             <div className="mt-8 pt-6 border-t border-[var(--ds-border)]">
-              <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-3">Documenti generati</h5>
+              <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-3">{t('generatedDocs')}</h5>
               <div className="flex items-center gap-1.5 overflow-x-auto pb-1 mb-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 {visibleDocs.map(({ key, label, Icon }) => {
                   const active = currentDoc.key === key;
@@ -627,7 +629,7 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
                         active ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-text-primary)]'
                                : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)] hover:text-[var(--ds-text-primary)]'}`}>
                       <Icon className="h-3.5 w-3.5" />
-                      {label}
+                      {t(`doc.${key}`, label)}
                     </button>
                   );
                 })}
@@ -636,11 +638,11 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
               <div className="flex items-center justify-end gap-2 mb-2">
                 <button onClick={copy} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-[var(--ds-radius)] border border-[var(--ds-border)] text-[13px] text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)]">
                   {copied ? <Check className="h-3.5 w-3.5 text-[var(--ds-seated-text)]" /> : <Copy className="h-3.5 w-3.5" />}
-                  {copied ? 'Copiato' : 'Copia'}
+                  {copied ? t('copied') : t('copy')}
                 </button>
                 <button onClick={download} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-[var(--ds-radius)] border border-[var(--ds-border)] text-[13px] text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)]">
                   <Download className="h-3.5 w-3.5" />
-                  Scarica
+                  {t('download')}
                 </button>
               </div>
 
@@ -648,7 +650,7 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
 {generatedText}
               </pre>
               <p className="text-[12px] text-[var(--ds-text-muted)] mt-2">
-                Testi generati automaticamente dai dati inseriti. I campi tra parentesi quadre non sono ancora compilati. Fai validare i testi da un consulente privacy prima della pubblicazione.
+                {t('generatedDocsNote')}
               </p>
             </div>
           </>

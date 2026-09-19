@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
 import {
   Ban,
@@ -103,6 +104,7 @@ const draftFromView = (o: TakeawayOrderView): DraftItem[] =>
   }));
 
 export const AsportoPage: React.FC<AsportoPageProps> = ({ dishes, isInitialLoading, autoOpenNew, onAutoOpenNewHandled, globalDate, onGlobalDateChange }) => {
+  const { t } = useTranslation('asporto', { useSuspense: false });
   // Il giorno del banco quando la board va per conto suo. Con date_mode
   // 'global' comanda la testata dell'app e questo resta lì, inerte, pronto a
   // riprendere se l'impostazione torna indietro.
@@ -313,8 +315,8 @@ export const AsportoPage: React.FC<AsportoPageProps> = ({ dishes, isInitialLoadi
         <button
           type="button"
           onClick={() => asportoApiService.updateConfig({ stop_date: date }).then(c => { setStopDate(c.stop_date); setPrepMinutes(c.prep_minutes); }).catch(() => {})}
-          aria-label="Ferma asporto per questo giorno"
-          title="Ferma asporto per questo giorno"
+          aria-label={t('stopToday')}
+          title={t('stopToday')}
           className={dsIconButton}
         >
           <Ban className="h-4 w-4" />
@@ -349,7 +351,7 @@ export const AsportoPage: React.FC<AsportoPageProps> = ({ dishes, isInitialLoadi
           <div className="flex flex-col gap-2">
             <div className="flex items-center gap-2">
               <h1 className="mr-auto text-[22px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)] sm:text-[26px]">
-                Asporto
+                {t('takeaway')}
               </h1>
               {/* Il «+» della testata è desktop-only, quindi sul telefono il
                   bottone in pagina è l'unica strada per un ordine nuovo. */}
@@ -357,7 +359,7 @@ export const AsportoPage: React.FC<AsportoPageProps> = ({ dishes, isInitialLoadi
                 <div className="flex-shrink-0">
                   <button type="button" onClick={() => setSheetOrder('new')} className={dsButton.primary}>
                     <Plus className="h-4 w-4" aria-hidden />
-                    Nuovo ordine
+                    {t('newOrder')}
                   </button>
                 </div>
               )}
@@ -370,7 +372,7 @@ export const AsportoPage: React.FC<AsportoPageProps> = ({ dishes, isInitialLoadi
         <Callout
           tone="pending"
           icon={Ban}
-          title="Asporto fermo per questa data"
+          title={t('stopped')}
           action={
             canManage ? (
               <button
@@ -383,7 +385,7 @@ export const AsportoPage: React.FC<AsportoPageProps> = ({ dishes, isInitialLoadi
             ) : undefined
           }
         >
-          Niente ordini nuovi finché non si riapre.
+          {t('stoppedHint')}
         </Callout>
       )}
 
@@ -402,10 +404,10 @@ export const AsportoPage: React.FC<AsportoPageProps> = ({ dishes, isInitialLoadi
             <SegmentedControl<ListFilter>
               value={filter}
               onChange={setFilter}
-              ariaLabel="Filtro ordini"
+              ariaLabel={t('ordersFilter')}
               options={[
                 { value: 'attivi', label: 'Attivi' },
-                { value: 'tutti', label: 'Tutti' },
+                { value: 'tutti', label: t('all') },
               ]}
               equalWidth={false}
             />
@@ -416,20 +418,20 @@ export const AsportoPage: React.FC<AsportoPageProps> = ({ dishes, isInitialLoadi
             {loadError && (
               <Callout
                 tone="critical"
-                title="Ordini non caricati"
-                action={<button type="button" className={dsButton.quiet} onClick={() => fetchDay(date)}>Riprova</button>}
+                title={t('ordersNotLoaded')}
+                action={<button type="button" className={dsButton.quiet} onClick={() => fetchDay(date)}>{t('retry')}</button>}
               >
-                Controlla la connessione e riprova.
+                {t('checkConnection')}
               </Callout>
             )}
             {!loadError && !loading && !isInitialLoading && visible.length === 0 && (
               <EmptyState icon={ShoppingBag}>
-                {orders.length === 0 ? 'Nessun ordine d’asporto per questo giorno.' : 'Nessun ordine con questi filtri.'}
+                {orders.length === 0 ? t('noOrdersToday') : t('noOrdersForFilters')}
               </EmptyState>
             )}
             {bySlot.map(([time, slotOrders]) => (
               <section key={time}>
-                <SectionHeader meta={slotOrders.length === 1 ? '1 ordine' : `${slotOrders.length} ordini`}>
+                <SectionHeader meta={t('orderCount', { count: slotOrders.length })}>
                   {time}
                 </SectionHeader>
                 <div className="space-y-2">
@@ -451,7 +453,7 @@ export const AsportoPage: React.FC<AsportoPageProps> = ({ dishes, isInitialLoadi
         {isDesktop && (
           <aside className="hidden w-[340px] flex-shrink-0 flex-col lg:flex xl:w-[380px]">
             {detail ?? (
-              <PanePlaceholder icon={ShoppingBag}>Scegli un ordine per vedere il dettaglio.</PanePlaceholder>
+              <PanePlaceholder icon={ShoppingBag}>{t('pickAnOrder')}</PanePlaceholder>
             )}
           </aside>
         )}
@@ -531,6 +533,7 @@ const DetailPanel: React.FC<{
   onEdit: () => void;
   onClose: () => void;
 }> = ({ order, state, readOnly, onSetStatus, onFire, onPrepareBill, onEdit }) => {
+  const { t } = useTranslation('asporto', { useSuspense: false });
   const ds = asportoStateDs(state);
   // Ritiro a conto aperto: il server risponde bill_unpaid e il bottone si
   // arma — secondo tocco per confermare, come Revoca/Rimborsa in cassa.
@@ -549,11 +552,11 @@ const DetailPanel: React.FC<{
   // il verbo è «Manda in cucina»: genera la comanda (KDS + stampa) e il
   // ritorno a «Pronto» arriva da solo dal monitor di partita.
   const primary: { label: string; icon: React.ComponentType<{ className?: string }>; action: () => void } | null =
-    state === 'requested' ? { label: 'Conferma', icon: Check, action: () => void onSetStatus('confirmed') }
-    : state === 'confirmed' || state === 'due' ? { label: 'Manda in cucina', icon: ChefHat, action: onFire }
-    : state === 'preparing' ? { label: 'Pronto', icon: Check, action: () => void onSetStatus('ready') }
+    state === 'requested' ? { label: t('confirm'), icon: Check, action: () => void onSetStatus('confirmed') }
+    : state === 'confirmed' || state === 'due' ? { label: t('sendToKitchen'), icon: ChefHat, action: onFire }
+    : state === 'preparing' ? { label: t('ready'), icon: Check, action: () => void onSetStatus('ready') }
     : state === 'ready' || state === 'late' ? {
-        label: pickupArmed ? 'Conto non incassato — confermi?' : 'Ritirato',
+        label: pickupArmed ? t('billUnpaidConfirm') : t('pickedUp'),
         icon: ShoppingBag,
         action: () => void pickup(),
       }
@@ -599,7 +602,7 @@ const DetailPanel: React.FC<{
           </li>
         ))}
         <li className="flex items-baseline justify-between py-2.5 text-[15px] font-semibold text-[var(--ds-text-primary)]">
-          <span>Totale</span>
+          <span>{t('total')}</span>
           <span className="tabular-nums">{euro(order.total_cents)}</span>
         </li>
       </ul>
@@ -629,23 +632,23 @@ const DetailPanel: React.FC<{
           ) : (
             <button type="button" onClick={onPrepareBill} className={dsButton.secondary}>
               <Receipt className="h-4 w-4" aria-hidden />
-              Prepara il conto
+              {t('prepareBill')}
             </button>
           )
         )}
         <div className="flex gap-2">
           <button type="button" onClick={onEdit} className={`${dsButton.secondary} flex-1`}>
             <Pencil className="h-4 w-4" aria-hidden />
-            Modifica
+            {t('edit')}
           </button>
           {state === 'late' && (
             <button type="button" onClick={() => onSetStatus('noshow')} className={`${dsButton.secondary} flex-1 text-[var(--ds-critical-text)]`}>
-              Non ritirato
+              {t('notPickedUp')}
             </button>
           )}
           {!closed && (
             <button type="button" onClick={() => onSetStatus('cancelled')} className={`${dsButton.secondary} flex-1 text-[var(--ds-critical-text)]`}>
-              Annulla
+              {t('cancelOrder')}
             </button>
           )}
           {closed && state !== 'picked' && (
@@ -672,6 +675,7 @@ const OrderSheet: React.FC<{
   onClose: () => void;
   onSaved: (view: TakeawayOrderView) => void;
 }> = ({ dishes, initial, defaultDate, onClose, onSaved }) => {
+  const { t } = useTranslation('asporto', { useSuspense: false });
   const [name, setName] = useState(initial?.customer_name ?? '');
   const [phone, setPhone] = useState(initial?.customer_phone ?? '');
   const [pickupDate, setPickupDate] = useState(initial?.pickup_date ?? defaultDate);
@@ -735,15 +739,15 @@ const OrderSheet: React.FC<{
       onSaved(view);
     } catch (err: any) {
       if (err?.data?.error === 'slot_full') {
-        setError('Slot al completo per la cucina.');
+        setError(t('slotFull'));
         setCanForce(true);
       } else if (err?.data?.error === 'takeaway_stopped') {
-        setError('Asporto fermo per questa data.');
+        setError(t('stoppedDot'));
         setCanForce(true);
       } else if (err?.data?.error === 'invalid_slot') {
         setError('Orario fuori dalla griglia di apertura.');
       } else {
-        setError('Salvataggio non riuscito. Riprova.');
+        setError(t('saveFailedRetry'));
       }
     } finally {
       setSaving(false);
@@ -754,13 +758,13 @@ const OrderSheet: React.FC<{
     <ModalShell
       open
       onClose={onClose}
-      title={initial ? 'Modifica ordine' : 'Nuovo ordine d’asporto'}
+      title={initial ? t('editOrder') : t('newTakeawayOrder')}
       size="lg"
       bodyClassName="space-y-4 p-4"
       footer={
         <>
           <button type="button" onClick={onClose} className={dsButton.secondary} disabled={saving}>
-            Annulla
+            {t('cancel')}
           </button>
           {canForce && (
             <button type="button" onClick={() => save(true)} className={dsButton.secondary} disabled={saving}>
@@ -768,12 +772,12 @@ const OrderSheet: React.FC<{
             </button>
           )}
           <button type="button" onClick={() => save(false)} className={dsButton.primary} disabled={!valid || saving}>
-            {initial ? 'Salva' : `Crea ordine${total > 0 ? ` · ${euro(total)}` : ''}`}
+            {initial ? t('save') : `${t('createOrder')}${total > 0 ? ` · ${euro(total)}` : ''}`}
           </button>
         </>
       }
     >
-      <FormCard title="Cliente">
+      <FormCard title={t('customer')}>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Nome" required>
             <input className={dsInput} value={name} onChange={e => setName(e.target.value)} autoFocus={!initial} />
@@ -784,9 +788,9 @@ const OrderSheet: React.FC<{
         </div>
       </FormCard>
 
-      <FormCard title="Ritiro">
+      <FormCard title={t('pickup')}>
         <div className="space-y-4">
-          <Field label="Giorno">
+          <Field label={t('day')}>
             <input
               className={dsInput}
               type="date"
@@ -795,13 +799,13 @@ const OrderSheet: React.FC<{
             />
           </Field>
           {board?.stopped && (
-            <Callout tone="pending" icon={Ban}>Asporto fermo per questa data.</Callout>
+            <Callout tone="pending" icon={Ban}>{t('stoppedDot')}</Callout>
           )}
           <SlotGrid board={board} value={pickupTime} onChange={setPickupTime} />
         </div>
       </FormCard>
 
-      <FormCard title="Ordine" aside={items.length > 0 ? <span className="tabular-nums text-[14px] font-semibold text-[var(--ds-text-primary)]">{euro(total)}</span> : undefined}>
+      <FormCard title={t('order')} aside={items.length > 0 ? <span className="tabular-nums text-[14px] font-semibold text-[var(--ds-text-primary)]">{euro(total)}</span> : undefined}>
         <div className="space-y-3">
           {items.map((item, idx) => (
             <div key={`${item.dish_id}-${idx}`} className="rounded-[var(--ds-radius-sm)] bg-[var(--ds-surface-row)] p-3">
@@ -812,7 +816,7 @@ const OrderSheet: React.FC<{
                   value={item.qty}
                   min={1}
                   max={99}
-                  ariaLabel={`Quantità ${item.name}`}
+                  ariaLabel={t('quantityOf', { nome: item.name })}
                   onChange={next => setItems(prev => prev.map((p, i) => (i === idx ? { ...p, qty: next ?? 1 } : p)))}
                 />
                 <button
@@ -826,14 +830,14 @@ const OrderSheet: React.FC<{
               </div>
               <input
                 className={`${dsInput} mt-2`}
-                placeholder="Nota per la cucina"
+                placeholder={t('kitchenNote')}
                 value={item.note}
                 onChange={e => setItems(prev => prev.map((p, i) => (i === idx ? { ...p, note: e.target.value } : p)))}
               />
             </div>
           ))}
           <div>
-            <SearchField value={dishQuery} onChange={setDishQuery} placeholder="Cerca un piatto" recessed />
+            <SearchField value={dishQuery} onChange={setDishQuery} placeholder={t('searchDish')} recessed />
             {pickable.length > 0 && (
               <ul className="mt-2 divide-y divide-[var(--ds-border)] overflow-hidden rounded-[var(--ds-radius-sm)] ring-1 ring-inset ring-[var(--ds-border)]">
                 {pickable.map(dish => (
@@ -855,7 +859,7 @@ const OrderSheet: React.FC<{
         </div>
       </FormCard>
 
-      <FormCard title="Note">
+      <FormCard title={t('notes')}>
         <textarea className={dsTextarea} rows={2} value={notes} onChange={e => setNotes(e.target.value)} />
       </FormCard>
 
@@ -872,13 +876,14 @@ const SlotGrid: React.FC<{
   value: string | null;
   onChange: (time: string) => void;
 }> = ({ board, value, onChange }) => {
-  if (!board) return <div className="text-[13px] text-[var(--ds-text-muted)]">Carico gli orari…</div>;
+  const { t } = useTranslation('asporto', { useSuspense: false });
+  if (!board) return <div className="text-[13px] text-[var(--ds-text-muted)]">{t('loadingSlots')}</div>;
   const groups = [
     { label: 'Pranzo', slots: board.lunch },
     { label: 'Cena', slots: board.dinner },
   ].filter(g => g.slots.length > 0);
   if (groups.length === 0) {
-    return <div className="text-[13px] text-[var(--ds-text-muted)]">Nessuno slot: giorno chiuso.</div>;
+    return <div className="text-[13px] text-[var(--ds-text-muted)]">{t('noSlotClosed')}</div>;
   }
   return (
     <div className="space-y-3">

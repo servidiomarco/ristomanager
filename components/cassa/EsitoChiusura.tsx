@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { Loader2 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import type { TableBill } from '../../types';
@@ -60,10 +61,11 @@ interface EsitoChiusuraProps {
   onBackToQueue: () => void;
 }
 
-const HEAD: Record<Esito, { label: string; tone: 'positive' | 'pending' | 'neutral' }> = {
+// Mappa di modulo: porta la chiave accanto all'italiano, come le altre.
+const HEAD: Record<Esito, { label: string; labelKey?: string; tone: 'positive' | 'pending' | 'neutral' }> = {
   saldato: { label: 'Saldato', tone: 'positive' },
   'da-verificare': { label: 'Pagato · da verificare fiscale', tone: 'pending' },
-  proforma: { label: 'Chiuso con proforma', tone: 'neutral' },
+  proforma: { label: 'Chiuso con proforma', labelKey: 'closedWithProforma', tone: 'neutral' },
   parziale: { label: 'Incassata una parte', tone: 'pending' },
 };
 
@@ -71,7 +73,9 @@ export const EsitoChiusura: React.FC<EsitoChiusuraProps> = ({
   esito, totalCents, paidNowCents = null, residualCents = null, tableName, closedAt, docNumber, receiptToken, onPrintReceipt, onPrintProforma, busy,
   onRetryDocument, onMarkProforma, onIssueReceipt, onIssueInvoice, onReopen, onBackToQueue,
 }) => {
+  const { t } = useTranslation('cassa', { useSuspense: false });
   const head = HEAD[esito];
+  const headLabel = head.labelKey ? t(head.labelKey, head.label) : head.label;
   const residuo = Math.max(0, residualCents ?? 0);
   // In grande c'è quello che è entrato ADESSO, non il totale del tavolo.
   const bigCents = esito === 'parziale'
@@ -89,20 +93,20 @@ export const EsitoChiusura: React.FC<EsitoChiusuraProps> = ({
 
   const secondary =
     esito === 'saldato'
-      ? [{ label: 'Apri il conto', onClick: onReopen }]
+      ? [{ label: t('openBill'), onClick: onReopen }]
       : esito === 'da-verificare'
-        ? [{ label: 'Chiudi con proforma', onClick: onMarkProforma }]
+        ? [{ label: t('closeWithProforma'), onClick: onMarkProforma }]
         : esito === 'parziale'
           ? [{ label: 'Riapri e continua', onClick: onReopen }]
           : [
-              { label: 'Emetti scontrino', onClick: onIssueReceipt },
+              { label: t('issueReceipt'), onClick: onIssueReceipt },
               { label: 'Emetti fattura', onClick: onIssueInvoice },
             ];
 
   return (
     <div className="flex h-full min-h-0 items-center justify-center px-4 py-8">
       <div className="w-full max-w-[480px] rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-6 shadow-[var(--ds-shadow-card)]">
-        <StatusPill tone={head.tone}>{head.label}</StatusPill>
+        <StatusPill tone={head.tone}>{headLabel}</StatusPill>
 
         <div className="mt-3 text-[40px] font-semibold leading-none tabular-nums tracking-[-0.02em] text-[var(--ds-text-primary)]">
           {euro(bigCents)}
@@ -131,7 +135,7 @@ export const EsitoChiusura: React.FC<EsitoChiusuraProps> = ({
         {(esito === 'proforma' || esito === 'parziale') && onPrintProforma && (
           <StampaCopiaButton
             onPrint={onPrintProforma}
-            label="Stampa proforma"
+            label={t('printProforma')}
             sentLabel="Proforma in stampa"
             className="mt-4"
           />

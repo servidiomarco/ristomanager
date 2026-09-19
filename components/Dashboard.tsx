@@ -1,4 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
+import { displayLocale } from '../utils/formatLocale';
 import { createPortal } from 'react-dom';
 import { Reservation, Table, Dish, Room, Shift, ReservationStatus, ReservationSource, TodoPriority, TodoCategory, StaffMember, StaffShift, StaffTimeOff, StaffCategory, StaffType, BanquetMenu, TableMerge, TableHiddenOverride } from '../types';
 import { ShoppingCategory, ShoppingItem } from '../services/shoppingApiService';
@@ -209,6 +211,7 @@ const KpiCard: React.FC<{
 };
 
 export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dishes, rooms, banquetMenus, onNavigateToBanquets, onNavigateToReservations, onNavigateToInventario, onNavigateToShoppingList, onNavigateToAttivita, globalDate, globalShiftFilter: globalShiftFilterProp, onDateChange, onShiftFilterChange, onUpdateReservation, onOpenReservationInList, isInitialLoading = false }) => {
+  const { t } = useTranslation('dashboard', { useSuspense: false });
   const { user, hasPermission } = useAuth();
   const { items: shoppingItems, addItem: addShoppingItemCtx, toggleItem: toggleShoppingItemCtx } = useShopping();
   const { todos, addTodo: addTodoCtx, toggleTodo: toggleTodoCtx } = useTodos();
@@ -563,7 +566,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       const { report } = await generateAiReport(30);
       setReport(report);
     } catch (err: any) {
-      setReportError(err?.data?.message || err?.message || 'Report non generato');
+      setReportError(err?.data?.message || err?.message || t('reportFailed'));
     } finally {
       setReportLoading(false);
     }
@@ -1015,7 +1018,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
       data.push({
         name: days[i],
-        date: date.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' }),
+        date: date.toLocaleDateString(displayLocale(), { day: 'numeric', month: 'short' }),
         guests: dayGuests
       });
     }
@@ -1032,7 +1035,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     const sunday = new Date(monday);
     sunday.setDate(monday.getDate() + 6);
 
-    return `${monday.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} - ${sunday.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}`;
+    return `${monday.toLocaleDateString(displayLocale(), { day: 'numeric', month: 'short' })} - ${sunday.toLocaleDateString(displayLocale(), { day: 'numeric', month: 'short' })}`;
   }, [selectedDate]);
 
   // Service window: lunch 11:00–15:30, dinner 18:00–23:30. Lives at component
@@ -1040,9 +1043,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   // greeting block that used to own it is higher up the tree.
   const serviceState = useMemo(() => {
     const minutes = currentTime.getHours() * 60 + currentTime.getMinutes();
-    if (minutes >= 11 * 60 && minutes < 15 * 60 + 30) return { text: 'Servizio pranzo · In corso', kind: 'lunch' as const };
-    if (minutes >= 18 * 60 && minutes < 23 * 60 + 30) return { text: 'Servizio cena · In corso', kind: 'dinner' as const };
-    return { text: 'Fuori servizio', kind: 'off' as const };
+    if (minutes >= 11 * 60 && minutes < 15 * 60 + 30) return { text: t('lunchService'), kind: 'lunch' as const };
+    if (minutes >= 18 * 60 && minutes < 23 * 60 + 30) return { text: t('dinnerService'), kind: 'dinner' as const };
+    return { text: t('offService'), kind: 'off' as const };
   }, [currentTime]);
 
   // One 16px gutter everywhere, matching the m-4 on the header and sidebar
@@ -1056,10 +1059,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       {(() => {
         const hour = currentTime.getHours();
         const greeting =
-          hour >= 5 && hour < 12 ? 'Buongiorno'
-          : hour >= 12 && hour < 18 ? 'Buon pomeriggio'
-          : hour >= 18 && hour < 23 ? 'Buonasera'
-          : 'Buonanotte';
+          hour >= 5 && hour < 12 ? t('goodMorning')
+          : hour >= 12 && hour < 18 ? t('goodAfternoon')
+          : hour >= 18 && hour < 23 ? t('goodEvening')
+          : t('goodNight');
         const roleLabels: Record<string, string> = {
           OWNER: 'Proprietario',
           GENERAL_MANAGER: 'General Manager',
@@ -1075,9 +1078,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           : null;
         const firstName =
           user?.full_name?.trim().split(' ')[0]
-          || (user?.role ? roleLabels[user.role] : null)
+          || (user?.role ? t(`role.${user.role}`, roleLabels[user.role]) : null)
           || capitalizedEmail
-          || 'Utente';
+          || t('user');
         // The greeting is the page title, not a bento box — it gets more air
         // than the uniform 16px gutter so it doesn't read as crammed between
         // the header card and the live deck.
@@ -1096,12 +1099,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 <button
                   onClick={() => onNavigateToAttivita?.()}
                   className="inline-flex items-center gap-2 md:gap-2.5 pl-4 md:pl-5 pr-1.5 h-11 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] transition-colors flex-shrink-0 self-center"
-                  aria-label={`${todaysTodos.length} attività di oggi`}
-                  title="Attività di oggi"
+                  aria-label={t('todaysTodosAria', { count: todaysTodos.length })}
+                  title={t('todaysTodos')}
                 >
                   {/* Mobile shows the icon; md+ shows the full label. */}
                   <ListTodo className="h-5 w-5 md:hidden text-[var(--ds-text-secondary)]" aria-hidden />
-                  <span className="hidden md:inline text-[15px] font-semibold tracking-[-0.01em] whitespace-nowrap">Attività di oggi</span>
+                  <span className="hidden md:inline text-[15px] font-semibold tracking-[-0.01em] whitespace-nowrap">{t('todaysTodos')}</span>
                   {/* KNOWN DEVIATION (see spec §3.3): white on amber is 3.25:1. At 16px
                       regular this is below WCAG's large-text threshold, so it does not meet
                       the 4.5:1 AA floor. Deliberate product decision. Switching the
@@ -1128,7 +1131,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               <div className="flex items-center gap-1.5 bg-[var(--ds-surface-row)] rounded-[var(--ds-radius-control)] px-4 h-10 flex-shrink-0">
                 <Clock className="h-4 w-4 text-[var(--ds-text-secondary)] flex-shrink-0" />
                 <span className="tabular-nums font-semibold text-[15px] tracking-[-0.01em] text-[var(--ds-text-primary)] whitespace-nowrap">
-                  {currentTime.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
+                  {currentTime.toLocaleTimeString(displayLocale(), { hour: '2-digit', minute: '2-digit' })}
                 </span>
               </div>
 
@@ -1137,7 +1140,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 {([
                   { key: 'LUNCH', label: 'Pranzo', icon: <Sun className="h-4 w-4" /> },
                   { key: 'DINNER', label: 'Cena', icon: <Sunset className="h-4 w-4" /> },
-                  { key: 'ALL', label: 'Tutti', icon: null as React.ReactNode },
+                  { key: 'ALL', label: t('all'), icon: null as React.ReactNode },
                 ] as const).map(opt => (
                   <button
                     key={opt.key}
@@ -1171,7 +1174,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             <div className="px-4 sm:px-5 pt-4 pb-3 flex items-center gap-2.5 min-w-0">
               <PulseDot dotClass="bg-[var(--ds-seated-solid)]" pulse sizeClass="h-2 w-2" />
               <h2 className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)] truncate">
-                Adesso in sala
+                {t('rightNow')}
               </h2>
               {/* Service hue follows the DS convention: pranzo amber, cena
                   indigo, fuori servizio neutral. */}
@@ -1190,7 +1193,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
             <div className="px-4 sm:px-5 pb-4 grid grid-cols-2 lg:grid-cols-4 gap-2.5">
               <LiveTile
-                label="In sala"
+                label={t('inRoom')}
                 value={liveService.seatedGuests}
                 sub={`${liveService.seatedTables} ${liveService.seatedTables === 1 ? 'tavolo' : 'tavoli'}`}
               />
@@ -1260,7 +1263,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             <KpiCard title="Ospiti" icon={<UsersIcon className="h-4 w-4" />}>
               <div className="flex items-baseline gap-2 flex-wrap">
                 <span className={headline}>{guestsTotal}</span>
-                <span className={qualifier}>attesi oggi</span>
+                <span className={qualifier}>{t('expectedToday')}</span>
               </div>
               <ShiftBar
                 lunch={showLunch ? lunchExpectedGuests : 0}
@@ -1295,7 +1298,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               <div className="flex items-baseline gap-2 flex-wrap">
                 <span className={headline}>{resTotal}</span>
                 <span className={qualifier}>
-                  {selectedDayPendingCount > 0 ? `${selectedDayPendingCount} da confermare` : 'oggi'}
+                  {selectedDayPendingCount > 0 ? `${selectedDayPendingCount} ${t('toConfirm')}` : t('today')}
                 </span>
               </div>
               <ShiftBar
@@ -1319,7 +1322,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                   <div className="flex items-baseline gap-2 flex-wrap">
                     <span className={headline}>{banquetsShown.length}</span>
                     <span className={qualifier}>
-                      {banquetsShown.length === 1 ? 'evento oggi' : 'eventi oggi'}
+                      {banquetsShown.length === 1 ? t('eventToday') : t('eventsToday')}
                     </span>
                   </div>
                   <ShiftBar
@@ -1352,7 +1355,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                     <span className="block h-1 w-6 rounded-full bg-[var(--ds-border-strong)]" />
                   </div>
                   <span className="text-[14px] text-[var(--ds-text-muted)]">
-                    {banquetsToday > 0 ? 'Nessun banchetto in questo turno' : 'Nessun banchetto oggi'}
+                    {banquetsToday > 0 ? t('noBanquetThisService') : t('noBanquetToday')}
                   </span>
                 </>
               )}
@@ -1399,7 +1402,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         ) : pendingReservations.length === 0 ? (
           <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-4 py-8 text-center">
             <CheckCircle2 className="h-7 w-7 text-[var(--ds-seated-solid)] mx-auto mb-2" aria-hidden />
-            <p className="text-[14px] text-[var(--ds-text-muted)]">Nessuna prenotazione da confermare</p>
+            <p className="text-[14px] text-[var(--ds-text-muted)]">{t('nothingToConfirm')}</p>
           </div>
         ) : (
           <div className="flex flex-col gap-2 max-h-[340px] xl:max-h-none xl:flex-1 xl:min-h-0 overflow-y-auto scrollbar-hide -mx-1 px-1">
@@ -1418,9 +1421,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               const resDateStr = getRomeDatePart(res.reservation_time);
               const todayStr = getRomeDatePart(new Date());
               const tomorrowStr = getRomeDatePart(new Date(Date.now() + 24 * 60 * 60 * 1000));
-              const dateLabel = resDateStr === todayStr ? 'oggi'
-                : resDateStr === tomorrowStr ? 'domani'
-                : new Date(`${resDateStr}T12:00:00`).toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short' });
+              const dateLabel = resDateStr === todayStr ? t('today')
+                : resDateStr === tomorrowStr ? t('tomorrow')
+                : new Date(`${resDateStr}T12:00:00`).toLocaleDateString(displayLocale(), { weekday: 'short', day: 'numeric', month: 'short' });
               const busy = inlinePendingBusy === res.id;
               return (
                 <div key={res.id} className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3 flex items-center gap-3 min-w-0">
@@ -1477,7 +1480,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-4 py-8 text-center">
             <StickyNote className="h-7 w-7 text-[var(--ds-text-subtle)] mx-auto mb-2" aria-hidden />
             <p className="text-[14px] text-[var(--ds-text-muted)]">
-              Nessuna nota {globalShiftFilter === 'LUNCH' ? 'per il pranzo' : globalShiftFilter === 'DINNER' ? 'per la cena' : 'per oggi'}
+              {t('noNote')} {globalShiftFilter === 'LUNCH' ? t('forLunch') : globalShiftFilter === 'DINNER' ? t('forDinner') : t('forToday')}
             </p>
           </div>
         ) : (
@@ -1492,7 +1495,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               // words rather than hiding behind a dash.
               const tableLabel = table
                 ? `T${table.name.replace(/[^0-9]/g, '') || table.name}`
-                : 'senza tavolo';
+                : t('noTable');
               const meta = [tableLabel, time || '—', room?.name].filter(Boolean).join(' · ');
               return (
                 <div key={reservation.id} className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3 min-w-0">
@@ -1522,7 +1525,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                           })}
                           className="text-[13px] font-medium text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] mt-1 transition-colors"
                         >
-                          {isExpanded ? 'Mostra meno' : 'Mostra tutto'}
+                          {isExpanded ? t('showLess') : t('showAll')}
                         </button>
                       )}
                     </div>
@@ -1815,7 +1818,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                     {idle.length > 0 && (
                       <div className="flex gap-2 items-center">
                         <div className="w-[168px] flex-shrink-0 text-[14px] font-medium text-[var(--ds-text-muted)] truncate">
-                          {active.length === 0 ? 'Tutte le sale' : 'Altre sale'}
+                          {active.length === 0 ? t('allRooms') : t('otherRooms')}
                         </div>
                         <div className="flex-1 h-11 rounded-[var(--ds-radius)] bg-[var(--ds-surface)]/60 flex items-center justify-center text-[13px] text-[var(--ds-text-muted)] px-3 text-center">
                           Nessuna prenotazione a {isLunch ? 'pranzo' : 'cena'}
@@ -1951,7 +1954,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] p-4 sm:p-5 flex flex-col gap-3 min-w-0 h-[440px]">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <h2 className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">Attività</h2>
+              <h2 className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">{t('todos')}</h2>
               <p className="text-[13px] text-[var(--ds-text-muted)] mt-0.5">
                 {overdueTodos.length > 0 && (
                   <span className="text-[var(--ds-critical-text)] font-semibold">{overdueTodos.length} scadute</span>
@@ -1966,7 +1969,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 onClick={onNavigateToAttivita}
                 className="flex-shrink-0 inline-flex items-center gap-1.5 text-[14px] font-medium text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] rounded-[var(--ds-radius-control)] px-1"
               >
-                Apri <ArrowRight className="h-4 w-4" aria-hidden />
+                {t('open')} <ArrowRight className="h-4 w-4" aria-hidden />
               </button>
             )}
           </div>
@@ -2013,7 +2016,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                         : isToday ? 'text-[var(--ds-text-muted)] font-normal'
                         : 'text-[var(--ds-pending-text)]'
                       }`}>
-                        {isToday ? 'oggi' : new Date(todo.dueDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}
+                        {isToday ? t('today') : new Date(todo.dueDate).toLocaleDateString(displayLocale(), { day: 'numeric', month: 'short' })}
                       </span>
                     )}
                   </div>
@@ -2028,14 +2031,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               value={newTaskTitle}
               onChange={e => setNewTaskTitle(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddTask(); } }}
-              placeholder="Nuova attività…"
+              placeholder={t('newTodo')}
               className="flex-1 min-w-0 h-11 px-3 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[15px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             />
             <button
               type="button"
               onClick={handleAddTask}
               disabled={!newTaskTitle.trim() || isAddingTask}
-              aria-label="Aggiungi attività"
+              aria-label={t('addTodo')}
               className="flex-shrink-0 inline-flex items-center justify-center w-11 h-11 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             >
               {isAddingTask ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-5 w-5" />}
@@ -2055,7 +2058,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 onClick={onNavigateToShoppingList}
                 className="flex-shrink-0 inline-flex items-center gap-1.5 text-[14px] font-medium text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] rounded-[var(--ds-radius-control)] px-1"
               >
-                Apri <ArrowRight className="h-4 w-4" aria-hidden />
+                {t('open')} <ArrowRight className="h-4 w-4" aria-hidden />
               </button>
             )}
           </div>
@@ -2067,12 +2070,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             </span>
             <div className="min-w-0 flex-1">
               <p className="text-[15px] font-semibold text-[var(--ds-text-primary)] truncate">
-                {breadEstimate.coperti > 0 ? `Pane ${breadEstimate.kg} kg` : 'Pane — nessuna prenotazione'}
+                {breadEstimate.coperti > 0 ? t('breadKg', { kg: breadEstimate.kg }) : t('breadNoBooking')}
               </p>
               <p className="text-[13px] text-[var(--ds-pending-text)] truncate">
                 {breadEstimate.coperti > 0
                   ? `${breadEstimate.coperti} coperti · 1 kg ogni 10`
-                  : 'Si aggiorna in base alle prenotazioni'}
+                  : t('breadHint')}
               </p>
             </div>
           </div>
@@ -2092,7 +2095,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                   return (
                     <div key={cat} className="flex items-center gap-2 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3 py-2.5 min-w-0">
                       <span className="inline-flex items-center gap-1.5 px-2.5 h-7 rounded-[var(--ds-radius-control)] text-[13px] font-medium bg-[var(--ds-surface)] text-[var(--ds-text-primary)] flex-shrink-0">
-                        {SHOPPING_CATEGORY_LABELS[cat]}
+                        {t(`shoppingCategory.${cat}`, SHOPPING_CATEGORY_LABELS[cat])}
                       </span>
                       <span className="text-[13px] tabular-nums text-[var(--ds-text-muted)] ml-auto flex-shrink-0">
                         {remaining}/{items.length} da prendere
@@ -2120,7 +2123,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               value={newItemName}
               onChange={e => setNewItemName(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddShoppingItem(); } }}
-              placeholder="Aggiungi prodotto…"
+              placeholder={t('addItem')}
               className="flex-1 min-w-0 h-11 px-3 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[15px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             />
             <select
@@ -2131,7 +2134,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               className="flex-shrink-0 h-11 pl-3 pr-0 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[14px] font-medium text-[var(--ds-text-secondary)] cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ds-select ds-select-sm"
               aria-label="Categoria"
             >
-              <option value="CUCINA">Cucina</option>
+              <option value="CUCINA">{t('shoppingCategory.CUCINA')}</option>
               <option value="BAR">Bar</option>
               <option value="ALTRO">Altro</option>
             </select>
@@ -2139,7 +2142,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               type="button"
               onClick={handleAddShoppingItem}
               disabled={!newItemName.trim() || isAddingShoppingItem}
-              aria-label="Aggiungi prodotto"
+              aria-label={t('addItemAria')}
               className="flex-shrink-0 inline-flex items-center justify-center w-11 h-11 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             >
               {isAddingShoppingItem ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-5 w-5" />}
@@ -2156,7 +2159,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               <h2 className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">Sotto scorta</h2>
               <p className="text-[13px] text-[var(--ds-text-muted)] mt-0.5">
                 {lowStockLoading
-                  ? 'Caricamento…'
+                  ? t('loading')
                   : `${lowStockItems.length} ${lowStockItems.length === 1 ? 'articolo' : 'articoli'} sotto soglia${
                       lowStockItems.filter(i => i.total_quantity <= 0).length > 0
                         ? ` · ${lowStockItems.filter(i => i.total_quantity <= 0).length} esauriti`
@@ -2168,21 +2171,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               type="button"
               onClick={onNavigateToInventario}
               className="flex-shrink-0 inline-flex items-center gap-1.5 text-[14px] font-medium text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] rounded-[var(--ds-radius-control)] px-1"
-              title="Vai all'inventario"
+              title={t('goToInventory')}
             >
-              Apri <ArrowRight className="h-4 w-4" aria-hidden />
+              {t('open')} <ArrowRight className="h-4 w-4" aria-hidden />
             </button>
           </div>
 
           <div className="flex-1 min-h-0 flex flex-col gap-1.5 overflow-y-auto scrollbar-hide -mx-1 px-1">
             {lowStockLoading ? (
               <div className="py-8 text-center">
-                <Loader label="Caricamento..." size={40} />
+                <Loader label={t('loading')} size={40} />
               </div>
             ) : lowStockItems.length === 0 ? (
               <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-4 py-8 text-center">
                 <Package className="h-7 w-7 text-[var(--ds-text-subtle)] mx-auto mb-2" aria-hidden />
-                <p className="text-[14px] text-[var(--ds-text-muted)]">Tutte le scorte sono in regola</p>
+                <p className="text-[14px] text-[var(--ds-text-muted)]">{t('stockAllFine')}</p>
               </div>
             ) : (
               [...lowStockItems]
@@ -2239,8 +2242,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             ? { wash: 'bg-[var(--ds-pending-tint)]', text: 'text-[var(--ds-pending-text)]', icon: <Sun className="h-3.5 w-3.5" />, label: 'Pranzo', end: '15:30' }
             : { wash: 'bg-[var(--ds-arriving-tint)]', text: 'text-[var(--ds-arriving-text)]', icon: <Sunset className="h-3.5 w-3.5" />, label: 'Cena', end: '23:30' };
           const groups = [
-            { label: 'Sala', people: data.sala },
-            { label: 'Cucina', people: data.cucina },
+            { label: t('roomStaff'), people: data.sala },
+            { label: t('kitchenStaff'), people: data.cucina },
           ].filter(g => g.people.length > 0);
 
           return (
@@ -2262,7 +2265,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               </div>
 
               {groups.length === 0 ? (
-                <p className="text-[14px] text-[var(--ds-text-muted)] py-2">Nessuno in turno</p>
+                <p className="text-[14px] text-[var(--ds-text-muted)] py-2">{t('nobodyOnShift')}</p>
               ) : (
                 // Sotto lg i due servizi si impilano e una brigata da diciotto
                 // spingeva il resto della dashboard fuori schermo. Il tetto sta
@@ -2305,14 +2308,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] p-4 sm:p-5 flex flex-col gap-4 min-w-0">
             <div className="flex items-baseline gap-2.5 flex-wrap">
               <h2 className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
-                Personale in servizio
+                {t('staffOnDuty')}
               </h2>
               <span className="text-[13px] text-[var(--ds-text-muted)]">{shownTotal} in turno</span>
             </div>
 
             {staffLoading ? (
               <div className="flex items-center justify-center py-8">
-                <Loader label="Caricamento..." size={40} />
+                <Loader label={t('loading')} size={40} />
               </div>
             ) : (
               <div className={`grid gap-3 ${showLunch && showDinner ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'}`}>
@@ -2336,9 +2339,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           <div className="flex items-center gap-2 min-w-0">
             <Wand2 className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
             <div className="min-w-0">
-              <h2 className="text-base font-semibold text-[var(--ds-text-primary)]">Come sta andando</h2>
+              <h2 className="text-base font-semibold text-[var(--ds-text-primary)]">{t('howItIsGoing')}</h2>
               <p className="text-[13px] text-[var(--ds-text-muted)]">
-                Lettura degli ultimi 30 giorni, a confronto con i 30 precedenti.
+                {t('last30Days')}
               </p>
             </div>
           </div>
@@ -2383,7 +2386,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             : { Icon: PhoneIcon, label: 'Telefono' };
           const resDate = new Date(res.reservation_time);
           const dateLabel = !Number.isNaN(resDate.getTime())
-            ? resDate.toLocaleDateString('it-IT', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric', timeZone: 'Europe/Rome' })
+            ? resDate.toLocaleDateString(displayLocale(), { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric', timeZone: 'Europe/Rome' })
             : '';
           const timeLabel = getRomeTimePart(res.reservation_time);
           const closeDisabled = pendingActionBusy !== null;
@@ -2416,7 +2419,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                     onClick={closeModal}
                     disabled={closeDisabled}
                     className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
-                    aria-label="Chiudi"
+                    aria-label={t('close')}
                   >
                     <X className="h-4 w-4" />
                   </button>
@@ -2462,7 +2465,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                     <div className="flex items-start gap-2 mb-3">
                       <AlertTriangle className="h-4 w-4 text-[var(--ds-pending-text)] flex-shrink-0 mt-0.5" aria-hidden />
                       <p className="text-[13px] text-[var(--ds-pending-text)] leading-snug">
-                        Il pagamento della caparra ancora non è avvenuto. Vuoi confermare la prenotazione lo stesso?
+                        {t('depositUnpaidAsk')}
                       </p>
                     </div>
                     <div className="flex items-center justify-end gap-2 flex-wrap">
@@ -2472,7 +2475,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                         disabled={closeDisabled}
                         className="inline-flex items-center h-9 px-3 rounded-[var(--ds-radius)] text-[13px] font-medium border border-[var(--ds-border)] text-[var(--ds-text-primary)] bg-[var(--ds-surface)] hover:bg-[var(--ds-surface-row)] disabled:opacity-50 transition-colors"
                       >
-                        Annulla
+                        {t('cancel')}
                       </button>
                       <button
                         type="button"
@@ -2481,7 +2484,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                         className="inline-flex items-center gap-1.5 h-9 px-3 rounded-[var(--ds-radius)] text-[13px] font-medium bg-[var(--ds-pending-solid)] text-[var(--ds-pending-fg)] hover:opacity-90 disabled:opacity-50 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                       >
                         {pendingActionBusy === 'confirm' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-                        Conferma comunque
+                        {t('confirmAnyway')}
                       </button>
                     </div>
                   </div>
@@ -2494,7 +2497,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                       className="inline-flex items-center gap-1.5 h-9 px-3 rounded-[var(--ds-radius)] text-[13px] font-medium bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] hover:opacity-90 disabled:opacity-50 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     >
                       {pendingActionBusy === 'decline' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Ban className="h-3.5 w-3.5" />}
-                      Rifiuta
+                      {t('decline')}
                     </button>
                     <button
                       type="button"
@@ -2503,7 +2506,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                       className="inline-flex items-center gap-1.5 h-9 px-3 rounded-[var(--ds-radius)] text-[13px] font-medium bg-[var(--ds-seated-solid)] text-[var(--ds-seated-fg)] hover:opacity-90 disabled:opacity-50 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     >
                       {pendingActionBusy === 'confirm' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-                      Conferma
+                      {t('confirm')}
                     </button>
                   </div>
                 )}
@@ -2520,7 +2523,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                       disabled={closeDisabled}
                       className="inline-flex items-center gap-1 text-[12px] text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] disabled:opacity-50 transition-colors"
                     >
-                      Modifica completa in Prenotazioni <ArrowRight className="h-3 w-3" />
+                      {t('fullEdit')} <ArrowRight className="h-3 w-3" />
                     </button>
                   </div>
                 )}

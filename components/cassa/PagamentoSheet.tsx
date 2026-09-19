@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { billsApiService, getOpenBills, getBillOrder, printBill, setBillDiscount, type OpenBillRow } from '../../services/billsApiService';
 import { voidItem } from '../../services/ordersApiService';
 import type { OrderItem, OrderWithItems } from '../../types';
@@ -38,6 +39,7 @@ interface PagamentoSheetProps {
 type Screen = 'payment' | 'split' | 'esito' | 'correggi';
 
 export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service, onClose, onBillClosed }) => {
+  const { t } = useTranslation('cassa', { useSuspense: false });
   const [bill, setBill] = useState<OpenBillRow | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [screen, setScreen] = useState<Screen>('payment');
@@ -193,7 +195,7 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
       {loadError ? (
         <p className="py-8 text-center text-[14px] text-[var(--ds-text-muted)]">{loadError}</p>
       ) : !bill ? (
-        <div className="flex justify-center py-10"><Loader label="Carico il conto…" size={40} /></div>
+        <div className="flex justify-center py-10"><Loader label={t('loadingBill')} size={40} /></div>
       ) : screen === 'esito' && esito ? (
         <EsitoChiusura
           esito={esito.kind}
@@ -314,7 +316,7 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
 
       {bill && discountOpen && (
         <DiscountDialog
-          title="Sconto sul conto"
+          title={t('billDiscount')}
           currentReason={bill.discount_reason ?? null}
           hasDiscount={bill.discount_type != null}
           reasonRequired={false}

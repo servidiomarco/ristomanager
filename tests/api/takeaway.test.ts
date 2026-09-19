@@ -50,7 +50,7 @@ describe('asporto — slot e capienza', () => {
     it('la config espone capienza e minuti di preparazione', async () => {
         const res = await api().get('/takeaway/config').set(bearer(token));
         expect(res.status).toBe(200);
-        expect(res.body).toEqual({ capacity_per_slot: 4, prep_minutes: 20, stop_date: null, online_enabled: false, voice_enabled: false });
+        expect(res.body).toEqual({ capacity_per_slot: 4, prep_minutes: 20, stop_date: null, online_enabled: false, voice_enabled: false, date_mode: 'own' });
     });
 });
 
@@ -443,7 +443,28 @@ describe('asporto — impostazioni', () => {
 
         const ripristino = await api().put('/takeaway/config').set(bearer(token))
             .send({ capacity_per_slot: 4, prep_minutes: 20, stop_date: null });
-        expect(ripristino.body).toEqual({ capacity_per_slot: 4, prep_minutes: 20, stop_date: null, online_enabled: false, voice_enabled: false });
+        expect(ripristino.body).toEqual({ capacity_per_slot: 4, prep_minutes: 20, stop_date: null, online_enabled: false, voice_enabled: false, date_mode: 'own' });
+    });
+
+    /* Il giorno della board: 'own' (default) o agganciato alla data dell'app.
+       La validazione esisteva senza un test che la battesse. */
+    it('il giorno della board accetta solo global o own', async () => {
+        const agganciato = await api().put('/takeaway/config').set(bearer(token)).send({ date_mode: 'global' });
+        expect(agganciato.status).toBe(200);
+        expect(agganciato.body.date_mode).toBe('global');
+
+        const riletto = await api().get('/takeaway/config').set(bearer(token));
+        expect(riletto.body.date_mode).toBe('global');
+
+        const assurdo = await api().put('/takeaway/config').set(bearer(token)).send({ date_mode: 'ieri' });
+        expect(assurdo.status).toBe(400);
+        expect(assurdo.body.error).toBe('invalid_value');
+
+        // e il valore buono di prima non si è mosso
+        const dopo = await api().get('/takeaway/config').set(bearer(token));
+        expect(dopo.body.date_mode).toBe('global');
+
+        await api().put('/takeaway/config').set(bearer(token)).send({ date_mode: 'own' });
     });
 
     it('l\'interruttore online passa dalla config e accende la pagina pubblica', async () => {

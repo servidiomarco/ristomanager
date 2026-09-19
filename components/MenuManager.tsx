@@ -1,6 +1,7 @@
 
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Dish, RestaurantMenu, BanquetMenu, BanquetCourse, BanquetStatus, Shift, COMMON_ALLERGENS, VAT_RATES, Customer, Table, TableMerge, Reservation, ArrivalStatus, ReservationStatus, Room } from '../types';
 import { Plus, Search, Tag, Tags, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, LayoutGrid, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat, Info, RefreshCw, QrCode, Copy, Languages, Layers, SlidersHorizontal, Share2, MessageCircle, Martini, IceCreamCone, Wine, Wand2, DoorClosed } from 'lucide-react';
 import { resizeImageToDataUrl } from '../utils/resizeImage';
@@ -134,11 +135,11 @@ const banquetGroupFor = (menu: BanquetMenu, today: string, weekEnd: string, mont
    anywhere from the header, and the required-field check still runs once, on
    save, exactly as it did when this was a single scroll. */
 const BANQUET_STEPS = [
-  { label: 'Evento e cliente', hint: 'nome interno, data, turno e chi lo ha richiesto', icon: BookUser },
-  { label: 'Coperti e tariffa', hint: 'un prezzo bambini separa il calcolo', icon: Users },
-  { label: 'Composizione menù', hint: 'clicca un piatto per aggiungerlo all\'uscita attiva', icon: Utensils },
-  { label: 'Tavoli assegnati', hint: 'i tavoli occupati nello stesso turno sono disabilitati', icon: LayoutGrid },
-  { label: 'Note operative', hint: 'compaiono nelle stampe per cucina e sala', icon: StickyNote },
+  { key: 'event', label: 'Evento e cliente', hint: 'nome interno, data, turno e chi lo ha richiesto', icon: BookUser },
+  { key: 'covers', label: 'Coperti e tariffa', hint: 'un prezzo bambini separa il calcolo', icon: Users },
+  { key: 'menu', label: 'Composizione menù', hint: 'clicca un piatto per aggiungerlo all\'uscita attiva', icon: Utensils },
+  { key: 'tables', label: 'Tavoli assegnati', hint: 'i tavoli occupati nello stesso turno sono disabilitati', icon: LayoutGrid },
+  { key: 'notes', label: 'Note operative', hint: 'compaiono nelle stampe per cucina e sala', icon: StickyNote },
 ] as const;
 
 // Category filters on Piatti alla carta. There are more of these than a
@@ -199,6 +200,16 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     autoOpenNewDish,
     onAutoOpenNewDishHandled
 }) => {
+  const { t } = useTranslation('menu', { useSuspense: false });
+
+  /* I cinque passi del menù banchetto si traducono tutti insieme: la costante
+     resta l'elenco (chiave, icona, versione italiana) e il testo passa di qui.
+     Tradurne uno solo darebbe uno stepper metà inglese e metà italiano. */
+  const banquetSteps = useMemo(() => BANQUET_STEPS.map(p => ({
+    label: t(`banquetStep.${p.key}.label`, p.label),
+    hint: t(`banquetStep.${p.key}.hint`, p.hint),
+    icon: p.icon,
+  })), [t]);
   const { hasPermission, hasFeature, user } = useAuth();
   const canViewBanquetPrice = hasPermission('banquet:view_price');
   const canManageBanquetPayments = hasPermission('banquet:manage_payments');
@@ -1049,7 +1060,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       if (isSavingBanquet) return;
 
       const missing: string[] = [];
-      if (!newBanquet.name || !newBanquet.name.trim()) missing.push('Nome Menu');
+      if (!newBanquet.name || !newBanquet.name.trim()) missing.push(t('menuName'));
       if (!newBanquet.event_date) missing.push('Data Evento');
       if (canViewBanquetPrice && (newBanquet.price_per_person == null || isNaN(Number(newBanquet.price_per_person)) || Number(newBanquet.price_per_person) <= 0)) {
         missing.push('Prezzo Adulti');
@@ -1520,10 +1531,10 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const BANQUET_SORT_OPTIONS: { value: BanquetSortBy; label: string }[] = [
     { value: 'date-asc',    label: 'Data evento (prima → dopo)' },
     { value: 'date-desc',   label: 'Data evento (dopo → prima)' },
-    { value: 'name-asc',    label: 'Nome A → Z' },
-    { value: 'name-desc',   label: 'Nome Z → A' },
-    { value: 'guests-asc',  label: 'Coperti (meno → più)' },
-    { value: 'guests-desc', label: 'Coperti (più → meno)' },
+    { value: 'name-asc',    label: t('nameAsc') },
+    { value: 'name-desc',   label: t('nameDesc') },
+    { value: 'guests-asc',  label: t('coversAsc') },
+    { value: 'guests-desc', label: t('coversDesc') },
   ];
 
   // Le righe arrivano già ordinate per (categoria, posizione, nome); qui si
@@ -1594,17 +1605,17 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
      con la sua riga; se spariscono tutti, sparisce il bottone. */
   const manageGroups: { icon: typeof QrCode; label: string; hint: string; meta: string | null; busy?: boolean; onClick: () => void }[][] = [
     [
-      { icon: QrCode, label: 'Menu digitale', hint: 'QR al tavolo e traduzioni', meta: null, onClick: () => setQrOpen(true) },
+      { icon: QrCode, label: t('digitalMenu'), hint: t('manageQrHint'), meta: null, onClick: () => setQrOpen(true) },
       ...(canImportCassa
-        ? [{ icon: RefreshCw, label: 'Importa da cassa', hint: 'Allinea a Passepartout', meta: null, busy: importing, onClick: handleImportCassa }]
+        ? [{ icon: RefreshCw, label: t('importFromTill'), hint: t('importFromTillHint'), meta: null, busy: importing, onClick: handleImportCassa }]
         : []),
     ],
     [
       ...(canEdit && dishCategories.length > 0
-        ? [{ icon: Tags, label: 'Categorie', hint: 'Ordine e accensione', meta: String(dishCategories.length), onClick: () => setCatsOpen(true) }]
+        ? [{ icon: Tags, label: t('categories'), hint: t('manageCategoriesHint'), meta: String(dishCategories.length), onClick: () => setCatsOpen(true) }]
         : []),
       ...(canEdit
-        ? [{ icon: Layers, label: 'Varianti', hint: 'Cotture, aggiunte, sovrapprezzi', meta: String(modifierGroups.length), onClick: () => setVariantsOpen(true) }]
+        ? [{ icon: Layers, label: t('variants'), hint: t('manageVariantsHint'), meta: String(modifierGroups.length), onClick: () => setVariantsOpen(true) }]
         : []),
     ],
   ].filter(g => g.length > 0);
@@ -1643,10 +1654,10 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 onClick={() => { setManageOpen(false); setMenuPickerOpen(v => !v); }}
                 aria-haspopup="menu"
                 aria-expanded={menuPickerOpen}
-                title="Menu da visualizzare"
+                title={t('menuToShow')}
                 className={`${DISH_FILTER_BASE} h-9 max-w-[220px] ${DISH_FILTER_OFF}`}
               >
-                <span className="min-w-0 truncate">{selectedMenu?.name ?? 'Menu'}</span>
+                <span className="min-w-0 truncate">{selectedMenu?.name ?? t('menuWord')}</span>
                 <ChevronDown className={`h-4 w-4 flex-shrink-0 transition-transform ${menuPickerOpen ? 'rotate-180' : ''}`} aria-hidden />
               </button>
               {menuPickerOpen && (
@@ -1675,8 +1686,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                               type="button"
                               onClick={() => { setMenuPickerOpen(false); setMenuFormName(m.name); setMenuFormError(null); setMenuForm({ kind: 'rename', menu: m }); }}
                               className={`${dsIconButton} h-11 w-11 bg-transparent shadow-none`}
-                              title={`Rinomina «${m.name}»`}
-                              aria-label={`Rinomina «${m.name}»`}
+                              title={t('renameNamed', { nome: m.name })}
+                              aria-label={t('renameNamed', { nome: m.name })}
                             >
                               <Edit2 className="h-4 w-4" />
                             </button>
@@ -1684,8 +1695,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                               type="button"
                               onClick={() => { setMenuPickerOpen(false); setDeleteMenuConfirm(m); }}
                               className={`${dsIconButton} h-11 w-11 bg-transparent shadow-none hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)]`}
-                              title={`Elimina «${m.name}»`}
-                              aria-label={`Elimina «${m.name}»`}
+                              title={t('deleteNamed', { nome: m.name })}
+                              aria-label={t('deleteNamed', { nome: m.name })}
                             >
                               <Trash2 className="h-4 w-4" />
                             </button>
@@ -1701,11 +1712,11 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                         type="button"
                         role="menuitem"
                         onClick={() => { setMenuPickerOpen(false); setMenuFormName(''); setMenuFormError(null); setMenuForm({ kind: 'create' }); }}
-                        title="Nuovo menu (es. Ferragosto, Pasqua)"
+                        title={t('newMenuPlaceholder')}
                         className="flex min-h-[44px] w-full items-center gap-3 px-4 text-left text-[15px] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)]"
                       >
                         <Plus className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
-                        Nuovo menu
+                        {t('newMenu')}
                       </button>
                     </>
                   )}
@@ -1739,7 +1750,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               className="inline-flex h-9 items-center justify-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] md:hidden"
             >
               <Plus className="h-4 w-4" aria-hidden />
-              Nuovo banchetto
+              {t('newBanquet')}
             </button>
           )}
         </div>
@@ -1771,8 +1782,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
             <SearchField
               value={searchTerm}
               onChange={setSearchTerm}
-              placeholder="Cerca piatto o ingrediente..."
-              ariaLabel="Cerca piatto"
+              placeholder={t('searchDishOrIngredient')}
+              ariaLabel={t('searchDish')}
               className="min-w-0 flex-1 sm:w-64 sm:flex-none lg:w-80"
             />
             <div className="ml-auto flex flex-shrink-0 items-center gap-2">
@@ -1795,14 +1806,14 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   onClick={() => { setMenuPickerOpen(false); setManageOpen(v => !v); }}
                   aria-haspopup="menu"
                   aria-expanded={manageOpen}
-                  aria-label="Gestisci il menu"
-                  title="Gestisci il menu"
+                  aria-label={t('manageMenuAria')}
+                  title={t('manageMenuAria')}
                   className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-2.5 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] sm:px-3.5"
                 >
                   {importing
                     ? <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin" aria-hidden />
                     : <SlidersHorizontal className="h-4 w-4 flex-shrink-0" aria-hidden />}
-                  <span className="hidden sm:inline">Gestisci</span>
+                  <span className="hidden sm:inline">{t('manage')}</span>
                   <ChevronDown className={`hidden h-4 w-4 flex-shrink-0 transition-transform sm:inline ${manageOpen ? 'rotate-180' : ''}`} aria-hidden />
                 </button>
                 {manageOpen && isWideMenuBar && (
@@ -2011,7 +2022,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                       onClick={e => { e.stopPropagation(); handleEditDish(dish); }}
                                       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); handleEditDish(dish); } }}
                                       className={`${dsIconButton} h-9 w-9 bg-[var(--ds-surface-row)] shadow-none`}
-                                      title="Modifica"
+                                      title={t('edit')}
                                     >
                                       <Edit2 className="h-4 w-4" />
                                     </span>
@@ -2021,7 +2032,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                       onClick={e => { e.stopPropagation(); setDeleteDishConfirm(dish); }}
                                       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setDeleteDishConfirm(dish); } }}
                                       className={`${dsIconButton} h-9 w-9 bg-[var(--ds-surface-row)] shadow-none hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)]`}
-                                      title="Elimina"
+                                      title={t('delete')}
                                     >
                                       <Trash2 className="h-4 w-4" />
                                     </span>
@@ -2095,7 +2106,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                     onClick={e => { e.stopPropagation(); if (!reorderBusy) handleMoveDish(dish, -1); }}
                                     onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); if (!reorderBusy) handleMoveDish(dish, -1); } }}
                                     className={`${dsIconButton} h-9 w-7 bg-transparent shadow-none ${reorderBusy ? 'opacity-40' : ''}`}
-                                    title="Sposta su"
+                                    title={t('moveUp')}
                                   >
                                     <ChevronUp className="h-4 w-4" />
                                   </span>
@@ -2106,7 +2117,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                     onClick={e => { e.stopPropagation(); if (!reorderBusy) handleMoveDish(dish, 1); }}
                                     onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); if (!reorderBusy) handleMoveDish(dish, 1); } }}
                                     className={`${dsIconButton} h-9 w-7 bg-transparent shadow-none ${reorderBusy ? 'opacity-40' : ''}`}
-                                    title="Sposta giù"
+                                    title={t('moveDown')}
                                   >
                                     <ChevronDown className="h-4 w-4" />
                                   </span>
@@ -2131,7 +2142,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                   onClick={e => { e.stopPropagation(); handleEditDish(dish); }}
                                   onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); handleEditDish(dish); } }}
                                   className={`${dsIconButton} h-9 w-9 bg-[var(--ds-surface-row)] shadow-none`}
-                                  title="Modifica"
+                                  title={t('edit')}
                                 >
                                   <Edit2 className="h-4 w-4" />
                                 </span>
@@ -2141,7 +2152,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                   onClick={e => { e.stopPropagation(); setDeleteDishConfirm(dish); }}
                                   onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setDeleteDishConfirm(dish); } }}
                                   className={`${dsIconButton} h-9 w-9 bg-[var(--ds-surface-row)] shadow-none hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)]`}
-                                  title="Elimina"
+                                  title={t('delete')}
                                 >
                                   <Trash2 className="h-4 w-4" />
                                 </span>
@@ -2200,7 +2211,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             ))}
                           </div>
                         ) : (
-                          <p className="text-[13px] text-[var(--ds-text-muted)]">Nessun allergene dichiarato.</p>
+                          <p className="text-[13px] text-[var(--ds-text-muted)]">{t('noAllergens')}</p>
                         )}
                       </div>
                       <div>
@@ -2252,7 +2263,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             type="button"
                             onClick={() => setDeleteDishConfirm(viewDish)}
                             className={`${dsIconButton} bg-[var(--ds-surface-row)] shadow-none hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)]`}
-                            title="Elimina piatto"
+                            title={t('deleteDish')}
                           >
                             <Trash2 className="h-4 w-4" />
                           </button>
@@ -2282,7 +2293,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     <div className="h-1 w-8 rounded-full bg-[var(--ds-text-subtle)]" />
                   </div>
                   <div className="px-5 pb-2">
-                    <h3 className="text-base font-semibold text-[var(--ds-text-primary)]">Gestione menu</h3>
+                    <h3 className="text-base font-semibold text-[var(--ds-text-primary)]">{t('menuManagement')}</h3>
                   </div>
                   <div className="max-h-[65vh] overflow-y-auto overscroll-contain px-3">
                     {manageGroups.map((group, gi) => (
@@ -2325,8 +2336,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 <SearchField
                   value={banquetSearchTerm}
                   onChange={setBanquetSearchTerm}
-                  placeholder="Cerca banchetto o tipo evento..."
-                  ariaLabel="Cerca banchetto"
+                  placeholder={t('searchBanquet')}
+                  ariaLabel={t('searchBanquetAria')}
                   className="sm:flex-1 sm:min-w-0"
                 />
               )}
@@ -2347,7 +2358,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     type="button"
                     onClick={() => setShowBanquetSortModal(true)}
                     className={`${dsIconButton} ml-auto h-9 w-9`}
-                    aria-label="Ordina banchetti"
+                    aria-label={t('sortBanquets')}
                     title={BANQUET_SORT_OPTIONS.find(o => o.value === banquetSortBy)?.label}
                   >
                     <ArrowUpDown className="h-4 w-4" />
@@ -2493,8 +2504,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                       // non è un comando.
                                       <span
                                           className={`${dsIconButton} h-9 w-9 bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] shadow-none hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-muted)]`}
-                                          title="Tavoli assegnati"
-                                          aria-label="Tavoli assegnati"
+                                          title={t('banquetStep.tables.label')}
+                                          aria-label={t('banquetStep.tables.label')}
                                           role="img"
                                       >
                                           <BookOpen className="h-4 w-4" />
@@ -2561,7 +2572,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                                       className="flex w-full items-center gap-2 px-4 py-2.5 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)]"
                                                   >
                                                       <Edit2 className="h-3.5 w-3.5 text-[var(--ds-text-muted)]" />
-                                                      Modifica
+                                                      {t('edit')}
                                                   </button>
                                                   <button
                                                       type="button"
@@ -2596,7 +2607,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                                       className="flex w-full items-center gap-2 px-4 py-2.5 text-[13px] font-medium text-[var(--ds-critical-text)] transition-colors hover:bg-[var(--ds-critical-tint)]"
                                                   >
                                                       <Trash2 className="h-3.5 w-3.5" />
-                                                      Elimina
+                                                      {t('delete')}
                                                   </button>
                                               </div>
                                           )}
@@ -2663,7 +2674,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             </div>
                           )}
                           <div className="flex items-center justify-between gap-3 border-t border-[var(--ds-border)] py-3 first:border-t-0">
-                              <span className="text-[13px] text-[var(--ds-text-muted)]">Piatti</span>
+                              <span className="text-[13px] text-[var(--ds-text-muted)]">{t('dishes')}</span>
                               <span className="text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">{dishesLong}</span>
                           </div>
                       </div>
@@ -2806,7 +2817,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           <form id="dish-form" onSubmit={handleAddDishSubmit} className="space-y-4">
             <FormCard title="Dettagli">
               <div className="space-y-4">
-                <Field label="Nome" required>
+                <Field label={t('name')} required>
                   <input
                     required
                     className={dsInput}
@@ -2815,7 +2826,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   />
                 </Field>
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <Field label="Prezzo (€)" required>
+                  <Field label={t('price')} required>
                     <input
                       type="number"
                       step="0.5"
@@ -2825,7 +2836,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       onChange={e => setNewDish({ ...newDish, price: parseFloat(e.target.value) })}
                     />
                   </Field>
-                  <Field label="Categoria">
+                  <Field label={t('category')}>
                     <select
                       className={dsSelect}
                       value={newDish.category}
@@ -2911,7 +2922,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     </Field>
                   )}
                 </div>
-                <Field label="Descrizione">
+                <Field label={t('description')}>
                   <textarea
                     rows={4}
                     className={`${dsTextarea} resize-none`}
@@ -2927,7 +2938,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 parte, e il footer lo dice invece di impedirlo — è legittimo
                 per un piatto in preparazione. */}
             <FormCard
-              title="Nei menu"
+              title={t('inMenus')}
               aside={
                 (newDish.menu_ids?.length ?? 0) === 0
                   ? <span className="text-[13px] text-[var(--ds-pending-text)]">in nessun menu</span>
@@ -2961,7 +2972,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 sovrapprezzi. Anche quelli della cassa si agganciano
                 liberamente — il legame fatto qui sopravvive agli import. */}
             <FormCard
-              title="Varianti"
+              title={t('variants')}
               aside={
                 dishGroupIds.length === 0
                   ? <span className="text-[13px] text-[var(--ds-text-muted)]">nessun gruppo</span>
@@ -3008,7 +3019,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 per i piatti di cucina: un vino non si abbina a un vino. */}
             {!dishCatIsWineish && wineDishes.length > 0 && (
               <FormCard
-                title="Vini abbinati"
+                title={t('pairedWines')}
                 aside={
                   <span className="flex items-center gap-2">
                     {dishWineIds.length === 0 && (
@@ -3062,7 +3073,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     type="text"
                     value={wineSearch}
                     onChange={e => setWineSearch(e.target.value)}
-                    placeholder="Cerca un vino…"
+                    placeholder={t('searchWine')}
                     autoFocus
                     className={`${dsInput} mb-3`}
                   />
@@ -3141,7 +3152,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       {suggestingWines ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
                       {suggestingWines ? 'Ci penso…' : 'Suggerisci'}
                     </button>
-                    <span className="text-[13px] text-[var(--ds-text-muted)]">La proposta si salva solo col Salva.</span>
+                    <span className="text-[13px] text-[var(--ds-text-muted)]">{t('suggestionNeedsSave')}</span>
                   </div>
                 )}
                 {suggestWinesError && <p className="mt-2 text-[13px] text-[var(--ds-critical-text)]">{suggestWinesError}</p>}
@@ -3256,7 +3267,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             className={`${dsInput} text-right tabular-nums`}
                             inputMode="decimal"
                             placeholder="sconto €"
-                            title="Sconto se tolto (vuoto = togliere è gratis)"
+                            title={t('removalDiscount')}
                             value={c.sconto}
                             onChange={e => setDishComponents(prev => prev.map((x, j) => j === i ? { ...x, sconto: e.target.value } : x))}
                           />
@@ -3283,7 +3294,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               </div>
             </FormCard>
 
-            <FormCard title="Foto" aside={<span className="text-[13px] text-[var(--ds-text-muted)]">opzionale</span>}>
+            <FormCard title={t('photo')} aside={<span className="text-[13px] text-[var(--ds-text-muted)]">opzionale</span>}>
               <div className="flex items-start gap-4">
                 {newDish.photo_url ? (
                   <img
@@ -3385,7 +3396,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           title={isEditingBanquet ? 'Modifica menu banchetto' : 'Crea menu banchetto'}
           // The step counter said what the stepper below already shows, and
           // selected. This line is the one thing the header could not say.
-          subtitle="Aggiungi almeno un piatto per completare il menù."
+          subtitle={t('addAtLeastOneDish')}
           size="lg"
           fixedHeight
           // No top padding: the pinned stepper above already supplies it.
@@ -3438,10 +3449,10 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           }
           subheader={
             <StepNav
-              steps={BANQUET_STEPS}
+              steps={banquetSteps}
               current={banquetStep}
               onSelect={setBanquetStep}
-              ariaLabel="Passi del menu banchetto"
+              ariaLabel={t('banquetStepsAria')}
             />
           }
         >
@@ -3455,7 +3466,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
             <Callout
               tone="pending"
               icon={Info}
-              title="Bozza non salvata trovata"
+              title={t('draftFound')}
               className="mb-4"
               action={
                 <div className="flex gap-2">
@@ -3539,23 +3550,23 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               {/* SECTION: Evento */}
               <section className={banquetStep === 0 ? 'block' : 'hidden'}>
                 <FormCard title="Evento">
-                  <p className="mb-4 text-[13px] text-[var(--ds-text-muted)]">Identifica il banchetto: nome interno, data e turno.</p>
+                  <p className="mb-4 text-[13px] text-[var(--ds-text-muted)]">{t('banquetIdentity')}</p>
                 <div className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div className="md:col-span-2">
-                      <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Nome Menu <span className="text-[var(--ds-critical-text)]">*</span></label>
+                      <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{t('menuName')} <span className="text-[var(--ds-critical-text)]">*</span></label>
                       <input
                           required
-                          placeholder="es. Menu Matrimonio Gold"
+                          placeholder={t('menuNamePlaceholder')}
                           className={`w-full bg-[var(--ds-surface)] border rounded-[var(--ds-radius)] px-3 py-2 text-sm focus:outline-none ${
-                            banquetFieldHasError('Nome Menu')
+                            banquetFieldHasError(t('menuName'))
                               ? 'border-[var(--ds-critical-solid)] focus:border-[var(--ds-critical-solid)]'
                               : 'border-[var(--ds-border)] focus:border-[var(--ds-text-primary)]'
                           }`}
                           value={newBanquet.name}
                           onChange={e => {
                             setNewBanquet({...newBanquet, name: e.target.value});
-                            if (banquetFormErrors.length > 0) setBanquetFormErrors(prev => prev.filter(f => f !== 'Nome Menu'));
+                            if (banquetFormErrors.length > 0) setBanquetFormErrors(prev => prev.filter(f => f !== t('menuName')));
                           }}
                       />
                     </div>
@@ -3593,9 +3604,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     </div>
                   </div>
                   <div>
-                    <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Descrizione Commerciale <span className="font-normal text-[var(--ds-text-muted)]">— opzionale</span></label>
+                    <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{t('commercialDescription')} <span className="font-normal text-[var(--ds-text-muted)]">— opzionale</span></label>
                     <textarea
-                      placeholder="Breve descrizione visibile in stampa (es. Cresima, Matrimonio civile…)"
+                      placeholder={t('commercialDescriptionPlaceholder')}
                       className="w-full bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-[var(--ds-radius)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)] h-20"
                       value={newBanquet.description}
                       onChange={e => setNewBanquet({...newBanquet, description: e.target.value})}
@@ -3607,7 +3618,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
               {/* SECTION: Coperti & Tariffa */}
               <section className={banquetStep === 1 ? 'block' : 'hidden'}>
-                <FormCard title="Coperti e tariffa">
+                <FormCard title={t('banquetStep.covers.label')}>
                   <p className="mb-4 text-[13px] text-[var(--ds-text-muted)]">Numero di partecipanti e prezzi. Se imposti un prezzo bambini, il calcolo distingue adulti e bambini.</p>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <Field label="Ospiti totali">
@@ -3639,7 +3650,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   </Field>
                   {canViewBanquetPrice && (
                   <div>
-                      <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Prezzo Adulti (€) <span className="text-[var(--ds-critical-text)]">*</span></label>
+                      <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{t('adultPrice')} <span className="text-[var(--ds-critical-text)]">*</span></label>
                       <input
                           type="number"
                           required
@@ -3660,7 +3671,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   )}
                   {canViewBanquetPrice && (
                   <div>
-                      <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Prezzo Bambini (€) <span className="font-normal text-[var(--ds-text-muted)]">— opzionale</span></label>
+                      <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{t('childPrice')} <span className="font-normal text-[var(--ds-text-muted)]">— opzionale</span></label>
                       <input
                           type="number"
                           min="0"
@@ -3747,13 +3758,13 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
               {/* SECTION: Note operative */}
               <section className={banquetStep === 4 ? 'block' : 'hidden'}>
-                <FormCard title="Note operative">
+                <FormCard title={t('banquetStep.notes.label')}>
                   <p className="mb-4 text-[13px] text-[var(--ds-text-muted)]">Istruzioni separate per cucina, sala e mise en place. Compariranno nelle stampe operative.</p>
                 <div className="space-y-4">
                   <div>
                     <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Note Portate <span className="font-normal normal-case tracking-normal">— cucina</span></label>
                     <textarea
-                      placeholder="es. Senza glutine al tavolo 3, allergia ai crostacei per il tavolo sposi…"
+                      placeholder={t('dietaryNotesPlaceholder')}
                       className="w-full bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-[var(--ds-radius)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)] h-28"
                       value={newBanquet.notes_courses || ''}
                       onChange={e => setNewBanquet({...newBanquet, notes_courses: e.target.value})}
@@ -3762,7 +3773,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   <div>
                     <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Note Servizio <span className="font-normal normal-case tracking-normal">— sala</span></label>
                     <textarea
-                      placeholder="es. Tempi: aperitivo 19:30, taglio torta 22:30. Vino bianco freddo per gli antipasti…"
+                      placeholder={t('serviceNotesPlaceholder')}
                       className="w-full bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-[var(--ds-radius)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)] h-28"
                       value={newBanquet.notes_service || ''}
                       onChange={e => setNewBanquet({...newBanquet, notes_service: e.target.value})}
@@ -3783,7 +3794,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
               <section className={banquetStep === 2 ? 'block' : 'hidden'}>
                 <FormCard
-                  title="Composizione del menù"
+                  title={t('menuCompositionTitle')}
                   aside={
                     <button
                       type="button"
@@ -3834,7 +3845,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                               onClick={() => moveCourse(courseIndex, -1)}
                               disabled={courseIndex === 0}
                               className="text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] disabled:opacity-30 disabled:cursor-not-allowed"
-                              title="Sposta su"
+                              title={t('moveUp')}
                             >
                               <ChevronLeft className="h-3.5 w-3.5 rotate-90" />
                             </button>
@@ -3843,7 +3854,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                               onClick={() => moveCourse(courseIndex, 1)}
                               disabled={courseIndex === totalCourses - 1}
                               className="text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] disabled:opacity-30 disabled:cursor-not-allowed"
-                              title="Sposta giù"
+                              title={t('moveDown')}
                             >
                               <ChevronRight className="h-3.5 w-3.5 rotate-90" />
                             </button>
@@ -3862,7 +3873,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             type="button"
                             onClick={() => removeCourse(courseIndex)}
                             className="p-1.5 rounded-[var(--ds-radius)] text-[var(--ds-text-muted)] hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)]"
-                            title="Elimina uscita"
+                            title={t('deleteCourse')}
                           >
                             <X className="h-4 w-4" />
                           </button>
@@ -3875,7 +3886,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             <SearchField
                               value={courseDishQuery[courseIndex] ?? ''}
                               onChange={q => setCourseDishQuery(prev => ({ ...prev, [courseIndex]: q }))}
-                              placeholder="Cerca piatto…"
+                              placeholder={t('searchDish')}
                               ariaLabel={`Cerca piatto in ${course.name || 'questa uscita'}`}
                             />
                           </div>
@@ -3971,7 +3982,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           <textarea
                             value={course.notes || ''}
                             onChange={e => setCourseNotes(courseIndex, e.target.value)}
-                            placeholder="Es. servire con pane caldo, abbinare a vino bianco fresco…"
+                            placeholder={t('courseNotesPlaceholder')}
                             rows={2}
                             className="w-full bg-[var(--ds-canvas)] border border-[var(--ds-border)] rounded-[var(--ds-radius)] p-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)] resize-y"
                           />
@@ -3981,7 +3992,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   })}
                   {(newBanquet.courses || []).length === 0 && (
                     <div className="text-center py-6 bg-[var(--ds-canvas)] rounded-[var(--ds-radius)] border border-dashed border-[var(--ds-border)]">
-                      <p className="text-sm text-[var(--ds-text-muted)] mb-2">Nessuna uscita</p>
+                      <p className="text-sm text-[var(--ds-text-muted)] mb-2">{t('noCourses')}</p>
                       <button
                         type="button"
                         onClick={addCourse}
@@ -3996,12 +4007,12 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               </section>
 
               <section className={banquetStep === 3 ? 'block' : 'hidden'}>
-                <FormCard title="Tavoli assegnati" aside={<span className="text-[13px] text-[var(--ds-text-muted)]">opzionale</span>}>
+                <FormCard title={t('banquetStep.tables.label')} aside={<span className="text-[13px] text-[var(--ds-text-muted)]">opzionale</span>}>
                   <p className="mb-4 text-[13px] text-[var(--ds-text-muted)]">Riserva i tavoli del banchetto. I tavoli occupati nello stesso turno sono disabilitati.</p>
                 {!newBanquet.event_date || !newBanquet.shift ? (
-                  <p className="text-xs text-[var(--ds-text-muted)] italic">Seleziona Data Evento e Turno per assegnare i tavoli.</p>
+                  <p className="text-xs text-[var(--ds-text-muted)] italic">{t('pickDateAndShift')}</p>
                 ) : tables.length === 0 ? (
-                  <p className="text-xs text-[var(--ds-text-muted)] italic">Nessun tavolo configurato.</p>
+                  <p className="text-xs text-[var(--ds-text-muted)] italic">{t('noTables')}</p>
                 ) : (
                   <div className="space-y-3">
 
@@ -4042,7 +4053,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           ? rooms
                           : rooms.filter(r => r.id === tablePickerRoomFilter);
                         if (displayedRooms.length === 0) {
-                          return <div className="text-center py-10 text-[var(--ds-text-subtle)] text-sm">Nessuna sala disponibile.</div>;
+                          return <div className="text-center py-10 text-[var(--ds-text-subtle)] text-sm">{t('noRooms')}</div>;
                         }
                         return displayedRooms.map(room => {
                           const roomTables = [...tables]
@@ -4158,8 +4169,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       <ModalShell
         open={qrOpen}
         onClose={() => setQrOpen(false)}
-        title="Menu digitale"
-        subtitle="L'ospite inquadra il QR e sfoglia il menu in quattro lingue."
+        title={t('digitalMenu')}
+        subtitle={t('digitalMenuHint')}
       >
         <div className="space-y-4">
           <div className="flex items-center justify-between gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-4 py-3">
@@ -4268,7 +4279,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
       <ConfirmDeleteModal
         isOpen={!!deleteDishConfirm}
-        title="Elimina Piatto"
+        title={t('deleteDishTitle')}
         message="Stai per eliminare il piatto:"
         itemName={deleteDishConfirm?.name}
         onCancel={() => setDeleteDishConfirm(null)}
@@ -4280,7 +4291,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
       <ConfirmDeleteModal
         isOpen={!!deleteBanquetConfirm}
-        title="Elimina Menu Banchetto"
+        title={t('deleteBanquetMenu')}
         message="Stai per eliminare il menu banchetto:"
         itemName={deleteBanquetConfirm?.name}
         onCancel={() => setDeleteBanquetConfirm(null)}
@@ -4295,7 +4306,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         <ModalShell
           open={!!menuForm}
           onClose={() => setMenuForm(null)}
-          title={menuForm.kind === 'create' ? 'Nuovo menu' : 'Rinomina menu'}
+          title={menuForm.kind === 'create' ? 'Nuovo menu' : t('renameMenu')}
           size="sm"
           bodyClassName="p-5"
           footer={
@@ -4316,7 +4327,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           }
         >
           <form id="menu-form" onSubmit={submitMenuForm}>
-            <Field label="Nome" required>
+            <Field label={t('name')} required>
               <input
                 autoFocus
                 required
@@ -4334,7 +4345,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
       <ConfirmDeleteModal
         isOpen={!!deleteMenuConfirm}
-        title="Elimina Menu"
+        title={t('deleteMenuTitle')}
         message="I piatti restano in anagrafica e negli altri menu. Stai per eliminare:"
         itemName={deleteMenuConfirm?.name}
         onCancel={() => setDeleteMenuConfirm(null)}
@@ -4469,8 +4480,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         <ModalShell
           open={catsOpen}
           onClose={() => setCatsOpen(false)}
-          title="Categorie"
-          subtitle="L'ordine e le categorie spente valgono anche su comande e menu digitale"
+          title={t('categories')}
+          subtitle={t('categoriesHint')}
           size="sm"
           bodyClassName="p-2"
         >
@@ -4487,7 +4498,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       applyMenuCats(next);
                     }}
                     className={`${dsIconButton} h-9 w-8 bg-transparent shadow-none disabled:opacity-30`}
-                    title="Sposta su"
+                    title={t('moveUp')}
                   >
                     <ChevronUp className="h-4 w-4" />
                   </button>
@@ -4500,7 +4511,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       applyMenuCats(next);
                     }}
                     className={`${dsIconButton} h-9 w-8 bg-transparent shadow-none disabled:opacity-30`}
-                    title="Sposta giù"
+                    title={t('moveDown')}
                   >
                     <ChevronDown className="h-4 w-4" />
                   </button>
@@ -4619,7 +4630,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   type="button"
                   onClick={() => { setCatFormName(cat.name); setCatFormError(null); setCatForm({ kind: 'rename', name: cat.name }); }}
                   className={`${dsIconButton} h-9 w-9 flex-shrink-0 bg-[var(--ds-surface-row)] shadow-none`}
-                  title="Rinomina categoria"
+                  title={t('renameCategory')}
                 >
                   <Edit2 className="h-4 w-4" />
                 </button>
@@ -4663,7 +4674,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         <ModalShell
           open={!!catForm}
           onClose={() => setCatForm(null)}
-          title={catForm.kind === 'create' ? 'Nuova categoria' : 'Rinomina categoria'}
+          title={catForm.kind === 'create' ? 'Nuova categoria' : t('renameCategory')}
           size="sm"
           bodyClassName="p-5"
           footer={
@@ -4684,7 +4695,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           }
         >
           <form id="cat-form" onSubmit={submitCatForm} className="space-y-3">
-            <Field label="Nome" required>
+            <Field label={t('name')} required>
               <input
                 autoFocus
                 required
@@ -4707,7 +4718,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
       <ConfirmDeleteModal
         isOpen={!!deleteCatConfirm}
-        title="Elimina Categoria"
+        title={t('deleteCategory')}
         message="La categoria è vuota: nessun piatto viene toccato. Stai per eliminare:"
         itemName={deleteCatConfirm ?? undefined}
         onCancel={() => setDeleteCatConfirm(null)}
@@ -4741,7 +4752,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               <div className="w-8 h-1 rounded-full bg-[var(--ds-text-subtle)]" />
             </div>
             <div className="px-5 pb-2 pt-2 sm:pt-5">
-              <h3 className="text-base font-semibold text-[var(--ds-text-primary)]">Ordina per</h3>
+              <h3 className="text-base font-semibold text-[var(--ds-text-primary)]">{t('sortBy')}</h3>
             </div>
             <div className="px-3">
               {BANQUET_SORT_OPTIONS.map(opt => (
@@ -4773,6 +4784,7 @@ interface BanquetCalendarProps {
 }
 
 const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelectBanquet, onViewBanquet, canEdit }) => {
+  const { t } = useTranslation('menu', { useSuspense: false });
   const { hasPermission } = useAuth();
   const canViewBanquetPrice = hasPermission('banquet:view_price');
   const canManageBanquetPayments = hasPermission('banquet:manage_payments');
@@ -4992,7 +5004,7 @@ const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelec
                         type="button"
                         onClick={e => { e.stopPropagation(); onSelectBanquet(menu); }}
                         className={`${dsIconButton} h-9 w-9 flex-shrink-0 bg-[var(--ds-surface)] shadow-none`}
-                        title="Modifica banchetto"
+                        title={t('editBanquet')}
                       >
                         <Edit2 className="h-4 w-4" />
                       </button>
@@ -5006,7 +5018,7 @@ const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelec
         ) : (
           <div className="flex flex-col items-center justify-center py-10 text-center">
             <Calendar className="mb-2 h-8 w-8 text-[var(--ds-text-subtle)]" />
-            <p className="text-[14px] text-[var(--ds-text-muted)]">Seleziona un giorno con eventi per vedere i dettagli.</p>
+            <p className="text-[14px] text-[var(--ds-text-muted)]">{t('pickDayWithEvents')}</p>
           </div>
         )}
       </div>
