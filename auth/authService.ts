@@ -229,6 +229,8 @@ export class AuthService {
               u.preferred_design_style, u.language,
               u.tenant_id, t.status AS tenant_status, t.slug AS tenant_slug, t.name AS tenant_name,
               t.default_language AS tenant_default_language,
+              t.currency AS tenant_currency, t.timezone AS tenant_timezone,
+              t.country_code AS tenant_country_code,
               t.onboarding_completed_at IS NULL AS tenant_needs_onboarding
          FROM users u
          JOIN tenants t ON t.id = u.tenant_id
@@ -297,6 +299,11 @@ export class AuthService {
         slug: userRow.tenant_slug,
         name: userRow.tenant_name,
         default_language: userRow.tenant_default_language ?? null,
+        // Dove sta il ristorante: la SPA ne ha bisogno per scrivere importi
+        // e date come li legge chi lavora lì.
+        currency: userRow.tenant_currency ?? null,
+        timezone: userRow.tenant_timezone ?? null,
+        country_code: userRow.tenant_country_code ?? null,
         needs_onboarding: userRow.tenant_needs_onboarding === true
       }
     };
@@ -444,6 +451,8 @@ export class AuthService {
               u.preferred_design_style, u.language,
               u.tenant_id, t.slug AS tenant_slug, t.name AS tenant_name,
               t.default_language AS tenant_default_language,
+              t.currency AS tenant_currency, t.timezone AS tenant_timezone,
+              t.country_code AS tenant_country_code,
               t.onboarding_completed_at IS NULL AS tenant_needs_onboarding
          FROM users u
          JOIN tenants t ON t.id = u.tenant_id
@@ -475,6 +484,9 @@ export class AuthService {
         slug: row.tenant_slug,
         name: row.tenant_name,
         default_language: row.tenant_default_language ?? null,
+        currency: row.tenant_currency ?? null,
+        timezone: row.tenant_timezone ?? null,
+        country_code: row.tenant_country_code ?? null,
         needs_onboarding: row.tenant_needs_onboarding === true
       }
     };
