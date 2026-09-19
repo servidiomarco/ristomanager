@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Customer, Reservation, BanquetMenu, Shift, Table, Room } from '../types';
 import { getCustomers, createCustomer, updateCustomer, deleteCustomer, getCustomerDuplicates, mergeCustomers, CustomerDuplicateGroup, getLegalSettings, getMarketingAudience } from '../services/apiService';
 import { customersCache } from '../services/customersCache';
@@ -198,6 +199,7 @@ const fuzzyNameScore = (nameFolded: string, termFolded: string): number => {
 };
 
 export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tables, rooms, showToast, autoOpenNew, onAutoOpenNewHandled, autoEditByPhone, onAutoEditHandled }) => {
+    const { t } = useTranslation('clienti', { useSuspense: false });
   const { hasPermission } = useAuth();
   const canEdit = hasPermission('customers:full');
 
@@ -258,12 +260,12 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
     try {
       const { recipients } = await getMarketingAudience();
       if (!recipients.length) {
-        showToast('Nessun destinatario con consenso marketing', 'info');
+        showToast(t('noMarketingRecipients'), 'info');
         return;
       }
       const esc = (v: string) => `"${(v || '').replace(/"/g, '""')}"`;
       const rows = [
-        ['Nome', 'Telefono', 'Email', 'Consenso aggiornato'],
+        [t('name'), t('phone'), t('email'), t('consentUpdated')],
         ...recipients.map(r => [r.name || '', r.phone || '', r.email || '', r.consent_marketing_updated_at || '']),
       ];
       const csv = rows.map(cols => cols.map(esc).join(',')).join('\n');
@@ -275,7 +277,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
       URL.revokeObjectURL(url);
       showToast(`Esportati ${recipients.length} destinatari`, 'success');
     } catch (err: any) {
-      showToast(err?.message || 'Marketing non disponibile in modalità semplice', 'error');
+      showToast(err?.message || t('marketingUnavailable'), 'error');
     } finally {
       setExporting(false);
     }
@@ -310,13 +312,13 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
     try {
       const updated = await mergeCustomers(sourceId, targetId);
       setCustomers(prev => prev.filter(c => c.id !== sourceId).map(c => c.id === updated.id ? updated : c));
-      showToast('Clienti uniti', 'success');
+      showToast(t('customersMerged'), 'success');
       await reloadDuplicates();
       if (detailCustomer?.id === sourceId) setDetailCustomer(updated);
       setConflictPrompt(null);
       setFormOpen(false);
     } catch (err: any) {
-      showToast(err?.message || 'Errore unione clienti', 'error');
+      showToast(err?.message || t('mergeError'), 'error');
     } finally {
       setIsMerging(false);
       setMergingIds(null);
@@ -328,7 +330,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
     if (customersCache.list === null) setIsLoading(true);
     getCustomers()
       .then(data => { if (!cancelled) { setCustomers(data); setError(null); } })
-      .catch(err => { if (!cancelled && customersCache.list === null) setError(err?.message || 'Errore caricamento clienti'); })
+      .catch(err => { if (!cancelled && customersCache.list === null) setError(err?.message || t('loadError')); })
       .finally(() => { if (!cancelled) setIsLoading(false); });
     return () => { cancelled = true; };
   }, []);
@@ -507,7 +509,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
     if (match) {
       openEdit(match);
     } else {
-      showToast('Cliente non trovato in rubrica', 'info');
+      showToast(t('customerNotFound'), 'info');
     }
     onAutoEditHandled?.();
   }, [autoEditByPhone, customers]);
@@ -548,11 +550,11 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
       if (form.id) {
         const updated = await updateCustomer(form.id, payload);
         setCustomers(prev => prev.map(c => c.id === updated.id ? updated : c));
-        showToast('Cliente aggiornato', 'success');
+        showToast(t('customerUpdated'), 'success');
       } else {
         const created = await createCustomer(payload);
         setCustomers(prev => [...prev, created]);
-        showToast('Cliente aggiunto alla rubrica', 'success');
+        showToast(t('customerAdded'), 'success');
       }
       setFormOpen(false);
     } catch (err: any) {
@@ -564,10 +566,10 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
           sourceId: form.id ?? null,
           sourceName: form.name.trim(),
           targetId: err.data.existing_customer_id,
-          targetName: err.data.existing_customer_name || 'cliente esistente',
+          targetName: err.data.existing_customer_name || t('existingCustomer'),
         });
       } else {
-        showToast(err?.message || 'Errore salvataggio cliente', 'error');
+        showToast(err?.message || t('saveError'), 'error');
       }
     } finally {
       setIsSaving(false);
@@ -580,9 +582,9 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
       setCustomers(prev => prev.filter(c => c.id !== id));
       setConfirmDeleteId(null);
       if (detailCustomer?.id === id) setDetailCustomer(null);
-      showToast('Cliente eliminato', 'info');
+      showToast(t('customerDeleted'), 'info');
     } catch (err: any) {
-      showToast(err?.message || 'Errore eliminazione cliente', 'error');
+      showToast(err?.message || t('deleteError'), 'error');
     }
   };
 
@@ -638,8 +640,8 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
         </div>
         {vip && (
           <span
-            title="Cliente VIP"
-            aria-label="Cliente VIP"
+            title={t('vip')}
+            aria-label={t('vip')}
             className="absolute -right-0.5 -top-0.5 inline-flex h-[18px] w-[18px] items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-pending-solid)] ring-2 ring-[var(--ds-surface)]"
           >
             <Star className="h-2.5 w-2.5 fill-[#ffffff] text-[#ffffff]" aria-hidden />
@@ -720,12 +722,12 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
   const cardMenuActions = (c: Customer) => {
     const hasDuplicate = duplicateGroups.some(g => g.customers.some(x => x.id === c.id));
     return [
-      { key: 'edit', label: 'Modifica scheda', icon: Pencil, run: () => openEdit(c) },
+      { key: 'edit', label: t('editCard'), icon: Pencil, run: () => openEdit(c) },
       ...(hasDuplicate
-        ? [{ key: 'merge', label: 'Unisci duplicati', icon: GitMerge, run: () => setDuplicatesOpen(true) }]
+        ? [{ key: 'merge', label: t('mergeDuplicates'), icon: GitMerge, run: () => setDuplicatesOpen(true) }]
         : []),
       { key: 'sep', separator: true as const },
-      { key: 'delete', label: 'Elimina cliente', icon: Trash2, danger: true, run: () => setConfirmDeleteId(c.id) },
+      { key: 'delete', label: t('deleteCustomer'), icon: Trash2, danger: true, run: () => setConfirmDeleteId(c.id) },
     ];
   };
 
@@ -904,7 +906,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
                   {c.phone}
                 </a>
               ) : (
-                <span className="truncate">Senza numero</span>
+                <span className="truncate">{t('noNumber')}</span>
               )}
               {f.reservations > 0 && (
                 <span className="flex-shrink-0 whitespace-nowrap">· {f.reservations} prenot.</span>
@@ -928,7 +930,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
         // schiaccia fino a sparire. "Chiama" è più corta e ci stava, ed è per
         // questo che il telefono si vedeva e il fumetto no.
         left={{
-          label: 'Chiama',
+          label: t('call'),
           icon: <Phone className="h-4 w-4 flex-shrink-0" aria-hidden />,
           tone: 'primary',
           onAction: () => { window.location.href = telHref(c.phone!); },
@@ -1056,8 +1058,8 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
       <SearchField
         value={search}
         onChange={setSearch}
-        placeholder="Nome, telefono…"
-        ariaLabel="Cerca cliente"
+        placeholder={t('searchPlaceholder')}
+        ariaLabel={t('searchCustomer')}
       />
 
       {(( canEdit && duplicateGroups.length > 0) || (marketingEnabled && marketingCount > 0)) && (
@@ -1066,11 +1068,11 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
             <button
               type="button"
               onClick={() => setDuplicatesOpen(true)}
-              title="Clienti con lo stesso numero di telefono"
+              title={t('sameNumber')}
               className={`${chip} bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] hover:opacity-80`}
             >
               <GitMerge className="h-4 w-4" aria-hidden />
-              Duplicati
+              {t('duplicatesTab')}
               <CountBadge count={duplicatesCount} />
             </button>
           )}
@@ -1080,7 +1082,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
                 type="button"
                 onClick={() => setMarketingOnly(v => !v)}
                 aria-pressed={marketingOnly}
-                title="Mostra solo i clienti con consenso marketing (contattabili)"
+                title={t('onlyMarketing')}
                 className={`${chip} ${
                   marketingOnly
                     ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
@@ -1096,11 +1098,11 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
                   type="button"
                   onClick={exportMarketingRecipients}
                   disabled={exporting}
-                  title="Esporta i destinatari con consenso marketing (CSV)"
+                  title={t('exportMarketing')}
                   className={`${chip} bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] hover:text-[var(--ds-text-primary)] disabled:opacity-50`}
                 >
                   {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" aria-hidden />}
-                  Esporta
+                  {t('export')}
                 </button>
               )}
             </>
@@ -1146,12 +1148,12 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
               ) : undefined}
             >
               <span className="block text-[15px] font-semibold text-[var(--ds-text-primary)]">
-                {isSearching ? 'Nessun cliente con questo nome' : 'La rubrica è vuota'}
+                {isSearching ? t('noCustomerWithName') : t('addressBookEmpty')}
               </span>
               <span className="mt-1 block">
                 {isSearching
-                  ? 'Se è al telefono adesso, aggiungilo con il nome già scritto e completa il resto dopo.'
-                  : 'I clienti salvati dalle prenotazioni compaiono qui.'}
+                  ? t('addFromCallHint')
+                  : t('savedFromBookings')}
               </span>
             </EmptyState>
           ) : isSearching ? (
@@ -1221,7 +1223,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
               <button
                 type="button"
                 onClick={() => setDetailCustomer(null)}
-                aria-label="Torna all'elenco clienti"
+                aria-label={t('backToList')}
                 className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] md:hidden"
               >
                 <ArrowLeft className="h-4 w-4" />
@@ -1293,7 +1295,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
               { value: f.reservations, label: 'prenotazioni' },
               {
                 value: f.avgCovers ? f.avgCovers.toLocaleString('it-IT', { maximumFractionDigits: 1 }) : '—',
-                label: 'coperti medi',
+                label: t('avgCovers'),
               },
               { value: f.noShow, label: 'no-show', tone: f.noShow > 0 ? 'critical' : 'neutral' },
             ]}
@@ -1332,12 +1334,12 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
             <div className="mb-3 flex items-center gap-2">
               <History className="h-4 w-4 text-[var(--ds-text-muted)]" aria-hidden />
               <h3 className="text-[15px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
-                Storico prenotazioni
+                {t('bookingHistory')}
               </h3>
               {sortedReservations.length > 0 && <CountBadge count={sortedReservations.length} />}
             </div>
             {sortedReservations.length === 0 ? (
-              <p className="py-2 text-[14px] text-[var(--ds-text-muted)]">Nessuna prenotazione registrata.</p>
+              <p className="py-2 text-[14px] text-[var(--ds-text-muted)]">{t('noBookings')}</p>
             ) : (
               <ul className="divide-y divide-[var(--ds-border)]">
                 {sortedReservations.map(r => {
@@ -1346,8 +1348,8 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
                   return (
                     <li key={r.id} className="flex items-center gap-2.5 py-2.5">
                       {isLunch
-                        ? <Sun className="h-4 w-4 flex-shrink-0 text-[var(--ds-pending-text)]" aria-label="Pranzo" />
-                        : <Moon className="h-4 w-4 flex-shrink-0 text-[var(--ds-arriving-text)]" aria-label="Cena" />}
+                        ? <Sun className="h-4 w-4 flex-shrink-0 text-[var(--ds-pending-text)]" aria-label={t('lunch')} />
+                        : <Moon className="h-4 w-4 flex-shrink-0 text-[var(--ds-arriving-text)]" aria-label={t('dinner')} />}
                       <span className="flex-shrink-0 text-[15px] font-medium tabular-nums text-[var(--ds-text-primary)]">{date}</span>
                       <span className="flex-shrink-0 text-[15px] tabular-nums text-[var(--ds-text-muted)]">{time}</span>
                       <span className="ml-auto inline-flex flex-shrink-0 items-center gap-1 text-[14px] tabular-nums text-[var(--ds-text-secondary)]">
@@ -1391,7 +1393,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
   const stepFields = step === 0 ? (
     <FormCard title="Contatto">
       <div className="space-y-4">
-        <Field label="Nome" htmlFor="cust-name" required>
+        <Field label={t('name')} htmlFor="cust-name" required>
           <input
             id="cust-name"
             type="text"
@@ -1402,7 +1404,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
           />
         </Field>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="Telefono" htmlFor="cust-phone" required>
+          <Field label={t('phone')} htmlFor="cust-phone" required>
             <input
               id="cust-phone"
               type="tel"
@@ -1411,11 +1413,11 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
               className={`${dsInput} tabular-nums`}
             />
           </Field>
-          <Field label="Email" htmlFor="cust-email">
+          <Field label={t('email')} htmlFor="cust-email">
             <input
               id="cust-email"
               type="email"
-              placeholder="nome@dominio.it"
+              placeholder={t('emailPlaceholder')}
               value={form.email}
               onChange={e => setForm({ ...form, email: e.target.value })}
               className={dsInput}
@@ -1433,11 +1435,11 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
           />
         </Field>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <Field label="Città" htmlFor="cust-city" className="sm:col-span-2">
+          <Field label={t('city')} htmlFor="cust-city" className="sm:col-span-2">
             <input
               id="cust-city"
               type="text"
-              placeholder="Città"
+              placeholder={t('city')}
               value={form.city}
               onChange={e => setForm({ ...form, city: e.target.value })}
               className={dsInput}
@@ -1461,9 +1463,9 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
             tutti gli altri. */}
         <details className="group rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3">
           <summary className="cursor-pointer select-none text-[14px] font-medium text-[var(--ds-text-primary)] list-none [&::-webkit-details-marker]:hidden">
-            Dati fatturazione
+            {t('billingData')}
             <span className="ml-2 text-[13px] font-normal text-[var(--ds-text-muted)]">
-              {form.billing_vat || form.billing_cf ? (form.billing_vat ? `P.IVA ${form.billing_vat}` : `CF ${form.billing_cf}`) : 'per la fattura elettronica'}
+              {form.billing_vat || form.billing_cf ? (form.billing_vat ? `P.IVA ${form.billing_vat}` : `CF ${form.billing_cf}`) : t('forEInvoice')}
             </span>
           </summary>
           <div className="mt-3 space-y-3">
@@ -1471,7 +1473,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
               <input
                 id="cust-bill-name"
                 type="text"
-                placeholder="Ragione sociale o nome e cognome"
+                placeholder={t('companyOrName')}
                 value={form.billing_name}
                 onChange={e => setForm({ ...form, billing_name: e.target.value })}
                 className={dsInput}
@@ -1573,8 +1575,8 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
           />
           <Star className={`h-4 w-4 flex-shrink-0 ${form.is_vip ? 'fill-[var(--ds-pending-solid)] text-[var(--ds-pending-solid)]' : 'text-[var(--ds-text-muted)]'}`} aria-hidden />
           <span className="min-w-0">
-            <span className="block text-[15px] font-medium text-[var(--ds-text-primary)]">Cliente VIP</span>
-            <span className="block text-[13px] text-[var(--ds-text-muted)]">Evidenzia la prenotazione in sala</span>
+            <span className="block text-[15px] font-medium text-[var(--ds-text-primary)]">{t('vip')}</span>
+            <span className="block text-[13px] text-[var(--ds-text-muted)]">{t('vipHint')}</span>
           </span>
         </label>
         <label className="flex cursor-pointer select-none items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3">
@@ -1595,7 +1597,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
             <input
               id="cust-blacklist-reason"
               type="text"
-              placeholder="Es. due no-show senza avviso"
+              placeholder={t('warningsPlaceholder')}
               value={form.blacklist_reason}
               onChange={e => setForm({ ...form, blacklist_reason: e.target.value })}
               className={dsInput}
@@ -1610,7 +1612,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
               onChange={e => setForm({ ...form, preferred_table_id: e.target.value === '' ? null : Number(e.target.value) })}
               className={dsSelect}
             >
-              <option value="">Nessuna preferenza</option>
+              <option value="">{t('noPreference')}</option>
               {tablesByRoom.map(group => (
                 <optgroup key={group.roomId ?? 'none'} label={group.roomName}>
                   {group.tables.map(t => (
@@ -1620,7 +1622,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
               ))}
             </select>
           </Field>
-          <Field label="Note preferenze" htmlFor="cust-prefs">
+          <Field label={t('preferenceNotes')} htmlFor="cust-prefs">
             <input
               id="cust-prefs"
               type="text"
@@ -1632,9 +1634,9 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
           </Field>
         </div>
         <Field
-          label="Allergie e note alimentari"
+          label={t('allergies')}
           htmlFor="cust-diet"
-          hint="Precompilate in ogni nuova prenotazione di questo cliente."
+          hint={t('allergiesHint')}
         >
           <textarea
             id="cust-diet"
@@ -1645,7 +1647,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
             className={`${dsTextarea} resize-none`}
           />
         </Field>
-        <Field label="Note" htmlFor="cust-notes">
+        <Field label={t('notes')} htmlFor="cust-notes">
           <textarea
             id="cust-notes"
             rows={3}
@@ -1665,7 +1667,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
           titolo ripeterebbe l'unica cosa che lo schermo dice già, rubando la
           riga alla ricerca. Col telefono la barra laterale non c'è. */}
       <h1 className="flex-shrink-0 px-4 pt-4 text-[22px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)] md:hidden">
-        Clienti
+        {t('customers')}
       </h1>
       <SplitPane
         detailOpen={!!detailCustomer}
@@ -1673,7 +1675,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
         list={list}
         detail={detailCustomer
           ? renderDetail(detailCustomer)
-          : <PanePlaceholder icon={BookUser}>Scegli un cliente per vederne la scheda.</PanePlaceholder>}
+          : <PanePlaceholder icon={BookUser}>{t('pickCustomer')}</PanePlaceholder>}
       />
 
       {/* ── Nuovo / modifica cliente ─────────────────────────────────────
@@ -1685,8 +1687,8 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
       <ModalShell
         open={formOpen}
         onClose={() => !isSaving && setFormOpen(false)}
-        title={form.id ? 'Modifica cliente' : 'Nuovo cliente'}
-        subtitle={form.id ? 'Le modifiche valgono da subito in sala' : 'Nome e telefono bastano — il resto si aggiunge dopo'}
+        title={form.id ? t('editCustomer') : t('newCustomer')}
+        subtitle={form.id ? t('editHint') : t('newHint')}
         size="md"
         fixedHeight
         bodyClassName="px-5 pb-5 sm:px-6 sm:pb-6"
@@ -1695,7 +1697,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
             steps={[{ label: 'Contatto', icon: UserIcon }, { label: 'Preferenze di servizio', icon: Star }]}
             current={step}
             onSelect={setStep}
-            ariaLabel="Passi del cliente"
+            ariaLabel={t('customerSteps')}
           />
         }
         // Una sola azione, sempre la stessa e sempre primaria: si salva da
@@ -1711,7 +1713,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
               disabled={isSaving}
               className={dsButton.quiet}
             >
-              Annulla
+              {t('cancel')}
             </button>
             <button
               type="submit"
@@ -1720,7 +1722,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
               className={dsButton.primary}
             >
               {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
-              {isSaving ? 'Salvataggio…' : (form.id ? 'Salva modifiche' : 'Aggiungi alla rubrica')}
+              {isSaving ? t('saving') : (form.id ? t('saveChanges') : t('addToAddressBook'))}
             </button>
           </>
         }
@@ -1748,14 +1750,14 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
       <ModalShell
         open={confirmDeleteId !== null}
         onClose={() => setConfirmDeleteId(null)}
-        title="Eliminare il cliente?"
+        title={t('deleteConfirm')}
         size="sm"
         closeOnEscape
         bodyClassName="px-5 pb-5 sm:px-6 sm:pb-6"
         footer={
           <>
             <button type="button" onClick={() => setConfirmDeleteId(null)} className={dsButton.quiet}>
-              Annulla
+              {t('cancel')}
             </button>
             <button
               type="button"
@@ -1763,13 +1765,13 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
               className="inline-flex h-11 items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-solid)] px-5 text-[15px] font-semibold text-[var(--ds-critical-fg)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             >
               <Trash2 className="h-4 w-4" aria-hidden />
-              Elimina
+              {t('delete')}
             </button>
           </>
         }
       >
         <p className="text-[15px] text-[var(--ds-text-secondary)]">
-          I banchetti collegati manterranno la storia ma non saranno più associati al cliente.
+          {t('deleteCustomerHint')}
         </p>
       </ModalShell>
 
@@ -1777,17 +1779,17 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
       <ModalShell
         open={duplicatesOpen}
         onClose={() => !isMerging && setDuplicatesOpen(false)}
-        title="Clienti duplicati"
-        subtitle="Ogni gruppo ha lo stesso numero di telefono"
+        title={t('duplicates')}
+        subtitle={t('duplicatesHint')}
         size="md"
         bodyClassName="px-5 pb-5 sm:px-6 sm:pb-6"
       >
         {duplicateGroups.length === 0 ? (
-          <EmptyState icon={GitMerge}>Nessun duplicato rilevato.</EmptyState>
+          <EmptyState icon={GitMerge}>{t('noDuplicates')}</EmptyState>
         ) : (
           <div className="space-y-4">
             <p className="text-[14px] text-[var(--ds-text-muted)]">
-              Scegli quale voce mantenere: le altre verranno unite in essa, storico prenotazioni e banchetti inclusi.
+              {t('mergeHint')}
             </p>
             {duplicateGroups.map(group => (
               <div key={group.key} className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
@@ -1842,7 +1844,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
       <ModalShell
         open={conflictPrompt !== null}
         onClose={() => !isMerging && setConflictPrompt(null)}
-        title="Numero già in rubrica"
+        title={t('numberInUse')}
         size="sm"
         bodyClassName="px-5 pb-5 sm:px-6 sm:pb-6"
         footer={
@@ -1853,7 +1855,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
               disabled={isMerging}
               className={dsButton.quiet}
             >
-              {conflictPrompt?.sourceId != null ? 'Annulla' : 'Chiudi'}
+              {conflictPrompt?.sourceId != null ? t('cancel') : t('close')}
             </button>
             {conflictPrompt?.sourceId != null && (
               <button
@@ -1863,7 +1865,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
                 className={dsButton.primary}
               >
                 {isMerging ? <Loader2 className="h-4 w-4 animate-spin" /> : <GitMerge className="h-4 w-4" aria-hidden />}
-                Unisci
+                {t('merge')}
               </button>
             )}
           </>
@@ -1871,11 +1873,11 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
       >
         {conflictPrompt && (
           <Callout tone="pending" icon={AlertTriangle}>
-            Questo numero è già associato a <strong>{conflictPrompt.targetName}</strong>.
+            {t('numberBelongsTo')} <strong>{conflictPrompt.targetName}</strong>.
             {conflictPrompt.sourceId != null ? (
-              <> Vuoi unire <strong>{conflictPrompt.sourceName || 'questa voce'}</strong> in <strong>{conflictPrompt.targetName}</strong>? Storico prenotazioni e banchetti verranno mantenuti.</>
+              <> {t('mergeAsk1')} <strong>{conflictPrompt.sourceName || t('thisEntry')}</strong> {t('mergeAsk2')} <strong>{conflictPrompt.targetName}</strong>{t('mergeAsk3')}</>
             ) : (
-              <> Non è possibile creare un nuovo cliente con lo stesso numero.</>
+              <> {t('numberInUseHint')}</>
             )}
           </Callout>
         )}
