@@ -135,11 +135,11 @@ const banquetGroupFor = (menu: BanquetMenu, today: string, weekEnd: string, mont
    anywhere from the header, and the required-field check still runs once, on
    save, exactly as it did when this was a single scroll. */
 const BANQUET_STEPS = [
-  { label: 'Evento e cliente', hint: 'nome interno, data, turno e chi lo ha richiesto', icon: BookUser },
-  { label: 'Coperti e tariffa', hint: 'un prezzo bambini separa il calcolo', icon: Users },
-  { label: 'Composizione menù', hint: 'clicca un piatto per aggiungerlo all\'uscita attiva', icon: Utensils },
-  { label: 'Tavoli assegnati', hint: 'i tavoli occupati nello stesso turno sono disabilitati', icon: LayoutGrid },
-  { label: 'Note operative', hint: 'compaiono nelle stampe per cucina e sala', icon: StickyNote },
+  { key: 'event', label: 'Evento e cliente', hint: 'nome interno, data, turno e chi lo ha richiesto', icon: BookUser },
+  { key: 'covers', label: 'Coperti e tariffa', hint: 'un prezzo bambini separa il calcolo', icon: Users },
+  { key: 'menu', label: 'Composizione menù', hint: 'clicca un piatto per aggiungerlo all\'uscita attiva', icon: Utensils },
+  { key: 'tables', label: 'Tavoli assegnati', hint: 'i tavoli occupati nello stesso turno sono disabilitati', icon: LayoutGrid },
+  { key: 'notes', label: 'Note operative', hint: 'compaiono nelle stampe per cucina e sala', icon: StickyNote },
 ] as const;
 
 // Category filters on Piatti alla carta. There are more of these than a
@@ -201,6 +201,15 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     onAutoOpenNewDishHandled
 }) => {
   const { t } = useTranslation('menu', { useSuspense: false });
+
+  /* I cinque passi del menù banchetto si traducono tutti insieme: la costante
+     resta l'elenco (chiave, icona, versione italiana) e il testo passa di qui.
+     Tradurne uno solo darebbe uno stepper metà inglese e metà italiano. */
+  const banquetSteps = useMemo(() => BANQUET_STEPS.map(p => ({
+    label: t(`banquetStep.${p.key}.label`, p.label),
+    hint: t(`banquetStep.${p.key}.hint`, p.hint),
+    icon: p.icon,
+  })), [t]);
   const { hasPermission, hasFeature, user } = useAuth();
   const canViewBanquetPrice = hasPermission('banquet:view_price');
   const canManageBanquetPayments = hasPermission('banquet:manage_payments');
@@ -3250,10 +3259,10 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           }
           subheader={
             <StepNav
-              steps={BANQUET_STEPS}
+              steps={banquetSteps}
               current={banquetStep}
               onSelect={setBanquetStep}
-              ariaLabel="Passi del menu banchetto"
+              ariaLabel={t('banquetStepsAria')}
             />
           }
         >
