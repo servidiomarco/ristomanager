@@ -23401,8 +23401,14 @@ function findVoiceDateBlock(date: string, shift: 'LUNCH' | 'DINNER', blocks: Voi
 
 // What Sofia reads to the caller when the requested date is blocked. The
 // date readback keeps weekday+day coherent (same reason as check-availability);
-// callback_hours is operator-written free text ("dalle 9:00 alle 12:00").
-function buildVoiceDateBlockMessage(date: string, shift: 'LUNCH' | 'DINNER', block: VoiceDateBlock): string {
+// callback_hours is operator-written free text ("dalle 9:00 alle 12:00") and
+// stays as written even in the English branch — it's the operator's wording.
+function buildVoiceDateBlockMessage(date: string, shift: 'LUNCH' | 'DINNER', block: VoiceDateBlock, language?: string | null): string {
+    if (isEnglishGuest(normalizeLanguageCode(language))) {
+        const shiftLabel = block.shift === 'ALL' ? '' : (shift === 'LUNCH' ? ' for lunch' : ' for dinner');
+        const when = block.callback_hours?.trim() || 'during the restaurant opening hours';
+        return `For ${formatItalianDateReadback(date, 'en')}${shiftLabel} bookings are handled personally by our staff, so I cannot register it myself. Please call back ${when} to speak with an operator. Thank you!`;
+    }
     const shiftLabel = block.shift === 'ALL' ? '' : (shift === 'LUNCH' ? ' a pranzo' : ' a cena');
     const when = block.callback_hours?.trim() || 'negli orari di apertura del ristorante';
     return `Per ${formatItalianDateReadback(date)}${shiftLabel} le prenotazioni vengono gestite personalmente dal nostro staff, quindi non posso registrarla io. La invitiamo a richiamare ${when} per parlare con un operatore. Grazie!`;
@@ -25252,14 +25258,20 @@ function matchVoiceDish(catalogue: { id: number; name: string; norm: string; tok
     return { suggestions: scored };
 }
 
-const takeawayDateReadback = (iso: string): string =>
-    new Date(`${iso}T12:00:00`).toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' });
+const takeawayDateReadback = (iso: string, language?: string | null): string =>
+    new Date(`${iso}T12:00:00`).toLocaleDateString(
+        isEnglishGuest(normalizeLanguageCode(language)) ? 'en-GB' : 'it-IT',
+        { weekday: 'long', day: 'numeric', month: 'long' });
 
 async function handleElevenLabsCheckTakeawaySlots(tenantId: number, req: express.Request, res: express.Response) {
     try {
         if (!authorizeElevenLabs(req, res)) return;
         if (!(await takeawayVoiceOpen(tenantId, res))) return;
         const p = elevenLabsParams(req);
+        // Card #34 — come i tool prenotazioni: 'en' esplicito dal canale
+        // accende messaggi e readback inglesi, tutto il resto resta italiano.
+        const english = normalizeLanguageCode(p.language) === 'en';
+        const lang = english ? 'en' : null;
         // Parse flessibile come le prenotazioni: «domani», «venerdì», una
         // data esplicita — mai far calcolare la data al modello.
         const date = parseFlexibleDate(p.date) ?? getItalianTodayIso();
@@ -25269,7 +25281,9 @@ async function handleElevenLabsCheckTakeawaySlots(tenantId: number, req: express
             getTakeawaySettings(tenantId),
         ]);
         if (settings.stopDate === date) {
-            return res.status(200).json({ success: false, error: 'takeaway_stopped', date, message: `Per ${takeawayDateReadback(date)} non prendiamo ordini d'asporto.` });
+            return res.status(200).json({ success: false, error: 'takeaway_stopped', date, message: english
+                ? `We are not taking takeaway orders for ${takeawayDateReadback(date, lang)}.`
+                : `Per ${takeawayDateReadback(date)} non prendiamo ordini d'asporto.` });
         }
         const counts = await queryWithRetry(
             `SELECT pickup_time, COUNT(*)::int AS n FROM takeaway_orders
@@ -25283,18 +25297,22 @@ async function handleElevenLabsCheckTakeawaySlots(tenantId: number, req: express
         const lunchFree = free(lunch);
         const dinnerFree = free(dinner);
         if (lunchFree.length === 0 && dinnerFree.length === 0) {
-            return res.status(200).json({ success: false, error: 'no_slots', date, message: `Per ${takeawayDateReadback(date)} non ho più orari di ritiro disponibili.` });
+            return res.status(200).json({ success: false, error: 'no_slots', date, message: english
+                ? `I have no pickup times left for ${takeawayDateReadback(date, lang)}.`
+                : `Per ${takeawayDateReadback(date)} non ho più orari di ritiro disponibili.` });
         }
         const parts: string[] = [];
-        if (lunchFree.length > 0) parts.push(`a pranzo ${formatSlotListItalian(lunchFree)}`);
-        if (dinnerFree.length > 0) parts.push(`a cena ${formatSlotListItalian(dinnerFree)}`);
+        if (lunchFree.length > 0) parts.push(english ? `at lunch ${formatSlotListItalian(lunchFree, lang)}` : `a pranzo ${formatSlotListItalian(lunchFree)}`);
+        if (dinnerFree.length > 0) parts.push(english ? `at dinner ${formatSlotListItalian(dinnerFree, lang)}` : `a cena ${formatSlotListItalian(dinnerFree)}`);
         res.status(200).json({
             success: true,
             date,
-            date_readback: takeawayDateReadback(date),
+            date_readback: takeawayDateReadback(date, lang),
             lunch_slots: lunchFree,
             dinner_slots: dinnerFree,
-            message: `Per il ritiro di ${takeawayDateReadback(date)} posso proporre ${parts.join(' e ')}.`,
+            message: english
+                ? `For pickup on ${takeawayDateReadback(date, lang)} I can offer ${parts.join(' and ')}.`
+                : `Per il ritiro di ${takeawayDateReadback(date)} posso proporre ${parts.join(' e ')}.`,
         });
     } catch (err) {
         console.error('[elevenlabs] check-takeaway-slots error:', err);
@@ -25309,25 +25327,35 @@ async function handleElevenLabsCreateTakeawayOrder(tenantId: number, req: expres
         if (!authorizeElevenLabs(req, res)) return;
         if (!(await takeawayVoiceOpen(tenantId, res))) return;
         const p = elevenLabsParams(req);
+        const english = normalizeLanguageCode(p.language) === 'en';
+        const lang = english ? 'en' : null;
         const fail = (error: string, message: string, extra: any = {}) =>
             res.status(200).json({ success: false, error, message, ...extra });
 
         const name = typeof p.customer_name === 'string' ? p.customer_name.trim().slice(0, 120) : '';
         if (!name || VOICE_NAME_PLACEHOLDERS.has(normalizeDishText(name))) {
-            return fail('missing_name', 'Mi serve il nome per l\'ordine: a che nome lo segno?');
+            return fail('missing_name', english
+                ? 'I need a name for the order: what name should I put it under?'
+                : 'Mi serve il nome per l\'ordine: a che nome lo segno?');
         }
         const phoneRaw = typeof p.phone === 'string' && p.phone.trim() ? p.phone : (typeof p.caller_id === 'string' ? p.caller_id : '');
         const phone = phoneRaw.trim().slice(0, 40);
         if (phone.replace(/\D/g, '').length < 6) {
-            return fail('missing_phone', 'Mi serve un numero di telefono per l\'ordine: me lo detti per favore?');
+            return fail('missing_phone', english
+                ? 'I need a phone number for the order: could you give it to me, please?'
+                : 'Mi serve un numero di telefono per l\'ordine: me lo detti per favore?');
         }
         const date = parseFlexibleDate(p.date) ?? getItalianTodayIso();
         const time = parseFlexibleTime(p.time);
-        if (!time) return fail('missing_time', 'A che ora vuoi passare a ritirare?');
+        if (!time) return fail('missing_time', english
+            ? 'What time would you like to come and collect it?'
+            : 'A che ora vuoi passare a ritirare?');
 
         const rawItems = Array.isArray(p.items) ? p.items : [];
-        if (rawItems.length === 0) return fail('missing_items', 'Cosa vuoi ordinare?');
-        if (rawItems.length > 50) return fail('too_many_items', 'Sono troppi piatti per un ordine telefonico: posso segnarne fino a cinquanta.');
+        if (rawItems.length === 0) return fail('missing_items', english ? 'What would you like to order?' : 'Cosa vuoi ordinare?');
+        if (rawItems.length > 50) return fail('too_many_items', english
+            ? 'That is too many dishes for a phone order: I can take up to fifty.'
+            : 'Sono troppi piatti per un ordine telefonico: posso segnarne fino a cinquanta.');
 
         const catalogue = await loadVoiceCatalogue(tenantId);
         const matched: { dish_id: number; qty: number; note: string | null }[] = [];
@@ -25341,23 +25369,37 @@ async function handleElevenLabsCreateTakeawayOrder(tenantId: number, req: expres
                 matched.push({ dish_id: match.dish.id, qty, note: note || null });
                 readback.push(`${qty} ${match.dish.name}`);
             } else if ('ambiguous' in match) {
-                return fail('ambiguous_dish', `Per «${spoken}» ho più piatti simili: ${match.ambiguous.join(', ')}. Quale intendi?`);
+                return fail('ambiguous_dish', english
+                    ? `For "${spoken}" I have more than one similar dish: ${match.ambiguous.join(', ')}. Which one do you mean?`
+                    : `Per «${spoken}» ho più piatti simili: ${match.ambiguous.join(', ')}. Quale intendi?`);
             } else {
-                const hint = match.suggestions.length > 0 ? ` Forse intendevi: ${match.suggestions.join(', ')}?` : '';
-                return fail('unknown_dish', `Non trovo «${spoken}» nel nostro menu.${hint}`);
+                const hint = match.suggestions.length > 0
+                    ? (english ? ` Did you mean: ${match.suggestions.join(', ')}?` : ` Forse intendevi: ${match.suggestions.join(', ')}?`)
+                    : '';
+                return fail('unknown_dish', english
+                    ? `I cannot find "${spoken}" on our menu.${hint}`
+                    : `Non trovo «${spoken}» nel nostro menu.${hint}`);
             }
         }
 
         const slot = await validateTakeawaySlot(tenantId, date, time, { force: false });
         if (slot.error) {
             const code = slot.error.body?.error;
-            if (code === 'takeaway_stopped') return fail('takeaway_stopped', `Per ${takeawayDateReadback(date)} non prendiamo ordini d'asporto.`);
-            if (code === 'slot_full') return fail('slot_full', `Per le ${time} siamo al completo con l'asporto: posso proporti un altro orario.`, { next_tool: 'check_takeaway_slots' });
-            return fail('invalid_slot', `Le ${time} non sono tra gli orari di ritiro: chiedimi gli orari disponibili.`, { next_tool: 'check_takeaway_slots' });
+            if (code === 'takeaway_stopped') return fail('takeaway_stopped', english
+                ? `We are not taking takeaway orders for ${takeawayDateReadback(date, lang)}.`
+                : `Per ${takeawayDateReadback(date)} non prendiamo ordini d'asporto.`);
+            if (code === 'slot_full') return fail('slot_full', english
+                ? `We are fully booked for takeaway at ${time}: I can suggest another time.`
+                : `Per le ${time} siamo al completo con l'asporto: posso proporti un altro orario.`, { next_tool: 'check_takeaway_slots' });
+            return fail('invalid_slot', english
+                ? `${time} is not one of our pickup times: ask me for the available times.`
+                : `Le ${time} non sono tra gli orari di ritiro: chiedimi gli orari disponibili.`, { next_tool: 'check_takeaway_slots' });
         }
         const settings = await getTakeawaySettings(tenantId);
         if (!filterOrderableSlots([time], date, settings.prepMinutes).includes(time)) {
-            return fail('slot_too_soon', `Per le ${time} la cucina non fa in tempo: serve almeno ${settings.prepMinutes} minuti da adesso.`, { next_tool: 'check_takeaway_slots' });
+            return fail('slot_too_soon', english
+                ? `The kitchen cannot make it for ${time}: we need at least ${settings.prepMinutes} minutes from now.`
+                : `Per le ${time} la cucina non fa in tempo: serve almeno ${settings.prepMinutes} minuti da adesso.`, { next_tool: 'check_takeaway_slots' });
         }
 
         const notes = typeof p.notes === 'string' ? p.notes.trim().slice(0, 1000) : '';
@@ -25397,18 +25439,22 @@ async function handleElevenLabsCreateTakeawayOrder(tenantId: number, req: expres
         const totalCents = Number(view.total_cents) || 0;
         const euros = Math.floor(totalCents / 100);
         const cents = totalCents % 100;
-        const totalReadback = cents === 0 ? `${euros} euro` : `${euros} euro e ${cents} centesimi`;
+        const totalReadback = english
+            ? (cents === 0 ? `${euros} euros` : `${euros} euros and ${cents} cents`)
+            : (cents === 0 ? `${euros} euro` : `${euros} euro e ${cents} centesimi`);
         res.status(200).json({
             success: true,
             order_id: orderId,
             daily_number: view?.daily_number ?? null,
             total_cents: totalCents,
             total_readback: totalReadback,
-            date_readback: takeawayDateReadback(date),
+            date_readback: takeawayDateReadback(date, lang),
             items_readback: readback.join(', '),
             // Il numero chiude la frase: è l'ultima cosa detta, quella che
             // il cliente si segna per il ritiro.
-            confirmation_phrase: `Perfetto ${name}: segnato ${readback.join(', ')}, da ritirare ${takeawayDateReadback(date)} alle ${time}. In tutto ${totalReadback}.${view?.daily_number != null ? ` Il suo numero d'ordine è il ${view.daily_number}.` : ''}`,
+            confirmation_phrase: english
+                ? `Perfect ${name}: noted ${readback.join(', ')}, to collect on ${takeawayDateReadback(date, lang)} at ${time}. The total is ${totalReadback}.${view?.daily_number != null ? ` Your order number is ${view.daily_number}.` : ''}`
+                : `Perfetto ${name}: segnato ${readback.join(', ')}, da ritirare ${takeawayDateReadback(date)} alle ${time}. In tutto ${totalReadback}.${view?.daily_number != null ? ` Il suo numero d'ordine è il ${view.daily_number}.` : ''}`,
         });
     } catch (err) {
         console.error('[elevenlabs] create-takeaway-order error:', err);
