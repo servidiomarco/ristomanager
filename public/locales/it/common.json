@@ -163,6 +163,17 @@
     "staff": "Dipendente",
     "takeawayOrder": "Ordine d’asporto"
   },
+  "date": {
+    "today": "Oggi",
+    "tomorrow": "Domani",
+    "yesterday": "Ieri",
+    "backToToday": "Torna a oggi",
+    "previousDay": "Giorno precedente",
+    "nextDay": "Giorno successivo",
+    "chooseDate": "Scegli la data",
+    "previousMonth": "Mese precedente",
+    "nextMonth": "Mese successivo"
+  },
   "toast": {
     "bookingConfirmed": "Prenotazione confermata",
     "bookingDeclined": "Prenotazione rifiutata",

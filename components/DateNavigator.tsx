@@ -1,5 +1,7 @@
-import React, { useRef } from 'react';
-import { Calendar, ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { Calendar, ChevronDown, ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react';
+import { DayPicker, Sheet, useCalendarLabels, useMediaQuery } from './ds';
 
 interface DateNavigatorProps {
   value: string;
@@ -21,8 +23,13 @@ const formatLocalDate = (date: Date) => {
   return `${y}-${m}-${d}`;
 };
 
-const formatDateShort = (date: Date) =>
-  date.toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short' });
+/* ── Il giorno della testata ──────────────────────────────────────────────
+   Le frecce per il giorno prima e dopo, la pastiglia al centro per saltare
+   altrove. La pastiglia apriva il calendario NATIVO del browser: una finestra
+   che non conosce i token, non conosce la lingua dell'app (in inglese anche
+   con l'app in italiano) e cambia faccia fra Chrome, Safari e Windows. Adesso
+   apre il DayPicker del design system — lo stesso calendario del resto
+   dell'app — in una tendina col puntatore e in un foglio sul telefono. */
 
 export const DateNavigator: React.FC<DateNavigatorProps> = ({
   value,
@@ -32,7 +39,13 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
   className = '',
   onCanvas = false,
 }) => {
-  const inputRef = useRef<HTMLInputElement>(null);
+  const { t } = useTranslation('common', { useSuspense: false });
+  const { locale } = useCalendarLabels();
+  const isPhone = !useMediaQuery('(min-width: 640px)');
+  const [open, setOpen] = useState(false);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
   const surface = onCanvas
     ? 'bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]'
     : 'bg-[var(--ds-surface-row)]';
@@ -40,15 +53,18 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
   const todayStr = formatLocalDate(new Date());
   const isToday = value === todayStr;
 
+  const formatDateShort = (date: Date) =>
+    date.toLocaleDateString(locale, { weekday: 'short', day: 'numeric', month: 'short' });
+
   const relativeLabel = (() => {
-    if (isToday) return 'Oggi';
+    if (isToday) return t('date.today');
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const target = new Date(selectedDate);
     target.setHours(0, 0, 0, 0);
     const diff = Math.round((target.getTime() - today.getTime()) / 86_400_000);
-    if (diff === 1) return 'Domani';
-    if (diff === -1) return 'Ieri';
+    if (diff === 1) return t('date.tomorrow');
+    if (diff === -1) return t('date.yesterday');
     return null;
   })();
 
@@ -59,6 +75,33 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
   };
   const goToToday = () => onChange(todayStr);
 
+  // Fuori e Esc chiudono la tendina. Sul telefono ci pensa il foglio, che
+  // porta con sé il suo velo e il suo Escape.
+  useEffect(() => {
+    if (!open || isPhone) return;
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (popoverRef.current?.contains(target) || triggerRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      setOpen(false);
+      triggerRef.current?.focus();
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open, isPhone]);
+
+  const pick = (iso: string) => {
+    onChange(iso);
+    setOpen(false);
+  };
+
   const backChip = (
     <button
       type="button"
@@ -66,7 +109,7 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
       className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-[var(--ds-radius-control)] ${surface} text-[13px] font-medium text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors flex-shrink-0`}
     >
       <RotateCcw className="h-3 w-3" />
-      Torna a oggi
+      {t('date.backToToday')}
     </button>
   );
 
@@ -76,33 +119,21 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
         <button
           type="button"
           onClick={() => navigate(-1)}
-          aria-label="Giorno precedente"
+          aria-label={t('date.previousDay')}
           className={`h-10 w-10 flex-shrink-0 rounded-[var(--ds-radius-control)] ${surface} text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] active:scale-[0.96] transition-all flex items-center justify-center`}
         >
           <ChevronLeft className="h-4 w-4" />
         </button>
 
         <div className={`relative ${widthClass}`}>
-          <input
-            ref={inputRef}
-            type="date"
-            value={value}
-            onChange={(e) => {
-              if (e.target.value) onChange(e.target.value);
-            }}
-            onClick={(e) => {
-              try {
-                if (typeof e.currentTarget.showPicker === 'function') e.currentTarget.showPicker();
-              } catch {
-                // ignore — the native click on the input already triggers the picker
-              }
-            }}
-            aria-label="Seleziona data"
-            className="peer absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-          />
-          <div
-            aria-hidden="true"
-            className={`pointer-events-none w-full h-10 px-4 rounded-[var(--ds-radius-control)] transition-colors flex items-center justify-center gap-2 ${
+          <button
+            ref={triggerRef}
+            type="button"
+            onClick={() => setOpen(v => !v)}
+            aria-haspopup="dialog"
+            aria-expanded={open}
+            aria-label={t('date.chooseDate')}
+            className={`w-full h-10 px-4 rounded-[var(--ds-radius-control)] transition-colors flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
               isToday
                 ? surface
                 : `${surface} ring-1 ring-inset ring-[var(--ds-border-strong)]`
@@ -110,6 +141,7 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
           >
             <Calendar
               className={`h-4 w-4 flex-shrink-0 ${isToday ? 'text-[var(--ds-text-secondary)]' : 'text-[var(--ds-text-primary)]'}`}
+              aria-hidden
             />
             {relativeLabel ? (
               <span className="flex items-baseline gap-1.5 min-w-0">
@@ -123,13 +155,30 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
                 {formatDateShort(selectedDate)}
               </span>
             )}
-          </div>
+            {/* La pastiglia prima non diceva di essere premibile: si scopriva
+                il calendario per caso. */}
+            <ChevronDown
+              className={`h-3.5 w-3.5 flex-shrink-0 text-[var(--ds-text-muted)] transition-transform ${open ? 'rotate-180' : ''}`}
+              aria-hidden
+            />
+          </button>
+
+          {open && !isPhone && (
+            <div
+              ref={popoverRef}
+              role="dialog"
+              aria-label={t('date.chooseDate')}
+              className="absolute left-1/2 top-full z-40 mt-2 w-[300px] -translate-x-1/2"
+            >
+              <DayPicker value={value} onPick={pick} shortcuts />
+            </div>
+          )}
         </div>
 
         <button
           type="button"
           onClick={() => navigate(1)}
-          aria-label="Giorno successivo"
+          aria-label={t('date.nextDay')}
           className={`h-10 w-10 flex-shrink-0 rounded-[var(--ds-radius-control)] ${surface} text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] active:scale-[0.96] transition-all flex items-center justify-center`}
         >
           <ChevronRight className="h-4 w-4" />
@@ -142,6 +191,14 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
         <div className="flex justify-center mt-2 animate-[fadeIn_180ms_ease-out]">
           {backChip}
         </div>
+      )}
+
+      {/* Sul telefono la tendina starebbe stretta contro il bordo: il
+          calendario sale dal basso, dove il pollice arriva. */}
+      {isPhone && (
+        <Sheet open={open} onClose={() => setOpen(false)} title={t('date.chooseDate')} bodyClassName="px-4 pb-4">
+          <DayPicker value={value} onPick={pick} shortcuts bare />
+        </Sheet>
       )}
     </div>
   );

@@ -163,6 +163,17 @@
     "staff": "Staff member",
     "takeawayOrder": "Takeaway order"
   },
+  "date": {
+    "today": "Today",
+    "tomorrow": "Tomorrow",
+    "yesterday": "Yesterday",
+    "backToToday": "Back to today",
+    "previousDay": "Previous day",
+    "nextDay": "Next day",
+    "chooseDate": "Pick a date",
+    "previousMonth": "Previous month",
+    "nextMonth": "Next month"
+  },
   "toast": {
     "bookingConfirmed": "Booking confirmed",
     "bookingDeclined": "Booking declined",
