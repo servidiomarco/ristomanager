@@ -151,10 +151,12 @@ export async function isValidSlotForShift(tenantId: number, time: string, date: 
 /**
  * Italian list rendering for an array of HH:MM slot strings.
  * Example: ["19:30","20:00","20:30"] → "19:30, 20:00 o 20:30"
+ * Con language 'en' cambia solo la congiunzione ("… or 20:30").
  */
-export function formatSlotListItalian(slots: readonly string[]): string {
+export function formatSlotListItalian(slots: readonly string[], language?: string | null): string {
     if (slots.length === 0) return '';
     if (slots.length === 1) return slots[0];
     const head = slots.slice(0, -1).join(', ');
-    return `${head} o ${slots[slots.length - 1]}`;
+    const conj = String(language ?? '').trim().toLowerCase().startsWith('en') ? 'or' : 'o';
+    return `${head} ${conj} ${slots[slots.length - 1]}`;
 }

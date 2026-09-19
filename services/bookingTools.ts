@@ -95,11 +95,11 @@ export interface BookingToolsDeps {
     parseFlexibleTime: (v: any) => string | null;
     normalizeItalianPhone: (v: string) => string;
     normalizeCustomerName: (v: string) => string;
-    formatItalianDateReadback: (date: string) => string;
-    formatItalianConfirmation: (r: any) => string;
-    formatItalianCancellation: (r: any) => string;
-    formatItalianModification: (r: any) => string;
-    formatSlotListItalian: (slots: string[]) => string;
+    formatItalianDateReadback: (date: string, language?: string | null) => string;
+    formatItalianConfirmation: (r: any, language?: string | null) => string;
+    formatItalianCancellation: (r: any, language?: string | null) => string;
+    formatItalianModification: (r: any, language?: string | null) => string;
+    formatSlotListItalian: (slots: string[], language?: string | null) => string;
     formatBookingDateTime: (d: any) => { dateLabel: string; timeLabel: string };
     formatEuroMinor: (cents: number) => string;
     asUtcInstant: (v: any) => any;
@@ -123,7 +123,7 @@ export interface BookingToolsDeps {
 
     getVoiceDateBlocks: (tenantId: number) => Promise<any>;
     findVoiceDateBlock: (date: string, shift: 'LUNCH' | 'DINNER', blocks: any) => any;
-    buildVoiceDateBlockMessage: (date: string, shift: 'LUNCH' | 'DINNER', block: any) => string;
+    buildVoiceDateBlockMessage: (date: string, shift: 'LUNCH' | 'DINNER', block: any, language?: string | null) => string;
     getLargeGroupThreshold: (tenantId: number) => Promise<number>;
 
     isAutoDepositRequired: (tenantId: number, guests: number) => Promise<boolean>;
@@ -178,6 +178,26 @@ const MSG = {
         `Per gruppi da ${threshold + 1} persone in su preferiamo gestire la prenotazione al telefono. Lascio un promemoria e la richiamiamo il prima possibile.`,
 };
 
+// Card #34 — versione inglese delle stesse frasi: il backend risponde nella
+// lingua della chiamata (elevenLabsParams inoltra `language` a ogni tool),
+// così l'agente legge invece di tradurre al volo. Qualunque valore diverso
+// da 'en' resta sull'italiano storico.
+const MSG_EN: typeof MSG = {
+    invalidDate: 'Date format not recognised. Accepted examples: 2026-05-14, 14/05/2026, "14 May 2026".',
+    invalidTime: 'Time format not recognised. Accepted examples: 20:30, "eight thirty", "half past eight".',
+    invalidShift: 'The shift is not valid. Is it for lunch or dinner?',
+    invalidGuests: 'The number of guests is not valid. Could you repeat how many people the booking is for?',
+    invalidPhoneCreate: 'I do not have a phone number for the booking. Could you give it to me?',
+    invalidPhoneFind: 'I do not have a phone number to look up the booking. Could you give it to me?',
+    notFound: 'I cannot find a booking with these details. Could you confirm the date and the name it is under?',
+    largeGroup: (threshold: number) =>
+        `For groups of ${threshold + 1} or more we prefer to handle the booking personally. I will leave a note and we will call you back as soon as possible.`,
+};
+const msg = (english: boolean) => (english ? MSG_EN : MSG);
+
+/** 'en' esplicito dal canale ⇒ frasi inglesi; tutto il resto italiano. */
+const isEnglishCall = (p: { language?: any }): boolean => normalizeLanguageCode(p.language) === 'en';
+
 const isShift = (s: string): s is Shift => s === Shift.LUNCH || s === Shift.DINNER;
 
 // ---------------------------------------------------------------------------
@@ -195,6 +215,9 @@ export interface CheckAvailabilityParams {
      *  scopriva che le 21:00 erano spente (71 chiamate, 9 clienti persi).
      *  Validarlo qui chiude il gap fra promessa e salvataggio. */
     time?: any;
+    /** Card #34 — lingua della chiamata (elevenLabsParams la inoltra sempre):
+     *  'en' accende messaggi e date_readback inglesi. */
+    language?: any;
 }
 
 /** I due orari della griglia più vicini a quello richiesto, per proporli a
@@ -224,6 +247,8 @@ export async function checkAvailability(
 
     const rawShift = String(p.shift ?? '').trim().toUpperCase();
     const guests = Number(p.guests);
+    const english = isEnglishCall(p);
+    const language = english ? 'en' : null;
     const rawLocation = String(p.location_preference ?? '').trim().toUpperCase();
     const locationPreference = rawLocation === 'INDOOR' || rawLocation === 'OUTDOOR'
         ? (rawLocation as 'INDOOR' | 'OUTDOOR')
@@ -232,18 +257,18 @@ export async function checkAvailability(
     const normalizedDate = d.parseFlexibleDate(p.date);
     if (!normalizedDate) {
         console.warn(`${channel.logPrefix} check-availability rejected: unparseable date`, { received: p.date });
-        return fail('invalid_date', MSG.invalidDate);
+        return fail('invalid_date', msg(english).invalidDate);
     }
-    if (!isShift(rawShift)) return fail('invalid_shift', MSG.invalidShift);
-    if (!Number.isFinite(guests) || guests < 1 || guests > 50) return fail('invalid_guests', MSG.invalidGuests);
+    if (!isShift(rawShift)) return fail('invalid_shift', msg(english).invalidShift);
+    if (!Number.isFinite(guests) || guests < 1 || guests > 50) return fail('invalid_guests', msg(english).invalidGuests);
 
     // Data bloccata dall'operatore (feste a menù fisso ecc.): non si prenota e
     // non si leggono nemmeno i tavoli liberi, si invita a richiamare.
     const dateBlock = d.findVoiceDateBlock(normalizedDate, rawShift, await d.getVoiceDateBlocks(tenantId));
     if (dateBlock) {
         console.log(`${channel.logPrefix} check-availability blocked date`, { date: normalizedDate, shift: rawShift, block: dateBlock });
-        return fail('date_blocked', d.buildVoiceDateBlockMessage(normalizedDate, rawShift, dateBlock), {
-            date_readback: d.formatItalianDateReadback(normalizedDate),
+        return fail('date_blocked', d.buildVoiceDateBlockMessage(normalizedDate, rawShift, dateBlock, language), {
+            date_readback: d.formatItalianDateReadback(normalizedDate, language),
         });
     }
 
@@ -257,7 +282,7 @@ export async function checkAvailability(
         console.log(`${channel.logPrefix} check-availability handoff (large group)`, { date: normalizedDate, shift: rawShift, guests, threshold });
         // next_tool: il promemoria promesso dalla frase va salvato DAVVERO —
         // l'estate 2026 ha chiuso 13 gruppi grandi senza lasciare traccia.
-        return fail('large_group', MSG.largeGroup(threshold), { next_tool: 'save_callback_request' });
+        return fail('large_group', msg(english).largeGroup(threshold), { next_tool: 'save_callback_request' });
     }
 
     try {
@@ -279,8 +304,9 @@ export async function checkAvailability(
                 timeFields = { requested_time: requestedTime, requested_time_available: true };
             } else {
                 const near = nearestSlots(requestedTime, validSlots);
-                const proposal = near.length === 2 ? `alle ${near[0]} o alle ${near[1]}`
-                    : near.length === 1 ? `alle ${near[0]}` : '';
+                const proposal = english
+                    ? (near.length === 2 ? `${near[0]} or ${near[1]}` : near.length === 1 ? `${near[0]}` : '')
+                    : (near.length === 2 ? `alle ${near[0]} o alle ${near[1]}` : near.length === 1 ? `alle ${near[0]}` : '');
                 console.warn(`${channel.logPrefix} check-availability: requested time off grid`, {
                     date: normalizedDate, shift: rawShift, requested_time: requestedTime, available_slots: validSlots,
                 });
@@ -290,8 +316,12 @@ export async function checkAvailability(
                     available_slots: validSlots,
                     nearest_slots: near,
                     message: proposal
-                        ? `Alle ${requestedTime} quel giorno non prendiamo prenotazioni. Gli orari più vicini sono ${proposal}: quale preferisce?`
-                        : 'Per quel turno non ci sono orari prenotabili quel giorno. Possiamo provare un altro giorno?',
+                        ? (english
+                            ? `We do not take bookings at ${requestedTime} that day. The closest times are ${proposal}: which one do you prefer?`
+                            : `Alle ${requestedTime} quel giorno non prendiamo prenotazioni. Gli orari più vicini sono ${proposal}: quale preferisce?`)
+                        : (english
+                            ? 'There are no bookable times for that shift on that day. Shall we try another day?'
+                            : 'Per quel turno non ci sono orari prenotabili quel giorno. Possiamo provare un altro giorno?'),
                 };
             }
         }
@@ -300,12 +330,15 @@ export async function checkAvailability(
         // date_readback è la stringa "venerdì 10 luglio" che il modello DEVE
         // ripetere alla lettera: da solo sbaglia regolarmente l'accoppiata
         // giorno della settimana / giorno del mese.
-        return { body: { ...result, ...timeFields, date_readback: d.formatItalianDateReadback(normalizedDate) } };
+        return { body: { ...result, ...timeFields, date_readback: d.formatItalianDateReadback(normalizedDate, language) } };
     } catch (err) {
         console.error(`${channel.logPrefix} check-availability error`, err);
         return {
             serverError: true,
-            body: { available: false, free_tables_count: 0, message: 'Si è verificato un errore tecnico, posso richiamarla?' },
+            body: {
+                available: false, free_tables_count: 0,
+                message: english ? 'A technical error occurred, may I call you back?' : 'Si è verificato un errore tecnico, posso richiamarla?',
+            },
         };
     }
 }
@@ -378,15 +411,20 @@ export async function createReservation(
     const explicitLanguage = normalizeLanguageCode(p.language);
     const detectedLanguage = explicitLanguage
         ?? (channel.id === 'whatsapp' && phoneRaw ? detectLanguageFromPhonePrefix(phoneRaw) : null);
+    const english = detectedLanguage === 'en';
 
     if (!customerName) {
-        return fail('invalid_customer_name', 'Non ho colto il nome per la prenotazione. Può ripetermi il nome del cliente?');
+        return fail('invalid_customer_name', english
+            ? 'I did not catch the name for the booking. Could you repeat the customer\'s name?'
+            : 'Non ho colto il nome per la prenotazione. Può ripetermi il nome del cliente?');
     }
     if (NAME_PLACEHOLDERS.has(customerName.toLowerCase().trim())) {
         console.warn(`${channel.logPrefix} create-reservation rejected: placeholder name`, { received: customerName });
-        return fail('invalid_customer_name', 'Serve il nome reale del cliente per registrare la prenotazione. Chieda nome e cognome al cliente e riprovi.');
+        return fail('invalid_customer_name', english
+            ? 'I need the customer\'s real name to register the booking. Ask for their full name and try again.'
+            : 'Serve il nome reale del cliente per registrare la prenotazione. Chieda nome e cognome al cliente e riprovi.');
     }
-    if (!phoneRaw) return fail('invalid_phone', MSG.invalidPhoneCreate);
+    if (!phoneRaw) return fail('invalid_phone', msg(english).invalidPhoneCreate);
 
     // Card #27 — blacklist: il comportamento lo decide il tenant per fonte
     // (Impostazioni → Opzioni prenotazioni → Blacklist). Su 'block' il canale
@@ -396,7 +434,9 @@ export async function createReservation(
     if ((await d.getBlacklistPolicy(tenantId))[blacklistSource] === 'block'
         && await d.isPhoneBlacklisted(tenantId, phoneRaw)) {
         console.log(`${channel.logPrefix} create-reservation blocked (blacklist)`, { conversation_id: conversationId });
-        return fail('customer_blacklisted', 'Mi dispiace, al momento non posso registrare questa prenotazione. Il ristorante resta a disposizione per assisterla direttamente.');
+        return fail('customer_blacklisted', english
+            ? 'I am sorry, I cannot register this booking right now. The restaurant remains available to assist you directly.'
+            : 'Mi dispiace, al momento non posso registrare questa prenotazione. Il ristorante resta a disposizione per assisterla direttamente.');
     }
 
     // Chi chiama da un numero già in rubrica di norma È quel cliente: se il
@@ -428,7 +468,9 @@ export async function createReservation(
                     given: customerName, registered: regName, conversation_id: conversationId,
                 });
                 return fail('name_mismatch',
-                    `Questo numero risulta già registrato a nome ${regName}. La prenotazione è per ${regName} o per un'altra persona?`,
+                    english
+                        ? `This number is already registered under the name ${regName}. Is the booking for ${regName} or for someone else?`
+                        : `Questo numero risulta già registrato a nome ${regName}. La prenotazione è per ${regName} o per un'altra persona?`,
                     {
                         registered_name: regName,
                         hint: 'Se il cliente conferma il nome in rubrica, richiama il tool con quel nome. Se la prenotazione è davvero per un\'altra persona, richiama il tool con gli stessi dati e name_confirmed: true.',
@@ -446,21 +488,21 @@ export async function createReservation(
     const normalizedDate = d.parseFlexibleDate(p.date);
     if (!normalizedDate) {
         console.warn(`${channel.logPrefix} create-reservation rejected: unparseable date`, { received: p.date });
-        return fail('invalid_date', MSG.invalidDate);
+        return fail('invalid_date', msg(english).invalidDate);
     }
     const normalizedTime = d.parseFlexibleTime(p.time);
     if (!normalizedTime) {
         console.warn(`${channel.logPrefix} create-reservation rejected: unparseable time`, { received: p.time });
-        return fail('invalid_time', MSG.invalidTime);
+        return fail('invalid_time', msg(english).invalidTime);
     }
-    if (!isShift(rawShift)) return fail('invalid_shift', MSG.invalidShift);
+    if (!isShift(rawShift)) return fail('invalid_shift', msg(english).invalidShift);
 
     // Doppia difesa sul blocco data: un modello che salta il controllo di
     // disponibilità non deve comunque poter prenotare un giorno riservato.
     const dateBlock = d.findVoiceDateBlock(normalizedDate, rawShift, await d.getVoiceDateBlocks(tenantId));
     if (dateBlock) {
         console.log(`${channel.logPrefix} create-reservation blocked date`, { date: normalizedDate, shift: rawShift, block: dateBlock, conversation_id: conversationId });
-        return fail('date_blocked', d.buildVoiceDateBlockMessage(normalizedDate, rawShift, dateBlock));
+        return fail('date_blocked', d.buildVoiceDateBlockMessage(normalizedDate, rawShift, dateBlock, english ? 'en' : null));
     }
 
     // L'orario deve stare sulla griglia degli slot, altrimenti la prenotazione
@@ -468,7 +510,9 @@ export async function createReservation(
     // dipende da opening_hours + special_closures, quindi cambia per giorno.
     const validSlots = await d.getAvailableSlots(tenantId, normalizedDate, rawShift as Shift);
     if (!validSlots.includes(normalizedTime)) {
-        const shiftLabel = (rawShift as Shift) === Shift.LUNCH ? 'il pranzo' : 'la cena';
+        const shiftLabel = english
+            ? ((rawShift as Shift) === Shift.LUNCH ? 'lunch' : 'dinner')
+            : ((rawShift as Shift) === Shift.LUNCH ? 'il pranzo' : 'la cena');
         console.warn(`${channel.logPrefix} create-reservation rejected: invalid_slot`, {
             received_time: p.time, normalized_time: normalizedTime, shift: rawShift, available_slots: validSlots,
         });
@@ -476,19 +520,25 @@ export async function createReservation(
         // telefono sono il punto esatto in cui i clienti dell'estate 2026
         // riattaccavano ("Non ho capito gli orari").
         const near = nearestSlots(normalizedTime, validSlots);
-        const message = validSlots.length === 0
-            ? `Mi dispiace, ${shiftLabel} di quel giorno non è disponibile. Possiamo provare un altro giorno?`
-            : near.length === 2
-                ? `Alle ${normalizedTime} non prendiamo prenotazioni: gli orari più vicini sono le ${near[0]} o le ${near[1]}. Quale preferisce?`
-                : `Per ${shiftLabel} possiamo prenotare solo alle ${d.formatSlotListItalian(validSlots)}. Quale orario preferisce?`;
+        const message = english
+            ? (validSlots.length === 0
+                ? `I am sorry, ${shiftLabel} is not available that day. Shall we try another day?`
+                : near.length === 2
+                    ? `We do not take bookings at ${normalizedTime}: the closest times are ${near[0]} or ${near[1]}. Which one do you prefer?`
+                    : `For ${shiftLabel} we can only book at ${d.formatSlotListItalian(validSlots, 'en')}. Which time do you prefer?`)
+            : (validSlots.length === 0
+                ? `Mi dispiace, ${shiftLabel} di quel giorno non è disponibile. Possiamo provare un altro giorno?`
+                : near.length === 2
+                    ? `Alle ${normalizedTime} non prendiamo prenotazioni: gli orari più vicini sono le ${near[0]} o le ${near[1]}. Quale preferisce?`
+                    : `Per ${shiftLabel} possiamo prenotare solo alle ${d.formatSlotListItalian(validSlots)}. Quale orario preferisce?`);
         return fail('invalid_slot', message, { available_slots: validSlots, nearest_slots: near });
     }
-    if (!Number.isFinite(guests) || guests < 1 || guests > 50) return fail('invalid_guests', MSG.invalidGuests);
+    if (!Number.isFinite(guests) || guests < 1 || guests > 50) return fail('invalid_guests', msg(english).invalidGuests);
 
     const threshold = await d.getLargeGroupThreshold(tenantId);
     if (guests > threshold) {
         console.log(`${channel.logPrefix} create-reservation blocked (large group)`, { guests, threshold, conversation_id: conversationId });
-        return fail('large_group', MSG.largeGroup(threshold), { next_tool: 'save_callback_request' });
+        return fail('large_group', msg(english).largeGroup(threshold), { next_tool: 'save_callback_request' });
     }
 
     const childrenNum = Number(p.children);
@@ -653,10 +703,14 @@ export async function createReservation(
         // che il tavolo è garantito solo dopo il pagamento.
         const firstName = spokenFirstName(d.toTitleCase(created.customer_name));
         const confirmationPhrase = depositCheckoutUrl
-            ? `Registrato ${firstName}: per i gruppi numerosi chiediamo una caparra di ${d.formatEuroMinor(depositAmountCents)}. Le ho appena inviato il link di pagamento su WhatsApp, o via SMS. Il tavolo sarà confermato appena riceviamo il pagamento. Grazie!`
+            ? (english
+                ? `Registered ${firstName}: for large groups we ask for a deposit of ${d.formatEuroMinor(depositAmountCents)}. I have just sent you the payment link on WhatsApp, or by SMS. The table will be confirmed as soon as we receive the payment. Thank you!`
+                : `Registrato ${firstName}: per i gruppi numerosi chiediamo una caparra di ${d.formatEuroMinor(depositAmountCents)}. Le ho appena inviato il link di pagamento su WhatsApp, o via SMS. Il tavolo sarà confermato appena riceviamo il pagamento. Grazie!`)
             : depositRequired
-                ? `Registrato ${firstName}: per i gruppi numerosi è prevista una caparra. La ricontatteremo a breve per completare la prenotazione. Grazie!`
-                : d.formatItalianConfirmation(created);
+                ? (english
+                    ? `Registered ${firstName}: for large groups a deposit is required. We will contact you shortly to complete the booking. Thank you!`
+                    : `Registrato ${firstName}: per i gruppi numerosi è prevista una caparra. La ricontatteremo a breve per completare la prenotazione. Grazie!`)
+                : d.formatItalianConfirmation(created, detectedLanguage);
 
         console.log(`${channel.logPrefix} create-reservation OK`, {
             id: created.id, conversation_id: conversationId, customer: created.customer_name,
@@ -670,7 +724,7 @@ export async function createReservation(
                 reservation_id: created.id,
                 requires_review: created.requires_review,
                 confirmation_phrase: confirmationPhrase,
-                date_readback: d.formatItalianDateReadback(normalizedDate),
+                date_readback: d.formatItalianDateReadback(normalizedDate, detectedLanguage),
                 table_id: created.table_id,
                 table_name: created.table_name,
                 room_name: created.room_name,
@@ -684,7 +738,12 @@ export async function createReservation(
         console.error(`${channel.logPrefix} create-reservation error`, err);
         return {
             serverError: true,
-            body: { success: false, message: 'Si è verificato un errore tecnico nel salvare la prenotazione, posso richiamarla?' },
+            body: {
+                success: false,
+                message: english
+                    ? 'A technical error occurred while saving the booking, may I call you back?'
+                    : 'Si è verificato un errore tecnico nel salvare la prenotazione, posso richiamarla?',
+            },
         };
     }
 }
@@ -702,6 +761,8 @@ export interface CancelReservationParams {
     date?: any;
     time?: any;
     conversation_id?: string;
+    /** Card #34 — lingua della chiamata: 'en' accende le frasi inglesi. */
+    language?: any;
 }
 
 /** Il primo valore che contiene almeno una cifra: un telefono senza cifre
@@ -722,12 +783,13 @@ export async function cancelReservation(
     const phoneSource: 'customer' | 'caller_id' | 'none' = /\d/.test(String(p.phone ?? ''))
         ? 'customer' : phoneRaw ? 'caller_id' : 'none';
     const customerName = String(p.customer_name ?? '').trim() || undefined;
+    const english = isEnglishCall(p);
 
-    if (!phoneRaw && !customerName) return fail('invalid_phone', MSG.invalidPhoneFind);
+    if (!phoneRaw && !customerName) return fail('invalid_phone', msg(english).invalidPhoneFind);
     const normalizedDate = d.parseFlexibleDate(p.date);
     if (!normalizedDate) {
         console.warn(`${channel.logPrefix} cancel-reservation rejected: unparseable date`, { received: p.date });
-        return fail('invalid_date', MSG.invalidDate);
+        return fail('invalid_date', msg(english).invalidDate);
     }
     // L'orario è facoltativo: serve solo a distinguere quando lo stesso numero
     // ha più prenotazioni nello stesso giorno.
@@ -736,7 +798,7 @@ export async function cancelReservation(
         const t = d.parseFlexibleTime(p.time);
         if (!t) {
             console.warn(`${channel.logPrefix} cancel-reservation rejected: unparseable time`, { received: p.time });
-            return fail('invalid_time', MSG.invalidTime);
+            return fail('invalid_time', msg(english).invalidTime);
         }
         normalizedTime = t;
     }
@@ -755,7 +817,7 @@ export async function cancelReservation(
             console.log(`${channel.logPrefix} cancel-reservation: no match`, {
                 phone: d.normalizeItalianPhone(phoneRaw), date: normalizedDate, time: normalizedTime,
             });
-            return { body: { success: false, status: 'not_found', message: MSG.notFound } };
+            return { body: { success: false, status: 'not_found', message: msg(english).notFound } };
         }
 
         if (outcome.status === 'already_cancelled') {
@@ -768,7 +830,9 @@ export async function cancelReservation(
                     success: false,
                     status: 'already_cancelled',
                     reservation_id: outcome.reservation.id,
-                    message: `La prenotazione di ${outcome.reservation.customer_name} delle ${timeLabel} risulta già annullata. C'è altro che posso fare?`,
+                    message: english
+                        ? `The booking for ${outcome.reservation.customer_name} at ${timeLabel} appears to be already cancelled. Is there anything else I can do?`
+                        : `La prenotazione di ${outcome.reservation.customer_name} delle ${timeLabel} risulta già annullata. C'è altro che posso fare?`,
                 },
             };
         }
@@ -776,7 +840,7 @@ export async function cancelReservation(
         if (outcome.status === 'ambiguous') {
             const list = outcome.candidates.map((c: any) => {
                 const { timeLabel } = d.formatBookingDateTime(d.asUtcInstant(c.reservation_time));
-                return `${timeLabel} per ${c.guests}`;
+                return english ? `${timeLabel} for ${c.guests}` : `${timeLabel} per ${c.guests}`;
             }).join(', ');
             console.log(`${channel.logPrefix} cancel-reservation: ambiguous`, {
                 count: outcome.candidates.length, candidates: outcome.candidates.map((c: any) => c.id),
@@ -786,7 +850,9 @@ export async function cancelReservation(
                     success: false,
                     status: 'ambiguous',
                     candidates: outcome.candidates,
-                    message: `Ho trovato più prenotazioni per quel giorno (${list}). Mi conferma l'orario di quella da annullare?`,
+                    message: english
+                        ? `I found more than one booking for that day (${list}). Could you confirm the time of the one to cancel?`
+                        : `Ho trovato più prenotazioni per quel giorno (${list}). Mi conferma l'orario di quella da annullare?`,
                 },
             };
         }
@@ -842,14 +908,19 @@ export async function cancelReservation(
                 success: true,
                 status: 'cancelled',
                 reservation_id: cancelled.id,
-                confirmation_phrase: d.formatItalianCancellation(cancelled),
+                confirmation_phrase: d.formatItalianCancellation(cancelled, english ? 'en' : null),
             },
         };
     } catch (err: any) {
         console.error(`${channel.logPrefix} cancel-reservation error`, err);
         return {
             serverError: true,
-            body: { success: false, message: 'Si è verificato un errore tecnico, posso richiamarla per cancellare la prenotazione?' },
+            body: {
+                success: false,
+                message: english
+                    ? 'A technical error occurred, may I call you back to cancel the booking?'
+                    : 'Si è verificato un errore tecnico, posso richiamarla per cancellare la prenotazione?',
+            },
         };
     }
 }
@@ -878,16 +949,21 @@ export async function modifyReservation(
 
     const phoneRaw = firstUsablePhone(p.phone, p.caller_id);
     const customerName = String(p.customer_name ?? '').trim() || undefined;
-    if (!phoneRaw && !customerName) return fail('invalid_phone', MSG.invalidPhoneFind);
+    const english = isEnglishCall(p);
+    if (!phoneRaw && !customerName) return fail('invalid_phone', msg(english).invalidPhoneFind);
 
     const normalizedDate = d.parseFlexibleDate(p.date);
     if (!normalizedDate) {
-        return fail('invalid_date', 'Formato data della prenotazione da modificare non riconosciuto. Esempi: 2026-05-14, 14/05/2026, "14 maggio 2026".');
+        return fail('invalid_date', english
+            ? 'Date format of the booking to modify not recognised. Examples: 2026-05-14, 14/05/2026, "14 May 2026".'
+            : 'Formato data della prenotazione da modificare non riconosciuto. Esempi: 2026-05-14, 14/05/2026, "14 maggio 2026".');
     }
     let normalizedTime: string | undefined;
     if (p.time !== undefined && p.time !== null && String(p.time).trim() !== '') {
         const t = d.parseFlexibleTime(p.time);
-        if (!t) return fail('invalid_time', 'Formato orario della prenotazione non riconosciuto. Esempi: 20:30, "20 e 30", "20 e mezza".');
+        if (!t) return fail('invalid_time', english
+            ? 'Time format of the booking not recognised. Examples: 20:30, "eight thirty".'
+            : 'Formato orario della prenotazione non riconosciuto. Esempi: 20:30, "20 e 30", "20 e mezza".');
         normalizedTime = t;
     }
 
@@ -895,24 +971,32 @@ export async function modifyReservation(
     let newDate: string | undefined;
     if (p.new_date !== undefined && p.new_date !== null && String(p.new_date).trim() !== '') {
         newDate = d.parseFlexibleDate(p.new_date) || undefined;
-        if (!newDate) return fail('invalid_new_date', 'Formato nuova data non riconosciuto. Esempi: 2026-05-14, 14/05/2026, "14 maggio 2026".');
+        if (!newDate) return fail('invalid_new_date', english
+            ? 'New date format not recognised. Examples: 2026-05-14, 14/05/2026, "14 May 2026".'
+            : 'Formato nuova data non riconosciuto. Esempi: 2026-05-14, 14/05/2026, "14 maggio 2026".');
     }
     let newTime: string | undefined;
     if (p.new_time !== undefined && p.new_time !== null && String(p.new_time).trim() !== '') {
         newTime = d.parseFlexibleTime(p.new_time) || undefined;
-        if (!newTime) return fail('invalid_new_time', 'Formato nuovo orario non riconosciuto. Esempi: 20:30, "20 e 30", "20 e mezza".');
+        if (!newTime) return fail('invalid_new_time', english
+            ? 'New time format not recognised. Examples: 20:30, "eight thirty".'
+            : 'Formato nuovo orario non riconosciuto. Esempi: 20:30, "20 e 30", "20 e mezza".');
     }
     let newShift: Shift | undefined;
     if (p.new_shift !== undefined && p.new_shift !== null && String(p.new_shift).trim() !== '') {
         const s = String(p.new_shift).trim().toUpperCase();
-        if (!isShift(s)) return fail('invalid_new_shift', 'Il nuovo turno non è valido. Può indicare se si tratta di pranzo o cena?');
+        if (!isShift(s)) return fail('invalid_new_shift', english
+            ? 'The new shift is not valid. Is it for lunch or dinner?'
+            : 'Il nuovo turno non è valido. Può indicare se si tratta di pranzo o cena?');
         newShift = s as Shift;
     }
     let newGuests: number | undefined;
     if (p.new_guests !== undefined && p.new_guests !== null && String(p.new_guests).trim() !== '') {
         const g = Number(p.new_guests);
         if (!Number.isFinite(g) || g < 1 || g > 50) {
-            return fail('invalid_new_guests', 'Il nuovo numero di ospiti non è valido. Può ripetermi per quante persone?');
+            return fail('invalid_new_guests', english
+                ? 'The new number of guests is not valid. Could you repeat how many people?'
+                : 'Il nuovo numero di ospiti non è valido. Può ripetermi per quante persone?');
         }
         newGuests = Math.trunc(g);
     }
@@ -924,7 +1008,9 @@ export async function modifyReservation(
     const newNotes = typeof p.new_notes === 'string' && p.new_notes.trim() !== '' ? p.new_notes.trim() : undefined;
 
     if (!newDate && !newTime && !newShift && newGuests === undefined && !newLocation && !newNotes) {
-        return fail('no_changes_provided', 'Cosa vuole modificare della prenotazione? Data, orario, numero di persone, zona (interno o esterno) o note?');
+        return fail('no_changes_provided', english
+            ? 'What would you like to change about the booking? Date, time, number of guests, area (indoor or outdoor) or notes?'
+            : 'Cosa vuole modificare della prenotazione? Data, orario, numero di persone, zona (interno o esterno) o note?');
     }
 
     // Se il nuovo orario scavalca il confine fra i turni e il turno non è
@@ -949,25 +1035,29 @@ export async function modifyReservation(
         });
 
         if (outcome.status === 'not_found') {
-            return { body: { success: false, status: 'not_found', message: MSG.notFound } };
+            return { body: { success: false, status: 'not_found', message: msg(english).notFound } };
         }
         if (outcome.status === 'already_cancelled') {
             return {
                 body: {
                     success: false, status: 'already_cancelled', reservation_id: outcome.reservation.id,
-                    message: `La prenotazione di ${outcome.reservation.customer_name} risulta annullata: non posso modificarla. Vuole fare una nuova prenotazione?`,
+                    message: english
+                        ? `The booking for ${outcome.reservation.customer_name} appears to be cancelled: I cannot modify it. Would you like to make a new booking?`
+                        : `La prenotazione di ${outcome.reservation.customer_name} risulta annullata: non posso modificarla. Vuole fare una nuova prenotazione?`,
                 },
             };
         }
         if (outcome.status === 'ambiguous') {
             const list = outcome.candidates.map((c: any) => {
                 const { timeLabel } = d.formatBookingDateTime(d.asUtcInstant(c.reservation_time));
-                return `${timeLabel} per ${c.guests}`;
+                return english ? `${timeLabel} for ${c.guests}` : `${timeLabel} per ${c.guests}`;
             }).join(', ');
             return {
                 body: {
                     success: false, status: 'ambiguous', candidates: outcome.candidates,
-                    message: `Ho trovato più prenotazioni per quel giorno (${list}). Mi conferma l'orario di quella da modificare?`,
+                    message: english
+                        ? `I found more than one booking for that day (${list}). Could you confirm the time of the one to modify?`
+                        : `Ho trovato più prenotazioni per quel giorno (${list}). Mi conferma l'orario di quella da modificare?`,
                 },
             };
         }
@@ -975,7 +1065,9 @@ export async function modifyReservation(
             return {
                 body: {
                     success: false, status: 'no_change',
-                    message: 'I dati che mi ha indicato coincidono con quelli già registrati. Non c\'è nulla da modificare.',
+                    message: english
+                        ? 'The details you gave me match what is already registered. There is nothing to change.'
+                        : 'I dati che mi ha indicato coincidono con quelli già registrati. Non c\'è nulla da modificare.',
                 },
             };
         }
@@ -983,7 +1075,9 @@ export async function modifyReservation(
             return {
                 body: {
                     success: false, status: 'unavailable',
-                    message: 'Mi dispiace, non abbiamo disponibilità per la nuova configurazione richiesta. Vuole provare un altro orario o un\'altra data?',
+                    message: english
+                        ? 'I am sorry, we have no availability for the new arrangement. Would you like to try another time or another date?'
+                        : 'Mi dispiace, non abbiamo disponibilità per la nuova configurazione richiesta. Vuole provare un altro orario o un\'altra data?',
                 },
             };
         }
@@ -1055,15 +1149,20 @@ export async function modifyReservation(
                 success: true,
                 status: 'modified',
                 reservation_id: after.id,
-                confirmation_phrase: d.formatItalianModification(after),
-                date_readback: d.formatItalianDateReadback(afterIso.slice(0, 10)),
+                confirmation_phrase: d.formatItalianModification(after, english ? 'en' : null),
+                date_readback: d.formatItalianDateReadback(afterIso.slice(0, 10), english ? 'en' : null),
             },
         };
     } catch (err: any) {
         console.error(`${channel.logPrefix} modify-reservation error`, err);
         return {
             serverError: true,
-            body: { success: false, message: 'Si è verificato un errore tecnico nel modificare la prenotazione, posso richiamarla?' },
+            body: {
+                success: false,
+                message: english
+                    ? 'A technical error occurred while modifying the booking, may I call you back?'
+                    : 'Si è verificato un errore tecnico nel modificare la prenotazione, posso richiamarla?',
+            },
         };
     }
 }
@@ -1089,6 +1188,8 @@ export interface SaveCallbackRequestParams {
     guests?: any;
     notes?: any;
     conversation_id?: string;
+    /** Card #34 — lingua della chiamata: 'en' accende le frasi inglesi. */
+    language?: any;
 }
 
 export async function saveCallbackRequest(
@@ -1100,8 +1201,11 @@ export async function saveCallbackRequest(
     const fail = (error: string, message: string): ToolOutcome => ({ body: { success: false, error, message } });
 
     const phoneRaw = firstUsablePhone(p.phone, p.caller_id);
+    const english = isEnglishCall(p);
     if (!phoneRaw) {
-        return fail('invalid_phone', 'Mi serve un numero a cui richiamare il cliente. Può chiederglielo e riprovare?');
+        return fail('invalid_phone', english
+            ? 'I need a number to call the customer back. Could you ask for it and try again?'
+            : 'Mi serve un numero a cui richiamare il cliente. Può chiederglielo e riprovare?');
     }
     const customerName = d.normalizeCustomerName(String(p.customer_name ?? '').trim()) || undefined;
     const reason = String(p.reason ?? '').trim() || undefined;
@@ -1154,14 +1258,21 @@ export async function saveCallbackRequest(
         return {
             body: {
                 success: true,
-                confirmation_phrase: 'Promemoria salvato: vi richiamiamo il prima possibile. Grazie!',
+                confirmation_phrase: english
+                    ? 'Reminder saved: we will call you back as soon as possible. Thank you!'
+                    : 'Promemoria salvato: vi richiamiamo il prima possibile. Grazie!',
             },
         };
     } catch (err: any) {
         console.error(`${channel.logPrefix} save-callback-request error`, err);
         return {
             serverError: true,
-            body: { success: false, message: 'Non sono riuscita a salvare il promemoria. Può invitare il cliente a richiamare il ristorante?' },
+            body: {
+                success: false,
+                message: english
+                    ? 'I could not save the reminder. Could you invite the customer to call the restaurant back?'
+                    : 'Non sono riuscita a salvare il promemoria. Può invitare il cliente a richiamare il ristorante?',
+            },
         };
     }
 }

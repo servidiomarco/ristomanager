@@ -119,6 +119,17 @@ const ITALIAN_MONTH_NAMES = [
     'gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno',
     'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre',
 ];
+// Card #34 — per le chiamate in inglese i formatter qui sotto producono le
+// frasi già in EN: prima il backend rispondeva solo in italiano e il prompt
+// chiedeva all'agente di tradurre al volo (rischio qualità documentato nella
+// regola 3 di docs/elevenlabs-agent-prompt.md).
+const ENGLISH_WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const ENGLISH_MONTH_NAMES = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December',
+];
+const isEnglishVoice = (language?: string | null): boolean =>
+    String(language ?? '').trim().toLowerCase().startsWith('en');
 
 function toIsoDate(y: number, mo: number, d: number): string | null {
     if (!Number.isFinite(y) || !Number.isFinite(mo) || !Number.isFinite(d)) return null;
@@ -152,11 +163,14 @@ function utcDateToIso(d: Date): string {
  * compute the weekday from a date — that's the class of error where it
  * confidently says "venerdì 11 luglio" when Friday is actually the 10th.
  */
-export function formatItalianDateReadback(iso: string): string {
+export function formatItalianDateReadback(iso: string, language?: string | null): string {
     const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
     if (!m) return iso;
     const y = +m[1], mo = +m[2], d = +m[3];
     const date = new Date(Date.UTC(y, mo - 1, d));
+    if (isEnglishVoice(language)) {
+        return `${ENGLISH_WEEKDAY_NAMES[date.getUTCDay()]} ${d} ${ENGLISH_MONTH_NAMES[mo - 1]}`;
+    }
     const weekday = ITALIAN_WEEKDAY_NAMES[date.getUTCDay()];
     const month = ITALIAN_MONTH_NAMES[mo - 1];
     return `${weekday} ${d} ${month}`;
@@ -1101,16 +1115,20 @@ export async function cancelVoiceReservation(
  * Example: "Cancellazione confermata Mario, prenotazione di giovedì 14 maggio
  * alle 20:30 annullata. Le invieremo conferma su WhatsApp."
  */
-export function formatItalianCancellation(r: CancelCandidate): string {
-    const rome = romeWallClock(r.reservation_time);
+export function formatItalianCancellation(r: CancelCandidate, language?: string | null): string {
+    const english = isEnglishVoice(language);
+    const rome = romeWallClock(r.reservation_time, english);
     const firstName = spokenFirstName(r.customer_name);
+    if (english) {
+        return `Cancellation confirmed ${firstName}, your reservation for ${rome.weekday} ${rome.day} ${rome.month} at ${rome.hh}:${rome.mm} has been cancelled. We will send you a confirmation on WhatsApp.`;
+    }
     return `Cancellazione confermata ${firstName}, la prenotazione di ${rome.weekday} ${rome.day} ${rome.month} alle ${rome.hh}:${rome.mm} è stata annullata. Le invieremo conferma su WhatsApp.`;
 }
 
 // Reads the wall-clock components of a reservation_time in Europe/Rome so that
 // voice-agent responses read the hour the caller actually booked — not the
 // UTC hour of the timestamptz value.
-function romeWallClock(iso: string | Date): {
+function romeWallClock(iso: string | Date, english: boolean = false): {
     weekday: string; day: number; month: string; hh: string; mm: string;
 } {
     const d = iso instanceof Date ? iso : new Date(iso);
@@ -1121,9 +1139,9 @@ function romeWallClock(iso: string | Date): {
     // Italian weekday for the reservation date without a second timezone hop.
     const naive = new Date(y, mo - 1, dd);
     return {
-        weekday: ITALIAN_WEEKDAYS[naive.getDay()],
+        weekday: english ? ENGLISH_WEEKDAY_NAMES[naive.getDay()] : ITALIAN_WEEKDAYS[naive.getDay()],
         day: dd,
-        month: ITALIAN_MONTHS[mo - 1],
+        month: english ? ENGLISH_MONTH_NAMES[mo - 1] : ITALIAN_MONTHS[mo - 1],
         hh,
         mm,
     };
@@ -1324,9 +1342,13 @@ export async function modifyVoiceReservation(
  * formatItalianConfirmation but says "aggiornata" so the caller understands
  * this is a change, not a new booking.
  */
-export function formatItalianModification(r: ModifiedReservation): string {
-    const rome = romeWallClock(r.reservation_time);
+export function formatItalianModification(r: ModifiedReservation, language?: string | null): string {
+    const english = isEnglishVoice(language);
+    const rome = romeWallClock(r.reservation_time, english);
     const firstName = spokenFirstName(r.customer_name);
+    if (english) {
+        return `Reservation updated ${firstName}: ${rome.weekday} ${rome.day} ${rome.month} at ${rome.hh}:${rome.mm} for ${r.guests} ${r.guests === 1 ? 'guest' : 'guests'}. We will send you a confirmation on WhatsApp.`;
+    }
     return `Prenotazione aggiornata ${firstName}: ${rome.weekday} ${rome.day} ${rome.month} alle ${rome.hh}:${rome.mm} per ${r.guests} persone. Le invieremo la conferma su WhatsApp.`;
 }
 
@@ -1411,10 +1433,18 @@ const ITALIAN_MONTHS = ['gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giu
  * Short Italian phrase the agent can read aloud at end of call.
  * Example: "Confermato Mario, tavolo per 4 persone giovedì 7 maggio alle 20:30."
  */
-export function formatItalianConfirmation(r: VoiceReservationOutput): string {
-    const rome = romeWallClock(r.reservation_time);
-    const persone = r.guests === 1 ? 'persona' : 'persone';
+export function formatItalianConfirmation(r: VoiceReservationOutput, language?: string | null): string {
+    const english = isEnglishVoice(language);
+    const rome = romeWallClock(r.reservation_time, english);
     const firstName = spokenFirstName(r.customer_name);
+    if (english) {
+        const guestsLabel = r.guests === 1 ? 'guest' : 'guests';
+        const childrenSuffix = r.children && r.children > 0
+            ? ` including ${r.children} ${r.children === 1 ? 'child' : 'children'}`
+            : '';
+        return `Confirmed ${firstName}, table for ${r.guests} ${guestsLabel}${childrenSuffix} on ${rome.weekday} ${rome.day} ${rome.month} at ${rome.hh}:${rome.mm}. We will send you a confirmation on WhatsApp.`;
+    }
+    const persone = r.guests === 1 ? 'persona' : 'persone';
     const childrenSuffix = r.children && r.children > 0
         ? ` di cui ${r.children} ${r.children === 1 ? 'bambino' : 'bambini'}`
         : '';
