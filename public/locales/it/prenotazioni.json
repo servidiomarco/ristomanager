@@ -64,5 +64,39 @@
   "empty": {
     "lunch": "Nessuna prenotazione per il turno di Pranzo in questa data.",
     "dinner": "Nessuna prenotazione per il turno di Cena in questa data."
+  },
+  "modal": {
+    "prevSection": "Sezione precedente",
+    "nextSection": "Sezione successiva",
+    "draftFound": "Bozza non salvata trovata",
+    "noSlots": "Nessuno slot disponibile",
+    "customerDetails": "Dettagli cliente",
+    "customerName": "Nome cliente",
+    "namePlaceholder": "Mario Rossi",
+    "addressBook": "Rubrica clienti",
+    "voiceDictation": "Dettatura vocale",
+    "call": "Chiama",
+    "email": "Email",
+    "emailPlaceholder": "cliente@email.com",
+    "banquet": "Banchetto",
+    "none": "Nessuno",
+    "allergies": "Allergie & Intolleranze",
+    "notes": "Note",
+    "otherNotes": "Altre note",
+    "notesPlaceholder": "Richieste speciali...",
+    "gdprTitle": "Consensi privacy (GDPR)",
+    "gdprHealth": "Consenso al trattamento di allergie / intolleranze",
+    "gdprMarketing": "Consenso all'invio di comunicazioni commerciali",
+    "selectTable": "Seleziona tavolo",
+    "unlinkTable": "Scollega tavolo dalla prenotazione",
+    "unlinkTableTitle": "Scollega il tavolo dalla prenotazione"
+  },
+  "legend": {
+    "free": "Libero",
+    "recommended": "Consigliato",
+    "selected": "Selezionato",
+    "occupied": "Occupato",
+    "tooSmall": "Capienza insuff.",
+    "banquet": "Evento / Banchetto"
   }
 }

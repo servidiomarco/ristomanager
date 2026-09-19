@@ -64,5 +64,39 @@
   "empty": {
     "lunch": "No bookings for lunch on this date.",
     "dinner": "No bookings for dinner on this date."
+  },
+  "modal": {
+    "prevSection": "Previous section",
+    "nextSection": "Next section",
+    "draftFound": "Unsaved draft found",
+    "noSlots": "No time available",
+    "customerDetails": "Guest details",
+    "customerName": "Guest name",
+    "namePlaceholder": "Jane Smith",
+    "addressBook": "Address book",
+    "voiceDictation": "Voice dictation",
+    "call": "Call",
+    "email": "Email",
+    "emailPlaceholder": "guest@email.com",
+    "banquet": "Event",
+    "none": "None",
+    "allergies": "Allergies & intolerances",
+    "notes": "Notes",
+    "otherNotes": "Other notes",
+    "notesPlaceholder": "Special requests…",
+    "gdprTitle": "Privacy consents (GDPR)",
+    "gdprHealth": "Consent to process allergies / intolerances",
+    "gdprMarketing": "Consent to receive marketing messages",
+    "selectTable": "Choose a table",
+    "unlinkTable": "Unlink table from booking",
+    "unlinkTableTitle": "Unlink the table from this booking"
+  },
+  "legend": {
+    "free": "Free",
+    "recommended": "Recommended",
+    "selected": "Selected",
+    "occupied": "Occupied",
+    "tooSmall": "Too small",
+    "banquet": "Event"
   }
 }
