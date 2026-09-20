@@ -82,7 +82,10 @@ import { offlineQueue } from './services/offlineQueue';
 import { socketClient } from './services/socketClient';
 import { refreshNodeConfig, onRoutingChange } from './services/apiRouting';
 import { voiceCallsApiService, voiceCallsCache } from './services/voiceCallsApiService';
-import { messagesApiService, inboxCache } from './services/messagesApiService';
+import {
+  messagesApiService, inboxCache, cacheAppendMessage, cachePatchMessage,
+  cacheMarkThreadRead, applyMessageToConversations, type InboxMessage,
+} from './services/messagesApiService';
 import { clearConfigCache } from './services/configCache';
 import { staffChatApiService, staffChatCache } from './services/staffChatApiService';
 import { customersCache } from './services/customersCache';
@@ -364,6 +367,11 @@ const App: React.FC = () => {
   const { t, i18n } = useTranslation('common', { useSuspense: false });
 
   const [view, setView] = useState<ViewState>(ViewState.DASHBOARD);
+  // La vista corrente letta dai gestori socket, che sono agganciati una volta
+  // sola: metterla nelle dipendenze li staccherebbe e riattaccherebbe a ogni
+  // navigazione.
+  const viewRef = useRef(view);
+  useEffect(() => { viewRef.current = view; }, [view]);
 
   /* Il marchio del ristorante in testa alla barra: chi la tiene aperta dieci
      ore al giorno lavora da lui, non da noi. Sympotia scende in fondo.
@@ -631,7 +639,36 @@ const App: React.FC = () => {
         .catch(() => {});
     };
     refresh();
-    const onEvent = () => refresh();
+
+    // Il messaggio che accende il badge è GIÀ nel browser: arriva da questo
+    // socket. Senza tenerne conto, la cache dell'inbox resta a prima e chi
+    // tocca il badge riapre Messaggi sulla lista vecchia, aspettando un giro
+    // di rete verso Railway per vedere ciò che il client aveva in mano da un
+    // pezzo. Qui la cache si aggiorna sul posto, così la pagina si apre già
+    // col messaggio dentro (il suo fetch parte comunque e riconcilia).
+    // Quando Messaggi è aperta non si tocca niente: ci pensa InboxPage, con
+    // le stesse funzioni, e scrivere in due sulla cache la farebbe litigare.
+    const inboxIsOpen = () => viewRef.current === ViewState.MESSAGGI;
+    const onInboxMessage = (msg: InboxMessage) => {
+      if (inboxIsOpen() || !msg?.id) return;
+      cacheAppendMessage(msg);
+      if (!inboxCache.conversations) return;
+      const { conversations, isNewThread } = applyMessageToConversations(inboxCache.conversations, msg);
+      inboxCache.conversations = conversations;
+      // Numero mai visto: il nome del cliente lo sa solo il server.
+      if (isNewThread) void messagesApiService.refreshConversationsCache();
+    };
+    const onInboxStatus = (msg: InboxMessage) => {
+      if (inboxIsOpen() || !msg?.id) return;
+      cachePatchMessage(msg);
+    };
+    const onInboxRead = (payload: { phone_digits?: string }) => {
+      refresh();
+      // Letto da un altro operatore: la lista in cache deve saperlo, o
+      // rientrando in Messaggi il pallino dei non letti torna a comparire.
+      if (!inboxIsOpen() && payload?.phone_digits) cacheMarkThreadRead(payload.phone_digits);
+    };
+    const onInboxInbound = (msg: InboxMessage) => { refresh(); onInboxMessage(msg); };
 
     // Re-attach on socket reconnect: if this effect runs before Socket.IO
     // finishes connecting, `getSocket()` returns null and a plain socket.on
@@ -641,13 +678,17 @@ const App: React.FC = () => {
     const attach = (s: ReturnType<typeof socketClient.getSocket>) => {
       if (attachedSocket === s) return;
       if (attachedSocket) {
-        attachedSocket.off('message:inbound', onEvent);
-        attachedSocket.off('message:read', onEvent);
+        attachedSocket.off('message:inbound', onInboxInbound);
+        attachedSocket.off('message:outbound', onInboxMessage);
+        attachedSocket.off('message:status', onInboxStatus);
+        attachedSocket.off('message:read', onInboxRead);
       }
       attachedSocket = s;
       if (attachedSocket) {
-        attachedSocket.on('message:inbound', onEvent);
-        attachedSocket.on('message:read', onEvent);
+        attachedSocket.on('message:inbound', onInboxInbound);
+        attachedSocket.on('message:outbound', onInboxMessage);
+        attachedSocket.on('message:status', onInboxStatus);
+        attachedSocket.on('message:read', onInboxRead);
       }
     };
     attach(socketClient.getSocket());
@@ -1281,12 +1322,25 @@ const App: React.FC = () => {
   // and often kills background websockets, so the socket "connect" handler is
   // not always enough — visibilitychange and pageshow cover the short
   // backgrounding case where the socket never noticed the gap.
+  //
+  // Ma non più di un giro ogni RESUME_REFETCH_MIN_MS: uno costa ~2 MB
+  // (prenotazioni della finestra, piatti, menù, tavoli, banchetti) più il
+  // re-render con tutto dentro, e arriva esattamente nell'istante in cui si
+  // torna sull'app per toccare qualcosa — la notifica sul badge dei messaggi
+  // è il caso tipico. Senza soglia partiva anche due volte di fila, perché al
+  // ripristino iOS fa scattare pageshow E visibilitychange. Se il socket era
+  // davvero caduto la ricarica arriva comunque: la chiede il suo handler di
+  // `connect`, che non passa di qui e non è soggetto alla soglia.
+  const RESUME_REFETCH_MIN_MS = 30_000;
+  const fetchDataInFlightRef = useRef(false);
+  const lastFetchDataAtRef = useRef(0);
   useEffect(() => {
     if (!isAuthenticated) return;
     const onResume = () => {
-      if (document.visibilityState === 'visible') {
-        fetchData();
-      }
+      if (document.visibilityState !== 'visible') return;
+      if (fetchDataInFlightRef.current) return;
+      if (Date.now() - lastFetchDataAtRef.current < RESUME_REFETCH_MIN_MS) return;
+      fetchData();
     };
     document.addEventListener('visibilitychange', onResume);
     // pageshow fires when a page is restored from the bfcache (common on iOS
@@ -1381,6 +1435,10 @@ const App: React.FC = () => {
       return;
     }
     const windowFrom = getRomeDatePart(new Date(Date.now() - RESERVATIONS_WINDOW_DAYS * 86400000));
+    // Timbro per la soglia del rientro in primo piano (vedi
+    // RESUME_REFETCH_MIN_MS): «in volo» copre i due eventi che scattano
+    // insieme al ripristino, l'orario di fine il rientro subito dopo.
+    fetchDataInFlightRef.current = true;
     try {
       const [roomsData, tablesData, dishesData, menusData, banquetMenusData, reservationsData] = await Promise.all([
         getRooms(),
@@ -1421,10 +1479,14 @@ const App: React.FC = () => {
       setBanquetMenus(banquetMenusData);
       setReservations(mergeReservationsById(reservationsData, reservationsArchiveRef.current));
       hydrateBellFromRecentReservations(reservationsData);
+      // Solo un giro ANDATO A BUON FINE vale come «dati freschi»: se è
+      // fallito, il rientro successivo deve poter riprovare subito.
+      lastFetchDataAtRef.current = Date.now();
     } catch (error) {
       console.error("Error fetching data:", error);
       addToast('Error fetching data', 'error');
     } finally {
+      fetchDataInFlightRef.current = false;
       setIsInitialDataLoading(false);
     }
     // Secondo tempo, fuori dal percorso critico: parte dopo che l'app è

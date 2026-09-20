@@ -2,6 +2,7 @@ import { authApiService } from './authApiService';
 import { socketClient } from './socketClient';
 import { buildApiError } from './apiError';
 import { resizeImageToDataUrl } from '../utils/resizeImage';
+import { phoneMatchKey } from '../utils/text';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';
 
@@ -90,6 +91,103 @@ export const inboxCache = {
   },
 };
 
+// ── Aggiornamento della cache dai messaggi che arrivano dal socket ──────────
+// Le stesse funzioni le usano InboxPage (mentre è aperta) e App (mentre è
+// altrove). Il messaggio è GIÀ nel browser quando il badge si accende: senza
+// questo, chi tocca il badge riapriva Messaggi sulla lista di prima e
+// aspettava un round trip verso Railway per vedere ciò che il client aveva
+// già in mano.
+
+/** Il thread di appartenenza di un messaggio: il numero dell'altra parte,
+ *  ridotto alla stessa chiave nazionale usata dal server. */
+export const inboxThreadKey = (msg: InboxMessage): string | null => {
+  const raw = msg.direction === 'inbound' ? msg.from_phone_digits : msg.to_phone_digits;
+  if (!raw) return null;
+  return phoneMatchKey(String(raw));
+};
+
+/** Accoda il messaggio alla timeline già in cache. Se quel thread non è mai
+ *  stato aperto non c'è niente da aggiornare: lo caricherà l'apertura. */
+export const cacheAppendMessage = (msg: InboxMessage): void => {
+  const key = inboxThreadKey(msg);
+  if (!key) return;
+  const cached = inboxCache.timelines.get(key);
+  if (cached && !cached.some(m => m.id === msg.id)) {
+    inboxCache.setTimeline(key, [...cached, msg]);
+  }
+};
+
+/** Esito di consegna su un messaggio già in timeline (callback Twilio). */
+export const cachePatchMessage = (msg: InboxMessage): void => {
+  const key = inboxThreadKey(msg);
+  if (!key) return;
+  const cached = inboxCache.timelines.get(key);
+  if (cached) {
+    inboxCache.setTimeline(key, cached.map(m => (m.id === msg.id ? { ...m, ...msg } : m)));
+  }
+};
+
+/** Applica un messaggio alla lista conversazioni: il thread sale in cima con
+ *  l'ultima riga aggiornata. `openKey` è la chat aperta in quel momento — lì i
+ *  non letti restano a zero perché la chat li sta già marcando letti.
+ *  `isNewThread` segnala che il nome del cliente lo sa solo il server: chi
+ *  chiama fa partire un refresh per riempirlo. */
+export const applyMessageToConversations = (
+  list: ConversationSummary[],
+  msg: InboxMessage,
+  openKey?: string | null,
+): { conversations: ConversationSummary[]; isNewThread: boolean } => {
+  const key = inboxThreadKey(msg);
+  if (!key) return { conversations: list, isNewThread: false };
+  const inbound = msg.direction === 'inbound';
+  const existing = list.find(c => c.phone_digits === key);
+  if (existing) {
+    const updated: ConversationSummary = {
+      ...existing,
+      last_channel: msg.channel,
+      last_direction: msg.direction,
+      last_body: msg.body,
+      last_sent_at: msg.sent_at,
+      ...(inbound
+        ? {
+            last_inbound_at: msg.sent_at,
+            unread_count: openKey === key ? 0 : existing.unread_count + 1,
+          }
+        : {}),
+    };
+    return {
+      conversations: [updated, ...list.filter(c => c.phone_digits !== key)],
+      isNewThread: false,
+    };
+  }
+  // Un messaggio in uscita verso un numero mai visto non apre un thread qui:
+  // lo porta il refresh, con nome e conteggi dal server.
+  if (!inbound) return { conversations: list, isNewThread: false };
+  const created: ConversationSummary = {
+    phone_digits: key,
+    phone: msg.from_phone,
+    last_channel: msg.channel,
+    last_direction: 'inbound',
+    last_body: msg.body,
+    last_sent_at: msg.sent_at,
+    last_reservation_id: msg.reservation_id,
+    unread_count: openKey === key ? 0 : 1,
+    last_inbound_at: msg.sent_at,
+    customer_name: null,
+  };
+  return { conversations: [created, ...list], isNewThread: true };
+};
+
+/** Lettura fatta altrove (altro operatore, altro dispositivo): azzera i non
+ *  letti di quel thread nella lista in cache. */
+export const cacheMarkThreadRead = (phoneDigits: string): void => {
+  const key = phoneMatchKey(String(phoneDigits));
+  if (!key || !inboxCache.conversations) return;
+  inboxCache.conversations = inboxCache.conversations.map(c =>
+    c.phone_digits === key ? { ...c, unread_count: 0 } : c
+  );
+};
+
 
 const getHeaders = (): HeadersInit => {
   const headers: Record<string, string> = {};
@@ -175,6 +273,16 @@ class MessagesApiService {
       const { conversations } = await this.listConversations();
       inboxCache.conversations = conversations;
     } catch { /* niente: il caricamento normale copre */ }
+  }
+
+  /** Come sopra ma riscrive anche una cache già piena: serve quando la
+   *  ricostruzione locale non basta (thread nuovo, nome cliente da riempire).
+   *  Silenzioso come il prefetch. */
+  async refreshConversationsCache(): Promise<void> {
+    try {
+      const { conversations } = await this.listConversations();
+      inboxCache.conversations = conversations;
+    } catch { /* niente: la pagina rifà il suo fetch all'apertura */ }
   }
 
   async unreadCount(): Promise<{ count: number }> {
