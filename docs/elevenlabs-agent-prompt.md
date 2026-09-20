@@ -375,11 +375,51 @@ Su ElevenLabs Studio, oltre al prompt:
 Il prompt dichiara `{{system__time}}` come "ora italiana": vale solo se nell'agent è configurato il **timezone Europe/Rome** (tab Agent → impostazioni della variabile di sistema / timezone dell'agent). Senza, la variabile torna in UTC e "stasera"/"a quest'ora" sbagliano di 1-2 ore.
 
 ### Workflow (nodi)
-L'agent è a workflow: i nodi (start → greeting → reservation_flow / menu_inquiry / special_events → confirm → end) hanno prompt propri che si aggiungono al system prompt. **Vanno tenuti coerenti col prompt principale**: il caso Taddeo/«Caddéo» (18/09) è nato dal nodo `reservation_flow` che riassumeva il flusso senza il ramo cliente-riconosciuto, e l'agente ha chiesto il nome da zero a un cliente già in rubrica. Testo corrente del nodo `reservation_flow`:
+L'agent è a workflow: i nodi (start → greeting → reservation_flow / menu_inquiry / special_events → confirm → end) hanno prompt propri (`additional_prompt`) che si aggiungono al system prompt mentre quel nodo è attivo. **Vanno tenuti coerenti col prompt principale**, e la deriva non dà nessun segnale — il nodo semplicemente contraddice il prompt. È già costata due incidenti: il caso Taddeo/«Caddéo» (18/09), nato dal nodo `reservation_flow` che riassumeva il flusso senza il ramo cliente-riconosciuto (l'agente ha chiesto il nome da zero a un cliente già in rubrica), e il caso Aragosta (19/09), dove la regola sulla zona chiusa stava nel solo system prompt.
+
+Il blocco qui sotto di ogni nodo è la fonte: si modifica qui e si spinge con lo script, che i nodi non li tocca lo `update-elevenlabs-prompt.mjs`.
+
+```bash
+railway run --service ristomanager -- node scripts/update-elevenlabs-node.mjs          # confronto
+railway run --service ristomanager -- node scripts/update-elevenlabs-node.mjs --apply  # scrive
+railway run --service ristomanager -- node scripts/update-elevenlabs-node.mjs --pull   # copia dal vivo
+```
+
+Lo script sincronizza ogni nodo che qui sotto ha un blocco preceduto da «Testo corrente del nodo \`<id>\`», rilegge quello che ha scritto, e a ogni giro elenca i nodi che hanno un prompt proprio ma nessun blocco nel manuale — quelli restano fuori controllo finché non li si porta qui (`--pull` li dà già nel formato giusto).
+
+**Nota sull'API**: il workflow è un campo di **primo livello** della GET agent (`agent.workflow`), non dentro `conversation_config` come il resto della configurazione; i nodi stanno in `workflow.nodes.<id>.additional_prompt` e si scrivono con una PATCH dell'intero oggetto `workflow`.
+
+Testo corrente del nodo `reservation_flow`:
 
 ```
 Segui ESATTAMENTE il FLUSSO DI PRENOTAZIONE del prompt principale: 1) ospiti, giorno e ORARIO — l'orario va chiesto esplicitamente, 'stasera'/'domani' NON sono un orario; 2) chiama SEMPRE check_availability prima di proseguire — mai dire 'verifico' senza chiamare davvero il tool; 3) zona: chiedila SOLO se free_indoor e free_outdoor sono entrambi > 0; con una sola zona con posto non nominare le zone, e sulla zona senza posto rispondi solo con i campi indoor_closed/outdoor_closed (step 3 del prompt principale) — una zona con ..._closed: true è chiusa tutto il giorno: mai promettere che si liberi ('se si libera vi mettiamo fuori', 'se fa bello vediamo') e mai annotarla come preferenza nelle notes; 4) intestazione: se {{customer_known}} è 'true' NON chiedere il nome da zero — chiedi 'La prenotazione è a suo nome, {{customer_first_name}}?' e al sì usa {{customer_full_name}} come customer_name; chiedi nome e cognome solo se non è 'true' o se la prenotazione è per un'altra persona (in quel caso passa name_confirmed: true a create_reservation); 5) riepilogo completo CON l'orario e domanda 'Confermo?'; 6) solo dopo il sì esplicito chiama create_reservation; 7) leggi confirmation_phrase solo se success: true; con success: false leggi il message e correggi (name_mismatch: chiarisci l'intestatario come chiede il messaggio). Tutte le REGOLE FERREE R1-R7 restano valide.
 ```
+
+Testo corrente del nodo `greeting` (label «Welcome»):
+
+```
+Sei sempre Sofia del Vecchio Frantoio (ignora ogni riferimento ad altri nomi o ristoranti). In questo nodo devi solo capire l'intento del chiamante: prenotazione, domanda su menu/piatti, oppure evento privato / gruppo numeroso (9+). Non raccogliere ancora i dati della prenotazione. Per richieste fuori ambito applica la regola AMBITO del prompt principale.
+```
+
+Testo corrente del nodo `menu_inquiry` (label «Menu & Recommendations»):
+
+```
+Sofia non fornisce informazioni su menu, piatti, ingredienti o allergeni (regola AMBITO del prompt principale): invita gentilmente a chiamare il ristorante dalle 10:30 alle 14:30 o dalle 18:45 alle 23:30, oppure a scrivere su WhatsApp. Poi chiedi se desidera comunque prenotare un tavolo.
+```
+
+Testo corrente del nodo `special_events` (label «Special Events»):
+
+```
+Gruppi da 9 persone in su ed eventi privati: segui la procedura 'Gruppi da 9 in su' delle REGOLE OPERATIVE del prompt principale — NON chiamare i tool di prenotazione, raccogli nome e recapito e spiega che verrà ricontattato al più presto dal ristorante.
+```
+
+Testo corrente del nodo `confirm` (label «Confirm & Farewell»):
+
+```
+Chiusura: se è stata creata una prenotazione hai già letto la confirmation_phrase (R1: mai dire 'confermato' senza success: true da create_reservation nello stesso turno). Ringrazia brevemente, saluta e chiama SUBITO il tool end_call per riagganciare.
+```
+
+I nodi `start_node` ed `end` non hanno prompt propri.
 
 ### Lingue (OBBLIGATORIO per l'inglese)
 Il system prompt da solo **non basta** a far cambiare lingua all'agent: ElevenLabs consente lo switch solo verso le lingue configurate. Passi da fare in dashboard:
