@@ -42,3 +42,8 @@ backups/
 # Artefatti locali
 .vercel/
 mk.mjs
+
+# Copie dal vivo dell'agent ElevenLabs (--pull dei due script): servono a
+# diffare prima di spingere, non sono la fonte — quella è il manuale.
+docs/elevenlabs-agent-prompt.live.md
+docs/elevenlabs-agent-nodes.live.md
