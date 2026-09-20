@@ -5,6 +5,10 @@ import { SkeletonInboxList } from './SkeletonCards';
 import {
   messagesApiService,
   inboxCache,
+  inboxThreadKey,
+  cacheAppendMessage,
+  cachePatchMessage,
+  applyMessageToConversations,
   ConversationSummary,
   InboxMessage,
   MessageChannel,
@@ -279,7 +283,11 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
   // il prossimo mount riparte da qui. Il guard su convLoading evita di
   // sovrascrivere una cache pre-riempita con lo stato iniziale vuoto se si
   // esce dalla pagina prima che il primo fetch risponda.
+  // La lista corrente letta dai gestori socket, che vivono in un effetto e
+  // vedrebbero altrimenti la chiusura del render in cui sono stati creati.
+  const conversationsRef = useRef(conversations);
   useEffect(() => {
+    conversationsRef.current = conversations;
     if (!convLoading && !convError) inboxCache.conversations = conversations;
   }, [conversations, convLoading, convError]);
 
@@ -344,59 +352,25 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
   // Real-time updates: append inbound/outbound messages to the open thread
   // when they match, and refresh the conversation list preview counts.
   useEffect(() => {
-    const digitsMatch = (msg: InboxMessage): string | null => {
-      const raw = msg.direction === 'inbound' ? msg.from_phone_digits : msg.to_phone_digits;
-      if (!raw) return null;
-      return phoneMatchKey(String(raw));
-    };
-
     // Anche la cache riceve il messaggio (qualunque thread, non solo quello
     // aperto): così riaprire una chat mostra subito anche ciò che è arrivato
-    // mentre si era altrove, senza aspettare il refresh in background.
-    const appendToCache = (key: string, msg: InboxMessage) => {
-      const cached = inboxCache.timelines.get(key);
-      if (cached && !cached.some(m => m.id === msg.id)) {
-        inboxCache.setTimeline(key, [...cached, msg]);
-      }
+    // mentre si era altrove, senza aspettare il refresh in background. Le
+    // stesse funzioni le chiama App quando questa pagina è chiusa.
+    const applyToList = (msg: InboxMessage) => {
+      // «Thread mai visto» si decide qui, sulla lista corrente: leggerlo
+      // dentro l'updater non funziona — React lo esegue al render, quando
+      // questa riga è già passata, e il nome del cliente non arriverebbe mai.
+      const { isNewThread } = applyMessageToConversations(conversationsRef.current, msg, selectedKey);
+      setConversations(prev => applyMessageToConversations(prev, msg, selectedKey).conversations);
+      // Il nome del cliente lo sa solo il server.
+      if (isNewThread) loadConversations();
     };
 
     const onInbound = (msg: InboxMessage) => {
-      const key = digitsMatch(msg);
+      const key = inboxThreadKey(msg);
       if (!key) return;
-      appendToCache(key, msg);
-      // Optimistically bump the conversation to the top, or add it if new.
-      setConversations(prev => {
-        const existing = prev.find(c => c.phone_digits === key);
-        const isOpen = selectedKey === key;
-        if (existing) {
-          const updated: ConversationSummary = {
-            ...existing,
-            last_channel: msg.channel,
-            last_direction: 'inbound',
-            last_body: msg.body,
-            last_sent_at: msg.sent_at,
-            last_inbound_at: msg.sent_at,
-            unread_count: isOpen ? 0 : existing.unread_count + 1,
-          };
-          return [updated, ...prev.filter(c => c.phone_digits !== key)];
-        }
-        // First-time contact: minimal record; a full refresh backfills customer_name.
-        const created: ConversationSummary = {
-          phone_digits: key,
-          phone: msg.from_phone,
-          last_channel: msg.channel,
-          last_direction: 'inbound',
-          last_body: msg.body,
-          last_sent_at: msg.sent_at,
-          last_reservation_id: msg.reservation_id,
-          unread_count: isOpen ? 0 : 1,
-          last_inbound_at: msg.sent_at,
-          customer_name: null,
-        };
-        // Trigger a background refresh for the customer_name lookup.
-        loadConversations();
-        return [created, ...prev];
-      });
+      cacheAppendMessage(msg);
+      applyToList(msg);
       if (selectedKey === key) {
         setMessages(prev => (prev.some(m => m.id === msg.id) ? prev : [...prev, msg]));
         messagesApiService.markRead(key).catch(() => {});
@@ -408,34 +382,15 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
     // fallito e chi l'ha mandato crede sia partito.
     const onStatus = (msg: InboxMessage) => {
       if (!msg?.id) return;
-      const key = digitsMatch(msg);
-      if (key) {
-        const cached = inboxCache.timelines.get(key);
-        if (cached) {
-          inboxCache.setTimeline(key, cached.map(m => (m.id === msg.id ? { ...m, ...msg } : m)));
-        }
-      }
+      cachePatchMessage(msg);
       setMessages(prev => prev.map(m => (m.id === msg.id ? { ...m, ...msg } : m)));
     };
 
     const onOutbound = (msg: InboxMessage) => {
-      const key = digitsMatch(msg);
+      const key = inboxThreadKey(msg);
       if (!key) return;
-      appendToCache(key, msg);
-      setConversations(prev => {
-        const existing = prev.find(c => c.phone_digits === key);
-        if (existing) {
-          const updated: ConversationSummary = {
-            ...existing,
-            last_channel: msg.channel,
-            last_direction: 'outbound',
-            last_body: msg.body,
-            last_sent_at: msg.sent_at,
-          };
-          return [updated, ...prev.filter(c => c.phone_digits !== key)];
-        }
-        return prev;
-      });
+      cacheAppendMessage(msg);
+      applyToList(msg);
       if (selectedKey === key) {
         setMessages(prev => (prev.some(m => m.id === msg.id) ? prev : [...prev, msg]));
       }
