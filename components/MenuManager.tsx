@@ -1,8 +1,9 @@
 
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Dish, RestaurantMenu, BanquetMenu, BanquetCourse, BanquetStatus, Shift, COMMON_ALLERGENS, VAT_RATES, Customer, Table, TableMerge, Reservation, ArrivalStatus, ReservationStatus, Room } from '../types';
-import { Plus, Search, Tag, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, LayoutGrid, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat, Info, RefreshCw, QrCode, Copy, Languages, Layers, SlidersHorizontal, Share2, MessageCircle, Martini, IceCreamCone, Wine, Wand2, DoorClosed } from 'lucide-react';
+import { Plus, Search, Tag, Tags, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, LayoutGrid, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat, Info, RefreshCw, QrCode, Copy, Languages, Layers, SlidersHorizontal, Share2, MessageCircle, Martini, IceCreamCone, Wine, Wand2, DoorClosed } from 'lucide-react';
 import { resizeImageToDataUrl } from '../utils/resizeImage';
 import { getRomeDatePart } from '../utils/reservationTime';
 import { printBanquet } from '../utils/printBanquet';
@@ -134,11 +135,11 @@ const banquetGroupFor = (menu: BanquetMenu, today: string, weekEnd: string, mont
    anywhere from the header, and the required-field check still runs once, on
    save, exactly as it did when this was a single scroll. */
 const BANQUET_STEPS = [
-  { label: 'Evento e cliente', hint: 'nome interno, data, turno e chi lo ha richiesto', icon: BookUser },
-  { label: 'Coperti e tariffa', hint: 'un prezzo bambini separa il calcolo', icon: Users },
-  { label: 'Composizione menù', hint: 'clicca un piatto per aggiungerlo all\'uscita attiva', icon: Utensils },
-  { label: 'Tavoli assegnati', hint: 'i tavoli occupati nello stesso turno sono disabilitati', icon: LayoutGrid },
-  { label: 'Note operative', hint: 'compaiono nelle stampe per cucina e sala', icon: StickyNote },
+  { key: 'event', label: 'Evento e cliente', hint: 'nome interno, data, turno e chi lo ha richiesto', icon: BookUser },
+  { key: 'covers', label: 'Coperti e tariffa', hint: 'un prezzo bambini separa il calcolo', icon: Users },
+  { key: 'menu', label: 'Composizione menù', hint: 'clicca un piatto per aggiungerlo all\'uscita attiva', icon: Utensils },
+  { key: 'tables', label: 'Tavoli assegnati', hint: 'i tavoli occupati nello stesso turno sono disabilitati', icon: LayoutGrid },
+  { key: 'notes', label: 'Note operative', hint: 'compaiono nelle stampe per cucina e sala', icon: StickyNote },
 ] as const;
 
 // Category filters on Piatti alla carta. There are more of these than a
@@ -199,6 +200,16 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     autoOpenNewDish,
     onAutoOpenNewDishHandled
 }) => {
+  const { t } = useTranslation('menu', { useSuspense: false });
+
+  /* I cinque passi del menù banchetto si traducono tutti insieme: la costante
+     resta l'elenco (chiave, icona, versione italiana) e il testo passa di qui.
+     Tradurne uno solo darebbe uno stepper metà inglese e metà italiano. */
+  const banquetSteps = useMemo(() => BANQUET_STEPS.map(p => ({
+    label: t(`banquetStep.${p.key}.label`, p.label),
+    hint: t(`banquetStep.${p.key}.hint`, p.hint),
+    icon: p.icon,
+  })), [t]);
   const { hasPermission, hasFeature, user } = useAuth();
   const canViewBanquetPrice = hasPermission('banquet:view_price');
   const canManageBanquetPayments = hasPermission('banquet:manage_payments');
@@ -1049,7 +1060,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       if (isSavingBanquet) return;
 
       const missing: string[] = [];
-      if (!newBanquet.name || !newBanquet.name.trim()) missing.push('Nome Menu');
+      if (!newBanquet.name || !newBanquet.name.trim()) missing.push(t('menuName'));
       if (!newBanquet.event_date) missing.push('Data Evento');
       if (canViewBanquetPrice && (newBanquet.price_per_person == null || isNaN(Number(newBanquet.price_per_person)) || Number(newBanquet.price_per_person) <= 0)) {
         missing.push('Prezzo Adulti');
@@ -1520,10 +1531,10 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const BANQUET_SORT_OPTIONS: { value: BanquetSortBy; label: string }[] = [
     { value: 'date-asc',    label: 'Data evento (prima → dopo)' },
     { value: 'date-desc',   label: 'Data evento (dopo → prima)' },
-    { value: 'name-asc',    label: 'Nome A → Z' },
-    { value: 'name-desc',   label: 'Nome Z → A' },
-    { value: 'guests-asc',  label: 'Coperti (meno → più)' },
-    { value: 'guests-desc', label: 'Coperti (più → meno)' },
+    { value: 'name-asc',    label: t('nameAsc') },
+    { value: 'name-desc',   label: t('nameDesc') },
+    { value: 'guests-asc',  label: t('coversAsc') },
+    { value: 'guests-desc', label: t('coversDesc') },
   ];
 
   // Le righe arrivano già ordinate per (categoria, posizione, nome); qui si
@@ -1543,6 +1554,78 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     - (categoryIndex.get((b.category ?? '').trim()) ?? Number.MAX_SAFE_INTEGER)
   );
 
+  /* ----- Testata della pagina Menu: due tendine ----------------------------
+     Prima stavano tutte in fila: i menu come pill, «Menu digitale» e «Importa
+     da cassa» accanto alla ricerca, e «Categorie» e «Varianti» infilate NELLA
+     riga delle categorie — due azioni in mezzo ai filtri, tanto che il commento
+     di allora spiegava come vestirle per non farle sembrare una categoria in
+     più. Il problema non era il numero dei controlli ma il fatto che azioni e
+     filtri stessero sulla stessa riga.
+     Adesso: «Alla carta ⌄» tiene tutto ciò che riguarda i menu (scelta,
+     rinomina, elimina, nuovo) e «Gestisci» tutto ciò che si fa AL menu. La riga
+     sotto resta solo filtri, a tutta larghezza — e le categorie, che prima si
+     spartivano metà riga con quei bottoni e andavano a capo tre volte, adesso
+     stanno in due. */
+  const isWideMenuBar = useMediaQuery('(min-width: 640px)');
+
+  const [menuPickerOpen, setMenuPickerOpen] = useState(false);
+  const menuPickerRef = useRef<HTMLDivElement | null>(null);
+  const menuPickerTriggerRef = useRef<HTMLButtonElement | null>(null);
+
+  const [manageOpen, setManageOpen] = useState(false);
+  const manageRef = useRef<HTMLDivElement | null>(null);
+  const manageTriggerRef = useRef<HTMLButtonElement | null>(null);
+
+  // Congedo delle tendine come ovunque nell'app (Inventario, Personale). Il
+  // foglio del telefono no: ha già il suo sfondo che lo chiude.
+  useEffect(() => {
+    if (!menuPickerOpen && !(manageOpen && isWideMenuBar)) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (menuPickerOpen && !menuPickerRef.current?.contains(t) && !menuPickerTriggerRef.current?.contains(t)) setMenuPickerOpen(false);
+      if (manageOpen && isWideMenuBar && !manageRef.current?.contains(t) && !manageTriggerRef.current?.contains(t)) setManageOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      setMenuPickerOpen(false);
+      setManageOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [menuPickerOpen, manageOpen, isWideMenuBar]);
+
+  /* Le voci di «Gestisci», in due gruppi separati da una riga: prima quello che
+     porta il menu fuori di qui (ospiti, cassa), poi come è fatto dentro. Una
+     lista sola per la tendina del desktop e per il foglio del telefono, così le
+     due non possono divergere. Un gruppo che resta vuoto per permessi sparisce
+     con la sua riga; se spariscono tutti, sparisce il bottone. */
+  const manageGroups: { icon: typeof QrCode; label: string; hint: string; meta: string | null; busy?: boolean; onClick: () => void }[][] = [
+    [
+      { icon: QrCode, label: t('digitalMenu'), hint: t('manageQrHint'), meta: null, onClick: () => setQrOpen(true) },
+      ...(canImportCassa
+        ? [{ icon: RefreshCw, label: t('importFromTill'), hint: t('importFromTillHint'), meta: null, busy: importing, onClick: handleImportCassa }]
+        : []),
+    ],
+    [
+      ...(canEdit && dishCategories.length > 0
+        ? [{ icon: Tags, label: t('categories'), hint: t('manageCategoriesHint'), meta: String(dishCategories.length), onClick: () => setCatsOpen(true) }]
+        : []),
+      ...(canEdit
+        ? [{ icon: Layers, label: t('variants'), hint: t('manageVariantsHint'), meta: String(modifierGroups.length), onClick: () => setVariantsOpen(true) }]
+        : []),
+    ],
+  ].filter(g => g.length > 0);
+
+  const runManageAction = (action: { busy?: boolean; onClick: () => void }) => {
+    if (action.busy) return;
+    setManageOpen(false);
+    action.onClick();
+  };
+
   return (
     <div className="p-4 sm:p-6 lg:p-8">
       {/* Tabs + header figures */}
@@ -1552,55 +1635,92 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
             it belongs to the switch. One element for both tabs also keeps the
             two labels identically sized — as separate buttons in separate rows
             they had drifted to different heights and widths. */}
-        <div className="flex flex-col items-start gap-2.5">
-          {/* Pagina Menu: un menu per pill — i due di sistema poi gli
-              stagionali, col "+" in coda. Un menu stagionale selezionato
-              porta con sé rinomina ed elimina; i due di sistema no. */}
+        {/* Su DISHES la colonna è una riga sola di controlli alti 36: si centra
+            contro la ricerca, che ne misura 44, invece di restare incollata in
+            alto come vuole l'items-start del contenitore (che serve a Banchetti,
+            dove questa colonna è una pila). */}
+        <div className={activeTab === 'DISHES' ? 'flex flex-wrap items-center gap-2 sm:self-center' : 'flex flex-col items-start gap-2.5'}>
+          {/* Pagina Menu: una tendina sola per i menu — quale si guarda, e
+              quello che si fa ai menu stagionali. Rinomina ed elimina stanno
+              sulla RIGA del menu, non sulla testata: prima erano due icone
+              accanto alle pill e agivano su «quello selezionato», che va letto
+              altrove; qui il bersaglio è la riga che si sta toccando. I due di
+              sistema non le hanno. */}
           {activeTab === 'DISHES' && (
-            <div className="flex flex-wrap items-center gap-2">
-              {menus.map(m => {
-                const isActive = selectedMenu?.id === m.id;
-                return (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={() => setSelectedMenuId(m.id)}
-                    className={`${DISH_FILTER_BASE} h-9 ${isActive ? DISH_FILTER_ON : DISH_FILTER_OFF}`}
-                  >
-                    {m.name}
-                  </button>
-                );
-              })}
-              {canEdit && (
-                <button
-                  type="button"
-                  onClick={() => { setMenuFormName(''); setMenuFormError(null); setMenuForm({ kind: 'create' }); }}
-                  title="Nuovo menu (es. Ferragosto, Pasqua)"
-                  className={`${DISH_FILTER_BASE} h-9 ${DISH_FILTER_OFF}`}
+            <div className="relative">
+              <button
+                ref={menuPickerTriggerRef}
+                type="button"
+                onClick={() => { setManageOpen(false); setMenuPickerOpen(v => !v); }}
+                aria-haspopup="menu"
+                aria-expanded={menuPickerOpen}
+                title={t('menuToShow')}
+                className={`${DISH_FILTER_BASE} h-9 max-w-[220px] ${DISH_FILTER_OFF}`}
+              >
+                <span className="min-w-0 truncate">{selectedMenu?.name ?? t('menuWord')}</span>
+                <ChevronDown className={`h-4 w-4 flex-shrink-0 transition-transform ${menuPickerOpen ? 'rotate-180' : ''}`} aria-hidden />
+              </button>
+              {menuPickerOpen && (
+                <div
+                  ref={menuPickerRef}
+                  role="menu"
+                  className="absolute left-0 top-full z-30 mt-2 w-[280px] overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] py-1.5 shadow-[var(--ds-shadow-raised)]"
                 >
-                  <Plus className="h-4 w-4" aria-hidden />
-                  Nuovo menu
-                </button>
-              )}
-              {canEdit && selectedMenu && !selectedMenu.system_key && (
-                <span className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => { setMenuFormName(selectedMenu.name); setMenuFormError(null); setMenuForm({ kind: 'rename', menu: selectedMenu }); }}
-                    className={`${dsIconButton} h-9 w-9 bg-[var(--ds-surface-row)] shadow-none`}
-                    title="Rinomina menu"
-                  >
-                    <Edit2 className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setDeleteMenuConfirm(selectedMenu)}
-                    className={`${dsIconButton} h-9 w-9 bg-[var(--ds-surface-row)] shadow-none hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)]`}
-                    title="Elimina menu"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </span>
+                  {menus.map(m => {
+                    const isActive = selectedMenu?.id === m.id;
+                    return (
+                      <div key={m.id} className="flex items-center">
+                        <button
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={isActive}
+                          onClick={() => { setSelectedMenuId(m.id); setMenuPickerOpen(false); }}
+                          className="flex min-h-[44px] min-w-0 flex-1 items-center gap-3 px-4 text-left text-[15px] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)]"
+                        >
+                          <span className="min-w-0 flex-1 truncate">{m.name}</span>
+                          {isActive && <Check className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />}
+                        </button>
+                        {canEdit && !m.system_key && (
+                          <span className="flex flex-shrink-0 items-center pr-1.5">
+                            <button
+                              type="button"
+                              onClick={() => { setMenuPickerOpen(false); setMenuFormName(m.name); setMenuFormError(null); setMenuForm({ kind: 'rename', menu: m }); }}
+                              className={`${dsIconButton} h-11 w-11 bg-transparent shadow-none`}
+                              title={t('renameNamed', { nome: m.name })}
+                              aria-label={t('renameNamed', { nome: m.name })}
+                            >
+                              <Edit2 className="h-4 w-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => { setMenuPickerOpen(false); setDeleteMenuConfirm(m); }}
+                              className={`${dsIconButton} h-11 w-11 bg-transparent shadow-none hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)]`}
+                              title={t('deleteNamed', { nome: m.name })}
+                              aria-label={t('deleteNamed', { nome: m.name })}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {canEdit && (
+                    <>
+                      <div className="my-1.5 border-t border-[var(--ds-border)]" />
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => { setMenuPickerOpen(false); setMenuFormName(''); setMenuFormError(null); setMenuForm({ kind: 'create' }); }}
+                        title={t('newMenuPlaceholder')}
+                        className="flex min-h-[44px] w-full items-center gap-3 px-4 text-left text-[15px] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)]"
+                      >
+                        <Plus className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
+                        {t('newMenu')}
+                      </button>
+                    </>
+                  )}
+                </div>
               )}
             </div>
           )}
@@ -1620,16 +1740,17 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           )}
           {/* Phone only, and the breakpoint is not a guess: the global "+" menu
               in the top bar is `hidden md:block`, so below md this is the only
-              route into either form. From md up it would be a second button for
-              a create the header already offers. */}
-          {canEdit && (
+              route into the banquet form. Per i piatti no: la voce «Piatto» è
+              nel foglio "+" della barra in basso, quindi qui sarebbe un secondo
+              bottone per la stessa creazione. */}
+          {canEdit && activeTab === 'BANQUETS' && (
             <button
               type="button"
-              onClick={activeTab === 'BANQUETS' ? handleOpenNewBanquet : handleOpenNewDish}
+              onClick={handleOpenNewBanquet}
               className="inline-flex h-9 items-center justify-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] md:hidden"
             >
               <Plus className="h-4 w-4" aria-hidden />
-              {activeTab === 'BANQUETS' ? 'Nuovo banchetto' : 'Nuovo piatto'}
+              {t('newBanquet')}
             </button>
           )}
         </div>
@@ -1651,36 +1772,83 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
             )}
           </div>
         )}
+        {/* Ricerca, «Gestisci» e l'interruttore di vista viaggiano insieme:
+            sul telefono sono la seconda riga, sotto il selettore, invece di
+            sparpagliarsi su due; da sm rientrano nella riga del selettore, con
+            la ricerca subito accanto — si filtra DENTRO il menu appena scelto,
+            e le due cose si leggono di seguito. */}
         {activeTab === 'DISHES' && (
-          <div className="flex items-center gap-2 sm:flex-1 sm:justify-end">
-            <button
-              type="button"
-              onClick={() => setQrOpen(true)}
-              title="QR e traduzioni del menu per gli ospiti"
-              className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-            >
-              <QrCode className="h-4 w-4" aria-hidden />
-              Menu digitale
-            </button>
-            {canImportCassa && (
-              <button
-                type="button"
-                onClick={handleImportCassa}
-                disabled={importing}
-                title="Allinea i piatti al catalogo della cassa Passepartout"
-                className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-              >
-                {importing ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
-                Importa da cassa
-              </button>
-            )}
+          <div className="flex items-center gap-2 sm:flex-1">
             <SearchField
               value={searchTerm}
               onChange={setSearchTerm}
-              placeholder="Cerca piatto o ingrediente..."
-              ariaLabel="Cerca piatto"
-              className="min-w-0 flex-1 sm:max-w-sm"
+              placeholder={t('searchDishOrIngredient')}
+              ariaLabel={t('searchDish')}
+              className="min-w-0 flex-1 sm:w-64 sm:flex-none lg:w-80"
             />
+            <div className="ml-auto flex flex-shrink-0 items-center gap-2">
+            {/* Il conteggio è una lettura, non un filtro: niente «235 piatti»,
+                che la pill «Tutte 235» dice già due righe più sotto. Sparisce
+                sotto lg, dove la riga serve tutta ai controlli. */}
+            <span className="hidden flex-shrink-0 text-[13px] text-[var(--ds-text-muted)] lg:inline">
+              {menuDishes.filter(d => d.allergens.length > 0).length} con allergeni · {menuDishes.filter(d => !d.photo_url).length} senza foto
+            </span>
+            {/* Tutto ciò che si fa AL menu invece che dentro. Tendina col
+                puntatore, foglio sul touch — le stesse voci (regola 13).
+                L'import tiene la sua rotella QUI e non nella voce: la tendina
+                si chiude al tocco, e senza questo l'allineamento alla cassa
+                girerebbe senza che niente lo dica finché non arriva l'esito. */}
+            {manageGroups.length > 0 && (
+              <div className="relative flex-shrink-0">
+                <button
+                  ref={manageTriggerRef}
+                  type="button"
+                  onClick={() => { setMenuPickerOpen(false); setManageOpen(v => !v); }}
+                  aria-haspopup="menu"
+                  aria-expanded={manageOpen}
+                  aria-label={t('manageMenuAria')}
+                  title={t('manageMenuAria')}
+                  className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-2.5 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] sm:px-3.5"
+                >
+                  {importing
+                    ? <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin" aria-hidden />
+                    : <SlidersHorizontal className="h-4 w-4 flex-shrink-0" aria-hidden />}
+                  <span className="hidden sm:inline">{t('manage')}</span>
+                  <ChevronDown className={`hidden h-4 w-4 flex-shrink-0 transition-transform sm:inline ${manageOpen ? 'rotate-180' : ''}`} aria-hidden />
+                </button>
+                {manageOpen && isWideMenuBar && (
+                  <div
+                    ref={manageRef}
+                    role="menu"
+                    className="absolute right-0 top-full z-30 mt-2 w-[264px] overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] py-1.5 shadow-[var(--ds-shadow-raised)]"
+                  >
+                    {manageGroups.map((group, gi) => (
+                      <React.Fragment key={gi}>
+                        {gi > 0 && <div className="my-1.5 border-t border-[var(--ds-border)]" />}
+                        {group.map(a => (
+                          <button
+                            key={a.label}
+                            type="button"
+                            role="menuitem"
+                            onClick={() => runManageAction(a)}
+                            disabled={a.busy}
+                            className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-[15px] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
+                          >
+                            {a.busy
+                              ? <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin text-[var(--ds-text-muted)]" aria-hidden />
+                              : <a.icon className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />}
+                            <span className="min-w-0 flex-1 truncate">{a.label}</span>
+                            {a.meta != null && (
+                              <span className="flex-shrink-0 text-[14px] tabular-nums text-[var(--ds-text-muted)]">{a.meta}</span>
+                            )}
+                          </button>
+                        ))}
+                      </React.Fragment>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
             {/* Icon-only: the two modes are self-evident from the glyphs, and
                 the labels were competing with the search beside them. */}
             <div className="flex flex-shrink-0 items-center gap-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] p-1">
@@ -1705,6 +1873,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 </button>
               ))}
             </div>
+            </div>
           </div>
         )}
       </div>
@@ -1719,63 +1888,44 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 </Callout>
               </div>
             )}
-            <div className="flex flex-col gap-3 md:flex-row md:items-center mb-5">
-              {dishCategories.length > 0 && (
-                <div className="flex flex-1 flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setCategoryFilter(null)}
-                    className={`${DISH_FILTER_BASE} ${categoryFilter === null ? DISH_FILTER_ON : DISH_FILTER_OFF}`}
-                  >
-                    Tutte <span className="tabular-nums opacity-70">{menuDishes.length}</span>
-                  </button>
-                  {dishCategories.map(cat => {
-                    const count = menuDishes.filter(d => d.category === cat).length;
-                    const isActive = categoryFilter === cat;
-                    const isOff = disabledCategories.has(cat);
-                    return (
-                      <button
-                        key={cat}
-                        type="button"
-                        onClick={() => setCategoryFilter(isActive ? null : cat)}
-                        title={isOff ? `${cat} — spenta: non compare su comande e menu digitale` : undefined}
-                        className={`${DISH_FILTER_BASE} ${isActive ? DISH_FILTER_ON : DISH_FILTER_OFF} ${isOff && !isActive ? 'opacity-50 line-through' : ''}`}
-                      >
-                        {cat} <span className="tabular-nums opacity-70">{count}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-              {/* Azione, non filtro: sta fuori dalla fila di pill e usa lo
-                  stesso vestito di "Importa da cassa", così non si confonde
-                  con una categoria in più. */}
-              {canEdit && dishCategories.length > 0 && (
+            {/* Solo filtri: «Categorie», «Varianti» e il conteggio se ne sono
+                andati nella testata. Una riga sola che scorre, mai a capo.
+                Il -my-5 py-5 non è spaziatura: un contenitore che scorre in
+                orizzontale ritaglia ANCHE in verticale (regola 11), e senza
+                quello le pastiglie tengono l'ombra ai lati e la perdono sopra e
+                sotto — che si legge come un controllo piatto voluto, non come
+                un difetto. La bozza va misurata sull'ombra, non a occhio:
+                shadow-card è 0 8px 24px, quindi servono ~20px. Il margine
+                negativo la riassorbe, così la riga resta dove starebbe. */}
+            {dishCategories.length > 0 && (
+              <div className="mb-5">
+              <div className="scrollbar-hide -mx-1 -my-5 flex gap-2 overflow-x-auto px-1 py-5">
                 <button
                   type="button"
-                  onClick={() => setCatsOpen(true)}
-                  title="Ordina e accendi/spegni le categorie"
-                  className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 self-start rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] md:self-center"
+                  onClick={() => setCategoryFilter(null)}
+                  className={`${DISH_FILTER_BASE} ${categoryFilter === null ? DISH_FILTER_ON : DISH_FILTER_OFF}`}
                 >
-                  <SlidersHorizontal className="h-4 w-4" aria-hidden />
-                  Categorie
+                  Tutte <span className="tabular-nums opacity-70">{menuDishes.length}</span>
                 </button>
-              )}
-              {canEdit && (
-                <button
-                  type="button"
-                  onClick={() => setVariantsOpen(true)}
-                  title="Gruppi di varianti: cotture, aggiunte, sovrapprezzi"
-                  className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 self-start rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] md:self-center"
-                >
-                  <Layers className="h-4 w-4" aria-hidden />
-                  Varianti
-                </button>
-              )}
-              <span className="text-[13px] text-[var(--ds-text-muted)] md:flex-shrink-0 md:self-center">
-                {menuDishes.length} piatti · {menuDishes.filter(d => d.allergens.length > 0).length} con allergeni · {menuDishes.filter(d => !d.photo_url).length} senza foto
-              </span>
-            </div>
+                {dishCategories.map(cat => {
+                  const count = menuDishes.filter(d => d.category === cat).length;
+                  const isActive = categoryFilter === cat;
+                  const isOff = disabledCategories.has(cat);
+                  return (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setCategoryFilter(isActive ? null : cat)}
+                      title={isOff ? `${cat} — spenta: non compare su comande e menu digitale` : undefined}
+                      className={`${DISH_FILTER_BASE} ${isActive ? DISH_FILTER_ON : DISH_FILTER_OFF} ${isOff && !isActive ? 'opacity-50 line-through' : ''}`}
+                    >
+                      {cat} <span className="tabular-nums opacity-70">{count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              </div>
+            )}
 
             {filteredDishes.length === 0 ? (
               <EmptyState icon={Utensils}>
@@ -1872,7 +2022,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                       onClick={e => { e.stopPropagation(); handleEditDish(dish); }}
                                       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); handleEditDish(dish); } }}
                                       className={`${dsIconButton} h-9 w-9 bg-[var(--ds-surface-row)] shadow-none`}
-                                      title="Modifica"
+                                      title={t('edit')}
                                     >
                                       <Edit2 className="h-4 w-4" />
                                     </span>
@@ -1882,7 +2032,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                       onClick={e => { e.stopPropagation(); setDeleteDishConfirm(dish); }}
                                       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setDeleteDishConfirm(dish); } }}
                                       className={`${dsIconButton} h-9 w-9 bg-[var(--ds-surface-row)] shadow-none hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)]`}
-                                      title="Elimina"
+                                      title={t('delete')}
                                     >
                                       <Trash2 className="h-4 w-4" />
                                     </span>
@@ -1956,7 +2106,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                     onClick={e => { e.stopPropagation(); if (!reorderBusy) handleMoveDish(dish, -1); }}
                                     onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); if (!reorderBusy) handleMoveDish(dish, -1); } }}
                                     className={`${dsIconButton} h-9 w-7 bg-transparent shadow-none ${reorderBusy ? 'opacity-40' : ''}`}
-                                    title="Sposta su"
+                                    title={t('moveUp')}
                                   >
                                     <ChevronUp className="h-4 w-4" />
                                   </span>
@@ -1967,7 +2117,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                     onClick={e => { e.stopPropagation(); if (!reorderBusy) handleMoveDish(dish, 1); }}
                                     onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); if (!reorderBusy) handleMoveDish(dish, 1); } }}
                                     className={`${dsIconButton} h-9 w-7 bg-transparent shadow-none ${reorderBusy ? 'opacity-40' : ''}`}
-                                    title="Sposta giù"
+                                    title={t('moveDown')}
                                   >
                                     <ChevronDown className="h-4 w-4" />
                                   </span>
@@ -1992,7 +2142,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                   onClick={e => { e.stopPropagation(); handleEditDish(dish); }}
                                   onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); handleEditDish(dish); } }}
                                   className={`${dsIconButton} h-9 w-9 bg-[var(--ds-surface-row)] shadow-none`}
-                                  title="Modifica"
+                                  title={t('edit')}
                                 >
                                   <Edit2 className="h-4 w-4" />
                                 </span>
@@ -2002,7 +2152,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                   onClick={e => { e.stopPropagation(); setDeleteDishConfirm(dish); }}
                                   onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setDeleteDishConfirm(dish); } }}
                                   className={`${dsIconButton} h-9 w-9 bg-[var(--ds-surface-row)] shadow-none hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)]`}
-                                  title="Elimina"
+                                  title={t('delete')}
                                 >
                                   <Trash2 className="h-4 w-4" />
                                 </span>
@@ -2061,7 +2211,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             ))}
                           </div>
                         ) : (
-                          <p className="text-[13px] text-[var(--ds-text-muted)]">Nessun allergene dichiarato.</p>
+                          <p className="text-[13px] text-[var(--ds-text-muted)]">{t('noAllergens')}</p>
                         )}
                       </div>
                       <div>
@@ -2113,7 +2263,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             type="button"
                             onClick={() => setDeleteDishConfirm(viewDish)}
                             className={`${dsIconButton} bg-[var(--ds-surface-row)] shadow-none hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)]`}
-                            title="Elimina piatto"
+                            title={t('deleteDish')}
                           >
                             <Trash2 className="h-4 w-4" />
                           </button>
@@ -2122,6 +2272,57 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     </div>
                   </aside>
                 )}
+              </div>
+            )}
+
+            {/* Le stesse voci di «Gestisci», nella forma che il touch si
+                aspetta — e nello stesso foglio che apre l'imbuto dei filtri in
+                Prenotazioni: maniglia, titolo, righe. Niente × e niente
+                «Chiudi»: si chiude toccando fuori, come l'altro.
+                Qui la riga porta anche una spiegazione — «Varianti» da solo non
+                dice a nessuno che cosa apre, e sul telefono non c'è il title del
+                puntatore a rimediare. */}
+            {manageOpen && !isWideMenuBar && (
+              <div className="fixed inset-0 z-50 flex items-end" onClick={() => setManageOpen(false)}>
+                <div className="absolute inset-0 bg-[var(--ds-backdrop)]" />
+                <div
+                  className="relative w-full rounded-t-[var(--ds-radius)] bg-[var(--ds-surface)] pb-8 shadow-[var(--ds-shadow-raised)]"
+                  onClick={e => e.stopPropagation()}
+                >
+                  <div className="flex justify-center pt-3 pb-2">
+                    <div className="h-1 w-8 rounded-full bg-[var(--ds-text-subtle)]" />
+                  </div>
+                  <div className="px-5 pb-2">
+                    <h3 className="text-base font-semibold text-[var(--ds-text-primary)]">{t('menuManagement')}</h3>
+                  </div>
+                  <div className="max-h-[65vh] overflow-y-auto overscroll-contain px-3">
+                    {manageGroups.map((group, gi) => (
+                      <React.Fragment key={gi}>
+                        {gi > 0 && <div className="mx-4 my-1.5 border-t border-[var(--ds-border)]" />}
+                        {group.map(a => (
+                          <button
+                            key={a.label}
+                            type="button"
+                            onClick={() => runManageAction(a)}
+                            disabled={a.busy}
+                            className="flex min-h-[56px] w-full items-center gap-3 rounded-[var(--ds-radius)] px-4 py-2 text-left transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
+                          >
+                            {a.busy
+                              ? <Loader2 className="h-5 w-5 flex-shrink-0 animate-spin text-[var(--ds-text-muted)]" aria-hidden />
+                              : <a.icon className="h-5 w-5 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />}
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-[15px] text-[var(--ds-text-primary)]">{a.label}</span>
+                              <span className="block truncate text-[13px] text-[var(--ds-text-muted)]">{a.hint}</span>
+                            </span>
+                            {a.meta != null && (
+                              <span className="flex-shrink-0 text-[15px] tabular-nums text-[var(--ds-text-muted)]">{a.meta}</span>
+                            )}
+                          </button>
+                        ))}
+                      </React.Fragment>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
           </>
@@ -2135,8 +2336,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 <SearchField
                   value={banquetSearchTerm}
                   onChange={setBanquetSearchTerm}
-                  placeholder="Cerca banchetto o tipo evento..."
-                  ariaLabel="Cerca banchetto"
+                  placeholder={t('searchBanquet')}
+                  ariaLabel={t('searchBanquetAria')}
                   className="sm:flex-1 sm:min-w-0"
                 />
               )}
@@ -2157,7 +2358,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     type="button"
                     onClick={() => setShowBanquetSortModal(true)}
                     className={`${dsIconButton} ml-auto h-9 w-9`}
-                    aria-label="Ordina banchetti"
+                    aria-label={t('sortBanquets')}
                     title={BANQUET_SORT_OPTIONS.find(o => o.value === banquetSortBy)?.label}
                   >
                     <ArrowUpDown className="h-4 w-4" />
@@ -2303,8 +2504,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                       // non è un comando.
                                       <span
                                           className={`${dsIconButton} h-9 w-9 bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] shadow-none hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-muted)]`}
-                                          title="Tavoli assegnati"
-                                          aria-label="Tavoli assegnati"
+                                          title={t('banquetStep.tables.label')}
+                                          aria-label={t('banquetStep.tables.label')}
                                           role="img"
                                       >
                                           <BookOpen className="h-4 w-4" />
@@ -2371,7 +2572,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                                       className="flex w-full items-center gap-2 px-4 py-2.5 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)]"
                                                   >
                                                       <Edit2 className="h-3.5 w-3.5 text-[var(--ds-text-muted)]" />
-                                                      Modifica
+                                                      {t('edit')}
                                                   </button>
                                                   <button
                                                       type="button"
@@ -2406,7 +2607,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                                       className="flex w-full items-center gap-2 px-4 py-2.5 text-[13px] font-medium text-[var(--ds-critical-text)] transition-colors hover:bg-[var(--ds-critical-tint)]"
                                                   >
                                                       <Trash2 className="h-3.5 w-3.5" />
-                                                      Elimina
+                                                      {t('delete')}
                                                   </button>
                                               </div>
                                           )}
@@ -2473,7 +2674,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             </div>
                           )}
                           <div className="flex items-center justify-between gap-3 border-t border-[var(--ds-border)] py-3 first:border-t-0">
-                              <span className="text-[13px] text-[var(--ds-text-muted)]">Piatti</span>
+                              <span className="text-[13px] text-[var(--ds-text-muted)]">{t('dishes')}</span>
                               <span className="text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">{dishesLong}</span>
                           </div>
                       </div>
@@ -2616,7 +2817,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           <form id="dish-form" onSubmit={handleAddDishSubmit} className="space-y-4">
             <FormCard title="Dettagli">
               <div className="space-y-4">
-                <Field label="Nome" required>
+                <Field label={t('name')} required>
                   <input
                     required
                     className={dsInput}
@@ -2625,7 +2826,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   />
                 </Field>
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <Field label="Prezzo (€)" required>
+                  <Field label={t('price')} required>
                     <input
                       type="number"
                       step="0.5"
@@ -2635,7 +2836,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       onChange={e => setNewDish({ ...newDish, price: parseFloat(e.target.value) })}
                     />
                   </Field>
-                  <Field label="Categoria">
+                  <Field label={t('category')}>
                     <select
                       className={dsSelect}
                       value={newDish.category}
@@ -2721,7 +2922,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     </Field>
                   )}
                 </div>
-                <Field label="Descrizione">
+                <Field label={t('description')}>
                   <textarea
                     rows={4}
                     className={`${dsTextarea} resize-none`}
@@ -2737,7 +2938,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 parte, e il footer lo dice invece di impedirlo — è legittimo
                 per un piatto in preparazione. */}
             <FormCard
-              title="Nei menu"
+              title={t('inMenus')}
               aside={
                 (newDish.menu_ids?.length ?? 0) === 0
                   ? <span className="text-[13px] text-[var(--ds-pending-text)]">in nessun menu</span>
@@ -2771,7 +2972,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 sovrapprezzi. Anche quelli della cassa si agganciano
                 liberamente — il legame fatto qui sopravvive agli import. */}
             <FormCard
-              title="Varianti"
+              title={t('variants')}
               aside={
                 dishGroupIds.length === 0
                   ? <span className="text-[13px] text-[var(--ds-text-muted)]">nessun gruppo</span>
@@ -2818,7 +3019,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 per i piatti di cucina: un vino non si abbina a un vino. */}
             {!dishCatIsWineish && wineDishes.length > 0 && (
               <FormCard
-                title="Vini abbinati"
+                title={t('pairedWines')}
                 aside={
                   <span className="flex items-center gap-2">
                     {dishWineIds.length === 0 && (
@@ -2872,7 +3073,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     type="text"
                     value={wineSearch}
                     onChange={e => setWineSearch(e.target.value)}
-                    placeholder="Cerca un vino…"
+                    placeholder={t('searchWine')}
                     autoFocus
                     className={`${dsInput} mb-3`}
                   />
@@ -2951,7 +3152,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       {suggestingWines ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
                       {suggestingWines ? 'Ci penso…' : 'Suggerisci'}
                     </button>
-                    <span className="text-[13px] text-[var(--ds-text-muted)]">La proposta si salva solo col Salva.</span>
+                    <span className="text-[13px] text-[var(--ds-text-muted)]">{t('suggestionNeedsSave')}</span>
                   </div>
                 )}
                 {suggestWinesError && <p className="mt-2 text-[13px] text-[var(--ds-critical-text)]">{suggestWinesError}</p>}
@@ -3066,7 +3267,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             className={`${dsInput} text-right tabular-nums`}
                             inputMode="decimal"
                             placeholder="sconto €"
-                            title="Sconto se tolto (vuoto = togliere è gratis)"
+                            title={t('removalDiscount')}
                             value={c.sconto}
                             onChange={e => setDishComponents(prev => prev.map((x, j) => j === i ? { ...x, sconto: e.target.value } : x))}
                           />
@@ -3093,7 +3294,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               </div>
             </FormCard>
 
-            <FormCard title="Foto" aside={<span className="text-[13px] text-[var(--ds-text-muted)]">opzionale</span>}>
+            <FormCard title={t('photo')} aside={<span className="text-[13px] text-[var(--ds-text-muted)]">opzionale</span>}>
               <div className="flex items-start gap-4">
                 {newDish.photo_url ? (
                   <img
@@ -3195,7 +3396,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           title={isEditingBanquet ? 'Modifica menu banchetto' : 'Crea menu banchetto'}
           // The step counter said what the stepper below already shows, and
           // selected. This line is the one thing the header could not say.
-          subtitle="Aggiungi almeno un piatto per completare il menù."
+          subtitle={t('addAtLeastOneDish')}
           size="lg"
           fixedHeight
           // No top padding: the pinned stepper above already supplies it.
@@ -3248,10 +3449,10 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           }
           subheader={
             <StepNav
-              steps={BANQUET_STEPS}
+              steps={banquetSteps}
               current={banquetStep}
               onSelect={setBanquetStep}
-              ariaLabel="Passi del menu banchetto"
+              ariaLabel={t('banquetStepsAria')}
             />
           }
         >
@@ -3265,7 +3466,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
             <Callout
               tone="pending"
               icon={Info}
-              title="Bozza non salvata trovata"
+              title={t('draftFound')}
               className="mb-4"
               action={
                 <div className="flex gap-2">
@@ -3349,23 +3550,23 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               {/* SECTION: Evento */}
               <section className={banquetStep === 0 ? 'block' : 'hidden'}>
                 <FormCard title="Evento">
-                  <p className="mb-4 text-[13px] text-[var(--ds-text-muted)]">Identifica il banchetto: nome interno, data e turno.</p>
+                  <p className="mb-4 text-[13px] text-[var(--ds-text-muted)]">{t('banquetIdentity')}</p>
                 <div className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div className="md:col-span-2">
-                      <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Nome Menu <span className="text-[var(--ds-critical-text)]">*</span></label>
+                      <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{t('menuName')} <span className="text-[var(--ds-critical-text)]">*</span></label>
                       <input
                           required
-                          placeholder="es. Menu Matrimonio Gold"
+                          placeholder={t('menuNamePlaceholder')}
                           className={`w-full bg-[var(--ds-surface)] border rounded-[var(--ds-radius)] px-3 py-2 text-sm focus:outline-none ${
-                            banquetFieldHasError('Nome Menu')
+                            banquetFieldHasError(t('menuName'))
                               ? 'border-[var(--ds-critical-solid)] focus:border-[var(--ds-critical-solid)]'
                               : 'border-[var(--ds-border)] focus:border-[var(--ds-text-primary)]'
                           }`}
                           value={newBanquet.name}
                           onChange={e => {
                             setNewBanquet({...newBanquet, name: e.target.value});
-                            if (banquetFormErrors.length > 0) setBanquetFormErrors(prev => prev.filter(f => f !== 'Nome Menu'));
+                            if (banquetFormErrors.length > 0) setBanquetFormErrors(prev => prev.filter(f => f !== t('menuName')));
                           }}
                       />
                     </div>
@@ -3403,9 +3604,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     </div>
                   </div>
                   <div>
-                    <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Descrizione Commerciale <span className="font-normal text-[var(--ds-text-muted)]">— opzionale</span></label>
+                    <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{t('commercialDescription')} <span className="font-normal text-[var(--ds-text-muted)]">— opzionale</span></label>
                     <textarea
-                      placeholder="Breve descrizione visibile in stampa (es. Cresima, Matrimonio civile…)"
+                      placeholder={t('commercialDescriptionPlaceholder')}
                       className="w-full bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-[var(--ds-radius)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)] h-20"
                       value={newBanquet.description}
                       onChange={e => setNewBanquet({...newBanquet, description: e.target.value})}
@@ -3417,7 +3618,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
               {/* SECTION: Coperti & Tariffa */}
               <section className={banquetStep === 1 ? 'block' : 'hidden'}>
-                <FormCard title="Coperti e tariffa">
+                <FormCard title={t('banquetStep.covers.label')}>
                   <p className="mb-4 text-[13px] text-[var(--ds-text-muted)]">Numero di partecipanti e prezzi. Se imposti un prezzo bambini, il calcolo distingue adulti e bambini.</p>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <Field label="Ospiti totali">
@@ -3449,7 +3650,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   </Field>
                   {canViewBanquetPrice && (
                   <div>
-                      <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Prezzo Adulti (€) <span className="text-[var(--ds-critical-text)]">*</span></label>
+                      <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{t('adultPrice')} <span className="text-[var(--ds-critical-text)]">*</span></label>
                       <input
                           type="number"
                           required
@@ -3470,7 +3671,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   )}
                   {canViewBanquetPrice && (
                   <div>
-                      <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Prezzo Bambini (€) <span className="font-normal text-[var(--ds-text-muted)]">— opzionale</span></label>
+                      <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{t('childPrice')} <span className="font-normal text-[var(--ds-text-muted)]">— opzionale</span></label>
                       <input
                           type="number"
                           min="0"
@@ -3557,13 +3758,13 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
               {/* SECTION: Note operative */}
               <section className={banquetStep === 4 ? 'block' : 'hidden'}>
-                <FormCard title="Note operative">
+                <FormCard title={t('banquetStep.notes.label')}>
                   <p className="mb-4 text-[13px] text-[var(--ds-text-muted)]">Istruzioni separate per cucina, sala e mise en place. Compariranno nelle stampe operative.</p>
                 <div className="space-y-4">
                   <div>
                     <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Note Portate <span className="font-normal normal-case tracking-normal">— cucina</span></label>
                     <textarea
-                      placeholder="es. Senza glutine al tavolo 3, allergia ai crostacei per il tavolo sposi…"
+                      placeholder={t('dietaryNotesPlaceholder')}
                       className="w-full bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-[var(--ds-radius)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)] h-28"
                       value={newBanquet.notes_courses || ''}
                       onChange={e => setNewBanquet({...newBanquet, notes_courses: e.target.value})}
@@ -3572,7 +3773,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   <div>
                     <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Note Servizio <span className="font-normal normal-case tracking-normal">— sala</span></label>
                     <textarea
-                      placeholder="es. Tempi: aperitivo 19:30, taglio torta 22:30. Vino bianco freddo per gli antipasti…"
+                      placeholder={t('serviceNotesPlaceholder')}
                       className="w-full bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-[var(--ds-radius)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)] h-28"
                       value={newBanquet.notes_service || ''}
                       onChange={e => setNewBanquet({...newBanquet, notes_service: e.target.value})}
@@ -3593,7 +3794,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
               <section className={banquetStep === 2 ? 'block' : 'hidden'}>
                 <FormCard
-                  title="Composizione del menù"
+                  title={t('menuCompositionTitle')}
                   aside={
                     <button
                       type="button"
@@ -3644,7 +3845,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                               onClick={() => moveCourse(courseIndex, -1)}
                               disabled={courseIndex === 0}
                               className="text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] disabled:opacity-30 disabled:cursor-not-allowed"
-                              title="Sposta su"
+                              title={t('moveUp')}
                             >
                               <ChevronLeft className="h-3.5 w-3.5 rotate-90" />
                             </button>
@@ -3653,7 +3854,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                               onClick={() => moveCourse(courseIndex, 1)}
                               disabled={courseIndex === totalCourses - 1}
                               className="text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] disabled:opacity-30 disabled:cursor-not-allowed"
-                              title="Sposta giù"
+                              title={t('moveDown')}
                             >
                               <ChevronRight className="h-3.5 w-3.5 rotate-90" />
                             </button>
@@ -3672,7 +3873,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             type="button"
                             onClick={() => removeCourse(courseIndex)}
                             className="p-1.5 rounded-[var(--ds-radius)] text-[var(--ds-text-muted)] hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)]"
-                            title="Elimina uscita"
+                            title={t('deleteCourse')}
                           >
                             <X className="h-4 w-4" />
                           </button>
@@ -3685,7 +3886,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             <SearchField
                               value={courseDishQuery[courseIndex] ?? ''}
                               onChange={q => setCourseDishQuery(prev => ({ ...prev, [courseIndex]: q }))}
-                              placeholder="Cerca piatto…"
+                              placeholder={t('searchDish')}
                               ariaLabel={`Cerca piatto in ${course.name || 'questa uscita'}`}
                             />
                           </div>
@@ -3781,7 +3982,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           <textarea
                             value={course.notes || ''}
                             onChange={e => setCourseNotes(courseIndex, e.target.value)}
-                            placeholder="Es. servire con pane caldo, abbinare a vino bianco fresco…"
+                            placeholder={t('courseNotesPlaceholder')}
                             rows={2}
                             className="w-full bg-[var(--ds-canvas)] border border-[var(--ds-border)] rounded-[var(--ds-radius)] p-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)] resize-y"
                           />
@@ -3791,7 +3992,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   })}
                   {(newBanquet.courses || []).length === 0 && (
                     <div className="text-center py-6 bg-[var(--ds-canvas)] rounded-[var(--ds-radius)] border border-dashed border-[var(--ds-border)]">
-                      <p className="text-sm text-[var(--ds-text-muted)] mb-2">Nessuna uscita</p>
+                      <p className="text-sm text-[var(--ds-text-muted)] mb-2">{t('noCourses')}</p>
                       <button
                         type="button"
                         onClick={addCourse}
@@ -3806,12 +4007,12 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               </section>
 
               <section className={banquetStep === 3 ? 'block' : 'hidden'}>
-                <FormCard title="Tavoli assegnati" aside={<span className="text-[13px] text-[var(--ds-text-muted)]">opzionale</span>}>
+                <FormCard title={t('banquetStep.tables.label')} aside={<span className="text-[13px] text-[var(--ds-text-muted)]">opzionale</span>}>
                   <p className="mb-4 text-[13px] text-[var(--ds-text-muted)]">Riserva i tavoli del banchetto. I tavoli occupati nello stesso turno sono disabilitati.</p>
                 {!newBanquet.event_date || !newBanquet.shift ? (
-                  <p className="text-xs text-[var(--ds-text-muted)] italic">Seleziona Data Evento e Turno per assegnare i tavoli.</p>
+                  <p className="text-xs text-[var(--ds-text-muted)] italic">{t('pickDateAndShift')}</p>
                 ) : tables.length === 0 ? (
-                  <p className="text-xs text-[var(--ds-text-muted)] italic">Nessun tavolo configurato.</p>
+                  <p className="text-xs text-[var(--ds-text-muted)] italic">{t('noTables')}</p>
                 ) : (
                   <div className="space-y-3">
 
@@ -3852,7 +4053,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           ? rooms
                           : rooms.filter(r => r.id === tablePickerRoomFilter);
                         if (displayedRooms.length === 0) {
-                          return <div className="text-center py-10 text-[var(--ds-text-subtle)] text-sm">Nessuna sala disponibile.</div>;
+                          return <div className="text-center py-10 text-[var(--ds-text-subtle)] text-sm">{t('noRooms')}</div>;
                         }
                         return displayedRooms.map(room => {
                           const roomTables = [...tables]
@@ -3968,8 +4169,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       <ModalShell
         open={qrOpen}
         onClose={() => setQrOpen(false)}
-        title="Menu digitale"
-        subtitle="L'ospite inquadra il QR e sfoglia il menu in quattro lingue."
+        title={t('digitalMenu')}
+        subtitle={t('digitalMenuHint')}
       >
         <div className="space-y-4">
           <div className="flex items-center justify-between gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-4 py-3">
@@ -4078,7 +4279,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
       <ConfirmDeleteModal
         isOpen={!!deleteDishConfirm}
-        title="Elimina Piatto"
+        title={t('deleteDishTitle')}
         message="Stai per eliminare il piatto:"
         itemName={deleteDishConfirm?.name}
         onCancel={() => setDeleteDishConfirm(null)}
@@ -4090,7 +4291,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
       <ConfirmDeleteModal
         isOpen={!!deleteBanquetConfirm}
-        title="Elimina Menu Banchetto"
+        title={t('deleteBanquetMenu')}
         message="Stai per eliminare il menu banchetto:"
         itemName={deleteBanquetConfirm?.name}
         onCancel={() => setDeleteBanquetConfirm(null)}
@@ -4105,7 +4306,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         <ModalShell
           open={!!menuForm}
           onClose={() => setMenuForm(null)}
-          title={menuForm.kind === 'create' ? 'Nuovo menu' : 'Rinomina menu'}
+          title={menuForm.kind === 'create' ? 'Nuovo menu' : t('renameMenu')}
           size="sm"
           bodyClassName="p-5"
           footer={
@@ -4126,7 +4327,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           }
         >
           <form id="menu-form" onSubmit={submitMenuForm}>
-            <Field label="Nome" required>
+            <Field label={t('name')} required>
               <input
                 autoFocus
                 required
@@ -4144,7 +4345,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
       <ConfirmDeleteModal
         isOpen={!!deleteMenuConfirm}
-        title="Elimina Menu"
+        title={t('deleteMenuTitle')}
         message="I piatti restano in anagrafica e negli altri menu. Stai per eliminare:"
         itemName={deleteMenuConfirm?.name}
         onCancel={() => setDeleteMenuConfirm(null)}
@@ -4279,8 +4480,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         <ModalShell
           open={catsOpen}
           onClose={() => setCatsOpen(false)}
-          title="Categorie"
-          subtitle="L'ordine e le categorie spente valgono anche su comande e menu digitale"
+          title={t('categories')}
+          subtitle={t('categoriesHint')}
           size="sm"
           bodyClassName="p-2"
         >
@@ -4297,7 +4498,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       applyMenuCats(next);
                     }}
                     className={`${dsIconButton} h-9 w-8 bg-transparent shadow-none disabled:opacity-30`}
-                    title="Sposta su"
+                    title={t('moveUp')}
                   >
                     <ChevronUp className="h-4 w-4" />
                   </button>
@@ -4310,7 +4511,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       applyMenuCats(next);
                     }}
                     className={`${dsIconButton} h-9 w-8 bg-transparent shadow-none disabled:opacity-30`}
-                    title="Sposta giù"
+                    title={t('moveDown')}
                   >
                     <ChevronDown className="h-4 w-4" />
                   </button>
@@ -4429,7 +4630,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   type="button"
                   onClick={() => { setCatFormName(cat.name); setCatFormError(null); setCatForm({ kind: 'rename', name: cat.name }); }}
                   className={`${dsIconButton} h-9 w-9 flex-shrink-0 bg-[var(--ds-surface-row)] shadow-none`}
-                  title="Rinomina categoria"
+                  title={t('renameCategory')}
                 >
                   <Edit2 className="h-4 w-4" />
                 </button>
@@ -4473,7 +4674,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         <ModalShell
           open={!!catForm}
           onClose={() => setCatForm(null)}
-          title={catForm.kind === 'create' ? 'Nuova categoria' : 'Rinomina categoria'}
+          title={catForm.kind === 'create' ? 'Nuova categoria' : t('renameCategory')}
           size="sm"
           bodyClassName="p-5"
           footer={
@@ -4494,7 +4695,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           }
         >
           <form id="cat-form" onSubmit={submitCatForm} className="space-y-3">
-            <Field label="Nome" required>
+            <Field label={t('name')} required>
               <input
                 autoFocus
                 required
@@ -4517,7 +4718,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
       <ConfirmDeleteModal
         isOpen={!!deleteCatConfirm}
-        title="Elimina Categoria"
+        title={t('deleteCategory')}
         message="La categoria è vuota: nessun piatto viene toccato. Stai per eliminare:"
         itemName={deleteCatConfirm ?? undefined}
         onCancel={() => setDeleteCatConfirm(null)}
@@ -4551,7 +4752,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               <div className="w-8 h-1 rounded-full bg-[var(--ds-text-subtle)]" />
             </div>
             <div className="px-5 pb-2 pt-2 sm:pt-5">
-              <h3 className="text-base font-semibold text-[var(--ds-text-primary)]">Ordina per</h3>
+              <h3 className="text-base font-semibold text-[var(--ds-text-primary)]">{t('sortBy')}</h3>
             </div>
             <div className="px-3">
               {BANQUET_SORT_OPTIONS.map(opt => (
@@ -4583,6 +4784,7 @@ interface BanquetCalendarProps {
 }
 
 const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelectBanquet, onViewBanquet, canEdit }) => {
+  const { t } = useTranslation('menu', { useSuspense: false });
   const { hasPermission } = useAuth();
   const canViewBanquetPrice = hasPermission('banquet:view_price');
   const canManageBanquetPayments = hasPermission('banquet:manage_payments');
@@ -4802,7 +5004,7 @@ const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelec
                         type="button"
                         onClick={e => { e.stopPropagation(); onSelectBanquet(menu); }}
                         className={`${dsIconButton} h-9 w-9 flex-shrink-0 bg-[var(--ds-surface)] shadow-none`}
-                        title="Modifica banchetto"
+                        title={t('editBanquet')}
                       >
                         <Edit2 className="h-4 w-4" />
                       </button>
@@ -4816,7 +5018,7 @@ const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelec
         ) : (
           <div className="flex flex-col items-center justify-center py-10 text-center">
             <Calendar className="mb-2 h-8 w-8 text-[var(--ds-text-subtle)]" />
-            <p className="text-[14px] text-[var(--ds-text-muted)]">Seleziona un giorno con eventi per vedere i dettagli.</p>
+            <p className="text-[14px] text-[var(--ds-text-muted)]">{t('pickDayWithEvents')}</p>
           </div>
         )}
       </div>

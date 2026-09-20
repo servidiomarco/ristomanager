@@ -10,12 +10,26 @@ import LanguageDetector from 'i18next-browser-languagedetector';
 // migrerà le traduzioni non vanno riscritte, solo agganciate qui.
 export type SupportedLanguage = 'it' | 'en';
 export const SUPPORTED_LANGUAGES: SupportedLanguage[] = ['it', 'en'];
+// Namespace della SPA autenticata: una namespace per vista, più `common` per
+// ciò che le attraversa tutte (navigazione, etichette di stato, toast,
+// conferme). Solo `common` è precaricata; le viste caricano la loro alla
+// prima apertura via useTranslation('<vista>') — il palmare in Comande non
+// si tira giù il testo di Impostazioni.
+export const COMMON_NAMESPACE = 'common';
+// Il widget pubblico /prenota NON passa da qui (è HTML statico con il suo
+// motore), ma legge gli stessi file: la namespace resta esportata per chi la
+// referenzia.
 export const DEFAULT_NAMESPACE = 'prenota';
 // Card dev board #35 — pagina pubblica /pay/:token, stesso schema di risorse
 // del widget /prenota ma con un namespace proprio (una pagina, un file). Non
 // in `ns` qui sotto: caricato on-demand da useTranslation('paytable'), così
 // il conto non tira giù prenota.json e viceversa.
 export const PAY_NAMESPACE = 'paytable';
+// Stesso schema per le altre due pagine pubbliche React: scontrino digitale
+// (/scontrino/:token) e preventivo banchetto (/preventivo/:token). Anche
+// questi caricati on-demand da useTranslation, mai in `ns`.
+export const RECEIPT_NAMESPACE = 'receipt';
+export const QUOTE_NAMESPACE = 'quote';
 
 i18n
     .use(Backend)
@@ -23,9 +37,11 @@ i18n
     .use(initReactI18next)
     .init({
         supportedLngs: SUPPORTED_LANGUAGES,
+        // Italiano come ripiego: una chiave non ancora tradotta esce in
+        // italiano, mai come chiave grezza sotto gli occhi di un cameriere.
         fallbackLng: 'it',
-        ns: [DEFAULT_NAMESPACE],
-        defaultNS: DEFAULT_NAMESPACE,
+        ns: [COMMON_NAMESPACE],
+        defaultNS: COMMON_NAMESPACE,
         backend: {
             // La SPA (Vercel) serve public/ come asset statici: stesso path
             // che il backend (Railway) espone esplicitamente per il widget.

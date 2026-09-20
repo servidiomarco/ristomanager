@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   AlertCircle, Ban, Calendar, Check, Copy, ExternalLink, Loader2, RefreshCw, RotateCcw,
   Users as UsersIcon,
@@ -32,6 +33,7 @@ export const PaymentDetail: React.FC<{
   onClose: () => void;
   onUpdated?: (updated: PaymentRequest) => void;
 }> = ({ payment: initialPayment, onClose, onUpdated }) => {
+  const { t } = useTranslation('cassa', { useSuspense: false });
   const { hasPermission } = useAuth();
   const [payment, setPayment] = useState<PaymentRequest>(initialPayment);
   const [messages, setMessages] = useState<PaymentMessage[]>([]);
@@ -228,7 +230,7 @@ export const PaymentDetail: React.FC<{
                 onClick={revoke}
                 onBlur={() => setRevokeArmed(false)}
                 disabled={revoking}
-                title="Annulla il link al provider: il cliente non potrà più pagarlo"
+                title={t('revokeLink')}
                 className={`${chip} ${
                   revokeArmed
                     ? 'bg-[var(--ds-critical-solid)] text-[#ffffff]'
@@ -263,7 +265,7 @@ export const PaymentDetail: React.FC<{
         )}
 
         {payment.table_bill_id != null && (
-          <FormCard title="Conto al tavolo">
+          <FormCard title={t('tableBill')}>
             <p className="text-[14px] text-[var(--ds-text-secondary)]">
               <span className="font-medium text-[var(--ds-text-primary)]">
                 {payment.table_name ? `Tavolo ${payment.table_name}` : `Conto #${payment.table_bill_id}`}
@@ -336,7 +338,7 @@ export const PaymentDetail: React.FC<{
           ) : error ? (
             <Callout tone="critical" icon={AlertCircle}>{error}</Callout>
           ) : messages.length === 0 ? (
-            <p className="text-[13px] text-[var(--ds-text-muted)]">Nessuna comunicazione registrata.</p>
+            <p className="text-[13px] text-[var(--ds-text-muted)]">{t('noMessages')}</p>
           ) : (
             <div className="space-y-2">
               {messages.map(msg => {

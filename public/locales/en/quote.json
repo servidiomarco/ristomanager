@@ -1,0 +1,40 @@
+{
+  "meta": {
+    "title": "Quote",
+    "titleFull": "Quote {{name}} — {{business}}"
+  },
+  "header": {
+    "langGroupAria": "Language"
+  },
+  "notFound": {
+    "title": "Quote not found",
+    "hint": "The link may be incomplete. Ask the restaurant to send it again."
+  },
+  "loadingAria": "Loading",
+  "status": {
+    "quote": "Quote",
+    "confirmed": "Confirmed"
+  },
+  "shift": {
+    "lunch": "lunch",
+    "dinner": "dinner"
+  },
+  "covers_one": "{{count}} guest",
+  "covers_other": "{{count}} guests",
+  "childrenSuffix_one": " ({{count}} child)",
+  "childrenSuffix_other": " ({{count}} children)",
+  "allergens": "allergens: {{list}}",
+  "rates": {
+    "title": "Rates",
+    "adults_one": "{{count}} adult × {{price}}",
+    "adults_other": "{{count}} adults × {{price}}",
+    "children_one": "{{count}} child × {{price}}",
+    "children_other": "{{count}} children × {{price}}",
+    "discount": "Discount",
+    "total": "Total",
+    "deposit": "Deposit due on confirmation"
+  },
+  "footer": {
+    "notBinding": "A quote is not a commitment: it's confirmed together with the restaurant."
+  }
+}

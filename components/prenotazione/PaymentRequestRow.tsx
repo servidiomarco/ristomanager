@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Ban, Check, Copy, ExternalLink, Loader2 } from 'lucide-react';
 import type { PaymentRequest } from '../../types';
 import { StatusPill } from '../ds';
@@ -11,15 +12,16 @@ import type { PillTone } from '../ds';
 
 const euro = (cents: number): string => `€ ${(cents / 100).toFixed(2).replace('.', ',')}`;
 
-const STATUS: Record<string, { label: string; tone: PillTone }> = {
-  PENDING: { label: 'In attesa', tone: 'pending' },
-  AUTHORISED: { label: 'Autorizzato', tone: 'info' },
-  COMPLETED: { label: 'Pagato', tone: 'positive' },
-  PAID: { label: 'Pagato', tone: 'positive' },
-  CANCELLED: { label: 'Annullato', tone: 'neutral' },
-  FAILED: { label: 'Fallito', tone: 'critical' },
-  EXPIRED: { label: 'Scaduto', tone: 'neutral' },
-  REFUNDED: { label: 'Rimborsato', tone: 'info' },
+// Mappa di modulo: porta le chiavi, la traduzione si prende al render.
+const STATUS: Record<string, { labelKey: string; label: string; tone: PillTone }> = {
+  PENDING: { labelKey: 'paymentStatus.pending', label: 'In attesa', tone: 'pending' },
+  AUTHORISED: { labelKey: 'paymentStatus.authorised', label: 'Autorizzato', tone: 'info' },
+  COMPLETED: { labelKey: 'paymentStatus.completed', label: 'Pagato', tone: 'positive' },
+  PAID: { labelKey: 'paymentStatus.completed', label: 'Pagato', tone: 'positive' },
+  CANCELLED: { labelKey: 'paymentStatus.cancelled', label: 'Annullato', tone: 'neutral' },
+  FAILED: { labelKey: 'paymentStatus.failed', label: 'Fallito', tone: 'critical' },
+  EXPIRED: { labelKey: 'paymentStatus.expired', label: 'Scaduto', tone: 'neutral' },
+  REFUNDED: { labelKey: 'paymentStatus.refunded', label: 'Rimborsato', tone: 'info' },
 };
 
 export const PaymentRequestRow: React.FC<{
@@ -32,11 +34,14 @@ export const PaymentRequestRow: React.FC<{
 }> = ({ request, copied, onCopy, onRevoke, revoking }) => {
   // Two-tap come il rimborso: il primo tocco arma, il secondo esegue,
   // il blur disarma — su un phone mid-servizio i tocchi involontari esistono.
+  const { t } = useTranslation('prenotazioni', { useSuspense: false });
   const [revokeArmed, setRevokeArmed] = useState(false);
-  const state = STATUS[request.status] ?? { label: request.status, tone: 'neutral' as PillTone };
+  const state = STATUS[request.status] ?? { labelKey: '', label: request.status, tone: 'neutral' as PillTone };
+  const stateLabel = state.labelKey ? t(state.labelKey, state.label) : state.label;
   const isRevocable = (request.status === 'PENDING' || request.status === 'AUTHORISED')
     && request.table_bill_split_id == null;
-  const isPaid = state.label === 'Pagato';
+  // Sullo stato, non sull'etichetta: quella ora cambia con la lingua.
+  const isPaid = request.status === 'COMPLETED';
   const when = (() => {
     try {
       return new Date(request.created_at).toLocaleString('it-IT', {
@@ -49,7 +54,7 @@ export const PaymentRequestRow: React.FC<{
 
   return (
     <li className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3.5 py-2.5">
-      <StatusPill tone={state.tone}>{state.label}</StatusPill>
+      <StatusPill tone={state.tone}>{stateLabel}</StatusPill>
       <span className="text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
         {euro(request.amount_cents)}
       </span>

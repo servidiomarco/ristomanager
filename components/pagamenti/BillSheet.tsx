@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import { Check, Copy, ExternalLink, FileText, Loader2, Printer, QrCode, Search, X, Banknote } from 'lucide-react';
@@ -87,22 +88,25 @@ const billSubtitle = (bill: BillLike) =>
 
 /** The two standing facts about a bill: what is left on it, and whether the
  *  total can still move. Shown beside the title in both containers. */
-const BillMeta: React.FC<{ bill: BillLike }> = ({ bill }) => (
+const BillMeta: React.FC<{ bill: BillLike }> = ({ bill }) => {
+  const { t } = useTranslation('cassa', { useSuspense: false });
+  return (
   <>
     {bill.residual_cents != null && (
       isSettled(bill)
         ? <StatusPill tone="positive">saldato</StatusPill>
         : bill.residual_cents === 0
-          ? <StatusPill tone="pending" title="Il resto è coperto da quote in checkout: possono ancora scadere">quote in pagamento</StatusPill>
+          ? <StatusPill tone="pending" title={t('remainderInCheckout')}>quote in pagamento</StatusPill>
           : <StatusPill tone="critical">{`residuo ${euro(bill.residual_cents)}`}</StatusPill>
     )}
     {bill.open_orders != null && bill.open_orders > 0 && (
-      <StatusPill tone="pending" title="Il totale può ancora cambiare">
+      <StatusPill tone="pending" title={t('totalMayChange')}>
         comanda aperta
       </StatusPill>
     )}
   </>
-);
+  );
+};
 
 /** Dialog di chiusura conto: registra i movimenti di incasso — metodo per
  *  metodo, il tavolo reale paga misto — e l'eventuale mancia. Il percorso a
@@ -116,6 +120,7 @@ export const SettleDialog: React.FC<{
    *  SUBITO l'emissione, invece di lasciare l'utente a metà strada. */
   onConfirm: (opts: SettleOpts, meta?: { invoiceIntent?: boolean }) => void;
 }> = ({ bill, busy, onCancel, onConfirm }) => {
+  const { t } = useTranslation('cassa', { useSuspense: false });
   const residual = bill.residual_cents ?? bill.total_cents;
   const alreadyPaid = Math.max(0, bill.total_cents - residual);
   const [movements, setMovements] = useState<BillPaymentInput[]>([]);
@@ -176,14 +181,14 @@ export const SettleDialog: React.FC<{
           davanti — a max-w-sm i numeri si leggevano da vicino e basta. */}
       <div className="w-full max-w-lg overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)]" onClick={e => e.stopPropagation()}>
         <div className="border-b border-[var(--ds-border)] p-5">
-          <h3 className="text-[18px] font-semibold text-[var(--ds-text-primary)]">Chiudi conto in cassa</h3>
+          <h3 className="text-[18px] font-semibold text-[var(--ds-text-primary)]">{t('closeAtTill')}</h3>
           <p className="mt-1 text-[14px] text-[var(--ds-text-muted)]">{billPlace(bill)} · totale {euro(bill.total_cents)}</p>
         </div>
         <div className="space-y-3 p-5">
           <dl className="space-y-1.5 text-[14px]">
             {alreadyPaid > 0 && (
               <div className="flex justify-between text-[var(--ds-text-muted)]">
-                <dt>Già pagato</dt><dd className="tabular-nums">{euro(alreadyPaid)}</dd>
+                <dt>{t('alreadyPaid')}</dt><dd className="tabular-nums">{euro(alreadyPaid)}</dd>
               </div>
             )}
             <div className="flex items-baseline justify-between font-medium text-[var(--ds-text-primary)]">
@@ -252,7 +257,7 @@ export const SettleDialog: React.FC<{
                 </button>
               </div>
               {change > 0 && (
-                <p className="text-[16px] font-semibold text-[var(--ds-text-primary)]">Resto <span className="tabular-nums">{euro(change)}</span></p>
+                <p className="text-[16px] font-semibold text-[var(--ds-text-primary)]">{t('change')} <span className="tabular-nums">{euro(change)}</span></p>
               )}
             </>
           )}
@@ -300,7 +305,7 @@ export const SettleDialog: React.FC<{
                     className={`${field} !text-left uppercase tracking-widest`}
                   />
                   {!lotteryValid && (
-                    <span className="mt-1 block text-[13px] text-[var(--ds-critical-text)]">Il codice sono 8 lettere o cifre</span>
+                    <span className="mt-1 block text-[13px] text-[var(--ds-critical-text)]">{t('codeIs8')}</span>
                   )}
                 </label>
               )}
@@ -314,7 +319,7 @@ export const SettleDialog: React.FC<{
                     maxLength={30}
                     autoCorrect="off"
                     spellCheck={false}
-                    placeholder="Numero scontrino (facoltativo)"
+                    placeholder={t('receiptNumberOptional')}
                     value={rtNumber}
                     onChange={e => setRtNumber(e.target.value)}
                     disabled={busy}
@@ -346,7 +351,7 @@ export const SettleDialog: React.FC<{
           </p>
         </div>
         <div className="flex items-center justify-end gap-2 border-t border-[var(--ds-border)] bg-[var(--ds-surface)] px-4 py-3">
-          <button type="button" onClick={onCancel} disabled={busy} className="inline-flex h-11 items-center rounded-[var(--ds-radius-control)] px-4 text-[15px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-40">Annulla</button>
+          <button type="button" onClick={onCancel} disabled={busy} className="inline-flex h-11 items-center rounded-[var(--ds-radius-control)] px-4 text-[15px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-40">{t('cancel')}</button>
           <button
             type="button"
             onClick={confirm}
@@ -438,6 +443,7 @@ const PaymentProgress: React.FC<{ bill: BillLike; live: boolean }> = ({ bill, li
 
 /** The QR, the items and the totals — identical in the pane and in the sheet. */
 const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
+  const { t } = useTranslation('cassa', { useSuspense: false });
   const [copied, setCopied] = useState(false);
   const [printState, setPrintState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
   const [printingKind, setPrintingKind] = useState<'PRECONTO' | 'QR'>('PRECONTO');
@@ -492,15 +498,15 @@ const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
               </button>
               <button type="button" onClick={() => print('QR')} disabled={printState === 'sending'} className={quiet}>
                 {printingKind === 'QR' && printState === 'sending' ? <><Loader2 className="h-4 w-4 animate-spin" /> Invio…</>
-                  : printingKind === 'QR' && printState === 'sent' ? <><Check className="h-4 w-4" /> In stampa</>
-                  : printingKind === 'QR' && printState === 'error' ? <><X className="h-4 w-4" /> Stampa fallita</>
-                  : <><QrCode className="h-4 w-4" /> Stampa QR</>}
+                  : printingKind === 'QR' && printState === 'sent' ? <><Check className="h-4 w-4" /> {t('printing')}</>
+                  : printingKind === 'QR' && printState === 'error' ? <><X className="h-4 w-4" /> {t('printFailed')}</>
+                  : <><QrCode className="h-4 w-4" /> {t('printQr')}</>}
               </button>
               <button type="button" onClick={() => print('PRECONTO')} disabled={printState === 'sending'} className={quiet}>
                 {printingKind === 'PRECONTO' && printState === 'sending' ? <><Loader2 className="h-4 w-4 animate-spin" /> Invio…</>
-                  : printingKind === 'PRECONTO' && printState === 'sent' ? <><Check className="h-4 w-4" /> In stampa</>
-                  : printingKind === 'PRECONTO' && printState === 'error' ? <><X className="h-4 w-4" /> Stampa fallita</>
-                  : <><Printer className="h-4 w-4" /> Stampa preconto</>}
+                  : printingKind === 'PRECONTO' && printState === 'sent' ? <><Check className="h-4 w-4" /> {t('printing')}</>
+                  : printingKind === 'PRECONTO' && printState === 'error' ? <><X className="h-4 w-4" /> {t('printFailed')}</>
+                  : <><Printer className="h-4 w-4" /> {t('printPreBill')}</>}
               </button>
             </div>
           </div>
@@ -624,13 +630,13 @@ const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
             const discountShown = itemsSum > 0 ? Math.max(0, itemsSum - bill.total_cents) : 0;
             return discountShown > 0 ? (
               <div className="flex justify-between text-[var(--ds-critical-text)]">
-                <dt>Sconto</dt>
+                <dt>{t('discount')}</dt>
                 <dd className="tabular-nums">−{euro(discountShown)}</dd>
               </div>
             ) : null;
           })()}
           <div className="flex justify-between font-semibold text-[var(--ds-text-primary)]">
-            <dt>Totale</dt>
+            <dt>{t('total')}</dt>
             <dd className="tabular-nums">{euro(bill.total_cents)}</dd>
           </div>
           {/* Acconto: si mostra l'importo PIENO versato dal cliente, non solo
@@ -640,7 +646,7 @@ const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
             const depositShown = bill.deposit_paid_cents ?? bill.deposit_credit_cents ?? 0;
             return depositShown > 0 ? (
               <div className="flex justify-between text-[var(--ds-seated-text)]">
-                <dt>Acconto già versato</dt>
+                <dt>{t('depositPaid')}</dt>
                 <dd className="tabular-nums">−{euro(depositShown)}</dd>
               </div>
             ) : null;
@@ -653,7 +659,7 @@ const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
           )}
           {bill.refund_due_cents != null && bill.refund_due_cents > 0 && (
             <div className="flex justify-between font-semibold text-[var(--ds-seated-text)]">
-              <dt>Da rimborsare al cliente</dt>
+              <dt>{t('toRefund')}</dt>
               <dd className="tabular-nums">{euro(bill.refund_due_cents)}</dd>
             </div>
           )}
@@ -688,6 +694,7 @@ export const InvoiceDialog: React.FC<{
    *  un solo nome, lo seleziona da sé coi suoi dati di fatturazione. */
   initialQuery?: string;
 }> = ({ bill, onCancel, onDone, initialQuery }) => {
+  const { t } = useTranslation('cassa', { useSuspense: false });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState(initialQuery ?? '');
@@ -802,11 +809,11 @@ export const InvoiceDialog: React.FC<{
         </div>
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-5">
           <label className="relative block">
-            <span className={label}>Cliente in rubrica</span>
+            <span className={label}>{t('customerInBook')}</span>
             <input
               type="text"
               value={query}
-              placeholder="Cerca per nome…"
+              placeholder={t('searchByName')}
               onChange={e => { setQuery(e.target.value); setCustomerId(null); }}
               disabled={busy}
               className={field}
@@ -845,7 +852,7 @@ export const InvoiceDialog: React.FC<{
                   type="button"
                   onClick={lookup}
                   disabled={busy || lookupBusy}
-                  aria-label="Cerca i dati aziendali dalla P.IVA"
+                  aria-label={t('searchByVat')}
                   className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 >
                   {lookupBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
@@ -887,7 +894,7 @@ export const InvoiceDialog: React.FC<{
           {error && <p className="text-[13px] text-[var(--ds-critical-text)]">{error}</p>}
         </div>
         <div className="flex items-center justify-end gap-2 border-t border-[var(--ds-border)] bg-[var(--ds-surface)] px-4 py-3">
-          <button type="button" onClick={onCancel} disabled={busy} className="inline-flex h-11 items-center rounded-[var(--ds-radius-control)] px-4 text-[15px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-40">Annulla</button>
+          <button type="button" onClick={onCancel} disabled={busy} className="inline-flex h-11 items-center rounded-[var(--ds-radius-control)] px-4 text-[15px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-40">{t('cancel')}</button>
           <button
             type="button"
             onClick={submit}
@@ -914,6 +921,7 @@ export const FiscalCard: React.FC<{
   bill: BillLike;
   onChanged?: () => void;
 }> = ({ bill, onChanged }) => {
+  const { t } = useTranslation('cassa', { useSuspense: false });
   const [busy, setBusy] = useState(false);
   const [armed, setArmed] = useState(false);
   const [rtArmed, setRtArmed] = useState(false);
@@ -952,15 +960,15 @@ export const FiscalCard: React.FC<{
     || (st === 'CONFIRMED' && creditNote)
   );
   const pill =
-    st === 'CONFIRMED' && creditNote ? { tone: 'neutral' as const, label: 'stornata con nota di credito' }
+    st === 'CONFIRMED' && creditNote ? { tone: 'neutral' as const, label: t('voidedWithCreditNote') }
     : st === 'CONFIRMED' && proforma ? { tone: 'neutral' as const, label: 'proforma' }
     : st === 'CONFIRMED' && invoice ? { tone: 'positive' as const, label: 'fattura emessa' }
     : st === 'CONFIRMED' ? { tone: 'positive' as const, label: viaPP || viaRT ? 'emesso in cassa' : 'emesso' }
     : st === 'PENDING' ? { tone: 'pending' as const, label: 'in emissione' }
     : st === 'FAILED' ? { tone: 'critical' as const, label: creditNote ? 'errore nota di credito' : invoice ? 'errore fattura' : 'errore' }
     : st === 'VOIDED' ? { tone: 'neutral' as const, label: 'annullato' }
-    : isPP ? { tone: 'pending' as const, label: 'da chiudere in cassa' }
-    : { tone: 'neutral' as const, label: 'non emesso' };
+    : isPP ? { tone: 'pending' as const, label: t('toCloseAtTill') }
+    : { tone: 'neutral' as const, label: t('notIssued') };
 
   const run = async (fn: () => Promise<unknown>) => {
     setBusy(true);
@@ -983,7 +991,7 @@ export const FiscalCard: React.FC<{
     'inline-flex h-10 items-center justify-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-4 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
   return (
-    <FormCard title="Scontrino" aside={<StatusPill tone={pill.tone}>{pill.label}</StatusPill>}>
+    <FormCard title={t('receipt')} aside={<StatusPill tone={pill.tone}>{pill.label}</StatusPill>}>
       <div className="space-y-2.5">
         {st === 'CONFIRMED' && proforma && (
           <p className="text-[13px] text-[var(--ds-text-muted)]">
@@ -1133,7 +1141,7 @@ export const FiscalCard: React.FC<{
                   maxLength={30}
                   autoCorrect="off"
                   spellCheck={false}
-                  placeholder="Numero scontrino"
+                  placeholder={t('receiptNumber')}
                   value={rtNumber}
                   onChange={e => setRtNumber(e.target.value)}
                   disabled={busy}

@@ -66,6 +66,13 @@ describe('auth', () => {
             // Base pubblica per i link da ospiti: nei test l'env
             // PUBLIC_BOOKING_BASE_URL non è configurata, quindi null.
             public_base_url: null,
+            // Lingua di default del ristorante: la SPA la usa per gli
+            // operatori che non hanno scelto la propria.
+            default_language: 'it',
+            // Dove sta il ristorante (tappa valuta/fuso/paese).
+            currency: 'EUR',
+            timezone: 'Europe/Rome',
+            country_code: 'IT',
         });
 
         // Il claim tenantId sta nel payload del JWT (segmento centrale).

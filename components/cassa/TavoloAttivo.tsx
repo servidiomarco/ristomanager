@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ArrowLeft, Loader2, Minus, Plus, Users } from 'lucide-react';
 import type { Dish, OrderItem, OrderWithItems, Reservation } from '../../types';
 import { Callout, StatusPill, useMediaQuery } from '../ds';
@@ -93,6 +94,7 @@ export const TavoloAttivo: React.FC<TavoloAttivoProps> = ({
   onAddDish, onRemoveDish, onVariants, onCartQty, onVoidItem, onCovers,
   onDiscount, onCustomer, onGoToPayment, onOpenInComande,
 }) => {
+  const { t } = useTranslation('cassa', { useSuspense: false });
   const isWide = useMediaQuery('(min-width: 1024px)');
   const [comandaOpen, setComandaOpen] = useState(false);
 
@@ -199,7 +201,7 @@ export const TavoloAttivo: React.FC<TavoloAttivoProps> = ({
                       type="button"
                       onClick={() => onCartQty(line.key, 1)}
                       disabled={busy}
-                      aria-label="Una in più"
+                      aria-label={t('oneMore')}
                       className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
                     >
                       <Plus size={14} />
@@ -233,7 +235,7 @@ export const TavoloAttivo: React.FC<TavoloAttivoProps> = ({
             ))}
             {order.discount_cents > 0 && (
               <div className="flex items-center justify-between gap-2 px-1 text-[13px]">
-                <span className="text-[var(--ds-critical-text)]">Sconto conto</span>
+                <span className="text-[var(--ds-critical-text)]">{t('billDiscount')}</span>
                 <span className="flex-shrink-0 tabular-nums text-[var(--ds-critical-text)]">
                   −{euro(order.discount_cents)}
                 </span>
@@ -245,7 +247,7 @@ export const TavoloAttivo: React.FC<TavoloAttivoProps> = ({
 
       <div className="flex-shrink-0 space-y-3 border-t border-[var(--ds-border)] pt-3">
         <div className="flex items-baseline justify-between gap-2">
-          <span className="text-[17px] font-semibold text-[var(--ds-text-primary)]">Totale</span>
+          <span className="text-[17px] font-semibold text-[var(--ds-text-primary)]">{t('total')}</span>
           <span className="text-[26px] font-semibold tabular-nums tracking-[-0.02em] text-[var(--ds-text-primary)]">
             {euro(totalCents)}
           </span>
@@ -344,7 +346,7 @@ export const TavoloAttivo: React.FC<TavoloAttivoProps> = ({
               type="button"
               onClick={() => onCovers(1)}
               disabled={busy}
-              aria-label="Un coperto in più"
+              aria-label={t('oneMoreCover')}
               className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
             >
               <Plus size={13} />

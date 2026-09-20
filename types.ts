@@ -1048,6 +1048,13 @@ export interface User {
   // null = classico (scatole morbide, controlli a pillola). Stessa natura
   // del layout comande: per utente, segue l'operatore su ogni dispositivo.
   preferred_design_style?: string | null;
+  // Lingua dell'interfaccia per questo operatore ('it' | 'en'). null = si
+  // eredita tenant.default_language (a sua volta 'it'): così cambiare il
+  // default del ristorante raggiunge anche chi non ha mai scelto. Stessa
+  // natura delle due preferenze qui sopra — segue l'operatore, non il
+  // dispositivo. Da non confondere con Customer.language, che è la lingua
+  // in cui si SCRIVE all'ospite.
+  language?: string | null;
   // Account nell'allowlist REPORTS_ADMIN_EMAILS (env backend): vede la
   // Reportistica anche senza reports:view in matrice. Serve al lancio
   // ristretto — i permessi di ruolo restano la via ordinaria.
@@ -1061,6 +1068,16 @@ export interface User {
     slug: string;
     name: string;
     features?: { voice: boolean; whatsapp: boolean; web_booking: boolean; pay_at_table: boolean; passepartout?: boolean };
+    // Lingua di default del ristorante: la usa chi non ha scelto la sua.
+    // Letta in modo difensivo (backend vecchio nella finestra di deploy →
+    // assente → 'it').
+    default_language?: string | null;
+    // Valuta, fuso e paese del ristorante. Letti in modo difensivo: un
+    // backend non ancora aggiornato non li manda, e allora valgono i default
+    // italiani di sempre.
+    currency?: string | null;
+    timezone?: string | null;
+    country_code?: string | null;
     // true finché l'OWNER non completa il wizard di primo accesso (D1):
     // la SPA lo mostra al posto dell'app, solo all'OWNER.
     needs_onboarding?: boolean;

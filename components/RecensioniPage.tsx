@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Star, Loader2, RefreshCw, Settings2 } from 'lucide-react';
-import { StatusPill, EmptyState, type PillTone } from './ds';
+import { Callout, EmptyState, StatusPill, dsButton, dsIconButton, type PillTone } from './ds';
+import { SkeletonReviewList } from './SkeletonCards';
 import {
     getReviewRequests, getReviewSettings,
     type ReviewRequestRow, type ReviewRequestStatus,
@@ -17,6 +18,7 @@ const PAGE_SIZE = 50;
 const STATUS_META: Record<ReviewRequestStatus, { label: string; tone: PillTone }> = {
     sent: { label: 'Inviata', tone: 'positive' },
     failed: { label: 'Non riuscita', tone: 'critical' },
+    sending: { label: 'Esito non confermato', tone: 'pending' },
     skipped_consent: { label: 'Saltata: senza consenso', tone: 'neutral' },
     skipped_no_contact: { label: 'Saltata: senza recapiti', tone: 'neutral' },
     skipped_recent: { label: 'Saltata: già chiesta di recente', tone: 'neutral' },
@@ -84,11 +86,11 @@ export const RecensioniPage: React.FC = () => {
     };
 
     return (
-        <div className="mx-auto w-full max-w-3xl space-y-4 p-4 sm:p-6">
+        <div className="space-y-4 p-4 sm:p-6 lg:p-8">
             <header className="flex items-start justify-between gap-3">
-                <div>
-                    <h2 className="text-[20px] font-semibold text-[var(--ds-text-primary)]">Recensioni</h2>
-                    <p className="text-[13px] text-[var(--ds-text-muted)]">
+                <div className="min-w-0">
+                    <h1 className="text-[22px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)] sm:text-[26px]">Recensioni</h1>
+                    <p className="mt-1 text-[15px] text-[var(--ds-text-muted)]">
                         Le richieste inviate ai clienti dopo la visita. Le recensioni del profilo
                         Google compariranno qui col collegamento dell'account.
                     </p>
@@ -97,51 +99,64 @@ export const RecensioniPage: React.FC = () => {
                     type="button"
                     onClick={() => { setLoading(true); load(); }}
                     aria-label="Aggiorna"
-                    className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    title="Aggiorna"
+                    className={dsIconButton}
                 >
-                    <RefreshCw size={16} aria-hidden />
+                    <RefreshCw className="h-4 w-4" aria-hidden />
                 </button>
             </header>
 
             {requestsEnabled === false && (
-                <p className="rounded-[var(--ds-radius)] bg-[var(--ds-pending-tint)] px-3 py-2.5 text-[13px] text-[var(--ds-pending-text)]">
+                <Callout tone="pending" icon={Settings2}>
                     La richiesta di recensione è spenta: si accende da Impostazioni → Recensioni.
-                </p>
+                </Callout>
             )}
             {requestsEnabled === true && googleReady === false && (
-                <p className="rounded-[var(--ds-radius)] bg-[var(--ds-pending-tint)] px-3 py-2.5 text-[13px] text-[var(--ds-pending-text)]">
+                <Callout tone="pending" icon={Settings2}>
                     Manca il Place ID del profilo Google: senza, il link non esiste e non parte nulla.
                     Si imposta da Impostazioni → Recensioni.
-                </p>
+                </Callout>
             )}
 
+            {/* Con l'azione, non senza: prima un caricamento fallito lasciava
+                la pagina in un vicolo cieco, da cui si usciva solo ricaricando
+                il browser. */}
             {error && (
-                <p className="rounded-[var(--ds-radius)] bg-[var(--ds-critical-tint)] px-3 py-2.5 text-[13px] text-[var(--ds-critical-text)]">{error}</p>
+                <Callout
+                    tone="critical"
+                    action={
+                        <button type="button" className={dsButton.quiet} onClick={() => { setLoading(true); load(); }}>
+                            Riprova
+                        </button>
+                    }
+                >
+                    {error}
+                </Callout>
             )}
 
             {loading ? (
-                <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-4 py-6 shadow-[var(--ds-shadow-card)] flex items-center gap-2 text-[13px] text-[var(--ds-text-muted)]">
-                    <Loader2 className="h-4 w-4 animate-spin" /> Caricamento…
-                </div>
+                <section className="overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+                    <SkeletonReviewList />
+                </section>
             ) : requests.length === 0 ? (
                 <EmptyState icon={Star}>
                     Nessuna richiesta ancora: quando un tavolo chiude la visita, il cliente
                     riceve il link per recensire e la richiesta compare qui.
                 </EmptyState>
             ) : (
-                <section className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] overflow-hidden">
-                    <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--ds-border)]">
-                        <h3 className="text-[13px] font-semibold text-[var(--ds-text-secondary)]">Richieste inviate</h3>
-                        <span className="text-[12px] text-[var(--ds-text-muted)]">{total}</span>
+                <section className="overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+                    <div className="flex items-center justify-between border-b border-[var(--ds-border)] px-4 py-3">
+                        <h2 className="text-[13px] font-semibold text-[var(--ds-text-secondary)]">Richieste inviate</h2>
+                        <span className="text-[13px] tabular-nums text-[var(--ds-text-muted)]">{total}</span>
                     </div>
                     <ul className="divide-y divide-[var(--ds-border)]">
                         {requests.map(r => {
                             const meta = STATUS_META[r.status] ?? { label: r.status, tone: 'neutral' as PillTone };
                             return (
-                                <li key={r.id} className="px-4 py-3 flex items-center gap-3">
+                                <li key={r.id} className="flex items-center gap-3 px-4 py-3">
                                     <div className="min-w-0 flex-1">
-                                        <p className="text-[14px] font-medium text-[var(--ds-text-primary)] truncate">{r.customer_name}</p>
-                                        <p className="text-[12px] text-[var(--ds-text-muted)] truncate">
+                                        <p className="truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">{r.customer_name}</p>
+                                        <p className="truncate text-[13px] tabular-nums text-[var(--ds-text-muted)]">
                                             {formatWhen(r.sent_at || r.reservation_time)}
                                             {r.status === 'sent' && r.channel ? ` · ${CHANNEL_LABEL[r.channel] ?? r.channel}` : ''}
                                             {r.status === 'failed' && r.error ? ` · ${r.error}` : ''}
@@ -153,13 +168,9 @@ export const RecensioniPage: React.FC = () => {
                         })}
                     </ul>
                     {requests.length < total && (
-                        <div className="px-4 py-3 border-t border-[var(--ds-border)] flex justify-center">
-                            <button
-                                type="button"
-                                disabled={loadingMore}
-                                onClick={loadMore}
-                                className="text-[13px] px-3 py-2 rounded-[var(--ds-radius-control)] border border-[var(--ds-border)] disabled:opacity-50"
-                            >
+                        <div className="flex justify-center border-t border-[var(--ds-border)] px-4 py-3">
+                            <button type="button" disabled={loadingMore} onClick={loadMore} className={dsButton.secondary}>
+                                {loadingMore && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
                                 {loadingMore ? 'Caricamento…' : 'Mostra altre'}
                             </button>
                         </div>
@@ -167,8 +178,8 @@ export const RecensioniPage: React.FC = () => {
                 </section>
             )}
 
-            <p className="flex items-center gap-1.5 text-[12px] text-[var(--ds-text-muted)]">
-                <Settings2 size={13} aria-hidden />
+            <p className="flex items-center gap-1.5 text-[13px] text-[var(--ds-text-muted)]">
+                <Settings2 className="h-3.5 w-3.5" aria-hidden />
                 Orari, destinatari e Place ID si regolano da Impostazioni → Recensioni.
             </p>
         </div>

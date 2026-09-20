@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Loader2, Eye, EyeOff } from 'lucide-react';
 import { Sheet, FormCard, Field, dsInput, dsButton } from './ds';
 import { useAuth } from '../contexts/AuthContext';
@@ -32,6 +33,7 @@ const Note: React.FC<{ tone: 'ok' | 'error'; children: React.ReactNode }> = ({ t
 );
 
 export const ProfiloSheet: React.FC<ProfiloSheetProps> = ({ open, onClose, roleLabel }) => {
+  const { t } = useTranslation('profilo', { useSuspense: false });
   const { user, updateProfile, changePassword, changeEmail } = useAuth();
 
   // ── Profilo (nome + telefono) ──
@@ -75,16 +77,16 @@ export const ProfiloSheet: React.FC<ProfiloSheetProps> = ({ open, onClose, roleL
   const handleProfileSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!fullName.trim()) {
-      setProfileNote({ tone: 'error', text: 'Il nome non può essere vuoto.' });
+      setProfileNote({ tone: 'error', text: t('nameRequired') });
       return;
     }
     setProfileBusy(true);
     setProfileNote(null);
     try {
       await updateProfile({ full_name: fullName.trim(), phone: phone.trim() || null });
-      setProfileNote({ tone: 'ok', text: 'Salvato.' });
+      setProfileNote({ tone: 'ok', text: t('savedOk') });
     } catch (err: any) {
-      setProfileNote({ tone: 'error', text: err?.data?.message || 'Salvataggio non riuscito.' });
+      setProfileNote({ tone: 'error', text: err?.data?.message || t('saveFailed') });
     } finally {
       setProfileBusy(false);
     }
@@ -93,11 +95,11 @@ export const ProfiloSheet: React.FC<ProfiloSheetProps> = ({ open, onClose, roleL
   const handlePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (newPassword.length < 8) {
-      setPasswordNote({ tone: 'error', text: 'La nuova password deve avere almeno 8 caratteri.' });
+      setPasswordNote({ tone: 'error', text: t('pwTooShort') });
       return;
     }
     if (newPassword !== confirmPassword) {
-      setPasswordNote({ tone: 'error', text: 'Le due password non coincidono.' });
+      setPasswordNote({ tone: 'error', text: t('pwMismatch') });
       return;
     }
     setPasswordBusy(true);
@@ -107,13 +109,13 @@ export const ProfiloSheet: React.FC<ProfiloSheetProps> = ({ open, onClose, roleL
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
-      setPasswordNote({ tone: 'ok', text: 'Password aggiornata. Le altre sessioni verranno scollegate.' });
+      setPasswordNote({ tone: 'ok', text: t('pwUpdated') });
     } catch (err: any) {
       setPasswordNote({
         tone: 'error',
         text: err?.status === 401
-          ? 'La password attuale non è corretta.'
-          : err?.data?.message || 'Cambio password non riuscito.',
+          ? t('pwCurrentWrong')
+          : err?.data?.message || t('pwChangeFailed'),
       });
     } finally {
       setPasswordBusy(false);
@@ -128,15 +130,15 @@ export const ProfiloSheet: React.FC<ProfiloSheetProps> = ({ open, onClose, roleL
       await changeEmail(newEmail, emailPassword);
       setNewEmail('');
       setEmailPassword('');
-      setEmailNote({ tone: 'ok', text: 'Email aggiornata.' });
+      setEmailNote({ tone: 'ok', text: t('emailUpdated') });
     } catch (err: any) {
       setEmailNote({
         tone: 'error',
         text: err?.status === 409
-          ? 'Questa email è già in uso.'
+          ? t('emailInUse')
           : err?.status === 401
-            ? 'La password non è corretta.'
-            : err?.data?.message || 'Cambio email non riuscito.',
+            ? t('pwWrong')
+            : err?.data?.message || t('emailChangeFailed'),
       });
     } finally {
       setEmailBusy(false);
@@ -147,14 +149,14 @@ export const ProfiloSheet: React.FC<ProfiloSheetProps> = ({ open, onClose, roleL
     <Sheet
       open={open}
       onClose={onClose}
-      title="Il tuo account"
+      title={t('accountTitle')}
       subtitle={user ? `${user.email} · ${roleLabel}` : undefined}
-      ariaLabel="Il tuo account"
+      ariaLabel={t('accountTitle')}
       bodyClassName="p-4 sm:p-5 space-y-4"
     >
-      <FormCard title="Profilo">
+      <FormCard title={t('profile')}>
         <form onSubmit={handleProfileSubmit} className="space-y-4">
-          <Field label="Nome" htmlFor="profilo-nome" required>
+          <Field label={t('name')} htmlFor="profilo-nome" required>
             <input
               id="profilo-nome"
               type="text"
@@ -166,7 +168,7 @@ export const ProfiloSheet: React.FC<ProfiloSheetProps> = ({ open, onClose, roleL
               className={dsInput}
             />
           </Field>
-          <Field label="Telefono" htmlFor="profilo-telefono">
+          <Field label={t('phone')} htmlFor="profilo-telefono">
             <input
               id="profilo-telefono"
               type="tel"
@@ -182,7 +184,7 @@ export const ProfiloSheet: React.FC<ProfiloSheetProps> = ({ open, onClose, roleL
           {profileNote && <Note tone={profileNote.tone}>{profileNote.text}</Note>}
           <button type="submit" disabled={profileBusy || !profileDirty} className={`${dsButton.primary} w-full`}>
             {profileBusy && <Loader2 className="h-4 w-4 animate-spin" />}
-            Salva
+            {t('save')}
           </button>
         </form>
       </FormCard>
@@ -194,7 +196,7 @@ export const ProfiloSheet: React.FC<ProfiloSheetProps> = ({ open, onClose, roleL
             type="button"
             onClick={() => setShowPasswords(p => !p)}
             aria-pressed={showPasswords}
-            aria-label={showPasswords ? 'Nascondi password' : 'Mostra password'}
+            aria-label={showPasswords ? t('hidePassword') : t('showPassword')}
             className="inline-flex h-11 w-11 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             {showPasswords ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -202,7 +204,7 @@ export const ProfiloSheet: React.FC<ProfiloSheetProps> = ({ open, onClose, roleL
         }
       >
         <form onSubmit={handlePasswordSubmit} className="space-y-4">
-          <Field label="Password attuale" htmlFor="profilo-pw-attuale" required>
+          <Field label={t('currentPassword')} htmlFor="profilo-pw-attuale" required>
             <input
               id="profilo-pw-attuale"
               type={showPasswords ? 'text' : 'password'}
@@ -214,7 +216,7 @@ export const ProfiloSheet: React.FC<ProfiloSheetProps> = ({ open, onClose, roleL
               className={dsInput}
             />
           </Field>
-          <Field label="Nuova password" htmlFor="profilo-pw-nuova" required hint="Minimo 8 caratteri.">
+          <Field label={t('newPassword')} htmlFor="profilo-pw-nuova" required hint={t('pwHint')}>
             <input
               id="profilo-pw-nuova"
               type={showPasswords ? 'text' : 'password'}
@@ -227,7 +229,7 @@ export const ProfiloSheet: React.FC<ProfiloSheetProps> = ({ open, onClose, roleL
               className={dsInput}
             />
           </Field>
-          <Field label="Conferma password" htmlFor="profilo-pw-conferma" required>
+          <Field label={t('confirmPassword')} htmlFor="profilo-pw-conferma" required>
             <input
               id="profilo-pw-conferma"
               type={showPasswords ? 'text' : 'password'}
@@ -247,14 +249,14 @@ export const ProfiloSheet: React.FC<ProfiloSheetProps> = ({ open, onClose, roleL
             className={`${dsButton.primary} w-full`}
           >
             {passwordBusy && <Loader2 className="h-4 w-4 animate-spin" />}
-            Aggiorna password
+            {t('updatePassword')}
           </button>
         </form>
       </FormCard>
 
       <FormCard title="Email">
         <form onSubmit={handleEmailSubmit} className="space-y-4">
-          <Field label="Nuova email" htmlFor="profilo-email-nuova" required>
+          <Field label={t('newEmail')} htmlFor="profilo-email-nuova" required>
             <input
               id="profilo-email-nuova"
               type="email"
@@ -266,7 +268,7 @@ export const ProfiloSheet: React.FC<ProfiloSheetProps> = ({ open, onClose, roleL
               className={dsInput}
             />
           </Field>
-          <Field label="Password attuale" htmlFor="profilo-email-pw" required hint="Serve a confermare che sei tu.">
+          <Field label={t('currentPassword')} htmlFor="profilo-email-pw" required hint={t('emailPwHint')}>
             <input
               id="profilo-email-pw"
               type="password"
@@ -285,7 +287,7 @@ export const ProfiloSheet: React.FC<ProfiloSheetProps> = ({ open, onClose, roleL
             className={`${dsButton.primary} w-full`}
           >
             {emailBusy && <Loader2 className="h-4 w-4 animate-spin" />}
-            Cambia email
+            {t('changeEmail')}
           </button>
         </form>
       </FormCard>

@@ -106,7 +106,7 @@ ${pren}
 COMPITO: ti verrà data la conversazione; scrivi la prossima risposta del RISTORANTE all'ultimo messaggio del cliente.
 
 COME SCRIVERE:
-- In italiano, dando del tu, tono cordiale e diretto come si scrive su WhatsApp.
+- Rispondi SEMPRE nella stessa lingua dell'ultimo messaggio del cliente: se scrive in inglese rispondi in inglese, se scrive in italiano rispondi in italiano (e così per altre lingue). In italiano dai del tu. Tono cordiale e diretto come si scrive su WhatsApp.
 - Da una a tre frasi. Niente formule da call center, niente "gentile cliente", niente firma finale.
 - Vai dritto al punto: il cliente sta guardando il telefono, non legge paragrafi.
 

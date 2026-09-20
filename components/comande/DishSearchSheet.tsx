@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
 import { ChevronDown, Search, X } from 'lucide-react';
 import type { Dish } from '../../types';
@@ -36,6 +37,7 @@ const MAX_HITS = 30;
 export const DishSearchSheet: React.FC<DishSearchSheetProps> = ({
   open, dishes, qtyInCourse, hasVariants, tapOpensSheet = hasVariants, onAdd, onClose,
 }) => {
+  const { t } = useTranslation('comande', { useSuspense: false });
   const [query, setQuery] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   // La foto in grande dal tocco sulla miniatura: sopra il velo della
@@ -66,7 +68,7 @@ export const DishSearchSheet: React.FC<DishSearchSheetProps> = ({
       onClick={onClose}
       role="dialog"
       aria-modal="true"
-      aria-label="Cerca un piatto"
+      aria-label={t('searchDish')}
     >
       <div className="absolute inset-0 bg-[var(--ds-backdrop)]" style={{ animation: 'fadeIn 200ms ease-out both' }} />
 
@@ -89,7 +91,7 @@ export const DishSearchSheet: React.FC<DishSearchSheetProps> = ({
             value={query}
             onChange={e => setQuery(e.target.value)}
             onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); onClose(); } }}
-            placeholder="Cerca un piatto…"
+            placeholder={t('searchDishShort')}
             className="h-12 w-full rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] pl-11 pr-11 text-[16px] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-raised)] outline-none placeholder:text-[var(--ds-text-muted)] focus-visible:outline-none sm:text-[15px]"
           />
           {query && (

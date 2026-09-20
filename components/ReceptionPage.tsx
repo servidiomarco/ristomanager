@@ -34,7 +34,8 @@ import {
 import { updateReservation, createReservation, swapReservationTables } from '../services/apiService';
 import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
-import { PulseDot, getReservationState, getTimedReservationState, isSeated, deriveTableDisplayStatus, TABLE_STATUS_LABEL } from './reservationState';
+import { useTranslation } from 'react-i18next';
+import { PulseDot, getReservationState, getTimedReservationState, isSeated, deriveTableDisplayStatus, useTableStatusLabel } from './reservationState';
 import { DietaryChips } from './DietaryChips';
 import { stripDietaryNote } from '../utils/dietary';
 import { toTitleCase } from '../utils/text';
@@ -88,6 +89,9 @@ interface ReceptionPageProps {
 }
 
 const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFilter, reservations, tables, rooms, onReservationChangedLocal, isInitialLoading = false, onBack, autoOpenWalkIn, onAutoOpenWalkInHandled }) => {
+  // Etichette di stato del tavolo nella lingua dell'operatore.
+  const { t } = useTranslation('reception', { useSuspense: false });
+  const tableStatus = useTableStatusLabel();
   const [selectedReservationId, setSelectedReservationId] = useState<number | null>(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'waiting' | 'arrived' | 'noTable'>('all');
@@ -522,8 +526,8 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
             {r.customer_is_vip && (
               <span
                 className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]"
-                title="Cliente VIP"
-                aria-label="Cliente VIP"
+                title={t('vip')}
+                aria-label={t('vip')}
               >
                 <Star className="h-3 w-3 fill-current" />
               </span>
@@ -572,7 +576,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
             type="button"
             onClick={(e) => { e.stopPropagation(); setSelectedReservationId(r.id); setShowTablePicker(true); }}
             className="inline-flex h-11 flex-shrink-0 items-center gap-1 rounded-[var(--ds-radius)] border border-dashed border-[var(--ds-pending-solid)] px-3 text-[13px] font-medium text-[var(--ds-pending-text)] transition-colors hover:bg-[var(--ds-pending-tint)]"
-            title="Assegna un tavolo"
+            title={t('assignTable')}
           >
             <Plus className="h-3.5 w-3.5" aria-hidden /> tavolo
           </button>
@@ -644,7 +648,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
       type="button"
       onClick={() => setShowWalkIn(true)}
       className={`${dsButton.primary} flex-shrink-0`}
-      title="Cliente senza prenotazione"
+      title={t('walkIn')}
     >
       <Zap className="h-4 w-4" aria-hidden />
       Registra walk-in
@@ -664,7 +668,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
         <h2 className="text-[15px] font-semibold text-[var(--ds-text-primary)]">Alla porta</h2>
         <span
           className="text-[13px] text-[var(--ds-text-muted)]"
-          title="Prenotazioni attese in questo momento: da 20 minuti prima dell'orario in poi"
+          title={t('expectedNow')}
         >
           {arrivingNow.length === 1 ? '1 atteso ora' : `${arrivingNow.length} attesi ora`}
         </span>
@@ -707,7 +711,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
                       disabled={busy}
                       onClick={() => handleQuickArrive(r)}
                       aria-label={`Segna ${toTitleCase(r.customer_name) || 'prenotazione'} come arrivato`}
-                      title="Segna come arrivato"
+                      title={t('markArrived')}
                       className={`inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] transition-opacity hover:opacity-85 disabled:opacity-50 ${
                         late
                           ? 'bg-[var(--ds-seated-solid)] text-white'
@@ -752,7 +756,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
           type="button"
           onClick={() => setShowWalkIn(true)}
           className={`${dsButton.primary} flex-shrink-0 px-4`}
-          title="Cliente senza prenotazione"
+          title={t('walkIn')}
         >
           <Zap className="h-4 w-4" aria-hidden />
           Walk-in
@@ -773,11 +777,11 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
               layout="stacked"
               stats={[
                 { value: stats.count, label: 'prenotazioni' },
-                { value: stats.guests, label: 'coperti' },
+                { value: stats.guests, label: t('covers') },
                 // Tone only once there's something to report: a green "0
                 // arrivati" claims a win before service has started.
                 { value: stats.arrived, label: 'arrivati', tone: stats.arrived > 0 ? 'positive' : 'neutral' },
-                { value: stats.noTable, label: 'senza tavolo', tone: stats.noTable > 0 ? 'pending' : 'neutral' },
+                { value: stats.noTable, label: t('noTable'), tone: stats.noTable > 0 ? 'pending' : 'neutral' },
               ]}
             />
 
@@ -785,7 +789,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
               <SearchField
                 value={search}
                 onChange={setSearch}
-                placeholder="Cerca nome o telefono"
+                placeholder={t('searchPlaceholder')}
                 ariaLabel="Cerca prenotazioni"
                 className="min-w-0 flex-1"
               />
@@ -807,8 +811,8 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
                 type="button"
                 onClick={() => setViewMode(viewMode === 'map' ? 'list' : 'map')}
                 className={`${dsIconButton} sm:hidden`}
-                aria-label="Mappa sala"
-                title="Mappa sala"
+                aria-label={t('roomMap')}
+                title={t('roomMap')}
               >
                 <LayoutGrid className="h-4 w-4" />
               </button>
@@ -820,10 +824,10 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
               ariaLabel="Filtra prenotazioni"
               overflow="scroll"
               options={[
-                { value: 'all' as const, label: 'Tutte', badge: filterCounts.all, badgeTone: 'neutral' },
+                { value: 'all' as const, label: t('allRooms'), badge: filterCounts.all, badgeTone: 'neutral' },
                 { value: 'waiting' as const, label: 'In attesa', badge: filterCounts.waiting, badgeTone: 'neutral' },
                 { value: 'arrived' as const, label: 'Arrivati', badge: filterCounts.arrived, badgeTone: 'neutral' },
-                { value: 'noTable' as const, label: 'Senza tavolo', badge: filterCounts.noTable, badgeTone: 'neutral' },
+                { value: 'noTable' as const, label: t('filterNoTable'), badge: filterCounts.noTable, badgeTone: 'neutral' },
               ]}
             />
           </div>
@@ -969,6 +973,7 @@ interface WalkInModalProps {
 }
 
 const WalkInModal: React.FC<WalkInModalProps> = ({ busy, onCancel, onSubmit }) => {
+  const { t } = useTranslation('reception', { useSuspense: false });
   const [name, setName] = useState('');
   const [guests, setGuests] = useState<number | undefined>(2);
   const [phone, setPhone] = useState('');
@@ -1001,7 +1006,7 @@ const WalkInModal: React.FC<WalkInModalProps> = ({ busy, onCancel, onSubmit }) =
     >
       <FormCard>
         <div className="space-y-5">
-          <Field label="Nome cliente" htmlFor="walkin-name" required>
+          <Field label={t('customerName')} htmlFor="walkin-name" required>
             <input
               id="walkin-name"
               autoFocus
@@ -1014,7 +1019,7 @@ const WalkInModal: React.FC<WalkInModalProps> = ({ busy, onCancel, onSubmit }) =
           </Field>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label="Coperti" required>
+            <Field label={t('coversLabel')} required>
               <Stepper value={guests} onChange={setGuests} min={1} ariaLabel="Coperti" required />
             </Field>
             <Field label="Telefono" htmlFor="walkin-phone">
@@ -1081,6 +1086,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
   onMarkDeparting,
   onFreeTable
 }) => {
+  const { t } = useTranslation('reception', { useSuspense: false });
   const arr = reservation.arrival_status || ArrivalStatus.WAITING;
   const noShow = reservation.reservation_status === ReservationStatus.NO_SHOW;
   const seated = isSeated(reservation);
@@ -1097,7 +1103,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
               {toTitleCase(reservation.customer_name) || 'Senza nome'}
             </h2>
             {reservation.customer_is_vip && (
-              <StatusPill tone="pending" title="Cliente VIP">
+              <StatusPill tone="pending" title={t('vip')}>
                 <Star className="h-3 w-3 fill-current" aria-hidden /> VIP
               </StatusPill>
             )}
@@ -1112,7 +1118,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
           <button
             type="button"
             onClick={onClose}
-            aria-label="Chiudi dettaglio"
+            aria-label={t('closeDetail')}
             className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:text-[var(--ds-text-primary)]"
           >
             <XIcon className="h-4 w-4" />
@@ -1132,12 +1138,12 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
         >
           <span className="text-[28px] font-semibold leading-none tabular-nums">{table.name}</span>
           <div className="min-w-0 text-[13px] leading-tight">
-            <div className="font-medium">Tavolo</div>
+            <div className="font-medium">{t('table')}</div>
             <div>{table.seats} posti{tooSmall ? ` · meno dei ${reservation.guests} coperti` : ''}</div>
           </div>
         </div>
       ) : (
-        <Callout tone="pending" className="mt-4">Nessun tavolo assegnato</Callout>
+        <Callout tone="pending" className="mt-4">{t('noTableAssigned')}</Callout>
       )}
 
       {/* The action you came here for. */}
@@ -1219,7 +1225,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
               disabled={busy}
               onClick={onMarkArrived}
               icon={<Check className="h-4 w-4" />}
-              label="Annulla no-show"
+              label={t('cancelNoShow')}
             />
           )}
         </div>
@@ -1235,7 +1241,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
             <NotesLine label="Dieta / allergie" text={reservation.customer_dietary_notes} tone="pending" />
           )}
           {reservation.customer_preferences_notes && (
-            <NotesLine label="Preferenze cliente" text={reservation.customer_preferences_notes} />
+            <NotesLine label={t('customerPrefs')} text={reservation.customer_preferences_notes} />
           )}
         </div>
       )}
@@ -1325,6 +1331,7 @@ const TablePicker: React.FC<TablePickerProps> = ({
   onSwap,
   busy
 }) => {
+  const { t } = useTranslation('reception', { useSuspense: false });
   // Tapping an occupied tile arms a swap confirmation — the host pairs the
   // current reservation with the booking sitting at that tile.
   const [swapCandidate, setSwapCandidate] = useState<Reservation | null>(null);
@@ -1465,7 +1472,7 @@ const TablePicker: React.FC<TablePickerProps> = ({
       <div className="flex flex-shrink-0 items-center justify-between gap-4 px-4 pb-3 pt-4 sm:px-6">
         <div className="flex min-w-0 flex-1 items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
           <div className="min-w-0 flex-1">
-            <p className="text-[13px] text-[var(--ds-text-muted)]">Tavolo per</p>
+            <p className="text-[13px] text-[var(--ds-text-muted)]">{t('tableFor')}</p>
             <h2 className="truncate text-[18px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
               {toTitleCase(reservation.customer_name) || 'Senza nome'}
             </h2>
@@ -1477,7 +1484,7 @@ const TablePicker: React.FC<TablePickerProps> = ({
           <button
             onClick={onCancel}
             disabled={busy}
-            aria-label="Chiudi"
+            aria-label={t('close')}
             className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:text-[var(--ds-text-primary)] disabled:opacity-50"
           >
             <XIcon className="h-4 w-4" />
@@ -1511,7 +1518,7 @@ const TablePicker: React.FC<TablePickerProps> = ({
           <LegendDot tone="neutral" label={`${counts.big} grandi`} />
           <LegendDot tone="critical" label={`${counts.occupied} occupati`} />
           {reservation.table_id && (
-            <LegendDot tone="pending" label="tocca occupato → scambia" />
+            <LegendDot tone="pending" label={t('swapHint')} />
           )}
         </div>
       </div>
@@ -1668,7 +1675,7 @@ const TablePicker: React.FC<TablePickerProps> = ({
           open
           onClose={() => { if (!busy) setSwapChoices(null); }}
           title="Quale prenotazione scambiare?"
-          subtitle="Questo tavolo ha più prenotazioni: scegli quella con cui invertire"
+          subtitle={t('swapPick')}
           size="sm"
           className="z-[60]"
           bodyClassName="p-4 sm:p-6"
@@ -1731,6 +1738,7 @@ interface SwapConfirmDialogProps {
 const SwapConfirmDialog: React.FC<SwapConfirmDialogProps> = ({
   source, target, tables, busy, onCancel, onConfirm,
 }) => {
+  const { t } = useTranslation('reception', { useSuspense: false });
   const tableName = (id?: number | null) =>
     tables.find(t => t.id === id)?.name ?? '—';
   return (
@@ -1740,8 +1748,8 @@ const SwapConfirmDialog: React.FC<SwapConfirmDialogProps> = ({
     <ModalShell
       open
       onClose={() => { if (!busy) onCancel(); }}
-      title="Inverti i due tavoli?"
-      subtitle="Le due prenotazioni si scambiano il posto"
+      title={t('swapConfirm')}
+      subtitle={t('swapConfirmHint')}
       size="sm"
       className="z-[60]"
       bodyClassName="p-4 sm:p-6"
@@ -1827,6 +1835,9 @@ const RoomMap: React.FC<RoomMapProps> = ({
   onPickReservation,
   now,
 }) => {
+  // RoomMap è un componente a sé: ha i suoi agganci.
+  const { t } = useTranslation('reception', { useSuspense: false });
+  const tableStatus = useTableStatusLabel();
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerSize, setContainerSize] = useState({ width: 600, height: 600 });
 
@@ -1887,14 +1898,14 @@ const RoomMap: React.FC<RoomMapProps> = ({
       <div className="flex flex-shrink-0 items-center justify-between gap-4 px-4 pb-3 pt-4 sm:px-6">
         <div className="flex min-w-0 flex-1 items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
           <div className="min-w-0 flex-1">
-            <p className="text-[13px] text-[var(--ds-text-muted)]">Stato sala</p>
+            <p className="text-[13px] text-[var(--ds-text-muted)]">{t('roomStatus')}</p>
             <h2 className="truncate text-[18px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
               {activeRoom?.name || 'Sala'}
             </h2>
           </div>
           <button
             onClick={onClose}
-            aria-label="Chiudi"
+            aria-label={t('close')}
             className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:text-[var(--ds-text-primary)]"
           >
             <XIcon className="h-4 w-4" />
@@ -1976,7 +1987,7 @@ const RoomMap: React.FC<RoomMapProps> = ({
                     // Still a seated party, so still the seated family — the
                     // caption carries the difference, not a fifth colour.
                     haloClass = 'ring-2 ring-[var(--ds-seated-text)]';
-                    caption = `${TABLE_STATUS_LABEL.uscita} · ${firstName}`;
+                    caption = `${tableStatus('uscita')} · ${firstName}`;
                     break;
                   case 'noshow':
                     haloClass = 'ring-2 ring-[var(--ds-critical-solid)]';

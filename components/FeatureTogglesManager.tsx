@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Globe, Phone, Loader2, ChevronDown, Users, PauseCircle, Clock, CalendarClock, Plus, Trash2, Percent, MessageSquare, Repeat } from 'lucide-react';
 import { Loader } from './Loader';
 import {
@@ -88,6 +89,7 @@ const CHANNELS: ChannelMeta[] = [
 ];
 
 export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
+    const { t } = useTranslation('canali', { useSuspense: false });
     const { hasPermission, hasFeature } = useAuth();
     const canEdit = hasPermission('settings:full');
     // Gating UI sugli entitlements (nota C1): restano solo i canali del piano.
@@ -174,7 +176,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                     console.warn('[channels] room occupancy unavailable:', occErr);
                 }
             } catch (err: any) {
-                if (!cancelled) showToastRef.current(err?.message || 'Errore nel caricamento delle impostazioni', 'error');
+                if (!cancelled) showToastRef.current(err?.message || t('loadSettingsError'), 'error');
             } finally {
                 if (!cancelled) setLoading(false);
             }
@@ -219,10 +221,10 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
             const updated = await updateFeatureFlags({ [key]: nextValue } as Partial<FeatureFlags>);
             setFlags(updated);
             const label = FLAG_LABELS[key];
-            showToast(`${label.title}: ${nextValue ? label.on : label.off}`, 'success');
+            showToast(`${t(`flag.${key}.title`, label.title)}: ${t(`flag.${key}.${nextValue ? 'on' : 'off'}`, nextValue ? label.on : label.off)}`, 'success');
         } catch (err: any) {
             setFlags(previous);
-            showToast(err?.message || 'Errore aggiornamento impostazione', 'error');
+            showToast(err?.message || t('settingUpdateError'), 'error');
         } finally {
             setSavingKey(null);
         }
@@ -232,7 +234,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
         if (!channels || !canEdit || savingVoiceThreshold) return;
         const n = Number(voiceThresholdDraft);
         if (!Number.isInteger(n) || n < 1 || n > 50) {
-            showToast('La soglia deve essere un intero tra 1 e 50', 'error');
+            showToast(t('thresholdRangeError'), 'error');
             return;
         }
         setSavingVoiceThreshold(true);
@@ -240,9 +242,9 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
             const updated = await updateChannelSettings({ voice_large_group_threshold: n });
             setChannels(updated);
             setVoiceThresholdDraft(String(updated.voice_large_group_threshold));
-            showToast('Soglia handoff aggiornata', 'success');
+            showToast(t('thresholdSaved'), 'success');
         } catch (err: any) {
-            showToast(err?.message || 'Errore aggiornamento soglia', 'error');
+            showToast(err?.message || t('thresholdSaveError'), 'error');
         } finally {
             setSavingVoiceThreshold(false);
         }
@@ -252,7 +254,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
         if (!channels || !canEdit || savingVoiceFirstMessage) return;
         const raw = voiceFirstMessageDraft.trim();
         if (raw.length > 500) {
-            showToast('Il messaggio può essere al massimo 500 caratteri', 'error');
+            showToast(t('firstMessageTooLong'), 'error');
             return;
         }
         setSavingVoiceFirstMessage(true);
@@ -260,9 +262,9 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
             const updated = await updateChannelSettings({ voice_first_message: raw });
             setChannels(updated);
             setVoiceFirstMessageDraft(updated.voice_first_message ?? '');
-            showToast(raw ? 'Messaggio iniziale aggiornato' : 'Messaggio iniziale ripristinato al default', 'success');
+            showToast(raw ? t('firstMessageSaved') : t('firstMessageReset'), 'success');
         } catch (err: any) {
-            showToast(err?.message || 'Errore aggiornamento messaggio', 'error');
+            showToast(err?.message || t('firstMessageSaveError'), 'error');
         } finally {
             setSavingVoiceFirstMessage(false);
         }
@@ -272,7 +274,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
         if (!channels || !canEdit || savingSuspensionCallback) return;
         const raw = suspensionCallbackDraft.trim();
         if (!HHMM_RE.test(raw)) {
-            showToast("L'orario deve essere in formato HH:MM (00-23:00-59)", 'error');
+            showToast("{t('timeFormatError')}", 'error');
             return;
         }
         setSavingSuspensionCallback(true);
@@ -280,9 +282,9 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
             const updated = await updateChannelSettings({ voice_bookings_suspension_callback_time: raw });
             setChannels(updated);
             setSuspensionCallbackDraft(updated.voice_bookings_suspension_callback_time);
-            showToast('Orario di richiamo aggiornato', 'success');
+            showToast(t('callbackTimeSaved'), 'success');
         } catch (err: any) {
-            showToast(err?.message || 'Errore aggiornamento orario', 'error');
+            showToast(err?.message || t('callbackTimeSaveError'), 'error');
         } finally {
             setSavingSuspensionCallback(false);
         }
@@ -317,16 +319,16 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
         if (!channels || !canEdit || savingSchedule) return;
         for (const [i, row] of scheduleDraft.entries()) {
             if (!ISO_DATE_RE.test(row.date)) {
-                showToast(`Riga ${i + 1}: data non valida`, 'error'); return;
+                showToast(t('rowInvalidDate', { n: i + 1 }), 'error'); return;
             }
             if (!HHMM_RE.test(row.start_time) || !HHMM_RE.test(row.end_time)) {
-                showToast(`Riga ${i + 1}: orari non validi`, 'error'); return;
+                showToast(t('rowInvalidTimes', { n: i + 1 }), 'error'); return;
             }
             if (row.start_time >= row.end_time) {
-                showToast(`Riga ${i + 1}: l'orario di inizio deve essere prima della fine`, 'error'); return;
+                showToast(t('rowStartAfterEnd', { n: i + 1 }), 'error'); return;
             }
             if (row.callback_time && !HHMM_RE.test(row.callback_time)) {
-                showToast(`Riga ${i + 1}: orario di richiamo non valido`, 'error'); return;
+                showToast(t('rowInvalidCallback', { n: i + 1 }), 'error'); return;
             }
         }
         setSavingSchedule(true);
@@ -334,9 +336,9 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
             const updated = await updateChannelSettings({ voice_bookings_suspension_schedule: scheduleDraft });
             setChannels(updated);
             setScheduleDraft(updated.voice_bookings_suspension_schedule ?? []);
-            showToast('Sospensioni programmate aggiornate', 'success');
+            showToast(t('scheduleSaved'), 'success');
         } catch (err: any) {
-            showToast(err?.message || 'Errore aggiornamento programma', 'error');
+            showToast(err?.message || t('scheduleSaveError'), 'error');
         } finally {
             setSavingSchedule(false);
         }
@@ -363,10 +365,10 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
         if (!channels || !canEdit || savingBlocks) return;
         for (const [i, row] of blocksDraft.entries()) {
             if (!ISO_DATE_RE.test(row.date)) {
-                showToast(`Blocco #${i + 1}: data non valida`, 'error'); return;
+                showToast(t('blockInvalidDate', { n: i + 1 }), 'error'); return;
             }
             if (row.shift !== 'LUNCH' && row.shift !== 'DINNER' && row.shift !== 'ALL') {
-                showToast(`Blocco #${i + 1}: turno non valido`, 'error'); return;
+                showToast(t('blockInvalidShift', { n: i + 1 }), 'error'); return;
             }
         }
         setSavingBlocks(true);
@@ -374,9 +376,9 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
             const updated = await updateChannelSettings({ public_bookings_blocks: blocksDraft });
             setChannels(updated);
             setBlocksDraft(updated.public_bookings_blocks ?? []);
-            showToast('Blocchi prenotazioni web aggiornati', 'success');
+            showToast(t('webBlocksSaved'), 'success');
         } catch (err: any) {
-            showToast(err?.message || 'Errore aggiornamento blocchi', 'error');
+            showToast(err?.message || t('webBlocksSaveError'), 'error');
         } finally {
             setSavingBlocks(false);
         }
@@ -402,13 +404,13 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
         if (!channels || !canEdit || savingVoiceBlocks) return;
         for (const [i, row] of voiceBlocksDraft.entries()) {
             if (!ISO_DATE_RE.test(row.date)) {
-                showToast(`Blocco #${i + 1}: data non valida`, 'error'); return;
+                showToast(t('blockInvalidDate', { n: i + 1 }), 'error'); return;
             }
             if (row.shift !== 'LUNCH' && row.shift !== 'DINNER' && row.shift !== 'ALL') {
-                showToast(`Blocco #${i + 1}: turno non valido`, 'error'); return;
+                showToast(t('blockInvalidShift', { n: i + 1 }), 'error'); return;
             }
             if (row.callback_hours && row.callback_hours.length > 120) {
-                showToast(`Blocco #${i + 1}: testo "quando richiamare" troppo lungo (max 120 caratteri)`, 'error'); return;
+                showToast(t('blockCallbackTooLong', { n: i + 1 }), 'error'); return;
             }
         }
         setSavingVoiceBlocks(true);
@@ -416,9 +418,9 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
             const updated = await updateChannelSettings({ voice_bookings_date_blocks: voiceBlocksDraft });
             setChannels(updated);
             setVoiceBlocksDraft(updated.voice_bookings_date_blocks ?? []);
-            showToast('Giorni bloccati per Sofia aggiornati', 'success');
+            showToast(t('voiceBlocksSaved'), 'success');
         } catch (err: any) {
-            showToast(err?.message || 'Errore aggiornamento blocchi', 'error');
+            showToast(err?.message || t('webBlocksSaveError'), 'error');
         } finally {
             setSavingVoiceBlocks(false);
         }
@@ -429,7 +431,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
     // raggiunto il limite.
     const renderShiftFill = (shift: RoomOccupancyShift, percent: number, roomClosed: boolean) => {
         if (roomClosed || shift.closed_for_shift) {
-            return <em className="not-italic text-[var(--ds-text-subtle)]">chiusa</em>;
+            return <em className="not-italic text-[var(--ds-text-subtle)]">{t('roomClosedShift')}</em>;
         }
         return (
             <strong className={shift.at_cap ? 'text-[var(--ds-pending-text)]' : 'text-[var(--ds-text-muted)]'}>
@@ -455,8 +457,8 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
         if (!channels || !canEdit || savingCaps) return;
         for (const cap of capsDraft) {
             if (!Number.isInteger(cap.percent) || cap.percent < 1 || cap.percent > 100) {
-                const roomName = occupancy.find(r => r.room_id === cap.room_id)?.room_name ?? `sala ${cap.room_id}`;
-                showToast(`${roomName}: la percentuale deve essere un intero tra 1 e 100`, 'error');
+                const roomName = occupancy.find(r => r.room_id === cap.room_id)?.room_name ?? t('roomFallbackName', { id: cap.room_id });
+                showToast(t('capPercentRangeError', { room: roomName }), 'error');
                 return;
             }
         }
@@ -473,9 +475,9 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
             } catch (occErr) {
                 console.warn('[channels] room occupancy refresh failed:', occErr);
             }
-            showToast('Limiti di occupazione aggiornati', 'success');
+            showToast(t('capsSaved'), 'success');
         } catch (err: any) {
-            showToast(err?.message || 'Errore aggiornamento limiti', 'error');
+            showToast(err?.message || t('capsSaveError'), 'error');
         } finally {
             setSavingCaps(false);
         }
@@ -484,7 +486,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
     if (loading) {
         return (
             <div className="flex items-center gap-2 text-[var(--ds-text-muted)] text-[13px] py-2">
-                <Loader label="Caricamento…" size={40} />
+                <Loader label={t('loading')} size={40} />
             </div>
         );
     }
@@ -510,7 +512,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
         <div className="space-y-3">
             {visibleChannels.length === 0 && !only && (
                 <p className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-4 py-3 text-[14px] text-[var(--ds-text-muted)] shadow-[var(--ds-shadow-card)]">
-                    Nessun canale incluso nel piano attuale.
+                    {t('noChannelsInPlan')}
                 </p>
             )}
             {visibleChannels.map((meta) => {
@@ -529,20 +531,20 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                     {meta.icon}
                                 </div>
                                 <div className="min-w-0">
-                                    <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">{meta.title}</h4>
-                                    <p className="text-[12px] text-[var(--ds-text-muted)] truncate">{meta.description}</p>
+                                    <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">{t(`channel.${meta.key}.title`, meta.title)}</h4>
+                                    <p className="text-[12px] text-[var(--ds-text-muted)] truncate">{t(`channel.${meta.key}.description`, meta.description)}</p>
                                 </div>
                             </div>
                             <div className="flex items-center gap-2 flex-shrink-0">
                                 <span className={`text-[12px] font-medium ${enabled ? 'text-[var(--ds-seated-text)]' : 'text-[var(--ds-text-subtle)]'}`}>
-                                    {enabled ? meta.onLabel : meta.offLabel}
+                                    {t(`channel.${meta.key}.${enabled ? 'on' : 'off'}`, enabled ? meta.onLabel : meta.offLabel)}
                                 </span>
                                 {/* stopPropagation so clicking the switch doesn't toggle the accordion */}
                                 <button
                                     type="button"
                                     role="switch"
                                     aria-checked={enabled}
-                                    aria-label={`${enabled ? 'Disattiva' : 'Attiva'} ${meta.title}`}
+                                    aria-label={t(enabled ? 'toggleOff' : 'toggleOn', { cosa: t(`channel.${meta.key}.title`, meta.title) })}
                                     onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggle(meta.key); }}
                                     disabled={!canEdit || isSaving}
                                     className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
@@ -560,17 +562,17 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                             </div>
                         </summary>
                         <div className="px-4 pb-4 pt-3 border-t border-[var(--ds-border)] space-y-3">
-                            <p className="text-[13px] text-[var(--ds-text-muted)] leading-relaxed">{meta.description}</p>
+                            <p className="text-[13px] text-[var(--ds-text-muted)] leading-relaxed">{t(`channel.${meta.key}.description`, meta.description)}</p>
 
                             {isVoice && (
                                 <>
                                     <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] border border-[var(--ds-border)] p-3">
                                         <label className="flex items-start gap-2 text-[13px] text-[var(--ds-text-primary)] font-medium">
                                             <MessageSquare className="h-4 w-4 mt-0.5 text-[var(--ds-text-muted)] flex-shrink-0" />
-                                            <span>Messaggio iniziale di Sofia</span>
+                                            <span>{t('firstMessageLabel')}</span>
                                         </label>
                                         <p className="text-[12px] text-[var(--ds-text-muted)] mt-1 mb-2 leading-relaxed">
-                                            La prima frase che Sofia pronuncia alla risposta. Modificalo qui invece che su ElevenLabs. Usa <code className="px-1 rounded bg-[var(--ds-surface)] text-[var(--ds-text-secondary)]">{'{nome}'}</code> per inserire il nome del cliente quando il numero è riconosciuto (viene tolto per i chiamanti sconosciuti). Lascia vuoto per usare il messaggio predefinito.
+                                            {t('firstMessageHintA')} <code className="px-1 rounded bg-[var(--ds-surface)] text-[var(--ds-text-secondary)]">{'{nome}'}</code> {t('firstMessageHintB')}
                                         </p>
                                         <textarea
                                             rows={3}
@@ -578,7 +580,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                             value={voiceFirstMessageDraft}
                                             onChange={(e) => setVoiceFirstMessageDraft(e.target.value)}
                                             disabled={!canEdit || savingVoiceFirstMessage}
-                                            placeholder="Es. Ciao {nome}, sono Sofia del ristorante, come posso aiutarti?"
+                                            placeholder={t('firstMessagePlaceholder')}
                                             className="w-full px-2.5 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[13px] text-[var(--ds-text-primary)] leading-relaxed resize-y focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
                                         />
                                         <div className="flex items-center gap-2 mt-2">
@@ -590,7 +592,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                                 className="ml-auto inline-flex items-center gap-1.5 h-9 px-3 rounded-[var(--ds-radius)] text-[13px] font-medium bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
                                             >
                                                 {savingVoiceFirstMessage && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                                                Salva
+                                                {t('save')}
                                             </button>
                                         </div>
                                     </div>
@@ -598,10 +600,10 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                     <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] border border-[var(--ds-border)] p-3">
                                         <label className="flex items-start gap-2 text-[13px] text-[var(--ds-text-primary)] font-medium">
                                             <Users className="h-4 w-4 mt-0.5 text-[var(--ds-text-muted)] flex-shrink-0" />
-                                            <span>Soglia handoff gruppi grandi</span>
+                                            <span>{t('largeGroupThresholdLabel')}</span>
                                         </label>
                                         <p className="text-[12px] text-[var(--ds-text-muted)] mt-1 mb-2 leading-relaxed">
-                                            Fino a questo numero di ospiti Sofia prenota da sola; oltre passa la richiamata a un operatore. Il calcolo di disponibilità del backend non è affidabile per gruppi grandi (verifica per tavoli singoli), quindi la soglia esiste per evitare risposte sbagliate al cliente.
+                                            {t('largeGroupThresholdHint')}
                                         </p>
                                         <div className="flex items-center gap-2">
                                             <input
@@ -614,7 +616,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                                 className="w-20 h-9 px-2 rounded-[var(--ds-radius)] border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] tabular focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
                                             />
                                             <span className="text-[12px] text-[var(--ds-text-muted)]">
-                                                Attualmente: prenotazioni fino a <strong className="text-[var(--ds-text-primary)]">{channels.voice_large_group_threshold}</strong> ospiti gestite dall'agent.
+                                                {t('thresholdCurrentA')} <strong className="text-[var(--ds-text-primary)]">{channels.voice_large_group_threshold}</strong> {t('thresholdCurrentB')}
                                             </span>
                                             <button
                                                 type="button"
@@ -633,17 +635,17 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                             <div className="min-w-0">
                                                 <label className="flex items-start gap-2 text-[13px] text-[var(--ds-text-primary)] font-medium">
                                                     <Repeat className="h-4 w-4 mt-0.5 text-[var(--ds-text-muted)] flex-shrink-0" />
-                                                    <span>Doppio turno sullo stesso tavolo</span>
+                                                    <span>{t('doubleSeatingLabel')}</span>
                                                 </label>
                                                 <p className="text-[12px] text-[var(--ds-text-muted)] mt-1 leading-relaxed">
-                                                    Quando attivo, Sofia può assegnare a un tavolo un secondo giro nello stesso servizio: il tavolo torna disponibile alla fine della prenotazione precedente (durata dal modal prenotazione; senza durata, 90 minuti a pranzo e 120 a cena). A turno pieno propone al cliente l'orario in cui si libera il primo tavolo adatto. Vale solo per il canale telefonico.
+                                                    {t('doubleSeatingHint')}
                                                 </p>
                                             </div>
                                             <button
                                                 type="button"
                                                 role="switch"
                                                 aria-checked={doubleSeating}
-                                                aria-label={doubleSeating ? 'Disattiva doppio turno' : 'Attiva doppio turno'}
+                                                aria-label={t(doubleSeating ? 'doubleSeatingToggleOff' : 'doubleSeatingToggleOn')}
                                                 onClick={() => toggle('voice_double_seating_enabled')}
                                                 disabled={!canEdit || doubleSeatingSaving}
                                                 className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
@@ -669,17 +671,17 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                             <div className="min-w-0">
                                                 <label className="flex items-start gap-2 text-[13px] text-[var(--ds-text-primary)] font-medium">
                                                     <PauseCircle className={`h-4 w-4 mt-0.5 flex-shrink-0 ${suspended ? 'text-[var(--ds-pending-text)]' : 'text-[var(--ds-text-muted)]'}`} />
-                                                    <span>Prenotazioni momentaneamente sospese</span>
+                                                    <span>{t('bookingsSuspendedLabel')}</span>
                                                 </label>
                                                 <p className="text-[12px] text-[var(--ds-text-muted)] mt-1 leading-relaxed">
-                                                    Quando attivo, Sofia risponde alla chiamata dicendo che le prenotazioni sono sospese e invita a richiamare dopo l'orario configurato. I tool <em>check-availability</em> e <em>create-reservation</em> vengono anche disabilitati come rete di sicurezza.
+                                                    {t('bookingsSuspendedHintA')} <em>check-availability</em> {t('and')} <em>create-reservation</em> {t('bookingsSuspendedHintB')}
                                                 </p>
                                             </div>
                                             <button
                                                 type="button"
                                                 role="switch"
                                                 aria-checked={suspended}
-                                                aria-label={suspended ? 'Riattiva prenotazioni' : 'Sospendi prenotazioni'}
+                                                aria-label={suspended ? t('resumeBookings') : t('suspendBookings')}
                                                 onClick={() => toggle('voice_bookings_suspended')}
                                                 disabled={!canEdit || suspensionSaving}
                                                 className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
@@ -696,7 +698,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                         </div>
                                         <div className="flex items-center gap-2 mt-3">
                                             <Clock className="h-4 w-4 text-[var(--ds-text-muted)] flex-shrink-0" />
-                                            <span className="text-[12px] text-[var(--ds-text-muted)]">Richiamare dopo le</span>
+                                            <span className="text-[12px] text-[var(--ds-text-muted)]">{t('ringBackAfter')}</span>
                                             <input
                                                 type="time"
                                                 value={suspensionCallbackDraft}
@@ -719,13 +721,13 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                     <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] border border-[var(--ds-border)] p-3">
                                         <label className="flex items-start gap-2 text-[13px] text-[var(--ds-text-primary)] font-medium">
                                             <CalendarClock className="h-4 w-4 mt-0.5 text-[var(--ds-text-muted)] flex-shrink-0" />
-                                            <span>Sospensioni programmate</span>
+                                            <span>{t('scheduledSuspensionsLabel')}</span>
                                         </label>
                                         <p className="text-[12px] text-[var(--ds-text-muted)] mt-1 mb-3 leading-relaxed">
-                                            Attiva la sospensione automaticamente in una o più finestre programmate: scegli il giorno e un turno intero (pranzo o cena), oppure una fascia oraria personalizzata. Quando l'orario corrente entra in una finestra, Sofia annuncia la sospensione e invita il cliente a richiamare dopo l'orario di fine di quella finestra. Il toggle immediato qui sopra ha comunque la precedenza se acceso.
+                                            {t('scheduledSuspensionsHint')}
                                         </p>
                                         {scheduleDraft.length === 0 ? (
-                                            <p className="text-[12px] text-[var(--ds-text-subtle)] italic mb-3">Nessuna sospensione programmata.</p>
+                                            <p className="text-[12px] text-[var(--ds-text-subtle)] italic mb-3">{t('noScheduledSuspensions')}</p>
                                         ) : (
                                             <div className="space-y-2 mb-3">
                                                 {scheduleDraft.map((row, idx) => {
@@ -744,16 +746,16 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                                                 value={rowShift}
                                                                 onChange={(e) => setScheduleRowShift(idx, e.target.value as SuspensionShift)}
                                                                 disabled={!canEdit || savingSchedule}
-                                                                aria-label="Turno della sospensione"
+                                                                aria-label={t('suspensionShiftAria')}
                                                                 className="h-9 px-2 rounded-[var(--ds-radius)] border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
                                                             >
-                                                                <option value="LUNCH">Pranzo</option>
-                                                                <option value="DINNER">Cena</option>
-                                                                <option value="CUSTOM">Fascia oraria</option>
+                                                                <option value="LUNCH">{t('lunch')}</option>
+                                                                <option value="DINNER">{t('dinner')}</option>
+                                                                <option value="CUSTOM">{t('customTimeRange')}</option>
                                                             </select>
                                                             {rowShift === 'CUSTOM' ? (
                                                                 <>
-                                                                    <span className="text-[12px] text-[var(--ds-text-muted)]">dalle</span>
+                                                                    <span className="text-[12px] text-[var(--ds-text-muted)]">{t('fromTime')}</span>
                                                                     <input
                                                                         type="time"
                                                                         value={row.start_time}
@@ -761,7 +763,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                                                         disabled={!canEdit || savingSchedule}
                                                                         className="w-24 h-9 px-2 rounded-[var(--ds-radius)] border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] tabular focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
                                                                     />
-                                                                    <span className="text-[12px] text-[var(--ds-text-muted)]">alle</span>
+                                                                    <span className="text-[12px] text-[var(--ds-text-muted)]">{t('toTime')}</span>
                                                                     <input
                                                                         type="time"
                                                                         value={row.end_time}
@@ -771,11 +773,11 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                                                     />
                                                                 </>
                                                             ) : (
-                                                                <span className="text-[12px] text-[var(--ds-text-muted)] tabular whitespace-nowrap" title="Finestra coperta dal turno">
+                                                                <span className="text-[12px] text-[var(--ds-text-muted)] tabular whitespace-nowrap" title={t('shiftWindowTitle')}>
                                                                     {row.start_time}–{row.end_time}
                                                                 </span>
                                                             )}
-                                                            <span className="text-[12px] text-[var(--ds-text-muted)] whitespace-nowrap" title="Orario che Sofia comunica al cliente per richiamare">richiamare dopo le</span>
+                                                            <span className="text-[12px] text-[var(--ds-text-muted)] whitespace-nowrap" title={t('callbackTimeTitle')}>{t('ringBackAfterLower')}</span>
                                                             <input
                                                                 type="time"
                                                                 value={row.callback_time ?? row.end_time}
@@ -784,13 +786,13 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                                                 className="w-24 h-9 px-2 rounded-[var(--ds-radius)] border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] tabular focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
                                                             />
                                                             {isPast && (
-                                                                <span className="text-[11px] text-[var(--ds-text-subtle)] italic">passata</span>
+                                                                <span className="text-[11px] text-[var(--ds-text-subtle)] italic">{t('past')}</span>
                                                             )}
                                                             <button
                                                                 type="button"
                                                                 onClick={() => removeScheduleRow(idx)}
                                                                 disabled={!canEdit || savingSchedule}
-                                                                aria-label="Rimuovi sospensione programmata"
+                                                                aria-label={t('removeScheduledSuspension')}
                                                                 className="ml-auto inline-flex items-center justify-center h-9 w-9 rounded-[var(--ds-radius)] text-[var(--ds-text-muted)] hover:text-[var(--ds-critical-text)] hover:bg-[var(--ds-critical-tint)] dark:hover:bg-[var(--ds-critical-tint)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                                                             >
                                                                 <Trash2 className="h-4 w-4" />
@@ -808,7 +810,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                                 className="inline-flex items-center gap-1.5 h-9 px-3 rounded-[var(--ds-radius)] text-[13px] font-medium border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                                             >
                                                 <Plus className="h-3.5 w-3.5" />
-                                                Aggiungi
+                                                {t('add')}
                                             </button>
                                             <button
                                                 type="button"
@@ -817,7 +819,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                                 className="ml-auto inline-flex items-center gap-1.5 h-9 px-3 rounded-[var(--ds-radius)] text-[13px] font-medium bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
                                             >
                                                 {savingSchedule && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                                                Salva programma
+                                                {t('saveSchedule')}
                                             </button>
                                         </div>
                                     </div>
@@ -827,10 +829,10 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                             <div>
                                                 <div className="flex items-center gap-2 text-[13px] text-[var(--ds-text-primary)] font-medium">
                                                     <CalendarClock className="h-4 w-4 text-[var(--ds-text-muted)]" />
-                                                    <span>Giorni gestiti solo da operatore</span>
+                                                    <span>{t('operatorOnlyDaysLabel')}</span>
                                                 </div>
                                                 <p className="text-[12px] text-[var(--ds-text-muted)] mt-1 leading-relaxed">
-                                                    Sofia non prende prenotazioni <em>per</em> questi giorni (o turni), qualunque sia il momento della chiamata: utile quando c'è un menù fisso o un evento che vuoi gestire a mano. Al cliente che chiede una data bloccata Sofia dice che se ne occupa lo staff e lo invita a richiamare negli orari indicati. Le altre date restano prenotabili normalmente. I blocchi già passati spariscono da soli.
+                                                    {t('operatorOnlyDaysHintA')} <em>{t('forWord')}</em> {t('operatorOnlyDaysHintB')}
                                                 </p>
                                             </div>
                                             <button
@@ -840,14 +842,14 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                                 className="inline-flex items-center gap-1 h-8 px-2.5 rounded-[var(--ds-radius)] text-[12px] font-medium border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
                                             >
                                                 <Plus className="h-3.5 w-3.5" />
-                                                Aggiungi
+                                                {t('add')}
                                             </button>
                                         </div>
 
                                         <div className="mt-3 space-y-2">
                                             {voiceBlocksDraft.length === 0 ? (
                                                 <p className="text-[12px] text-[var(--ds-text-subtle)] italic py-1">
-                                                    Nessun giorno bloccato. Sofia prenota per qualsiasi data.
+                                                    {t('noBlockedDays')}
                                                 </p>
                                             ) : (
                                                 voiceBlocksDraft.map((row, idx) => {
@@ -868,30 +870,30 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                                                 disabled={!canEdit || savingVoiceBlocks}
                                                                 className="h-8 px-2 rounded border border-[var(--ds-border-strong)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] text-[12px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
                                                             >
-                                                                <option value="ALL">Intera giornata</option>
-                                                                <option value="LUNCH">Solo pranzo</option>
-                                                                <option value="DINNER">Solo cena</option>
+                                                                <option value="ALL">{t('wholeDay')}</option>
+                                                                <option value="LUNCH">{t('lunchOnly')}</option>
+                                                                <option value="DINNER">{t('dinnerOnly')}</option>
                                                             </select>
-                                                            <span className="text-[12px] text-[var(--ds-text-muted)] whitespace-nowrap" title="Quando Sofia invita a richiamare per parlare con un operatore">richiamare</span>
+                                                            <span className="text-[12px] text-[var(--ds-text-muted)] whitespace-nowrap" title={t('voiceBlockCallbackTitle')}>{t('ringBack')}</span>
                                                             <input
                                                                 type="text"
                                                                 value={row.callback_hours ?? ''}
                                                                 onChange={(e) => updateVoiceBlockRow(idx, { callback_hours: e.target.value })}
-                                                                placeholder="es. dalle 9:00 alle 12:00"
+                                                                placeholder={t('callbackHoursPlaceholder')}
                                                                 maxLength={120}
                                                                 disabled={!canEdit || savingVoiceBlocks}
                                                                 className="flex-1 min-w-[160px] h-8 px-2 rounded border border-[var(--ds-border-strong)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] text-[12px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50 placeholder:text-[var(--ds-text-subtle)]"
                                                             />
                                                             {inPast && (
-                                                                <span className="text-[11px] text-[var(--ds-pending-text)]">Data già passata</span>
+                                                                <span className="text-[11px] text-[var(--ds-pending-text)]">{t('datePast')}</span>
                                                             )}
                                                             <button
                                                                 type="button"
                                                                 onClick={() => removeVoiceBlockRow(idx)}
                                                                 disabled={!canEdit || savingVoiceBlocks}
                                                                 className="ml-auto inline-flex items-center justify-center h-7 w-7 rounded-[var(--ds-radius)] text-[var(--ds-text-muted)] hover:text-[var(--ds-critical-text)] hover:bg-[var(--ds-critical-tint)] dark:hover:bg-[var(--ds-critical-tint)] disabled:opacity-50 transition-colors"
-                                                                aria-label="Rimuovi giorno bloccato"
-                                                                title="Rimuovi"
+                                                                aria-label={t('removeBlockedDay')}
+                                                                title={t('remove')}
                                                             >
                                                                 <Trash2 className="h-3.5 w-3.5" />
                                                             </button>
@@ -909,7 +911,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                                 className="inline-flex items-center gap-1.5 h-9 px-3 rounded-[var(--ds-radius)] text-[13px] font-medium bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
                                             >
                                                 {savingVoiceBlocks && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                                                Salva blocchi
+                                                {t('saveBlocks')}
                                             </button>
                                         </div>
                                     </div>
@@ -922,10 +924,10 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                         <div>
                                             <div className="flex items-center gap-2 text-[13px] text-[var(--ds-text-primary)] font-medium">
                                                 <CalendarClock className="h-4 w-4 text-[var(--ds-text-muted)]" />
-                                                <span>Blocca prenotazioni web per giorni specifici</span>
+                                                <span>{t('webBlocksLabel')}</span>
                                             </div>
                                             <p className="text-[12px] text-[var(--ds-text-muted)] mt-1 leading-relaxed">
-                                                Chiudi il canale web per un turno (pranzo o cena) o per l'intera giornata. Il modulo /prenota nasconde gli slot bloccati e rifiuta eventuali tentativi POST diretti. I blocchi già scaduti vengono rimossi automaticamente al prossimo caricamento.
+                                                {t('webBlocksHint')}
                                             </p>
                                         </div>
                                         <button
@@ -935,14 +937,14 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                             className="inline-flex items-center gap-1 h-8 px-2.5 rounded-[var(--ds-radius)] text-[12px] font-medium border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
                                         >
                                             <Plus className="h-3.5 w-3.5" />
-                                            Aggiungi
+                                            {t('add')}
                                         </button>
                                     </div>
 
                                     <div className="mt-3 space-y-2">
                                         {blocksDraft.length === 0 ? (
                                             <p className="text-[12px] text-[var(--ds-text-subtle)] italic py-1">
-                                                Nessun blocco programmato. Il canale web è aperto tutti i giorni.
+                                                {t('noWebBlocks')}
                                             </p>
                                         ) : (
                                             blocksDraft.map((row, idx) => {
@@ -964,19 +966,19 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                                             className="h-8 px-2 rounded border border-[var(--ds-border-strong)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] text-[12px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
                                                         >
                                                             <option value="ALL">Intera giornata</option>
-                                                            <option value="LUNCH">Solo pranzo</option>
-                                                            <option value="DINNER">Solo cena</option>
+                                                            <option value="LUNCH">{t('lunchOnly')}</option>
+                                                            <option value="DINNER">{t('dinnerOnly')}</option>
                                                         </select>
                                                         {inPast && (
-                                                            <span className="text-[11px] text-[var(--ds-pending-text)]">Data già passata</span>
+                                                            <span className="text-[11px] text-[var(--ds-pending-text)]">{t('datePast')}</span>
                                                         )}
                                                         <button
                                                             type="button"
                                                             onClick={() => removeBlockRow(idx)}
                                                             disabled={!canEdit || savingBlocks}
                                                             className="ml-auto inline-flex items-center justify-center h-7 w-7 rounded-[var(--ds-radius)] text-[var(--ds-text-muted)] hover:text-[var(--ds-critical-text)] hover:bg-[var(--ds-critical-tint)] dark:hover:bg-[var(--ds-critical-tint)] disabled:opacity-50 transition-colors"
-                                                            aria-label="Rimuovi blocco"
-                                                            title="Rimuovi"
+                                                            aria-label={t('removeBlock')}
+                                                            title={t('remove')}
                                                         >
                                                             <Trash2 className="h-3.5 w-3.5" />
                                                         </button>
@@ -1002,7 +1004,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
 
                             {!isVoice && !isWeb && (
                                 <p className="text-[12px] text-[var(--ds-text-subtle)] italic">
-                                    Nessuna impostazione specifica al momento oltre a Attivo / Sospeso.
+                                    {t('noSpecificSettings')}
                                 </p>
                             )}
                         </div>
@@ -1022,35 +1024,30 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                             <Percent className="w-5 h-5" />
                         </div>
                         <div className="min-w-0">
-                            <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">Limiti di occupazione per sala</h4>
+                            <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">{t('roomOccupancyCapsTitle')}</h4>
                             <p className="text-[12px] text-[var(--ds-text-muted)] truncate">
-                                Quota di tavoli o coperti oltre la quale le prenotazioni automatiche passano dallo staff.
+                                {t('roomOccupancyCapsSubtitle')}
                             </p>
                         </div>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
                         <span className={`text-[12px] font-medium ${capsDraft.length > 0 ? 'text-[var(--ds-seated-text)]' : 'text-[var(--ds-text-subtle)]'}`}>
-                            {capsDraft.length > 0 ? `${capsDraft.length} ${capsDraft.length === 1 ? 'attivo' : 'attivi'}` : 'Nessun limite'}
+                            {capsDraft.length > 0 ? t('capsActive', { count: capsDraft.length }) : t('noCaps')}
                         </span>
                         <ChevronDown className="w-4 h-4 text-[var(--ds-text-muted)] flex-shrink-0 transition-transform group-open:rotate-180" />
                     </div>
                 </summary>
                 <div className="px-4 pb-4 pt-3 border-t border-[var(--ds-border)] space-y-3">
                     <p className="text-[13px] text-[var(--ds-text-muted)] leading-relaxed">
-                        Riserva una quota di ogni sala ai canali gestiti da voi. Esempio con il 70% sulla sala Macine: finché
-                        Macine sta sotto il 70%, le prenotazioni web di quella sala vengono confermate subito con il tavolo
-                        assegnato in automatico; appena tocca il 70% le nuove richieste restano da confermare a mano e
-                        l'agente telefonico smette di proporre la sala. Lo staff continua a prenotare senza limiti dal
-                        gestionale.
+                        {t('capsExplainer')}
                     </p>
                     <p className="text-[12px] text-[var(--ds-text-subtle)] leading-relaxed">
-                        <strong className="text-[var(--ds-text-muted)]">Tavoli</strong>: tavoli occupati sul totale della sala (un tavolo accorpato o
-                        tenuto da un banchetto conta come occupato). <strong className="text-[var(--ds-text-muted)]">Coperti</strong>: ospiti prenotati
-                        sul totale dei posti. Le richieste web ancora senza tavolo pesano sulla sala che il cliente ha scelto.
+                        <strong className="text-[var(--ds-text-muted)]">{t('basisTablesLabel')}</strong>{t('basisTablesHint')}
+                        <strong className="text-[var(--ds-text-muted)]">{t('basisSeatsLabel')}</strong>{t('basisSeatsHint')}
                     </p>
 
                     {occupancy.length === 0 ? (
-                        <p className="text-[12px] text-[var(--ds-text-subtle)] italic">Nessuna sala configurata.</p>
+                        <p className="text-[12px] text-[var(--ds-text-subtle)] italic">{t('noRoomsConfigured')}</p>
                     ) : (
                         <div className="space-y-2">
                             {occupancy.map(room => {
@@ -1061,8 +1058,8 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                 // Un turno chiuso non è "al limite": non accetta niente da nessun
                                 // canale, quindi non ha senso segnalarlo come soglia raggiunta.
                                 const atCapShifts = [
-                                    room.lunch.at_cap && !room.lunch.closed_for_shift && !room.is_closed ? 'pranzo' : null,
-                                    room.dinner.at_cap && !room.dinner.closed_for_shift && !room.is_closed ? 'cena' : null,
+                                    room.lunch.at_cap && !room.lunch.closed_for_shift && !room.is_closed ? t('lunchLower') : null,
+                                    room.dinner.at_cap && !room.dinner.closed_for_shift && !room.is_closed ? t('dinnerLower') : null,
                                 ].filter(Boolean) as string[];
                                 return (
                                     <div
@@ -1074,7 +1071,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                                 <div className="flex items-center gap-2 flex-wrap">
                                                     <span className="text-[13px] font-medium text-[var(--ds-text-primary)]">{room.room_name}</span>
                                                     {room.is_closed && (
-                                                        <span className="text-[11px] px-1.5 py-0.5 rounded bg-[var(--ds-surface-row)] text-[var(--ds-text-subtle)]">chiusa</span>
+                                                        <span className="text-[11px] px-1.5 py-0.5 rounded bg-[var(--ds-surface-row)] text-[var(--ds-text-subtle)]">{t('roomClosed')}</span>
                                                     )}
                                                 </div>
                                                 <p className="text-[12px] text-[var(--ds-text-muted)] mt-0.5">
@@ -1096,7 +1093,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                                 type="button"
                                                 role="switch"
                                                 aria-checked={!!cap}
-                                                aria-label={`${cap ? 'Disattiva' : 'Attiva'} limite per ${room.room_name}`}
+                                                aria-label={t(cap ? 'capToggleOff' : 'capToggleOn', { room: room.room_name })}
                                                 onClick={() => toggleCap(room.room_id)}
                                                 disabled={!canEdit || savingCaps}
                                                 className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
@@ -1114,7 +1111,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
 
                                         {cap && (
                                             <div className="flex flex-wrap items-center gap-2 mt-3">
-                                                <span className="text-[12px] text-[var(--ds-text-muted)]">Limite</span>
+                                                <span className="text-[12px] text-[var(--ds-text-muted)]">{t('capLimit')}</span>
                                                 <input
                                                     type="number"
                                                     min={1}
@@ -1125,19 +1122,19 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                                                         updateCap(room.room_id, { percent: Number.isFinite(n) ? Math.trunc(n) : cap.percent });
                                                     }}
                                                     disabled={!canEdit || savingCaps}
-                                                    aria-label={`Percentuale massima per ${room.room_name}`}
+                                                    aria-label={t('capPercentAria', { room: room.room_name })}
                                                     className="w-20 h-9 px-2 rounded-[var(--ds-radius)] border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] tabular focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
                                                 />
-                                                <span className="text-[12px] text-[var(--ds-text-muted)]">% dei</span>
+                                                <span className="text-[12px] text-[var(--ds-text-muted)]">{t('percentOf')}</span>
                                                 <select
                                                     value={cap.basis}
                                                     onChange={(e) => updateCap(room.room_id, { basis: e.target.value as RoomOccupancyCap['basis'] })}
                                                     disabled={!canEdit || savingCaps}
-                                                    aria-label={`Base di calcolo per ${room.room_name}`}
+                                                    aria-label={t('capBasisAria', { room: room.room_name })}
                                                     className="h-9 px-2 rounded-[var(--ds-radius)] border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] text-[13px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
                                                 >
-                                                    <option value="TABLES">tavoli</option>
-                                                    <option value="SEATS">coperti</option>
+                                                    <option value="TABLES">{t('tablesOption')}</option>
+                                                    <option value="SEATS">{t('seatsOption')}</option>
                                                 </select>
                                             </div>
                                         )}
@@ -1155,7 +1152,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
                             className="inline-flex items-center gap-1.5 h-9 px-3 rounded-[var(--ds-radius)] text-[13px] font-medium bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
                         >
                             {savingCaps && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                            Salva limiti
+                            {t('saveCaps')}
                         </button>
                     </div>
                 </div>
@@ -1164,7 +1161,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
 
             {!canEdit && (
                 <p className="text-[12px] text-[var(--ds-text-subtle)] mt-1">
-                    Solo gli amministratori possono modificare queste impostazioni.
+                    {t('adminsOnly')}
                 </p>
             )}
         </div>

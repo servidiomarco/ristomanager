@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Loader2, Minus, Plus } from 'lucide-react';
 import { ModalShell, dsButton, dsInput } from '../ds';
 
@@ -21,6 +22,7 @@ export const ReasonDialog: React.FC<{
   onCancel: () => void;
   onConfirm: (reason: string, qty?: number) => void;
 }> = ({ title, hint, confirmLabel, busy, maxQty, onCancel, onConfirm }) => {
+  const { t } = useTranslation('comande', { useSuspense: false });
   const [reason, setReason] = useState('');
   const [qty, setQty] = useState(maxQty ?? 1);
   const partial = maxQty != null && maxQty > 1;
@@ -50,7 +52,7 @@ export const ReasonDialog: React.FC<{
     >
       {partial && (
         <div className="flex items-center justify-between gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-2 pl-4">
-          <span className="text-[14px] text-[var(--ds-text-secondary)]">Quantità</span>
+          <span className="text-[14px] text-[var(--ds-text-secondary)]">{t('quantity')}</span>
           <div className="flex items-center gap-1">
             <button
               type="button"
@@ -68,7 +70,7 @@ export const ReasonDialog: React.FC<{
               type="button"
               onClick={() => setQty(q => Math.min(maxQty!, q + 1))}
               disabled={busy || qty >= maxQty!}
-              aria-label="Storna un pezzo in più"
+              aria-label={t('voidOneMore')}
               className={stepper}
             >
               <Plus size={16} />

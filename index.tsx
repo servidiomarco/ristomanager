@@ -48,19 +48,28 @@ root.render(
         <PublicPayPageEntry />
       </I18nProvider>
     ) : isPublicReceiptRoute ? (
-      <PublicReceiptPage />
+      <I18nProvider>
+        <PublicReceiptPage />
+      </I18nProvider>
     ) : isPublicQuoteRoute ? (
-      <PublicQuotePage />
+      <I18nProvider>
+        <PublicQuotePage />
+      </I18nProvider>
     ) : (
-      <AuthProvider>
-        <ToastProvider>
-          <ShoppingProvider>
-            <TodosProvider>
-              <App />
-            </TodosProvider>
-          </ShoppingProvider>
-        </ToastProvider>
-      </AuthProvider>
+      // Anche la SPA autenticata passa dall'istanza i18n: la lingua qui non
+      // la sceglie il browser ma l'account (users.language), applicata in
+      // App.tsx appena lo user è noto.
+      <I18nProvider>
+        <AuthProvider>
+          <ToastProvider>
+            <ShoppingProvider>
+              <TodosProvider>
+                <App />
+              </TodosProvider>
+            </ShoppingProvider>
+          </ToastProvider>
+        </AuthProvider>
+      </I18nProvider>
     )}
   </React.StrictMode>
 );

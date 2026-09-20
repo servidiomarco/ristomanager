@@ -226,8 +226,11 @@ export class AuthService {
     const result = await queryWithRetry(
       `SELECT u.id, u.email, u.password_hash, u.full_name, u.phone, u.role, u.is_active,
               u.created_at, u.updated_at, u.last_login, u.preferred_landing_view, u.preferred_orderpad_layout,
-              u.preferred_design_style,
+              u.preferred_design_style, u.language,
               u.tenant_id, t.status AS tenant_status, t.slug AS tenant_slug, t.name AS tenant_name,
+              t.default_language AS tenant_default_language,
+              t.currency AS tenant_currency, t.timezone AS tenant_timezone,
+              t.country_code AS tenant_country_code,
               t.onboarding_completed_at IS NULL AS tenant_needs_onboarding
          FROM users u
          JOIN tenants t ON t.id = u.tenant_id
@@ -288,10 +291,19 @@ export class AuthService {
       preferred_landing_view: userRow.preferred_landing_view ?? null,
       preferred_orderpad_layout: userRow.preferred_orderpad_layout ?? null,
       preferred_design_style: userRow.preferred_design_style ?? null,
+      // Lingua dell'interfaccia scelta dall'operatore; null = si eredita il
+      // default del ristorante (tenant.default_language), a sua volta 'it'.
+      language: userRow.language ?? null,
       tenant: {
         id: Number(userRow.tenant_id),
         slug: userRow.tenant_slug,
         name: userRow.tenant_name,
+        default_language: userRow.tenant_default_language ?? null,
+        // Dove sta il ristorante: la SPA ne ha bisogno per scrivere importi
+        // e date come li legge chi lavora lì.
+        currency: userRow.tenant_currency ?? null,
+        timezone: userRow.tenant_timezone ?? null,
+        country_code: userRow.tenant_country_code ?? null,
         needs_onboarding: userRow.tenant_needs_onboarding === true
       }
     };
@@ -436,8 +448,11 @@ export class AuthService {
     const result = await queryWithRetry(
       `SELECT u.id, u.email, u.full_name, u.phone, u.role, u.is_active, u.created_at,
               u.updated_at, u.last_login, u.preferred_landing_view, u.preferred_orderpad_layout,
-              u.preferred_design_style,
+              u.preferred_design_style, u.language,
               u.tenant_id, t.slug AS tenant_slug, t.name AS tenant_name,
+              t.default_language AS tenant_default_language,
+              t.currency AS tenant_currency, t.timezone AS tenant_timezone,
+              t.country_code AS tenant_country_code,
               t.onboarding_completed_at IS NULL AS tenant_needs_onboarding
          FROM users u
          JOIN tenants t ON t.id = u.tenant_id
@@ -463,10 +478,15 @@ export class AuthService {
       preferred_landing_view: row.preferred_landing_view ?? null,
       preferred_orderpad_layout: row.preferred_orderpad_layout ?? null,
       preferred_design_style: row.preferred_design_style ?? null,
+      language: row.language ?? null,
       tenant: {
         id: Number(row.tenant_id),
         slug: row.tenant_slug,
         name: row.tenant_name,
+        default_language: row.tenant_default_language ?? null,
+        currency: row.tenant_currency ?? null,
+        timezone: row.tenant_timezone ?? null,
+        country_code: row.tenant_country_code ?? null,
         needs_onboarding: row.tenant_needs_onboarding === true
       }
     };
@@ -505,7 +525,7 @@ export class AuthService {
   // a field as it is; `null` clears it.
   static async updatePreferences(
     userId: number,
-    prefs: { preferred_landing_view?: string | null; preferred_orderpad_layout?: string | null; preferred_design_style?: string | null }
+    prefs: { preferred_landing_view?: string | null; preferred_orderpad_layout?: string | null; preferred_design_style?: string | null; language?: string | null }
   ): Promise<User | null> {
     const fields: string[] = [];
     const values: unknown[] = [];
@@ -521,6 +541,10 @@ export class AuthService {
       fields.push(`preferred_design_style = $${values.length + 1}`);
       values.push(prefs.preferred_design_style);
     }
+    if (prefs.language !== undefined) {
+      fields.push(`language = $${values.length + 1}`);
+      values.push(prefs.language);
+    }
     if (fields.length === 0) {
       return this.getUserById(userId);
     }
@@ -530,7 +554,7 @@ export class AuthService {
       `UPDATE users
        SET ${fields.join(', ')}, updated_at = CURRENT_TIMESTAMP
        WHERE id = $${values.length}
-       RETURNING id, email, full_name, phone, role, is_active, created_at, updated_at, last_login, preferred_landing_view, preferred_orderpad_layout, preferred_design_style`,
+       RETURNING id, email, full_name, phone, role, is_active, created_at, updated_at, last_login, preferred_landing_view, preferred_orderpad_layout, preferred_design_style, language`,
       values
     );
 
@@ -554,7 +578,8 @@ export class AuthService {
       last_login: row.last_login,
       preferred_landing_view: row.preferred_landing_view ?? null,
       preferred_orderpad_layout: row.preferred_orderpad_layout ?? null,
-      preferred_design_style: row.preferred_design_style ?? null
+      preferred_design_style: row.preferred_design_style ?? null,
+      language: row.language ?? null
     };
   }
 

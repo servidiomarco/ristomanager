@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { isBarCourse, isDessertCourse, ordinal } from '../utils/courses';
 import { BarChart3, Bell, BellOff, Check, Loader2, Play, RotateCcw, TriangleAlert, WifiOff } from 'lucide-react';
 import { useNow } from '../hooks/useNow';
@@ -38,6 +39,7 @@ const passeAction =
   'inline-flex h-11 flex-shrink-0 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-4 text-[14px] font-semibold transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
 export const ExpediterDisplay: React.FC = () => {
+  const { t } = useTranslation('comande', { useSuspense: false });
   const now = useNow(10_000);
   const [board, setBoard] = useState<ExpediterBoard | null>(null);
   const [loading, setLoading] = useState(true);
@@ -219,7 +221,7 @@ export const ExpediterDisplay: React.FC = () => {
             In attesa di lancio
           </SectionHeader>
           {inAttesa.length === 0 ? (
-            <p className="px-2 py-2 text-[14px] text-[var(--ds-text-muted)]">Nessuna proposta dalla sala.</p>
+            <p className="px-2 py-2 text-[14px] text-[var(--ds-text-muted)]">{t('noProposals')}</p>
           ) : (
             <div className="space-y-2">
               {inAttesa.map(c => (
@@ -430,6 +432,7 @@ const CourseRow: React.FC<{
 // sabato sera. La mediana accanto alla media: una sola comanda dimenticata
 // sposta la media e non la mediana.
 const KitchenStats: React.FC<{ report: KitchenReport | null }> = ({ report }) => {
+  const { t } = useTranslation('comande', { useSuspense: false });
   if (!report) {
     return (
       <div className="mb-5 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-5 py-4 text-[14px] text-[var(--ds-text-muted)] shadow-[var(--ds-shadow-card)]">
@@ -441,7 +444,7 @@ const KitchenStats: React.FC<{ report: KitchenReport | null }> = ({ report }) =>
   return (
     <div className="mb-5 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-5 shadow-[var(--ds-shadow-card)]">
       <div className="mb-5 grid grid-cols-2 gap-4 md:grid-cols-4">
-        <Stat label="Uscite completate" value={String(s?.uscite ?? 0)} />
+        <Stat label={t('completedCourses')} value={String(s?.uscite ?? 0)} />
         <Stat label="Delta di sincronia (mediano)" value={s?.delta_mediano_min != null ? `${s.delta_mediano_min}′` : '—'}
               hint="fra la prima riga pronta e l'ultima" />
         <Stat label="Delta peggiore" value={s?.delta_massimo_min != null ? `${s.delta_massimo_min}′` : '—'} />
@@ -472,7 +475,7 @@ const KitchenStats: React.FC<{ report: KitchenReport | null }> = ({ report }) =>
             ))}
             {report.partite.length === 0 && (
               <tr>
-                <td colSpan={4} className="py-2 text-[var(--ds-text-muted)]">Nessun dato nel periodo.</td>
+                <td colSpan={4} className="py-2 text-[var(--ds-text-muted)]">{t('noDataInPeriod')}</td>
               </tr>
             )}
           </tbody>

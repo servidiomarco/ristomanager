@@ -1,0 +1,138 @@
+{
+  "toolbar": {
+    "searchPlaceholder": "Cerca per nome o telefono",
+    "filters": "Filtri",
+    "print": "Stampa",
+    "channelOptions": "Opzioni canali di prenotazione"
+  },
+  "sort": {
+    "title": "Ordina per",
+    "createdAsc": "Prenotata prima → dopo",
+    "createdDesc": "Prenotata dopo → prima",
+    "timeAsc": "Orario (prima → dopo)",
+    "timeDesc": "Orario (dopo → prima)",
+    "nameAsc": "Nome A → Z",
+    "nameDesc": "Nome Z → A",
+    "guestsAsc": "Coperti (meno → più)",
+    "guestsDesc": "Coperti (più → meno)"
+  },
+  "filters": {
+    "title": "Filtra per",
+    "reset": "Reimposta",
+    "room": "Sala",
+    "allRooms": "Tutte",
+    "paymentStatus": "Stato pagamento",
+    "all": "Tutti",
+    "paymentPending": "Sospeso",
+    "paymentDeposit": "Acconto",
+    "paymentPaid": "Saldato",
+    "channel": "Canale",
+    "channelManual": "Utente",
+    "channelWeb": "Web",
+    "channelVoice": "Agente vocale",
+    "channelWhatsapp": "WhatsApp",
+    "other": "Altro",
+    "allergens": "Allergeni",
+    "withNotes": "Con note",
+    "noTable": "Senza tavolo"
+  },
+  "channel": {
+    "whatsapp": "Canale: WhatsApp",
+    "web": "Canale: Web",
+    "voice": "Canale: Agente vocale",
+    "phone": "Canale: Telefono",
+    "phoneShort": "Telefono"
+  },
+  "badge": {
+    "vip": "Cliente VIP",
+    "blacklist": "Cliente in blacklist"
+  },
+  "actions": {
+    "edit": "Modifica",
+    "cancel": "Annulla",
+    "new": "Nuova prenotazione"
+  },
+  "shift": {
+    "lunch": "Pranzo",
+    "dinner": "Cena"
+  },
+  "stats": {
+    "covers": "coperti",
+    "reservations": "pren.",
+    "noTable": "senza tav."
+  },
+  "empty": {
+    "lunch": "Nessuna prenotazione per il turno di Pranzo in questa data.",
+    "dinner": "Nessuna prenotazione per il turno di Cena in questa data."
+  },
+  "modal": {
+    "prevSection": "Sezione precedente",
+    "nextSection": "Sezione successiva",
+    "draftFound": "Bozza non salvata trovata",
+    "noSlots": "Nessuno slot disponibile",
+    "customerDetails": "Dettagli cliente",
+    "customerName": "Nome cliente",
+    "namePlaceholder": "Mario Rossi",
+    "addressBook": "Rubrica clienti",
+    "voiceDictation": "Dettatura vocale",
+    "call": "Chiama",
+    "email": "Email",
+    "emailPlaceholder": "cliente@email.com",
+    "banquet": "Banchetto",
+    "none": "Nessuno",
+    "allergies": "Allergie & Intolleranze",
+    "notes": "Note",
+    "otherNotes": "Altre note",
+    "notesPlaceholder": "Richieste speciali...",
+    "gdprTitle": "Consensi privacy (GDPR)",
+    "gdprHealth": "Consenso al trattamento di allergie / intolleranze",
+    "gdprMarketing": "Consenso all'invio di comunicazioni commerciali",
+    "selectTable": "Seleziona tavolo",
+    "unlinkTable": "Scollega tavolo dalla prenotazione",
+    "unlinkTableTitle": "Scollega il tavolo dalla prenotazione"
+  },
+  "legend": {
+    "free": "Libero",
+    "recommended": "Consigliato",
+    "selected": "Selezionato",
+    "occupied": "Occupato",
+    "tooSmall": "Capienza insuff.",
+    "banquet": "Evento / Banchetto"
+  },
+  "payments": {
+    "tableBill": "Conto al tavolo",
+    "loading": "Caricamento…",
+    "noBill": "Nessun conto attivo.",
+    "requestDeposit": "Richiedi un acconto",
+    "sendVia": "Invia il link tramite",
+    "email": "Email",
+    "whatsapp": "WhatsApp",
+    "sms": "SMS",
+    "amount": "Importo",
+    "description": "Descrizione",
+    "descriptionPlaceholder": "Es. acconto cena del 15/08",
+    "sendLink": "Invia link"
+  },
+  "billState": {
+    "paid": "Saldato",
+    "partial": "Saldato in parte",
+    "unpaid": "Da saldare"
+  },
+  "paymentStatus": {
+    "pending": "In attesa",
+    "authorised": "Autorizzato",
+    "completed": "Pagato",
+    "cancelled": "Annullato",
+    "failed": "Fallito",
+    "expired": "Scaduto",
+    "refunded": "Rimborsato"
+  },
+  "messages": {
+    "inbound": "Entrata",
+    "reply": "Risposta",
+    "delivered": "Consegnato",
+    "sent": "Inviato",
+    "failed": "Fallito",
+    "queued": "In coda"
+  }
+}

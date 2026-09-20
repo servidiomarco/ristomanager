@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   InventoryArea,
   InventoryLocation,
@@ -73,6 +74,11 @@ const rowIconButtonDanger =
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
 
 export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAutoOpenNewProductHandled }) => {
+    const { t } = useTranslation('inventario', { useSuspense: false });
+
+  /* AREA_LABEL resta l'elenco e la versione italiana: una costante di modulo
+     non può chiamare un hook, e il nome dell'area compare dentro mezza pagina. */
+  const areaLabel = (a: InventoryArea) => t(`area.${a}`, AREA_LABEL[a]);
   const { hasPermission } = useAuth();
   const canEdit = hasPermission('inventory:full');
 
@@ -191,7 +197,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
       })
       .catch((err: any) => {
         if (cancelled) return;
-        setError(err?.message || 'Errore caricamento inventario');
+        setError(err?.message || t('loadError'));
       })
       .finally(() => {
         if (!cancelled) setIsLoading(false);
@@ -294,7 +300,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
       if (items?.length) out.push({ id: cat.id, name: cat.name, products: items });
     }
     const loose = byCategory.get(UNCATEGORIZED);
-    if (loose?.length) out.push({ id: UNCATEGORIZED, name: 'Senza categoria', products: loose });
+    if (loose?.length) out.push({ id: UNCATEGORIZED, name: t('uncategorized'), products: loose });
     return out;
   }, [filteredProducts, categories]);
 
@@ -375,7 +381,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
         if (!cancelled) setForeign({ locations: locs, products: prods, stock: st, categories: cats });
       })
       .catch((err: any) => {
-        if (!cancelled) showToast(err?.message || 'Errore caricamento area', 'error');
+        if (!cancelled) showToast(err?.message || t('loadAreaError'), 'error');
       })
       .finally(() => {
         if (!cancelled) setForeignLoading(false);
@@ -435,7 +441,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
       });
       setSavedKeys(prev => new Set(prev).add(key));
     } catch (err: any) {
-      showToast(err?.message || 'Errore aggiornamento stock', 'error');
+      showToast(err?.message || t('stockUpdateError'), 'error');
     } finally {
       setPendingKeys(prev => {
         const next = new Set(prev);
@@ -447,7 +453,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
 
   const handleStep = (productId: number, sign: 1 | -1) => {
     if (activeLocationId == null) {
-      showToast("Seleziona un'area per modificare le quantità", 'info');
+      showToast("{t('pickAreaFirst')}", 'info');
       return;
     }
     const reason = sign > 0 ? InventoryMovementReason.CARICO : InventoryMovementReason.SCARICO;
@@ -458,7 +464,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
     if (activeLocationId == null) return;
     const target = Number(raw);
     if (!Number.isFinite(target)) {
-      showToast('Quantità non valida', 'error');
+      showToast(t('invalidQuantity'), 'error');
       return;
     }
     const current = stockMap.get(stockKey(productId, activeLocationId)) ?? 0;
@@ -489,9 +495,9 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
       });
       setMLocations(prev => [...prev, created]);
       setLocationDraftName('');
-      showToast('Area creata', 'success');
+      showToast(t('areaCreated'), 'success');
     } catch (err: any) {
-      showToast(err?.message || 'Errore creazione area', 'error');
+      showToast(err?.message || t('areaCreateError'), 'error');
     }
   };
 
@@ -506,9 +512,9 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
       setMLocations(prev => prev.map(l => (l.id === updated.id ? updated : l)));
       setEditingLocationId(null);
       setEditingLocationName('');
-      showToast('Area aggiornata', 'success');
+      showToast(t('areaUpdated'), 'success');
     } catch (err: any) {
-      showToast(err?.message || 'Errore aggiornamento area', 'error');
+      showToast(err?.message || t('areaUpdateError'), 'error');
     }
   };
 
@@ -525,9 +531,9 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
         if (activeLocationId === id) setActiveLocationId(null);
       }
       setConfirmDeleteLocationId(null);
-      showToast('Area eliminata', 'success');
+      showToast(t('areaDeleted'), 'success');
     } catch (err: any) {
-      showToast(err?.message || 'Errore eliminazione area', 'error');
+      showToast(err?.message || t('areaDeleteError'), 'error');
       setConfirmDeleteLocationId(null);
     }
   };
@@ -543,9 +549,9 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
       });
       setMCategories(prev => [...prev, created]);
       setCategoryDraftName('');
-      showToast('Categoria creata', 'success');
+      showToast(t('categoryCreated'), 'success');
     } catch (err: any) {
-      showToast(err?.message || 'Errore creazione categoria', 'error');
+      showToast(err?.message || t('categoryCreateError'), 'error');
     }
   };
 
@@ -562,9 +568,9 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
       setMProducts(prev => prev.map(p => p.category_id === updated.id ? { ...p, category_name: updated.name } : p));
       setEditingCategoryId(null);
       setEditingCategoryName('');
-      showToast('Categoria aggiornata', 'success');
+      showToast(t('categoryUpdated'), 'success');
     } catch (err: any) {
-      showToast(err?.message || 'Errore aggiornamento categoria', 'error');
+      showToast(err?.message || t('categoryUpdateError'), 'error');
     }
   };
 
@@ -576,9 +582,9 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
       setMProducts(prev => prev.map(p => p.category_id === id ? { ...p, category_id: null, category_name: null } : p));
       if (!isForeign && categoryFilter === id) setCategoryFilter(null);
       setConfirmDeleteCategoryId(null);
-      showToast('Categoria eliminata', 'success');
+      showToast(t('categoryDeleted'), 'success');
     } catch (err: any) {
-      showToast(err?.message || 'Errore eliminazione categoria', 'error');
+      showToast(err?.message || t('categoryDeleteError'), 'error');
       setConfirmDeleteCategoryId(null);
     }
   };
@@ -609,7 +615,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
       );
     } catch (err: any) {
       setMCategories(() => previous);
-      showToast(err?.message || 'Errore riordino categorie', 'error');
+      showToast(err?.message || t('categoryReorderError'), 'error');
     }
   };
 
@@ -628,7 +634,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
       );
     } catch (err: any) {
       setMLocations(() => previous);
-      showToast(err?.message || 'Errore riordino aree', 'error');
+      showToast(err?.message || t('areaReorderError'), 'error');
     }
   };
 
@@ -661,7 +667,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
   const handleSaveProduct = async () => {
     const name = productForm.name.trim();
     if (!name) {
-      showToast('Inserisci un nome prodotto', 'error');
+      showToast(t('productNameRequired'), 'error');
       return;
     }
     try {
@@ -673,7 +679,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
           category_id: productForm.category_id,
         });
         setProducts(prev => prev.map(p => (p.id === updated.id ? updated : p)));
-        showToast('Prodotto aggiornato', 'success');
+        showToast(t('productUpdated'), 'success');
       } else {
         const created = await createInventoryProduct({
           area: activeArea,
@@ -683,11 +689,11 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
           category_id: productForm.category_id,
         });
         setProducts(prev => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
-        showToast('Prodotto creato', 'success');
+        showToast(t('productCreated'), 'success');
       }
       setProductModalOpen(false);
     } catch (err: any) {
-      showToast(err?.message || 'Errore salvataggio prodotto', 'error');
+      showToast(err?.message || t('productSaveError'), 'error');
     }
   };
 
@@ -697,9 +703,9 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
       setProducts(prev => prev.filter(p => p.id !== id));
       setStock(prev => prev.filter(s => s.product_id !== id));
       setConfirmDeleteProductId(null);
-      showToast('Prodotto eliminato', 'success');
+      showToast(t('productDeleted'), 'success');
     } catch (err: any) {
-      showToast(err?.message || 'Errore eliminazione prodotto', 'error');
+      showToast(err?.message || t('productDeleteError'), 'error');
       setConfirmDeleteProductId(null);
     }
   };
@@ -716,7 +722,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
       });
     } catch (err: any) {
       setCrossArea(null);
-      showToast(err?.message || 'Errore ricerca', 'error');
+      showToast(err?.message || t('searchError'), 'error');
     }
   };
 
@@ -728,7 +734,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
 
   const areaOptions = (Object.values(InventoryArea) as InventoryArea[]).map(area => ({
     value: area,
-    label: AREA_LABEL[area],
+    label: areaLabel(area),
     icon: AREA_ICON[area],
   }));
 
@@ -736,7 +742,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
   // containers: a dropdown where there is a pointer, a bottom sheet where there
   // is a thumb.
   const manageActions = [
-    { icon: Printer, label: 'Stampa inventario', meta: null as string | null, onClick: () => setPrintModalOpen(true) },
+    { icon: Printer, label: t('print'), meta: null as string | null, onClick: () => setPrintModalOpen(true) },
     ...(canEdit
       ? [
           { icon: Tag, label: 'Gestisci categorie', meta: String(categories.length), onClick: openCategoriesModal },
@@ -753,7 +759,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
       value={manageArea}
       onChange={(next: InventoryArea) => switchManageArea(next)}
       options={areaOptions}
-      ariaLabel="Area da gestire"
+      ariaLabel={t('areaToManage')}
       equalWidth={false}
     />
   );
@@ -765,8 +771,8 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
       onClick={() => setMenuOpen(v => !v)}
       aria-haspopup="menu"
       aria-expanded={menuOpen}
-      aria-label="Gestisci inventario"
-      title="Gestisci inventario"
+      aria-label={t('manage')}
+      title={t('manage')}
       className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
     >
       <MoreVertical className="h-4 w-4" aria-hidden />
@@ -784,7 +790,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
   ];
 
   const categoryOptions = [
-    { value: 'ALL', label: 'Tutte', badge: products.length, badgeTone: 'neutral' as const },
+    { value: 'ALL', label: t('all'), badge: products.length, badgeTone: 'neutral' as const },
     ...categories.map(cat => ({
       value: String(cat.id),
       label: cat.name,
@@ -792,7 +798,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
       badgeTone: 'neutral' as const,
     })),
     ...(products.some(p => p.category_id == null)
-      ? [{ value: String(UNCATEGORIZED), label: 'Senza categoria', badge: productCountFor(UNCATEGORIZED), badgeTone: 'neutral' as const }]
+      ? [{ value: String(UNCATEGORIZED), label: t('uncategorized'), badge: productCountFor(UNCATEGORIZED), badgeTone: 'neutral' as const }]
       : []),
   ];
 
@@ -832,7 +838,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
             {lowStock && (
               <StatusPill tone="critical">
                 <AlertTriangle className="h-3 w-3" aria-hidden />
-                Scorta bassa
+                {t('lowStockBadge')}
               </StatusPill>
             )}
             {p.unit && (
@@ -842,7 +848,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
             {!isPending && isSaved && (
               <StatusPill tone="positive">
                 <Check className="h-3 w-3" aria-hidden />
-                Aggiornato
+                {t('updated')}
               </StatusPill>
             )}
           </div>
@@ -956,7 +962,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
               onClick={() => openEditProduct(p)}
               className={rowIconButton}
               aria-label={`Modifica ${p.name}`}
-              title="Modifica"
+              title={t('edit')}
             >
               <Pencil className="h-4 w-4" />
             </button>
@@ -965,7 +971,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
               onClick={() => setConfirmDeleteProductId(p.id)}
               className={rowIconButtonDanger}
               aria-label={`Elimina ${p.name}`}
-              title="Elimina"
+              title={t('delete')}
             >
               <Trash2 className="h-4 w-4" />
             </button>
@@ -990,7 +996,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
         <div className="flex min-w-0 items-center justify-between gap-2 lg:flex-1">
           <div className="min-w-0">
             <h1 className="text-[22px] font-semibold tracking-[-0.02em] text-[var(--ds-text-primary)] sm:text-[26px]">
-              Inventario
+              {t('inventory')}
             </h1>
           </div>
           {/* On a phone the top bar's + is a reach away from where the thumb is
@@ -1001,7 +1007,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
               {canEdit && (
                 <button type="button" onClick={() => openCreateProduct()} className={`${dsButton.primary} px-4`}>
                   <Plus className="h-4 w-4" aria-hidden />
-                  Nuovo prodotto
+                  {t('newProduct')}
                 </button>
               )}
               {menuTrigger}
@@ -1014,14 +1020,14 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
             layout="stacked"
             className="min-w-0 flex-1 lg:w-[300px] lg:flex-none"
             stats={[
-              { value: products.length, label: 'prodotti' },
+              { value: products.length, label: t('products') },
               {
                 value: lowStockProducts.length,
-                label: 'scorta bassa',
+                label: t('lowStock'),
                 tone: lowStockProducts.length > 0 ? 'critical' : 'neutral',
                 tint: lowStockProducts.length > 0,
                 onClick: lowStockProducts.length > 0 ? () => setOnlyLowStock(v => !v) : undefined,
-                title: onlyLowStock ? 'Mostra tutti i prodotti' : 'Mostra solo i prodotti sotto soglia',
+                title: onlyLowStock ? t('showAllProducts') : t('showOnlyLow'),
               },
             ]}
           />
@@ -1066,7 +1072,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
             value={activeArea}
             onChange={(next: InventoryArea) => setActiveArea(next)}
             options={areaOptions}
-            ariaLabel="Area dell'inventario"
+            ariaLabel={t('inventoryArea')}
             // Segments start from their own text width and share what is left
             // over: with equal widths "Cucina" plus its icon is the longest of
             // the three and gets clipped to fit "Bar".
@@ -1095,8 +1101,8 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
         <SearchField
           value={search}
           onChange={setSearch}
-          placeholder="Cerca prodotto"
-          ariaLabel="Cerca prodotto"
+          placeholder={t('searchProduct')}
+          ariaLabel={t('searchProduct')}
           className="min-w-0 lg:w-[260px] lg:flex-shrink-0"
         />
         {categoryOptions.length > 1 && (
@@ -1105,7 +1111,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
               value={categoryFilter == null ? 'ALL' : String(categoryFilter)}
               onChange={v => setCategoryFilter(v === 'ALL' ? null : Number(v))}
               options={categoryOptions}
-              ariaLabel="Filtra per categoria"
+              ariaLabel={t('filterByCategory')}
               equalWidth={false}
               overflow="scroll"
               size="sm"
@@ -1122,7 +1128,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
             className="inline-flex h-10 flex-shrink-0 items-center gap-2 rounded-[var(--ds-radius-control)] border border-dashed border-[var(--ds-border-strong)] px-4 text-[14px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:border-solid hover:bg-[var(--ds-surface)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             <Pencil className="h-3.5 w-3.5" aria-hidden />
-            Modifica
+            {t('edit')}
           </button>
         )}
       </div>
@@ -1133,14 +1139,14 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
         <Callout
           tone="critical"
           icon={AlertTriangle}
-          title={`${plural(lowStockProducts.length, 'prodotto', 'prodotti')} sotto soglia (≤ ${LOW_STOCK_THRESHOLD})`}
+          title={t('lowStockTitle', { products: plural(lowStockProducts.length, t('productOne'), t('productMany')), threshold: LOW_STOCK_THRESHOLD })}
           action={
             <button
               type="button"
               onClick={() => setOnlyLowStock(v => !v)}
               className="inline-flex h-10 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-4 text-[14px] font-medium text-[var(--ds-critical-text)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             >
-              {onlyLowStock ? 'Mostra tutti' : 'Mostra solo questi'}
+              {onlyLowStock ? t('showAll') : t('showOnlyThese')}
             </button>
           }
         >
@@ -1165,20 +1171,20 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
             canEdit ? (
               <div className="flex flex-col items-stretch gap-2 sm:flex-row">
                 <button type="button" onClick={openLocationsModal} className={dsButton.secondary}>
-                  Gestisci aree
+                  {t('manageAreas')}
                 </button>
                 <button type="button" onClick={() => openCreateProduct()} className={dsButton.primary}>
                   <Plus className="h-4 w-4" aria-hidden />
-                  Aggiungi il primo
+                  {t('addFirst')}
                 </button>
               </div>
             ) : undefined
           }
         >
           <span className="mb-1 block text-[16px] font-semibold text-[var(--ds-text-primary)]">
-            Nessun prodotto in {AREA_LABEL[activeArea]}
+            {t('noProductIn', { area: areaLabel(activeArea) })}
           </span>
-          Crea le celle o i ripiani dell'area, poi aggiungi i primi prodotti da contare.
+          {t('emptyAreaHint')}
         </EmptyState>
       )}
 
@@ -1196,7 +1202,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
                   className={dsButton.secondary}
                 >
                   {crossArea?.loading && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
-                  Cerca in tutte le aree
+                  {t('searchEverywhere')}
                 </button>
                 {canEdit && (
                   <button type="button" onClick={() => openCreateProduct(searchTerm)} className={dsButton.primary}>
@@ -1210,13 +1216,13 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
             <span className="mb-1 block text-[16px] font-semibold text-[var(--ds-text-primary)]">
               Nessun risultato per “{searchTerm}”
             </span>
-            In {AREA_LABEL[activeArea]} non c'è un prodotto con questo nome.
+            {t('noProductNamed', { area: areaLabel(activeArea) })}
           </EmptyState>
 
           {crossArea && !crossArea.loading && (
             crossArea.results.length === 0 ? (
               <p className="text-center text-[14px] text-[var(--ds-text-muted)]">
-                Nemmeno nelle altre aree.
+                {t('notInOtherAreas')}
               </p>
             ) : (
               <div className="overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
@@ -1232,7 +1238,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
                     <span className="min-w-0 flex-1 truncate text-[15px] font-medium text-[var(--ds-text-primary)]">
                       {p.name}
                     </span>
-                    <StatusPill tone="neutral">{AREA_LABEL[p.area]}</StatusPill>
+                    <StatusPill tone="neutral">{areaLabel(p.area)}</StatusPill>
                   </button>
                 ))}
               </div>
@@ -1251,11 +1257,11 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
               onClick={() => { setCategoryFilter(null); setOnlyLowStock(false); }}
               className={dsButton.secondary}
             >
-              Rimuovi i filtri
+              {t('clearFilters')}
             </button>
           }
         >
-          Nessun prodotto con questi filtri.
+          {t('noProductForFilters')}
         </EmptyState>
       )}
 
@@ -1265,8 +1271,8 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
           {/* Column names, from md up. On a phone the row carries its own
               labels, so a header would be a line of text with nothing under it. */}
           <div className="hidden items-center gap-3 px-5 py-3 text-[13px] text-[var(--ds-text-muted)] md:flex">
-            <span className="min-w-0 flex-1">Prodotto</span>
-            {isTotale && <span className="w-[260px] text-right lg:w-[320px]">Dove</span>}
+            <span className="min-w-0 flex-1">{t('product')}</span>
+            {isTotale && <span className="w-[260px] text-right lg:w-[320px]">{t('where')}</span>}
             <span className={isTotale ? 'w-14 text-right' : canEdit ? 'w-[176px] text-right' : 'w-[76px] text-right'}>
               {isTotale ? 'Totale' : `Quantità in ${toTitleCase(activeLocation?.name ?? '')}`}
             </span>
@@ -1280,7 +1286,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
                 <div className="border-t border-[var(--ds-border)] bg-[var(--ds-surface-row)] px-4 sm:px-5">
                   <SectionHeader
                     tone={lowInGroup > 0 ? 'attention' : 'muted'}
-                    meta={plural(group.products.length, 'prodotto', 'prodotti')}
+                    meta={plural(group.products.length, t('productOne'), t('productMany'))}
                     action={
                       lowInGroup > 0 ? (
                         <StatusPill tone="critical">{lowInGroup} sotto soglia</StatusPill>
@@ -1297,7 +1303,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
 
           {!isTotale && canEdit && (
             <div className="border-t border-[var(--ds-border)] px-4 py-3 text-[13px] text-[var(--ds-text-muted)] sm:px-5">
-              Invio conferma e passa al prodotto successivo · Esc annulla la riga
+              {t('keyboardHint')}
             </div>
           )}
         </div>
@@ -1307,13 +1313,13 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
       <Sheet
         open={menuOpen && !isWide}
         onClose={() => setMenuOpen(false)}
-        title="Gestisci inventario"
-        subtitle={AREA_LABEL[activeArea]}
-        ariaLabel="Gestisci inventario"
+        title={t('manage')}
+        subtitle={areaLabel(activeArea)}
+        ariaLabel={t('manage')}
         bodyClassName="px-4 py-4"
         footer={
           <button type="button" onClick={() => setMenuOpen(false)} className={dsButton.secondary}>
-            Chiudi
+            {t('close')}
           </button>
         }
       >
@@ -1342,7 +1348,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
         open={locationsModalOpen}
         onClose={() => setLocationsModalOpen(false)}
         title="Aree"
-        subtitle="Celle e ripiani in cui si conta la merce"
+        subtitle={t('areasHint')}
         size="sm"
         closeOnEscape
         subheader={manageAreaSwitcher}
@@ -1355,8 +1361,8 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
                 value={locationDraftName}
                 onChange={(e) => setLocationDraftName(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') handleAddLocation(); }}
-                placeholder="Nome area (es. Cella 4)"
-                aria-label="Nome della nuova area"
+                placeholder={t('areaNamePlaceholder')}
+                aria-label={t('newAreaName')}
                 className={`${dsInput} sm:w-56`}
               />
               <button
@@ -1366,7 +1372,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
                 className={dsButton.primary}
               >
                 <Plus className="h-4 w-4" aria-hidden />
-                Aggiungi
+                {t('add')}
               </button>
             </>
           ) : undefined
@@ -1375,11 +1381,11 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
         {foreignLoading ? (
           <p className="flex items-center justify-center gap-2 py-6 text-[14px] text-[var(--ds-text-muted)]">
             <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-            Carico {AREA_LABEL[manageArea]}…
+            {t('loadingArea', { area: areaLabel(manageArea) })}
           </p>
         ) : mLocations.length === 0 ? (
           <p className="py-6 text-center text-[14px] text-[var(--ds-text-muted)]">
-            Nessuna area in {AREA_LABEL[manageArea]}. Aggiungine una qui sotto.
+            {t('noAreaIn', { area: areaLabel(manageArea) })}
           </p>
         ) : (
           <ul className="space-y-2">
@@ -1406,13 +1412,13 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
                       aria-label={`Nuovo nome per ${loc.name}`}
                       autoFocus
                     />
-                    <button type="button" onClick={handleSaveLocationEdit} className={dsButton.primary}>Salva</button>
+                    <button type="button" onClick={handleSaveLocationEdit} className={dsButton.primary}>{t('save')}</button>
                     <button
                       type="button"
                       onClick={() => { setEditingLocationId(null); setEditingLocationName(''); }}
                       className={dsButton.quiet}
                     >
-                      Annulla
+                      {t('cancel')}
                     </button>
                   </>
                 ) : (
@@ -1428,7 +1434,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
                         {toTitleCase(loc.name)}
                       </div>
                       <div className="truncate text-[13px] text-[var(--ds-text-muted)]">
-                        {plural(mStockedCountFor(loc.id), 'prodotto', 'prodotti')} con giacenza
+                        {t('withStock', { products: plural(mStockedCountFor(loc.id), t('productOne'), t('productMany')) })}
                       </div>
                     </div>
                     {canEdit && (
@@ -1464,7 +1470,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
         open={categoriesModalOpen}
         onClose={() => setCategoriesModalOpen(false)}
         title="Categorie"
-        subtitle="Trascina per riordinare l'elenco prodotti"
+        subtitle={t('dragToReorder')}
         size="sm"
         closeOnEscape
         subheader={manageAreaSwitcher}
@@ -1477,8 +1483,8 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
                 value={categoryDraftName}
                 onChange={(e) => setCategoryDraftName(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') handleAddCategory(); }}
-                placeholder="Nome categoria (es. Verdure)"
-                aria-label="Nome della nuova categoria"
+                placeholder={t('categoryNamePlaceholder')}
+                aria-label={t('newCategoryName')}
                 className={`${dsInput} sm:w-56`}
               />
               <button
@@ -1488,7 +1494,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
                 className={dsButton.primary}
               >
                 <Plus className="h-4 w-4" aria-hidden />
-                Aggiungi
+                {t('add')}
               </button>
             </>
           ) : undefined
@@ -1497,11 +1503,11 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
         {foreignLoading ? (
           <p className="flex items-center justify-center gap-2 py-6 text-[14px] text-[var(--ds-text-muted)]">
             <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-            Carico {AREA_LABEL[manageArea]}…
+            {t('loadingArea', { area: areaLabel(manageArea) })}
           </p>
         ) : mCategories.length === 0 ? (
           <p className="py-6 text-center text-[14px] text-[var(--ds-text-muted)]">
-            Nessuna categoria in {AREA_LABEL[manageArea]}. Aggiungine una qui sotto.
+            {t('noCategoryIn', { area: areaLabel(manageArea) })}
           </p>
         ) : (
           <ul className="space-y-2">
@@ -1528,13 +1534,13 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
                       aria-label={`Nuovo nome per ${cat.name}`}
                       autoFocus
                     />
-                    <button type="button" onClick={handleSaveCategoryEdit} className={dsButton.primary}>Salva</button>
+                    <button type="button" onClick={handleSaveCategoryEdit} className={dsButton.primary}>{t('save')}</button>
                     <button
                       type="button"
                       onClick={() => { setEditingCategoryId(null); setEditingCategoryName(''); }}
                       className={dsButton.quiet}
                     >
-                      Annulla
+                      {t('cancel')}
                     </button>
                   </>
                 ) : (
@@ -1549,7 +1555,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
                       {cat.name}
                     </span>
                     <span className="flex-shrink-0 text-[13px] text-[var(--ds-text-muted)]">
-                      {plural(mProductCountFor(cat.id), 'prodotto', 'prodotti')}
+                      {plural(mProductCountFor(cat.id), t('productOne'), t('productMany'))}
                     </span>
                     {canEdit && (
                       <>
@@ -1583,27 +1589,27 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
       <ModalShell
         open={productModalOpen}
         onClose={() => setProductModalOpen(false)}
-        title={productEditing ? 'Modifica prodotto' : 'Nuovo prodotto'}
+        title={productEditing ? t('editProduct') : t('newProduct')}
         subtitle={
           productEditing
-            ? `${AREA_LABEL[activeArea]} · ${productEditing.name}`
-            : `${AREA_LABEL[activeArea]} · sarà disponibile in tutte le aree`
+            ? `${areaLabel(activeArea)} · ${productEditing.name}`
+            : `${areaLabel(activeArea)} · ${t('availableEverywhere')}`
         }
         size="sm"
         bodyClassName="px-5 py-5 sm:px-6"
         footer={
           <>
             <button type="button" onClick={() => setProductModalOpen(false)} className={dsButton.secondary}>
-              Annulla
+              {t('cancel')}
             </button>
             <button type="button" onClick={handleSaveProduct} className={dsButton.primary}>
-              Salva prodotto
+              {t('saveProduct')}
             </button>
           </>
         }
       >
         <FormCard className="space-y-4">
-          <Field label="Nome" htmlFor="inv-name" required>
+          <Field label={t('name')} htmlFor="inv-name" required>
             <input
               id="inv-name"
               type="text"
@@ -1619,7 +1625,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
               chips wrapped two to a line and the select clipped "Senza
               categoria" mid-word. */}
           <div className="space-y-4">
-            <Field label="Unità di misura" htmlFor="inv-unit">
+            <Field label={t('unit')} htmlFor="inv-unit">
               <input
                 id="inv-unit"
                 type="text"
@@ -1647,9 +1653,9 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
             </Field>
 
             <Field
-              label="Categoria"
+              label={t('category')}
               htmlFor="inv-category"
-              hint={categories.length === 0 ? 'Nessuna categoria. Aggiungine una da "Categorie".' : undefined}
+              hint={categories.length === 0 ? t('noCategoryHint') : undefined}
             >
               <select
                 id="inv-category"
@@ -1657,7 +1663,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
                 onChange={(e) => setProductForm(f => ({ ...f, category_id: e.target.value ? Number(e.target.value) : null }))}
                 className={dsSelect}
               >
-                <option value="">Senza categoria</option>
+                <option value="">{t('uncategorized')}</option>
                 {categories.map(c => (
                   <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
@@ -1665,13 +1671,13 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
             </Field>
           </div>
 
-          <Field label="Note" htmlFor="inv-notes">
+          <Field label={t('notes')} htmlFor="inv-notes">
             <textarea
               id="inv-notes"
               value={productForm.notes}
               onChange={(e) => setProductForm(f => ({ ...f, notes: e.target.value }))}
               rows={3}
-              placeholder="Fornitore, soglia, dove si trova…"
+              placeholder={t('notesPlaceholder')}
               className={dsTextarea}
             />
           </Field>
@@ -1695,7 +1701,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
       <ModalShell
         open={confirmDeleteCategoryId != null}
         onClose={() => setConfirmDeleteCategoryId(null)}
-        title="Eliminare la categoria?"
+        title={t('deleteCategoryConfirm')}
         size="sm"
         closeOnEscape
         className="z-[60]"
@@ -1703,20 +1709,20 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
         footer={
           <>
             <button type="button" onClick={() => setConfirmDeleteCategoryId(null)} className={dsButton.secondary}>
-              Annulla
+              {t('cancel')}
             </button>
             <button
               type="button"
               onClick={() => confirmDeleteCategoryId != null && handleDeleteCategory(confirmDeleteCategoryId)}
               className={dsButton.critical}
             >
-              Elimina
+              {t('delete')}
             </button>
           </>
         }
       >
         <p className="text-[15px] text-[var(--ds-text-secondary)]">
-          I prodotti associati resteranno, ma diventeranno "Senza categoria".
+          {t('deleteCategoryHint')}
         </p>
       </ModalShell>
 
@@ -1724,7 +1730,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
       <ModalShell
         open={confirmDeleteLocationId != null}
         onClose={() => setConfirmDeleteLocationId(null)}
-        title="Eliminare l'area?"
+        title={t('deleteAreaConfirm')}
         size="sm"
         closeOnEscape
         className="z-[60]"
@@ -1732,20 +1738,20 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
         footer={
           <>
             <button type="button" onClick={() => setConfirmDeleteLocationId(null)} className={dsButton.secondary}>
-              Annulla
+              {t('cancel')}
             </button>
             <button
               type="button"
               onClick={() => confirmDeleteLocationId != null && handleDeleteLocation(confirmDeleteLocationId)}
               className={dsButton.critical}
             >
-              Elimina
+              {t('delete')}
             </button>
           </>
         }
       >
         <p className="text-[15px] text-[var(--ds-text-secondary)]">
-          Tutte le quantità in quest'area verranno cancellate. L'azione non è reversibile.
+          {t('deleteAreaHint')}
         </p>
       </ModalShell>
 
@@ -1753,27 +1759,27 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
       <ModalShell
         open={confirmDeleteProductId != null}
         onClose={() => setConfirmDeleteProductId(null)}
-        title="Eliminare il prodotto?"
+        title={t('deleteProductConfirm')}
         size="sm"
         closeOnEscape
         bodyClassName="px-5 py-5 sm:px-6"
         footer={
           <>
             <button type="button" onClick={() => setConfirmDeleteProductId(null)} className={dsButton.secondary}>
-              Annulla
+              {t('cancel')}
             </button>
             <button
               type="button"
               onClick={() => confirmDeleteProductId != null && handleDeleteProduct(confirmDeleteProductId)}
               className={dsButton.critical}
             >
-              Elimina
+              {t('delete')}
             </button>
           </>
         }
       >
         <p className="text-[15px] text-[var(--ds-text-secondary)]">
-          Verrà rimosso dall'inventario in tutte le aree. L'azione non è reversibile.
+          {t('deleteProductHint')}
         </p>
       </ModalShell>
     </div>

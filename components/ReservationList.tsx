@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
 import {
   ModalShell, FormCard, Field, Stepper, StepNav, SegmentedControl, dsInput, dsSelect, dsTextarea, dsButton, dsStepArrow,
@@ -10,7 +11,7 @@ import { BillFigures, billStateLabel } from './prenotazione/BillFigures';
 import { PaymentRequestRow } from './prenotazione/PaymentRequestRow';
 import { MessaggiPanel } from './prenotazione/MessaggiPanel';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, RoomClosedOverride, Customer, PaymentRequest, TableBillWithSplits, TableBill, NoteSelection, TableAssignmentSuggestion } from '../types';
-import { Banknote, Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, ListFilter, Map as MapIcon, List, MessageCircle, Mail, Armchair, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal, DoorClosed, CornerDownLeft, ArrowDownLeft, ArrowUpRight, Reply, Receipt, QrCode, Maximize2, Minimize2 } from 'lucide-react';
+import { Banknote, Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, ListFilter, Map as MapIcon, List, MessageCircle, Mail, Armchair, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal, DoorClosed, CornerDownLeft, ArrowDownLeft, ArrowUpRight, Reply, Receipt, QrCode, Maximize2, Minimize2 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { sendWhatsAppConfirmation, sendEmailConfirmation, sendCustomEmail, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getRoomClosed, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, revokePaymentRequest, getReservationMessages, sendReservationReminder, OutboundMessage, getLegalSettings, getFeatureFlags, getOpeningHours, OpeningHoursRow, getActivePaymentProvider, getChannelSettings, RoomOccupancyCap, getTableAssignmentSuggestions, confirmTableAssignmentSuggestion, dismissTableAssignmentSuggestion } from '../services/apiService';
 import { billsApiService, printBill } from '../services/billsApiService';
@@ -23,7 +24,7 @@ import { saveDraft, loadDraft, clearDraft, DRAFT_KEYS } from '../services/draftS
 import { applyMerges } from '../utils/tableMerge';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
 import {
-  getReservationState, getTimedReservationState, RESERVATION_STATE_META,
+  getReservationState, getTimedReservationState, RESERVATION_STATE_META, useReservationStateLabel,
   reservationStatePatch, deriveTableDisplayStatus, isSeated,
   DsStatusChip, reservationStateDs,
   isOverdue, extendedDurationMin, OVERDUE_EXTEND_MIN, getEffectiveDurationMin,
@@ -176,31 +177,33 @@ const renderOperatorBadge = (res: Reservation): React.ReactNode => {
 const ATTR_BADGE =
   'inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]';
 
-const renderChannelIcon = (res: Reservation): React.ReactNode => {
+// Helper di modulo: non può usare un hook, quindi la traduzione arriva
+// dal chiamante (che ce l'ha). Senza, restano le parole italiane.
+const renderChannelIcon = (res: Reservation, tv: (k: string) => string): React.ReactNode => {
   const source = res.source || ReservationSource.MANUAL;
   if (source === ReservationSource.WHATSAPP) {
     return (
-      <span className={`${ATTR_BADGE} bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]`} title="WhatsApp" aria-label="Canale: WhatsApp">
+      <span className={`${ATTR_BADGE} bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]`} title="WhatsApp" aria-label={tv('channel.whatsapp')}>
         <MessageCircle className="h-3.5 w-3.5" />
       </span>
     );
   }
   if (source === ReservationSource.GOOGLE) {
     return (
-      <span className={ATTR_BADGE} title="Web" aria-label="Canale: Web">
+      <span className={ATTR_BADGE} title={tv('filters.channelWeb')} aria-label={tv('channel.web')}>
         <Globe className="h-3.5 w-3.5" />
       </span>
     );
   }
   if (source === ReservationSource.VOICE) {
     return (
-      <span className={ATTR_BADGE} title="Agente vocale" aria-label="Canale: Agente vocale">
+      <span className={ATTR_BADGE} title={tv('filters.channelVoice')} aria-label={tv('channel.voice')}>
         <Mic className="h-3.5 w-3.5" />
       </span>
     );
   }
   return (
-    <span className={ATTR_BADGE} title="Telefono" aria-label="Canale: Telefono">
+    <span className={ATTR_BADGE} title={tv('channel.phoneShort')} aria-label={tv('channel.phone')}>
       <Phone className="h-3.5 w-3.5" />
     </span>
   );
@@ -564,6 +567,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   onShiftFilterChange,
   isInitialLoading = false,
 }) => {
+  // Etichette di stato nella lingua dell'operatore: intestazioni dei gruppi,
+  // pastiglie, toast e selettore leggono tutti da qui.
+  const { t } = useTranslation('common', { useSuspense: false });
+  // Namespace della vista: caricata alla prima apertura di Prenotazioni.
+  const { t: tv } = useTranslation('prenotazioni', { useSuspense: false });
+  const stateLabel = useReservationStateLabel();
   const { hasPermission } = useAuth();
   const canViewBanquetPrice = hasPermission('banquet:view_price');
   // Main View State
@@ -860,7 +869,6 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     return () => window.removeEventListener('keydown', onKey);
   }, [isMapFullscreen]);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
-  const [showSortModal, setShowSortModal] = useState(false);
   // Mobile-only: sheet with per-shift channel toggles (voice + web). The
   // desktop header already carries these icons inline (BookingChannelsBar),
   // but there's no room in the mobile header — so we tuck them behind an
@@ -1588,6 +1596,20 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     setSortBy('created-asc');
   };
 
+  /* Sort lives inside the filter sheet — there is no separate sort control.
+     One list, rendered by both copies of the sheet (desktop column and
+     mobile/tablet), so the two can't drift apart. */
+  const sortOptions = [
+    { value: 'created-asc' as const, label: tv('sort.createdAsc') },
+    { value: 'created-desc' as const, label: tv('sort.createdDesc') },
+    { value: 'time-asc' as const, label: tv('sort.timeAsc') },
+    { value: 'time-desc' as const, label: tv('sort.timeDesc') },
+    { value: 'name-asc' as const, label: tv('sort.nameAsc') },
+    { value: 'name-desc' as const, label: tv('sort.nameDesc') },
+    { value: 'guests-asc' as const, label: tv('sort.guestsAsc') },
+    { value: 'guests-desc' as const, label: tv('sort.guestsDesc') },
+  ];
+
   // --- Grouped reservation list for split-view ---
   // Groups: waiting (in attesa), arrived (arrivati, no table), seated (seduti, has table), completed (departed)
   type ReservationGroup = { key: string; label: string; dotClass: string; items: Reservation[] };
@@ -1692,18 +1714,19 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
     // Labels/dots come from the shared state meta so group headers can never
     // drift from the chips below them ('cancelled' keeps its plural label).
-    const meta = (k: Exclude<ReservationStateKey, 'arriving'>) => RESERVATION_STATE_META[k];
     const dot = (k: Exclude<ReservationStateKey, 'arriving'>) => reservationStateDs(k).solid;
     return [
-      { key: 'pending', label: meta('pending').label, dotClass: dot('pending'), items: pending },
-      { key: 'waiting', label: meta('waiting').label, dotClass: dot('waiting'), items: waiting },
-      { key: 'arrived', label: meta('arrived').label, dotClass: dot('arrived'), items: arrived },
-      { key: 'departing', label: meta('departing').label, dotClass: dot('departing'), items: departing },
-      { key: 'noshow', label: meta('noshow').label, dotClass: dot('noshow'), items: noshow },
-      { key: 'freed', label: meta('freed').label, dotClass: dot('freed'), items: freed },
-      { key: 'cancelled', label: 'Annullate', dotClass: dot('cancelled'), items: cancelled },
+      { key: 'pending', label: stateLabel('pending'), dotClass: dot('pending'), items: pending },
+      { key: 'waiting', label: stateLabel('waiting'), dotClass: dot('waiting'), items: waiting },
+      { key: 'arrived', label: stateLabel('arrived'), dotClass: dot('arrived'), items: arrived },
+      { key: 'departing', label: stateLabel('departing'), dotClass: dot('departing'), items: departing },
+      { key: 'noshow', label: stateLabel('noshow'), dotClass: dot('noshow'), items: noshow },
+      { key: 'freed', label: stateLabel('freed'), dotClass: dot('freed'), items: freed },
+      // Il gruppo va al plurale: è l'unica etichetta che non coincide con
+      // quella della pastiglia singola.
+      { key: 'cancelled', label: t('reservationState.cancelledGroup', 'Annullate'), dotClass: dot('cancelled'), items: cancelled },
     ].filter(g => g.items.length > 0);
-  }, [reservations, selectedDate, selectedShift, filterRoomId, filterStatus, filterArrivalStatus, filterGuestRange, filterHasAllergens, filterHasNotes, filterNoTable, filterSource, searchTerm, displayTables, sortBy, isViewingToday, nowTick]);
+  }, [reservations, selectedDate, selectedShift, filterRoomId, filterStatus, filterArrivalStatus, filterGuestRange, filterHasAllergens, filterHasNotes, filterNoTable, filterSource, searchTerm, displayTables, sortBy, isViewingToday, nowTick, stateLabel, t]);
 
   const totalGroupedCount = groupedReservations.reduce((s, g) => s + g.items.length, 0);
 
@@ -1846,7 +1869,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       patch.duration_minutes = extendedDurationMin(res, nowTick);
     }
     onUpdateReservation({ ...res, ...patch });
-    showToast(`${toTitleCase(res.customer_name)}: stato → ${RESERVATION_STATE_META[state].label}`, 'success');
+    showToast(`${toTitleCase(res.customer_name)}: stato → ${stateLabel(state)}`, 'success');
   };
 
   // --- Overdue-table prompt ------------------------------------------------
@@ -3429,7 +3452,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     // their own row under it below sm — so phone and desktop can't drift.
     const attrGlyphs = (
       <>
-        {renderChannelIcon(res)}
+        {renderChannelIcon(res, tv)}
         {renderConfirmationIcon(res)}
         {renderReminderIcon(res)}
         {matchedNoteIcons.map(m => {
@@ -3506,11 +3529,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             {/* Who */}
             <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
               {res.customer_is_vip && (
-                <Star className="h-4 w-4 flex-shrink-0 fill-[var(--ds-pending-solid)] text-[var(--ds-pending-solid)]" aria-label="Cliente VIP" />
+                <Star className="h-4 w-4 flex-shrink-0 fill-[var(--ds-pending-solid)] text-[var(--ds-pending-solid)]" aria-label={tv('badge.vip')} />
               )}
               {res.customer_is_blacklisted && (
-                <span title={res.customer_blacklist_reason || 'Cliente in blacklist'}>
-                  <Ban className="h-4 w-4 flex-shrink-0 text-[var(--ds-critical-text)]" aria-label="Cliente in blacklist" />
+                <span title={res.customer_blacklist_reason || tv('badge.blacklist')}>
+                  <Ban className="h-4 w-4 flex-shrink-0 text-[var(--ds-critical-text)]" aria-label={tv('badge.blacklist')} />
                 </span>
               )}
               <p className={`truncate text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)] ${group.key === 'cancelled' ? 'line-through' : ''}`}>
@@ -3622,8 +3645,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               type="button"
               onClick={(e) => { e.stopPropagation(); handleEditClick(res); }}
               className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]"
-              aria-label="Modifica"
-              title="Modifica"
+              aria-label={tv('actions.edit')}
+              title={tv('actions.edit')}
             >
               <Edit2 className="h-4 w-4" />
             </button>
@@ -3631,8 +3654,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               type="button"
               onClick={(e) => { e.stopPropagation(); handleDeleteClick(res.id, res.customer_name); }}
               className="ml-auto inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)]"
-              aria-label="Annulla"
-              title="Annulla"
+              aria-label={tv('actions.cancel')}
+              title={tv('actions.cancel')}
             >
               <Trash2 className="h-4 w-4" />
             </button>
@@ -3670,10 +3693,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             <div>
               <h3 className="text-base font-semibold text-[var(--ds-text-primary)] inline-flex items-center gap-1.5">
                 {res.customer_is_vip && (
-                  <Star className="h-4 w-4 text-[var(--ds-pending-solid)] fill-[var(--ds-pending-solid)] flex-shrink-0" aria-label="Cliente VIP" />
+                  <Star className="h-4 w-4 text-[var(--ds-pending-solid)] fill-[var(--ds-pending-solid)] flex-shrink-0" aria-label={tv('badge.vip')} />
                 )}
                 {res.customer_is_blacklisted && (
-                  <Ban className="h-4 w-4 flex-shrink-0 text-[var(--ds-critical-text)]" aria-label="Cliente in blacklist" />
+                  <Ban className="h-4 w-4 flex-shrink-0 text-[var(--ds-critical-text)]" aria-label={tv('badge.blacklist')} />
                 )}
                 {toTitleCase(res.customer_name)}
                 {(() => {
@@ -3829,7 +3852,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         onChange={setSearchTerm}
         inputRef={searchInputRef}
         onKeyDown={handleSearchKeyDown}
-        placeholder="Cerca per nome o telefono"
+        placeholder={tv('toolbar.searchPlaceholder')}
         ariaLabel="Cerca prenotazioni"
         className="min-w-0 flex-1"
         hint={searchTerm && quickArriveCandidates.length === 1 ? (
@@ -3837,15 +3860,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         ) : undefined}
       />
 
-      <button type="button" onClick={() => setShowSortModal(true)} className={dsIconButton} aria-label="Ordina" title="Ordina">
-        <ArrowUpDown className="h-4 w-4" />
-      </button>
-
       <button
         type="button"
         onClick={() => setShowFiltersPanel(true)}
-        aria-label="Filtri"
-        title="Filtri"
+        aria-label={tv('toolbar.filters')}
+        title={tv('toolbar.filters')}
         className={activeFilterCount > 0
           ? 'relative inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] shadow-[var(--ds-shadow-card)] transition-colors'
           : `relative ${dsIconButton}`}
@@ -3858,7 +3877,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         )}
       </button>
 
-      <button type="button" onClick={() => setIsPrintModalOpen(true)} className={dsIconButton} aria-label="Stampa" title="Stampa">
+      <button type="button" onClick={() => setIsPrintModalOpen(true)} className={dsIconButton} aria-label={tv('toolbar.print')} title={tv('toolbar.print')}>
         <Printer className="h-4 w-4" />
       </button>
 
@@ -3866,8 +3885,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         type="button"
         onClick={() => setShowChannelsSheet(true)}
         className={`${dsIconButton} lg:hidden`}
-        aria-label="Opzioni canali di prenotazione"
-        title="Opzioni canali di prenotazione"
+        aria-label={tv('toolbar.channelOptions')}
+        title={tv('toolbar.channelOptions')}
       >
         <SlidersHorizontal className="h-4 w-4" />
       </button>
@@ -3895,11 +3914,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           icon={selectedShift === Shift.LUNCH ? Sun : Sunset}
           action={canEdit ? (
             <button type="button" onClick={() => handleOpenNew()} className={dsButton.primary}>
-              <Plus className="h-4 w-4" aria-hidden /> Nuova prenotazione
+              <Plus className="h-4 w-4" aria-hidden /> {tv('actions.new')}
             </button>
           ) : undefined}
         >
-          Nessuna prenotazione per il turno di {selectedShift === Shift.LUNCH ? 'Pranzo' : 'Cena'} in questa data.
+          {selectedShift === Shift.LUNCH ? tv('empty.lunch') : tv('empty.dinner')}
         </EmptyState>
       );
     }
@@ -3957,42 +3976,6 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         {renderGroupedCards()}
       </div>
 
-      {/* Sort modal — slides up within list column on desktop */}
-      {showSortModal && (
-        <div className="absolute inset-0 z-50 flex items-end" onClick={() => setShowSortModal(false)}>
-          <div className="absolute inset-0 bg-black/30" />
- <div className="relative w-full bg-[var(--ds-surface)] rounded-t-[var(--ds-radius)] shadow-[var(--ds-shadow-raised)] pb-6 duration-200"onClick={e => e.stopPropagation()}>
-            <div className="flex justify-center pt-3 pb-2">
-              <div className="w-8 h-1 rounded-full bg-[var(--ds-text-subtle)]" />
-            </div>
-            <div className="px-5 pb-2">
-              <h3 className="text-base font-semibold text-[var(--ds-text-primary)]">Ordina per</h3>
-            </div>
-            <div className="px-3">
-              {[
-                { value: 'created-asc' as const, label: 'Prenotata prima → dopo' },
-                { value: 'created-desc' as const, label: 'Prenotata dopo → prima' },
-                { value: 'time-asc' as const, label: 'Orario (prima → dopo)' },
-                { value: 'time-desc' as const, label: 'Orario (dopo → prima)' },
-                { value: 'name-asc' as const, label: 'Nome A → Z' },
-                { value: 'name-desc' as const, label: 'Nome Z → A' },
-                { value: 'guests-asc' as const, label: 'Coperti (meno → più)' },
-                { value: 'guests-desc' as const, label: 'Coperti (più → meno)' },
-              ].map(opt => (
-                <button key={opt.value} type="button"
-                  onClick={() => { setSortBy(opt.value); setShowSortModal(false); }}
-                  className={`w-full flex items-center justify-between px-4 py-2.5 text-sm rounded-[var(--ds-radius)] transition-colors ${
-                    sortBy === opt.value ? 'bg-[var(--ds-surface-row)] font-medium text-[var(--ds-text-primary)]' : 'text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)]'
-                  }`}>
-                  {opt.label}
-                  {sortBy === opt.value && <Check className="h-4 w-4 text-[var(--ds-text-primary)]" />}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Filter modal — slides up within list column on desktop */}
       {showFiltersPanel && (
         <div className="absolute inset-0 z-50 flex items-end" onClick={() => setShowFiltersPanel(false)}>
@@ -4001,86 +3984,107 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             <div className="flex justify-center pt-3 pb-2">
               <div className="w-8 h-1 rounded-full bg-[var(--ds-text-subtle)]" />
             </div>
-            <div className="px-5 pb-3 flex items-center justify-between">
-              <h3 className="text-base font-semibold text-[var(--ds-text-primary)]">Filtri</h3>
-              {activeFilterCount > 0 && (
-                <button type="button" onClick={resetFilters} className="flex items-center gap-1.5 text-xs font-medium text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]">
-                  <RotateCcw className="h-3.5 w-3.5" /> Reimposta
-                </button>
-              )}
-            </div>
-            <div className="px-5 space-y-4">
+            <div className="max-h-[65vh] overflow-y-auto overscroll-contain px-5 pb-2 pt-2">
+              {/* Sort first, then the filters: one funnel opens both. */}
               <div>
-                <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">Sala</label>
-                <div className="flex flex-wrap gap-2">
-                  <button type="button" onClick={() => setFilterRoomId('ALL')}
-                    className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
-                      filterRoomId === 'ALL'
-                        ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
-                        : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
-                    }`}>Tutte</button>
-                  {rooms.filter(rm => !rm.is_closed).map(rm => (
-                    <button key={rm.id} type="button" onClick={() => setFilterRoomId(rm.id)}
-                      className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
-                        filterRoomId === rm.id
-                          ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
-                          : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
-                      }`}>{rm.name}</button>
+                <label htmlFor="reservations-sort-desktop" className="mb-2 block text-base font-semibold text-[var(--ds-text-primary)]">{tv('sort.title')}</label>
+                <select
+                  id="reservations-sort-desktop"
+                  className={dsSelect}
+                  value={sortBy}
+                  onChange={e => setSortBy(e.target.value as typeof sortBy)}
+                >
+                  {sortOptions.map(opt => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
                   ))}
-                </div>
+                </select>
               </div>
-              <div>
-                <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">Stato pagamento</label>
-                <div className="flex flex-wrap gap-2">
-                  {[
-                    { value: 'ALL', label: 'Tutti' },
-                    { value: PaymentStatus.PENDING, label: 'Sospeso' },
-                    { value: PaymentStatus.PAID_DEPOSIT, label: 'Acconto' },
-                    { value: PaymentStatus.PAID_FULL, label: 'Saldato' },
-                  ].map(opt => (
-                    <button key={opt.value} type="button" onClick={() => setFilterStatus(opt.value)}
-                      className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
-                        filterStatus === opt.value
-                          ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
-                          : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
-                      }`}>{opt.label}</button>
-                  ))}
+
+              {/* mt-7 is the gap between the two sections — they are peers, and
+                  without it the dropdown reads as the first filter. */}
+              <div className="mt-7">
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="text-base font-semibold text-[var(--ds-text-primary)]">{tv('filters.title')}</h3>
+                  {activeFilterCount > 0 && (
+                    <button type="button" onClick={resetFilters} className="flex items-center gap-1.5 text-xs font-medium text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]">
+                      <RotateCcw className="h-3.5 w-3.5" /> {tv('filters.reset')}
+                    </button>
+                  )}
                 </div>
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">Canale</label>
-                <div className="flex flex-wrap gap-2">
-                  {[
-                    { value: 'ALL', label: 'Tutti' },
-                    { value: ReservationSource.MANUAL, label: 'Utente' },
-                    { value: ReservationSource.GOOGLE, label: 'Web' },
-                    { value: ReservationSource.VOICE, label: 'Agente vocale' },
-                    { value: ReservationSource.WHATSAPP, label: 'WhatsApp' },
-                  ].map(opt => (
-                    <button key={opt.value} type="button" onClick={() => setFilterSource(opt.value)}
-                      className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
-                        filterSource === opt.value
-                          ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
-                          : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
-                      }`}>{opt.label}</button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">Altro</label>
-                <div className="flex flex-wrap gap-2">
-                  <button type="button" onClick={() => setFilterHasAllergens(v => !v)}
-                    className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${filterHasAllergens ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
-                    Allergeni
-                  </button>
-                  <button type="button" onClick={() => setFilterHasNotes(v => !v)}
-                    className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${filterHasNotes ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
-                    Con note
-                  </button>
-                  <button type="button" onClick={() => setFilterNoTable(v => !v)}
-                    className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${filterNoTable ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
-                    Senza tavolo
-                  </button>
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">{tv('filters.room')}</label>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={() => setFilterRoomId('ALL')}
+                        className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
+                          filterRoomId === 'ALL'
+                            ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
+                            : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
+                        }`}>{tv('filters.allRooms')}</button>
+                      {rooms.filter(rm => !rm.is_closed).map(rm => (
+                        <button key={rm.id} type="button" onClick={() => setFilterRoomId(rm.id)}
+                          className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
+                            filterRoomId === rm.id
+                              ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
+                              : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
+                          }`}>{rm.name}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">{tv('filters.paymentStatus')}</label>
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        { value: 'ALL', label: tv('filters.all') },
+                        { value: PaymentStatus.PENDING, label: tv('filters.paymentPending') },
+                        { value: PaymentStatus.PAID_DEPOSIT, label: tv('filters.paymentDeposit') },
+                        { value: PaymentStatus.PAID_FULL, label: tv('filters.paymentPaid') },
+                      ].map(opt => (
+                        <button key={opt.value} type="button" onClick={() => setFilterStatus(opt.value)}
+                          className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
+                            filterStatus === opt.value
+                              ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
+                              : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
+                          }`}>{opt.label}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">{tv('filters.channel')}</label>
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        { value: 'ALL', label: tv('filters.all') },
+                        { value: ReservationSource.MANUAL, label: tv('filters.channelManual') },
+                        { value: ReservationSource.GOOGLE, label: tv('filters.channelWeb') },
+                        { value: ReservationSource.VOICE, label: tv('filters.channelVoice') },
+                        { value: ReservationSource.WHATSAPP, label: tv('filters.channelWhatsapp') },
+                      ].map(opt => (
+                        <button key={opt.value} type="button" onClick={() => setFilterSource(opt.value)}
+                          className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
+                            filterSource === opt.value
+                              ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
+                              : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
+                          }`}>{opt.label}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">{tv('filters.other')}</label>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={() => setFilterHasAllergens(v => !v)}
+                        className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${filterHasAllergens ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
+                        {tv('filters.allergens')}
+                      </button>
+                      <button type="button" onClick={() => setFilterHasNotes(v => !v)}
+                        className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${filterHasNotes ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
+                        {tv('filters.withNotes')}
+                      </button>
+                      <button type="button" onClick={() => setFilterNoTable(v => !v)}
+                        className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${filterNoTable ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
+                        {tv('filters.noTable')}
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -4324,7 +4328,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         <StatStrip
           className="flex-shrink-0"
           stats={[
-            { value: totalGuestsForDayShift, label: 'coperti' },
+            { value: totalGuestsForDayShift, label: tv('stats.covers') },
             {
               value: reservationCountForDayShift,
               label: reservationCountForDayShift === 1 ? 'prenotazione' : 'prenotazioni',
@@ -4614,8 +4618,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             />
             <div className="flex h-11 flex-shrink-0 items-center gap-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] p-1 shadow-[var(--ds-shadow-card)]">
               {[
-                { shift: Shift.LUNCH, label: 'Pranzo', Icon: Sun },
-                { shift: Shift.DINNER, label: 'Cena', Icon: Sunset },
+                { shift: Shift.LUNCH, label: tv('shift.lunch'), Icon: Sun },
+                { shift: Shift.DINNER, label: tv('shift.dinner'), Icon: Sunset },
               ].map(({ shift, label, Icon }) => (
                 <button
                   key={label}
@@ -4643,11 +4647,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             <StatStrip
               className="mb-3"
               stats={[
-                { value: totalGuestsForDayShift, label: 'coperti' },
-                { value: reservationCountForDayShift, label: 'pren.' },
+                { value: totalGuestsForDayShift, label: tv('stats.covers') },
+                { value: reservationCountForDayShift, label: tv('stats.reservations') },
                 ...(unassignedCountForDayShift > 0 ? [{
                   value: unassignedCountForDayShift,
-                  label: 'senza tav.',
+                  label: tv('stats.noTable'),
                   tone: 'pending' as const,
                   tint: true,
                   onClick: () => setShowUnassignedModal(true),
@@ -4671,42 +4675,6 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             ))}
           </div>
 
-          {/* Sort modal — slide up (mobile/tablet) */}
-          {showSortModal && (
-            <div className="fixed inset-0 z-50 flex items-end" onClick={() => setShowSortModal(false)}>
-              <div className="absolute inset-0 bg-black/30" />
- <div className="relative w-full bg-[var(--ds-surface)] rounded-t-[var(--ds-radius)] shadow-[var(--ds-shadow-raised)] pb-8 duration-200"onClick={e => e.stopPropagation()}>
-                <div className="flex justify-center pt-3 pb-2">
-                  <div className="w-8 h-1 rounded-full bg-[var(--ds-text-subtle)]" />
-                </div>
-                <div className="px-5 pb-2">
-                  <h3 className="text-base font-semibold text-[var(--ds-text-primary)]">Ordina per</h3>
-                </div>
-                <div className="px-3">
-                  {[
-                    { value: 'created-asc' as const, label: 'Prenotata prima → dopo' },
-                    { value: 'created-desc' as const, label: 'Prenotata dopo → prima' },
-                    { value: 'time-asc' as const, label: 'Orario (prima → dopo)' },
-                    { value: 'time-desc' as const, label: 'Orario (dopo → prima)' },
-                    { value: 'name-asc' as const, label: 'Nome A → Z' },
-                    { value: 'name-desc' as const, label: 'Nome Z → A' },
-                    { value: 'guests-asc' as const, label: 'Coperti (meno → più)' },
-                    { value: 'guests-desc' as const, label: 'Coperti (più → meno)' },
-                  ].map(opt => (
-                    <button key={opt.value} type="button"
-                      onClick={() => { setSortBy(opt.value); setShowSortModal(false); }}
-                      className={`w-full flex items-center justify-between px-4 py-3 text-sm rounded-[var(--ds-radius)] transition-colors ${
-                        sortBy === opt.value ? 'bg-[var(--ds-surface-row)] font-medium text-[var(--ds-text-primary)]' : 'text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)]'
-                      }`}>
-                      {opt.label}
-                      {sortBy === opt.value && <Check className="h-4 w-4 text-[var(--ds-text-primary)]" />}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* Filter modal — slide up (mobile/tablet) */}
           {showFiltersPanel && (
             <div className="fixed inset-0 z-50 flex items-end" onClick={() => setShowFiltersPanel(false)}>
@@ -4715,86 +4683,107 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 <div className="flex justify-center pt-3 pb-2">
                   <div className="w-8 h-1 rounded-full bg-[var(--ds-text-subtle)]" />
                 </div>
-                <div className="px-5 pb-3 flex items-center justify-between">
-                  <h3 className="text-base font-semibold text-[var(--ds-text-primary)]">Filtri</h3>
-                  {activeFilterCount > 0 && (
-                    <button type="button" onClick={resetFilters} className="flex items-center gap-1.5 text-xs font-medium text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]">
-                      <RotateCcw className="h-3.5 w-3.5" /> Reimposta
-                    </button>
-                  )}
-                </div>
-                <div className="px-5 space-y-4">
+                <div className="max-h-[65vh] overflow-y-auto overscroll-contain px-5 pb-2 pt-2">
+                  {/* Sort first, then the filters: one funnel opens both. */}
                   <div>
-                    <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">Sala</label>
-                    <div className="flex flex-wrap gap-2">
-                      <button type="button" onClick={() => setFilterRoomId('ALL')}
-                        className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
-                          filterRoomId === 'ALL'
-                            ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
-                            : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
-                        }`}>Tutte</button>
-                      {rooms.filter(rm => !rm.is_closed).map(rm => (
-                        <button key={rm.id} type="button" onClick={() => setFilterRoomId(rm.id)}
-                          className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
-                            filterRoomId === rm.id
-                              ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
-                              : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
-                          }`}>{rm.name}</button>
+                    <label htmlFor="reservations-sort-mobile" className="mb-2 block text-base font-semibold text-[var(--ds-text-primary)]">{tv('sort.title')}</label>
+                    <select
+                      id="reservations-sort-mobile"
+                      className={dsSelect}
+                      value={sortBy}
+                      onChange={e => setSortBy(e.target.value as typeof sortBy)}
+                    >
+                      {sortOptions.map(opt => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
                       ))}
-                    </div>
+                    </select>
                   </div>
-                  <div>
-                    <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">Stato pagamento</label>
-                    <div className="flex flex-wrap gap-2">
-                      {[
-                        { value: 'ALL', label: 'Tutti' },
-                        { value: PaymentStatus.PENDING, label: 'Sospeso' },
-                        { value: PaymentStatus.PAID_DEPOSIT, label: 'Acconto' },
-                        { value: PaymentStatus.PAID_FULL, label: 'Saldato' },
-                      ].map(opt => (
-                        <button key={opt.value} type="button" onClick={() => setFilterStatus(opt.value)}
-                          className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
-                            filterStatus === opt.value
-                              ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
-                              : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
-                          }`}>{opt.label}</button>
-                      ))}
+
+                  {/* mt-7 is the gap between the two sections — they are peers, and
+                      without it the dropdown reads as the first filter. */}
+                  <div className="mt-7">
+                    <div className="mb-3 flex items-center justify-between">
+                      <h3 className="text-base font-semibold text-[var(--ds-text-primary)]">{tv('filters.title')}</h3>
+                      {activeFilterCount > 0 && (
+                        <button type="button" onClick={resetFilters} className="flex items-center gap-1.5 text-xs font-medium text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]">
+                          <RotateCcw className="h-3.5 w-3.5" /> {tv('filters.reset')}
+                        </button>
+                      )}
                     </div>
-                  </div>
-                  <div>
-                    <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">Canale</label>
-                    <div className="flex flex-wrap gap-2">
-                      {[
-                        { value: 'ALL', label: 'Tutti' },
-                        { value: ReservationSource.MANUAL, label: 'Utente' },
-                        { value: ReservationSource.GOOGLE, label: 'Web' },
-                        { value: ReservationSource.VOICE, label: 'Agente vocale' },
-                        { value: ReservationSource.WHATSAPP, label: 'WhatsApp' },
-                      ].map(opt => (
-                        <button key={opt.value} type="button" onClick={() => setFilterSource(opt.value)}
-                          className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
-                            filterSource === opt.value
-                              ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
-                              : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
-                          }`}>{opt.label}</button>
-                      ))}
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">Altro</label>
-                    <div className="flex flex-wrap gap-2">
-                      <button type="button" onClick={() => setFilterHasAllergens(v => !v)}
-                        className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${filterHasAllergens ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
-                        Allergeni
-                      </button>
-                      <button type="button" onClick={() => setFilterHasNotes(v => !v)}
-                        className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${filterHasNotes ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
-                        Con note
-                      </button>
-                      <button type="button" onClick={() => setFilterNoTable(v => !v)}
-                        className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${filterNoTable ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
-                        Senza tavolo
-                      </button>
+                    <div className="space-y-4">
+                      <div>
+                        <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">{tv('filters.room')}</label>
+                        <div className="flex flex-wrap gap-2">
+                          <button type="button" onClick={() => setFilterRoomId('ALL')}
+                            className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
+                              filterRoomId === 'ALL'
+                                ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
+                                : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
+                            }`}>{tv('filters.allRooms')}</button>
+                          {rooms.filter(rm => !rm.is_closed).map(rm => (
+                            <button key={rm.id} type="button" onClick={() => setFilterRoomId(rm.id)}
+                              className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
+                                filterRoomId === rm.id
+                                  ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
+                                  : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
+                              }`}>{rm.name}</button>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">{tv('filters.paymentStatus')}</label>
+                        <div className="flex flex-wrap gap-2">
+                          {[
+                            { value: 'ALL', label: tv('filters.all') },
+                            { value: PaymentStatus.PENDING, label: tv('filters.paymentPending') },
+                            { value: PaymentStatus.PAID_DEPOSIT, label: tv('filters.paymentDeposit') },
+                            { value: PaymentStatus.PAID_FULL, label: tv('filters.paymentPaid') },
+                          ].map(opt => (
+                            <button key={opt.value} type="button" onClick={() => setFilterStatus(opt.value)}
+                              className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
+                                filterStatus === opt.value
+                                  ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
+                                  : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
+                              }`}>{opt.label}</button>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">{tv('filters.channel')}</label>
+                        <div className="flex flex-wrap gap-2">
+                          {[
+                            { value: 'ALL', label: tv('filters.all') },
+                            { value: ReservationSource.MANUAL, label: tv('filters.channelManual') },
+                            { value: ReservationSource.GOOGLE, label: tv('filters.channelWeb') },
+                            { value: ReservationSource.VOICE, label: tv('filters.channelVoice') },
+                            { value: ReservationSource.WHATSAPP, label: tv('filters.channelWhatsapp') },
+                          ].map(opt => (
+                            <button key={opt.value} type="button" onClick={() => setFilterSource(opt.value)}
+                              className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${
+                                filterSource === opt.value
+                                  ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
+                                  : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
+                              }`}>{opt.label}</button>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">{tv('filters.other')}</label>
+                        <div className="flex flex-wrap gap-2">
+                          <button type="button" onClick={() => setFilterHasAllergens(v => !v)}
+                            className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${filterHasAllergens ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
+                            {tv('filters.allergens')}
+                          </button>
+                          <button type="button" onClick={() => setFilterHasNotes(v => !v)}
+                            className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${filterHasNotes ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
+                            {tv('filters.withNotes')}
+                          </button>
+                          <button type="button" onClick={() => setFilterNoTable(v => !v)}
+                            className={`px-3.5 py-2 rounded-[var(--ds-radius-control)] text-xs font-medium border transition-colors ${filterNoTable ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
+                            {tv('filters.noTable')}
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -4864,8 +4853,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               type="button"
               onClick={() => setFormStep(s => Math.max(0, s - 1))}
               disabled={formStep === 0}
-              aria-label="Sezione precedente"
-              title="Sezione precedente"
+              aria-label={tv('modal.prevSection')}
+              title={tv('modal.prevSection')}
               className={dsStepArrow}
             >
               <ChevronLeft className="h-4 w-4" />
@@ -4893,8 +4882,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   type="button"
                   onClick={() => setFormStep(s => Math.min(RESERVATION_STEPS.length - 1, s + 1))}
                   disabled={formStep === RESERVATION_STEPS.length - 1}
-                  aria-label="Sezione successiva"
-                  title="Sezione successiva"
+                  aria-label={tv('modal.nextSection')}
+                  title={tv('modal.nextSection')}
                   className={dsStepArrow}
                 >
                   <ChevronRight className="h-4 w-4" />
@@ -4941,7 +4930,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         <div className="mx-4 sm:mx-5 mt-4 flex items-start gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-pending-tint)] p-4">
                             <Info className="mt-0.5 h-5 w-5 flex-shrink-0 text-[var(--ds-pending-text)]" />
                             <div className="flex-1 min-w-0">
-                                <p className="text-[15px] font-semibold text-[var(--ds-pending-text)]">Bozza non salvata trovata</p>
+                                <p className="text-[15px] font-semibold text-[var(--ds-pending-text)]">{tv('modal.draftFound')}</p>
                                 <p className="mt-0.5 text-[13px] text-[var(--ds-pending-text)]">
                                     Salvata {new Date(draftBanner.savedAt).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}
                                 </p>
@@ -5052,7 +5041,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                 if (current && !options.includes(current)) options.push(current);
                                                 options.sort();
                                                 if (options.length === 0) {
-                                                    return <option value="" disabled>Nessuno slot disponibile</option>;
+                                                    return <option value="" disabled>{tv('modal.noSlots')}</option>;
                                                 }
                                                 return options.map(s => <option key={s} value={s}>{s}</option>);
                                             })()}
@@ -5141,11 +5130,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 weight to the block. Light grey fill + soft border
                                 separates it from the datetime / table pickers above
                                 without adding another card shadow. */}
-                            <FormCard title="Dettagli cliente">
+                            <FormCard title={tv('modal.customerDetails')}>
                             <div className="flex flex-col gap-5">
                             {/* Customer Name with Voice Input */}
                             <div>
-                                <label className="mb-1.5 block text-[14px] font-medium text-[var(--ds-text-secondary)]">Nome cliente</label>
+                                <label className="mb-1.5 block text-[14px] font-medium text-[var(--ds-text-secondary)]">{tv('modal.customerName')}</label>
                                 <div className="flex items-center gap-2">
                                     <div className="flex-1 relative">
                                         <input
@@ -5160,7 +5149,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                             }}
                                             onFocus={() => setActiveSuggestField('name')}
                                             onBlur={() => setTimeout(() => setActiveSuggestField(prev => prev === 'name' ? null : prev), 150)}
-                                            placeholder="Mario Rossi"
+                                            placeholder={tv('modal.namePlaceholder')}
                                             autoComplete="off"
                                         />
                                         {activeSuggestField === 'name' && customerSuggestions.length > 0 && (
@@ -5202,7 +5191,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         type="button"
                                         onClick={() => setIsCustomerPickerOpen(true)}
                                         className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                                        title="Rubrica clienti"
+                                        title={tv('modal.addressBook')}
                                     >
                                         <BookUser className="h-[18px] w-[18px]" />
                                     </button>
@@ -5216,7 +5205,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                     ? 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] animate-pulse motion-reduce:animate-none'
                                                     : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)]'
                                             }`}
-                                            title="Dettatura vocale"
+                                            title={tv('modal.voiceDictation')}
                                         >
                                             <Mic className="h-[18px] w-[18px]" />
                                         </button>
@@ -5258,8 +5247,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                 href={`tel:${formData.phone.replace(/[^\d+]/g, '')}`}
                                                 onMouseDown={e => e.preventDefault()}
                                                 className="absolute right-1.5 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-[var(--ds-radius)] bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] transition-all hover:brightness-95"
-                                                aria-label="Chiama"
-                                                title="Chiama"
+                                                aria-label={tv('modal.call')}
+                                                title={tv('modal.call')}
                                             >
                                                 <Phone className="h-3.5 w-3.5" />
                                             </a>
@@ -5301,13 +5290,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     </div>
                                 </div>
                                 <div>
-                                    <label className="mb-1.5 block text-[14px] font-medium text-[var(--ds-text-secondary)]">Email</label>
+                                    <label className="mb-1.5 block text-[14px] font-medium text-[var(--ds-text-secondary)]">{tv('modal.email')}</label>
                                     <input
                                         type="email"
                                         className={dsInput}
                                         value={formData.email || ''}
                                         onChange={e => setFormData({...formData, email: e.target.value})}
-                                        placeholder="cliente@email.com"
+                                        placeholder={tv('modal.emailPlaceholder')}
                                     />
                                 </div>
                             </div>
@@ -5323,7 +5312,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 if (banquetsForDate.length === 0) return null;
                                 return (
                                     <div>
-                                        <label className="mb-1.5 block text-[14px] font-medium text-[var(--ds-text-secondary)]">Banchetto</label>
+                                        <label className="mb-1.5 block text-[14px] font-medium text-[var(--ds-text-secondary)]">{tv('modal.banquet')}</label>
                                         <div className="relative">
                                             <select
                                                 className={dsSelect}
@@ -5335,7 +5324,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                     banquet_menu_id: e.target.value ? Number(e.target.value) : null
                                                 })}
                                             >
-                                                <option value="">Nessuno</option>
+                                                <option value="">{tv('modal.none')}</option>
                                                 {banquetsForDate.map(m => (
                                                     <option key={m.id} value={m.id}>
                                                         {m.name}{canViewBanquetPrice && ` — €${Number(m.price_per_person).toFixed(2)}/persona`}
@@ -5364,7 +5353,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         <div className="flex items-center gap-3">
                                             <AlertTriangle className={`h-4 w-4 ${(selectedAllergies.length + selectedAllergens.length) > 0 ? 'text-[var(--ds-critical-text)]' : 'text-[var(--ds-text-secondary)]'}`} />
                                             <div className="text-left">
-                                                <span className="text-sm font-medium text-[var(--ds-text-primary)]">Allergie &amp; Intolleranze</span>
+                                                <span className="text-sm font-medium text-[var(--ds-text-primary)]">{tv('modal.allergies')}</span>
                                                 {(selectedAllergies.length + selectedAllergens.length) > 0 && (
                                                     <p className="text-xs text-[var(--ds-text-secondary)]">
                                                         {[selectedAllergies.length > 0 && `${selectedAllergies.length} allergie`, selectedAllergens.length > 0 && `${selectedAllergens.length} intolleranze`].filter(Boolean).join(' · ')}
@@ -5468,7 +5457,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         <div className="flex items-center gap-3">
                                             <StickyNote className={`h-4 w-4 ${(selectedQuickNotes.length > 0 || noteSelections.length > 0 || formData.notes) ? 'text-[var(--ds-text-primary)]' : 'text-[var(--ds-text-secondary)]'}`} />
                                             <div className="text-left">
-                                                <span className="text-sm font-medium text-[var(--ds-text-primary)]">Note</span>
+                                                <span className="text-sm font-medium text-[var(--ds-text-primary)]">{tv('modal.notes')}</span>
                                                 {(selectedQuickNotes.length > 0 || noteSelections.length > 0) && (
                                                     <p className="text-xs text-[var(--ds-text-secondary)]">
                                                         {[
@@ -5535,10 +5524,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
                                             {/* Free text notes */}
                                             <div>
-                                                <label className="mb-1.5 block text-[14px] font-medium text-[var(--ds-text-secondary)]">Altre note</label>
+                                                <label className="mb-1.5 block text-[14px] font-medium text-[var(--ds-text-secondary)]">{tv('modal.otherNotes')}</label>
                                                 <textarea
                                                     className={`${dsTextarea} h-20 resize-none`}
-                                                    placeholder="Richieste speciali..."
+                                                    placeholder={tv('modal.notesPlaceholder')}
                                                     value={formData.notes || ''}
                                                     onChange={e => setFormData({...formData, notes: e.target.value})}
                                                 />
@@ -5552,7 +5541,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     the whole card hides when neither consent applies. */}
                                 {((askHealthConsent && selectedAllergens.length > 0) || marketingEnabled) && (
                                 <div className="mt-3 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] p-3">
-                                    <label className="mb-1.5 block text-[14px] font-medium text-[var(--ds-text-secondary)]">Consensi privacy (GDPR)</label>
+                                    <label className="mb-1.5 block text-[14px] font-medium text-[var(--ds-text-secondary)]">{tv('modal.gdprTitle')}</label>
                                     <div className="space-y-1.5">
                                         {askHealthConsent && selectedAllergens.length > 0 && (
                                         <label className="flex items-start gap-2 text-sm text-[var(--ds-text-primary)] cursor-pointer">
@@ -5562,7 +5551,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                 checked={formData.consent_data_health === true}
                                                 onChange={e => setFormData({ ...formData, consent_data_health: e.target.checked })}
                                             />
-                                            <span>Consenso al trattamento di allergie / intolleranze <span className="text-[var(--ds-text-secondary)]">(dati sanitari, art. 9 GDPR)</span></span>
+                                            <span>{tv('modal.gdprHealth')} <span className="text-[var(--ds-text-secondary)]">(dati sanitari, art. 9 GDPR)</span></span>
                                         </label>
                                         )}
                                         {marketingEnabled && (
@@ -5573,7 +5562,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                 checked={formData.consent_marketing === true}
                                                 onChange={e => setFormData({ ...formData, consent_marketing: e.target.checked })}
                                             />
-                                            <span>Consenso all'invio di comunicazioni commerciali <span className="text-[var(--ds-text-secondary)]">(marketing)</span></span>
+                                            <span>{tv('modal.gdprMarketing')} <span className="text-[var(--ds-text-secondary)]">(marketing)</span></span>
                                         </label>
                                         )}
                                     </div>
@@ -5593,7 +5582,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                              <div className="flex flex-wrap items-center gap-3 pb-4 mb-4 border-b border-[var(--ds-border)]">
                                 <MapPin className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-secondary)]" />
                                 <div className="flex-1">
-                                    <h3 className="text-[15px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">Seleziona tavolo</h3>
+                                    <h3 className="text-[15px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">{tv('modal.selectTable')}</h3>
                                     <p className="text-[14px] text-[var(--ds-text-muted)]">
                                         {formData.shift === Shift.LUNCH ? 'Pranzo' : 'Cena'} — {' '}
                                         <span className="font-semibold text-[var(--ds-seated-text)]">{freeTablesCount} tavoli liberi</span> su {totalTablesInFilter}
@@ -5619,8 +5608,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                 showToast('Tavolo scollegato dalla prenotazione', 'info');
                                             }}
                                             className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-white/15 text-white transition-colors hover:bg-white/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
-                                            title="Scollega il tavolo dalla prenotazione"
-                                            aria-label="Scollega tavolo dalla prenotazione"
+                                            title={tv('modal.unlinkTableTitle')}
+                                            aria-label={tv('modal.unlinkTable')}
                                         >
                                             <X className="h-4 w-4" />
                                         </button>
@@ -5963,12 +5952,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 )}
                              </div>
                              <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mt-4 pt-4 border-t border-[var(--ds-border)] text-[12px] text-[var(--ds-text-secondary)]">
-                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[var(--ds-radius-sm)] bg-[var(--ds-surface)] ring-1 ring-inset ring-[var(--ds-border-strong)]"></span> Libero</div>
-                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[var(--ds-radius-sm)] bg-[var(--ds-seated-tint)] ring-1 ring-inset ring-[var(--ds-seated-solid)]"></span> Consigliato</div>
-                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[var(--ds-radius-sm)] bg-[var(--ds-seated-solid)]"></span> Selezionato</div>
-                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[var(--ds-radius-sm)] bg-[var(--ds-critical-tint)]"></span> Occupato</div>
-                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[var(--ds-radius-sm)] bg-[var(--ds-surface)] opacity-50"></span> Capienza insuff.</div>
-                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[var(--ds-radius-sm)] bg-[var(--ds-arriving-tint)]"></span> Evento / Banchetto</div>
+                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[var(--ds-radius-sm)] bg-[var(--ds-surface)] ring-1 ring-inset ring-[var(--ds-border-strong)]"></span> {tv('legend.free')}</div>
+                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[var(--ds-radius-sm)] bg-[var(--ds-seated-tint)] ring-1 ring-inset ring-[var(--ds-seated-solid)]"></span> {tv('legend.recommended')}</div>
+                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[var(--ds-radius-sm)] bg-[var(--ds-seated-solid)]"></span> {tv('legend.selected')}</div>
+                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[var(--ds-radius-sm)] bg-[var(--ds-critical-tint)]"></span> {tv('legend.occupied')}</div>
+                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[var(--ds-radius-sm)] bg-[var(--ds-surface)] opacity-50"></span> {tv('legend.tooSmall')}</div>
+                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[var(--ds-radius-sm)] bg-[var(--ds-arriving-tint)]"></span> {tv('legend.banquet')}</div>
                              </div>
                              {mergeMode && (
                                  <div className="mt-3 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3.5 py-2 text-[13px] font-medium text-[var(--ds-text-secondary)]">
@@ -5991,10 +5980,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         <FormCard>
                           <div className="mb-4 flex flex-wrap items-center gap-2">
                             <Receipt className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
-                            <h4 className="text-[15px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">Conto al tavolo</h4>
+                            <h4 className="text-[15px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">{tv('payments.tableBill')}</h4>
                             {bill && (() => {
                               const state = billStateLabel(bill.bill.total_cents, bill.paid_cents);
-                              return <StatusPill tone={state.tone}>{state.label}</StatusPill>;
+                              return <StatusPill tone={state.tone}>{tv(state.labelKey, state.fallback)}</StatusPill>;
                             })()}
                             {bill && (
                               <span className="ml-auto text-[13px] text-[var(--ds-text-muted)]">
@@ -6005,7 +5994,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
                           {billLoading && !bill && (
                             <div className="flex items-center gap-2 text-[13px] text-[var(--ds-text-muted)]">
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Caricamento…
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" /> {tv('payments.loading')}
                             </div>
                           )}
 
@@ -6089,7 +6078,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                           })()}
 
                           {!billLoading && !bill && !hasPermission('payments:full') && (
-                            <p className="text-[14px] text-[var(--ds-text-muted)]">Nessun conto attivo.</p>
+                            <p className="text-[14px] text-[var(--ds-text-muted)]">{tv('payments.noBill')}</p>
                           )}
 
                           {bill && (
@@ -6124,7 +6113,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                       className={dsButton.secondary}
                                     >
                                       {billActionLoading === 'notify' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                                      Invia link
+                                      {tv('payments.sendLink')}
                                     </button>
                                     <button
                                       type="button"
@@ -6225,7 +6214,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         <FormCard>
                           <div className="mb-4 flex flex-wrap items-center gap-2">
                             <CreditCard className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
-                            <h4 className="text-[15px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">Richiedi un acconto</h4>
+                            <h4 className="text-[15px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">{tv('payments.requestDeposit')}</h4>
                             <span className="ml-auto text-[13px] text-[var(--ds-text-muted)]">
                               {paymentProviderLabel}
                             </span>
@@ -6235,12 +6224,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                               invio. I canali senza recapito sul booking sono mutati
                               (email→nessuna email, WhatsApp/SMS→nessun telefono). */}
                           <div className="mb-4">
-                            <span className="mb-1.5 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Invia il link tramite</span>
+                            <span className="mb-1.5 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{tv('payments.sendVia')}</span>
                             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                               {([
-                                { key: 'email' as const, label: 'Email', icon: Mail, target: formData.email, missing: 'Nessuna email sul contatto' },
-                                { key: 'whatsapp' as const, label: 'WhatsApp', icon: MessageCircle, target: formData.phone, missing: 'Nessun telefono sul contatto' },
-                                { key: 'sms' as const, label: 'SMS', icon: Phone, target: formData.phone, missing: 'Nessun telefono sul contatto' },
+                                { key: 'email' as const, label: tv('payments.email'), icon: Mail, target: formData.email, missing: 'Nessuna email sul contatto' },
+                                { key: 'whatsapp' as const, label: tv('payments.whatsapp'), icon: MessageCircle, target: formData.phone, missing: 'Nessun telefono sul contatto' },
+                                { key: 'sms' as const, label: tv('payments.sms'), icon: Phone, target: formData.phone, missing: 'Nessun telefono sul contatto' },
                               ]).map(({ key, label, icon: Icon, target, missing }) => {
                                 const available = paymentChannelAvailable[key];
                                 const selected = paymentChannel === key && available;
@@ -6277,7 +6266,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                           </div>
 
                           <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,150px)_1fr]">
-                            <Field label="Importo">
+                            <Field label={tv('payments.amount')}>
                               <div className="relative">
                                 <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[15px] text-[var(--ds-text-muted)]">€</span>
                                 <input
@@ -6291,10 +6280,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 />
                               </div>
                             </Field>
-                            <Field label="Descrizione">
+                            <Field label={tv('payments.description')}>
                               <input
                                 type="text"
-                                placeholder="Es. acconto cena del 15/08"
+                                placeholder={tv('payments.descriptionPlaceholder')}
                                 value={paymentDescription}
                                 onChange={e => setPaymentDescription(e.target.value)}
                                 disabled={isCreatingPayment}
@@ -6314,7 +6303,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 : `Genera il link e invia ${paymentChannel === 'email' ? 'via email' : paymentChannel === 'sms' ? 'via SMS' : 'via WhatsApp'}`}
                             >
                               {isCreatingPayment ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                              Invia link
+                              {tv('payments.sendLink')}
                             </button>
                           </div>
 
@@ -7031,7 +7020,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     >
                       <span className="flex items-center gap-2.5">
                         <span className={`w-2 h-2 rounded-full ${ds.solid}`} />
-                        <span className="text-sm font-medium text-[var(--ds-text-primary)]">{meta.label}</span>
+                        <span className="text-sm font-medium text-[var(--ds-text-primary)]">{stateLabel(opt)}</span>
                       </span>
                       {isCurrent && <Check className="h-4 w-4 text-[var(--ds-text-muted)]" />}
                     </button>

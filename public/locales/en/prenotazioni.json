@@ -1,0 +1,138 @@
+{
+  "toolbar": {
+    "searchPlaceholder": "Search by name or phone",
+    "filters": "Filters",
+    "print": "Print",
+    "channelOptions": "Booking channel options"
+  },
+  "sort": {
+    "title": "Sort by",
+    "createdAsc": "Booked first → last",
+    "createdDesc": "Booked last → first",
+    "timeAsc": "Time (earliest → latest)",
+    "timeDesc": "Time (latest → earliest)",
+    "nameAsc": "Name A → Z",
+    "nameDesc": "Name Z → A",
+    "guestsAsc": "Covers (fewest → most)",
+    "guestsDesc": "Covers (most → fewest)"
+  },
+  "filters": {
+    "title": "Filter by",
+    "reset": "Reset",
+    "room": "Room",
+    "allRooms": "All",
+    "paymentStatus": "Payment status",
+    "all": "All",
+    "paymentPending": "Outstanding",
+    "paymentDeposit": "Deposit",
+    "paymentPaid": "Paid",
+    "channel": "Channel",
+    "channelManual": "Staff",
+    "channelWeb": "Web",
+    "channelVoice": "Voice agent",
+    "channelWhatsapp": "WhatsApp",
+    "other": "Other",
+    "allergens": "Allergens",
+    "withNotes": "With notes",
+    "noTable": "No table"
+  },
+  "channel": {
+    "whatsapp": "Channel: WhatsApp",
+    "web": "Channel: Web",
+    "voice": "Channel: Voice agent",
+    "phone": "Channel: Phone",
+    "phoneShort": "Phone"
+  },
+  "badge": {
+    "vip": "VIP guest",
+    "blacklist": "Blacklisted guest"
+  },
+  "actions": {
+    "edit": "Edit",
+    "cancel": "Cancel",
+    "new": "New booking"
+  },
+  "shift": {
+    "lunch": "Lunch",
+    "dinner": "Dinner"
+  },
+  "stats": {
+    "covers": "covers",
+    "reservations": "bookings",
+    "noTable": "no table"
+  },
+  "empty": {
+    "lunch": "No bookings for lunch on this date.",
+    "dinner": "No bookings for dinner on this date."
+  },
+  "modal": {
+    "prevSection": "Previous section",
+    "nextSection": "Next section",
+    "draftFound": "Unsaved draft found",
+    "noSlots": "No time available",
+    "customerDetails": "Guest details",
+    "customerName": "Guest name",
+    "namePlaceholder": "Jane Smith",
+    "addressBook": "Address book",
+    "voiceDictation": "Voice dictation",
+    "call": "Call",
+    "email": "Email",
+    "emailPlaceholder": "guest@email.com",
+    "banquet": "Event",
+    "none": "None",
+    "allergies": "Allergies & intolerances",
+    "notes": "Notes",
+    "otherNotes": "Other notes",
+    "notesPlaceholder": "Special requests…",
+    "gdprTitle": "Privacy consents (GDPR)",
+    "gdprHealth": "Consent to process allergies / intolerances",
+    "gdprMarketing": "Consent to receive marketing messages",
+    "selectTable": "Choose a table",
+    "unlinkTable": "Unlink table from booking",
+    "unlinkTableTitle": "Unlink the table from this booking"
+  },
+  "legend": {
+    "free": "Free",
+    "recommended": "Recommended",
+    "selected": "Selected",
+    "occupied": "Occupied",
+    "tooSmall": "Too small",
+    "banquet": "Event"
+  },
+  "payments": {
+    "tableBill": "Table bill",
+    "loading": "Loading…",
+    "noBill": "No open bill.",
+    "requestDeposit": "Request a deposit",
+    "sendVia": "Send the link via",
+    "email": "Email",
+    "whatsapp": "WhatsApp",
+    "sms": "SMS",
+    "amount": "Amount",
+    "description": "Description",
+    "descriptionPlaceholder": "E.g. deposit for dinner on 15/08",
+    "sendLink": "Send link"
+  },
+  "billState": {
+    "paid": "Paid",
+    "partial": "Partly paid",
+    "unpaid": "Unpaid"
+  },
+  "paymentStatus": {
+    "pending": "Pending",
+    "authorised": "Authorised",
+    "completed": "Paid",
+    "cancelled": "Cancelled",
+    "failed": "Failed",
+    "expired": "Expired",
+    "refunded": "Refunded"
+  },
+  "messages": {
+    "inbound": "Inbound",
+    "reply": "Reply",
+    "delivered": "Delivered",
+    "sent": "Sent",
+    "failed": "Failed",
+    "queued": "Queued"
+  }
+}

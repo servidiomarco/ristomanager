@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ArrowLeft, Loader2, Printer } from 'lucide-react';
 import type { CashSessionView } from '../../types';
 import { getRomeTimePart } from '../../utils/reservationTime';
@@ -45,6 +46,7 @@ const field = 'h-12 w-full rounded-[var(--ds-radius)] border border-[var(--ds-bo
 export const FondoEChiusura: React.FC<FondoEChiusuraProps> = ({
   view, loading, error, busy, canClose, onBack, onOpen, onUpdateFloat, onClose, onPrint, onOpenGiornale,
 }) => {
+  const { t } = useTranslation('cassa', { useSuspense: false });
   const session = view?.session ?? null;
   const closed = session?.closed_at != null;
 
@@ -175,9 +177,9 @@ export const FondoEChiusura: React.FC<FondoEChiusuraProps> = ({
 
         <div className="grid gap-4 lg:grid-cols-2">
           {/* Incassi per metodo */}
-          <FormCard title="Incassi per metodo">
+          <FormCard title={t('takingsByMethod')}>
             {methods.length === 0 ? (
-              <p className="text-[14px] text-[var(--ds-text-muted)]">Nessun incasso in questo servizio.</p>
+              <p className="text-[14px] text-[var(--ds-text-muted)]">{t('noTakings')}</p>
             ) : (
               <dl className="space-y-1.5 text-[14px]">
                 {methods.map(m => (
@@ -221,7 +223,7 @@ export const FondoEChiusura: React.FC<FondoEChiusuraProps> = ({
           </FormCard>
 
           {/* Il contante */}
-          <FormCard title="Contante in cassa">
+          <FormCard title={t('cashInDrawer')}>
             <dl className="space-y-1.5 text-[14px]">
               <div className="flex justify-between gap-2">
                 <dt className="text-[var(--ds-text-secondary)]">Fondo di apertura</dt>
@@ -230,7 +232,7 @@ export const FondoEChiusura: React.FC<FondoEChiusuraProps> = ({
                 </dd>
               </div>
               <div className="flex justify-between gap-2">
-                <dt className="text-[var(--ds-text-secondary)]">Incassi in contanti</dt>
+                <dt className="text-[var(--ds-text-secondary)]">{t('cashTakings')}</dt>
                 <dd className="tabular-nums text-[var(--ds-text-secondary)]">{euro(view?.cash_cents ?? 0)}</dd>
               </div>
               <div className="flex justify-between gap-2 border-t border-[var(--ds-border)] pt-2 text-[16px] font-semibold">

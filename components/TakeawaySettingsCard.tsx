@@ -2,14 +2,15 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Ban, Copy, Loader2, ShoppingBag } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { asportoApiService, TakeawayConfig } from '../services/asportoApiService';
-import { Callout, Field, Stepper } from './ds';
+import { Callout, Field, SegmentedControl, Stepper } from './ds';
 
 /* ===========================================================================
    Impostazioni → Asporto.
 
-   Le tre manopole di servizio del modulo: capienza per slot (quanti ordini
+   Le manopole di servizio del modulo: capienza per slot (quanti ordini
    regge la cucina in un quarto d'ora), minuti di preparazione (quanto prima
-   dell'ora di ritiro un ordine diventa «Da produrre»), e lo stop per data.
+   dell'ora di ritiro un ordine diventa «Da produrre»), lo stop per data e
+   il giorno che la board mostra.
    La modifica sta su takeaway:manage come le route: sono decisioni del
    servizio, non del contratto.
    ========================================================================= */
@@ -166,6 +167,29 @@ export const TakeawaySettingsCard: React.FC<TakeawaySettingsCardProps> = ({ show
                 </p>
               </Field>
             )}
+
+            <Field
+              label="Giorno della board"
+              hint="Il navigatore del giorno sta nella testata, come in Prenotazioni e Sala. Qui si decide se muove anche le altre pagine o solo l'asporto."
+            >
+              {/* ?? 'own': il campo nasce oggi e il backend schierato può non
+                  mandarlo ancora. Senza ripiego nessuno dei due segmenti
+                  risulterebbe acceso finché il server non sale. */}
+              <SegmentedControl<'global' | 'own'>
+                value={config.date_mode ?? 'own'}
+                onChange={next => { if (canEdit && next !== (config.date_mode ?? 'own')) save({ date_mode: next }); }}
+                ariaLabel="Giorno della board"
+                options={[
+                  { value: 'own', label: 'Indipendente' },
+                  { value: 'global', label: 'Segue l’app' },
+                ]}
+              />
+              <p className="mt-2 text-[13px] text-[var(--ds-text-muted)]">
+                {config.date_mode === 'global'
+                  ? 'Il giorno è quello dell’app: cambiarlo qui lo cambia anche in prenotazioni, sala e cassa.'
+                  : 'Il banco tiene il suo giorno: cambiarlo non tocca le altre pagine.'}
+              </p>
+            </Field>
 
             <div className="grid gap-4 sm:grid-cols-2">
               <Field

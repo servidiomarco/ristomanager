@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ArrowLeft, ChevronDown, Loader2, Receipt } from 'lucide-react';
 import type { CashMovement, CashTransactionsView } from '../../types';
 import { getRomeTimePart } from '../../utils/reservationTime';
@@ -41,7 +42,7 @@ const pill = (m: CashMovement): { label: string; tone: 'positive' | 'pending' | 
  *  Il piede parla anche quando il documento NON c'è: un conto chiuso senza
  *  riga fiscale lo dice, e un conto saldato dal QR ma mai chiuso pure —
  *  visto al collaudo: piede muto e nessuno sa se il fiscale è a posto. */
-const groupDoc = (ms: CashMovement[]): { label: string; tone: 'positive' | 'pending' | 'critical' | 'neutral'; token: string | null } | null => {
+const groupDoc = (ms: CashMovement[], tr: (k: string) => string): { label: string; tone: 'positive' | 'pending' | 'critical' | 'neutral'; token: string | null } | null => {
   // Solo le righe del conto portano i campi fiscali: un gruppo di sole
   // caparre non può dire niente sul documento, e sta zitto.
   const billRows = ms.filter(x => x.source === 'bill');
@@ -50,7 +51,7 @@ const groupDoc = (ms: CashMovement[]): { label: string; tone: 'positive' | 'pend
   if (!m.fiscal_doc_type) {
     const st = m.bill_status;
     if (st === 'CLOSED' || st === 'SETTLED_PARTIAL') return { label: 'chiusa senza documento fiscale', tone: 'neutral', token: null };
-    if (st === 'SETTLED') return { label: 'saldato · conto da chiudere in cassa', tone: 'pending', token: null };
+    if (st === 'SETTLED') return { label: tr('settledToClose'), tone: 'pending', token: null };
     return null;
   }
   const n = m.fiscal_doc_number ?? m.fiscal_ref;
@@ -93,6 +94,7 @@ interface TransazioniProps {
 export const Transazioni: React.FC<TransazioniProps> = ({
   data, loading, error, onBack, onOpenBill,
 }) => {
+  const { t: tr } = useTranslation('cassa', { useSuspense: false });
   const [filter, setFilter] = useState<Filter>('all');
   const [query, setQuery] = useState('');
   // Le card partono chiuse: la lista dice tavolo, totale e documento a colpo
@@ -152,8 +154,8 @@ export const Transazioni: React.FC<TransazioniProps> = ({
   }, [visible]);
 
   const options = [
-    { value: 'all' as Filter, label: 'Tutti', badge: counts.all ?? 0, badgeTone: 'neutral' as const },
-    { value: 'CONTANTI' as Filter, label: 'Contanti', badge: counts.CONTANTI ?? 0, badgeTone: 'neutral' as const },
+    { value: 'all' as Filter, label: tr('all'), badge: counts.all ?? 0, badgeTone: 'neutral' as const },
+    { value: 'CONTANTI' as Filter, label: tr('cash'), badge: counts.CONTANTI ?? 0, badgeTone: 'neutral' as const },
     { value: 'POS_FISICO' as Filter, label: 'POS', badge: counts.POS_FISICO ?? 0, badgeTone: 'neutral' as const },
     { value: 'online' as Filter, label: 'Online', badge: counts.online ?? 0, badgeTone: 'neutral' as const },
     { value: 'voided' as Filter, label: 'Stornati', badge: counts.voided ?? 0, badgeTone: 'neutral' as const },
@@ -182,7 +184,7 @@ export const Transazioni: React.FC<TransazioniProps> = ({
         <SearchField
           value={query}
           onChange={setQuery}
-          placeholder="Tavolo, importo o cliente…"
+          placeholder={tr('searchTransactions')}
           ariaLabel="Cerca un movimento"
           className="mt-3 w-full"
         />
@@ -218,7 +220,7 @@ export const Transazioni: React.FC<TransazioniProps> = ({
               const head = g[0];
               const collected = groupCollected(g);
               const billOpen = head.bill_status === 'OPEN' || head.bill_status === 'LOCKED';
-              const doc = groupDoc(g);
+              const doc = groupDoc(g, tr);
               const key = head.bill_id != null ? `b${head.bill_id}` : `m${head.id}`;
               const expanded = openGroups.has(key);
               return (
