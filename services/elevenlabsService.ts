@@ -861,6 +861,73 @@ export interface VoiceReservationOutput {
     language?: string | null;
 }
 
+// Parole con cui il cliente (e quindi l'agente, che ricopia le sue) nomina
+// una zona. Servono solo a riconoscere una nota che PROMETTE una zona; la
+// mappa zona→sala vera resta quella di rooms.location.
+const ZONE_WORDS: Record<RoomLocation, RegExp> = {
+    OUTDOOR: /\b(esterno|esterni|esterna|esterne|fuori|giardino|porticato|terrazz\w*|fiume|dehor\w*)\b/i,
+    INDOOR: /\b(interno|interni|interna|interne|dentro|sala|sale|veranda|macine)\b/i,
+};
+
+/**
+ * Le sale di `location` sono tutte chiuse in quella data+turno?
+ *
+ * Più grezzo di `indoor_closed`/`outdoor_closed` di `checkAvailability` (che
+ * pesa anche posti e unioni): qui conta solo se una sala di quella zona è
+ * APERTA quel giorno. È la domanda giusta per decidere se una promessa fatta
+ * al cliente è impossibile o soltanto improbabile.
+ */
+async function isLocationClosed(
+    tenantId: number,
+    date: string,
+    shift: Shift,
+    location: RoomLocation
+): Promise<boolean> {
+    const res = await queryWithRetry(`
+        SELECT 1
+        FROM rooms r
+        WHERE r.tenant_id = $1
+          AND r.location = $2
+          AND r.is_closed = false
+          AND r.id NOT IN (
+              SELECT room_id FROM room_closed_overrides
+              WHERE date = $3 AND shift = $4 AND tenant_id = $1
+          )
+        LIMIT 1
+    `, [tenantId, location, date, shift]);
+    return res.rows.length === 0;
+}
+
+/**
+ * Smonta la promessa di una zona chiusa prima che la nota arrivi in sala.
+ *
+ * Chiamata Aragosta, 19/09/2026 10:37: l'agente dice correttamente «al momento
+ * le sale all'esterno sono chiuse», poi il cliente insiste («nel caso fa caldo
+ * mi mettete fuori?») e l'agente promette «se si libera uno spazio all'esterno
+ * vi mettiamo fuori», salvando in nota «Cliente preferisce esterno se
+ * disponibile». Le sale esterne del Frantoio sono chiuse per stagione: non si
+ * libera niente, e la nota diventava un impegno che il personale leggeva il
+ * giorno dopo senza poterlo mantenere.
+ *
+ * Il divieto di prometterlo sta nel prompt (R3); questa è la rete. La nota non
+ * si cancella — potrebbe contenere altro (allergie, passeggino) — le si
+ * appende la verità, così chi la legge in sala sa già come stanno le cose.
+ */
+async function annotateImpossibleZonePromise(
+    tenantId: number,
+    date: string,
+    shift: Shift,
+    notes: string
+): Promise<string> {
+    for (const location of ['OUTDOOR', 'INDOOR'] as RoomLocation[]) {
+        if (!ZONE_WORDS[location].test(notes)) continue;
+        if (!(await isLocationClosed(tenantId, date, shift, location))) continue;
+        const dove = location === 'OUTDOOR' ? "all'esterno" : "all'interno";
+        return `${notes} — NB: le sale ${dove} sono chiuse quel giorno, la preferenza non è applicabile`;
+    }
+    return notes;
+}
+
 /**
  * Pick the smallest free table that fits `guests` on the given date+shift,
  * restricted to `locationPreference` when provided. Rooms already at their
@@ -897,11 +964,11 @@ export async function createVoiceReservation(
     input: VoiceReservationInput
 ): Promise<VoiceReservationOutput> {
     const phone = normalizeItalianPhone(input.phone);
-    const notes = input.notes
-        ? `[Voce] ${input.notes}`
-        : '[Voce] Prenotazione creata da agent vocale ElevenLabs';
     const children = Math.max(0, Math.min(Number(input.children) || 0, input.guests));
     const reservationDate = input.reservation_time.slice(0, 10);
+    const notes = input.notes
+        ? `[Voce] ${await annotateImpossibleZonePromise(tenantId, reservationDate, input.shift, input.notes)}`
+        : '[Voce] Prenotazione creata da agent vocale ElevenLabs';
 
     // No table while a deposit is pending: assigning one would guarantee the
     // very thing the deposit exists to secure.
@@ -1273,7 +1340,7 @@ export async function modifyVoiceReservation(
     // downstream code (which slices the ISO string) sees the intended values.
     const newReservationTime = `${newDate}T${newTime}:00`;
     const notesToStore = input.new_notes !== undefined
-        ? `[Voce] ${input.new_notes.trim()}`
+        ? `[Voce] ${await annotateImpossibleZonePromise(tenantId, newDate, newShift, input.new_notes.trim())}`
         : current.notes;
 
     // The two branches use different SQL parameter counts. Postgres refuses

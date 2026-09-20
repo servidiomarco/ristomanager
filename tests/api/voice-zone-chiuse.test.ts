@@ -104,6 +104,51 @@ describe('zone chiuse sul canale voce (check_availability)', () => {
         expect(res.body.message).not.toContain('tutto prenotato');
     });
 
+    // Chiamata Aragosta 19/09/2026: dette correttamente chiuse le sale esterne,
+    // l'agente ha poi promesso al cliente insistente «se si libera uno spazio
+    // all'esterno vi mettiamo fuori» e ha salvato «preferisce esterno se
+    // disponibile». Le sale chiuse non si liberano: la nota arrivava in sala
+    // come un impegno impossibile.
+    it('nota che chiede una zona chiusa: la prenotazione la porta con la smentita', async () => {
+        const res = await api().post('/webhook/elevenlabs/create-reservation').send({
+            customer_name: 'Zona Test Promessa',
+            phone: '3390000501',
+            date: DATA,
+            time: '20:00',
+            shift: 'DINNER',
+            guests: 2,
+            notes: 'Cliente preferisce esterno se disponibile',
+        });
+        expect(res.status).toBe(200);
+        expect(res.body.success).toBe(true);
+
+        const riga = await dbQuery(`SELECT notes FROM reservations WHERE id = $1`, [res.body.reservation_id]);
+        expect(riga.rows[0].notes).toContain('preferisce esterno');
+        expect(riga.rows[0].notes).toContain("le sale all'esterno sono chiuse quel giorno");
+
+        // Via subito: il test che segue conta sui tavoli liberi di questo turno.
+        await dbQuery(`DELETE FROM reservations WHERE id = $1`, [res.body.reservation_id]);
+    });
+
+    it('nota senza zone: resta com\'è', async () => {
+        const res = await api().post('/webhook/elevenlabs/create-reservation').send({
+            customer_name: 'Zona Test Nota Neutra',
+            phone: '3390000502',
+            date: DATA,
+            time: '20:00',
+            shift: 'DINNER',
+            guests: 2,
+            notes: 'Allergia ai crostacei',
+        });
+        expect(res.status).toBe(200);
+        expect(res.body.success).toBe(true);
+
+        const riga = await dbQuery(`SELECT notes FROM reservations WHERE id = $1`, [res.body.reservation_id]);
+        expect(riga.rows[0].notes).toBe('[Voce] Allergia ai crostacei');
+
+        await dbQuery(`DELETE FROM reservations WHERE id = $1`, [res.body.reservation_id]);
+    });
+
     it('esterno aperto ma pieno: resta "tutto prenotato"', async () => {
         const riaperta = await api().patch(`/rooms/${salaEsternaId}`).set(bearer(token)).send({ is_closed: false });
         expect(riaperta.status).toBe(200);
