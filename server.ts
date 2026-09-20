@@ -8687,6 +8687,21 @@ app.post('/pay/:token/release', publicPayLimiter, async (req, res) => runAsPlatf
 // ============================================
 // INBOX (SMS / WhatsApp conversations)
 // ============================================
+// Automatismi che non sono una conversazione: Messaggi è il posto degli
+// scambi con le persone, e questi non aspettano risposta. La richiesta di
+// recensione ne è l'esempio vivo — 483 invii il 18-19/09/2026 (l'incidente
+// dei reinvii) più 28 scuse hanno preso la cima della lista su 75 thread e
+// sotterrato gli scambi veri, perché ogni invio rimette il thread in testa
+// con «Ciao X! Grazie per essere stati…» come anteprima.
+//
+// Nascosti, non cancellati: le righe restano in outbound_messages e nello
+// storico della prenotazione (review_request_status dice se e quando la
+// richiesta è partita). Sparisce solo la loro comparsa in Messaggi.
+//
+// Le CONFERME restano visibili: sono la traccia di «al cliente è arrivata la
+// conferma?», che si guarda proprio da lì.
+const INBOX_HIDDEN_KINDS = ['review_request', 'apology'];
+
 // Conversations are grouped by the last 10 digits of the customer phone so
 // that +39 / 39 / 0 prefix variants collapse into a single thread. We union
 // outbound.to_phone_digits with inbound.from_phone_digits, pick the most
@@ -8704,6 +8719,7 @@ app.get('/messages/conversations', authenticate, requirePermission('reservations
                 FROM outbound_messages
                 WHERE tenant_id = $1
                   AND channel IN ('sms','whatsapp')
+                  AND (kind IS NULL OR kind <> ALL($2::text[]))
                   AND COALESCE(from_phone_digits, to_phone_digits) IS NOT NULL
                   -- Finestra di 12 mesi: non per velocità oggi (33ms su tutto
                   -- lo storico) ma per tenere stabile l'aggregazione quando la
@@ -8770,7 +8786,7 @@ app.get('/messages/conversations', authenticate, requirePermission('reservations
             ) r ON true
             ORDER BY l.sent_at DESC
             LIMIT 200
-        `, [req.tenantId!]);
+        `, [req.tenantId!, INBOX_HIDDEN_KINDS]);
         res.json({ conversations: result.rows });
     } catch (err) {
         console.error('GET /messages/conversations error:', err);
@@ -8814,12 +8830,13 @@ app.get('/messages/conversations/:phoneDigits', authenticate, requirePermission(
                 FROM outbound_messages
                 WHERE tenant_id = $2
                   AND channel IN ('sms','whatsapp')
+                  AND (kind IS NULL OR kind <> ALL($3::text[]))
                   AND (to_phone_digits = ANY($1::text[])
                        OR from_phone_digits = ANY($1::text[]))
                 ORDER BY sent_at DESC
                 LIMIT 500
              ) t ORDER BY sent_at ASC`,
-            [phoneDigitsVariants(key), req.tenantId!]
+            [phoneDigitsVariants(key), req.tenantId!, INBOX_HIDDEN_KINDS]
         );
         res.json({ messages: result.rows });
     } catch (err) {
@@ -20910,6 +20927,10 @@ async function logOutboundMessage(params: {
     reservationId?: number | null;
     status?: string | null;
     errorMessage?: string | null;
+    /** Che cosa è questo messaggio ('confirmation', 'review_request', …):
+     *  NULL = scritto a mano da un operatore, che è il caso normale. Serve
+     *  all'inbox per non mostrare gli automatismi — vedi INBOX_HIDDEN_KINDS. */
+    kind?: string | null;
 }): Promise<void> {
     try {
         const digits = String(params.to).replace(/\D/g, '');
@@ -20917,8 +20938,8 @@ async function logOutboundMessage(params: {
             ?? (params.errorMessage ? 'failed' : (params.sid ? 'queued' : 'sent'));
         await queryWithRetry(
             `INSERT INTO outbound_messages
-             (tenant_id, provider, channel, to_phone, to_phone_digits, body, status, provider_sid, reservation_id, error_message, failed_at)
-             VALUES ($11, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+             (tenant_id, provider, channel, to_phone, to_phone_digits, body, status, provider_sid, reservation_id, error_message, failed_at, kind)
+             VALUES ($11, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $12)`,
             [
                 params.provider,
                 params.channel,
@@ -20931,6 +20952,7 @@ async function logOutboundMessage(params: {
                 params.errorMessage ?? null,
                 params.errorMessage ? new Date() : null,
                 params.tenantId,
+                params.kind ?? null,
             ]
         );
     } catch (err: any) {
@@ -21158,7 +21180,8 @@ async function sendTwilioWhatsApp(
     text: string,
     reservationId?: number | null,
     template?: WhatsAppTemplateOpts,
-    mediaUrls?: string[]
+    mediaUrls?: string[],
+    kind?: string | null
 ): Promise<OutboundConfirmationResult> {
     const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
     const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
@@ -21213,21 +21236,21 @@ async function sendTwilioWhatsApp(
             console.error('[Twilio] ❌ Error sending message:', result);
             await logOutboundMessage({
                 tenantId, provider: 'twilio', channel: 'whatsapp', to, body: text,
-                reservationId, errorMessage: `Twilio API error: ${response.status} - ${JSON.stringify(result)}`,
+                reservationId, kind, errorMessage: `Twilio API error: ${response.status} - ${JSON.stringify(result)}`,
             });
             throw new Error(`Twilio API error: ${response.status} - ${JSON.stringify(result)}`);
         }
         console.log(`[Twilio] ✅ Message sent to ${to} (sid=${result.sid})`);
         await logOutboundMessage({
             tenantId, provider: 'twilio', channel: 'whatsapp', to, body: text,
-            sid: result.sid, reservationId,
+            sid: result.sid, reservationId, kind,
         });
         return { sid: result.sid, channel: 'whatsapp' };
     } catch (err: any) {
         if (err?.message && !err.message.startsWith('Twilio API error')) {
             await logOutboundMessage({
                 tenantId, provider: 'twilio', channel: 'whatsapp', to, body: text,
-                reservationId, errorMessage: err.message,
+                reservationId, kind, errorMessage: err.message,
             });
         }
         throw err;
@@ -21245,7 +21268,8 @@ async function sendWhatsAppText(
     text: string,
     reservationId?: number | null,
     template?: WhatsAppTemplateOpts,
-    mediaUrls?: string[]
+    mediaUrls?: string[],
+    kind?: string | null
 ): Promise<OutboundConfirmationResult> {
     // Sul nodo di sala non si spedisce niente: l'invio è lavoro del cloud, e
     // un nodo che mandasse WhatsApp dalla propria replica li duplicherebbe.
@@ -21253,17 +21277,17 @@ async function sendWhatsAppText(
     // loggano, quelli interattivi mostrano l'errore — che è la verità.
     if (isServiceNode) throw new Error('profilo service-node: gli invii esterni partono solo dal cloud');
     if (isTwilioWhatsAppConfigured()) {
-        return sendTwilioWhatsApp(tenantId, to, text, reservationId, template, mediaUrls);
+        return sendTwilioWhatsApp(tenantId, to, text, reservationId, template, mediaUrls, kind);
     }
     if (template) throw new Error('WhatsApp template requires Twilio (Vonage unsupported)');
     if (mediaUrls?.length) throw new Error('Gli allegati richiedono Twilio (Vonage non supportato)');
     try {
         await sendVonageWhatsApp(to, text);
-        await logOutboundMessage({ tenantId, provider: 'vonage', channel: 'whatsapp', to, body: text, reservationId });
+        await logOutboundMessage({ tenantId, provider: 'vonage', channel: 'whatsapp', to, body: text, reservationId, kind });
         return { channel: 'whatsapp' };
     } catch (err: any) {
         await logOutboundMessage({
-            tenantId, provider: 'vonage', channel: 'whatsapp', to, body: text, reservationId,
+            tenantId, provider: 'vonage', channel: 'whatsapp', to, body: text, reservationId, kind,
             errorMessage: err?.message || String(err),
         });
         throw err;
@@ -21283,7 +21307,7 @@ function isTwilioSmsConfigured(): boolean {
         && (process.env.TWILIO_MESSAGING_SERVICE_SID || process.env.TWILIO_SMS_FROM));
 }
 
-async function sendTwilioSms(tenantId: number, to: string, text: string, reservationId?: number | null): Promise<OutboundConfirmationResult> {
+async function sendTwilioSms(tenantId: number, to: string, text: string, reservationId?: number | null, kind?: string | null): Promise<OutboundConfirmationResult> {
     const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
     const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
     const MESSAGING_SERVICE_SID = process.env.TWILIO_MESSAGING_SERVICE_SID;
@@ -21335,21 +21359,21 @@ async function sendTwilioSms(tenantId: number, to: string, text: string, reserva
             console.error('[Twilio SMS] ❌ Error sending message:', result);
             await logOutboundMessage({
                 tenantId, provider: 'twilio', channel: 'sms', to, body: text,
-                reservationId, errorMessage: `Twilio SMS API error: ${response.status} - ${JSON.stringify(result)}`,
+                reservationId, kind, errorMessage: `Twilio SMS API error: ${response.status} - ${JSON.stringify(result)}`,
             });
             throw new Error(`Twilio SMS API error: ${response.status} - ${JSON.stringify(result)}`);
         }
         console.log(`[Twilio SMS] ✅ Message sent to ${to} (sid=${result.sid})`);
         await logOutboundMessage({
             tenantId, provider: 'twilio', channel: 'sms', to, body: text,
-            sid: result.sid, reservationId,
+            sid: result.sid, reservationId, kind,
         });
         return { sid: result.sid, channel: 'sms' };
     } catch (err: any) {
         if (err?.message && !err.message.startsWith('Twilio SMS API error')) {
             await logOutboundMessage({
                 tenantId, provider: 'twilio', channel: 'sms', to, body: text,
-                reservationId, errorMessage: err.message,
+                reservationId, kind, errorMessage: err.message,
             });
         }
         throw err;
@@ -21376,10 +21400,14 @@ async function sendBookingConfirmation(
     // recordConfirmation: false per reminder e avvisi di modifica — il loro
     // esito di consegna NON deve sovrascrivere confirmation_status, che
     // sulla card racconta la sorte della CONFERMA.
-    opts?: { whatsappTemplate?: WhatsAppTemplateOpts; forceChannel?: 'whatsapp' | 'sms'; recordConfirmation?: boolean }
+    // kind: che cosa stiamo mandando ('confirmation', 'review_request', …).
+    // Finisce sulla riga salvata, non solo nei log, perché l'inbox possa
+    // distinguere un automatismo da una conversazione.
+    opts?: { whatsappTemplate?: WhatsAppTemplateOpts; forceChannel?: 'whatsapp' | 'sms'; recordConfirmation?: boolean; kind?: string | null }
 ): Promise<OutboundConfirmationResult> {
     const template = opts?.whatsappTemplate;
     const force = opts?.forceChannel;
+    const kind = opts?.kind ?? null;
     const tryWhatsApp = force === 'sms' ? false : (!!template && isTwilioWhatsAppConfigured());
     if (force === 'whatsapp' && !tryWhatsApp) {
         throw new Error('WhatsApp non configurato o template mancante');
@@ -21387,12 +21415,12 @@ async function sendBookingConfirmation(
     let result: OutboundConfirmationResult;
     try {
         result = tryWhatsApp
-            ? await sendWhatsAppText(tenantId, to, text, reservationId, template)
-            : await sendTwilioSms(tenantId, to, text, reservationId);
+            ? await sendWhatsAppText(tenantId, to, text, reservationId, template, undefined, kind)
+            : await sendTwilioSms(tenantId, to, text, reservationId, kind);
     } catch (err: any) {
         if (tryWhatsApp && !force && isTwilioSmsConfigured()) {
             console.warn('[confirmation] WA send failed, falling back to SMS:', err?.message || err);
-            result = await sendTwilioSms(tenantId, to, text, reservationId);
+            result = await sendTwilioSms(tenantId, to, text, reservationId, kind);
         } else {
             throw err;
         }
@@ -21456,7 +21484,9 @@ async function dispatchBookingNotification(params: {
     whatsappTemplate?: WhatsAppTemplateOpts;
     /** Assente = questa notifica non ha una versione email. */
     buildEmail?: () => { subject: string; text: string; html: string };
-    /** Etichetta nei log: 'ack' | 'confirmation' | 'decline' | 'review_request'. */
+    /** Che cosa stiamo mandando: 'ack' | 'confirmation' | 'decline' |
+     *  'review_request'. Va nei log E in colonna sulla riga salvata, così
+     *  l'inbox può nascondere gli automatismi (INBOX_HIDDEN_KINDS). */
     kind: string;
 }): Promise<{ delivered: boolean; channel: string | null; error?: string }> {
     // Vedi sendWhatsAppText: sul nodo di sala le notifiche al cliente non
@@ -21527,6 +21557,7 @@ async function dispatchBookingNotification(params: {
                     await sendBookingConfirmation(tenantId, phone, params.smsText, params.reservationId ?? null, {
                         whatsappTemplate: channel === 'whatsapp' ? params.whatsappTemplate : undefined,
                         forceChannel: channel,
+                        kind,
                     });
                 }
                 deliveredChannel = channel;
