@@ -227,5 +227,18 @@
     "lunch": "Lunch",
     "dinner": "Dinner",
     "all": "All"
+  },
+  "loaderDefault": "Loading…",
+  "loadingAria": "Loading",
+  "payment": {
+    "paid": "Paid",
+    "authorised": "Authorised",
+    "pending": "Awaiting payment",
+    "failed": "Payment failed",
+    "cancelled": "Payment cancelled",
+    "expired": "Link expired",
+    "viaChannel": "via {{canale}}",
+    "sentOn": "sent on {{quando}}",
+    "paidOn": "paid on {{quando}}"
   }
 }

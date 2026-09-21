@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 
 interface LoaderProps {
   /** Text shown under the ring. Pass null to render the ring on its own. */
@@ -17,15 +18,20 @@ interface LoaderProps {
  * "working" on its own.
  */
 export const Loader: React.FC<LoaderProps> = ({
-  label = 'Carico…',
+  label,
   size = 48,
   className = '',
-}) => (
+}) => {
+  const { t } = useTranslation('common', { useSuspense: false });
+  /* `undefined` prende il testo di default tradotto; `null` resta l'anello
+     nudo, come prima. */
+  const testo = label === undefined ? t('loaderDefault') : label;
+  return (
   <div
     className={`flex flex-col items-center justify-center gap-3 text-[var(--ds-text-muted)] ${className}`}
     role="status"
     aria-live="polite"
-    aria-label={label ?? 'Caricamento in corso'}
+    aria-label={testo ?? t('loadingAria')}
   >
     <svg
       className="animate-spin"
@@ -43,8 +49,9 @@ export const Loader: React.FC<LoaderProps> = ({
         strokeLinecap="round"
       />
     </svg>
-    {label != null && <span className="text-sm">{label}</span>}
-  </div>
-);
+    {testo != null && <span className="text-sm">{testo}</span>}
+    </div>
+  );
+};
 
 export default Loader;

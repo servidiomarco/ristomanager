@@ -227,5 +227,18 @@
     "lunch": "Pranzo",
     "dinner": "Cena",
     "all": "Tutti"
+  },
+  "loaderDefault": "Carico…",
+  "loadingAria": "Caricamento in corso",
+  "payment": {
+    "paid": "Pagato",
+    "authorised": "Autorizzato",
+    "pending": "In attesa di pagamento",
+    "failed": "Pagamento fallito",
+    "cancelled": "Pagamento annullato",
+    "expired": "Link scaduto",
+    "viaChannel": "via {{canale}}",
+    "sentOn": "inviato il {{quando}}",
+    "paidOn": "pagato il {{quando}}"
   }
 }

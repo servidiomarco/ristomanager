@@ -1138,8 +1138,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               {/* Global meal filter — drives KPI cards, Stato Tavoli, Affluenza, Note, Personale */}
               <div className="basis-full md:basis-auto flex items-center justify-center bg-[var(--ds-surface-row)] rounded-[var(--ds-radius-control)] p-1 gap-0.5">
                 {([
-                  { key: 'LUNCH', label: 'Pranzo', icon: <Sun className="h-4 w-4" /> },
-                  { key: 'DINNER', label: 'Cena', icon: <Sunset className="h-4 w-4" /> },
+                  { key: 'LUNCH', label: t('lunch'), icon: <Sun className="h-4 w-4" /> },
+                  { key: 'DINNER', label: t('dinner'), icon: <Sunset className="h-4 w-4" /> },
                   { key: 'ALL', label: t('all'), icon: null as React.ReactNode },
                 ] as const).map(opt => (
                   <button
@@ -1195,24 +1195,24 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               <LiveTile
                 label={t('inRoom')}
                 value={liveService.seatedGuests}
-                sub={`${liveService.seatedTables} ${liveService.seatedTables === 1 ? 'tavolo' : 'tavoli'}`}
+                sub={t('tableCount', { count: liveService.seatedTables })}
               />
               <LiveTile
                 tone="arriving"
-                label="In arrivo"
+                label={t('arriving')}
                 value={liveService.arriving.length}
-                sub="entro 20 min"
+                sub={t('withinTwentyMin')}
                 dot={<PulseDot dotClass="bg-[var(--ds-arriving-solid)]" pulse={liveService.arriving.length > 0} />}
               />
               <LiveTile
-                label="In uscita"
+                label={t('departing')}
                 value={liveService.departingCount}
-                sub="turnover in vista"
+                sub={t('turnoverAhead')}
               />
               <LiveTile
-                label="Tavoli liberi"
+                label={t('freeTables')}
                 value={`${liveService.freeTables}/${liveService.serviceTables}`}
-                sub="tavoli disponibili"
+                sub={t('tablesAvailable')}
               />
             </div>
           </div>
@@ -1260,7 +1260,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         return (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {/* Ospiti */}
-            <KpiCard title="Ospiti" icon={<UsersIcon className="h-4 w-4" />}>
+            <KpiCard title={t('guests')} icon={<UsersIcon className="h-4 w-4" />}>
               <div className="flex items-baseline gap-2 flex-wrap">
                 <span className={headline}>{guestsTotal}</span>
                 <span className={qualifier}>{t('expectedToday')}</span>
@@ -1277,7 +1277,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             </KpiCard>
 
             {/* Tavoli */}
-            <KpiCard title="Tavoli" icon={<LayoutGrid className="h-4 w-4" />}>
+            <KpiCard title={t('tables')} icon={<LayoutGrid className="h-4 w-4" />}>
               <div className="flex items-baseline gap-2 flex-wrap">
                 <span className={headline}>{tablesShown}</span>
                 <span className={qualifier}>prenotati su {tablesInService}</span>
@@ -1294,7 +1294,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             </KpiCard>
 
             {/* Prenotazioni */}
-            <KpiCard title="Prenotazioni" icon={<Calendar className="h-4 w-4" />} onClick={onNavigateToReservations}>
+            <KpiCard title={t('bookings')} icon={<Calendar className="h-4 w-4" />} onClick={onNavigateToReservations}>
               <div className="flex items-baseline gap-2 flex-wrap">
                 <span className={headline}>{resTotal}</span>
                 <span className={qualifier}>
@@ -1316,7 +1316,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             {/* Stessa icona della voce "Menu & Banchetti" nella barra laterale:
                 la scheda porta lì, e due glifi diversi per la stessa
                 destinazione la fanno sembrare un'altra cosa. */}
-            <KpiCard title="Banchetti" icon={<UtensilsCrossed className="h-4 w-4" />} onClick={onNavigateToBanquets}>
+            <KpiCard title={t('banquets')} icon={<UtensilsCrossed className="h-4 w-4" />} onClick={onNavigateToBanquets}>
               {banquetsShown.length > 0 ? (
                 <>
                   <div className="flex items-baseline gap-2 flex-wrap">
@@ -1387,7 +1387,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           the guard holds. Full editing lives in Prenotazioni. */}
       <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] p-4 sm:p-5 flex flex-col gap-3 min-w-0 xl:flex-1 xl:min-h-0">
         <div className="flex items-center justify-between gap-2">
-          <h2 className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">Da confermare</h2>
+          <h2 className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">{t('toConfirmTitle')}</h2>
           {pendingReservations.length > 0 && (
             <span className="inline-flex items-center justify-center min-w-[28px] h-7 px-2 rounded-[var(--ds-radius-control)] text-[14px] font-semibold tabular-nums bg-[var(--ds-pending-solid)] text-[#ffffff]">
               {pendingReservations.length}
@@ -1410,8 +1410,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               const source = res.source || ReservationSource.MANUAL;
               const channelLabel = source === ReservationSource.WHATSAPP ? 'WhatsApp'
                 : source === ReservationSource.GOOGLE ? 'Google'
-                : source === ReservationSource.VOICE ? 'Agente vocale'
-                : 'Telefono';
+                : source === ReservationSource.VOICE ? t('channelVoice')
+                : t('channelPhone');
               // reservation_time is timestamptz; read it in Europe/Rome or a
               // 20:30 booking renders as its UTC hour.
               const timeLabel = getRomeTimePart(res.reservation_time);
@@ -1437,7 +1437,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                     </p>
                     <p
                       className="text-[13px] text-[var(--ds-text-muted)] truncate"
-                      title={`${dateLabel} · ${timeLabel} · ${res.guests || 0} coperti · ${channelLabel}`}
+                      title={`${dateLabel} · ${timeLabel} · ${t('coversCount', { count: res.guests || 0 })} · ${channelLabel}`}
                     >
                       {dateLabel} · {timeLabel} · {res.guests || 0} coperti · {channelLabel}
                     </p>
@@ -1448,7 +1448,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                     disabled={busy || !onUpdateReservation}
                     onClick={() => handleInlinePending(res, 'decline')}
                     className="flex-shrink-0 h-9 w-9 inline-flex items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] hover:brightness-95 transition-all disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                    aria-label={`Rifiuta la prenotazione di ${toTitleCase(res.customer_name)}`}
+                    aria-label={t('declineBookingOf', { nome: toTitleCase(res.customer_name) })}
                   >
                     <X className="h-4 w-4" aria-hidden />
                   </button>
@@ -1470,7 +1470,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] p-4 sm:p-5 flex flex-col gap-3 min-w-0 xl:flex-1 xl:min-h-0">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
-            Note &amp; allergeni
+            {t('notesAndAllergens')}
           </h2>
           {reservationNotes.length > 0 && (
             <span className="text-[14px] tabular-nums text-[var(--ds-text-muted)]">{reservationNotes.length}</span>
@@ -1602,7 +1602,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 <LayoutGrid className="h-4 w-4" aria-hidden />
               </span>
               <div className="min-w-0">
-                <h2 className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">Stato tavoli</h2>
+                <h2 className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">{t('tablesState')}</h2>
                 <p className="text-[13px] text-[var(--ds-text-muted)] truncate">
                   {busyIds.size} tavoli su {tablesInService} in servizio
                 </p>
@@ -1612,13 +1612,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div className="flex items-baseline gap-2">
                 <span className="tabular text-[30px] sm:text-[34px] leading-none font-bold tracking-[-0.02em] text-[var(--ds-text-primary)]">{dayPct}%</span>
-                <span className="text-[14px] text-[var(--ds-text-muted)]">occupazione giornaliera</span>
+                <span className="text-[14px] text-[var(--ds-text-muted)]">{t('dailyOccupancy')}</span>
               </div>
               <div className="flex items-center gap-2 flex-wrap">
                 {showLunch && (
                   <span className="inline-flex items-center gap-1.5 pl-2 pr-3 h-8 rounded-[var(--ds-radius-control)] text-[13px] font-medium bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]">
                     <Sun className="h-3.5 w-3.5 flex-shrink-0" aria-hidden />
-                    Pranzo {lunchOccupancy}% · {lunchTableIds.size} tavoli
+                    {t('lunch')} {lunchOccupancy}% · {t('tableCount', { count: lunchTableIds.size })}
                   </span>
                 )}
                 {showDinner && (
@@ -1639,9 +1639,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               {/* Named anchors, not just a percentage — "Pieno" means something
                   to a host mid-service in a way that "50%" does not. */}
               <div className="flex justify-between mt-1.5 text-[12px] text-[var(--ds-text-muted)]">
-                <span>Calmo</span>
-                <span>Pieno</span>
-                <span>Sold out</span>
+                <span>{t('quiet')}</span>
+                <span>{t('busy')}</span>
+                <span>{t('soldOut')}</span>
               </div>
             </div>
 
@@ -1689,7 +1689,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               <BarChart3 className="h-4 w-4" aria-hidden />
             </span>
             <div className="min-w-0">
-              <h2 className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">Affluenza</h2>
+              <h2 className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">{t('footfall')}</h2>
               <p className="text-[13px] text-[var(--ds-text-muted)] truncate">
                 Coperti per fascia · {globalShiftFilter === 'LUNCH' ? 'pranzo' : globalShiftFilter === 'DINNER' ? 'cena' : 'entrambi i servizi'}
               </p>
@@ -1697,8 +1697,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           </div>
           <div className="inline-flex p-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] flex-shrink-0">
             {([
-              { key: 'ORARIO', label: 'Orario' },
-              { key: 'SETTIMANA', label: 'Settimana' },
+              { key: 'ORARIO', label: t('byTime') },
+              { key: 'SETTIMANA', label: t('byWeek') },
             ] as const).map(t => (
               <button
                 key={t.key}
@@ -1722,8 +1722,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           const renderService = (shift: 'lunch' | 'dinner') => {
             const isLunch = shift === 'lunch';
             const tone = isLunch
-              ? { wash: 'bg-[var(--ds-pending-tint)]', text: 'text-[var(--ds-pending-text)]', solid: 'var(--ds-pending-solid)', icon: <Sun className="h-3.5 w-3.5" />, label: 'Pranzo' }
-              : { wash: 'bg-[var(--ds-arriving-tint)]', text: 'text-[var(--ds-arriving-text)]', solid: 'var(--ds-arriving-solid)', icon: <Sunset className="h-3.5 w-3.5" />, label: 'Cena' };
+              ? { wash: 'bg-[var(--ds-pending-tint)]', text: 'text-[var(--ds-pending-text)]', solid: 'var(--ds-pending-solid)', icon: <Sun className="h-3.5 w-3.5" />, label: t('lunch') }
+              : { wash: 'bg-[var(--ds-arriving-tint)]', text: 'text-[var(--ds-arriving-text)]', solid: 'var(--ds-arriving-solid)', icon: <Sunset className="h-3.5 w-3.5" />, label: t('dinner') };
 
             const all = timeSlotAffluence.roomTimeSlots;
             if (all.length === 0) return null;
@@ -1762,7 +1762,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                   </span>
                   <h3 className="text-[15px] font-semibold text-[var(--ds-text-primary)]">{tone.label}</h3>
                   <span className={`text-[13px] ${tone.text}`}>
-                    {range} · {serviceTotal} coperti{peak ? ` · picco alle ${peak}` : ''}
+                    {range} · {t('coversCount', { count: serviceTotal })}{peak ? ` · ${t('peakAt', { ora: peak })}` : ''}
                   </span>
                 </div>
 
@@ -1791,14 +1791,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                             </span>
                             <div className="min-w-0">
                               <div className="text-[14px] font-semibold text-[var(--ds-text-primary)] truncate">{room.roomName}</div>
-                              <div className="text-[12px] text-[var(--ds-text-muted)] truncate">max {capOf(room)} coperti</div>
+                              <div className="text-[12px] text-[var(--ds-text-muted)] truncate">{t('maxCovers', { count: capOf(room) })}</div>
                             </div>
                           </div>
                           {slotsOf(room).map(slot => (
                             <div
                               key={slot.time}
                               className="relative flex-1 min-w-[56px] h-11 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] overflow-hidden flex items-center justify-center"
-                              title={`${room.roomName} · ${slot.time} · ${slot.guests} coperti (${slot.percentage}%)`}
+                              title={`${room.roomName} · ${slot.time} · ${t('coversCount', { count: slot.guests })} (${slot.percentage}%)`}
                             >
                               {slot.percentage > 0 && (
                                 <span className="absolute inset-0" style={{ backgroundColor: tone.solid, opacity: intensity(slot.percentage) }} aria-hidden />
@@ -1851,7 +1851,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                       <span className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]">
                         <Sun className="h-3.5 w-3.5" />
                       </span>
-                      <span className="truncate">Totale pranzo</span>
+                      <span className="truncate">{t('lunchTotal')}</span>
                     </span>
                     <span className="tabular text-[17px] font-bold text-[var(--ds-text-primary)] flex-shrink-0">
                       {lunchGuests}<span className="text-[14px] font-normal text-[var(--ds-text-muted)]">/{timeSlotAffluence.lunchTotalCapacity}</span>
@@ -1864,7 +1864,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                       <span className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]">
                         <Sunset className="h-3.5 w-3.5" />
                       </span>
-                      <span className="truncate">Totale cena</span>
+                      <span className="truncate">{t('dinnerTotal')}</span>
                     </span>
                     <span className="tabular text-[17px] font-bold text-[var(--ds-text-primary)] flex-shrink-0">
                       {dinnerGuests}<span className="text-[14px] font-normal text-[var(--ds-text-muted)]">/{timeSlotAffluence.dinnerTotalCapacity}</span>
@@ -1872,7 +1872,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                   </div>
                 )}
                 <div className="rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] p-3 flex items-center justify-between gap-2 min-w-0">
-                  <span className="text-[14px] font-medium truncate">Totale giornata</span>
+                  <span className="text-[14px] font-medium truncate">{t('dayTotal')}</span>
                   <span className="tabular text-[17px] font-bold flex-shrink-0">
                     {shownGuests}<span className="text-[14px] font-normal opacity-60">/{shownCapacity}</span>
                   </span>
@@ -1921,7 +1921,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                     <span className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]">
                       <Sun className="h-3.5 w-3.5" />
                     </span>
-                    <span className="truncate">Totale pranzo (settimana)</span>
+                    <span className="truncate">{t('lunchTotalWeek')}</span>
                   </span>
                   <span className="tabular text-[17px] font-bold text-[var(--ds-text-primary)] flex-shrink-0">
                     {weeklyChartData.reduce((acc, d) => acc + d.guests, 0)}
@@ -1934,7 +1934,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                     <span className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]">
                       <Sunset className="h-3.5 w-3.5" />
                     </span>
-                    <span className="truncate">Totale cena (settimana)</span>
+                    <span className="truncate">{t('dinnerTotalWeek')}</span>
                   </span>
                   <span className="tabular text-[17px] font-bold text-[var(--ds-text-primary)] flex-shrink-0">
                     {weeklyChartData.reduce((acc, d) => acc + d.guests, 0)}
@@ -1992,7 +1992,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             {urgentTasks.length === 0 ? (
               <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-4 py-8 text-center">
                 <CheckCircle2 className="h-7 w-7 text-[var(--ds-seated-solid)] mx-auto mb-2" aria-hidden />
-                <p className="text-[14px] text-[var(--ds-text-muted)]">Tutto sotto controllo</p>
+                <p className="text-[14px] text-[var(--ds-text-muted)]">{t('allUnderControl')}</p>
               </div>
             ) : (
               urgentTasks.map(todo => {
@@ -2050,7 +2050,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] p-4 sm:p-5 flex flex-col gap-3 min-w-0 h-[440px]">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <h2 className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">Spesa</h2>
+              <h2 className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">{t('shopping')}</h2>
               <p className="text-[13px] text-[var(--ds-text-muted)] mt-0.5">{checkedItems} di {totalItems} completati</p>
             </div>
             {onNavigateToShoppingList && (
@@ -2074,7 +2074,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               </p>
               <p className="text-[13px] text-[var(--ds-pending-text)] truncate">
                 {breadEstimate.coperti > 0
-                  ? `${breadEstimate.coperti} coperti · 1 kg ogni 10`
+                  ? t('breadCovers', { count: breadEstimate.coperti })
                   : t('breadHint')}
               </p>
             </div>
@@ -2084,7 +2084,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             {totalItems === 0 ? (
               <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-4 py-8 text-center">
                 <ShoppingCart className="h-7 w-7 text-[var(--ds-text-subtle)] mx-auto mb-2" aria-hidden />
-                <p className="text-[14px] text-[var(--ds-text-muted)]">Lista vuota</p>
+                <p className="text-[14px] text-[var(--ds-text-muted)]">{t('emptyList')}</p>
               </div>
             ) : (
               <>
@@ -2132,11 +2132,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               // ds-select disegna la nostra freccia e le riserva lo spazio:
               // quella nativa restava incollata al bordo della pillola.
               className="flex-shrink-0 h-11 pl-3 pr-0 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[14px] font-medium text-[var(--ds-text-secondary)] cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ds-select ds-select-sm"
-              aria-label="Categoria"
+              aria-label={t('category')}
             >
               <option value="CUCINA">{t('shoppingCategory.CUCINA')}</option>
               <option value="BAR">Bar</option>
-              <option value="ALTRO">Altro</option>
+              <option value="ALTRO">{t('shoppingCategory.ALTRO')}</option>
             </select>
             <button
               type="button"
@@ -2156,7 +2156,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] p-4 sm:p-5 flex flex-col gap-3 min-w-0 h-[440px]">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <h2 className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">Sotto scorta</h2>
+              <h2 className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">{t('lowStockTitle')}</h2>
               <p className="text-[13px] text-[var(--ds-text-muted)] mt-0.5">
                 {lowStockLoading
                   ? t('loading')
@@ -2239,8 +2239,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           const total = data.sala.length + data.cucina.length;
           const isLive = liveShift === shiftKey;
           const tone = isLunch
-            ? { wash: 'bg-[var(--ds-pending-tint)]', text: 'text-[var(--ds-pending-text)]', icon: <Sun className="h-3.5 w-3.5" />, label: 'Pranzo', end: '15:30' }
-            : { wash: 'bg-[var(--ds-arriving-tint)]', text: 'text-[var(--ds-arriving-text)]', icon: <Sunset className="h-3.5 w-3.5" />, label: 'Cena', end: '23:30' };
+            ? { wash: 'bg-[var(--ds-pending-tint)]', text: 'text-[var(--ds-pending-text)]', icon: <Sun className="h-3.5 w-3.5" />, label: t('lunch'), end: '15:30' }
+            : { wash: 'bg-[var(--ds-arriving-tint)]', text: 'text-[var(--ds-arriving-text)]', icon: <Sunset className="h-3.5 w-3.5" />, label: t('dinner'), end: '23:30' };
           const groups = [
             { label: t('roomStaff'), people: data.sala },
             { label: t('kitchenStaff'), people: data.cucina },
@@ -2256,11 +2256,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 {isLive && (
                   <span className="inline-flex items-center gap-1.5 pl-1.5 pr-2.5 h-6 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[12px] font-medium text-[var(--ds-seated-text)]">
                     <PulseDot dotClass="bg-[var(--ds-seated-solid)]" pulse />
-                    in corso
+                    {t('live')}
                   </span>
                 )}
                 <span className={`text-[13px] ${tone.text}`}>
-                  {total} in turno{isLive ? ` · fine ${tone.end}` : ''}
+                  {t('onShiftCount', { count: total })}{isLive ? ` · ${t('endsAt', { ora: tone.end })}` : ''}
                 </span>
               </div>
 
@@ -2310,7 +2310,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               <h2 className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
                 {t('staffOnDuty')}
               </h2>
-              <span className="text-[13px] text-[var(--ds-text-muted)]">{shownTotal} in turno</span>
+              <span className="text-[13px] text-[var(--ds-text-muted)]">{t('onShiftCount', { count: shownTotal })}</span>
             </div>
 
             {staffLoading ? (
@@ -2380,10 +2380,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           const channel = source === ReservationSource.WHATSAPP
             ? { Icon: MessageCircle, label: 'WhatsApp' }
             : source === ReservationSource.GOOGLE
-            ? { Icon: Globe, label: 'Web' }
+            ? { Icon: Globe, label: t('channelWeb') }
             : source === ReservationSource.VOICE
-            ? { Icon: Mic, label: 'Agente vocale' }
-            : { Icon: PhoneIcon, label: 'Telefono' };
+            ? { Icon: Mic, label: t('channelVoice') }
+            : { Icon: PhoneIcon, label: t('channelPhone') };
           const resDate = new Date(res.reservation_time);
           const dateLabel = !Number.isNaN(resDate.getTime())
             ? resDate.toLocaleDateString(displayLocale(), { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric', timeZone: 'Europe/Rome' })
@@ -2401,7 +2401,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               onClick={closeModal}
               role="dialog"
               aria-modal="true"
-              aria-label="Prenotazione da confermare"
+              aria-label={t('pendingBooking')}
             >
               <div className="absolute inset-0 bg-[var(--ds-backdrop)]" />
               <div
@@ -2411,7 +2411,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--ds-border)]">
                   <div className="flex items-center gap-2 min-w-0">
                     <HelpCircle className="h-4 w-4 text-[var(--ds-pending-solid)] flex-shrink-0" aria-hidden />
-                    <h3 className="text-sm font-semibold text-[var(--ds-text-primary)] truncate">Prenotazione da confermare</h3>
+                    <h3 className="text-sm font-semibold text-[var(--ds-text-primary)] truncate">{t('pendingBooking')}</h3>
                     <PaymentBadge reservation={res} />
                   </div>
                   <button
