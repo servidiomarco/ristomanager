@@ -97,7 +97,7 @@ import { useTranslation } from 'react-i18next';
 import { SUPPORTED_LANGUAGES } from './i18n/config';
 import { sortRooms } from './utils/roomOrder';
 import { toTitleCase } from './utils/text';
-import { getRomeDatePart } from './utils/reservationTime';
+import { datePart } from './utils/displayTime';
 
 // Il servizio «di adesso», come lo intende il server (resolveService in
 // server.ts): prima delle 5 siamo ancora nella cena di ieri — la data del
@@ -109,9 +109,9 @@ const currentServiceRome = (at: Date): { date: string; shift: 'LUNCH' | 'DINNER'
   const hour = at.getHours();
   if (hour < 5) {
     const anchor = new Date(at.getTime() - 6 * 3600 * 1000);
-    return { date: getRomeDatePart(anchor), shift: 'DINNER', anchor };
+    return { date: datePart(anchor), shift: 'DINNER', anchor };
   }
-  return { date: getRomeDatePart(at), shift: hour < 17 ? 'LUNCH' : 'DINNER', anchor: at };
+  return { date: datePart(at), shift: hour < 17 ? 'LUNCH' : 'DINNER', anchor: at };
 };
 
 import {
@@ -886,7 +886,7 @@ const App: React.FC = () => {
       const prev = autoServiceRef.current;
       if (next.date === prev.date && next.shift === prev.shift) return;
       autoServiceRef.current = next;
-      setGlobalDate(d => (getRomeDatePart(d) === prev.date ? next.anchor : d));
+      setGlobalDate(d => (datePart(d) === prev.date ? next.anchor : d));
       setGlobalShiftFilter(s => (s === prev.shift ? next.shift : s));
     };
     const timer = window.setInterval(roll, 60_000);
@@ -1434,7 +1434,7 @@ const App: React.FC = () => {
       setIsInitialDataLoading(false);
       return;
     }
-    const windowFrom = getRomeDatePart(new Date(Date.now() - RESERVATIONS_WINDOW_DAYS * 86400000));
+    const windowFrom = datePart(new Date(Date.now() - RESERVATIONS_WINDOW_DAYS * 86400000));
     // Timbro per la soglia del rientro in primo piano (vedi
     // RESUME_REFETCH_MIN_MS): «in volo» copre i due eventi che scattano
     // insieme al ripristino, l'orario di fine il rientro subito dopo.
@@ -3847,7 +3847,7 @@ const App: React.FC = () => {
           onClose={() => setPaletteOpen(false)}
           reservations={reservations}
           onSelectReservation={(res) => {
-            const dateOnly = getRomeDatePart(res.reservation_time);
+            const dateOnly = datePart(res.reservation_time);
             const [y, m, d] = dateOnly.split('-').map(Number);
             if (y && m && d) setGlobalDate(new Date(y, m - 1, d));
             setPendingReservationId(res.id);

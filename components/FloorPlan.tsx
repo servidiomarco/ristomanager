@@ -8,7 +8,7 @@ import { deriveTableDisplayStatus, isSeated, useTableStatusLabel } from './reser
 import { useNow } from '../hooks/useNow';
 import { Loader } from './Loader';
 import { computeAutoLayout } from '../utils/tableLayout';
-import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
+import { datePart, timePart } from '../utils/displayTime';
 import { buildFloorLabels } from '../utils/labelPlacement';
 import { buildBanquetColorClassMap } from '../utils/banquetColors';
 import { BanquetLabel } from './ReservationCard';
@@ -616,7 +616,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   // too expensive to repeat ~50× per render.
   const romeClock = useMemo(() => {
       const now = new Date(nowTick);
-      const todayStr = getRomeDatePart(now);
+      const todayStr = datePart(now);
       const romeNow = now.toLocaleTimeString('it-IT', { timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit', hour12: false });
       const [nowH, nowM] = romeNow.split(':').map(Number);
       const currentTimeValue = nowH * 60 + nowM;
@@ -633,7 +633,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
       const candidates = reservations.filter(r => {
           if (r.table_id !== table.id) return false;
-          if (getRomeDatePart(r.reservation_time) !== todayStr) return false;
+          if (datePart(r.reservation_time) !== todayStr) return false;
           if (r.arrival_status === ArrivalStatus.DEPARTED) return false;
           if (r.reservation_status === ReservationStatus.CANCELLED) return false;
           if (r.reservation_status === ReservationStatus.DECLINED) return false;
@@ -645,7 +645,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
           if (currentActiveShift && r.shift !== currentActiveShift) return false;
 
-          const [h, m] = getRomeTimePart(r.reservation_time).split(':').map(Number);
+          const [h, m] = timePart(r.reservation_time).split(':').map(Number);
           const resTimeValue = h * 60 + m;
 
           // Broad check to display name if reservation is roughly now
@@ -705,7 +705,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     // Check Reservations
     const reservation = getActiveReservation(table);
     if (reservation) {
-        const [h, m] = getRomeTimePart(reservation.reservation_time).split(':').map(Number);
+        const [h, m] = timePart(reservation.reservation_time).split(':').map(Number);
         const resTimeValue = h * 60 + m;
         const nowDate = new Date();
         const [nowH, nowM] = nowDate.toLocaleTimeString('it-IT', { timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit', hour12: false }).split(':').map(Number);

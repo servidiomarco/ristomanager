@@ -9,7 +9,7 @@ import type { Customer } from '../../types';
 import { FormCard, PaneHeader, Sheet, StatusPill } from '../ds';
 import { formatEuro } from './paymentsView';
 import { METHODS, methodLabel, eurToCents, settleMath, settlePayments, nextAmountText } from './settleView';
-import { getRomeTimePart } from '../../utils/reservationTime';
+import { timePart } from '../../utils/displayTime';
 
 /** Chiusura conto: i movimenti di incasso (metodo + importo) e la mancia.
  *  Passa dritto a POST /bills/:id/close come CloseBillPayload. */
@@ -568,7 +568,7 @@ const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
                         ? <span className="text-[13px] text-[var(--ds-critical-text)]">non riuscito</span>
                         : s.status === 'CLAIMED'
                           ? <span className="text-[13px] text-[var(--ds-pending-text)]">sta pagando</span>
-                          : s.paid_at && <span className="text-[13px] text-[var(--ds-text-muted)]">{getRomeTimePart(s.paid_at)}</span>}
+                          : s.paid_at && <span className="text-[13px] text-[var(--ds-text-muted)]">{timePart(s.paid_at)}</span>}
                       <span className={`tabular-nums ${s.status === 'PAID' ? 'text-[var(--ds-text-secondary)]' : 'text-[var(--ds-text-muted)]'}`}>
                         {euro(s.amount_cents)}
                       </span>
@@ -595,7 +595,7 @@ const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
                 >
                   <span className="min-w-0 truncate text-[var(--ds-text-primary)]">{methodLabel(p.method)}</span>
                   <span className="flex flex-shrink-0 items-baseline gap-3">
-                    <span className="text-[13px] text-[var(--ds-text-muted)]">{getRomeTimePart(p.recorded_at)}</span>
+                    <span className="text-[13px] text-[var(--ds-text-muted)]">{timePart(p.recorded_at)}</span>
                     <span className="tabular-nums text-[var(--ds-text-secondary)]">{euro(p.amount_cents)}</span>
                   </span>
                 </li>

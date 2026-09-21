@@ -15,7 +15,7 @@ import {
   type OrderTimelineEvent,
 } from '../services/ordersApiService';
 import { getKitchenServiceSummary, type KitchenServiceSummary } from '../services/apiService';
-import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
+import { datePart, timePart } from '../utils/displayTime';
 import { weightLabel } from './comande/orderView';
 import { chime } from '../utils/chime';
 import { ModalShell, EmptyState, SearchField, SegmentedControl, StatusPill, dsButton } from './ds';
@@ -289,7 +289,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
   // Il banner segue la data/turno globale dell'header: se il cuoco naviga a
   // "Mar 18 Cena" vuole vedere il riepilogo di quel servizio, non di oggi.
   // Con turno "ALL" ripieghiamo sull'inferenza oraria del giorno selezionato.
-  const summaryDate = globalDate ? getRomeDatePart(globalDate) : '';
+  const summaryDate = globalDate ? datePart(globalDate) : '';
   const summaryShift: 'LUNCH' | 'DINNER' =
     globalShiftFilter === 'LUNCH' || globalShiftFilter === 'DINNER'
       ? globalShiftFilter
@@ -995,7 +995,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                                   {aggregate(mine)}
                                 </span>
                                 <span className="flex-shrink-0 tabular-nums text-[var(--ds-text-muted)]">
-                                  {getRomeTimePart(c.served_at)}
+                                  {timePart(c.served_at)}
                                 </span>
                               </div>
                               {[...othersByStation.entries()].map(([sid, its]) => (
@@ -1222,7 +1222,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
               const list = detailGroup.rows.filter(r => r.course_no === no);
               const served = list.every(r => r.status === 'SERVED');
               const state = served
-                ? `servita${(() => { const at = list.reduce<string | null>((max, r) => (r.served_at && (!max || r.served_at > max) ? r.served_at : max), null); return at ? ` ${getRomeTimePart(at)}` : ''; })()}`
+                ? `servita${(() => { const at = list.reduce<string | null>((max, r) => (r.served_at && (!max || r.served_at > max) ? r.served_at : max), null); return at ? ` ${timePart(at)}` : ''; })()}`
                 : list.every(r => r.status === 'QUEUED') ? 'in coda'
                 : list.every(r => r.status === 'READY' || r.status === 'SERVED') ? 'pronta'
                 : 'in lavorazione';
@@ -1426,7 +1426,7 @@ const OrderCard: React.FC<{
             {/* L'ora in cui il tavolo ha aperto: il primo fatto del binario. */}
             {g.openedAt && (
               <span className="ml-auto text-[14px] tabular-nums text-[var(--ds-text-muted)]">
-                {getRomeTimePart(g.openedAt)}
+                {timePart(g.openedAt)}
               </span>
             )}
           </div>
@@ -1875,7 +1875,7 @@ const PassiveSection: React.FC<{
           </span>
           <span className="ml-auto flex-shrink-0 tabular-nums text-[var(--ds-text-muted)]">
             {served
-              ? `servita${servedAt ? ` ${getRomeTimePart(servedAt)}` : ''}`
+              ? `servita${servedAt ? ` ${timePart(servedAt)}` : ''}`
               : queued ? 'in coda' : 'altre partite'}
           </span>
           <ChevronRight
@@ -2145,7 +2145,7 @@ const TimelinePane: React.FC<{
               <div className="flex items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3.5 py-2.5">
                 <span className="min-w-0 flex-1 text-[14px] leading-snug text-[var(--ds-text-primary)]">{label(e)}</span>
                 <span className="flex-shrink-0 text-[16px] font-semibold tabular-nums tracking-[-0.01em] text-[var(--ds-text-primary)]">
-                  {getRomeTimePart(e.at)}
+                  {timePart(e.at)}
                 </span>
               </div>
             </li>

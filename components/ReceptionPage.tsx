@@ -32,7 +32,7 @@ import {
   X as XIcon
 } from 'lucide-react';
 import { updateReservation, createReservation, swapReservationTables } from '../services/apiService';
-import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
+import { datePart, timePart } from '../utils/displayTime';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
 import { useTranslation } from 'react-i18next';
 import { PulseDot, getReservationState, getTimedReservationState, isSeated, deriveTableDisplayStatus, useTableStatusLabel } from './reservationState';
@@ -57,7 +57,7 @@ const formatLocalDate = (d: Date): string => {
 
 const parseReservationTime = (iso: string): Date => new Date(iso);
 
-const formatHHMM = (iso: string): string => getRomeTimePart(iso) || '—';
+const formatHHMM = (iso: string): string => timePart(iso) || '—';
 
 const formatPhone = (phone?: string): string => {
   if (!phone) return '';
@@ -141,7 +141,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
   const todayReservations = useMemo(() => {
     const dateStr = formatLocalDate(globalDate);
     return reservations
-      .filter(r => getRomeDatePart(r.reservation_time) === dateStr)
+      .filter(r => datePart(r.reservation_time) === dateStr)
       .filter(r => r.reservation_status !== ReservationStatus.CANCELLED && r.reservation_status !== ReservationStatus.DECLINED)
       .filter(r => globalShiftFilter === 'ALL' || r.shift === globalShiftFilter)
       .sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));

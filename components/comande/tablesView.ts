@@ -1,6 +1,6 @@
 import type { CourseStatus, Reservation, Table, TableMerge } from '../../types';
 import { ArrivalStatus, ReservationStatus } from '../../types';
-import { getRomeDatePart, getRomeTimePart } from '../../utils/reservationTime';
+import { datePart, timePart } from '../../utils/displayTime';
 import { ordinal } from '../../utils/courses';
 import { COURSE_BADGE, euro } from './orderView';
 import type { OpenOrderSummary } from '../../services/ordersApiService';
@@ -120,7 +120,7 @@ export const tableNameLine = (row: TableRow): string =>
  *  sala, e non chiede di sapere che giorno la griglia sta mostrando. */
 export const staleOrderLabel = (order: OpenOrderSummary): string => {
   if (!order.service_date) return 'appesa';
-  const today = getRomeDatePart(new Date());
+  const today = datePart(new Date());
   if (order.service_date === today) return order.shift === 'DINNER' ? 'appesa da stasera' : 'appesa da pranzo';
   const y = new Date(`${today}T12:00:00Z`);
   y.setUTCDate(y.getUTCDate() - 1);
@@ -151,7 +151,7 @@ export const tableStatusLine = (row: TableRow): string => {
     return money ? `${money} · ${what}` : what;
   }
   if (row.state === 'booked' && row.reservation) {
-    return getRomeTimePart(row.reservation.reservation_time);
+    return timePart(row.reservation.reservation_time);
   }
   return 'libero';
 };
@@ -197,7 +197,7 @@ export const makeReservationForTable = (
   mergeGroups: Map<string, number[]>,
 ) => (id: number): Reservation | null => {
   const isLive = (r: Reservation): boolean =>
-    getRomeDatePart(r.reservation_time) === dateRome
+    datePart(r.reservation_time) === dateRome
     && (shiftFilter === 'ALL' || r.shift === shiftFilter)
     && r.reservation_status !== ReservationStatus.CANCELLED
     && r.arrival_status !== ArrivalStatus.DEPARTED;

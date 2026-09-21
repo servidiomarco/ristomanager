@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { User, UserRole, ViewState, LoginCredentials } from '../types';
 import { authApiService } from '../services/authApiService';
+import { setSessionTimeZone } from '../utils/displayTime';
 import { completeOnboarding as apiCompleteOnboarding } from '../services/apiService';
 import { socketClient } from '../services/socketClient';
 import { syncPushSubscription, detachPushSubscription } from '../services/pushClient';
@@ -96,11 +97,25 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+/* Il fuso del ristorante prima del primo render.
+ *
+ * L'effetto qui sotto lo aggiorna a ogni cambio di utente, ma un effetto gira
+ * DOPO il mount dei figli: al rientro con una sessione già valida le prime
+ * date verrebbero formattate su Roma e poi non si aggiornerebbero, perché i
+ * formatter non sono reattivi. Il profilo sta in localStorage e si legge
+ * sincrono, quindi qui il fuso è già quello giusto. */
+setSessionTimeZone(authApiService.getUser()?.tenant?.timezone ?? null);
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [permissions, setPermissions] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showSessionExpiredModal, setShowSessionExpiredModal] = useState(false);
+
+  // Login, «Entra» del platform admin, logout: il fuso segue l'utente.
+  useEffect(() => {
+    setSessionTimeZone(user?.tenant?.timezone ?? null);
+  }, [user?.tenant?.timezone]);
 
   // Check for existing auth on mount
   useEffect(() => {

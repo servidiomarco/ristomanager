@@ -4,7 +4,7 @@ import type { Customer, Dish, RestaurantMenu, OrderItem, OrderWithItems, Reserva
 import { ArrivalStatus, PaymentStatus, ReservationSource, ReservationStatus } from '../../types';
 import type { CashSessionView, CashTransactionsView } from '../../types';
 import { Shift } from '../../types';
-import { getRomeDatePart } from '../../utils/reservationTime';
+import { datePart } from '../../utils/displayTime';
 import { signedModifierLabel, signedModifierDelta } from '../../utils/modifierScale';
 import { getTableMerges } from '../../services/apiService';
 import {
@@ -226,7 +226,7 @@ export const CassaPage: React.FC<CassaPageProps> = ({
   );
   const [variantFor, setVariantFor] = useState<Dish | null>(null);
 
-  const selectedDateRome = useMemo(() => getRomeDatePart(globalDate), [globalDate]);
+  const selectedDateRome = useMemo(() => datePart(globalDate), [globalDate]);
 
   const serviceFilter = useMemo(() => ({
     service_date: selectedDateRome,
@@ -535,7 +535,7 @@ export const CassaPage: React.FC<CassaPageProps> = ({
     setScreen('queue');
   }, []);
 
-  const isTodayRome = selectedDateRome === getRomeDatePart(new Date());
+  const isTodayRome = selectedDateRome === datePart(new Date());
 
   /* ── Il tavolo aperto ────────────────────────────────────────────────── */
 

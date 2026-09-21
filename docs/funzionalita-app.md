@@ -660,6 +660,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-21 | Funzionalità trasversali | Un ristorante con un fuso orario diverso da quello italiano vede ora le proprie date e ore in tutta l app: liste, pianta, cassa, report e messaggi al cliente seguono l orologio del locale. |
 | 2026-09-21 | Sala & Tavoli; Messaggi | Con la lingua inglese parlano inglese la pianta della sala (strumenti, chiusure, legenda, avvisi di sovrapposizione) e la pagina Messaggi (lista, conversazione, allegati, proposta dell agente). |
 | 2026-09-21 | Prenotazioni | Con la lingua inglese la pagina Prenotazioni è in inglese: la lista e le sue righe, la mappa dei tavoli con la legenda, il modal in tre passi, il conto al tavolo, il foglio di conferma, l'email libera e i pannelli degli avvisi. |
 | 2026-09-21 | Funzionalità trasversali | Lo spinner di caricamento dice la stessa cosa in tutta l'applicazione (prima tre grafie diverse) e segue la lingua scelta anche nelle schede che non sono ancora tradotte. |

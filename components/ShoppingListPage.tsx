@@ -3,7 +3,7 @@ import { useShopping } from '../contexts/ShoppingContext';
 import { ShoppingItem, ShoppingCategory, ShoppingUnit } from '../services/shoppingApiService';
 import { Reservation, BanquetMenu, ReservationStatus } from '../types';
 import { printShoppingList, shareShoppingList } from '../utils/printShoppingList';
-import { getRomeDatePart } from '../utils/reservationTime';
+import { datePart } from '../utils/displayTime';
 import { SupplierManagementModal } from './SupplierManagementModal';
 import { ShoppingCart, Printer, Trash2, X, ListChecks, Send, Share2, Check } from 'lucide-react';
 import { SkeletonTaskList } from './SkeletonCards';
@@ -113,7 +113,7 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
   const breadEstimate = useMemo(() => {
     const reservationGuests = (reservations || [])
       .filter(r =>
-        getRomeDatePart(r.reservation_time) === todayStr &&
+        datePart(r.reservation_time) === todayStr &&
         r.reservation_status !== ReservationStatus.CANCELLED &&
         r.reservation_status !== ReservationStatus.DECLINED,
       )

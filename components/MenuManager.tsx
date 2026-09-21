@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { Dish, RestaurantMenu, BanquetMenu, BanquetCourse, BanquetStatus, Shift, COMMON_ALLERGENS, VAT_RATES, Customer, Table, TableMerge, Reservation, ArrivalStatus, ReservationStatus, Room } from '../types';
 import { Plus, Search, Tag, Tags, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, LayoutGrid, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat, Info, RefreshCw, QrCode, Copy, Languages, Layers, SlidersHorizontal, Share2, MessageCircle, Martini, IceCreamCone, Wine, Wand2, DoorClosed } from 'lucide-react';
 import { resizeImageToDataUrl } from '../utils/resizeImage';
-import { getRomeDatePart } from '../utils/reservationTime';
+import { datePart } from '../utils/displayTime';
 import { printBanquet } from '../utils/printBanquet';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { BanquetCompositionModal } from './BanquetCompositionModal';
@@ -1430,7 +1430,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       if ((r.arrival_status || ArrivalStatus.WAITING) === ArrivalStatus.DEPARTED) continue;
       if (r.reservation_status === ReservationStatus.CANCELLED) continue;
       if (r.reservation_status === ReservationStatus.DECLINED) continue;
-      if (getRomeDatePart(r.reservation_time) !== date) continue;
+      if (datePart(r.reservation_time) !== date) continue;
       if (!map.has(r.table_id)) {
         map.set(r.table_id, { source: 'reservation', label: r.customer_name });
       }
