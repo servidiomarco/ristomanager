@@ -54,6 +54,29 @@ export function dialCodeForCountry(countryCode: string | null | undefined): stri
 }
 
 /** Un fuso che Intl non riconosce manderebbe in eccezione ogni formattazione. */
+/* Il fuso dentro una stringa SQL.
+ *
+ * `AT TIME ZONE` vuole un literal, e i tre helper che lo usano (SERVICE_OF,
+ * SHIFT_OF, LOCAL_DAY) compongono SQL per concatenazione: un parametro $n
+ * sposterebbe la numerazione di ogni query che li contiene. Quindi il fuso si
+ * interpola — e allora deve essere impossibile che ci arrivi qualcosa che non
+ * è un fuso.
+ *
+ * Due sbarramenti invece di uno: la forma (i nomi IANA sono lettere, cifre,
+ * '/', '_', '+' e '-', niente apici né spazi) e Intl, che conosce l'elenco
+ * vero. Quello che non passa entrambi diventa Europe/Rome, che è dove
+ * l'applicazione ha sempre vissuto.
+ */
+const IANA_SHAPE = /^[A-Za-z0-9_+\-]+(?:\/[A-Za-z0-9_+\-]+)*$/;
+
+export function sqlTimeZone(tz: string | null | undefined): string {
+    const value = String(tz ?? '').trim();
+    if (!IANA_SHAPE.test(value) || !isValidTimeZone(value)) {
+        return `'${DEFAULT_TENANT_LOCALE.timezone}'`;
+    }
+    return `'${value}'`;
+}
+
 export function isValidTimeZone(tz: string | null | undefined): boolean {
     const value = String(tz ?? '').trim();
     if (!value) return false;

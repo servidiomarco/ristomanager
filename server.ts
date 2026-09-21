@@ -30,7 +30,7 @@ import { createServer as createHttpsServer, type Server as HttpsServer } from 'h
 import { startSalaNodeReplica } from './services/salaNodeReplica.js';
 import { VOICE_CHANNEL, WHATSAPP_CHANNEL, type ToolOutcome } from './services/bookingTools.js';
 import { TENANT_FEATURES, getTenantFeatures, isFeatureEnabledForTenant, invalidateTenantFeaturesCache, clearTenantFeaturesCache, type TenantFeature } from './services/entitlements.js';
-import { clearTenantLocaleCache, getTenantLocale } from './services/tenantLocale.js';
+import { clearTenantLocaleCache, getTenantLocale, sqlTimeZone } from './services/tenantLocale.js';
 import { normalizePhoneE164 } from './utils/phone.js';
 import { provisionTenant, ProvisioningError } from './services/tenantProvisioning.js';
 import {
@@ -33933,12 +33933,16 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
 //
 // Espressione unica per non farla divergere fra le query — stessa regola di
 // resolveService(): sotto le 5 si è ancora nella cena di ieri, 5–16 pranzo.
-const SERVICE_OF = (col: string) => `
-    CASE WHEN EXTRACT(hour FROM (${col} AT TIME ZONE 'Europe/Rome')) < ${SERVICE_DAY_START_HOUR}
-         THEN ((${col} AT TIME ZONE 'Europe/Rome') - INTERVAL '1 day')::date
-         ELSE (${col} AT TIME ZONE 'Europe/Rome')::date END`;
-const SHIFT_OF = (col: string) => `
-    CASE WHEN EXTRACT(hour FROM (${col} AT TIME ZONE 'Europe/Rome')) BETWEEN ${SERVICE_DAY_START_HOUR} AND ${DINNER_START_HOUR - 1}
+// Il fuso è un parametro con Roma per default: le chiamate che non lo passano
+// generano SQL byte-identico a prima, e un tenant estero lo passerà quando la
+// sua pagina saprà chi è. sqlTimeZone() garantisce che ci arrivi un fuso vero.
+const ROME_TZ = sqlTimeZone('Europe/Rome');
+const SERVICE_OF = (col: string, tz: string = ROME_TZ) => `
+    CASE WHEN EXTRACT(hour FROM (${col} AT TIME ZONE ${tz})) < ${SERVICE_DAY_START_HOUR}
+         THEN ((${col} AT TIME ZONE ${tz}) - INTERVAL '1 day')::date
+         ELSE (${col} AT TIME ZONE ${tz})::date END`;
+const SHIFT_OF = (col: string, tz: string = ROME_TZ) => `
+    CASE WHEN EXTRACT(hour FROM (${col} AT TIME ZONE ${tz})) BETWEEN ${SERVICE_DAY_START_HOUR} AND ${DINNER_START_HOUR - 1}
          THEN 'LUNCH' ELSE 'DINNER' END`;
 
 // OMAGGIO e SOSPESO chiudono un conto ma non portano un euro nel cassetto:
@@ -34386,7 +34390,9 @@ const parseReportRange = (req: any, res: any): { from: string; to: string; prevF
     return { from, to, prevFrom: addDaysIso(prevTo, -(days - 1)), prevTo, days };
 };
 
-const ROME_DAY = (col: string) => `(${col} AT TIME ZONE 'Europe/Rome')::date`;
+// Il giorno locale di un istante. Il nome resta ROME_DAY perché è quello che
+// le venti query che lo usano leggono, ma il fuso ora si può passare.
+const ROME_DAY = (col: string, tz: string = ROME_TZ) => `(${col} AT TIME ZONE ${tz})::date`;
 
 app.get('/reports/reservations', authenticate, requireReportsAccess, async (req, res) => {
     try {
