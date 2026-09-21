@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { MessageCircle, Send, Loader2, RefreshCw, AlertTriangle, CheckCircle2, Clock, ArrowRight, Check, CalendarPlus, Paperclip, X as XIcon, Wand2, FolderOpen } from 'lucide-react';
 import { Loader } from './Loader';
 import { SkeletonInboxList } from './SkeletonCards';
@@ -85,6 +86,7 @@ const channelTone = (channel: MessageChannel): PillTone =>
  *  dietro autenticazione: si scarica dal backend e si mostra da un object URL,
  *  revocato allo smontaggio per non tenersi i blob in memoria. */
 const MediaAttachment: React.FC<{ messageId: number; index: number; media: MessageMedia }> = ({ messageId, index, media }) => {
+  const { t: tv } = useTranslation('messaggi', { useSuspense: false });
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const type = media.content_type || '';
@@ -109,7 +111,7 @@ const MediaAttachment: React.FC<{ messageId: number; index: number; media: Messa
   }, [messageId, index]);
 
   if (failed) {
-    return <p className="text-[13px] italic opacity-70">Allegato non disponibile</p>;
+    return <p className="text-[13px] italic opacity-70">{tv('attachmentUnavailable')}</p>;
   }
   if (!url) {
     return <div className="h-32 w-44 animate-pulse rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)]" />;
@@ -125,19 +127,19 @@ const MediaAttachment: React.FC<{ messageId: number; index: number; media: Messa
   if (isVideo) return <video controls src={url} className="max-h-64 rounded-[var(--ds-radius)]" />;
   return (
     <a href={url} download target="_blank" rel="noopener noreferrer" className="text-[14px] underline">
-      Scarica allegato
+      {tv('downloadAttachment')}
     </a>
   );
 };
 
 // Delivery state on an outbound bubble. The bubble is already filled, so these
 // ride on currentColor rather than a second colour fighting the fill.
-const statusIcon = (m: InboxMessage) => {
+const statusIcon = (m: InboxMessage, tv: (k: string) => string) => {
   if (m.direction !== 'outbound') return null;
   const s = (m.status || '').toLowerCase();
-  if (s === 'delivered' || s === 'read') return <CheckCircle2 className="h-3.5 w-3.5" aria-label="Consegnato" />;
-  if (s === 'failed' || s === 'undelivered') return <AlertTriangle className="h-3.5 w-3.5" aria-label="Non consegnato" />;
-  return <Clock className="h-3.5 w-3.5" aria-label="In invio" />;
+  if (s === 'delivered' || s === 'read') return <CheckCircle2 className="h-3.5 w-3.5" aria-label={tv('delivered')} />;
+  if (s === 'failed' || s === 'undelivered') return <AlertTriangle className="h-3.5 w-3.5" aria-label={tv('notDelivered')} />;
+  return <Clock className="h-3.5 w-3.5" aria-label={tv('sending')} />;
 };
 
 const displayName = (c: ConversationSummary): string =>
@@ -150,12 +152,12 @@ const displayName = (c: ConversationSummary): string =>
 // storici a 9 cifre (caso Pisciotta 2026-09-18).
 const lastTen = (s: string | null | undefined): string => phoneMatchKey(s);
 
-const reservationStatusPill = (status: string | null | undefined): { label: string; tone: PillTone } | null => {
+const reservationStatusPill = (status: string | null | undefined, tv: (k: string) => string): { label: string; tone: PillTone } | null => {
   switch (status) {
-    case 'CONFIRMED': return { label: 'Confermata', tone: 'positive' };
-    case 'PENDING': return { label: 'In attesa', tone: 'pending' };
-    case 'CANCELLED': return { label: 'Annullata', tone: 'critical' };
-    case 'DECLINED': return { label: 'Rifiutata', tone: 'critical' };
+    case 'CONFIRMED': return { label: tv('status.confirmed'), tone: 'positive' };
+    case 'PENDING': return { label: tv('status.pending'), tone: 'pending' };
+    case 'CANCELLED': return { label: tv('status.cancelled'), tone: 'critical' };
+    case 'DECLINED': return { label: tv('status.declined'), tone: 'critical' };
     default: return status ? { label: status, tone: 'neutral' } : null;
   }
 };
@@ -199,6 +201,7 @@ interface InboxPageProps {
 }
 
 const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, onOpenReservation, refreshTick, reservations }) => {
+  const { t: tv } = useTranslation('messaggi', { useSuspense: false });
   // Riparte dall'ultimo stato noto (cache modulo-level): la pagina viene
   // smontata a ogni cambio vista, e senza questo ogni rientro mostrava lo
   // spinner per dati visti dieci secondi prima. Il fetch parte comunque e
@@ -271,7 +274,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
       const { conversations } = await messagesApiService.listConversations();
       setConversations(conversations);
     } catch (err: any) {
-      setConvError(err?.message || 'Errore caricamento conversazioni');
+      setConvError(err?.message || tv('loadListError'));
     } finally {
       setConvLoading(false);
     }
@@ -329,7 +332,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
         .catch(() => {});
     } catch (err: any) {
       if (selectedKeyRef.current === phoneDigits) {
-        setMsgError(err?.message || 'Errore caricamento conversazione');
+        setMsgError(err?.message || tv('loadOneError'));
       }
     } finally {
       if (selectedKeyRef.current === phoneDigits) setMsgLoading(false);
@@ -443,7 +446,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
       // invio fallisca solo perche' il canale era su SMS.
       setPreferredChannel('whatsapp');
     } catch (err: any) {
-      setSendError(err?.message || 'Caricamento allegato non riuscito');
+      setSendError(err?.message || tv('attachmentLoadError'));
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -476,10 +479,10 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
         setComposerText(r.reply);
         composerRef.current?.focus();
       } else if (!r.proposal) {
-        setSendError(r.reason || 'Nessun suggerimento: rispondi tu.');
+        setSendError(r.reason || tv('noSuggestion'));
       }
     } catch (err: any) {
-      setSendError(err?.data?.message || err?.message || 'Suggerimento non riuscito');
+      setSendError(err?.data?.message || err?.message || tv('suggestionFailed'));
     } finally {
       setSuggesting(false);
     }
@@ -532,10 +535,10 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
         setProposal(null);
         loadConversations();
       } else {
-        setSendError(r.result?.message || 'Il gestionale ha rifiutato la modifica');
+        setSendError(r.result?.message || tv('tillRejected'));
       }
     } catch (err: any) {
-      setSendError(err?.data?.message || err?.message || 'Esecuzione non riuscita');
+      setSendError(err?.data?.message || err?.message || tv('executionFailed'));
     } finally {
       setProposalBusy(false);
     }
@@ -551,7 +554,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
       const { files } = await listMedia();
       setLibreria(files);
     } catch (err: any) {
-      setSendError(err?.data?.error || 'Libreria non caricata');
+      setSendError(err?.data?.error || tv('libraryLoadFailed'));
       setLibreria([]);
     }
   }, [libreria]);
@@ -565,7 +568,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
       setPreferredChannel('whatsapp');
       setLibreriaAperta(false);
     } catch (err: any) {
-      setSendError(err?.data?.error || 'Allegato non preparato');
+      setSendError(err?.data?.error || tv('attachmentNotReady'));
     } finally {
       setUploading(false);
     }
@@ -597,7 +600,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
     } catch (err: any) {
       const data = (err as any)?.data;
       if (data?.error === 'window_closed' && preferredChannel === 'whatsapp') {
-        setSendError('Finestra 24h WhatsApp chiusa. Passa a SMS o attendi che il cliente scriva.');
+        setSendError(tv('whatsappWindowClosed'));
       } else {
         setSendError(err?.message || 'Invio fallito');
       }
@@ -670,13 +673,13 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
         key={c.phone_digits}
         hint={hint}
         left={unread > 0 ? {
-          label: 'Letto',
+          label: tv('markRead'),
           tone: 'confirm',
           icon: <Check className="h-4 w-4" aria-hidden />,
           onAction: () => markConversationRead(c.phone_digits),
         } : undefined}
         right={{
-          label: 'Rispondi',
+          label: tv('reply'),
           tone: 'primary',
           icon: <ArrowRight className="h-4 w-4" aria-hidden />,
           onAction: () => setSelectedKey(c.phone_digits),
@@ -729,19 +732,19 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
         <div className="space-y-3">
           {/* No visible page title: the sidebar and the mobile switcher both
               name this screen, and both already carry the unread count. */}
-          <h2 className="sr-only">Messaggi{totalUnread > 0 ? `, ${totalUnread} non letti` : ''}</h2>
+          <h2 className="sr-only">{tv('title')}{totalUnread > 0 ? `, ${tv('unreadCount', { count: totalUnread })}` : ''}</h2>
           <div className="flex items-center gap-2">
             <SearchField
               className="min-w-0 flex-1"
               value={searchQuery}
               onChange={setSearchQuery}
-              placeholder="Cerca nome o numero…"
+              placeholder={tv('searchPlaceholder')}
             />
             <button
               onClick={() => { setConvLoading(true); loadConversations(); }}
               className={dsIconButton}
-              title="Aggiorna"
-              aria-label="Aggiorna"
+              title={tv('refresh')}
+              aria-label={tv('refresh')}
             >
               <RefreshCw className="h-4 w-4" />
             </button>
@@ -755,7 +758,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
           <Callout tone="critical" icon={AlertTriangle}>{convError}</Callout>
         ) : conversations.length === 0 ? (
           <EmptyState icon={MessageCircle}>
-            Nessuna conversazione. I messaggi in arrivo appariranno qui.
+            {tv('emptyList')}
           </EmptyState>
         ) : filteredConversations.length === 0 ? (
           <EmptyState icon={MessageCircle}>
@@ -765,7 +768,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
           <div className="space-y-1">
             {replyQueue.length > 0 && (
               <>
-                <SectionHeader tone="positive">Da rispondere</SectionHeader>
+                <SectionHeader tone="positive">{tv('tabToAnswer')}</SectionHeader>
                 <div className="space-y-2 pb-2">
                   {replyQueue.map((c, i) => renderConversation(c, swipeHint && i === 0))}
                 </div>
@@ -773,7 +776,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
             )}
             {restOfInbox.length > 0 && (
               <>
-                <SectionHeader>Tutti i messaggi</SectionHeader>
+                <SectionHeader>{tv('tabAll')}</SectionHeader>
                 <div className="space-y-2">
                   {restOfInbox.map((c, i) => renderConversation(c, swipeHint && replyQueue.length === 0 && i === 0))}
                 </div>
@@ -784,7 +787,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
       }
       detail={
         !selected ? (
-          <PanePlaceholder icon={MessageCircle}>Seleziona una conversazione dalla lista</PanePlaceholder>
+          <PanePlaceholder icon={MessageCircle}>{tv('pickConversation')}</PanePlaceholder>
         ) : (
           <>
             <PaneHeader
@@ -818,7 +821,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                         className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] border border-[var(--ds-border)] px-3.5 text-[13px] font-semibold text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                       >
                         <ArrowRight className="h-4 w-4" aria-hidden />
-                        <span className="hidden sm:inline">Prenotazioni</span>
+                        <span className="hidden sm:inline">{tv('bookings')}</span>
                         <CountBadge count={reservationsForPhone.length} />
                       </button>
                       {resMenuOpen && (
@@ -830,7 +833,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                             className="absolute right-0 z-50 mt-1.5 max-h-[60vh] w-[19rem] max-w-[85vw] overflow-y-auto rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] p-1.5 shadow-lg"
                           >
                             {reservationsForPhone.map(res => {
-                              const badge = reservationStatusPill(res.reservation_status ?? null);
+                              const badge = reservationStatusPill(res.reservation_status ?? null, tv);
                               return (
                                 <button
                                   key={res.id}
@@ -863,7 +866,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                       className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     >
                       {suggesting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <CalendarPlus className="h-4 w-4" aria-hidden />}
-                      <span className="hidden sm:inline">Crea prenotazione</span>
+                      <span className="hidden sm:inline">{tv('createBooking')}</span>
                     </button>
                   )}
                 </div>
@@ -878,7 +881,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                 <Callout tone="critical" icon={AlertTriangle}>{msgError}</Callout>
               ) : messages.length === 0 ? (
                 <p className="mt-8 text-center text-[14px] text-[var(--ds-text-muted)]">
-                  Nessun messaggio ancora.
+                  {tv('noMessagesYet')}
                 </p>
               ) : (
                 <div className="mx-auto max-w-3xl space-y-4">
@@ -915,7 +918,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                               )}
                               <div className={`mt-1 flex items-center justify-end gap-1.5 text-[12px] ${outbound ? 'text-white/75' : 'text-[var(--ds-text-muted)]'}`}>
                                 <span className="tabular-nums">{formatTime(m.sent_at)}</span>
-                                {statusIcon(m)}
+                                {statusIcon(m, tv)}
                                 <span className={`rounded-[var(--ds-radius-control)] px-1.5 text-[11px] ${outbound ? 'bg-white/20' : 'bg-[var(--ds-surface-row)]'}`}>
                                   {m.channel === 'whatsapp' ? 'WA' : 'SMS'}
                                 </span>
@@ -943,7 +946,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                         onClick={() => setPreferredChannel('sms')}
                         className="whitespace-nowrap font-semibold underline underline-offset-4 hover:no-underline"
                       >
-                        Passa a SMS
+                        {tv('switchToSms')}
                       </button>
                     }
                   >
@@ -999,11 +1002,11 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                       <Wand2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-[var(--ds-text-secondary)]" aria-hidden />
                       <div className="min-w-0 flex-1">
                         <p className="text-[13px] font-semibold text-[var(--ds-text-primary)]">
-                          L'agente propone un'azione sulla prenotazione
+                          {tv('agentProposal')}
                         </p>
                         <p className="mt-0.5 text-[14px] text-[var(--ds-text-primary)]">{proposal.summary}</p>
                         <p className="mt-1 text-[12px] text-[var(--ds-text-muted)]">
-                          Niente è ancora cambiato: controlla e conferma tu.
+                          {tv('nothingChangedYet')}
                         </p>
                         <div className="mt-2.5 flex flex-wrap items-center gap-2">
                           <button
@@ -1013,7 +1016,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                             className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                           >
                             {proposalBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                            Conferma ed esegui
+                            {tv('confirmAndRun')}
                           </button>
                           <button
                             type="button"
@@ -1036,7 +1039,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                   <SegmentedControl
                     value={preferredChannel}
                     onChange={next => setPreferredChannel(next)}
-                    ariaLabel="Canale di invio"
+                    ariaLabel={tv('sendChannel')}
                     equalWidth={false}
                     size="sm"
                     options={[
@@ -1087,8 +1090,8 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                       type="button"
                       onClick={handleSuggest}
                       disabled={suggesting || sending}
-                      aria-label="Suggerisci una risposta"
-                      title="Proponi una risposta in base alla conversazione e alle regole della casa"
+                      aria-label={tv('suggestReply')}
+                      title={tv('suggestReplyHint')}
                       className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     >
                       {suggesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
@@ -1098,8 +1101,8 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={uploading || sending}
-                    aria-label="Allega un file"
-                    title="Allega foto, PDF o audio (solo WhatsApp)"
+                    aria-label={tv('attachFile')}
+                    title={tv('attachFileHint')}
                     className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
                     {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
@@ -1108,8 +1111,8 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                     type="button"
                     onClick={handleApriLibreria}
                     disabled={uploading || sending}
-                    aria-label="Allega un file dalla libreria"
-                    title="Allega un file già caricato (menù, piantina…)"
+                    aria-label={tv('attachFromLibrary')}
+                    title={tv('attachFromLibraryHint')}
                     className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
                     <FolderOpen className="h-4 w-4" />
@@ -1121,7 +1124,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                     onKeyDown={handleComposerKeyDown}
                     placeholder={preferredChannel === 'whatsapp' && !waWindowOpen
                       ? 'Finestra chiusa — passa a SMS'
-                      : 'Scrivi un messaggio…'}
+                      : tv('composerPlaceholder')}
                     rows={1}
                     disabled={preferredChannel === 'whatsapp' && !waWindowOpen}
                     className="max-h-40 min-w-0 flex-1 resize-none border-0 bg-transparent px-3 py-2 text-[15px] leading-snug text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] focus:outline-none disabled:opacity-60"
@@ -1129,7 +1132,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                   <button
                     onClick={handleSend}
                     disabled={(!composerText.trim() && attachments.length === 0) || sending || uploading || (preferredChannel === 'whatsapp' && !waWindowOpen)}
-                    aria-label="Invia messaggio"
+                    aria-label={tv('sendMessage')}
                     className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-white transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:cursor-not-allowed disabled:bg-[var(--ds-surface-row)] disabled:text-[var(--ds-text-subtle)] ${
                       preferredChannel === 'whatsapp'
                         ? 'bg-[var(--ds-seated-solid)] hover:brightness-95 active:scale-95'
@@ -1141,7 +1144,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                   </div>
                 </div>
                 <p className="px-1 text-[12px] text-[var(--ds-text-muted)]">
-                  Invio con <kbd className="rounded bg-[var(--ds-surface-row)] px-1.5 py-0.5 font-mono text-[11px]">Enter</kbd>, a capo con <kbd className="rounded bg-[var(--ds-surface-row)] px-1.5 py-0.5 font-mono text-[11px]">Shift+Enter</kbd>
+                  {tv('sendWith')} <kbd className="rounded bg-[var(--ds-surface-row)] px-1.5 py-0.5 font-mono text-[11px]">Enter</kbd>{tv('newLineWith')} <kbd className="rounded bg-[var(--ds-surface-row)] px-1.5 py-0.5 font-mono text-[11px]">Shift+Enter</kbd>
                 </p>
               </div>
             </div>
