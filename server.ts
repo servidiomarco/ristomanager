@@ -195,7 +195,7 @@ import {
 } from './services/reviewRequests.js';
 import { clampModifierN, signedModifierLabel, signedModifierDelta } from './utils/modifierScale.js';
 import { BAR_COURSE_NO, DESSERT_COURSE_NO, isOffSequenceCourse } from './utils/courses.js';
-import { getRomeDatePart, getRomeTimePart } from './utils/reservationTime.js';
+import { getRomeDatePart, getRomeTimePart, getTimePartInTz } from './utils/reservationTime.js';
 import { buildEReceiptPayload, buildFatturaPaXml, getFiscalDriver, type FiscalSeller, type InvoiceBuyer } from './services/fiscalService.js';
 import {
     getAvailableSlots,
@@ -13106,9 +13106,9 @@ const BREAD_AUTO_KIND = 'BREAD_DAILY';
 const BREAD_TARGET_TZ = 'Europe/Rome';
 const BREAD_TRIGGER_HOUR = 20;
 
-const getItalianDateParts = (date: Date): { year: string; month: string; day: string; hour: string; minute: string } => {
+const getItalianDateParts = (date: Date, tz: string = BREAD_TARGET_TZ): { year: string; month: string; day: string; hour: string; minute: string } => {
     const fmt = new Intl.DateTimeFormat('en-CA', {
-        timeZone: BREAD_TARGET_TZ,
+        timeZone: tz,
         year: 'numeric', month: '2-digit', day: '2-digit',
         hour: '2-digit', minute: '2-digit', hour12: false,
     });
@@ -13607,8 +13607,11 @@ const WEEKDAY_CODES = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
 //   - the reminder didn't already fire today
 // The "already fired today" check is what protects against re-firing at
 // every 5-min tick after the trigger hour.
-function isReminderDue(r: ReminderRow, now: Date): boolean {
-    const { year, month, day, hour, minute } = getItalianDateParts(now);
+function isReminderDue(r: ReminderRow, now: Date, tz: string = BREAD_TARGET_TZ): boolean {
+    /* «È l'ora?» si decide sull'orologio del ristorante: un promemoria alle
+       20:00 deve suonare alle 20:00 di Londra per un locale londinese, non
+       alle 20:00 di Roma. Il fuso arriva dal tenant della riga. */
+    const { year, month, day, hour, minute } = getItalianDateParts(now, tz);
     const todayIso = `${year}-${month}-${day}`;
     const [schedH, schedM] = r.schedule_time.split(':').map(x => parseInt(x, 10));
     if (!Number.isFinite(schedH) || !Number.isFinite(schedM)) return false;
@@ -13619,7 +13622,7 @@ function isReminderDue(r: ReminderRow, now: Date): boolean {
     // Compare last_run_at as YYYY-MM-DD in Italian time — a fire earlier
     // today (from a previous tick) means "already done".
     if (r.last_run_at) {
-        const lastParts = getItalianDateParts(r.last_run_at);
+        const lastParts = getItalianDateParts(r.last_run_at, tz);
         if (`${lastParts.year}-${lastParts.month}-${lastParts.day}` === todayIso) return false;
     }
 
@@ -13672,8 +13675,18 @@ const startRemindersScheduler = () => {
                  WHERE active = TRUE`
             );
             const now = new Date();
+            // Un giro a getTenantLocale per tenant, non per riga: la cache ha
+            // TTL 60s e un ristorante ha in genere più promemoria.
+            const fusi = new Map<number, string>();
+            const fusoDi = async (tenantId: number): Promise<string> => {
+                const cached = fusi.get(tenantId);
+                if (cached) return cached;
+                const tz = (await getTenantLocale(tenantId)).timezone;
+                fusi.set(tenantId, tz);
+                return tz;
+            };
             for (const row of result.rows as ReminderRow[]) {
-                if (!isReminderDue(row, now)) continue;
+                if (!isReminderDue(row, now, await fusoDi(row.tenant_id))) continue;
                 try {
                     await fireReminder(row);
                     await queryWithRetry(
@@ -13890,20 +13903,20 @@ async function getGooglePlaceId(tenantId: number): Promise<string | null> {
     }
 }
 
-const romeMinutesOfDay = (d: Date): number => {
-    const [h, m] = getRomeTimePart(d).split(':').map(Number);
+const romeMinutesOfDay = (d: Date, tz: string = 'Europe/Rome'): number => {
+    const [h, m] = getTimePartInTz(d, tz).split(':').map(Number);
     return h * 60 + m;
 };
 
 // Quando la riga diventa eleggibile, dato il timing del tenant. La visita
 // finisce a reservation_time + durata (esplicita o default per turno).
-function reviewRequestEligibleAt(visitEnd: Date, settings: ReviewRequestSettings): Date {
+function reviewRequestEligibleAt(visitEnd: Date, settings: ReviewRequestSettings, tz: string = 'Europe/Rome'): Date {
     if (settings.timing === 'immediate') return visitEnd;
     if (settings.timing === 'delay') return new Date(visitEnd.getTime() + settings.delayHours * 3600_000);
-    // next_morning: le 10:30 (Roma) del giorno dopo la fine visita —
-    // dall'istante di fine si va a mezzanotte di Roma e si sommano 10:30.
-    // Un eventuale scarto DST di un'ora lo assorbe la finestra d'invio.
-    const minutes = romeMinutesOfDay(visitEnd);
+    // next_morning: le 10:30 del giorno dopo la fine visita, sull'orologio del
+    // ristorante — dall'istante di fine si va a mezzanotte locale e si sommano
+    // 10:30. Un eventuale scarto DST di un'ora lo assorbe la finestra d'invio.
+    const minutes = romeMinutesOfDay(visitEnd, tz);
     return new Date(visitEnd.getTime() + (24 * 60 - minutes + REVIEW_REQUEST_NEXT_MORNING_MIN) * 60_000);
 }
 
@@ -13911,10 +13924,10 @@ const startReviewRequestScheduler = () => {
     const tick = async () => {
         try {
             const now = new Date();
-            // Fuori dalla finestra d'invio non si valuta niente: le righe
-            // restano NULL e il primo giro dentro la finestra le riprende.
-            const nowMin = romeMinutesOfDay(now);
-            if (nowMin < REVIEW_REQUEST_WINDOW_START_MIN || nowMin > REVIEW_REQUEST_WINDOW_END_MIN) return;
+            /* La finestra d'invio si valuta per tenant, non una volta per tick:
+               era un return globale sull'orologio di Roma, e un ristorante a
+               Londra o a Dubai si vedeva fermare gli invii negli orari
+               sbagliati — o svegliare i clienti. Il filtro sta nel loop. */
 
             // Nessun filtro tenant, di proposito (come gli altri tick): ogni
             // riga porta il suo tenant_id. Lookback 3 giorni: al primo deploy
@@ -13935,7 +13948,7 @@ const startReviewRequestScheduler = () => {
             if (result.rows.length === 0) return;
 
             // Guardie e impostazioni per tenant, calcolate una volta per giro.
-            const tenantGate = new Map<number, { ok: boolean; settings: ReviewRequestSettings; placeId: string | null }>();
+            const tenantGate = new Map<number, { ok: boolean; settings: ReviewRequestSettings; placeId: string | null; tz: string }>();
             const gateFor = async (tenantId: number) => {
                 let gate = tenantGate.get(tenantId);
                 if (!gate) {
@@ -13943,7 +13956,8 @@ const startReviewRequestScheduler = () => {
                         && await getFeatureFlag(tenantId, 'review_requests_enabled', false);
                     const placeId = enabled ? await getGooglePlaceId(tenantId) : null;
                     const settings = enabled ? await getReviewRequestSettings(tenantId) : { ...REVIEW_REQUEST_DEFAULTS };
-                    gate = { ok: enabled && !!placeId, settings, placeId };
+                    const tz = (await getTenantLocale(tenantId)).timezone;
+                    gate = { ok: enabled && !!placeId, settings, placeId, tz };
                     // Identità fresca prima di comporre i messaggi del tenant.
                     if (gate.ok) await refreshBusinessIdentity(tenantId).catch(() => {});
                     tenantGate.set(tenantId, gate);
@@ -13956,7 +13970,12 @@ const startReviewRequestScheduler = () => {
                 const gate = await gateFor(tenantId);
                 if (!gate.ok) continue;
 
-                const eligibleAt = reviewRequestEligibleAt(new Date(row.visit_end), gate.settings);
+                // Fuori dalla finestra d'invio di QUESTO ristorante la riga
+                // resta NULL: la riprende il primo giro dentro la finestra.
+                const nowMin = romeMinutesOfDay(now, gate.tz);
+                if (nowMin < REVIEW_REQUEST_WINDOW_START_MIN || nowMin > REVIEW_REQUEST_WINDOW_END_MIN) continue;
+
+                const eligibleAt = reviewRequestEligibleAt(new Date(row.visit_end), gate.settings, gate.tz);
                 if (now < eligibleAt) continue;
 
                 const phone = String(row.phone || '').trim();
