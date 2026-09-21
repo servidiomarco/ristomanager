@@ -215,7 +215,7 @@
     "roomClosed": "Sala «{{nome}}» chiusa",
     "roomReopened": "Sala «{{nome}}» riaperta"
   },
-  "loading": "Caricamento...",
+  "loading": "Caricamento…",
   "role": {
     "PLATFORM_ADMIN": "Admin piattaforma",
     "OWNER": "Proprietario",
@@ -228,7 +228,6 @@
     "dinner": "Cena",
     "all": "Tutti"
   },
-  "loaderDefault": "Carico…",
   "loadingAria": "Caricamento in corso",
   "payment": {
     "paid": "Pagato",

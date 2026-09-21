@@ -282,7 +282,7 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
 
             {loading ? (
               <div className="flex items-center justify-center py-8 text-[var(--ds-text-subtle)]">
-                <Loader label="Caricamento…" size={40} />
+                <Loader size={40} />
               </div>
             ) : payments.length === 0 ? (
               <p className="text-sm text-[var(--ds-text-subtle)] italic text-center py-6 bg-[var(--ds-surface-row)] rounded-[var(--ds-radius)] border border-dashed border-[var(--ds-border)]">

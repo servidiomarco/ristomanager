@@ -314,7 +314,7 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
         </div>
       ) : loading && logs.length === 0 ? (
         <div className="p-8 text-center">
-          <Loader label="Caricamento…" size={40} />
+          <Loader size={40} />
         </div>
       ) : logs.length === 0 ? (
         <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-6 py-12 text-center text-[14px] text-[var(--ds-text-muted)] shadow-[var(--ds-shadow-card)]">

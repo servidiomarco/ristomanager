@@ -49,7 +49,6 @@
   "breadKg": "Pane {{kg}} kg",
   "breadNoBooking": "Pane — nessuna prenotazione",
   "breadHint": "Si aggiorna in base alle prenotazioni",
-  "loading": "Caricamento…",
   "stockAllFine": "Tutte le scorte sono in regola",
   "nobodyOnShift": "Nessuno in turno",
   "staffOnDuty": "Personale in servizio",
@@ -142,5 +141,9 @@
     "free": "Libera",
     "assign": "Assegna",
     "confirm": "Conferma"
-  }
+  },
+  "itemsUnderThreshold_one": "{{count}} articolo sotto soglia",
+  "itemsUnderThreshold_other": "{{count}} articoli sotto soglia",
+  "outOfStockCount_one": "{{count}} esaurito",
+  "outOfStockCount_other": "{{count}} esauriti"
 }

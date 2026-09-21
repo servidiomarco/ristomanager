@@ -270,7 +270,7 @@ export const ScheduledClosuresManager: React.FC<Props> = ({ showToast }) => {
 
             {loading ? (
                 <div className="flex items-center justify-center py-8 text-[var(--ds-text-muted)]">
-                    <Loader label="Caricamento..." />
+                    <Loader />
                 </div>
             ) : rows.length === 0 ? (
                 <div className="text-center py-8 text-sm text-[var(--ds-text-muted)]">

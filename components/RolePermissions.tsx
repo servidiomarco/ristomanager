@@ -199,7 +199,7 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
     >
       {loading ? (
         <div className="flex items-center justify-center py-12">
-          <Loader label="Caricamento…" size={40} />
+          <Loader size={40} />
         </div>
       ) : error ? (
         <div role="alert" className="rounded-[var(--ds-radius)] bg-[var(--ds-critical-tint)] px-4 py-3 text-[14px] text-[var(--ds-critical-text)]">

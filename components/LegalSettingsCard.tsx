@@ -374,7 +374,7 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
 
       <div className="px-4 pb-4 pt-1 border-t border-[var(--ds-border)]">
         {loading ? (
-          <div className="py-10 flex justify-center"><Loader label={t('loading')} size={40} /></div>
+          <div className="py-10 flex justify-center"><Loader size={40} /></div>
         ) : (
           <>
             {!canEdit && (

@@ -127,7 +127,7 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
   if (loading || !flags || !config) {
     return (
       <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] px-4 py-3 flex items-center gap-2 text-[13px] text-[var(--ds-text-muted)]">
-        <Loader2 className="h-4 w-4 animate-spin" /> {t('loading')}
+        <Loader2 className="h-4 w-4 animate-spin" /> {t('common:loading')}
       </div>
     );
   }

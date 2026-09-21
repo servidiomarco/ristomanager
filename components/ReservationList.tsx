@@ -5994,7 +5994,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
                           {billLoading && !bill && (
                             <div className="flex items-center gap-2 text-[13px] text-[var(--ds-text-muted)]">
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" /> {tv('payments.loading')}
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" /> {tv('common:loading')}
                             </div>
                           )}
 

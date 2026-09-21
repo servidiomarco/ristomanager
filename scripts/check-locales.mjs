@@ -119,8 +119,9 @@ for (const t of attributiRotti) errori.push(`${t}: chiamata dentro un attributo 
  * definizione vince e t('priority') torna un oggetto. Il typecheck non vede
  * nulla in nessuno dei due casi.
  *
- * Si controllano solo i file che dichiarano una namespace sola: dove ce ne
- * sono due il prefisso «ns:» decide, e non vale la pena inseguirlo.
+ * Si controllano i file che dichiarano una namespace sola. Una chiave scritta
+ * «common:loading» va cercata in common qualunque sia la namespace del file:
+ * è il modo di leggere un testo condiviso senza averne una copia per vista.
  */
 const chiaviMancanti = [];
 const scansiona = (dir) => {
@@ -131,17 +132,27 @@ const scansiona = (dir) => {
         const testo = fs.readFileSync(p, 'utf8');
         const ns = [...new Set([...testo.matchAll(/useTranslation\(\s*'([\w-]+)'/g)].map(m => m[1]))];
         if (ns.length !== 1) continue;
-        const file = path.join(BASE, RIFERIMENTO, `${ns[0]}.json`);
-        if (!fs.existsSync(file)) continue;
-        const dizionario = JSON.parse(fs.readFileSync(file, 'utf8'));
-        const valore = (chiave) => chiave.split('.').reduce((o, k) => (o == null ? undefined : o[k]), dizionario);
-        for (const m of testo.matchAll(/\bt\(\s*'([\w.]+)'/g)) {
-            const chiave = m[1];
+        const dizionarioDi = (nome) => {
+            const file = path.join(BASE, RIFERIMENTO, `${nome}.json`);
+            return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : null;
+        };
+        if (!dizionarioDi(ns[0])) continue;
+        const valore = (chiave, nome) => {
+            const d = dizionarioDi(nome);
+            return d ? chiave.split('.').reduce((o, k) => (o == null ? undefined : o[k]), d) : undefined;
+        };
+        // `t` e i suoi alias: dove `t` era già preso da un'altra variabile la
+        // traduzione si chiama `tr` o `tv`. Niente `\w*`: matcherebbe toggle().
+        for (const m of testo.matchAll(/\b(?:t|tr|tv)\(\s*'([\w.]+|[\w-]+:[\w.]+)'/g)) {
+            const grezza = m[1];
+            const conPrefisso = grezza.includes(':');
+            const nome = conPrefisso ? grezza.split(':')[0] : ns[0];
+            const chiave = conPrefisso ? grezza.split(':').slice(1).join(':') : grezza;
             // Una chiave al plurale non esiste da sola: vale per le sue due forme.
-            const v = valore(chiave) ?? valore(`${chiave}_other`);
+            const v = valore(chiave, nome) ?? valore(`${chiave}_other`, nome);
             const riga = testo.slice(0, m.index).split('\n').length;
-            if (v === undefined) chiaviMancanti.push(`${p}:${riga}: "${chiave}" non esiste in ${ns[0]}.json`);
-            else if (typeof v !== 'string') chiaviMancanti.push(`${p}:${riga}: "${chiave}" in ${ns[0]}.json è una mappa, non una stringa`);
+            if (v === undefined) chiaviMancanti.push(`${p}:${riga}: "${chiave}" non esiste in ${nome}.json`);
+            else if (typeof v !== 'string') chiaviMancanti.push(`${p}:${riga}: "${chiave}" in ${nome}.json è una mappa, non una stringa`);
         }
     }
 };

@@ -7,7 +7,7 @@
     "langGroupAria": "Lingua"
   },
   "notFound": "Documento non trovato. Controlla il link o chiedi al ristorante.",
-  "loadingAria": "Carico",
+  "loadingAria": "Caricamento in corso",
   "vatLabel": "P.IVA {{vat}}",
   "docType": {
     "proforma": "Proforma — non è un documento fiscale",

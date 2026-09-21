@@ -10,7 +10,7 @@
     "title": "Preventivo non trovato",
     "hint": "Il link potrebbe essere incompleto. Chiedi al ristorante di inviartelo di nuovo."
   },
-  "loadingAria": "Caricamento",
+  "loadingAria": "Caricamento in corso",
   "status": {
     "quote": "Preventivo",
     "confirmed": "Confermato"
