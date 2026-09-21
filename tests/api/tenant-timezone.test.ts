@@ -298,3 +298,117 @@ describe('fuso per tenant — leggere l\'orologio del ristorante', () => {
         expect(getDatePartInTz(istante, 'Europe/Atlantide')).toBe('2027-01-16');
     });
 });
+
+/* I confini della scrittura.
+ *
+ * Il client manda un orario da calendario — «20:30 del 15 gennaio», senza
+ * fuso — e la colonna è timestamptz: Postgres lo interpreta nel fuso della
+ * SESSIONE, che db.ts fissa a Europe/Rome. Per il Frantoio è giusto per
+ * costruzione; per un ristorante londinese sarebbe un'ora sbagliata.
+ *
+ * Questi test fissano i quattro confini che contano: mezzanotte, i due cambi
+ * d'ora, e la differenza fra un orario naive (da interpretare) e un istante
+ * già determinato (da non toccare).
+ */
+describe('fuso per tenant — i confini della scrittura', () => {
+    const ADMIN_HEADER = { 'X-Platform-Admin-Token': 'test-platform-token' };
+    const SLUG = 'londra-scritture-tz';
+    const EMAIL = 'owner.scritture.tz@example.com';
+    let db: Client;
+    let londraId = 0;
+    let londraToken = '';
+    let roma = '';
+
+    const creaPrenotazione = async (token: string, quando: string) => {
+        const res = await api().post('/reservations').set(bearer(token)).send({
+            customer_name: 'Confine Fuso',
+            phone: '+390000000011',
+            guests: 2,
+            reservation_time: quando,
+            shift: 'DINNER',
+        });
+        expect(res.status).toBe(201);
+        return Number(res.body.id);
+    };
+
+    /** L'ora di calendario come la vede il ristorante, letta dal database. */
+    const oraLocale = async (id: number, tz: string) => {
+        const r = await db.query(
+            `SELECT to_char(reservation_time AT TIME ZONE $2, 'YYYY-MM-DD HH24:MI') AS locale FROM reservations WHERE id = $1`,
+            [id, tz]
+        );
+        return String(r.rows[0].locale);
+    };
+
+    beforeAll(async () => {
+        roma = await ownerToken();
+        db = new Client({ connectionString: process.env.DATABASE_URL || 'postgresql://localhost/ristotest_api' });
+        await db.connect();
+
+        const creato = await api().post('/admin/tenants').set(ADMIN_HEADER).send({
+            slug: SLUG, name: 'Mill Writes', timezone: 'Europe/London',
+            owner_email: EMAIL, owner_full_name: 'Writes Owner',
+        });
+        expect(creato.status).toBe(201);
+        londraId = Number(creato.body.tenant?.id ?? creato.body.id);
+        await db.query('UPDATE tenants SET timezone = $1 WHERE id = $2', ['Europe/London', londraId]);
+        const login = await api().post('/auth/login').send({
+            email: EMAIL, password: String(creato.body.owner_temp_password),
+        });
+        expect(login.status).toBe(200);
+        londraToken = login.body.accessToken;
+    });
+
+    afterAll(async () => {
+        if (!db) return;
+        try {
+            await db.query(`DELETE FROM reservations WHERE customer_name = 'Confine Fuso'`);
+            for (const t of ['activity_logs', 'user_sessions', 'app_settings', 'tenant_tokens', 'users', 'tenant_features', 'role_permissions']) {
+                await db.query(`DELETE FROM ${t} WHERE tenant_id = $1`, [londraId]).catch(() => {});
+            }
+            await db.query('DELETE FROM tenants WHERE id = $1', [londraId]);
+        } finally {
+            await db.end();
+        }
+    });
+
+    it('il tenant romano: mezzanotte e mezza resta mezzanotte e mezza', async () => {
+        const id = await creaPrenotazione(roma, '2027-01-16T00:30:00');
+        expect(await oraLocale(id, 'Europe/Rome')).toBe('2027-01-16 00:30');
+    });
+
+    it('il tenant romano: il cambio ora di marzo non sposta la sera', async () => {
+        // 2027: l'ora legale in Europa scatta il 28 marzo. Una cena il 28 alle
+        // 21:00 è dopo il salto, una il 27 è prima: entrambe devono restare
+        // l'ora che il cameriere ha scritto.
+        const prima = await creaPrenotazione(roma, '2027-03-27T21:00:00');
+        const dopo = await creaPrenotazione(roma, '2027-03-28T21:00:00');
+        expect(await oraLocale(prima, 'Europe/Rome')).toBe('2027-03-27 21:00');
+        expect(await oraLocale(dopo, 'Europe/Rome')).toBe('2027-03-28 21:00');
+    });
+
+    it('il tenant romano: il cambio ora di ottobre non sposta la sera', async () => {
+        // 2027: si torna all'ora solare il 31 ottobre.
+        const prima = await creaPrenotazione(roma, '2027-10-30T21:00:00');
+        const dopo = await creaPrenotazione(roma, '2027-10-31T21:00:00');
+        expect(await oraLocale(prima, 'Europe/Rome')).toBe('2027-10-30 21:00');
+        expect(await oraLocale(dopo, 'Europe/Rome')).toBe('2027-10-31 21:00');
+    });
+
+    it('un istante già determinato non viene reinterpretato', async () => {
+        // Con la Z la stringa NON è un orario da calendario: è un istante.
+        // Va salvato com'è, qualunque sia il fuso del ristorante.
+        const id = await creaPrenotazione(roma, '2027-01-15T19:30:00.000Z');
+        expect(await oraLocale(id, 'UTC')).toBe('2027-01-15 19:30');
+    });
+
+    it('il tenant londinese: le 20:30 sono le 20:30 di Londra', async () => {
+        const id = await creaPrenotazione(londraToken, '2027-01-15T20:30:00');
+        expect(await oraLocale(id, 'Europe/London')).toBe('2027-01-15 20:30');
+    });
+
+    it('il tenant londinese: anche in luglio, con gli offset invertiti', async () => {
+        const id = await creaPrenotazione(londraToken, '2027-07-15T20:30:00');
+        expect(await oraLocale(id, 'Europe/London')).toBe('2027-07-15 20:30');
+    });
+});

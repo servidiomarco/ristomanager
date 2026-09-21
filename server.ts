@@ -2281,9 +2281,36 @@ app.get('/reservations', authenticate, requirePermission('reservations:view'), a
     }
 });
 
+/* Un orario di prenotazione, scritto nel fuso giusto.
+ *
+ * Il client manda un orario da CALENDARIO — «20:30 del 15 gennaio», senza
+ * fuso — e la colonna è timestamptz: passandolo così, Postgres lo interpreta
+ * nel fuso della sessione, che db.ts fissa a Europe/Rome. Per il Frantoio è
+ * corretto per costruzione; per un ristorante londinese sarebbero le 20:30 di
+ * Roma, cioè le 19:30 sue. Un'ora di anticipo su ogni prenotazione.
+ *
+ * Ma non tutte le stringhe sono orari da calendario: quelle con `Z` o con un
+ * offset sono ISTANTI già determinati (li mandano i canali automatici), e
+ * reinterpretarle le sposterebbe. Quindi il cast si decide dalla forma:
+ *
+ *   '2027-01-15T20:30:00'       naive    → l'orologio del ristorante
+ *   '2027-01-15T19:30:00.000Z'  istante  → così com'è
+ *
+ * Restituisce il frammento SQL per quel parametro: il numero dei parametri
+ * non cambia, quindi nessuna query va rinumerata.
+ */
+const HA_FUSO = /(?:Z|[+-]\d{2}:?\d{2})$/;
+
+const reservationTimeSql = (valore: unknown, n: number, tz: string): string => {
+    const grezzo = typeof valore === 'string' ? valore.trim() : '';
+    if (!grezzo || HA_FUSO.test(grezzo)) return `$${n}::timestamptz`;
+    return `($${n}::timestamp AT TIME ZONE ${tz})`;
+};
+
 app.post('/reservations', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
         const { customer_name, reservation_time, shift, guests, children, table_id, notes, note_selections, email, phone, payment_status, arrival_status, reservation_status, duration_minutes, consent_marketing, consent_data_health, banquet_menu_id } = req.body;
+        const TZ = sqlTimeZone((await getTenantLocale(req.tenantId!)).timezone);
         const childrenCount = Math.max(0, Math.min(Number(children) || 0, Number(guests) || 0));
         const noteSelectionsJson = sanitizeNoteSelections(note_selections);
         // GDPR consents (optional). Stamp consent_updated_at whenever the client
@@ -2390,7 +2417,7 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
             const insRes = await txClient.query(
             `WITH ins AS (
                 INSERT INTO reservations (customer_name, reservation_time, shift, guests, children, table_id, notes, email, phone, payment_status, arrival_status, reservation_status, duration_minutes, created_by_user_id, consent_marketing, consent_data_health, consent_updated_at, note_selections, tenant_id, banquet_menu_id)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18::jsonb, $19, $20)
+                VALUES ($1, ${reservationTimeSql(reservation_time, 2, TZ)}, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18::jsonb, $19, $20)
                 RETURNING *
             )
             SELECT ins.*, u.full_name AS created_by_user_name,
@@ -2519,6 +2546,7 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
 app.put('/reservations/:id', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
         const { id } = req.params;
+        const TZ = sqlTimeZone((await getTenantLocale(req.tenantId!)).timezone);
         const { customer_name, reservation_time, shift, guests, children, table_id, notes, note_selections, email, phone, payment_status, arrival_status, reservation_status, duration_minutes, consent_marketing, consent_data_health, banquet_menu_id } = req.body;
         // Consents are non-destructive: only touched when the client sends an
         // explicit boolean. Missing → keep the stored value (COALESCE).
@@ -2597,7 +2625,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                 FROM reservations WHERE id = $14 AND tenant_id = $18
             ), upd AS (
                 UPDATE reservations
-                SET customer_name = $1, reservation_time = $2, shift = $3, guests = $4, children = $5, table_id = $6, notes = $7, email = $8, phone = $9, payment_status = $10, arrival_status = $11, reservation_status = $12, duration_minutes = $13,
+                SET customer_name = $1, reservation_time = ${reservationTimeSql(reservation_time, 2, TZ)}, shift = $3, guests = $4, children = $5, table_id = $6, notes = $7, email = $8, phone = $9, payment_status = $10, arrival_status = $11, reservation_status = $12, duration_minutes = $13,
                     consent_marketing = COALESCE($15, consent_marketing),
                     consent_data_health = COALESCE($16, consent_data_health),
                     consent_updated_at = CASE WHEN ($15 IS NOT NULL OR $16 IS NOT NULL) THEN CURRENT_TIMESTAMP ELSE consent_updated_at END,
@@ -19615,7 +19643,8 @@ async function processWhatsAppBooking(phoneNumber: string, messageText: string) 
             const insRes = await txClient.query(
             // Canale WhatsApp inbound: niente JWT, la prenotazione nasce sul
             // tenant pubblico come il resto del flusso webhook.
-            'INSERT INTO reservations (customer_name, reservation_time, shift, guests, phone, payment_status, arrival_status, reservation_status, tenant_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *',
+            `INSERT INTO reservations (customer_name, reservation_time, shift, guests, phone, payment_status, arrival_status, reservation_status, tenant_id)
+                 VALUES ($1, ($2::timestamp AT TIME ZONE ${sqlTimeZone((await getTenantLocale(PUBLIC_TENANT_ID)).timezone)}), $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
             [
                 name,
                 `${date}T${time}`,
