@@ -155,3 +155,102 @@ describe('fuso per tenant — caratterizzazione', () => {
         expect((await getTenantLocale(tenantId)).currency).toBe('GBP');
     });
 });
+
+/* Il fuso in azione: lo stesso istante cade in due giorni diversi.
+ *
+ * 23:30 UTC del 15 gennaio è mezzanotte e mezza del 16 a Roma (UTC+1 in
+ * inverno) e le 23:30 del 15 a Londra (UTC+0). Un report che raggruppa per
+ * giorno locale deve quindi contarla in giorni diversi nei due tenant — è la
+ * prova che il fuso non è più quello del server.
+ */
+describe('fuso per tenant — il giorno locale segue il ristorante', () => {
+    const SLUG_LONDRA = 'londra-report-tz';
+    const EMAIL = 'owner.londra.tz@example.com';
+    const ADMIN_HEADER = { 'X-Platform-Admin-Token': 'test-platform-token' };
+    // 23:30Z del 15/01: giorno 16 a Roma, giorno 15 a Londra.
+    const ISTANTE = '2027-01-15T23:30:00.000Z';
+    const RANGE = { from: '2027-01-10', to: '2027-01-20' };
+
+    let db: Client;
+    let londraId = 0;
+    let londraToken = '';
+    let ownerRoma = '';
+
+    beforeAll(async () => {
+        ownerRoma = await ownerToken();
+        db = new Client({ connectionString: process.env.DATABASE_URL || 'postgresql://localhost/ristotest_api' });
+        await db.connect();
+
+        const creato = await api().post('/admin/tenants').set(ADMIN_HEADER).send({
+            slug: SLUG_LONDRA,
+            name: 'The Old Mill',
+            timezone: 'Europe/London',
+            owner_email: EMAIL,
+            owner_full_name: 'London Owner',
+        });
+        expect(creato.status).toBe(201);
+        londraId = Number(creato.body.tenant?.id ?? creato.body.id);
+        expect(londraId).toBeGreaterThan(0);
+        // La password temporanea esce solo da questa risposta, come in produzione.
+        const PASSWORD = String(creato.body.owner_temp_password);
+
+        // Il provisioning può non propagare il fuso: quello che conta qui è
+        // che la colonna sia Europe/London quando la query lo legge.
+        await db.query('UPDATE tenants SET timezone = $1 WHERE id = $2', ['Europe/London', londraId]);
+
+        /* La Reportistica è dietro un'allowlist di email più il permesso
+           reports:view; l'owner londinese non è nell'allowlist, quindi gli si
+           dà il permesso come farebbe il titolare dalla pagina Utenti. */
+        await db.query(
+            `INSERT INTO role_permissions (tenant_id, role, permission)
+             VALUES ($1, 'OWNER', 'reports:view')
+             ON CONFLICT DO NOTHING`,
+            [londraId]
+        );
+
+        const login = await api().post('/auth/login').send({ email: EMAIL, password: PASSWORD });
+        expect(login.status).toBe(200);
+        londraToken = login.body.accessToken;
+
+        // La stessa prenotazione, lo stesso istante, nei due tenant.
+        for (const tid of [1, londraId]) {
+            await db.query(
+                `INSERT INTO reservations (tenant_id, customer_name, phone, guests, reservation_time, shift, payment_status, reservation_status)
+                 VALUES ($1, 'Mezzanotte Fuso', '+390000000009', 2, $2::timestamptz, 'DINNER', 'NONE', 'CONFIRMED')`,
+                [tid, ISTANTE]
+            );
+        }
+    });
+
+    afterAll(async () => {
+        if (!db) return;
+        try {
+            await db.query(`DELETE FROM reservations WHERE customer_name = 'Mezzanotte Fuso'`);
+            // Il provisioning lascia dietro di sé righe con FK sul tenant:
+            // vanno via prima, o la DELETE finale viola il vincolo.
+            for (const tabella of ['activity_logs', 'user_sessions', 'app_settings', 'tenant_tokens', 'users', 'tenant_features']) {
+                await db.query(`DELETE FROM ${tabella} WHERE tenant_id = $1`, [londraId]).catch(() => {});
+            }
+            await db.query('DELETE FROM tenants WHERE id = $1', [londraId]);
+        } finally {
+            await db.end();
+        }
+    });
+
+    it('il report del tenant romano la conta il 16, quello londinese il 15', async () => {
+        const roma = await api().get('/reports/reservations').query(RANGE).set(bearer(ownerRoma));
+        expect(roma.status).toBe(200);
+        const londra = await api().get('/reports/reservations').query(RANGE).set(bearer(londraToken));
+        expect(londra.status).toBe(200);
+
+        const giornoCon = (body: any, nome: string) => {
+            const serie = (body.per_giorno ?? []) as any[];
+            const righe = serie.filter(g => Number(g.prenotazioni ?? 0) > 0);
+            return righe.length ? righe.map(g => String(g.giorno)).join(',') : `(nessuna riga in ${nome})`;
+        };
+
+        // Il confronto che conta: lo stesso istante, due giorni diversi.
+        expect(giornoCon(roma.body, 'roma')).toContain('2027-01-16');
+        expect(giornoCon(londra.body, 'londra')).toContain('2027-01-15');
+    });
+});

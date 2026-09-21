@@ -33953,6 +33953,10 @@ const NON_CASH_METHODS = `('OMAGGIO', 'SOSPESO')`;
  *  legge anche PRIMA che un fondo sia dichiarato: i numeri del turno esistono
  *  comunque, ed è quello che la schermata mostra mentre il servizio corre. */
 async function loadCashSession(tenantId: number, service: CurrentService) {
+    /* Il servizio di un conto si decide sul fuso del ristorante, non su quello
+       del server: un conto chiuso all'1:00 appartiene alla cena di ieri, e
+       «l'1:00» dipende da dove sta il locale. */
+    const TZ = sqlTimeZone((await getTenantLocale(tenantId)).timezone);
     const { service_date, shift } = service;
 
     const sessionRs = await queryWithRetry(
@@ -33967,8 +33971,8 @@ async function loadCashSession(tenantId: number, service: CurrentService) {
         `SELECT method, SUM(amount_cents)::int AS amount_cents, COUNT(*)::int AS movements
            FROM table_bill_payments p
           WHERE p.tenant_id = $1 AND p.voided_at IS NULL
-            AND ${SERVICE_OF('p.recorded_at')} = $2::date
-            AND ${SHIFT_OF('p.recorded_at')} = $3
+            AND ${SERVICE_OF('p.recorded_at', TZ)} = $2::date
+            AND ${SHIFT_OF('p.recorded_at', TZ)} = $3
           GROUP BY method
           ORDER BY amount_cents DESC`,
         [tenantId, service_date, shift]
@@ -33980,8 +33984,8 @@ async function loadCashSession(tenantId: number, service: CurrentService) {
         `SELECT COALESCE(SUM(amount_cents), 0)::int AS amount_cents, COUNT(*)::int AS movements
            FROM table_bill_payments p
           WHERE p.tenant_id = $1 AND p.voided_at IS NOT NULL
-            AND ${SERVICE_OF('p.voided_at')} = $2::date
-            AND ${SHIFT_OF('p.voided_at')} = $3`,
+            AND ${SERVICE_OF('p.voided_at', TZ)} = $2::date
+            AND ${SHIFT_OF('p.voided_at', TZ)} = $3`,
         [tenantId, service_date, shift]
     );
 
@@ -33993,8 +33997,8 @@ async function loadCashSession(tenantId: number, service: CurrentService) {
            JOIN table_bills b ON b.id = s.table_bill_id AND b.tenant_id = s.tenant_id
           WHERE s.tenant_id = $1 AND s.kind = 'deposit' AND s.status = 'PAID'
             AND b.closed_at IS NOT NULL
-            AND ${SERVICE_OF('b.closed_at')} = $2::date
-            AND ${SHIFT_OF('b.closed_at')} = $3`,
+            AND ${SERVICE_OF('b.closed_at', TZ)} = $2::date
+            AND ${SHIFT_OF('b.closed_at', TZ)} = $3`,
         [tenantId, service_date, shift]
     );
 
@@ -34027,11 +34031,11 @@ async function loadCashSession(tenantId: number, service: CurrentService) {
             AND b.status IN ('OPEN', 'LOCKED', 'SETTLED', 'SETTLED_PARTIAL')
             AND COALESCE(
                     (SELECT o.service_date FROM orders o WHERE o.table_bill_id = b.id ORDER BY o.id LIMIT 1),
-                    ${SERVICE_OF('b.opened_at')}
+                    ${SERVICE_OF('b.opened_at', TZ)}
                 ) = $2::date
             AND COALESCE(
                     (SELECT o.shift FROM orders o WHERE o.table_bill_id = b.id ORDER BY o.id LIMIT 1),
-                    ${SHIFT_OF('b.opened_at')}
+                    ${SHIFT_OF('b.opened_at', TZ)}
                 ) = $3`,
         [tenantId, service_date, shift]
     );
@@ -34222,6 +34226,7 @@ app.post('/cash/session/:id/close', authenticate, requirePermission('cash:close_
 // semplice per far quadrare la cassa su un numero falso.
 app.get('/cash/transactions', authenticate, requirePermission('cash:operate'), async (req, res) => {
     try {
+        const TZ = sqlTimeZone((await getTenantLocale(req.tenantId!)).timezone);
         const service = serviceFromQuery(req.query);
         const { service_date, shift } = service;
 
@@ -34258,8 +34263,8 @@ app.get('/cash/transactions', authenticate, requirePermission('cash:operate'), a
                     ORDER BY (table_bill_split_id IS NULL) DESC, created_at DESC LIMIT 1
                ) fd ON TRUE
               WHERE p.tenant_id = $1
-                AND ${SERVICE_OF('COALESCE(p.voided_at, p.recorded_at)')} = $2::date
-                AND ${SHIFT_OF('COALESCE(p.voided_at, p.recorded_at)')} = $3
+                AND ${SERVICE_OF('COALESCE(p.voided_at, p.recorded_at)', TZ)} = $2::date
+                AND ${SHIFT_OF('COALESCE(p.voided_at, p.recorded_at)', TZ)} = $3
               ORDER BY COALESCE(p.voided_at, p.recorded_at) DESC
               LIMIT 500`,
             [req.tenantId!, service_date, shift]
@@ -34276,8 +34281,8 @@ app.get('/cash/transactions', authenticate, requirePermission('cash:operate'), a
                LEFT JOIN reservations r ON r.id = b.reservation_id AND r.tenant_id = b.tenant_id
               WHERE s.tenant_id = $1 AND s.kind = 'deposit' AND s.status = 'PAID'
                 AND b.closed_at IS NOT NULL
-                AND ${SERVICE_OF('b.closed_at')} = $2::date
-                AND ${SHIFT_OF('b.closed_at')} = $3
+                AND ${SERVICE_OF('b.closed_at', TZ)} = $2::date
+                AND ${SHIFT_OF('b.closed_at', TZ)} = $3
               ORDER BY b.closed_at DESC
               LIMIT 200`,
             [req.tenantId!, service_date, shift]
@@ -34399,6 +34404,7 @@ app.get('/reports/reservations', authenticate, requireReportsAccess, async (req,
         const range = parseReportRange(req, res);
         if (!range) return;
         const tenantId = req.tenantId!;
+        const TZ = sqlTimeZone((await getTenantLocale(tenantId)).timezone);
 
         const totali = async (da: string, a: string) => {
             const r = await queryWithRetry(
@@ -34408,14 +34414,14 @@ app.get('/reports/reservations', authenticate, requireReportsAccess, async (req,
                         COUNT(*) FILTER (WHERE reservation_status = 'CANCELLED')::int AS cancellate,
                         COUNT(*) FILTER (WHERE reservation_status = 'NO_SHOW')::int AS no_show
                    FROM reservations
-                  WHERE tenant_id = $1 AND ${ROME_DAY('reservation_time')} BETWEEN $2 AND $3`,
+                  WHERE tenant_id = $1 AND ${ROME_DAY('reservation_time', TZ)} BETWEEN $2 AND $3`,
                 [tenantId, da, a]);
             return r.rows[0];
         };
 
         // I trend escludono cancellate e rifiutate (non sono servizio reso);
         // i tassi nei totali le contano — stessa convenzione dell'ai-summary.
-        const trendWhere = `tenant_id = $1 AND ${ROME_DAY('reservation_time')} BETWEEN $2 AND $3
+        const trendWhere = `tenant_id = $1 AND ${ROME_DAY('reservation_time', TZ)} BETWEEN $2 AND $3
                     AND reservation_status NOT IN ('CANCELLED','DECLINED')`;
         const params = [tenantId, range.from, range.to];
 
@@ -34423,17 +34429,17 @@ app.get('/reports/reservations', authenticate, requireReportsAccess, async (req,
             totali(range.from, range.to),
             totali(range.prevFrom, range.prevTo),
             queryWithRetry(
-                `SELECT ${ROME_DAY('reservation_time')}::text AS giorno,
+                `SELECT ${ROME_DAY('reservation_time', TZ)}::text AS giorno,
                         COUNT(*)::int AS prenotazioni, COALESCE(SUM(guests),0)::int AS coperti
                    FROM reservations WHERE ${trendWhere}
                   GROUP BY 1 ORDER BY 1`, params),
             queryWithRetry(
-                `SELECT EXTRACT(DOW FROM reservation_time AT TIME ZONE 'Europe/Rome')::int AS giorno,
+                `SELECT EXTRACT(DOW FROM reservation_time AT TIME ZONE ${TZ})::int AS giorno,
                         COUNT(*)::int AS prenotazioni, COALESCE(SUM(guests),0)::int AS coperti
                    FROM reservations WHERE ${trendWhere}
                   GROUP BY 1 ORDER BY 1`, params),
             queryWithRetry(
-                `SELECT EXTRACT(HOUR FROM reservation_time AT TIME ZONE 'Europe/Rome')::int AS ora,
+                `SELECT EXTRACT(HOUR FROM reservation_time AT TIME ZONE ${TZ})::int AS ora,
                         COUNT(*)::int AS prenotazioni, COALESCE(SUM(guests),0)::int AS coperti
                    FROM reservations WHERE ${trendWhere}
                   GROUP BY 1 ORDER BY 1`, params),
@@ -34441,7 +34447,7 @@ app.get('/reports/reservations', authenticate, requireReportsAccess, async (req,
                 `SELECT COALESCE(source, 'MANUAL') AS canale,
                         COUNT(*)::int AS prenotazioni, COALESCE(SUM(guests),0)::int AS coperti
                    FROM reservations
-                  WHERE tenant_id = $1 AND ${ROME_DAY('reservation_time')} BETWEEN $2 AND $3
+                  WHERE tenant_id = $1 AND ${ROME_DAY('reservation_time', TZ)} BETWEEN $2 AND $3
                   GROUP BY 1 ORDER BY 2 DESC`, params),
             queryWithRetry(
                 `SELECT COALESCE(ro.name, '(nessuna sala)') AS sala,
@@ -34449,7 +34455,7 @@ app.get('/reports/reservations', authenticate, requireReportsAccess, async (req,
                    FROM reservations r
                    LEFT JOIN tables t ON t.id = r.table_id AND t.tenant_id = r.tenant_id
                    LEFT JOIN rooms ro ON ro.id = t.room_id AND ro.tenant_id = t.tenant_id
-                  WHERE r.tenant_id = $1 AND ${ROME_DAY('r.reservation_time')} BETWEEN $2 AND $3
+                  WHERE r.tenant_id = $1 AND ${ROME_DAY('r.reservation_time', TZ)} BETWEEN $2 AND $3
                     AND r.reservation_status NOT IN ('CANCELLED','DECLINED')
                   GROUP BY 1 ORDER BY 3 DESC`, params),
         ]);
@@ -34476,6 +34482,7 @@ app.get('/reports/revenue', authenticate, requireReportsAccess, async (req, res)
         const range = parseReportRange(req, res);
         if (!range) return;
         const tenantId = req.tenantId!;
+        const TZ = sqlTimeZone((await getTenantLocale(tenantId)).timezone);
 
         // Incassato = movimenti vivi del libro cassa, esclusi OMAGGIO e
         // SOSPESO (chiudono un conto senza portare un euro — stessa regola
@@ -34487,7 +34494,7 @@ app.get('/reports/revenue', authenticate, requireReportsAccess, async (req, res)
                    FROM table_bill_payments p
                   WHERE p.tenant_id = $1 AND p.voided_at IS NULL
                     AND p.method NOT IN ${NON_CASH_METHODS}
-                    AND ${SERVICE_OF('p.recorded_at')} BETWEEN $2 AND $3`,
+                    AND ${SERVICE_OF('p.recorded_at', TZ)} BETWEEN $2 AND $3`,
                 [tenantId, da, a]);
             return r.rows[0];
         };
@@ -34503,7 +34510,7 @@ app.get('/reports/revenue', authenticate, requireReportsAccess, async (req, res)
                         COALESCE(SUM(tip_cents), 0)::int AS mance_cents
                    FROM table_bills b
                   WHERE b.tenant_id = $1 AND b.closed_at IS NOT NULL AND b.status <> 'VOIDED'
-                    AND ${SERVICE_OF('b.closed_at')} BETWEEN $2 AND $3`,
+                    AND ${SERVICE_OF('b.closed_at', TZ)} BETWEEN $2 AND $3`,
                 [tenantId, da, a]);
             return r.rows[0];
         };
@@ -34515,13 +34522,13 @@ app.get('/reports/revenue', authenticate, requireReportsAccess, async (req, res)
             conti(range.from, range.to),
             conti(range.prevFrom, range.prevTo),
             queryWithRetry(
-                `SELECT ${SERVICE_OF('p.recorded_at')}::text AS giorno,
-                        ${SHIFT_OF('p.recorded_at')} AS turno,
+                `SELECT ${SERVICE_OF('p.recorded_at', TZ)}::text AS giorno,
+                        ${SHIFT_OF('p.recorded_at', TZ)} AS turno,
                         COALESCE(SUM(amount_cents), 0)::int AS incassato_cents
                    FROM table_bill_payments p
                   WHERE p.tenant_id = $1 AND p.voided_at IS NULL
                     AND p.method NOT IN ${NON_CASH_METHODS}
-                    AND ${SERVICE_OF('p.recorded_at')} BETWEEN $2 AND $3
+                    AND ${SERVICE_OF('p.recorded_at', TZ)} BETWEEN $2 AND $3
                   GROUP BY 1, 2 ORDER BY 1`, params),
             queryWithRetry(
                 `SELECT method AS metodo,
@@ -34530,7 +34537,7 @@ app.get('/reports/revenue', authenticate, requireReportsAccess, async (req, res)
                         (method IN ${NON_CASH_METHODS}) AS non_cash
                    FROM table_bill_payments p
                   WHERE p.tenant_id = $1 AND p.voided_at IS NULL
-                    AND ${SERVICE_OF('p.recorded_at')} BETWEEN $2 AND $3
+                    AND ${SERVICE_OF('p.recorded_at', TZ)} BETWEEN $2 AND $3
                   GROUP BY method ORDER BY amount_cents DESC`, params),
             queryWithRetry(
                 `SELECT COUNT(*)::int AS sessioni,
@@ -34614,6 +34621,7 @@ app.get('/reports/communications', authenticate, requireReportsAccess, async (re
         const range = parseReportRange(req, res);
         if (!range) return;
         const tenantId = req.tenantId!;
+        const TZ = sqlTimeZone((await getTenantLocale(tenantId)).timezone);
 
         const voce = async (da: string, a: string) => {
             const r = await queryWithRetry(
@@ -34623,7 +34631,7 @@ app.get('/reports/communications', authenticate, requireReportsAccess, async (re
                         COUNT(*) FILTER (WHERE phantom_confirmation)::int AS phantom,
                         COUNT(*) FILTER (WHERE large_group_handoff)::int AS gruppi_grandi
                    FROM voice_calls
-                  WHERE tenant_id = $1 AND ${ROME_DAY('created_at')} BETWEEN $2 AND $3`,
+                  WHERE tenant_id = $1 AND ${ROME_DAY('created_at', TZ)} BETWEEN $2 AND $3`,
                 [tenantId, da, a]);
             return r.rows[0];
         };
@@ -34633,10 +34641,10 @@ app.get('/reports/communications', authenticate, requireReportsAccess, async (re
             voce(range.from, range.to),
             voce(range.prevFrom, range.prevTo),
             queryWithRetry(
-                `SELECT ${ROME_DAY('created_at')}::text AS giorno,
+                `SELECT ${ROME_DAY('created_at', TZ)}::text AS giorno,
                         COUNT(*)::int AS chiamate, COALESCE(SUM(duration_seconds), 0)::int AS secondi
                    FROM voice_calls
-                  WHERE tenant_id = $1 AND ${ROME_DAY('created_at')} BETWEEN $2 AND $3
+                  WHERE tenant_id = $1 AND ${ROME_DAY('created_at', TZ)} BETWEEN $2 AND $3
                   GROUP BY 1 ORDER BY 1`, params),
             // Solo le righe in uscita: il log unificato contiene anche email
             // e messaggi ricevuti (direction='inbound'), che sporcherebbero i
@@ -34647,7 +34655,7 @@ app.get('/reports/communications', authenticate, requireReportsAccess, async (re
                         COUNT(*) FILTER (WHERE failed_at IS NOT NULL)::int AS falliti
                    FROM outbound_messages
                   WHERE tenant_id = $1 AND direction <> 'inbound'
-                    AND ${ROME_DAY('sent_at')} BETWEEN $2 AND $3
+                    AND ${ROME_DAY('sent_at', TZ)} BETWEEN $2 AND $3
                   GROUP BY 1 ORDER BY 2 DESC`, params),
         ]);
 
