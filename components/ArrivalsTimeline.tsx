@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
 import { Reservation, Table, Room, Shift, BanquetMenu, TableMerge, ArrivalStatus, ReservationStatus } from '../types';
 import { getRomeTimePart } from '../utils/reservationTime';
@@ -67,12 +68,12 @@ const ACTION_STYLE: Record<Exclude<RowAction, null>, string> = {
 };
 
 /** "da 2h 14m" / "tra 25 min" — how long since (or until) the booked time. */
-const elapsedLabel = (reservationTime: string, nowTick: number): string => {
+const elapsedLabel = (reservationTime: string, nowTick: number, tr: (k: string) => string): string => {
   const t = new Date(reservationTime).getTime();
   if (Number.isNaN(t)) return '';
   const diffMin = Math.round((nowTick - t) / 60000);
   const abs = Math.abs(diffMin);
-  const prefix = diffMin >= 0 ? 'da' : 'tra';
+  const prefix = diffMin >= 0 ? tr('since') : tr('until');
   if (abs < 60) return `${prefix} ${abs} min`;
   const h = Math.floor(abs / 60);
   const m = abs % 60;
@@ -90,6 +91,9 @@ export const ArrivalsTimeline: React.FC<ArrivalsTimelineProps> = ({
   onConfirmPending,
   onNavigateToReservations,
 }) => {
+  /* La griglia dei tavoli usa già `t` come variabile del ciclo (un Table),
+     quindi la traduzione qui si chiama `tr`. */
+  const { t: tr } = useTranslation('dashboard', { useSuspense: false });
   const [busyId, setBusyId] = useState<number | null>(null);
   const [assigning, setAssigning] = useState<Reservation | null>(null);
 
@@ -210,11 +214,11 @@ export const ArrivalsTimeline: React.FC<ArrivalsTimelineProps> = ({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
-            Timeline arrivi
+            {tr('arrivalsTimeline')}
           </h2>
           <p className="text-[13px] text-[var(--ds-text-muted)] mt-0.5">
-            {rows.length} {rows.length === 1 ? 'prenotazione' : 'prenotazioni'}
-            {withoutTable > 0 && ` · ${withoutTable} senza tavolo`}
+            {tr('bookingCount', { count: rows.length })}
+            {withoutTable > 0 && ` · ${tr('withoutTableCount', { count: withoutTable })}`}
           </p>
         </div>
         {onNavigateToReservations && (
@@ -223,14 +227,14 @@ export const ArrivalsTimeline: React.FC<ArrivalsTimelineProps> = ({
             onClick={onNavigateToReservations}
             className="flex-shrink-0 inline-flex items-center gap-1.5 text-[14px] font-medium text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] rounded-[var(--ds-radius-control)] px-1"
           >
-            Vedi tutte <ArrowRight className="h-4 w-4" aria-hidden />
+            {tr('seeAll')} <ArrowRight className="h-4 w-4" aria-hidden />
           </button>
         )}
       </div>
 
       {rows.length === 0 ? (
         <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-4 py-8 text-center text-[14px] text-[var(--ds-text-muted)]">
-          Nessuna prenotazione per questo turno
+          {tr('noBookingThisService')}
         </div>
       ) : (
         // Five rows (5 × 60px + 4 × 8px gap) then scroll. On xl the card is
@@ -243,7 +247,7 @@ export const ArrivalsTimeline: React.FC<ArrivalsTimelineProps> = ({
               ? (mergedNameByTable.get(`${r.shift}:${r.table_id}`) ?? table?.name)
               : undefined;
             const room = table ? roomById.get(table.room_id) : undefined;
-            const meta = [room?.name, `${r.guests} coperti`, r.notes?.trim()]
+            const meta = [room?.name, tr('coversCount', { count: r.guests }), r.notes?.trim()]
               .filter(Boolean)
               .join(' · ');
             const busy = busyId === r.id;
@@ -258,13 +262,13 @@ export const ArrivalsTimeline: React.FC<ArrivalsTimelineProps> = ({
                     {getRomeTimePart(r.reservation_time)}
                   </div>
                   <div className="text-[12px] text-[var(--ds-text-muted)] leading-tight mt-0.5 whitespace-nowrap">
-                    {elapsedLabel(r.reservation_time, nowTick)}
+                    {elapsedLabel(r.reservation_time, nowTick, tr)}
                   </div>
                 </div>
 
                 <span
                   className="flex-shrink-0 inline-flex h-9 min-w-[36px] px-1.5 items-center justify-center rounded-[var(--ds-radius)] bg-[var(--ds-surface)]/70 text-[14px] font-semibold tabular-nums text-[var(--ds-text-secondary)]"
-                  aria-label={tableLabel ? `Tavolo ${tableLabel}` : 'Senza tavolo'}
+                  aria-label={tableLabel ? tr('tableNamed', { nome: tableLabel }) : tr('withoutTable')}
                 >
                   {tableLabel ?? '—'}
                 </span>
@@ -285,7 +289,7 @@ export const ArrivalsTimeline: React.FC<ArrivalsTimelineProps> = ({
                     onClick={() => runAction(r, action)}
                     className={`flex-shrink-0 h-9 px-3.5 rounded-[var(--ds-radius-control)] text-[14px] font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${ACTION_STYLE[action]}`}
                   >
-                    {busy ? '…' : ACTION_LABEL[action]}
+                    {busy ? '…' : tr(`rowAction.${action}`, ACTION_LABEL[action])}
                   </button>
                 )}
               </div>
@@ -300,18 +304,18 @@ export const ArrivalsTimeline: React.FC<ArrivalsTimelineProps> = ({
             <div className="flex items-start justify-between gap-3 p-5 pb-3">
               <div className="min-w-0">
                 <h3 className="text-[17px] font-semibold text-[var(--ds-text-primary)] truncate">
-                  Assegna tavolo
+                  {tr('assignTable')}
                 </h3>
                 <p className="text-[13px] text-[var(--ds-text-muted)] mt-0.5 truncate">
-                  {toTitleCase(assigning.customer_name)} · {assigning.guests} coperti ·{' '}
-                  {assigning.shift === Shift.LUNCH ? 'pranzo' : 'cena'}
+                  {toTitleCase(assigning.customer_name)} · {tr('coversCount', { count: assigning.guests })} ·{' '}
+                  {assigning.shift === Shift.LUNCH ? tr('lunchLower') : tr('dinnerLower')}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setAssigning(null)}
                 className="flex-shrink-0 h-9 w-9 inline-flex items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)] transition-colors"
-                aria-label="Chiudi"
+                aria-label={tr('close')}
               >
                 <X className="h-4 w-4" />
               </button>
@@ -320,7 +324,7 @@ export const ArrivalsTimeline: React.FC<ArrivalsTimelineProps> = ({
             <div className="flex-1 overflow-y-auto px-5 pb-5 flex flex-col gap-4">
               {freeByRoom.length === 0 ? (
                 <p className="text-[14px] text-[var(--ds-text-muted)] py-6 text-center">
-                  Nessun tavolo libero in questo turno
+                  {tr('noFreeTable')}
                 </p>
               ) : (
                 freeByRoom.map(({ room, tables: free }) => (
@@ -343,7 +347,7 @@ export const ArrivalsTimeline: React.FC<ArrivalsTimelineProps> = ({
                               ? 'bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] hover:bg-[var(--ds-border)]'
                               : 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] hover:brightness-95'
                           }`}
-                          title={`${t.seats} posti${t.seats < assigning.guests ? ' — sotto la capienza richiesta' : ''}`}
+                          title={`${tr('seatsCount', { count: t.seats })}${t.seats < assigning.guests ? ` — ${tr('belowCapacity')}` : ''}`}
                         >
                           {t.name}
                           <span className="ml-1.5 font-normal opacity-70">{t.seats}p</span>

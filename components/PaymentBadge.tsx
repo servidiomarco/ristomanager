@@ -1,5 +1,7 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { CreditCard } from 'lucide-react';
+import { displayLocale } from '../utils/formatLocale';
 import { Reservation, PaymentStatus } from '../types';
 
 // Compact date-time formatter for payment tooltips. Falls back to '—' when
@@ -8,7 +10,7 @@ const formatPaymentTs = (iso?: string | null): string => {
     if (!iso) return '—';
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return '—';
-    return `${d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })} ${d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`;
+    return `${d.toLocaleDateString(displayLocale(), { day: '2-digit', month: '2-digit', year: 'numeric' })} ${d.toLocaleTimeString(displayLocale(), { hour: '2-digit', minute: '2-digit' })}`;
 };
 
 // Whether the reservation has an unsettled deposit link — used by the
@@ -28,6 +30,7 @@ export const hasUnpaidDeposit = (res: Pick<Reservation, 'latest_payment_status'>
 // story while a link is in flight or has failed. Returns null when neither
 // signal has anything to say (fresh reservation, no link, no cash marked).
 export const PaymentBadge: React.FC<{ reservation: Reservation; size?: 'sm' | 'md' }> = ({ reservation: res, size = 'sm' }) => {
+  const { t } = useTranslation('common', { useSuspense: false });
     const box = size === 'md' ? 'w-7 h-7' : 'w-6 h-6';
     const icon = size === 'md' ? 'h-4 w-4' : 'h-3.5 w-3.5';
     const base = `inline-flex items-center justify-center ${box} rounded-[var(--ds-radius-control)] flex-shrink-0`;
@@ -52,36 +55,36 @@ export const PaymentBadge: React.FC<{ reservation: Reservation; size?: 'sm' | 'm
         switch (linkStatus) {
             case 'COMPLETED':
                 cls = 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]';
-                label = 'Pagato';
+                label = t('payment.paid');
                 break;
             case 'AUTHORISED':
                 cls = 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]';
-                label = 'Autorizzato';
+                label = t('payment.authorised');
                 break;
             case 'PENDING':
                 cls = 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]';
-                label = 'In attesa di pagamento';
+                label = t('payment.pending');
                 break;
             case 'FAILED':
                 cls = 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)]';
-                label = 'Pagamento fallito';
+                label = t('payment.failed');
                 break;
             case 'CANCELLED':
                 cls = 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)]';
-                label = 'Pagamento annullato';
+                label = t('payment.cancelled');
                 break;
             case 'EXPIRED':
                 cls = 'bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)]';
-                label = 'Link scaduto';
+                label = t('payment.expired');
                 break;
         }
 
         const parts: string[] = [];
         if (amount) parts.push(amount);
         parts.push(label);
-        if (channel) parts.push(`via ${channel}`);
-        parts.push(`inviato il ${sentTs}`);
-        if (paidTs) parts.push(`pagato il ${paidTs}`);
+        if (channel) parts.push(t('payment.viaChannel', { canale: channel }));
+        parts.push(t('payment.sentOn', { quando: sentTs }));
+        if (paidTs) parts.push(t('payment.paidOn', { quando: paidTs }));
         const title = parts.join(' · ');
 
         return (
