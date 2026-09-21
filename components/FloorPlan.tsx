@@ -219,7 +219,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         });
       }
     } catch (err: any) {
-      setAlertModal({ message: err?.message || 'Operazione non riuscita', type: 'error' });
+      setAlertModal({ message: err?.message || tv('actionFailed'), type: 'error' });
     }
   };
 
@@ -231,7 +231,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       setHiddenTableIds(new Set());
       setShowHidden(false);
     } catch (err: any) {
-      setAlertModal({ message: err?.message || 'Operazione non riuscita', type: 'error' });
+      setAlertModal({ message: err?.message || tv('actionFailed'), type: 'error' });
     }
   };
 
@@ -257,7 +257,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         });
       }
     } catch (err: any) {
-      setAlertModal({ message: err?.message || 'Operazione non riuscita', type: 'error' });
+      setAlertModal({ message: err?.message || tv('actionFailed'), type: 'error' });
     }
   };
 
@@ -988,7 +988,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       });
       if (blocked.length > 0) {
           setAlertModal({
-              message: `Impossibile ingrandire ${blocked.length > 1 ? 'i tavoli' : 'il tavolo'} ${blocked.join(', ')}: si sovrapporrebbe a un tavolo vicino. Spostalo prima di aggiungere coperti.`,
+              message: tv('cannotEnlarge', { count: blocked.length, tavoli: blocked.join(', ') }),
               type: 'warning'
           });
       }
@@ -1016,7 +1016,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       });
       if (blocked.length > 0) {
           setAlertModal({
-              message: `Impossibile ruotare ${blocked.length > 1 ? 'i tavoli' : 'il tavolo'} ${blocked.join(', ')}: si sovrapporrebbe a un tavolo vicino. Spostalo prima di ruotarlo.`,
+              message: tv('cannotRotate', { count: blocked.length, tavoli: blocked.join(', ') }),
               type: 'warning'
           });
       }
@@ -1033,12 +1033,12 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
   const handleDeleteRoomClick = (room_id: number) => {
       if (rooms.length <= 1) {
-          setAlertModal({ message: "Devi mantenere almeno una sala attiva.", type: 'warning' });
+          setAlertModal({ message: tv('keepOneRoom'), type: 'warning' });
           return;
       }
       const roomTables = tables.filter(t => t.room_id === room_id);
       if (roomTables.length > 0) {
-          setAlertModal({ message: "Non puoi eliminare una sala che contiene dei tavoli. Rimuovi prima i tavoli.", type: 'warning' });
+          setAlertModal({ message: tv('roomHasTables'), type: 'warning' });
           return;
       }
       const room = rooms.find(r => r.id === room_id);
@@ -1198,7 +1198,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         <RotateCw className="h-16 w-16 text-[var(--ds-text-subtle)] mb-6" />
         <h2 className="text-[20px] font-semibold text-[var(--ds-text-primary)] mb-2">{tv('rotateDevice')}</h2>
         <p className="text-[15px] text-[var(--ds-text-muted)] max-w-[280px]">
-          Ruota il dispositivo in orizzontale per vedere sala e tavoli
+          {tv('rotateDeviceLong')}
         </p>
       </div>
     );
@@ -1222,7 +1222,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         <SegmentedControl<Shift>
           value={selectedShift}
           onChange={setSelectedShift}
-          ariaLabel="Turno"
+          ariaLabel={tv('shiftAria')}
           size="sm"
           options={[
             { value: Shift.LUNCH, label: tv('lunch'), icon: <Sun className="h-4 w-4" /> },
@@ -1233,7 +1233,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             <button
                 onClick={() => setShowHidden(s => !s)}
                 className={`ml-auto h-11 ${HIDDEN_TOGGLE_BASE} ${showHidden ? HIDDEN_TOGGLE_ON : HIDDEN_TOGGLE_OFF}`}
-                title={showHidden ? 'Nascondi i tavoli nascosti' : 'Mostra i tavoli nascosti per riattivarli'}
+                title={showHidden ? tv('hideHiddenTables') : tv('showHiddenTables')}
             >
                 {showHidden ? <Eye size={14} /> : <EyeOff size={14} />}
                 {hiddenTableIds.size} {hiddenTableIds.size === 1 ? 'nascosto' : 'nascosti'}
@@ -1245,14 +1245,14 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       <div className="hidden md:flex items-center gap-3 px-1 z-20">
         <span className="inline-flex items-center gap-1.5 text-[13px] text-[var(--ds-text-muted)]">
           <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0 text-[var(--ds-pending-fg)]" />
-          Le unioni tavoli sono valide solo per questa data e turno.
+          {tv('mergesScopeNote')}
         </span>
         {hiddenTableIds.size > 0 && (
             <div className="ml-auto flex items-center gap-1.5">
                 <button
                     onClick={() => setShowHidden(s => !s)}
                     className={`h-8 ${HIDDEN_TOGGLE_BASE} ${showHidden ? HIDDEN_TOGGLE_ON : HIDDEN_TOGGLE_OFF}`}
-                    title={showHidden ? 'Nascondi i tavoli nascosti' : 'Mostra i tavoli nascosti per riattivarli'}
+                    title={showHidden ? tv('hideHiddenTables') : tv('showHiddenTables')}
                 >
                     {showHidden ? <Eye size={14} /> : <EyeOff size={14} />}
                     {hiddenTableIds.size} {hiddenTableIds.size === 1 ? 'nascosto' : 'nascosti'}
@@ -1260,10 +1260,10 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                 <button
                     onClick={() => setUnhideAllConfirm(true)}
                     className={`h-8 ${HIDDEN_TOGGLE_BASE} bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]`}
-                    title={`Riattiva tutti i ${hiddenTableIds.size} tavoli nascosti per questo turno`}
+                    title={tv('restoreAllTitle', { count: hiddenTableIds.size })}
                 >
                     <Eye size={14} />
-                    Riattiva tutti
+                    {tv('restoreAll')}
                 </button>
             </div>
         )}
@@ -1289,9 +1289,9 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                     : ROOM_TAB_IDLE
               }`}
               title={room.is_closed
-                ? `${room.name} (Chiusa)`
+                ? tv('roomClosedShort', { sala: room.name })
                 : closedRoomIdsForShift.has(room.id)
-                  ? `${room.name} (Chiusa per questo turno)`
+                  ? tv('roomClosedSuffix', { sala: room.name })
                   : room.name}
             >
               {(room.is_closed || closedRoomIdsForShift.has(room.id)) && <DoorClosed size={14} />}
@@ -1313,7 +1313,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                   <button
                     onClick={handleConfirmAddRoom}
                     className={`${dsIconButton} bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] shadow-none hover:bg-[var(--ds-action-bg-hover)] hover:text-[var(--ds-action-fg)]`}
-                    title="Conferma"
+                    title={tv('confirm')}
                   >
                       <Check size={16}/>
                   </button>
@@ -1339,7 +1339,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         {/* Tools section - Only shown in edit mode */}
         {canEdit && (
         <div className="flex items-center gap-2 sm:border-l sm:pl-4 border-[var(--ds-border)] overflow-x-auto shrink-0 w-full sm:w-auto">
-          <span className="text-[13px] font-semibold text-[var(--ds-text-muted)] hidden xl:block">Strumenti</span>
+          <span className="text-[13px] font-semibold text-[var(--ds-text-muted)] hidden xl:block">{tv('tools')}</span>
 
           <button
             onClick={() => setIsSelectionMode(!isSelectionMode)}
@@ -1352,7 +1352,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           <button
             onClick={() => setLayoutMode(m => m === 'auto' ? 'manual' : 'auto')}
             className={`${dsIconButton} shadow-none ${layoutMode === 'manual' ? TOOL_BUTTON_ON : 'bg-[var(--ds-surface-row)]'}`}
-            title={layoutMode === 'manual' ? 'Layout manuale: trascina per posizionare. Clicca per tornare ad auto-tidy.' : 'Layout auto-tidy: posizioni ordinate per numero. Clicca per attivare drag manuale.'}
+            title={layoutMode === 'manual' ? tv('layoutManual') : tv('layoutAuto')}
           >
               {layoutMode === 'manual' ? <Move className="h-4 w-4" /> : <Layout className="h-4 w-4" />}
           </button>
@@ -1361,7 +1361,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
               <button
                 onClick={() => setSelectedTables([])}
                 className={`${dsIconButton} bg-[var(--ds-surface-row)] shadow-none hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)]`}
-                title="Deseleziona Tutto"
+                title={tv('deselectAll')}
               >
                   <X className="h-4 w-4" />
               </button>
@@ -1369,13 +1369,13 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
           <div className="h-6 w-px bg-[var(--ds-border)] mx-1"></div>
 
-          <button onClick={() => handleAddTable(TableShape.RECTANGLE)} className={`${dsIconButton} bg-[var(--ds-surface-row)] shadow-none`} title="Rettangolo">
+          <button onClick={() => handleAddTable(TableShape.RECTANGLE)} className={`${dsIconButton} bg-[var(--ds-surface-row)] shadow-none`} title={tv('shapeRect')}>
             <div className="w-6 h-4 border-2 border-current rounded-[var(--ds-radius-sm)]" />
           </button>
-          <button onClick={() => handleAddTable(TableShape.SQUARE)} className={`${dsIconButton} bg-[var(--ds-surface-row)] shadow-none`} title="Quadrato">
+          <button onClick={() => handleAddTable(TableShape.SQUARE)} className={`${dsIconButton} bg-[var(--ds-surface-row)] shadow-none`} title={tv('shapeSquare')}>
             <div className="w-4 h-4 border-2 border-current rounded-[var(--ds-radius-sm)]" />
           </button>
-          <button onClick={() => handleAddTable(TableShape.CIRCLE)} className={`${dsIconButton} bg-[var(--ds-surface-row)] shadow-none`} title="Tondo">
+          <button onClick={() => handleAddTable(TableShape.CIRCLE)} className={`${dsIconButton} bg-[var(--ds-surface-row)] shadow-none`} title={tv('shapeRound')}>
              <div className="w-4 h-4 border-2 border-current rounded-[var(--ds-radius-control)]" />
           </button>
 
@@ -1410,7 +1410,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                   title={`Gestisci chiusura: ${activeRoom.name}`}
                 >
                   {isAnyClosed ? <DoorOpen className="h-4 w-4" /> : <DoorClosed className="h-4 w-4" />}
-                  <span className="hidden lg:inline">Chiusura</span>
+                  <span className="hidden lg:inline">{tv('closure')}</span>
                   <ChevronDown className="h-3 w-3" />
                 </button>
                 {roomClosureMenuOpen && roomClosureAnchor && createPortal(
@@ -1438,7 +1438,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                           : <DoorClosed className="h-4 w-4 mt-0.5 flex-shrink-0 text-[var(--ds-pending-fg)]" />}
                         <div>
                           <div className="font-medium text-[var(--ds-text-primary)]">
-                            {isShiftClosed ? 'Riapri per questo turno' : 'Chiudi solo per questo turno'}
+                            {isShiftClosed ? tv('reopenForShift') : tv('closeForShift')}
                           </div>
                           <div className="text-[13px] text-[var(--ds-text-muted)] mt-0.5">
                             {selectedDate} · {shiftLabel}
@@ -1460,7 +1460,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                             {isExtendedClosed ? 'Riapri (chiusura estesa)' : 'Chiusura estesa'}
                           </div>
                           <div className="text-[13px] text-[var(--ds-text-muted)] mt-0.5">
-                            Chiusa finché non riapri
+                            {tv('closedUntilReopen')}
                           </div>
                         </div>
                       </button>
@@ -1476,7 +1476,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           <button
             onClick={() => handleDeleteRoomClick(activeRoomId)}
             className="inline-flex h-11 flex-shrink-0 items-center gap-1 rounded-[var(--ds-radius-control)] px-3 text-[var(--ds-critical-text)] transition-colors hover:bg-[var(--ds-critical-tint)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-            title={`Elimina Sala Corrente: ${rooms.find(r => r.id === activeRoomId)?.name}`}
+            title={tv('deleteCurrentRoom', { sala: rooms.find(r => r.id === activeRoomId)?.name })}
           >
              <Layout className="h-4 w-4"/>
              <Trash2 className="h-4 w-4" />
@@ -1558,7 +1558,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                     title={tv('tableDetails')}
                 >
                     <Info size={16} />
-                    <span className="hidden sm:inline">Dettagli</span>
+                    <span className="hidden sm:inline">{tv('details')}</span>
                 </button>
             )}
 
@@ -1568,7 +1568,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                     onClick={(e) => handleRotate(e.shiftKey ? -15 : 15)}
                     onContextMenu={(e) => { e.preventDefault(); handleRotate(-15); }}
                     className={`${EDIT_ACTION_BASE} ${EDIT_ACTION_QUIET}`}
-                    title={`Ruota +15° (Shift/click destro per -15°)${singleSelectedTable ? ` — attuale: ${singleSelectedTable.rotation || 0}°` : ''}`}
+                    title={`${tv('rotateHint')}${singleSelectedTable ? ` — ${tv('rotateCurrent', { gradi: singleSelectedTable.rotation || 0 })}` : ''}`}
                 >
                     <RotateCw size={16} />
                     {singleSelectedTable && (singleSelectedTable.rotation || 0) !== 0 && (
@@ -1618,11 +1618,11 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                                 ? 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'
                                 : EDIT_ACTION_QUIET
                         }`}
-                        title={allHidden ? 'Mostra di nuovo nel turno' : 'Nascondi per questo turno'}
+                        title={allHidden ? tv('showAgainInShift') : tv('hideForShift')}
                     >
                         {allHidden
-                            ? <><Eye size={16} /> Mostra</>
-                            : <><EyeOff size={16} /> Nascondi</>}
+                            ? <><Eye size={16} /> {tv('show')}</>
+                            : <><EyeOff size={16} /> {tv('hide')}</>}
                     </button>
                 );
             })()}
@@ -1652,17 +1652,17 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
               type="button"
               onClick={() => setDismissedOverlapSig(overlapSig)}
               className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--ds-radius-control)] transition-colors hover:bg-[var(--ds-critical-solid)]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-              aria-label="Ignora avviso"
-              title="Ignora avviso"
+              aria-label={tv('dismissWarning')}
+              title={tv('dismissWarning')}
             >
               <X className="h-4 w-4" />
             </button>
           }
         >
           <span className="font-semibold">
-            {overlapPairs.length === 1 ? 'Un tavolo si sovrappone' : `${overlapPairs.length} sovrapposizioni di tavoli`} in questa sala.
+            {tv('overlapCount', { count: overlapPairs.length })}
           </span>{' '}
-          Trascina per separarli: {overlapPairs.map(([a, b]) => `${a.name} ↔ ${b.name}`).join(', ')}
+          {tv('dragToSeparate')} {overlapPairs.map(([a, b]) => `${a.name} ↔ ${b.name}`).join(', ')}
         </Callout>
       )}
 
@@ -1732,7 +1732,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             const extended = activeRoom.is_closed === true;
             const shiftOnly = closedRoomIdsForShift.has(activeRoom.id);
             if (!extended && !shiftOnly) return null;
-            const label = extended ? 'Sala Chiusa' : 'Sala Chiusa per il turno';
+            const label = extended ? tv('roomClosed') : tv('roomClosedForShift');
             return (
               <div className="absolute top-4 right-4 bg-[var(--ds-pending-solid)] text-[#ffffff] px-3 py-1.5 rounded-[var(--ds-radius-control)] text-[13px] font-semibold shadow-[var(--ds-shadow-raised)] pointer-events-none flex items-center gap-1.5">
                 <DoorClosed size={12} /> {label}
@@ -1749,7 +1749,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                 aria-expanded={isLegendOpen}
             >
                 <Info size={14} />
-                Legenda
+                {tv('legend')}
             </button>
             {isLegendOpen && (
                 <div
@@ -1782,7 +1782,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         <ModalShell
           open={!!alertModal}
           onClose={() => setAlertModal(null)}
-          title="Attenzione"
+          title={tv('warning')}
           size="sm"
           bodyClassName="p-5 sm:p-6"
           closeOnEscape
@@ -1808,7 +1808,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       <ConfirmDeleteModal
         isOpen={!!deleteRoomConfirm}
         title={tv('deleteRoom')}
-        message="Stai per eliminare la sala:"
+        message={tv('deleteRoomMessage')}
         itemName={deleteRoomConfirm?.name}
         onCancel={() => setDeleteRoomConfirm(null)}
         onConfirm={handleDeleteRoomConfirm}
@@ -1816,11 +1816,11 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
       <ConfirmDeleteModal
         isOpen={!!deleteTablesConfirm && deleteTablesConfirm.length > 0}
-        title={deleteTablesConfirm && deleteTablesConfirm.length > 1 ? 'Elimina Tavoli' : 'Elimina Tavolo'}
+        title={deleteTablesConfirm && deleteTablesConfirm.length > 1 ? tv('deleteTablesTitle') : tv('deleteTableTitle')}
         message={
           deleteTablesConfirm && deleteTablesConfirm.length > 1
-            ? `Stai per eliminare ${deleteTablesConfirm.length} tavoli:`
-            : 'Stai per eliminare il tavolo:'
+            ? tv('deleteTablesMessage', { count: deleteTablesConfirm.length })
+            : tv('deleteTableMessage')
         }
         itemName={
           deleteTablesConfirm
@@ -1843,8 +1843,8 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       <ConfirmDeleteModal
         isOpen={unhideAllConfirm}
         title={tv('reactivateTables')}
-        message={`Stai per riattivare ${hiddenTableIds.size} ${hiddenTableIds.size === 1 ? 'tavolo nascosto' : 'tavoli nascosti'} per questo turno.`}
-        confirmLabel="Riattiva tutti"
+        message={tv('restoreAllMessage', { count: hiddenTableIds.size })}
+        confirmLabel={tv('restoreAll')}
         icon={<Eye className="h-5 w-5 text-[var(--ds-seated-fg)]" />}
         iconWrapperClassName="mx-auto w-12 h-12 bg-[var(--ds-seated-tint)] rounded-[var(--ds-radius-control)] flex items-center justify-center mb-4"
         confirmClassName="rounded-[var(--ds-radius-control)] px-5 h-11 inline-flex items-center bg-[var(--ds-seated-solid)] text-[var(--ds-seated-fg)] text-[15px] font-semibold hover:opacity-90 transition-opacity"
@@ -1861,7 +1861,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         <ModalShell
           open={!!detailsModal}
           onClose={() => setDetailsModal(null)}
-          title={`Dettagli tavolo ${detailsModal.table.name}`}
+          title={tv('tableDetailsNamed', { tavolo: detailsModal.table.name })}
           size="sm"
           bodyClassName="p-5 sm:p-6"
           footer={
@@ -1899,22 +1899,22 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
               }
             >
               <div className="flex items-end gap-2">
-                <Field label="Larghezza" className="flex-1">
+                <Field label={tv('width')} className="flex-1">
                   <input
                     type="number"
                     min="0"
-                    placeholder="es. 80"
+                    placeholder={tv('widthPlaceholder')}
                     className={dsInput}
                     value={detailsModal.widthCm}
                     onChange={e => setDetailsModal({ ...detailsModal, widthCm: e.target.value })}
                   />
                 </Field>
                 <span className="pb-3 text-[var(--ds-text-muted)]">×</span>
-                <Field label="Lunghezza" className="flex-1">
+                <Field label={tv('length')} className="flex-1">
                   <input
                     type="number"
                     min="0"
-                    placeholder="es. 120"
+                    placeholder={tv('lengthPlaceholder')}
                     className={dsInput}
                     value={detailsModal.lengthCm}
                     onChange={e => setDetailsModal({ ...detailsModal, lengthCm: e.target.value })}
