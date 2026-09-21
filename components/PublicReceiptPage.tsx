@@ -48,6 +48,10 @@ const dateLabel = (iso: string | null, lang: SupportedLanguage): string => {
   if (Number.isNaN(d.getTime())) return '';
   // Fuso di Roma in entrambe le lingue: l'ora del documento è quella del
   // ristorante, non del telefono che lo legge.
+  //
+  // Roma è cablata di proposito, come la valuta sopra: lo scontrino è un
+  // documento fiscale italiano e i tenant esteri non hanno il modulo
+  // (entitlement 'fiscal'), quindi da questa pagina non ci passano.
   return new Intl.DateTimeFormat(lang === 'en' ? 'en-GB' : 'it-IT', {
     day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
     timeZone: 'Europe/Rome',

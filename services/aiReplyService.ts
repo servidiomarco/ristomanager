@@ -46,6 +46,10 @@ export interface AiReplyContext {
     knowledge: Array<{ title: string; content: string }>;
     /** Nome del ristorante per la firma. */
     restaurantName?: string;
+    /** Fuso del locale: è l'orologio su cui il modello risolve «domani» e
+     *  «venerdì». A Roma per difetto — un default sbagliato qui fa
+     *  prenotare il giorno prima. */
+    timezone?: string;
     /** Politica caparra dalle Impostazioni: vedi la nota in whatsappAgent.ts. */
     depositPolicy?: DepositPolicy;
 }
@@ -61,17 +65,18 @@ export function isAiConfigured(): boolean {
     return Boolean((process.env.ANTHROPIC_API_KEY || '').trim());
 }
 
-const fmtDate = (d: Date | string | null | undefined): string => {
+const fmtDate = (d: Date | string | null | undefined, tz: string = 'Europe/Rome'): string => {
     if (!d) return '';
     const dt = typeof d === 'string' ? new Date(d) : d;
     if (Number.isNaN(dt.getTime())) return '';
     return dt.toLocaleString('it-IT', {
-        timeZone: 'Europe/Rome', weekday: 'long', day: '2-digit',
+        timeZone: tz, weekday: 'long', day: '2-digit',
         month: '2-digit', hour: '2-digit', minute: '2-digit',
     });
 };
 
 function buildSystem(ctx: AiReplyContext): string {
+    const tz = ctx.timezone || 'Europe/Rome';
     const nome = ctx.restaurantName || 'il ristorante';
     const regole = ctx.knowledge.length > 0
         ? ctx.knowledge.map(k => `- ${k.title}: ${k.content}`).join('\n')
@@ -81,7 +86,7 @@ function buildSystem(ctx: AiReplyContext): string {
     const pren = ctx.reservation
         ? [
             `- Cliente: ${ctx.reservation.customer_name || 'n/d'}`,
-            `- Quando: ${fmtDate(ctx.reservation.reservation_time) || 'n/d'}`,
+            `- Quando: ${fmtDate(ctx.reservation.reservation_time, tz) || 'n/d'}`,
             `- Persone: ${ctx.reservation.guests ?? 'n/d'}`,
             ctx.reservation.room_name ? `- Sala: ${ctx.reservation.room_name}` : '',
             ctx.reservation.status ? `- Stato: ${ctx.reservation.status}` : '',

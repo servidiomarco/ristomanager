@@ -91,20 +91,24 @@ export const WHATSAPP_CHANNEL: ToolChannel = {
 
 /** Tutto ciò che gli strumenti prendono da server.ts. */
 export interface BookingToolsDeps {
-    parseFlexibleDate: (v: any) => string | null;
+    parseFlexibleDate: (v: any, tz?: string) => string | null;
     parseFlexibleTime: (v: any) => string | null;
     normalizeItalianPhone: (v: string) => string;
     normalizeCustomerName: (v: string) => string;
     formatItalianDateReadback: (date: string, language?: string | null) => string;
-    formatItalianConfirmation: (r: any, language?: string | null) => string;
-    formatItalianCancellation: (r: any, language?: string | null) => string;
-    formatItalianModification: (r: any, language?: string | null) => string;
+    formatItalianConfirmation: (r: any, language?: string | null, tz?: string) => string;
+    formatItalianCancellation: (r: any, language?: string | null, tz?: string) => string;
+    formatItalianModification: (r: any, language?: string | null, tz?: string) => string;
     formatSlotListItalian: (slots: string[], language?: string | null) => string;
     formatBookingDateTime: (d: any) => { dateLabel: string; timeLabel: string };
     formatEuroMinor: (cents: number) => string;
     asUtcInstant: (v: any) => any;
     toTitleCase: (v: any) => string;
-    reservationPushLabel: (d: any) => string;
+    reservationPushLabel: (d: any, tz?: string) => string;
+
+    // Il fuso del locale, per i formatter che qui sono puri: senza di questo
+    // le push di un tenant londinese dicevano l'ora di Roma.
+    getTenantTimeZone: (tenantId: number) => Promise<string>;
 
     findAvailability: (tenantId: number, p: any) => Promise<any>;
     getAvailableSlots: (tenantId: number, date: string, shift: Shift) => Promise<string[]>;
@@ -256,7 +260,7 @@ export async function checkAvailability(
         ? (rawLocation as 'INDOOR' | 'OUTDOOR')
         : undefined;
 
-    const normalizedDate = d.parseFlexibleDate(p.date);
+    const normalizedDate = d.parseFlexibleDate(p.date, await d.getTenantTimeZone(tenantId));
     if (!normalizedDate) {
         console.warn(`${channel.logPrefix} check-availability rejected: unparseable date`, { received: p.date });
         return fail('invalid_date', msg(english).invalidDate);
@@ -487,7 +491,7 @@ export async function createReservation(
         console.warn(`${channel.logPrefix} rubrica lookup failed (non-blocking):`, (err as Error)?.message || err);
     }
 
-    const normalizedDate = d.parseFlexibleDate(p.date);
+    const normalizedDate = d.parseFlexibleDate(p.date, await d.getTenantTimeZone(tenantId));
     if (!normalizedDate) {
         console.warn(`${channel.logPrefix} create-reservation rejected: unparseable date`, { received: p.date });
         return fail('invalid_date', msg(english).invalidDate);
@@ -697,7 +701,7 @@ export async function createReservation(
             console.warn(`${channel.logPrefix} broadcastReservationCreated failed:`, err);
         }
 
-        const reservationLabel = d.reservationPushLabel(d.asUtcInstant(created.reservation_time));
+        const reservationLabel = d.reservationPushLabel(d.asUtcInstant(created.reservation_time), await d.getTenantTimeZone(tenantId));
         d.pushSendToRoles(
             tenantId,
             ['OWNER', 'GENERAL_MANAGER', 'MANAGER', 'WAITER'],
@@ -722,7 +726,7 @@ export async function createReservation(
                 ? (english
                     ? `Registered ${firstName}: for large groups a deposit is required. We will contact you shortly to complete the booking. Thank you!`
                     : `Registrato ${firstName}: per i gruppi numerosi è prevista una caparra. La ricontatteremo a breve per completare la prenotazione. Grazie!`)
-                : d.formatItalianConfirmation(created, detectedLanguage);
+                : d.formatItalianConfirmation(created, detectedLanguage, await d.getTenantTimeZone(tenantId));
 
         console.log(`${channel.logPrefix} create-reservation OK`, {
             id: created.id, conversation_id: conversationId, customer: created.customer_name,
@@ -798,7 +802,7 @@ export async function cancelReservation(
     const english = isEnglishCall(p);
 
     if (!phoneRaw && !customerName) return fail('invalid_phone', msg(english).invalidPhoneFind);
-    const normalizedDate = d.parseFlexibleDate(p.date);
+    const normalizedDate = d.parseFlexibleDate(p.date, await d.getTenantTimeZone(tenantId));
     if (!normalizedDate) {
         console.warn(`${channel.logPrefix} cancel-reservation rejected: unparseable date`, { received: p.date });
         return fail('invalid_date', msg(english).invalidDate);
@@ -898,7 +902,7 @@ export async function cancelReservation(
             console.warn(`${channel.logPrefix} broadcastReservationUpdated failed:`, err);
         }
 
-        const reservationLabel = d.reservationPushLabel(d.asUtcInstant(cancelled.reservation_time));
+        const reservationLabel = d.reservationPushLabel(d.asUtcInstant(cancelled.reservation_time), await d.getTenantTimeZone(tenantId));
         d.pushSendToRoles(
             tenantId,
             ['OWNER', 'GENERAL_MANAGER', 'MANAGER', 'WAITER'],
@@ -920,7 +924,7 @@ export async function cancelReservation(
                 success: true,
                 status: 'cancelled',
                 reservation_id: cancelled.id,
-                confirmation_phrase: d.formatItalianCancellation(cancelled, english ? 'en' : null),
+                confirmation_phrase: d.formatItalianCancellation(cancelled, english ? 'en' : null, await d.getTenantTimeZone(tenantId)),
             },
         };
     } catch (err: any) {
@@ -964,7 +968,7 @@ export async function modifyReservation(
     const english = isEnglishCall(p);
     if (!phoneRaw && !customerName) return fail('invalid_phone', msg(english).invalidPhoneFind);
 
-    const normalizedDate = d.parseFlexibleDate(p.date);
+    const normalizedDate = d.parseFlexibleDate(p.date, await d.getTenantTimeZone(tenantId));
     if (!normalizedDate) {
         return fail('invalid_date', english
             ? 'Date format of the booking to modify not recognised. Examples: 2026-05-14, 14/05/2026, "14 May 2026".'
@@ -982,7 +986,7 @@ export async function modifyReservation(
     // Gli override "new_*" sono tutti facoltativi: quello che manca resta com'è.
     let newDate: string | undefined;
     if (p.new_date !== undefined && p.new_date !== null && String(p.new_date).trim() !== '') {
-        newDate = d.parseFlexibleDate(p.new_date) || undefined;
+        newDate = d.parseFlexibleDate(p.new_date, await d.getTenantTimeZone(tenantId)) || undefined;
         if (!newDate) return fail('invalid_new_date', english
             ? 'New date format not recognised. Examples: 2026-05-14, 14/05/2026, "14 May 2026".'
             : 'Formato nuova data non riconosciuto. Esempi: 2026-05-14, 14/05/2026, "14 maggio 2026".');
@@ -1135,7 +1139,7 @@ export async function modifyReservation(
             console.warn(`${channel.logPrefix} broadcastReservationUpdated (modify) failed:`, err);
         }
 
-        const reservationLabel = d.reservationPushLabel(d.asUtcInstant(after.reservation_time));
+        const reservationLabel = d.reservationPushLabel(d.asUtcInstant(after.reservation_time), await d.getTenantTimeZone(tenantId));
         d.pushSendToRoles(
             tenantId,
             ['OWNER', 'GENERAL_MANAGER', 'MANAGER', 'WAITER'],
@@ -1161,7 +1165,7 @@ export async function modifyReservation(
                 success: true,
                 status: 'modified',
                 reservation_id: after.id,
-                confirmation_phrase: d.formatItalianModification(after, english ? 'en' : null),
+                confirmation_phrase: d.formatItalianModification(after, english ? 'en' : null, await d.getTenantTimeZone(tenantId)),
                 date_readback: d.formatItalianDateReadback(afterIso.slice(0, 10), english ? 'en' : null),
             },
         };
@@ -1225,7 +1229,7 @@ export async function saveCallbackRequest(
     // Data/ora/coperti desiderati: informativi, mai bloccanti — un promemoria
     // con la data scritta male vale comunque più di nessun promemoria.
     const parts: string[] = [];
-    const reqDate = d.parseFlexibleDate(p.requested_date);
+    const reqDate = d.parseFlexibleDate(p.requested_date, await d.getTenantTimeZone(tenantId));
     if (reqDate) parts.push(d.formatItalianDateReadback(reqDate));
     else if (String(p.requested_date ?? '').trim()) parts.push(String(p.requested_date).trim());
     const reqTime = d.parseFlexibleTime(p.requested_time);

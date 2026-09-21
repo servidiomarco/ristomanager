@@ -30,6 +30,7 @@ import {
   PaneHeader, AttachmentRow,
 } from './ds';
 import type { PillTone } from './ds';
+import { sessionTimeZone } from '../utils/displayTime';
 
 const formatRelative = (iso: string | null): string => {
   if (!iso) return '';
@@ -166,7 +167,7 @@ const reservationStatusPill = (status: string | null | undefined, tv: (k: string
 const formatReservationWhen = (iso: string): string => {
   try {
     return new Date(iso).toLocaleString('it-IT', {
-      timeZone: 'Europe/Rome',
+      timeZone: sessionTimeZone(),
       day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
     });
   } catch { return iso; }

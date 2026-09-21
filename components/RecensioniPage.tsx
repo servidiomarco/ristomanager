@@ -6,6 +6,7 @@ import {
     getReviewRequests, getReviewSettings,
     type ReviewRequestRow, type ReviewRequestStatus,
 } from '../services/reviewsApiService';
+import { sessionTimeZone } from '../utils/displayTime';
 
 /* ── Recensioni ───────────────────────────────────────────────────────────
    La pagina della reputazione su Google. In questa prima tappa mostra il
@@ -35,7 +36,7 @@ const formatWhen = (iso: string | null): string => {
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return '—';
     return d.toLocaleString('it-IT', {
-        timeZone: 'Europe/Rome',
+        timeZone: sessionTimeZone(),
         day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
     });
 };

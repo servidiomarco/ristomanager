@@ -4,6 +4,7 @@ import {
 } from 'lucide-react';
 import type { ComponentType } from 'react';
 import type { PillTone } from '../ds';
+import { sessionTimeZone } from '../../utils/displayTime';
 
 /* ── Presentation vocabulary for Pagamenti ────────────────────────────────
    Both surfaces on this page — the open bills and the payment links — used to
@@ -25,7 +26,7 @@ export const formatDateTime = (iso: string | null | undefined): string => {
   if (!iso) return '—';
   try {
     return new Date(iso).toLocaleString('it-IT', {
-      timeZone: 'Europe/Rome',
+      timeZone: sessionTimeZone(),
       day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
     });
   } catch {

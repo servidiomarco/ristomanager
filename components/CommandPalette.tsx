@@ -5,6 +5,7 @@ import { Reservation, Customer, ReservationStatus } from '../types';
 import { getCustomers } from '../services/apiService';
 import { datePart, timePart } from '../utils/displayTime';
 import { toTitleCase } from '../utils/text';
+import { sessionTimeZone } from '../utils/displayTime';
 
 interface CommandPaletteProps {
   isOpen: boolean;
@@ -24,7 +25,7 @@ const formatResDate = (iso: string): string => {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
   return d.toLocaleDateString('it-IT', {
-    timeZone: 'Europe/Rome',
+    timeZone: sessionTimeZone(),
     day: '2-digit',
     month: 'short',
     year: 'numeric',

@@ -4,6 +4,7 @@ import { BellRing, Loader2, Mail, Send } from 'lucide-react';
 import type { OutboundMessage } from '../../services/apiService';
 import { EmptyState, StatusPill, LinkifiedText } from '../ds';
 import type { PillTone } from '../ds';
+import { sessionTimeZone } from '../../utils/displayTime';
 
 /* ── Comunicazione con il cliente ─────────────────────────────────────────
    Every SMS, WhatsApp and email on this booking, newest first.
@@ -40,7 +41,7 @@ const outcome = (msg: OutboundMessage): { labelKey: string; label: string; tone:
 const when = (iso: string): string => {
   try {
     return new Date(iso).toLocaleString('it-IT', {
-      timeZone: 'Europe/Rome', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+      timeZone: sessionTimeZone(), day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
     });
   } catch {
     return iso;

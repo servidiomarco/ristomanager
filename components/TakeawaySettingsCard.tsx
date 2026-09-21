@@ -3,6 +3,7 @@ import { Ban, Copy, Loader2, ShoppingBag } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { asportoApiService, TakeawayConfig } from '../services/asportoApiService';
 import { Callout, Field, SegmentedControl, Stepper } from './ds';
+import { sessionTimeZone } from '../utils/displayTime';
 
 /* ===========================================================================
    Impostazioni → Asporto.
@@ -21,7 +22,7 @@ interface TakeawaySettingsCardProps {
 
 /** Oggi in Italia — lo stop dal pannello si mette quasi sempre per stasera. */
 const todayIso = (): string =>
-  new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome' }).format(new Date());
+  new Intl.DateTimeFormat('en-CA', { timeZone: sessionTimeZone() }).format(new Date());
 
 /** La pagina pubblica vive sul dominio del backend, come /prenota. */
 const API_BASE = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';

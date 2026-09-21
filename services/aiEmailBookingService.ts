@@ -22,6 +22,10 @@ export interface EmailBookingContext {
     subject: string | null;
     body: string;
     restaurantName?: string;
+    /** Fuso del locale: è l'orologio su cui il modello risolve «domani» e
+     *  «venerdì». A Roma per difetto — un default sbagliato qui fa
+     *  prenotare il giorno prima. */
+    timezone?: string;
 }
 
 export interface ExtractedBooking {
@@ -77,14 +81,15 @@ const declaration: Anthropic.Tool = {
 };
 
 function buildSystem(ctx: EmailBookingContext): string {
+    const tz = ctx.timezone || 'Europe/Rome';
     const oggi = new Date().toLocaleDateString('it-IT', {
-        timeZone: 'Europe/Rome', weekday: 'long', year: 'numeric', month: '2-digit', day: '2-digit',
+        timeZone: tz, weekday: 'long', year: 'numeric', month: '2-digit', day: '2-digit',
     });
-    const iso = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Rome' }); // YYYY-MM-DD
+    const iso = new Date().toLocaleDateString('sv-SE', { timeZone: tz }); // YYYY-MM-DD
 
     return `Sei l'addetto alle prenotazioni del ristorante "${ctx.restaurantName || 'il ristorante'}" e leggi le email in arrivo dai clienti.
 
-Oggi è ${oggi} (${iso}), fuso orario Europe/Rome.
+Oggi è ${oggi} (${iso}), fuso orario ${tz}.
 
 COMPITO: leggi l'email e, se contiene una richiesta di prenotazione, chiama estrai_prenotazione con i dati trovati.
 
