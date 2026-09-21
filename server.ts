@@ -195,7 +195,7 @@ import {
 } from './services/reviewRequests.js';
 import { clampModifierN, signedModifierLabel, signedModifierDelta } from './utils/modifierScale.js';
 import { BAR_COURSE_NO, DESSERT_COURSE_NO, isOffSequenceCourse } from './utils/courses.js';
-import { getRomeDatePart, getRomeTimePart, getTimePartInTz } from './utils/reservationTime.js';
+import { getRomeDatePart, getRomeTimePart, getDatePartInTz, getTimePartInTz } from './utils/reservationTime.js';
 import { buildEReceiptPayload, buildFatturaPaXml, getFiscalDriver, type FiscalSeller, type InvoiceBuyer } from './services/fiscalService.js';
 import {
     getAvailableSlots,
@@ -2203,6 +2203,10 @@ const buildConflictMessage = (conflicts: TableConflict[]): string => {
 // piattaforma, Fase B) su questa route non mordevano.
 app.get('/reservations', authenticate, requirePermission('reservations:view'), async (req, res) => {
     try {
+        /* La finestra è «dal giorno X al giorno Y» come li vede il ristorante:
+           mezzanotte del suo fuso, non di Roma. Il confronto resta sargabile —
+           l'istante si calcola prima, niente AT TIME ZONE sulla colonna. */
+        const TZ = sqlTimeZone((await getTenantLocale(req.tenantId!)).timezone);
         // Finestra opzionale (?from=YYYY-MM-DD&to=YYYY-MM-DD, estremi inclusi,
         // giorni Europe/Rome). Il boot dell'app carica prima la finestra
         // recente e poi lo storico in background (caricamento in due tempi,
@@ -2217,11 +2221,11 @@ app.get('/reservations', authenticate, requirePermission('reservations:view'), a
             params.push(from);
             // Mezzanotte di Roma convertita a istante UTC: il confronto resta
             // sargabile sulla colonna, niente AT TIME ZONE sul lato indice.
-            windowSql += ` AND r.reservation_time >= ($${params.length}::date::timestamp AT TIME ZONE 'Europe/Rome')`;
+            windowSql += ` AND r.reservation_time >= ($${params.length}::date::timestamp AT TIME ZONE ${TZ})`;
         }
         if (to) {
             params.push(to);
-            windowSql += ` AND r.reservation_time < (($${params.length}::date + 1)::timestamp AT TIME ZONE 'Europe/Rome')`;
+            windowSql += ` AND r.reservation_time < (($${params.length}::date + 1)::timestamp AT TIME ZONE ${TZ})`;
         }
         // Enrich each reservation with the matching rubrica entry, joined on the
         // digit-only phone so "+39 333 1234567" and "3331234567" align. Used by
@@ -11955,6 +11959,7 @@ app.get('/table-hidden', authenticate, async (req, res) => {
 // for the same (date, shift) — caller must reassign/split first.
 app.post('/table-hidden', authenticate, requirePermission('floorplan:full'), async (req, res) => {
     try {
+        const TZ = sqlTimeZone((await getTenantLocale(req.tenantId!)).timezone);
         const { date, shift, table_id } = req.body;
         if (!date || !shift || table_id == null) {
             return res.status(400).json({ error: 'date, shift and table_id are required' });
@@ -11975,7 +11980,7 @@ app.post('/table-hidden', authenticate, requirePermission('floorplan:full'), asy
              WHERE tenant_id = $4
                AND table_id = $1
                AND shift = $2
-               AND DATE(reservation_time AT TIME ZONE 'Europe/Rome') = $3`,
+               AND ${ROME_DAY('reservation_time', TZ)} = $3`,
             [table_id, shift, date, req.tenantId!]
         );
         if (reservationCheck.rowCount && reservationCheck.rowCount > 0) {
@@ -12126,6 +12131,7 @@ app.get('/room-closed', authenticate, async (req, res) => {
 // DECLINED) for the same (date, shift) — caller must reassign/cancel first.
 app.post('/room-closed', authenticate, requirePermission('floorplan:full'), async (req, res) => {
     try {
+        const TZ = sqlTimeZone((await getTenantLocale(req.tenantId!)).timezone);
         const { date, shift, room_id } = req.body;
         if (!date || !shift || room_id == null) {
             return res.status(400).json({ error: 'date, shift and room_id are required' });
@@ -12154,7 +12160,7 @@ app.post('/room-closed', authenticate, requirePermission('floorplan:full'), asyn
              WHERE res.tenant_id = $4
                AND t.room_id = $1
                AND res.shift = $2
-               AND DATE(res.reservation_time AT TIME ZONE 'Europe/Rome') = $3
+               AND ${ROME_DAY('res.reservation_time', TZ)} = $3
                AND res.banquet_menu_id IS NULL
                AND COALESCE(res.reservation_status, 'CONFIRMED') NOT IN ('CANCELLED', 'DECLINED')`,
             [room_id, shift, date, req.tenantId!]
@@ -23446,8 +23452,10 @@ async function getPublicBookingBlocks(tenantId: number): Promise<PublicBookingBl
 // Purge blocks whose date is already in the past so the settings screen
 // doesn't accumulate stale rows over time. Runs opportunistically at read
 // time — cheap since the array is small.
-function pruneExpiredBlocks<T extends { date: string }>(blocks: T[]): T[] {
-    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Rome', year: 'numeric', month: '2-digit', day: '2-digit' });
+function pruneExpiredBlocks<T extends { date: string }>(blocks: T[], tz: string = 'Europe/Rome'): T[] {
+    // «Scaduto» è scaduto per il ristorante: a Dubai un blocco di oggi è
+    // ancora valido quando a Roma il giorno è già cambiato.
+    const today = getDatePartInTz(new Date(), tz);
     return blocks.filter(b => b.date >= today);
 }
 
@@ -23549,14 +23557,12 @@ async function getVoiceSuspensionSchedule(tenantId: number): Promise<ScheduledSu
 // Rome-anchored "YYYY-MM-DD" and "HH:MM" for the current instant. Used to
 // decide whether a scheduled entry covers now. String comparison works
 // because ISO date + zero-padded time are lexicographically ordered.
-function getRomeNowParts(now: Date = new Date()): { date: string; time: string } {
-    const d = now.toLocaleDateString('en-CA', { timeZone: 'Europe/Rome', year: 'numeric', month: '2-digit', day: '2-digit' });
-    const t = now.toLocaleTimeString('en-GB', { timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit', hour12: false });
-    return { date: d, time: t };
+function getRomeNowParts(now: Date = new Date(), tz: string = 'Europe/Rome'): { date: string; time: string } {
+    return { date: getDatePartInTz(now, tz), time: getTimePartInTz(now, tz) };
 }
 
-function pickActiveScheduleEntry(entries: ScheduledSuspension[], now: Date = new Date()): ScheduledSuspension | null {
-    const { date, time } = getRomeNowParts(now);
+function pickActiveScheduleEntry(entries: ScheduledSuspension[], now: Date = new Date(), tz: string = 'Europe/Rome'): ScheduledSuspension | null {
+    const { date, time } = getRomeNowParts(now, tz);
     for (const e of entries) {
         if (e.date === date && time >= e.start_time && time < e.end_time) return e;
     }
@@ -23574,13 +23580,15 @@ async function computeVoiceSuspensionState(tenantId: number): Promise<{ suspende
         return { suspended: true, callbackTime };
     }
     const schedule = await getVoiceSuspensionSchedule(tenantId);
-    const active = pickActiveScheduleEntry(schedule);
+    const { timezone } = await getTenantLocale(tenantId);
+    const active = pickActiveScheduleEntry(schedule, new Date(), timezone);
     if (active) return { suspended: true, callbackTime: active.callback_time || active.end_time };
     return { suspended: false, callbackTime: '' };
 }
 
 app.get('/settings/channels', authenticate, async (req, res) => {
     try {
+        const fusoTenant = (await getTenantLocale(req.tenantId!)).timezone;
         const [voiceThreshold, suspensionCallback, suspensionSchedule, publicBlocksRaw, voiceDateBlocksRaw, roomCaps, voiceFirstMessage] = await Promise.all([
             getVoiceLargeGroupThreshold(req.tenantId!),
             getVoiceSuspensionCallbackTime(req.tenantId!),
@@ -23591,8 +23599,8 @@ app.get('/settings/channels', authenticate, async (req, res) => {
             getVoiceFirstMessage(req.tenantId!),
         ]);
         // Filter past blocks at read time; UI never has to worry about them.
-        const publicBlocks = pruneExpiredBlocks(publicBlocksRaw);
-        const voiceDateBlocks = pruneExpiredBlocks(voiceDateBlocksRaw);
+        const publicBlocks = pruneExpiredBlocks(publicBlocksRaw, fusoTenant);
+        const voiceDateBlocks = pruneExpiredBlocks(voiceDateBlocksRaw, fusoTenant);
         res.json({
             voice_large_group_threshold: voiceThreshold,
             voice_bookings_suspension_callback_time: suspensionCallback,
@@ -23609,6 +23617,7 @@ app.get('/settings/channels', authenticate, async (req, res) => {
 });
 
 app.put('/settings/channels', authenticate, requirePermission('settings:full'), async (req, res) => {
+    const fusoTenant = (await getTenantLocale(req.tenantId!)).timezone;
     const body = req.body ?? {};
     const updates: Array<{ key: string; column: 'int_value' | 'text_value'; value: number | string }> = [];
 
@@ -23838,8 +23847,8 @@ app.put('/settings/channels', authenticate, requirePermission('settings:full'), 
             getRoomOccupancyCaps(req.tenantId!),
             getVoiceFirstMessage(req.tenantId!),
         ]);
-        const publicBlocks = pruneExpiredBlocks(publicBlocksRaw);
-        const voiceDateBlocks = pruneExpiredBlocks(voiceDateBlocksRaw);
+        const publicBlocks = pruneExpiredBlocks(publicBlocksRaw, fusoTenant);
+        const voiceDateBlocks = pruneExpiredBlocks(voiceDateBlocksRaw, fusoTenant);
         res.json({
             voice_large_group_threshold: voiceThreshold,
             voice_bookings_suspension_callback_time: suspensionCallback,
@@ -28417,16 +28426,17 @@ async function buildPublicCalendar(
     to: string,
     romeToday: string,
 ): Promise<Array<{ date: string; status: 'open' | 'busy' | 'closed'; reason: string | null }>> {
+    const TZ = sqlTimeZone((await getTenantLocale(tenantId)).timezone);
     const [hoursRows, closures, blocks, coversResult, seatsResult] = await Promise.all([
         getAllOpeningHours(tenantId),
         listClosures(tenantId, from),
         getPublicBookingBlocks(tenantId),
         queryWithRetry(
-            `SELECT to_char(reservation_time AT TIME ZONE 'Europe/Rome', 'YYYY-MM-DD') AS day,
+            `SELECT to_char(reservation_time AT TIME ZONE ${TZ}, 'YYYY-MM-DD') AS day,
                     COALESCE(SUM(guests), 0)::int AS seats
              FROM reservations
              WHERE tenant_id = $1
-               AND DATE(reservation_time AT TIME ZONE 'Europe/Rome') BETWEEN $2::date AND $3::date
+               AND ${ROME_DAY('reservation_time', TZ)} BETWEEN $2::date AND $3::date
                AND COALESCE(reservation_status, 'CONFIRMED') NOT IN ('CANCELLED', 'DECLINED')
              GROUP BY 1`,
             [tenantId, from, to]
@@ -29599,6 +29609,20 @@ app.post('/debug/whatsapp-test', authenticate, requireFeature('whatsapp'), requi
 // 17:00, come il resto del CRM.
 const SERVICE_DAY_START_HOUR = 5;
 const DINNER_START_HOUR = 17;
+
+// Espressione unica per non farla divergere fra le query — stessa regola di
+// resolveService(): sotto le 5 si è ancora nella cena di ieri, 5–16 pranzo.
+// Il fuso è un parametro con Roma per default: le chiamate che non lo passano
+// generano SQL byte-identico a prima, e un tenant estero lo passerà quando la
+// sua pagina saprà chi è. sqlTimeZone() garantisce che ci arrivi un fuso vero.
+const ROME_TZ = sqlTimeZone('Europe/Rome');
+const SERVICE_OF = (col: string, tz: string = ROME_TZ) => `
+    CASE WHEN EXTRACT(hour FROM (${col} AT TIME ZONE ${tz})) < ${SERVICE_DAY_START_HOUR}
+         THEN ((${col} AT TIME ZONE ${tz}) - INTERVAL '1 day')::date
+         ELSE (${col} AT TIME ZONE ${tz})::date END`;
+const SHIFT_OF = (col: string, tz: string = ROME_TZ) => `
+    CASE WHEN EXTRACT(hour FROM (${col} AT TIME ZONE ${tz})) BETWEEN ${SERVICE_DAY_START_HOUR} AND ${DINNER_START_HOUR - 1}
+         THEN 'LUNCH' ELSE 'DINNER' END`;
 
 interface CurrentService { service_date: string; shift: 'LUNCH' | 'DINNER' }
 
@@ -33736,6 +33760,11 @@ app.get('/reports/kitchen', authenticate, requirePermission('orders:expedite'), 
 // endpoint elenca i conti attivi per tavolo, con o senza prenotazione.
 app.get('/bills/open', authenticate, requirePermission('payments:view'), async (req, res) => {
     try {
+        /* Il giorno di servizio di un conto aperto a mano si deduce dall'ora,
+           e l'ora è quella del ristorante. Le quattro espressioni erano
+           scritte a mano qui dentro, identiche agli helper: ora passano da
+           quelli, così non possono più divergere. */
+        const TZ = sqlTimeZone((await getTenantLocale(req.tenantId!)).timezone);
         // La coda cassa vive col pay-at-table, ma un tenant col solo modulo
         // asporto incassa da qui i suoi conti: basta uno dei due.
         if (!(await isPayAtTableActive(req.tenantId!))
@@ -33777,14 +33806,11 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
                     -- la stessa regola del giorno di servizio.
                     COALESCE(
                         (SELECT o.service_date FROM orders o WHERE o.table_bill_id = b.id ORDER BY o.id LIMIT 1),
-                        CASE WHEN EXTRACT(hour FROM (b.opened_at AT TIME ZONE 'Europe/Rome')) < 5
-                             THEN ((b.opened_at AT TIME ZONE 'Europe/Rome') - INTERVAL '1 day')::date
-                             ELSE (b.opened_at AT TIME ZONE 'Europe/Rome')::date END
+                        ${SERVICE_OF('b.opened_at', TZ)}
                     ) AS service_date,
                     COALESCE(
                         (SELECT o.shift FROM orders o WHERE o.table_bill_id = b.id ORDER BY o.id LIMIT 1),
-                        CASE WHEN EXTRACT(hour FROM (b.opened_at AT TIME ZONE 'Europe/Rome')) BETWEEN 5 AND 16
-                             THEN 'LUNCH' ELSE 'DINNER' END
+                        ${SHIFT_OF('b.opened_at', TZ)}
                     ) AS shift,
                     COALESCE(SUM(s.amount_cents) FILTER (WHERE s.status = 'PAID'), 0)::int AS paid_cents,
                     COALESCE(SUM(s.amount_cents) FILTER (WHERE s.status = 'CLAIMED'), 0)::int AS claimed_cents,
@@ -33853,13 +33879,10 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
                AND b.tenant_id = $4
                AND ($1::date IS NULL OR COALESCE(
                         (SELECT o.service_date FROM orders o WHERE o.table_bill_id = b.id ORDER BY o.id LIMIT 1),
-                        CASE WHEN EXTRACT(hour FROM (b.opened_at AT TIME ZONE 'Europe/Rome')) < 5
-                             THEN ((b.opened_at AT TIME ZONE 'Europe/Rome') - INTERVAL '1 day')::date
-                             ELSE (b.opened_at AT TIME ZONE 'Europe/Rome')::date END) = $1::date)
+                        ${SERVICE_OF('b.opened_at', TZ)}) = $1::date)
                AND ($2::varchar IS NULL OR COALESCE(
                         (SELECT o.shift FROM orders o WHERE o.table_bill_id = b.id ORDER BY o.id LIMIT 1),
-                        CASE WHEN EXTRACT(hour FROM (b.opened_at AT TIME ZONE 'Europe/Rome')) BETWEEN 5 AND 16
-                             THEN 'LUNCH' ELSE 'DINNER' END) = $2::varchar)
+                        ${SHIFT_OF('b.opened_at', TZ)}) = $2::varchar)
              GROUP BY b.id, t.name, r.customer_name, tw.customer_name, tw.pickup_time, tw.daily_number, fd.id, fd.status, fd.error, fd.provider, fd.provider_ref, fd.doc_type, fd.doc_number, fd.public_token, fd.related_doc_id
              ORDER BY b.closed_at DESC NULLS LAST, b.opened_at DESC`,
             [filterDate, filterShift, statuses, req.tenantId!]
@@ -33979,19 +34002,7 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
 // pranzo incassato a cena entrano nel cassetto della cena. È esattamente il
 // caso del conto rimasto aperto in un servizio passato.
 //
-// Espressione unica per non farla divergere fra le query — stessa regola di
-// resolveService(): sotto le 5 si è ancora nella cena di ieri, 5–16 pranzo.
-// Il fuso è un parametro con Roma per default: le chiamate che non lo passano
-// generano SQL byte-identico a prima, e un tenant estero lo passerà quando la
-// sua pagina saprà chi è. sqlTimeZone() garantisce che ci arrivi un fuso vero.
-const ROME_TZ = sqlTimeZone('Europe/Rome');
-const SERVICE_OF = (col: string, tz: string = ROME_TZ) => `
-    CASE WHEN EXTRACT(hour FROM (${col} AT TIME ZONE ${tz})) < ${SERVICE_DAY_START_HOUR}
-         THEN ((${col} AT TIME ZONE ${tz}) - INTERVAL '1 day')::date
-         ELSE (${col} AT TIME ZONE ${tz})::date END`;
-const SHIFT_OF = (col: string, tz: string = ROME_TZ) => `
-    CASE WHEN EXTRACT(hour FROM (${col} AT TIME ZONE ${tz})) BETWEEN ${SERVICE_DAY_START_HOUR} AND ${DINNER_START_HOUR - 1}
-         THEN 'LUNCH' ELSE 'DINNER' END`;
+
 
 // OMAGGIO e SOSPESO chiudono un conto ma non portano un euro nel cassetto:
 // stanno nel libro cassa e fuori dall'incassato, come in 8b.

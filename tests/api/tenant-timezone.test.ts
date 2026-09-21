@@ -412,3 +412,73 @@ describe('fuso per tenant — i confini della scrittura', () => {
         expect(await oraLocale(id, 'Europe/London')).toBe('2027-07-15 20:30');
     });
 });
+
+/* La finestra della lista: «dal 15 al 15» deve contenere la prenotazione che
+ * il ristorante vede il 15, e per Londra quella prenotazione è un'altra.
+ */
+describe('fuso per tenant — la finestra della lista prenotazioni', () => {
+    const ADMIN_HEADER = { 'X-Platform-Admin-Token': 'test-platform-token' };
+    const SLUG = 'londra-finestra-tz';
+    const EMAIL = 'owner.finestra.tz@example.com';
+    // 23:30Z del 15: il 16 a Roma, il 15 a Londra.
+    const ISTANTE = '2027-02-15T23:30:00.000Z';
+    let db: Client;
+    let londraId = 0;
+    let londraToken = '';
+    let roma = '';
+
+    beforeAll(async () => {
+        roma = await ownerToken();
+        db = new Client({ connectionString: process.env.DATABASE_URL || 'postgresql://localhost/ristotest_api' });
+        await db.connect();
+        const creato = await api().post('/admin/tenants').set(ADMIN_HEADER).send({
+            slug: SLUG, name: 'Mill Window', timezone: 'Europe/London',
+            owner_email: EMAIL, owner_full_name: 'Window Owner',
+        });
+        expect(creato.status).toBe(201);
+        londraId = Number(creato.body.tenant?.id ?? creato.body.id);
+        await db.query('UPDATE tenants SET timezone = $1 WHERE id = $2', ['Europe/London', londraId]);
+        const login = await api().post('/auth/login').send({
+            email: EMAIL, password: String(creato.body.owner_temp_password),
+        });
+        expect(login.status).toBe(200);
+        londraToken = login.body.accessToken;
+
+        for (const tid of [1, londraId]) {
+            await db.query(
+                `INSERT INTO reservations (tenant_id, customer_name, phone, guests, reservation_time, shift, payment_status, reservation_status)
+                 VALUES ($1, 'Finestra Fuso', '+390000000012', 2, $2::timestamptz, 'DINNER', 'NONE', 'CONFIRMED')`,
+                [tid, ISTANTE]
+            );
+        }
+    });
+
+    afterAll(async () => {
+        if (!db) return;
+        try {
+            await db.query(`DELETE FROM reservations WHERE customer_name = 'Finestra Fuso'`);
+            for (const t of ['activity_logs', 'user_sessions', 'app_settings', 'tenant_tokens', 'users', 'tenant_features', 'role_permissions']) {
+                await db.query(`DELETE FROM ${t} WHERE tenant_id = $1`, [londraId]).catch(() => {});
+            }
+            await db.query('DELETE FROM tenants WHERE id = $1', [londraId]);
+        } finally {
+            await db.end();
+        }
+    });
+
+    const nellaFinestra = async (token: string, giorno: string) => {
+        const res = await api().get('/reservations').query({ from: giorno, to: giorno }).set(bearer(token));
+        expect(res.status).toBe(200);
+        return (res.body as any[]).filter(r => r.customer_name === 'Finestra Fuso').length;
+    };
+
+    it('il tenant romano la trova il 16, non il 15', async () => {
+        expect(await nellaFinestra(roma, '2027-02-16')).toBe(1);
+        expect(await nellaFinestra(roma, '2027-02-15')).toBe(0);
+    });
+
+    it('il tenant londinese la trova il 15, non il 16', async () => {
+        expect(await nellaFinestra(londraToken, '2027-02-15')).toBe(1);
+        expect(await nellaFinestra(londraToken, '2027-02-16')).toBe(0);
+    });
+});
