@@ -254,3 +254,47 @@ describe('fuso per tenant — il giorno locale segue il ristorante', () => {
         expect(giornoCon(londra.body, 'londra')).toContain('2027-01-15');
     });
 });
+
+/* Gli helper su cui poggia lo scheduler.
+ *
+ * Il tick dei promemoria e quello delle recensioni decidono «è l'ora?»
+ * leggendo l'orologio del ristorante: getTimePartInTz è quella lettura. Le
+ * funzioni del tick vivono in server.ts e non sono esportate — qui si prova
+ * il mattone, e che il mattone regga anche un fuso inventato.
+ */
+describe('fuso per tenant — leggere l\'orologio del ristorante', () => {
+    it('lo stesso istante dà ore diverse nei due fusi', async () => {
+        const { getTimePartInTz, getDatePartInTz, getRomeTimePart } = await import('../../utils/reservationTime.js');
+        // 23:30Z del 15 gennaio: Roma UTC+1, Londra UTC+0, Dubai UTC+4.
+        const istante = new Date('2027-01-15T23:30:00.000Z');
+
+        expect(getTimePartInTz(istante, 'Europe/Rome')).toBe('00:30');
+        expect(getTimePartInTz(istante, 'Europe/London')).toBe('23:30');
+        expect(getTimePartInTz(istante, 'Asia/Dubai')).toBe('03:30');
+
+        // e il giorno cambia con l'ora: è quello che spostava i report
+        expect(getDatePartInTz(istante, 'Europe/Rome')).toBe('2027-01-16');
+        expect(getDatePartInTz(istante, 'Europe/London')).toBe('2027-01-15');
+        expect(getDatePartInTz(istante, 'Asia/Dubai')).toBe('2027-01-16');
+
+        // il fuso di casa resta quello che era
+        expect(getRomeTimePart(istante)).toBe('00:30');
+    });
+
+    it('in luglio il confronto Roma-Londra resta di un ora, DST compresa', async () => {
+        const { getTimePartInTz } = await import('../../utils/reservationTime.js');
+        // d'estate Roma è UTC+2 e Londra UTC+1: un'ora di differenza, come
+        // d'inverno, ma su offset diversi. È il caso che un calcolo a mano
+        // con un offset fisso sbaglierebbe.
+        const luglio = new Date('2027-07-15T22:30:00.000Z');
+        expect(getTimePartInTz(luglio, 'Europe/Rome')).toBe('00:30');
+        expect(getTimePartInTz(luglio, 'Europe/London')).toBe('23:30');
+    });
+
+    it('un fuso inventato ricade su Roma invece di far esplodere la lista', async () => {
+        const { getTimePartInTz, getDatePartInTz } = await import('../../utils/reservationTime.js');
+        const istante = new Date('2027-01-15T23:30:00.000Z');
+        expect(getTimePartInTz(istante, 'Europe/Atlantide')).toBe('00:30');
+        expect(getDatePartInTz(istante, 'Europe/Atlantide')).toBe('2027-01-16');
+    });
+});
