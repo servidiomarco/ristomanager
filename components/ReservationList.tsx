@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
+import { displayLocale } from '../utils/formatLocale';
 import { createPortal } from 'react-dom';
 import {
   ModalShell, FormCard, Field, Stepper, StepNav, SegmentedControl, dsInput, dsSelect, dsTextarea, dsButton, dsStepArrow,
@@ -110,9 +111,9 @@ const OVERDUE_SNOOZE_MIN = 15;
    time and Salva stays live on all of them, because an edit is usually one
    field, not a journey. Validation still runs once, on save. */
 const RESERVATION_STEPS = [
-  { label: 'Dettagli', icon: Calendar },
-  { label: 'Pagamenti', icon: CreditCard },
-  { label: 'Comunicazione', icon: MessageCircle },
+  { key: 'details', label: 'Dettagli', icon: Calendar },
+  { key: 'payments', label: 'Pagamenti', icon: CreditCard },
+  { key: 'messages', label: 'Comunicazione', icon: MessageCircle },
 ] as const;
 
 // Sezione conto-al-tavolo nel modal prenotazione. Interruttore lato client
@@ -142,13 +143,13 @@ const formatDateTime = (isoString: string): string => {
 // Two-letter initials from a full name (falls back to '?' on empty)
 // Small circular badge showing who took the reservation:
 // voice-agent bookings get a Mic icon, manual bookings get user initials.
-const renderOperatorBadge = (res: Reservation): React.ReactNode => {
+const renderOperatorBadge = (res: Reservation, tv: (k: string, o?: Record<string, unknown>) => string): React.ReactNode => {
   if (res.source === ReservationSource.VOICE) {
     return (
       <span
         className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]"
-        title="Presa dall'agente vocale"
-        aria-label="Presa dall'agente vocale"
+        title={tv('takenByVoiceAgent')}
+        aria-label={tv('takenByVoiceAgent')}
       >
         <Mic className="h-2.5 w-2.5" />
       </span>
@@ -228,14 +229,14 @@ const formatConfirmationTs = (iso: string | null | undefined): string => {
 //   - delivered      → CheckCheck (green) tooltip: "Consegnato il ..."
 //   - failed / undelivered → AlertOctagon (red) tooltip: "Consegna fallita"
 // Renders nothing when we never sent a confirmation for this reservation.
-const renderConfirmationIcon = (res: Reservation): React.ReactNode => {
+const renderConfirmationIcon = (res: Reservation, tv: (k: string, o?: Record<string, unknown>) => string): React.ReactNode => {
   const status = res.confirmation_status;
   if (!status) return null;
   const channelLabel = res.confirmation_channel === 'sms' ? 'SMS' : 'WhatsApp';
 
   if (status === 'delivered') {
     const ts = formatConfirmationTs(res.confirmation_delivered_at);
-    const title = `${channelLabel} consegnato il ${ts}`;
+    const title = tv('confirmDelivered', { canale: channelLabel, quando: ts });
     return (
       <span className={`${ATTR_BADGE} bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]`} title={title} aria-label={title}>
         <CheckCheck className="h-3.5 w-3.5" />
@@ -245,7 +246,7 @@ const renderConfirmationIcon = (res: Reservation): React.ReactNode => {
 
   if (status === 'failed' || status === 'undelivered') {
     const err = res.confirmation_error ? ` — ${res.confirmation_error}` : '';
-    const title = `${channelLabel}: consegna fallita${err}`;
+    const title = tv('confirmFailed', { canale: channelLabel, errore: err });
     return (
       <span className={`${ATTR_BADGE} bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)]`} title={title} aria-label={title}>
         <AlertOctagon className="h-3.5 w-3.5" />
@@ -255,7 +256,7 @@ const renderConfirmationIcon = (res: Reservation): React.ReactNode => {
 
   // queued / sent (or any unknown intermediate state)
   const ts = formatConfirmationTs(res.confirmation_sent_at);
-  const title = `${channelLabel} inviato il ${ts} — in attesa di consegna`;
+  const title = tv('confirmSent', { canale: channelLabel, quando: ts });
   return (
     <span className={ATTR_BADGE} title={title} aria-label={title}>
       <Send className="h-3.5 w-3.5" />
@@ -267,10 +268,10 @@ const renderConfirmationIcon = (res: Reservation): React.ReactNode => {
 // modal's Comunicazione tab). Boolean only — the per-message delivery outcome
 // lives in the timeline, so the badge stays a quiet "already done" marker that
 // spares the staff a second reminder to the same customer.
-const renderReminderIcon = (res: Reservation): React.ReactNode => {
+const renderReminderIcon = (res: Reservation, tv: (k: string, o?: Record<string, unknown>) => string): React.ReactNode => {
   if (!res.reminder_sent) return null;
   return (
-    <span className={ATTR_BADGE} title="Reminder inviato" aria-label="Reminder inviato">
+    <span className={ATTR_BADGE} title={tv('reminderSent')} aria-label={tv('reminderSent')}>
       <BellRing className="h-3.5 w-3.5" />
     </span>
   );
@@ -289,18 +290,18 @@ const renderPaymentIcon = (res: Reservation): React.ReactNode => (
 // created_at is missing (pre-migration rows with no CREATE log to backfill).
 // formatBookedAtBy folds in who took the booking — the card used to carry a
 // separate initials circle for that, one glyph too many on a crowded row.
-const formatBookedAtBy = (res: Reservation): string => {
-  const base = formatBookedAt(res.created_at);
-  if (res.source === ReservationSource.VOICE) return `${base} · presa dall'agente vocale`;
-  if (res.created_by_user_name) return `${base} · presa da ${toTitleCase(res.created_by_user_name)}`;
+const formatBookedAtBy = (res: Reservation, tv: (k: string, o?: Record<string, unknown>) => string): string => {
+  const base = formatBookedAt(res.created_at, tv);
+  if (res.source === ReservationSource.VOICE) return `${base} · ${tv('takenByVoiceAgentShort')}`;
+  if (res.created_by_user_name) return `${base} · ${tv('takenBy', { chi: toTitleCase(res.created_by_user_name) })}`;
   return base;
 };
 
-const formatBookedAt = (createdAt?: string | null): string => {
-  if (!createdAt) return 'Data di prenotazione non disponibile';
+const formatBookedAt = (createdAt?: string | null, tv?: (k: string, o?: Record<string, unknown>) => string): string => {
+  if (!createdAt) return tv ? tv('bookedAtUnknown') : '';
   const d = new Date(createdAt);
-  if (Number.isNaN(d.getTime())) return 'Data di prenotazione non disponibile';
-  return `Prenotata il ${d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })} alle ${d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`;
+  if (Number.isNaN(d.getTime())) return tv ? tv('bookedAtUnknown') : '';
+  return tv ? tv('bookedOn', { data: d.toLocaleDateString(displayLocale(), { day: '2-digit', month: '2-digit', year: 'numeric' }), ora: d.toLocaleTimeString(displayLocale(), { hour: '2-digit', minute: '2-digit' }) }) : '';
 };
 
 // Helper to calculate lateness in minutes (returns negative if reservation is in the future)
@@ -572,6 +573,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const { t } = useTranslation('common', { useSuspense: false });
   // Namespace della vista: caricata alla prima apertura di Prenotazioni.
   const { t: tv } = useTranslation('prenotazioni', { useSuspense: false });
+
+  /* I tre passi del modal si traducono tutti insieme: la costante resta
+     l'elenco (chiave, icona, versione italiana) e il testo passa di qui. */
+  const reservationSteps = useMemo(() => RESERVATION_STEPS.map(p => ({
+    key: p.key,
+    label: tv(`step.${p.key}`, p.label),
+    icon: p.icon,
+  })), [tv]);
   const stateLabel = useReservationStateLabel();
   const { hasPermission } = useAuth();
   const canViewBanquetPrice = hasPermission('banquet:view_price');
@@ -1220,7 +1229,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       return next;
     });
     if (assigned) {
-      showToast(`Tavolo preferito ${assigned.tableName} assegnato automaticamente.`, 'success');
+      showToast(tv('toast.preferredTableAssigned', { tavolo: assigned.tableName }), 'success');
     }
   };
 
@@ -1327,7 +1336,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           next.delete(table.id);
           return next;
         });
-        showToast(`Tavolo ${table.name} riattivato`, 'success');
+        showToast(tv('toast.tableRestored', { tavolo: table.name }), 'success');
       } else {
         await createTableHidden(focalDate, focalShift, table.id);
         setHiddenTableIds(prev => {
@@ -1335,10 +1344,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           next.add(table.id);
           return next;
         });
-        showToast(`Tavolo ${table.name} nascosto per questo turno`, 'success');
+        showToast(tv('toast.tableHidden', { tavolo: table.name }), 'success');
       }
     } catch (err: any) {
-      showToast(err?.message || 'Operazione non riuscita', 'error');
+      showToast(err?.message || tv('err.actionFailed'), 'error');
     }
   };
 
@@ -1349,9 +1358,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       await Promise.all(ids.map(id => deleteTableHidden(focalDate, focalShift, id)));
       setHiddenTableIds(new Set());
       setShowHidden(false);
-      showToast(`${ids.length} ${ids.length === 1 ? 'tavolo riattivato' : 'tavoli riattivati'} per questo turno`, 'success');
+      showToast(tv('toast.tablesRestored', { count: ids.length }), 'success');
     } catch (err: any) {
-      showToast(err?.message || 'Operazione non riuscita', 'error');
+      showToast(err?.message || tv('err.actionFailed'), 'error');
     }
   };
 
@@ -1515,9 +1524,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         next.delete(suggestion.reservation_id);
         return next;
       });
-      showToast(`Tavolo ${suggestion.table_name || ''} assegnato a ${toTitleCase(reservation.customer_name)}`, 'success');
+      showToast(tv('toast.tableAssignedTo', { tavolo: suggestion.table_name || '', chi: toTitleCase(reservation.customer_name) }), 'success');
     } catch (err: any) {
-      showToast(err?.message || 'Impossibile confermare il tavolo suggerito', 'error');
+      showToast(err?.message || tv('err.confirmSuggestedFailed'), 'error');
     }
   };
 
@@ -1530,7 +1539,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     try {
       await dismissTableAssignmentSuggestion(suggestion.id);
     } catch (err: any) {
-      showToast(err?.message || 'Impossibile ignorare il suggerimento', 'error');
+      showToast(err?.message || tv('err.ignoreSuggestionFailed'), 'error');
     }
   };
 
@@ -1779,7 +1788,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       handleSetReservationState(quickArriveCandidates[0], 'arrived');
       setSearchTerm(''); // input keeps focus: ready for the next surname
     } else if (quickArriveCandidates.length > 1) {
-      showToast(`${quickArriveCandidates.length} prenotazioni confermate corrispondono — affina la ricerca`, 'info');
+      showToast(tv('toast.tooManyMatches', { count: quickArriveCandidates.length }), 'info');
     }
   };
 
@@ -1838,16 +1847,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
   const handleSendWhatsapp = async (res: Reservation) => {
       if (!res.phone) {
-          showToast('Numero di telefono mancante per questa prenotazione.', 'error');
+          showToast(tv('toast.noPhone'), 'error');
           return;
       }
 
       try {
           await sendWhatsAppConfirmation(res.id);
-          showToast(`Conferma WhatsApp inviata a ${toTitleCase(res.customer_name)}`, 'success');
+          showToast(tv('toast.whatsappConfirmSent', { chi: toTitleCase(res.customer_name) }), 'success');
       } catch (error) {
           console.error('Error sending WhatsApp confirmation:', error);
-          showToast('Errore durante l\'invio della conferma WhatsApp', 'error');
+          showToast(tv('toast.whatsappConfirmError'), 'error');
       }
   };
 
@@ -1869,7 +1878,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       patch.duration_minutes = extendedDurationMin(res, nowTick);
     }
     onUpdateReservation({ ...res, ...patch });
-    showToast(`${toTitleCase(res.customer_name)}: stato → ${stateLabel(state)}`, 'success');
+    showToast(tv('toast.stateChanged', { chi: toTitleCase(res.customer_name), stato: stateLabel(state) }), 'success');
   };
 
   // --- Overdue-table prompt ------------------------------------------------
@@ -1909,12 +1918,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // Voice input handler
   const handleVoiceInput = async () => {
     if (!isVoiceSupported()) {
-      showToast('Riconoscimento vocale non supportato dal browser', 'error');
+      showToast(tv('toast.voiceUnsupported'), 'error');
       return;
     }
 
     setIsListening(true);
-    showToast('Parla ora...', 'info');
+    showToast(tv('toast.speakNow'), 'info');
 
     try {
       const transcript = await startListening();
@@ -1953,19 +1962,19 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       if (parsed.shift) parsedFields.push(parsed.shift === Shift.LUNCH ? 'Pranzo' : 'Cena');
 
       if (parsedFields.length > 0) {
-        showToast(`Compilato: ${parsedFields.join(' · ')}`, 'success');
+        showToast(tv('toast.filledIn', { campi: parsedFields.join(' · ') }), 'success');
       } else {
-        showToast(`Riconosciuto: "${transcript}"`, 'info');
+        showToast(tv('toast.heard', { testo: transcript }), 'info');
       }
     } catch (error: any) {
       if (error.message === 'no-speech') {
-        showToast('Nessun audio rilevato, riprova', 'error');
+        showToast(tv('toast.noAudio'), 'error');
       } else if (error.message === 'audio-capture') {
-        showToast('Microfono non disponibile', 'error');
+        showToast(tv('toast.micUnavailable'), 'error');
       } else if (error.message === 'not-allowed') {
-        showToast('Permesso microfono negato', 'error');
+        showToast(tv('toast.micDenied'), 'error');
       } else {
-        showToast('Errore riconoscimento vocale', 'error');
+        showToast(tv('toast.voiceError'), 'error');
       }
     } finally {
       setIsListening(false);
@@ -2082,7 +2091,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         const requested = toMin(prefillTime);
         const nearest = daySlots.reduce((best, s) =>
           Math.abs(toMin(s) - requested) < Math.abs(toMin(best) - requested) ? s : best, daySlots[0]);
-        requestedTimeNote = `Orario richiesto: ${prefillTime}`;
+        requestedTimeNote = tv('requestedTime', { ora: prefillTime });
         prefillTime = nearest;
       }
       const reservationTime = walkIn
@@ -2262,7 +2271,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     try {
       const result = await revokePaymentRequest(paymentRequestId);
       setPaymentRequests(prev => prev.map(pr => pr.id === paymentRequestId ? result.payment_request : pr));
-      showToast('Link revocato: non è più pagabile', 'success');
+      showToast(tv('toast.linkRevoked'), 'success');
     } catch (err) {
       showToast((err as Error).message || 'Revoca fallita', 'error');
     } finally {
@@ -2274,11 +2283,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     if (!formData.id) return;
     const amount = Number(String(paymentAmount).replace(',', '.'));
     if (!Number.isFinite(amount) || amount <= 0) {
-      showToast('Inserisci un importo valido', 'error');
+      showToast(tv('toast.invalidAmount'), 'error');
       return;
     }
     if (!paymentChannelAvailable[paymentChannel]) {
-      showToast('Canale di invio non disponibile per questa prenotazione', 'error');
+      showToast(tv('toast.noChannel'), 'error');
       return;
     }
     setIsCreatingPayment(true);
@@ -2293,9 +2302,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       setPaymentAmount('');
       setPaymentDescription('');
       const channelLabel = paymentChannel === 'email' ? 'via email' : paymentChannel === 'sms' ? 'via SMS' : 'via WhatsApp';
-      showToast(`Link di pagamento inviato ${channelLabel}`, 'success');
+      showToast(tv('toast.paymentLinkSent', { canale: channelLabel }), 'success');
     } catch (err: any) {
-      showToast(err?.message || 'Errore creazione link di pagamento', 'error');
+      showToast(err?.message || tv('err.paymentLinkFailed'), 'error');
     } finally {
       setIsCreatingPayment(false);
     }
@@ -2308,7 +2317,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       setCopiedPaymentId(pr.id);
       setTimeout(() => setCopiedPaymentId(prev => prev === pr.id ? null : prev), 1500);
     } catch {
-      showToast('Copia non riuscita, apri il link manualmente', 'error');
+      showToast(tv('toast.copyFailed'), 'error');
     }
   };
 
@@ -2396,7 +2405,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     if (!formData.id) return;
     const euros = Number(String(billTotalInput).replace(',', '.'));
     if (!Number.isFinite(euros) || euros <= 0) {
-      showToast('Inserisci un totale valido', 'error');
+      showToast(tv('toast.invalidTotal'), 'error');
       return;
     }
     const coversNum = Number(billCoversInput);
@@ -2411,7 +2420,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       setBillTotalInput('');
       setBillCoversInput('');
       if (!notify) {
-        showToast('Conto aperto', 'success');
+        showToast(tv('toast.billOpened'), 'success');
         return;
       }
       // The bill row is committed; the notify call is a best-effort follow-up.
@@ -2419,12 +2428,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       // "Invia link al cliente" without re-opening the bill.
       try {
         const delivery = await billsApiService.notifyBillLink(formData.id as number);
-        showToast(`Conto aperto e link inviato via ${delivery.channel === 'whatsapp' ? 'WhatsApp' : 'SMS'}`, 'success');
+        showToast(tv('toast.billOpenedAndSent', { canale: delivery.channel === 'whatsapp' ? 'WhatsApp' : 'SMS' }), 'success');
       } catch (notifyErr: any) {
-        showToast(notifyErr?.message || 'Conto aperto, ma invio del link non riuscito', 'error');
+        showToast(notifyErr?.message || tv('err.billOpenedLinkFailed'), 'error');
       }
     } catch (err: any) {
-      showToast(err?.message || 'Errore apertura conto', 'error');
+      showToast(err?.message || tv('err.billOpenFailed'), 'error');
     } finally {
       setBillActionLoading(null);
     }
@@ -2437,7 +2446,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     if (!formData.id) return;
     const tavolo = ppTavolo.trim();
     if (!tavolo) {
-      showToast('Assegna un tavolo alla prenotazione per importare il conto', 'error');
+      showToast(tv('toast.assignTableFirst'), 'error');
       return;
     }
     setBillActionLoading('import-pp');
@@ -2447,15 +2456,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         pp_tavolo: tavolo,
       });
       setBill(created);
-      showToast(`Conto importato dal gestionale: €${(created.bill.total_cents / 100).toFixed(2).replace('.', ',')}`, 'success');
+      showToast(tv('toast.billImported', { importo: `€${(created.bill.total_cents / 100).toFixed(2).replace('.', ',')}` }), 'success');
     } catch (err: any) {
       // Nome tavolo che non combacia col gestionale (il server ha già provato
       // le varianti tipografiche): si chiede all'operatore il nome esatto e
       // si ritenta, invece di lasciarlo davanti a un vicolo cieco.
       if (err?.data?.error === 'no_comanda') {
         const manual = window.prompt(
-          `Nessuna comanda trovata sul tavolo "${tavolo}" nel gestionale.\n` +
-          'Scrivi il nome ESATTO del tavolo come appare in Passepartout (punto e spazi compresi):',
+          tv('noComandaPrompt', { tavolo }),
           tavolo
         );
         const retry = manual?.trim();
@@ -2465,7 +2473,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           return;
         }
       }
-      showToast(err?.data?.message || err?.message || 'Importazione dal gestionale non riuscita', 'error');
+      showToast(err?.data?.message || err?.message || tv('err.importFailed'), 'error');
     } finally {
       setBillActionLoading(null);
     }
@@ -2476,9 +2484,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     setBillActionLoading('notify');
     try {
       const delivery = await billsApiService.notifyBillLink(formData.id as number);
-      showToast(`Link inviato al cliente via ${delivery.channel === 'whatsapp' ? 'WhatsApp' : 'SMS'}`, 'success');
+      showToast(tv('toast.linkSent', { canale: delivery.channel === 'whatsapp' ? 'WhatsApp' : 'SMS' }), 'success');
     } catch (err: any) {
-      showToast(err?.message || 'Invio del link non riuscito', 'error');
+      showToast(err?.message || tv('err.linkSendFailed'), 'error');
     } finally {
       setBillActionLoading(null);
     }
@@ -2494,7 +2502,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       // "in coda", non "stampato": la conferma vera e' la termica che parte.
       showToast(kind === 'QR' ? 'QR inviato alla stampante' : 'Preconto inviato alla stampante', 'success');
     } catch (err: any) {
-      showToast(err?.message || 'Stampa non riuscita', 'error');
+      showToast(err?.message || tv('err.printFailed'), 'error');
     } finally {
       setBillActionLoading(null);
     }
@@ -2516,9 +2524,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         const fresh = await billsApiService.getBill(formData.id as number).catch(() => null);
         setBill(fresh);
       }
-      showToast(result.reopened ? 'Quota rimborsata, conto riaperto' : 'Quota rimborsata', 'success');
+      showToast(result.reopened ? tv('toast.refundedReopened') : tv('toast.refunded'), 'success');
     } catch (err: any) {
-      showToast(err?.message || 'Rimborso non riuscito', 'error');
+      showToast(err?.message || tv('err.refundFailed'), 'error');
     } finally {
       setRefundingSplitId(null);
     }
@@ -2530,9 +2538,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     try {
       await billsApiService.closeBill(bill.bill.id, opts);
       setBill(null);
-      showToast('Conto chiuso', 'success');
+      showToast(tv('toast.billClosed'), 'success');
     } catch (err: any) {
-      showToast(err?.message || 'Errore chiusura conto', 'error');
+      showToast(err?.message || tv('err.billCloseFailed'), 'error');
     } finally {
       setBillActionLoading(null);
     }
@@ -2540,14 +2548,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
   const handleVoidBill = async () => {
     if (!bill) return;
-    if (!window.confirm('Annullare il conto? Il QR non sarà più valido.')) return;
+    if (!window.confirm(tv('bill.cancelConfirm'))) return;
     setBillActionLoading('void');
     try {
       await billsApiService.voidBill(bill.bill.id);
       setBill(null);
-      showToast('Conto annullato', 'success');
+      showToast(tv('toast.billCancelled'), 'success');
     } catch (err: any) {
-      showToast(err?.message || 'Errore annullamento conto', 'error');
+      showToast(err?.message || tv('err.billCancelFailed'), 'error');
     } finally {
       setBillActionLoading(null);
     }
@@ -2583,7 +2591,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         !!existing.data.formData?.notes
       );
       setDraftBanner(null);
-      showToast('Bozza ripristinata', 'success');
+      showToast(tv('toast.draftRestored'), 'success');
   };
 
   const handleDiscardDraft = () => {
@@ -2767,46 +2775,46 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               const suggestions = suitableTables.slice(0, 3).map(t => {
                   const room = rooms.find(r => r.id === t.room_id);
                   return {
-                      label: `${t.name} - ${t.seats} posti (${room?.name})`,
+                      label: tv('tableWithSeats', { nome: t.name, posti: t.seats, sala: room?.name }),
                       table: t
                   };
               });
 
               setConfirmModal({
                   isOpen: true,
-                  title: '⚠️ Capienza Insufficiente',
-                  message: `Il tavolo ${table.name} ha solo ${table.seats} posti ma la prenotazione è per ${guests} ospiti.`,
+                  title: `⚠️ ${tv('capacity.title')}`,
+                  message: tv('capacity.message', { tavolo: table.name, posti: table.seats, ospiti: guests }),
                   suggestions: suggestions,
                   onConfirm: () => {
                       setFormData({...formData, table_id: table.id});
                       setSelectedTablesForMerge([]);
                       setConfirmModal(null);
-                      showToast(`Tavolo ${table.name} assegnato`, 'success');
+                      showToast(tv('toast.tableAssigned', { tavolo: table.name }), 'success');
                   },
                   onCancel: () => {
-                      showToast('Selezione annullata. Scegli un tavolo più grande.', 'info');
+                      showToast(tv('toast.pickBiggerTable'), 'info');
                       setConfirmModal(null);
                   },
                   onSelectSuggestion: (suggestedTable: Table) => {
                       setFormData({...formData, table_id: suggestedTable.id});
                       setSelectedTablesForMerge([]);
                       setConfirmModal(null);
-                      showToast(`Tavolo ${suggestedTable.name} assegnato automaticamente`, 'success');
+                      showToast(tv('toast.tableAutoAssigned', { tavolo: suggestedTable.name }), 'success');
                   }
               });
           } else {
               // No suitable tables available - warn but allow
               setConfirmModal({
                   isOpen: true,
-                  title: '⚠️ Capienza Insufficiente',
-                  message: `Il tavolo ${table.name} ha solo ${table.seats} posti ma la prenotazione è per ${guests} ospiti.\n\nNon ci sono tavoli disponibili più grandi.`,
+                  title: `⚠️ ${tv('capacity.title')}`,
+                  message: `${tv('capacity.message', { tavolo: table.name, posti: table.seats, ospiti: guests })}\n\n${tv('capacity.noBigger')}`,
                   onConfirm: () => {
                       setFormData({...formData, table_id: table.id});
                       setSelectedTablesForMerge([]);
                       setConfirmModal(null);
                   },
                   onCancel: () => {
-                      showToast('Selezione annullata.', 'info');
+                      showToast(tv('toast.selectionCancelled'), 'info');
                       setConfirmModal(null);
                   }
               });
@@ -2838,9 +2846,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
       if (availableTables.length > 0) {
           setFormData({ ...formData, table_id: availableTables[0].id });
-          showToast(`Tavolo ${availableTables[0].name} assegnato automaticamente.`, 'success');
+          showToast(tv('toast.tableAutoAssignedDot', { tavolo: availableTables[0].name }), 'success');
       } else {
-          showToast("Nessun tavolo ottimale trovato.", 'error');
+          showToast(tv('toast.noOptimalTable'), 'error');
       }
   };
 
@@ -2876,7 +2884,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           showToast(res.channel === 'whatsapp' ? 'Reminder inviato su WhatsApp' : 'Reminder inviato via SMS', 'success');
           refreshOutboundTimeline(id as number);
       } catch (err: any) {
-          showToast(err?.data?.message || err?.message || 'Invio reminder non riuscito', 'error');
+          showToast(err?.data?.message || err?.message || tv('err.reminderFailed'), 'error');
       } finally {
           setReminderSending(false);
       }
@@ -2897,11 +2905,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
       if (channel === 'email') {
           if (!target.email) {
-              showToast('Email cliente mancante.', 'error');
+              showToast(tv('toast.noEmail'), 'error');
               return;
           }
           if (!target.id) {
-              showToast('Prenotazione non ancora salvata.', 'error');
+              showToast(tv('toast.notSavedYet'), 'error');
               return;
           }
           try {
@@ -2919,7 +2927,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               else await refreshOutboundTimeline(target.id);
           } catch (err: any) {
               console.error('Errore invio conferma email:', err);
-              showToast(err?.message || 'Errore invio conferma email', 'error');
+              showToast(err?.message || tv('toast.emailConfirmError'), 'error');
           } finally {
               setSendingConfirmation(null);
           }
@@ -2927,11 +2935,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       }
 
       if (!target.phone) {
-          showToast('Numero di telefono mancante per questa prenotazione.', 'error');
+          showToast(tv('toast.noPhone'), 'error');
           return;
       }
       if (!target.id) {
-          showToast('Prenotazione non ancora salvata.', 'error');
+          showToast(tv('toast.notSavedYet'), 'error');
           return;
       }
 
@@ -2949,7 +2957,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           else await refreshOutboundTimeline(target.id);
       } catch (err: any) {
           console.error('Errore invio conferma:', err);
-          showToast(err?.message || `Errore invio conferma ${channel}`, 'error');
+          showToast(err?.message || tv('toast.confirmSendError', { canale: channel }), 'error');
       } finally {
           setSendingConfirmation(null);
       }
@@ -2960,34 +2968,34 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // timeline immediately without waiting for the next open.
   const handleSendCustomEmail = async () => {
       if (!formData.id) {
-          showToast('Prenotazione non ancora salvata.', 'error');
+          showToast(tv('toast.notSavedYet'), 'error');
           return;
       }
       if (!formData.email) {
-          showToast('Email cliente mancante.', 'error');
+          showToast(tv('toast.noEmail'), 'error');
           return;
       }
       const subject = customEmailSubject.trim();
       const body = customEmailBody.trim();
       if (!subject) {
-          showToast('Inserisci un oggetto per la mail.', 'error');
+          showToast(tv('toast.needSubject'), 'error');
           return;
       }
       if (!body) {
-          showToast('Il corpo della mail non può essere vuoto.', 'error');
+          showToast(tv('toast.needBody'), 'error');
           return;
       }
       try {
           setCustomEmailSending(true);
           await sendCustomEmail(formData.id as number, subject, body);
-          showToast(`Email inviata a ${formData.email}`, 'success');
+          showToast(tv('toast.emailSent', { indirizzo: formData.email }), 'success');
           setCustomEmailOpen(false);
           setCustomEmailSubject('');
           setCustomEmailBody('');
           await refreshOutboundTimeline(formData.id as number);
       } catch (err: any) {
           console.error('Errore invio email libera:', err);
-          showToast(err?.message || 'Errore invio email', 'error');
+          showToast(err?.message || tv('toast.emailError'), 'error');
       } finally {
           setCustomEmailSending(false);
       }
@@ -3044,7 +3052,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       const hasEmail = !!(formData.email && formData.email.trim());
       if (contactRequired && !hasPhone && !hasEmail) {
           setFormStep(0);
-          showToast('Inserisci un contatto (telefono o email).', 'error');
+          showToast(tv('toast.needContact'), 'error');
           return;
       }
       if (isSavingReservation) return;
@@ -3200,18 +3208,18 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       const showHoverPill = isMapHovered && hoverPillNames.length > 0 && !isHighlighted && !isHoverMatch;
 
       const tooltipText = isHidden
-          ? 'Tavolo nascosto per questo turno — clicca per riattivarlo'
+          ? tv('tables.hiddenTooltip')
           : hasMultipleReservations
               ? `Doppio turno · ${allReservations.map(r => {
                     const t = getRomeTimePart(r.reservation_time);
-                    const covers = `${r.guests}${r.children && r.children > 0 ? ` (${r.children}b)` : ''} coperti`;
+                    const covers = `${tv('coversCount', { count: r.guests })}${r.children && r.children > 0 ? ` (${r.children}b)` : ''}`;
                     return `${toTitleCase(r.customer_name)}${t ? ` (${t})` : ''} · ${covers}`;
                 }).join(' · ')}`
               : reservation
-                  ? `Occupato da: ${toTitleCase(reservation.customer_name)} · ${reservation.guests}${reservation.children && reservation.children > 0 ? ` (${reservation.children}b)` : ''} coperti${reservationTime ? ` · ${reservationTime}` : ''}`
+                  ? `${tv('tables.takenBy', { chi: toTitleCase(reservation.customer_name) })} · ${tv('coversCount', { count: reservation.guests })}${reservation.children && reservation.children > 0 ? ` (${reservation.children}b)` : ''}${reservationTime ? ` · ${reservationTime}` : ''}`
                   : banquet
-                      ? `Banchetto: ${banquet.name}`
-                      : 'Libero — clicca per assegnare una prenotazione';
+                      ? tv('tables.banquetNamed', { nome: banquet.name })
+                      : tv('tables.freeTooltip');
 
       const pos = layoutPositions?.get(table.id) || { x: table.x, y: table.y };
 
@@ -3393,8 +3401,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             type="button"
             onClick={(e) => { e.stopPropagation(); setTooltipReservation({ id: res.id, type: 'tables', text: table.name, x: e.clientX, y: e.clientY }); }}
             className="flex items-center justify-center gap-0.5 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-            title={`Tavoli uniti: ${names.join(', ')}`}
-            aria-label={`${names.length} tavoli uniti: ${names.join(', ')}. Tocca per i dettagli.`}
+            title={tv('tables.mergedList', { elenco: names.join(', ') })}
+            aria-label={tv('tables.mergedCount', { count: names.length, elenco: names.join(', ') })}
           >
             <span className={`text-base font-bold leading-tight ${textClass}`}>{names[0]}</span>
             <span className={`text-[11px] font-semibold leading-none opacity-60 ${textClass}`}>+{extraCount}</span>
@@ -3453,8 +3461,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     const attrGlyphs = (
       <>
         {renderChannelIcon(res, tv)}
-        {renderConfirmationIcon(res)}
-        {renderReminderIcon(res)}
+        {renderConfirmationIcon(res, tv)}
+        {renderReminderIcon(res, tv)}
         {matchedNoteIcons.map(m => {
           const Icon = m.Icon!;
           return (
@@ -3468,15 +3476,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             type="button"
             onClick={(e) => { e.stopPropagation(); setTooltipReservation({ id: res.id, type: 'note', text: noteText, x: e.clientX, y: e.clientY }); }}
             className={`${ATTR_BADGE} transition-colors hover:text-[var(--ds-text-primary)]`}
-            title="Nota"
-            aria-label="Nota"
+            title={tv('row.note')}
+            aria-label={tv('row.note')}
           >
             <StickyNote className="h-3.5 w-3.5" />
           </button>
         )}
         {renderPaymentIcon(res)}
         {menu && (
-          <span className={`${ATTR_BADGE} bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]`} title={menu.name} aria-label={`Menù: ${menu.name}`}>
+          <span className={`${ATTR_BADGE} bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]`} title={menu.name} aria-label={tv('banquetMenu', { nome: menu.name })}>
             <BookOpen className="h-3.5 w-3.5" />
           </span>
         )}
@@ -3505,7 +3513,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               </span>
               <span
                 className="inline-flex h-6 flex-shrink-0 items-center gap-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-2 text-[12px] font-medium text-[var(--ds-text-secondary)]"
-                title={`${res.guests} coperti${res.children ? ` (${res.children} bambini)` : ''}`}
+                title={`${tv('coversCount', { count: res.guests })}${res.children ? ` (${tv('childrenCount', { count: res.children })})` : ''}`}
               >
                 <Users className="h-3.5 w-3.5" aria-hidden />
                 <span className="tabular-nums">{res.guests}</span>
@@ -3517,10 +3525,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   circle was one glyph too many on an already crowded row. */}
               <button
                 type="button"
-                onClick={(e) => { e.stopPropagation(); setTooltipReservation({ id: res.id, type: 'bookedAt', text: formatBookedAtBy(res), x: e.clientX, y: e.clientY }); }}
+                onClick={(e) => { e.stopPropagation(); setTooltipReservation({ id: res.id, type: 'bookedAt', text: formatBookedAtBy(res, tv), x: e.clientX, y: e.clientY }); }}
                 className="flex-shrink-0 text-[var(--ds-text-subtle)] transition-colors hover:text-[var(--ds-text-primary)]"
-                title={formatBookedAtBy(res)}
-                aria-label={formatBookedAtBy(res)}
+                title={formatBookedAtBy(res, tv)}
+                aria-label={formatBookedAtBy(res, tv)}
               >
                 <Info className="h-4 w-4" />
               </button>
@@ -3545,18 +3553,18 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             {hasWideAttributes && (
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                 {turno && (
-                  <StatusPill tone="info" title={`Doppio turno sullo stesso tavolo (${turno.total} prenotazioni)`}>
+                  <StatusPill tone="info" title={tv('doubleSeating', { count: turno.total })}>
                     {turno.position}° turno
                   </StatusPill>
                 )}
                 <DietaryChips notes={res.notes} presets={allergenPresets} size="sm" />
                 {preferredMatch && (
-                  <StatusPill tone="positive" title={`Tavolo preferito: ${res.customer_preferred_table_name || ''}`}>
+                  <StatusPill tone="positive" title={tv('preferredTableFull', { tavolo: res.customer_preferred_table_name || '' })}>
                     <Armchair className="h-3 w-3 flex-shrink-0" aria-hidden /> Tavolo preferito
                   </StatusPill>
                 )}
                 {preferredMissed && (
-                  <StatusPill tone="pending" title={`Preferito: ${res.customer_preferred_table_name || ''}`}>
+                  <StatusPill tone="pending" title={tv('preferredTableShort', { tavolo: res.customer_preferred_table_name || '' })}>
                     <Armchair className="h-3 w-3 flex-shrink-0" aria-hidden /> Preferito non disponibile
                   </StatusPill>
                 )}
@@ -3568,8 +3576,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                       type="button"
                       onClick={(e) => { e.stopPropagation(); handleConfirmTableSuggestion(tableSuggestion); }}
                       className="flex h-5 w-5 items-center justify-center rounded-[var(--ds-radius-control)] hover:bg-black/10 dark:hover:bg-white/10"
-                      title="Conferma tavolo suggerito"
-                      aria-label="Conferma tavolo suggerito"
+                      title={tv('row.confirmSuggested')}
+                      aria-label={tv('row.confirmSuggested')}
                     >
                       <Check className="h-3.5 w-3.5" />
                     </button>
@@ -3577,8 +3585,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                       type="button"
                       onClick={(e) => { e.stopPropagation(); handleDismissTableSuggestion(tableSuggestion); }}
                       className="flex h-5 w-5 items-center justify-center rounded-[var(--ds-radius-control)] hover:bg-black/10 dark:hover:bg-white/10"
-                      title="Ignora suggerimento"
-                      aria-label="Ignora suggerimento"
+                      title={tv('row.ignoreSuggestion')}
+                      aria-label={tv('row.ignoreSuggestion')}
                     >
                       <X className="h-3.5 w-3.5" />
                     </button>
@@ -3615,8 +3623,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); handleEditClick(res); }}
-              title="Assegna un tavolo"
-              aria-label="Assegna un tavolo"
+              title={tv('row.assignTable')}
+              aria-label={tv('row.assignTable')}
               className={`flex min-h-[56px] w-[64px] flex-shrink-0 items-center justify-center rounded-[var(--ds-radius)] border border-dashed border-[var(--ds-pending-solid)] text-[var(--ds-pending-text)] transition-colors hover:bg-[var(--ds-pending-tint)]`}
             >
               <Plus className="h-4 w-4" />
@@ -3705,7 +3713,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   return (
                     <span
                       className="inline-flex items-center px-1.5 py-0.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)] text-[10px] font-semibold"
-                      title={`Doppio turno sullo stesso tavolo (${turno.total} prenotazioni)`}
+                      title={tv('doubleSeating', { count: turno.total })}
                     >
                       {turno.position}° turno
                     </span>
@@ -3713,7 +3721,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 })()}
               </h3>
               <div className="flex items-center gap-3 text-xs text-[var(--ds-text-muted)] mt-0.5">
-                <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {res.guests} {res.guests === 1 ? 'ospite' : 'ospiti'}{res.children && res.children > 0 ? ` (${res.children} bambin${res.children === 1 ? 'o' : 'i'})` : ''}</span>
+                <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {tv('guestsCount', { count: res.guests })}{res.children && res.children > 0 ? ` (${res.children} bambin${res.children === 1 ? 'o' : 'i'})` : ''}</span>
                 <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {formatTime(res.reservation_time)}</span>
                 {table && <span className="flex items-center gap-1"><MapPin className="h-3 w-3" /> T.{table.name}{tableRoomName ? ` · ${tableRoomName}` : ''}</span>}
               </div>
@@ -3738,12 +3746,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             )}
             <DietaryChips notes={res.notes} presets={allergenPresets} size="sm" />
             {res.customer_preferred_table_id != null && res.customer_preferred_table_id === res.table_id && (
-              <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] text-[10px] font-medium" title={`Tavolo preferito: ${res.customer_preferred_table_name || ''}`}>
+              <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] text-[10px] font-medium" title={tv('preferredTableFull', { tavolo: res.customer_preferred_table_name || '' })}>
                 <Armchair className="h-2.5 w-2.5" /> Tavolo preferito
               </span>
             )}
             {res.customer_preferred_table_id != null && res.customer_preferred_table_id !== res.table_id && (
-              <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] text-[10px] font-medium" title={`Preferito: ${res.customer_preferred_table_name || ''}`}>
+              <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] text-[10px] font-medium" title={tv('preferredTableShort', { tavolo: res.customer_preferred_table_name || '' })}>
                 <Armchair className="h-2.5 w-2.5" /> Preferito non disponibile
               </span>
             )}
@@ -3778,7 +3786,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           {/* Consensi privacy (read-only) — mostrati solo se registrati almeno una volta */}
           {(res.consent_marketing != null || res.consent_data_health != null || res.consent_updated_at) && (
             <div className="text-xs bg-[var(--ds-surface-row)] rounded-[var(--ds-radius)] px-3 py-2 space-y-1">
-              <div className="font-medium text-[var(--ds-text-muted)]">Consensi privacy</div>
+              <div className="font-medium text-[var(--ds-text-muted)]">{tv('modal.gdprConsents')}</div>
               {[
                 { label: 'Allergie / dati sanitari', v: res.consent_data_health },
                 { label: 'Marketing', v: res.consent_marketing },
@@ -3791,7 +3799,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   ) : (
                     <span className="h-3 w-3 inline-flex items-center justify-center text-[var(--ds-text-subtle)] flex-shrink-0">—</span>
                   )}
-                  <span>{label}: <span className="text-[var(--ds-text-muted)]">{v === true ? 'concesso' : v === false ? 'negato' : 'non registrato'}</span></span>
+                  <span>{label}: <span className="text-[var(--ds-text-muted)]">{v === true ? 'concesso' : v === false ? 'negato' : tv('notRecorded')}</span></span>
                 </div>
               ))}
               {res.consent_updated_at && (
@@ -3808,7 +3816,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               <DsStatusChip
                 state={isViewingToday ? getTimedReservationState(res, nowTick) : getReservationState(res)}
                 onClick={() => setStateChangeReservation(res)}
-                title="Cambia stato"
+                title={tv('row.changeState')}
                 trailing={<ChevronDown className="h-3 w-3 opacity-60" />}
               />
               {isSeated(res) && !res.table_id && (
@@ -3853,10 +3861,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         inputRef={searchInputRef}
         onKeyDown={handleSearchKeyDown}
         placeholder={tv('toolbar.searchPlaceholder')}
-        ariaLabel="Cerca prenotazioni"
+        ariaLabel={tv('toolbar.searchAria')}
         className="min-w-0 flex-1"
         hint={searchTerm && quickArriveCandidates.length === 1 ? (
-          <StatusPill tone="positive">↵ Arrivato</StatusPill>
+          <StatusPill tone="positive">↵ {tv('quickArrive.arrived')}</StatusPill>
         ) : undefined}
       />
 
@@ -3936,8 +3944,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             tone={groupTone(group.key)}
             onToggle={() => toggleGroup(group.key)}
             expanded={expanded}
-            meta={`${group.items.length} ${group.items.length === 1 ? 'prenotazione' : 'prenotazioni'} · ${covers} coperti${
-              children > 0 ? ` (${children} bambin${children === 1 ? 'o' : 'i'})` : ''
+            meta={`${tv('bookingCount', { count: group.items.length })} · ${tv('coversCount', { count: covers })}${
+              children > 0 ? ` (${tv('childrenCount', { count: children })})` : ''
             }`}
           >
             {group.label}
@@ -4156,7 +4164,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       const percent = total > 0 ? Math.min(100, Math.round((busy / total) * 100)) : 0;
       roomFillById.set(room.id, {
         percent,
-        label: `${busy}/${total} ${useSeats ? 'coperti' : 'tavoli'} (${percent}%)`,
+        label: `${busy}/${total} ${useSeats ? tv('legend.coversLower') : tv('legend.tablesLower')} (${percent}%)`,
         capPercent: cap?.percent ?? null,
         overCap: cap ? percent >= cap.percent : false,
       });
@@ -4266,13 +4274,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               const isClosedForShift = closedRoomIdsForShift.has(room.id);
               const fill = roomFillById.get(room.id);
               const fillTitle = fill
-                ? `${room.name} — ${fill.label}${fill.capPercent !== null ? ` · limite web ${fill.capPercent}%${fill.overCap ? ' (superato: le prenotazioni web arrivano da confermare)' : ''}` : ''}`
+                ? `${room.name} — ${fill.label}${fill.capPercent !== null ? ` · limite web ${fill.capPercent}%${fill.overCap ? tv('tables.overCapSuffix') : ''}` : ''}`
                 : room.name;
               return (
                 <button key={room.id} onClick={() => setActiveMapRoomId(room.id)}
                   type="button"
                   aria-pressed={isActive}
-                  title={isClosedForShift ? `${room.name} (Chiusa per questo turno)` : fillTitle}
+                  title={isClosedForShift ? tv('tables.roomClosedSuffix', { sala: room.name }) : fillTitle}
                   className={`inline-flex h-9 flex-shrink-0 items-center gap-2 whitespace-nowrap rounded-[var(--ds-radius-control)] px-3.5 text-[14px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                     isActive
                       ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
@@ -4306,18 +4314,18 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             <StatusPill
               tone="pending"
               className="hidden xl:inline-flex"
-              title={`Sala oltre il limite del ${activeRoomFill.capPercent}%: le prenotazioni web e telefoniche non assegnano più tavoli qui da sole.`}
+              title={tv('tables.overCapNotice', { percento: activeRoomFill.capPercent })}
             >
-              Oltre il limite web
+              {tv('tables.overWebLimit')}
             </StatusPill>
           )}
 
           {hiddenTableIds.size > 0 && canEdit && (
             <button type="button" onClick={() => setUnhideAllConfirm(true)}
               className="inline-flex h-11 flex-shrink-0 items-center gap-2 whitespace-nowrap rounded-[var(--ds-radius-control)] bg-[var(--ds-seated-tint)] px-4 text-[14px] font-medium text-[var(--ds-seated-text)] transition-opacity hover:opacity-80"
-              title="Riattiva tutti i tavoli nascosti per questo turno">
+              title={tv('tables.restoreHiddenTitle')}>
               <RotateCcw size={16} aria-hidden />
-              <span>Riattiva tutti</span>
+              <span>{tv('tables.restoreAll')}</span>
             </button>
           )}
         </div>
@@ -4335,11 +4343,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             },
             ...(unassignedCountForDayShift > 0 ? [{
               value: unassignedCountForDayShift,
-              label: unassignedCountForDayShift === 1 ? 'senza tavolo' : 'senza tavoli',
+              label: tv('stats.withoutTable', { count: unassignedCountForDayShift }),
               tone: 'pending' as const,
               tint: true,
               onClick: () => setShowUnassignedModal(true),
-              title: 'Tocca per vedere le prenotazioni senza tavolo',
+              title: tv('noTablePanel.tapToSee'),
             }] : []),
             // Liberi e occupati come segmenti pieni della strip (scelta di
             // Marco, 29/08: qui il tint marca i due numeri che si cercano al
@@ -4373,7 +4381,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         {/* Per-shift closure banner for the room currently shown on the map */}
         {typeof activeMapRoomId === 'number' && closedRoomIdsForShift.has(activeMapRoomId) && (
           <Callout tone="pending" icon={DoorClosed} className="flex-shrink-0">
-            Sala chiusa per questo turno
+            {tv('tables.roomClosed')}
           </Callout>
         )}
 
@@ -4383,13 +4391,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             {isLoadingMerges && (
               <div className="absolute inset-0 z-30 bg-[var(--ds-surface)]/70 backdrop-blur-[1px] flex items-center justify-center">
                 <div className="flex items-center gap-2 px-4 py-2 bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] border border-[var(--ds-border)]">
-                  <Loader label="Caricamento tavoli…" size={40} />
+                  <Loader label={tv('tables.loading')} size={40} />
                 </div>
               </div>
             )}
             {tablesInRoom.length === 0 ? (
               <div className="text-center py-10 px-4 text-sm text-[var(--ds-text-muted)]">
-                Nessun tavolo in questa sala.
+                {tv('tables.noTables')}
               </div>
             ) : (
               <ul className="divide-y divide-[var(--ds-border)]">
@@ -4448,7 +4456,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                               <>
                                 <div className="flex items-center gap-2">
                                   <span className="font-medium text-[var(--ds-text-primary)] truncate">{toTitleCase(reservation.customer_name)}</span>
-                                  {isArrived && <span className="text-[10px] font-medium bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] px-1.5 py-0.5 rounded-[var(--ds-radius-control)] flex-shrink-0">Arrivato</span>}
+                                  {isArrived && <span className="text-[10px] font-medium bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] px-1.5 py-0.5 rounded-[var(--ds-radius-control)] flex-shrink-0">{tv('legend.arrived')}</span>}
                                 </div>
                                 <div className="flex items-center gap-3 text-xs text-[var(--ds-text-muted)] mt-0.5">
                                   <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {formatTime(reservation.reservation_time)}</span>
@@ -4461,7 +4469,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 <div className="flex items-center gap-2">
                                   <BookOpen className="h-3.5 w-3.5 text-[var(--ds-arriving-solid)] flex-shrink-0" aria-hidden />
                                   <span className="font-medium text-[var(--ds-arriving-text)] truncate">{banquet.name}</span>
-                                  <span className="text-[10px] font-medium bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)] px-1.5 py-0.5 rounded-[var(--ds-radius-control)] flex-shrink-0">Banchetto</span>
+                                  <span className="text-[10px] font-medium bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)] px-1.5 py-0.5 rounded-[var(--ds-radius-control)] flex-shrink-0">{tv('legend.banquetFull')}</span>
                                 </div>
                                 <div className="flex items-center gap-3 text-xs text-[var(--ds-text-muted)] mt-0.5">
                                   {typeof banquet.guests === 'number' && <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {banquet.guests}</span>}
@@ -4470,10 +4478,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                               </>
                             ) : (
                               <>
-                                <div className="font-medium text-[var(--ds-text-secondary)]">Libero</div>
+                                <div className="font-medium text-[var(--ds-text-secondary)]">{tv('legend.freeFull')}</div>
                                 <div className="flex items-center gap-3 text-xs text-[var(--ds-text-muted)] mt-0.5">
                                   <span className="flex items-center gap-1"><Armchair className="h-3 w-3" /> {table.seats} posti</span>
-                                  {canEdit && <span className="text-[var(--ds-text-primary)] font-medium">Tocca per assegnare</span>}
+                                  {canEdit && <span className="text-[var(--ds-text-primary)] font-medium">{tv('tables.tapToAssign')}</span>}
                                 </div>
                               </>
                             )}
@@ -4496,7 +4504,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             {isLoadingMerges && (
               <div className="absolute inset-0 z-30 flex items-center justify-center bg-[var(--ds-surface)]/70 backdrop-blur-[1px]">
                 <div className="flex items-center gap-2 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-4 py-2 shadow-[var(--ds-shadow-card)]">
-                  <Loader label="Caricamento tavoli…" size={40} />
+                  <Loader label={tv('tables.loading')} size={40} />
                 </div>
               </div>
             )}
@@ -4506,8 +4514,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             <div className="absolute left-4 top-4 z-10 flex select-none items-center gap-2">
               <button type="button" onClick={() => setIsMapFullscreen(v => !v)}
                 className="inline-flex h-9 w-9 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                title={isMapFullscreen ? 'Riduci la mappa (Esc)' : 'Mappa a tutto schermo'}
-                aria-label={isMapFullscreen ? 'Riduci la mappa' : 'Mappa a tutto schermo'}>
+                title={isMapFullscreen ? tv('tables.shrinkMapEsc') : 'Mappa a tutto schermo'}
+                aria-label={isMapFullscreen ? tv('tables.shrinkMap') : 'Mappa a tutto schermo'}>
                 {isMapFullscreen ? <Minimize2 size={16} aria-hidden /> : <Maximize2 size={16} aria-hidden />}
               </button>
               {hiddenTableIds.size > 0 && (
@@ -4518,7 +4526,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                       ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                       : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
                   }`}
-                  title={showHidden ? 'Nascondi tavoli disabilitati' : 'Mostra tavoli nascosti per questo turno'}>
+                  title={showHidden ? tv('tables.hideDisabled') : tv('tables.showHidden')}>
                   {showHidden ? <Eye size={16} aria-hidden /> : <EyeOff size={16} aria-hidden />}
                   <span className="tabular-nums">{hiddenTableIds.size}</span>
                   <span>{hiddenTableIds.size === 1 ? 'nascosto' : 'nascosti'}</span>
@@ -4557,17 +4565,17 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               {isLegendOpen && (
  <div className="absolute bottom-full right-0 mb-2 w-60 space-y-2 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 text-[13px] shadow-[var(--ds-shadow-raised)] duration-150"
                   onClick={(e) => e.stopPropagation()}>
-                  <div className="text-[14px] font-semibold text-[var(--ds-text-primary)]">Stato dei tavoli</div>
-                  <div className="flex items-center gap-2 text-[var(--ds-text-secondary)]"><div className="h-3 w-3 rounded-[var(--ds-radius-sm)] border" style={{ background: 'var(--tg-libera-bg)', borderColor: 'var(--tg-libera-stroke)' }}></div> Libera</div>
-                  <div className="flex items-center gap-2 text-[var(--ds-text-secondary)]"><div className="h-3 w-3 rounded-[var(--ds-radius-sm)] border" style={{ background: 'var(--tg-attesa-bg)', borderColor: 'var(--tg-attesa-stroke)' }}></div> In attesa <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--tg-attesa-accent)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg></div>
-                  <div className="flex items-center gap-2 text-[var(--ds-text-secondary)]"><div className="h-3 w-3 rounded-[var(--ds-radius-sm)] border" style={{ background: 'var(--tg-arrivato-bg)', borderColor: 'var(--tg-arrivato-stroke)' }}></div> Arrivato</div>
-                  <div className="flex items-center gap-2 text-[var(--ds-text-secondary)]"><div className="flex h-3 w-3 items-center justify-center rounded-[var(--ds-radius)] border" style={{ background: 'var(--tg-attesa-bg)', borderColor: 'var(--tg-attesa-stroke)' }}><BookOpen size={8} style={{ color: 'var(--ds-arriving-solid)' }} /></div> Banchetto</div>
+                  <div className="text-[14px] font-semibold text-[var(--ds-text-primary)]">{tv('legend.title')}</div>
+                  <div className="flex items-center gap-2 text-[var(--ds-text-secondary)]"><div className="h-3 w-3 rounded-[var(--ds-radius-sm)] border" style={{ background: 'var(--tg-libera-bg)', borderColor: 'var(--tg-libera-stroke)' }}></div> {tv('legend.free')}</div>
+                  <div className="flex items-center gap-2 text-[var(--ds-text-secondary)]"><div className="h-3 w-3 rounded-[var(--ds-radius-sm)] border" style={{ background: 'var(--tg-attesa-bg)', borderColor: 'var(--tg-attesa-stroke)' }}></div> {tv('legend.waiting')} <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--tg-attesa-accent)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg></div>
+                  <div className="flex items-center gap-2 text-[var(--ds-text-secondary)]"><div className="h-3 w-3 rounded-[var(--ds-radius-sm)] border" style={{ background: 'var(--tg-arrivato-bg)', borderColor: 'var(--tg-arrivato-stroke)' }}></div> {tv('legend.arrived')}</div>
+                  <div className="flex items-center gap-2 text-[var(--ds-text-secondary)]"><div className="flex h-3 w-3 items-center justify-center rounded-[var(--ds-radius)] border" style={{ background: 'var(--tg-attesa-bg)', borderColor: 'var(--tg-attesa-stroke)' }}><BookOpen size={8} style={{ color: 'var(--ds-arriving-solid)' }} /></div> {tv('legend.banquet')}</div>
                   <div className="mt-1 border-t border-[var(--ds-border)] pt-2">
-                    <div className="font-semibold text-[var(--ds-text-primary)]">Occupazione</div>
+                    <div className="font-semibold text-[var(--ds-text-primary)]">{tv('legend.occupancy')}</div>
                     <div className="text-[var(--ds-text-secondary)]"><span className="font-semibold tabular-nums text-[var(--ds-text-primary)]">{occupiedTablesCount}</span> / {totalTablesInRoom} tavoli (<span className="font-semibold tabular-nums text-[var(--ds-text-primary)]">{occupancyPercentage}%</span>)</div>
                   </div>
                   <div className="mt-1 border-t border-[var(--ds-border)] pt-2">
-                    <div className="font-semibold text-[var(--ds-text-primary)]">Coperti</div>
+                    <div className="font-semibold text-[var(--ds-text-primary)]">{tv('legend.covers')}</div>
                     <div className="text-[var(--ds-text-secondary)]"><span className="font-semibold tabular-nums text-[var(--ds-text-primary)]">{totalGuestsForDayShift}</span> in <span className="font-semibold tabular-nums text-[var(--ds-text-primary)]">{reservationCountForDayShift}</span> {reservationCountForDayShift === 1 ? 'prenotazione' : 'prenotazioni'}</div>
                   </div>
                 </div>
@@ -4655,7 +4663,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   tone: 'pending' as const,
                   tint: true,
                   onClick: () => setShowUnassignedModal(true),
-                  title: 'Tocca per vedere le prenotazioni senza tavolo',
+                  title: tv('noTablePanel.tapToSee'),
                 }] : []),
               ]}
             />
@@ -4813,18 +4821,18 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           subheader={
             <StepNav
               steps={isEditing
-                ? RESERVATION_STEPS
-                : RESERVATION_STEPS.map((s, i) => ({ ...s, disabled: i > 0 }))}
+                ? reservationSteps
+                : reservationSteps.map((s, i) => ({ ...s, disabled: i > 0 }))}
               current={formStep}
               onSelect={setFormStep}
-              ariaLabel="Sezioni della prenotazione"
+              ariaLabel={tv('formSections')}
             />
           }
           fixedHeight
           // One row at every width: back, the save, forward. Stacked, the two
           // arrows became two lonely rows around the button.
           footerLayout="row"
-          title={isEditing ? 'Modifica prenotazione' : 'Nuova prenotazione'}
+          title={isEditing ? tv('modal.editTitle') : tv('modal.newTitle')}
           subtitle={(() => {
             // Restates what's about to be booked, straight from the form state,
             // so the header stays true as the fields change.
@@ -4864,7 +4872,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             <>
               {mergeMode && selectedTablesForMerge.length > 0 && (
                 <span className="rounded-[var(--ds-radius-control)] bg-[var(--ds-pending-tint)] px-3 py-1.5 text-center text-[13px] text-[var(--ds-pending-text)]">
-                  Conferma l'unione tavoli prima di salvare
+                  {tv('form.confirmMergeFirst')}
                 </span>
               )}
               {/* No Annulla: the X in the header closes the modal, and one exit
@@ -4875,7 +4883,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 className={`min-w-0 flex-1 sm:w-auto sm:flex-none ${dsButton.primary}`}
               >
                 {isSavingReservation && <Loader2 className="h-4 w-4 animate-spin" />}
-                {isEditing ? 'Salva modifiche' : 'Crea prenotazione'}
+                {isEditing ? tv('modal.saveChanges') : tv('modal.create')}
               </button>
               {isEditing && (
                 <button
@@ -4907,7 +4915,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     Attenzione: cliente con {matchedCustomerNoShows} no-show
                                 </p>
                                 <p className="mt-0.5 text-[13px] text-[var(--ds-critical-text)]">
-                                    Questo cliente non si è presentato {matchedCustomerNoShows === 1 ? 'una volta' : `${matchedCustomerNoShows} volte`} in passato.
+                                    {tv('badge.noShowHistory', { count: matchedCustomerNoShows })}
                                 </p>
                             </div>
                         </div>
@@ -4917,11 +4925,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             <Ban className="mt-0.5 h-5 w-5 flex-shrink-0 text-[var(--ds-critical-text)]" />
                             <div className="flex-1 min-w-0">
                                 <p className="text-[15px] font-semibold text-[var(--ds-critical-text)]">
-                                    Cliente in blacklist
+                                    {tv('badge.blacklistFull')}
                                 </p>
                                 <p className="mt-0.5 text-[13px] text-[var(--ds-critical-text)]">
                                     {(matchedCustomerBlacklist || formData.customer_blacklist_reason || '').trim()
-                                        || 'Web e agente vocale rifiutano questo numero; a mano decidi tu se procedere.'}
+                                        || tv('badge.blacklistHint')}
                                 </p>
                             </div>
                         </div>
@@ -4941,14 +4949,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     onClick={handleRestoreDraft}
                                     className="h-9 flex-shrink-0 rounded-[var(--ds-radius-control)] bg-[var(--ds-pending-solid)] px-3.5 text-[14px] font-semibold text-[var(--ds-pending-fg)] transition-all hover:brightness-95"
                                 >
-                                    Riprendi
+                                    {tv('draft.resume')}
                                 </button>
                                 <button
                                     type="button"
                                     onClick={handleDiscardDraft}
                                     className="h-9 flex-shrink-0 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-3.5 text-[14px] font-semibold text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)]"
                                 >
-                                    Scarta
+                                    {tv('draft.discard')}
                                 </button>
                             </div>
                         </div>
@@ -4962,12 +4970,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         <div className="lg:col-span-5 flex flex-col gap-5 min-w-0">
                             <FormCard>
                                 <div className="grid grid-cols-2 gap-3">
-                                    <Field label="Numero ospiti">
+                                    <Field label={tv('form.guestCount')}>
                                         <Stepper
                                             value={formData.guests}
                                             min={1}
                                             required
-                                            ariaLabel="Numero ospiti"
+                                            ariaLabel={tv('form.guestCount')}
                                             onChange={next => setFormData({
                                                 ...formData,
                                                 guests: next,
@@ -4975,21 +4983,21 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                             })}
                                         />
                                     </Field>
-                                    <Field label="Di cui bambini">
+                                    <Field label={tv('form.children')}>
                                         <Stepper
                                             value={formData.children ?? 0}
                                             min={0}
                                             max={formData.guests || 0}
-                                            ariaLabel="Di cui bambini"
+                                            ariaLabel={tv('form.children')}
                                             onChange={next => setFormData({ ...formData, children: next ?? 0 })}
                                         />
                                     </Field>
                                 </div>
 
                                 <div className="mt-5">
-                                    <Field label="Turno">
+                                    <Field label={tv('form.shift')}>
                                         <SegmentedControl
-                                            ariaLabel="Turno"
+                                            ariaLabel={tv('form.shift')}
                                             value={formData.shift === Shift.LUNCH ? Shift.LUNCH : Shift.DINNER}
                                             onChange={next => {
                                                 const currentDate = formData.reservation_time?.split('T')[0] || new Date().toISOString().split('T')[0];
@@ -5010,7 +5018,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 </div>
 
                                 <div className="mt-5 grid grid-cols-2 gap-3">
-                                    <Field label="Data">
+                                    <Field label={tv('form.date')}>
                                         <input
                                             type="date"
                                             required
@@ -5022,7 +5030,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                             }}
                                         />
                                     </Field>
-                                    <Field label="Ora">
+                                    <Field label={tv('form.time')}>
                                         <select
                                             required
                                             className={dsSelect}
@@ -5051,7 +5059,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
                                 <div className="mt-5">
                                     <Field
-                                        label="Durata"
+                                        label={tv('form.duration')}
                                         aside={(() => {
                                             const start = formData.reservation_time ? parseLocalDate(formData.reservation_time) : null;
                                             const dur = resolveDurationMinutes({ duration_minutes: formData.duration_minutes, shift: formData.shift });
@@ -5086,12 +5094,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 {slotArrivalStats && (
                                     <div className="mt-5">
                                         <Field
-                                            label="Affluenza arrivi"
+                                            label={tv('form.arrivalsLoad')}
                                             aside={
                                                 <span className="hidden sm:inline-flex items-center gap-2.5">
-                                                    <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[var(--ds-seated-solid)]" /> scarsa</span>
-                                                    <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[var(--ds-pending-solid)]" /> media</span>
-                                                    <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[var(--ds-critical-solid)]" /> alta</span>
+                                                    <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[var(--ds-seated-solid)]" /> {tv('form.loadLow')}</span>
+                                                    <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[var(--ds-pending-solid)]" /> {tv('form.loadMedium')}</span>
+                                                    <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[var(--ds-critical-solid)]" /> {tv('form.loadHigh')}</span>
                                                 </span>
                                             }
                                         >
@@ -5111,7 +5119,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                                 setFormData({ ...formData, reservation_time: `${currentDate}T${s.time}` });
                                                             }}
                                                             className={`flex min-w-0 flex-1 flex-col items-center rounded-[var(--ds-radius)] px-1 py-1.5 transition-colors ${isSelected ? 'bg-[var(--ds-surface-row)] ring-1 ring-inset ring-[var(--ds-border-strong)]' : 'hover:bg-[var(--ds-surface-row)]'}`}
-                                                            title={`${s.time} — ${s.guests} coperti`}
+                                                            title={`${s.time} — ${tv('coversCount', { count: s.guests })}`}
                                                         >
                                                             <div className={`h-2.5 w-full rounded-full ${bg}`} />
                                                             <div className="mt-1 text-[11px] leading-tight tabular-nums text-[var(--ds-text-muted)]">{s.time}</div>
@@ -5213,7 +5221,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 </div>
                                 {isVoiceSupported() && (
                                     <p className="mt-2 text-[13px] text-[var(--ds-text-muted)]">
-                                        Premi il microfono e detta: "Prenotazione per Mario Rossi domani alle 20 per 4 persone"
+                                        Premi il microfono e detta: «{tv('form.dictationExample')}»
                                     </p>
                                 )}
                             </div>
@@ -5222,7 +5230,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div>
                                     <label className="mb-1.5 block text-[14px] font-medium text-[var(--ds-text-secondary)]">
-                                        Telefono
+                                        {tv('form.phone')}
                                         {contactRequired && !(formData.email && formData.email.trim()) && <span className="text-[var(--ds-critical-text)]"> *</span>}
                                     </label>
                                     <div className="relative">
@@ -5239,7 +5247,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                             }}
                                             onFocus={() => setActiveSuggestField('phone')}
                                             onBlur={() => setTimeout(() => setActiveSuggestField(prev => prev === 'phone' ? null : prev), 150)}
-                                            placeholder="+39 333..."
+                                            placeholder={tv('form.phonePlaceholder')}
                                             autoComplete="off"
                                         />
                                         {formData.phone && (
@@ -5356,7 +5364,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                 <span className="text-sm font-medium text-[var(--ds-text-primary)]">{tv('modal.allergies')}</span>
                                                 {(selectedAllergies.length + selectedAllergens.length) > 0 && (
                                                     <p className="text-xs text-[var(--ds-text-secondary)]">
-                                                        {[selectedAllergies.length > 0 && `${selectedAllergies.length} allergie`, selectedAllergens.length > 0 && `${selectedAllergens.length} intolleranze`].filter(Boolean).join(' · ')}
+                                                        {[selectedAllergies.length > 0 && tv('allergiesCount', { count: selectedAllergies.length }), selectedAllergens.length > 0 && tv('intolerancesCount', { count: selectedAllergens.length })].filter(Boolean).join(' · ')}
                                                     </p>
                                                 )}
                                             </div>
@@ -5368,7 +5376,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         <div className="p-3 pt-0 space-y-3 border-t border-[var(--ds-border)] bg-[var(--ds-surface)]">
                                             {/* Tab switcher */}
                                             <div className="grid grid-cols-2 gap-0.5 p-1 mt-3 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)]">
-                                                {([['allergie', 'Allergie', selectedAllergies.length], ['intolleranze', 'Intolleranze', selectedAllergens.length]] as const).map(([key, label, count]) => (
+                                                {([['allergie', tv('modal.allergiesTab'), selectedAllergies.length], ['intolleranze', tv('tooltip.allergens'), selectedAllergens.length]] as const).map(([key, label, count]) => (
                                                     <button
                                                         key={key}
                                                         type="button"
@@ -5551,7 +5559,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                 checked={formData.consent_data_health === true}
                                                 onChange={e => setFormData({ ...formData, consent_data_health: e.target.checked })}
                                             />
-                                            <span>{tv('modal.gdprHealth')} <span className="text-[var(--ds-text-secondary)]">(dati sanitari, art. 9 GDPR)</span></span>
+                                            <span>{tv('modal.gdprHealth')} <span className="text-[var(--ds-text-secondary)]">{tv('modal.gdprHealthNote')}</span></span>
                                         </label>
                                         )}
                                         {marketingEnabled && (
@@ -5562,7 +5570,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                 checked={formData.consent_marketing === true}
                                                 onChange={e => setFormData({ ...formData, consent_marketing: e.target.checked })}
                                             />
-                                            <span>{tv('modal.gdprMarketing')} <span className="text-[var(--ds-text-secondary)]">(marketing)</span></span>
+                                            <span>{tv('modal.gdprMarketing')} <span className="text-[var(--ds-text-secondary)]">{tv('modal.gdprMarketingNote')}</span></span>
                                         </label>
                                         )}
                                     </div>
@@ -5605,7 +5613,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                             type="button"
                                             onClick={() => {
                                                 setFormData({...formData, table_id: undefined});
-                                                showToast('Tavolo scollegato dalla prenotazione', 'info');
+                                                showToast(tv('toast.tableUnlinked'), 'info');
                                             }}
                                             className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-white/15 text-white transition-colors hover:bg-white/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
                                             title={tv('modal.unlinkTableTitle')}
@@ -5644,7 +5652,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         }}
                                         className={mergeMode ? dsButton.primary : dsButton.secondary}
                                     >
-                                        <Combine className="h-4 w-4" /> {mergeMode ? 'Esci unione' : 'Unisci tavoli'}
+                                        <Combine className="h-4 w-4" /> {mergeMode ? tv('tables.exitMerge') : 'Unisci tavoli'}
                                     </button>
                                 </div>
                                 <div className="flex gap-2 items-center">
@@ -5660,7 +5668,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                             type="button"
                                             onClick={async () => {
                                                 if (!formData.reservation_time || !formData.shift) {
-                                                    showToast('Imposta data e turno della prenotazione prima di unire i tavoli', 'error');
+                                                    showToast(tv('toast.setDateBeforeMerge'), 'error');
                                                     return;
                                                 }
                                                 try {
@@ -5670,11 +5678,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                     await refreshMerges(mergeDate, formData.shift);
                                                     // Auto-select the merged table for the reservation
                                                     setFormData(prev => ({ ...prev, table_id: primaryTableId }));
-                                                    showToast(`Tavoli uniti e assegnati alla prenotazione`, 'success');
+                                                    showToast(tv('toast.tablesMerged'), 'success');
                                                     setSelectedTablesForMerge([]);
                                                     setMergeMode(false);
                                                 } catch (error) {
-                                                    showToast('Errore durante l\'unione dei tavoli', 'error');
+                                                    showToast(tv('toast.mergeError'), 'error');
                                                 }
                                             }}
                                             className="inline-flex items-center gap-1.5 rounded-[var(--ds-radius-control)] px-4 py-2 bg-[var(--ds-text-primary)] text-[var(--ds-action-fg)] text-sm font-medium hover:opacity-90 transition-opacity"
@@ -5688,17 +5696,17 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                             type="button"
                                             onClick={async () => {
                                                 if (!formData.reservation_time || !formData.shift) {
-                                                    showToast('Imposta data e turno della prenotazione prima di dividere i tavoli', 'error');
+                                                    showToast(tv('toast.setDateBeforeSplit'), 'error');
                                                     return;
                                                 }
                                                 try {
                                                     const splitDate = formData.reservation_time.split('T')[0];
                                                     await onSplitTable(selectedTableObj.id, splitDate, formData.shift);
                                                     await refreshMerges(splitDate, formData.shift);
-                                                    showToast('Tavoli divisi con successo', 'success');
+                                                    showToast(tv('toast.tablesSplit'), 'success');
                                                     setFormData({...formData, table_id: undefined});
                                                 } catch (error) {
-                                                    showToast('Errore durante la divisione dei tavoli', 'error');
+                                                    showToast(tv('toast.splitError'), 'error');
                                                 }
                                             }}
                                             className="inline-flex items-center gap-1.5 rounded-[var(--ds-radius-control)] px-4 py-2 border border-[var(--ds-pending-tint)] bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] dark:text-sm font-medium transition-colors"
@@ -5717,7 +5725,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         onClick={() => setModalRoomFilter('ALL')}
                                         className={`px-4 py-1.5 text-sm font-medium rounded-[var(--ds-radius-control)] whitespace-nowrap transition-colors flex-shrink-0 border ${modalRoomFilter === 'ALL' ? 'bg-[var(--ds-text-primary)] text-[var(--ds-action-fg)] border-[var(--ds-text-primary)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)]'}`}
                                      >
-                                         Tutte le sale
+                                         {tv('filters.allRoomsOption')}
                                      </button>
                                      {openRooms.map(room => (
                                          <button
@@ -5737,7 +5745,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 {isLoadingMerges && (
                                     <div className="absolute inset-0 z-30 bg-[var(--ds-surface-row)]/70 backdrop-blur-[1px] flex items-center justify-center rounded-[var(--ds-radius)]">
                                         <div className="flex items-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-4 py-2 shadow-[var(--ds-shadow-card)]">
-                                            <Loader label="Caricamento tavoli…" size={40} />
+                                            <Loader label={tv('tables.loading')} size={40} />
                                         </div>
                                     </div>
                                 )}
@@ -5827,7 +5835,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                     <div className="min-w-0">
                                                         <p className="text-sm font-semibold text-[var(--ds-arriving-text)] truncate">{banquet.name}</p>
                                                         <p className="text-xs text-[var(--ds-arriving-text)]">
-                                                            {bTables.length} {bTables.length === 1 ? 'tavolo' : 'tavoli'} · {banquet.guests ?? 0} coperti · {banquet.shift === Shift.LUNCH ? 'Pranzo' : 'Cena'}
+                                                            {tv('tableCount', { count: bTables.length })} · {tv('coversCount', { count: banquet.guests ?? 0 })} · {banquet.shift === Shift.LUNCH ? tv('shift.lunch') : tv('shift.dinner')}
                                                         </p>
                                                     </div>
                                                 </div>
@@ -5894,7 +5902,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                     >
                                                         {recommended && !isSelected && !isSelectedForMerge && (
                                                             <span className="absolute -top-2 left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-[var(--ds-radius-control)] bg-[var(--ds-seated-solid)] px-2 py-0.5 text-[10px] font-semibold text-white">
-                                                                Consigliato
+                                                                {tv('legend.recommendedFull')}
                                                             </span>
                                                         )}
 
@@ -5947,7 +5955,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 })}
                                 {displayedRooms.length === 0 && (
                                     <div className="text-center py-10 text-[var(--ds-text-muted)]">
-                                        Nessuna sala trovata.
+                                        {tv('noRoomFound')}
                                     </div>
                                 )}
                              </div>
@@ -5987,7 +5995,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             })()}
                             {bill && (
                               <span className="ml-auto text-[13px] text-[var(--ds-text-muted)]">
-                                {billTableName ? `Tav. ${billTableName} · ` : ''}{bill.bill.covers} coperti
+                                {billTableName ? `${tv('bill.tableShort', { tavolo: billTableName })} · ` : ''}{tv('coversCount', { count: bill.bill.covers })}
                               </span>
                             )}
                           </div>
@@ -6012,7 +6020,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                   Apri il conto per generare un QR che gli ospiti possono scansionare per pagare la propria quota.
                                 </p>
                                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,140px)_minmax(0,120px)_auto]">
-                                  <Field label="Totale">
+                                  <Field label={tv('form.total')}>
                                     <div className="relative">
                                       <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[15px] text-[var(--ds-text-muted)]">€</span>
                                       <input
@@ -6026,11 +6034,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                       />
                                     </div>
                                   </Field>
-                                  <Field label="Coperti">
+                                  <Field label={tv('form.covers')}>
                                     <input
                                       type="number"
                                       min={1}
-                                      placeholder={formData.guests ? `${formData.guests}` : 'Coperti'}
+                                      placeholder={formData.guests ? `${formData.guests}` : tv('form.covers')}
                                       value={billCoversInput}
                                       onChange={e => setBillCoversInput(e.target.value)}
                                       disabled={busy}
@@ -6045,7 +6053,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                       className={`w-full sm:w-auto ${dsButton.primary}`}
                                     >
                                       {billActionLoading === 'open' ? <Loader2 className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />}
-                                      Apri conto
+                                      {tv('bill.open')}
                                     </button>
                                   </div>
                                 </div>
@@ -6056,11 +6064,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                   type="button"
                                   onClick={() => handleOpenBill({ notify: true })}
                                   disabled={busy || !formData.phone}
-                                  title={!formData.phone ? 'La prenotazione non ha un numero di telefono' : undefined}
+                                  title={!formData.phone ? tv('noPhoneOnBooking') : undefined}
                                   className={`w-full ${dsButton.secondary}`}
                                 >
                                   {billActionLoading === 'open-and-notify' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                                  Apri e invia link al cliente
+                                  {tv('bill.openAndSend')}
                                 </button>
                                 {resvTableName && (
                                   <button
@@ -6109,7 +6117,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                       type="button"
                                       onClick={handleNotifyBill}
                                       disabled={billActionLoading !== null || !formData.phone}
-                                      title={!formData.phone ? 'La prenotazione non ha un numero di telefono' : undefined}
+                                      title={!formData.phone ? tv('noPhoneOnBooking') : undefined}
                                       className={dsButton.secondary}
                                     >
                                       {billActionLoading === 'notify' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
@@ -6119,11 +6127,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                       type="button"
                                       onClick={() => handlePrintBill('QR')}
                                       disabled={billActionLoading !== null || !bill.bill.share_token}
-                                      title={!bill.bill.share_token ? 'Conto chiuso: il QR non è più valido' : undefined}
+                                      title={!bill.bill.share_token ? tv('bill.closedQrInvalid') : undefined}
                                       className={dsButton.secondary}
                                     >
                                       {billActionLoading === 'print-qr' ? <Loader2 className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />}
-                                      Stampa QR
+                                      {tv('bill.printQr')}
                                     </button>
                                     <button
                                       type="button"
@@ -6132,7 +6140,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                       className={dsButton.secondary}
                                     >
                                       {billActionLoading === 'print-preconto' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
-                                      Stampa preconto
+                                      {tv('bill.printProforma')}
                                     </button>
                                     <button
                                       type="button"
@@ -6141,7 +6149,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                       className="inline-flex h-11 items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-seated-tint)] px-5 text-[15px] font-semibold text-[var(--ds-seated-text)] transition-colors hover:brightness-95 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                                     >
                                       {billActionLoading === 'close' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Banknote className="h-4 w-4" />}
-                                      Incassa e chiudi
+                                      {tv('bill.settleAndClose')}
                                     </button>
                                     <button
                                       type="button"
@@ -6150,7 +6158,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                       className="ml-auto inline-flex h-11 items-center justify-center gap-2 rounded-[var(--ds-radius-control)] px-4 text-[15px] font-medium text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                                     >
                                       {billActionLoading === 'void' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />}
-                                      Annulla conto
+                                      {tv('bill.cancel')}
                                     </button>
                                   </>
                                 )}
@@ -6183,7 +6191,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                               onClick={() => handleRefundSplit(s.id)}
                                               onBlur={() => setRefundConfirmSplitId(prev => prev === s.id ? null : prev)}
                                               disabled={refundingSplitId !== null}
-                                              title={refundConfirmSplitId === s.id ? 'Tocca di nuovo per confermare il rimborso' : 'Rimborsa quota'}
+                                              title={refundConfirmSplitId === s.id ? tv('bill.tapAgainToRefund') : 'Rimborsa quota'}
                                               className={`inline-flex h-8 shrink-0 items-center gap-1 rounded-[var(--ds-radius-control)] px-2 text-[12px] font-semibold transition-colors disabled:opacity-50 ${
                                                 refundConfirmSplitId === s.id
                                                   ? 'bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] hover:brightness-95'
@@ -6227,9 +6235,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             <span className="mb-1.5 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{tv('payments.sendVia')}</span>
                             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                               {([
-                                { key: 'email' as const, label: tv('payments.email'), icon: Mail, target: formData.email, missing: 'Nessuna email sul contatto' },
-                                { key: 'whatsapp' as const, label: tv('payments.whatsapp'), icon: MessageCircle, target: formData.phone, missing: 'Nessun telefono sul contatto' },
-                                { key: 'sms' as const, label: tv('payments.sms'), icon: Phone, target: formData.phone, missing: 'Nessun telefono sul contatto' },
+                                { key: 'email' as const, label: tv('payments.email'), icon: Mail, target: formData.email, missing: tv('payments.noEmailOnContact') },
+                                { key: 'whatsapp' as const, label: tv('payments.whatsapp'), icon: MessageCircle, target: formData.phone, missing: tv('payments.noPhoneOnContact') },
+                                { key: 'sms' as const, label: tv('payments.sms'), icon: Phone, target: formData.phone, missing: tv('payments.noPhoneOnContact') },
                               ]).map(({ key, label, icon: Icon, target, missing }) => {
                                 const available = paymentChannelAvailable[key];
                                 const selected = paymentChannel === key && available;
@@ -6299,8 +6307,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                               disabled={isCreatingPayment || !paymentChannelAvailable[paymentChannel]}
                               className={`w-full sm:w-auto ${dsButton.primary}`}
                               title={!paymentChannelAvailable[paymentChannel]
-                                ? 'Nessun canale disponibile: aggiungi email o telefono'
-                                : `Genera il link e invia ${paymentChannel === 'email' ? 'via email' : paymentChannel === 'sms' ? 'via SMS' : 'via WhatsApp'}`}
+                                ? tv('payments.noChannelAvailable')
+                                : tv('payments.generateAndSend', { canale: paymentChannel === 'email' ? tv('payments.email') : paymentChannel === 'sms' ? tv('payments.sms') : tv('payments.whatsapp') })}
                             >
                               {isCreatingPayment ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                               {tv('payments.sendLink')}
@@ -6309,14 +6317,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
                           {!formData.phone && !formData.email && (
                             <p className="mt-2 text-[13px] text-[var(--ds-critical-text)]">
-                              Aggiungi un'email o un numero di telefono per inviare il link di pagamento.
+                              {tv('payments.needContact')}
                             </p>
                           )}
 
                           {paymentRequests.length > 0 && (
                             <div className="mt-4 border-t border-[var(--ds-border)] pt-4">
                               <h5 className="mb-2 text-[13px] font-semibold text-[var(--ds-text-primary)]">
-                                Richieste già inviate
+                                {tv('payments.alreadySent')}
                                 <span className="ml-1 font-normal text-[var(--ds-text-muted)] tabular-nums">
                                   {paymentRequests.length}
                                 </span>
@@ -6418,7 +6426,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     {confirmModal.suggestions && confirmModal.suggestions.length > 0 && (
                         <div className="bg-[var(--ds-surface-row)] border border-[var(--ds-border)] rounded-[var(--ds-radius)] p-3">
                             <p className="text-sm font-semibold text-[var(--ds-text-primary)] mb-3">
-                                Tavoli disponibili con capienza adeguata
+                                {tv('capacity.suitableTables')}
                             </p>
                             <div className="space-y-2">
                                 {confirmModal.suggestions.map((suggestion, index) => (
@@ -6446,13 +6454,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         onClick={confirmModal.onCancel}
                         className="w-full sm:w-auto px-4 py-2 rounded-[var(--ds-radius-control)] border border-[var(--ds-border)] text-[var(--ds-text-primary)] text-sm font-medium hover:bg-[var(--ds-surface-row)]"
                     >
-                        Annulla
+                        {tv('actions.cancelAction')}
                     </button>
                     <button
                         onClick={confirmModal.onConfirm}
                         className="w-full sm:w-auto px-4 py-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-sm font-medium hover:opacity-90"
                     >
-                        Procedi Comunque
+                        {tv('capacity.proceedAnyway')}
                     </button>
                 </div>
             </div>
@@ -6463,7 +6471,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       {/* Delete Confirmation Modal */}
       <ConfirmDeleteModal
         isOpen={deleteConfirmModal.show}
-        message="Stai per eliminare la prenotazione di:"
+        message={tv('deleteBookingMessage')}
         itemName={toTitleCase(deleteConfirmModal.customerName)}
         onCancel={handleCancelDelete}
         onConfirm={handleConfirmDelete}
@@ -6471,9 +6479,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
       <ConfirmDeleteModal
         isOpen={unhideAllConfirm}
-        title="Riattiva tutti i tavoli"
-        message={`Stai per riattivare ${hiddenTableIds.size} ${hiddenTableIds.size === 1 ? 'tavolo nascosto' : 'tavoli nascosti'} per questo turno.`}
-        confirmLabel="Riattiva tutti"
+        title={tv('tables.restoreAllTitle')}
+        message={tv('tables.restoreAllMessage', { count: hiddenTableIds.size })}
+        confirmLabel={tv('tables.restoreAll')}
         icon={<Eye className="h-5 w-5 text-[var(--ds-seated-text)]" />}
         iconWrapperClassName="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-seated-tint)]"
         confirmClassName="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-[var(--ds-radius-control)] bg-[var(--ds-seated-solid)] text-[var(--ds-seated-fg)] text-[15px] font-semibold hover:opacity-90 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
@@ -6498,7 +6506,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           if (!dt) return r.reservation_time;
           const datePart = dt.toLocaleDateString('it-IT', { weekday: 'short', day: '2-digit', month: 'short' });
           const timePart = dt.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
-          return `${datePart} · ${timePart} · ${r.guests || '?'} ospiti`;
+          return `${datePart} · ${timePart} · ${tv('guestsCount', { count: r.guests || 0 })}`;
         };
 
         // Portaled: opens on top of the portaled booking form; rendered in the
@@ -6522,7 +6530,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   </span>
                   <div className="min-w-0">
                     <h3 className="text-[16px] font-semibold text-[var(--ds-text-primary)]">
-                      {hasDuplicate ? 'Verifica prenotazione' : 'Conferma prenotazione'}
+                      {hasDuplicate ? tv('preflight.title') : tv('confirmSheet.title')}
                     </h3>
                     <p className="text-xs text-[var(--ds-text-muted)] mt-0.5 truncate">
                       {toTitleCase(preflightModal.payload.customer_name || '')}
@@ -6541,7 +6549,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 {futureWarning && (
                   <div className="rounded-[var(--ds-radius)] bg-[var(--ds-arriving-tint)] p-4">
                     <p className="text-[13px] font-semibold text-[var(--ds-arriving-text)]">
-                      Prenotazione futura
+                      {tv('preflight.futureDate')}
                       {futureWarning.daysAhead === 1 ? ' · domani' : ` · tra ${futureWarning.daysAhead} giorni`}
                     </p>
                     <p className="mt-2 text-[20px] font-semibold text-[var(--ds-text-primary)] capitalize leading-tight">
@@ -6551,7 +6559,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                       {futureWarning.time}
                     </p>
                     <p className="mt-2 text-sm text-[var(--ds-text-muted)]">
-                      Conferma che la data e l'ora siano corrette.
+                      {tv('preflight.checkDateTime')}
                     </p>
                   </div>
                 )}
@@ -6559,7 +6567,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 {pastWarning && (
                   <div className="rounded-[var(--ds-radius)] bg-[var(--ds-critical-tint)] p-4">
                     <p className="text-[13px] font-semibold text-[var(--ds-critical-text)]">
-                      Orario già passato
+                      {tv('preflight.pastTime')}
                       {pastWarning.minutesAgo >= 60
                         ? ` · ${Math.floor(pastWarning.minutesAgo / 60)}h fa`
                         : ` · ${pastWarning.minutesAgo} min fa`}
@@ -6579,7 +6587,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 {hasDuplicate && (
                   <div className="rounded-[var(--ds-radius)] bg-[var(--ds-pending-tint)] p-4">
                     <p className="text-[13px] font-semibold text-[var(--ds-pending-text)]">
-                      Possibile duplicato
+                      {tv('preflight.duplicate')}
                     </p>
                     <p className="mt-2 text-sm text-[var(--ds-text-primary)]">
                       Una prenotazione simile esiste già per <strong>{toTitleCase(preflightModal.payload.customer_name || '')}</strong>:
@@ -6609,7 +6617,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   disabled={isSavingReservation}
                   className="px-4 py-2 rounded-[var(--ds-radius-control)] text-sm font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-50"
                 >
-                  Annulla
+                  {tv('actions.cancelAction')}
                 </button>
                 <button
                   type="button"
@@ -6618,7 +6626,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   className="px-4 py-2 rounded-[var(--ds-radius-control)] text-sm font-medium bg-[var(--ds-action-bg)] text-[var(--ds-surface)] hover:opacity-90 disabled:opacity-50 inline-flex items-center gap-2"
                 >
                   {isSavingReservation && <Loader2 className="h-4 w-4 animate-spin" />}
-                  Conferma e salva
+                  {tv('preflight.confirmAndSave')}
                 </button>
               </div>
             </div>
@@ -6639,7 +6647,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         // a channel here, the backend flips it to CONFIRMED — so the labels
         // and the header change to reflect the dual action.
         const isPending = (target.reservation_status as any) === 'PENDING';
-        const actionPrefix = isPending ? 'Conferma e invia' : 'Invia';
+        const actionPrefix = isPending ? tv('confirmSheet.confirmAndSend') : tv('email.send');
         const closePicker = () => {
           if (sendingConfirmation) return;
           setConfirmationPicker(null);
@@ -6656,13 +6664,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             >
               <div className="p-5 border-b border-[var(--ds-border)]">
                 <h3 className="text-lg font-semibold text-[var(--ds-text-primary)]">
-                  {isPending ? 'Conferma la prenotazione' : 'Invia conferma al cliente?'}
+                  {isPending ? tv('confirmSheet.headingPending') : tv('confirmSheet.headingResend')}
                 </h3>
                 <p className="mt-1 text-sm text-[var(--ds-text-muted)]">
                   {isPending ? (
-                    <>Scegli il canale per confermare la prenotazione di <strong>{toTitleCase(target.customer_name || '')}</strong>: lo stato passerà da "Da confermare" a "Confermata".</>
+                    <>{tv('confirmSheet.pendingA')} <strong>{toTitleCase(target.customer_name || '')}</strong>{tv('confirmSheet.pendingB')}</>
                   ) : (
-                    <>Vuoi mandare una conferma della prenotazione a <strong>{toTitleCase(target.customer_name || '')}</strong>?</>
+                    <>{tv('confirmSheet.resendA')} <strong>{toTitleCase(target.customer_name || '')}</strong>{tv('confirmSheet.resendB')}</>
                   )}
                 </p>
               </div>
@@ -6717,7 +6725,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-[var(--ds-border)] bg-[var(--ds-surface-row)]">
                 {isPending ? (
                   <span className="text-[11px] text-[var(--ds-text-subtle)]">
-                    La conferma parte solo dopo la tua scelta di canale.
+                    {tv('confirmSheet.hint')}
                   </span>
                 ) : <span />}
                 <button
@@ -6726,7 +6734,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   disabled={sendingConfirmation !== null}
                   className="px-4 py-2 rounded-[var(--ds-radius-control)] text-sm font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-50"
                 >
-                  {isPending ? 'Salva senza confermare' : 'Non ora'}
+                  {isPending ? tv('confirmSheet.saveWithout') : tv('confirmSheet.notNow')}
                 </button>
               </div>
             </div>
@@ -6761,7 +6769,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               <div className="p-5 border-b border-[var(--ds-border)]">
                 <div className="flex items-center gap-2">
                   <Mail className="h-4 w-4 text-[var(--ds-arriving-solid)]" />
-                  <h3 className="text-lg font-semibold text-[var(--ds-text-primary)]">Nuova email</h3>
+                  <h3 className="text-lg font-semibold text-[var(--ds-text-primary)]">{tv('email.title')}</h3>
                 </div>
                 <p className="mt-1 text-sm text-[var(--ds-text-muted)]">
                   Invia un'email libera a <strong className="text-[var(--ds-text-primary)]">{formData.email}</strong>.
@@ -6770,7 +6778,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               <div className="p-5 space-y-3 overflow-y-auto">
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
-                    <label className="text-xs font-medium text-[var(--ds-text-muted)]">Oggetto</label>
+                    <label className="text-xs font-medium text-[var(--ds-text-muted)]">{tv('email.subject')}</label>
                     <span className={`text-[10px] tabular ${customEmailSubject.length > subjectLimit ? 'text-[var(--ds-critical-text)]' : 'text-[var(--ds-text-subtle)]'}`}>
                       {customEmailSubject.length}/{subjectLimit}
                     </span>
@@ -6780,14 +6788,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     value={customEmailSubject}
                     onChange={e => setCustomEmailSubject(e.target.value.slice(0, subjectLimit))}
                     disabled={customEmailSending}
-                    placeholder="Es. Correzione orario prenotazione"
+                    placeholder={tv('email.subjectPlaceholder')}
                     className="w-full h-10 px-3 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] text-sm focus:outline-none focus:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus:border-transparent"
                     autoFocus
                   />
                 </div>
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
-                    <label className="text-xs font-medium text-[var(--ds-text-muted)]">Messaggio</label>
+                    <label className="text-xs font-medium text-[var(--ds-text-muted)]">{tv('email.body')}</label>
                     <span className={`text-[10px] tabular ${customEmailBody.length > bodyLimit ? 'text-[var(--ds-critical-text)]' : 'text-[var(--ds-text-subtle)]'}`}>
                       {customEmailBody.length}/{bodyLimit}
                     </span>
@@ -6797,7 +6805,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     onChange={e => setCustomEmailBody(e.target.value.slice(0, bodyLimit))}
                     disabled={customEmailSending}
                     rows={8}
-                    placeholder="Ciao Francesca, ci scusiamo: l'email precedente riportava un orario errato. La prenotazione è confermata per le 21:00, non le 23:00. Grazie!"
+                    placeholder={tv('email.bodyPlaceholder')}
                     className="w-full px-3 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] text-sm leading-relaxed focus:outline-none focus:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus:border-transparent resize-y"
                   />
                   <p className="mt-1.5 text-[11px] text-[var(--ds-text-subtle)]">
@@ -6812,7 +6820,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   disabled={customEmailSending}
                   className="px-4 py-2 rounded-[var(--ds-radius-control)] text-sm font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-50"
                 >
-                  Annulla
+                  {tv('actions.cancelAction')}
                 </button>
                 <button
                   type="button"
@@ -6821,8 +6829,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   className="inline-flex items-center gap-1.5 px-4 py-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-sm font-medium hover:bg-[var(--ds-action-bg-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 >
                   {customEmailSending
-                    ? <><Loader2 className="h-4 w-4 animate-spin" /> Invio…</>
-                    : <><Send className="h-4 w-4" /> Invia</>}
+                    ? <><Loader2 className="h-4 w-4 animate-spin" /> {tv('email.sending')}</>
+                    : <><Send className="h-4 w-4" /> {tv('email.send')}</>}
                 </button>
               </div>
             </div>
@@ -6845,7 +6853,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       {/* Mobile bottom-sheet per i toggle canali. Su desktop la stessa UI vive
           inline nell'header (BookingChannelsBar), quindi qui è mobile-only. */}
       {showChannelsSheet && createPortal(
-        <div className="fixed inset-0 z-[80] flex items-end" onClick={() => setShowChannelsSheet(false)} role="dialog" aria-modal="true" aria-label="Canali di prenotazione">
+        <div className="fixed inset-0 z-[80] flex items-end" onClick={() => setShowChannelsSheet(false)} role="dialog" aria-modal="true" aria-label={tv('channelsPanel.title')}>
           <div className="absolute inset-0 bg-black/40" />
  <div className="relative w-full bg-[var(--ds-surface)] rounded-t-[var(--ds-radius)] shadow-[var(--ds-shadow-raised)] pb-6 duration-200"onClick={e => e.stopPropagation()}>
             <div className="flex justify-center pt-3 pb-2">
@@ -6853,12 +6861,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             </div>
             <div className="px-5 pb-3 flex items-center justify-between">
               <div>
-                <h3 className="text-base font-semibold text-[var(--ds-text-primary)]">Canali di prenotazione</h3>
+                <h3 className="text-base font-semibold text-[var(--ds-text-primary)]">{tv('channelsPanel.title')}</h3>
                 <p className="text-[12px] text-[var(--ds-text-muted)] mt-0.5">
                   {selectedDate.split('T')[0]} · {selectedShift === Shift.LUNCH ? 'Pranzo' : 'Cena'}
                 </p>
               </div>
-              <button type="button" onClick={() => setShowChannelsSheet(false)} className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]" aria-label="Chiudi">
+              <button type="button" onClick={() => setShowChannelsSheet(false)} className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]" aria-label={tv('close')}>
                 <X className="h-4 w-4" />
               </button>
             </div>
@@ -6869,7 +6877,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 showToast={(msg, kind) => showToast(msg, kind ?? 'info')}
               />
               <p className="text-[12px] text-[var(--ds-text-muted)] leading-tight">
-                Tocca l'icona per bloccare o riattivare il canale per questo turno.
+                {tv('channelsPanel.hint')}
               </p>
             </div>
           </div>
@@ -6900,14 +6908,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               <div className="flex items-start gap-4 px-5 pt-5 pb-4 sm:px-6 sm:pt-6">
                 <div className="min-w-0 flex-1">
                   <h3 className="text-[18px] font-semibold leading-snug tracking-[-0.01em] text-[var(--ds-text-primary)]">
-                    Tavolo ancora occupato?
+                    {tv('overdue.title')}
                   </h3>
                   <p className="mt-1 truncate text-[14px] text-[var(--ds-text-muted)]">
                     {toTitleCase(res.customer_name)} · {formatTime(res.reservation_time)}{table ? ` · Tavolo ${table.name}` : ''}
                   </p>
                 </div>
                 <button onClick={() => snoozeOverduePrompt(res)}
-                  aria-label="Chiudi questo avviso"
+                  aria-label={tv('dismissNotice')}
                   className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]">
                   <X className="h-4 w-4" />
                 </button>
@@ -6918,7 +6926,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   Il tempo previsto è terminato alle {endLabel} e lo stato non è stato aggiornato.
                 </p>
                 <p className="mt-4 text-[15px] leading-relaxed text-[var(--ds-text-secondary)]">
-                  I clienti sono ancora al tavolo?
+                  {tv('overdue.question')}
                 </p>
 
                 {/* Impilati e a tutta larghezza: affiancati, "Ancora qui · +30
@@ -6928,7 +6936,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     onClick={() => {
                       snoozeOverduePrompt(res);
                       onUpdateReservation({ ...res, duration_minutes: extendedDurationMin(res, nowTick) });
-                      showToast(`${toTitleCase(res.customer_name)}: +${OVERDUE_EXTEND_MIN} minuti al tavolo`, 'success');
+                      showToast(tv('toast.extended', { chi: toTitleCase(res.customer_name), minuti: OVERDUE_EXTEND_MIN }), 'success');
                     }}
                     className="inline-flex w-full items-center justify-center gap-2 h-11 rounded-[var(--ds-radius-control)] text-[15px] font-semibold bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]">
                     <UserCheck className="h-4 w-4" aria-hidden /> Ancora qui · +{OVERDUE_EXTEND_MIN} min
@@ -6944,7 +6952,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     farebbe esattamente quello che fa la X in testata. */}
                 {overdueQueue.length > 1 && (
                   <button type="button" onClick={snoozeAllOverduePrompts}
-                    title={`Rimanda tutti i ${overdueQueue.length} avvisi di ${OVERDUE_SNOOZE_MIN} minuti`}
+                    title={tv('overdue.snoozeAll', { count: overdueQueue.length, minuti: OVERDUE_SNOOZE_MIN })}
                     className="mt-4 inline-flex h-11 w-full items-center justify-center rounded-[var(--ds-radius-control)] text-[14px] font-medium text-[var(--ds-text-secondary)] underline underline-offset-2 transition-colors hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]">
                     Chiudi tutti · {overdueQueue.length}
                   </button>
@@ -6969,7 +6977,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         const options: Exclude<ReservationStateKey, 'arriving'>[] = isPending
           ? ['waiting', 'declined']
           : ['pending', 'waiting', 'arrived', 'departing', 'freed', 'noshow', 'cancelled', 'declined'];
-        const title = isPending ? 'Rispondi al cliente' : 'Cambia stato';
+        const title = isPending ? tv('replyToGuest') : 'Cambia stato';
         return createPortal(
           <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] sm:px-4" onClick={() => setStateChangeReservation(null)}>
  <div className="bg-[var(--ds-surface)] w-full sm:max-w-sm rounded-t-[var(--ds-radius)] sm:rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-raised)] border border-[var(--ds-border)] overflow-hidden duration-200 pb-[env(safe-area-inset-bottom)] sm:pb-0"onClick={(e) => e.stopPropagation()}>
@@ -7044,7 +7052,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               </div>
               <div className="flex items-start justify-between p-4 border-b border-[var(--ds-border)]">
                 <div className="min-w-0">
-                  <h3 className="text-[16px] font-semibold text-[var(--ds-text-primary)]">Non confermare</h3>
+                  <h3 className="text-[16px] font-semibold text-[var(--ds-text-primary)]">{tv('decline.title')}</h3>
                   <p className="text-xs text-[var(--ds-text-muted)] mt-0.5 truncate">
                     {toTitleCase(res.customer_name)} · {formatTime(res.reservation_time)}
                   </p>
@@ -7061,7 +7069,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 <div className="flex items-center justify-end gap-2 pt-1">
                   <button type="button" onClick={() => setDeclineReservation(null)}
                     className="px-3 h-9 rounded-[var(--ds-radius)] text-sm font-medium border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] transition-colors">
-                    Annulla
+                    {tv('actions.cancelAction')}
                   </button>
                   <button type="button" onClick={() => { handleSetReservationState(res, 'declined'); setDeclineReservation(null); }}
                     className="inline-flex items-center gap-1.5 px-3 h-9 rounded-[var(--ds-radius)] text-sm font-semibold bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] hover:opacity-90 transition-opacity">
@@ -7094,13 +7102,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               onClose={() => setShowUnassignedModal(false)}
               closeOnEscape
               size="sm"
-              title="Prenotazioni senza tavolo"
+              title={tv('noTablePanel.title')}
               subtitle={`${effectiveShift === Shift.LUNCH ? 'Pranzo' : 'Cena'} · ${new Date(dateOnly).toLocaleDateString('it-IT', { weekday: 'short', day: '2-digit', month: 'short' })}`}
               bodyClassName="p-4"
             >
               {unassigned.length === 0 ? (
                 <EmptyState icon={Check}>
-                  Tutte le prenotazioni hanno un tavolo per questo turno.
+                  {tv('noTablePanel.allAssigned')}
                 </EmptyState>
               ) : (
                 // Cards, not a divided list: each row is a booking you're about
@@ -7118,7 +7126,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                           <span className="truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">
                             {toTitleCase(r.customer_name)}
                           </span>
-                          {renderOperatorBadge(r)}
+                          {renderOperatorBadge(r, tv)}
                         </div>
                         <div className="mt-0.5 flex items-center gap-3 text-[13px] text-[var(--ds-text-muted)]">
                           <span className="flex items-center gap-1">
@@ -7217,7 +7225,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         }}
                         className="w-full px-4 py-2 rounded-[var(--ds-radius-control)] border border-[var(--ds-border)] text-[var(--ds-text-primary)] text-sm font-medium hover:bg-[var(--ds-surface-row)]"
                     >
-                      Aggiungi un altro turno
+                      {tv('addAnotherShift')}
                     </button>
                   </div>
                 )}
@@ -7242,7 +7250,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
           const assign = (r: Reservation) => {
               onUpdateReservation({ ...r, table_id: table.id });
-              showToast(`Tavolo ${table.name} assegnato a ${toTitleCase(r.customer_name)}`, 'success');
+              showToast(tv('toast.tableAssignedTo', { tavolo: table.name, chi: toTitleCase(r.customer_name) }), 'success');
               setAssignTableModal(null);
           };
 
@@ -7273,14 +7281,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                           try {
                             await onSplitTable(table.id, dateOnly, effectiveShift);
                             await refreshMerges(dateOnly, effectiveShift);
-                            showToast('Tavoli divisi con successo', 'success');
+                            showToast(tv('toast.tablesSplit'), 'success');
                             setAssignTableModal(null);
                           } catch {
-                            showToast('Errore durante la divisione dei tavoli', 'error');
+                            showToast(tv('toast.splitError'), 'error');
                           }
                         }}
                         className="p-2 rounded-[var(--ds-radius)] text-[var(--ds-pending-text)] hover:bg-[var(--ds-pending-tint)] transition-colors"
-                        title={`Dividi i tavoli uniti (${table.name})`}
+                        title={tv('tables.splitMerged', { tavolo: table.name })}
                       >
                         <Scissors className="h-5 w-5" />
                       </button>
@@ -7296,7 +7304,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             ? 'text-[var(--ds-seated-text)] hover:bg-[var(--ds-seated-tint)]'
                             : 'text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]'
                         }`}
-                        title={isHidden ? 'Riattiva tavolo per questo turno' : 'Nascondi tavolo per questo turno'}
+                        title={isHidden ? tv('tables.restoreOne') : tv('tables.hideOne')}
                       >
                         {isHidden ? <Eye className="h-5 w-5" /> : <EyeOff className="h-5 w-5" />}
                       </button>
@@ -7326,9 +7334,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         };
                         try {
                             await onAddReservation(walkIn);
-                            showToast(`Walk-in al tavolo ${table.name} registrato`, 'success');
+                            showToast(tv('toast.walkInRegistered', { tavolo: table.name }), 'success');
                         } catch {
-                            showToast('Errore nella registrazione del walk-in', 'error');
+                            showToast(tv('toast.walkInError'), 'error');
                         }
                         setAssignTableModal(null);
                     }}
@@ -7356,7 +7364,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                       <Plus className="h-5 w-5 text-[#ffffff]" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="font-semibold text-[var(--ds-arriving-text)]">Nuova prenotazione</div>
+                      <div className="font-semibold text-[var(--ds-arriving-text)]">{tv('actions.new')}</div>
                       <div className="text-xs text-[var(--ds-arriving-text)] mt-0.5">Crea e assegna direttamente al tavolo {table.name}</div>
                     </div>
                     <ChevronRight className="h-4 w-4 text-[var(--ds-arriving-text)] flex-shrink-0" />
@@ -7364,12 +7372,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
                   {unassigned.length === 0 ? (
                     <div className="text-center py-6 px-4">
-                      <p className="text-xs text-[var(--ds-text-muted)]">Nessuna prenotazione senza tavolo per questo turno.</p>
+                      <p className="text-xs text-[var(--ds-text-muted)]">{tv('noTablePanel.empty')}</p>
                     </div>
                   ) : (
                     <>
                       <div className="px-1 pt-2 pb-1 text-[11px] font-semibold tracking-wide text-[var(--ds-text-muted)]">
-                        Oppure assegna a una prenotazione esistente
+                        {tv('noTablePanel.orAssignExisting')}
                       </div>
                       <ul className="divide-y divide-[var(--ds-border)]">
                         {unassigned.map(r => {
@@ -7383,10 +7391,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2">
                                     <span className="font-semibold text-[var(--ds-text-primary)] truncate">{toTitleCase(r.customer_name)}</span>
-                                    {renderOperatorBadge(r)}
+                                    {renderOperatorBadge(r, tv)}
                                     {insufficient && (
                                       <span className="text-[10px] font-bold tracking-wide bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] px-1.5 py-0.5 rounded">
-                                        Capienza insufficiente
+                                        {tv('capacity.title')}
                                       </span>
                                     )}
                                   </div>
@@ -7411,7 +7419,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     onClick={() => setAssignTableModal(null)}
                     className="w-full px-4 py-2 rounded-[var(--ds-radius-control)] border border-[var(--ds-border)] text-[var(--ds-text-primary)] text-sm font-medium hover:bg-[var(--ds-surface-row)]"
                   >
-                    Annulla
+                    {tv('actions.cancelAction')}
                   </button>
                 </div>
               </div>
@@ -7454,9 +7462,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   ? <MapPin className="h-4 w-4 text-[var(--ds-arriving-solid)] flex-shrink-0" />
                   : tooltipReservation.type === 'bookedAt' ? <Info className="h-4 w-4 text-[var(--ds-arriving-solid)] flex-shrink-0" /> : <StickyNote className="h-4 w-4 text-[var(--ds-pending-solid)] flex-shrink-0" />}
                 <span className="text-xs font-semibold text-[var(--ds-text-primary)]">
-                  {tooltipReservation.type === 'allergen' ? 'Intolleranze'
-                    : tooltipReservation.type === 'tables' ? `Tavoli uniti (${tooltipReservation.text.split('+').filter(Boolean).length})`
-                    : tooltipReservation.type === 'bookedAt' ? 'Prenotazione' : 'Note'}
+                  {tooltipReservation.type === 'allergen' ? tv('tooltip.allergens')
+                    : tooltipReservation.type === 'tables' ? tv('tables.mergedTitle', { count: tooltipReservation.text.split('+').filter(Boolean).length })
+                    : tooltipReservation.type === 'bookedAt' ? tv('tooltip.booking') : tv('tooltip.notes')}
                 </span>
               </div>
               <button type="button" onClick={() => setTooltipReservation(null)}
@@ -7601,6 +7609,7 @@ const usePopoverPosition = (
 };
 
 const NotePickerPopover: React.FC<NotePickerPopoverProps> = ({ preset, picks, anchorEl, onCommit, onCancel }) => {
+  const { t: tv } = useTranslation('prenotazioni', { useSuspense: false });
     // Se il preset ha varianti trattiamo il popover come editor di più righe
     // (una per variante scelta). Altrimenti è una singola quantità.
     const hasVariants = preset.variants.length > 0;
@@ -7652,7 +7661,7 @@ const NotePickerPopover: React.FC<NotePickerPopoverProps> = ({ preset, picks, an
                     type="button"
                     onClick={onCancel}
                     className={`rounded-[var(--ds-radius-control)] flex items-center justify-center hover:bg-[var(--ds-surface-row)] ${isWide ? 'w-7 h-7' : 'w-11 h-11'}`}
-                    aria-label="Chiudi"
+                    aria-label={tv('close')}
                 >
                     <X className={`text-[var(--ds-text-muted)] ${isWide ? 'w-3.5 h-3.5' : 'w-5 h-5'}`} />
                 </button>
@@ -7674,7 +7683,7 @@ const NotePickerPopover: React.FC<NotePickerPopoverProps> = ({ preset, picks, an
                 </ul>
             ) : (
                 <div className="flex items-center justify-between gap-3 py-1">
-                    <span className={`text-[var(--ds-text-secondary)] ${isWide ? 'text-[13px]' : 'text-[15px]'}`}>Quantità</span>
+                    <span className={`text-[var(--ds-text-secondary)] ${isWide ? 'text-[13px]' : 'text-[15px]'}`}>{tv('notes.quantity')}</span>
                     <QuantityStepper
                         large={!isWide}
                         value={qtyByVariant[''] ?? 0}
@@ -7690,7 +7699,7 @@ const NotePickerPopover: React.FC<NotePickerPopoverProps> = ({ preset, picks, an
                     onClick={clear}
                     className={`text-[var(--ds-critical-solid)] hover:text-[var(--ds-critical-text)] font-medium ${isWide ? 'text-[12px]' : 'text-[15px] min-h-11 px-2'}`}
                 >
-                    Rimuovi
+                    {tv('notes.remove')}
                 </button>
                 <button
                     type="button"
@@ -7699,7 +7708,7 @@ const NotePickerPopover: React.FC<NotePickerPopoverProps> = ({ preset, picks, an
                         isWide ? 'px-3 py-1.5 text-[12px]' : 'px-5 min-h-11 text-[15px]'
                     }`}
                 >
-                    Conferma
+                    {tv('notes.confirm')}
                 </button>
             </div>
         </>
@@ -7758,6 +7767,7 @@ const QuantityStepper: React.FC<{
     onChange: (n: number) => void;
     large?: boolean;
 }> = ({ value, onIncrement, onDecrement, onChange, large = false }) => {
+  const { t: tv } = useTranslation('prenotazioni', { useSuspense: false });
     const btn = large ? 'w-11 h-11 text-[18px]' : 'w-8 h-8';
     const input = large ? 'w-12 h-11 text-[16px]' : 'w-10 h-8 text-[13px]';
     return (
@@ -7767,7 +7777,7 @@ const QuantityStepper: React.FC<{
                 onClick={onDecrement}
                 disabled={value <= 0}
                 className={`${btn} flex items-center justify-center text-[var(--ds-text-primary)] disabled:opacity-30`}
-                aria-label="Diminuisci"
+                aria-label={tv('notes.decrease')}
             >−</button>
             <input
                 type="number"
@@ -7781,7 +7791,7 @@ const QuantityStepper: React.FC<{
                 type="button"
                 onClick={onIncrement}
                 className={`${btn} flex items-center justify-center text-[var(--ds-text-primary)]`}
-                aria-label="Aumenta"
+                aria-label={tv('notes.increase')}
             >+</button>
         </div>
     );
