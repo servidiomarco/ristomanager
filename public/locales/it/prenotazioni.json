@@ -101,7 +101,6 @@
   },
   "payments": {
     "tableBill": "Conto al tavolo",
-    "loading": "Caricamento…",
     "noBill": "Nessun conto attivo.",
     "requestDeposit": "Richiedi un acconto",
     "sendVia": "Invia il link tramite",

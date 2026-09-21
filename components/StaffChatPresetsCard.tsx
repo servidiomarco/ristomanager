@@ -81,7 +81,7 @@ export const StaffChatPresetsCard: React.FC<Props> = ({ showToast }) => {
 
       <div className="px-4 pb-4 pt-1 border-t border-[var(--ds-border)]">
         {loading ? (
-          <div className="py-10 flex justify-center"><Loader label="Carico…" size={40} /></div>
+          <div className="py-10 flex justify-center"><Loader size={40} /></div>
         ) : (
           <div className="space-y-3 pt-2">
             {!canEdit && (

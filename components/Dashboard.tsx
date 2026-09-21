@@ -2159,10 +2159,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               <h2 className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">{t('lowStockTitle')}</h2>
               <p className="text-[13px] text-[var(--ds-text-muted)] mt-0.5">
                 {lowStockLoading
-                  ? t('loading')
-                  : `${lowStockItems.length} ${lowStockItems.length === 1 ? 'articolo' : 'articoli'} sotto soglia${
+                  ? t('common:loading')
+                  : `${t('itemsUnderThreshold', { count: lowStockItems.length })}${
                       lowStockItems.filter(i => i.total_quantity <= 0).length > 0
-                        ? ` · ${lowStockItems.filter(i => i.total_quantity <= 0).length} esauriti`
+                        ? ` · ${t('outOfStockCount', { count: lowStockItems.filter(i => i.total_quantity <= 0).length })}`
                         : ''
                     }`}
               </p>
@@ -2180,7 +2180,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           <div className="flex-1 min-h-0 flex flex-col gap-1.5 overflow-y-auto scrollbar-hide -mx-1 px-1">
             {lowStockLoading ? (
               <div className="py-8 text-center">
-                <Loader label={t('loading')} size={40} />
+                <Loader size={40} />
               </div>
             ) : lowStockItems.length === 0 ? (
               <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-4 py-8 text-center">
@@ -2315,7 +2315,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
             {staffLoading ? (
               <div className="flex items-center justify-center py-8">
-                <Loader label={t('loading')} size={40} />
+                <Loader size={40} />
               </div>
             ) : (
               <div className={`grid gap-3 ${showLunch && showDinner ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'}`}>

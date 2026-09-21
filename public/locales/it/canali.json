@@ -19,7 +19,6 @@
   "roomClosedShift": "chiusa",
   "capsSaved": "Limiti di occupazione aggiornati",
   "capsSaveError": "Errore aggiornamento limiti",
-  "loading": "Caricamento…",
   "noChannelsInPlan": "Nessun canale incluso nel piano attuale.",
   "firstMessageLabel": "Messaggio iniziale di Sofia",
   "firstMessagePlaceholder": "Es. Ciao {nome}, sono Sofia del ristorante, come posso aiutarti?",

@@ -486,7 +486,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
     if (loading) {
         return (
             <div className="flex items-center gap-2 text-[var(--ds-text-muted)] text-[13px] py-2">
-                <Loader label={t('loading')} size={40} />
+                <Loader size={40} />
             </div>
         );
     }

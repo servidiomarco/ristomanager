@@ -25,7 +25,7 @@ export const Loader: React.FC<LoaderProps> = ({
   const { t } = useTranslation('common', { useSuspense: false });
   /* `undefined` prende il testo di default tradotto; `null` resta l'anello
      nudo, come prima. */
-  const testo = label === undefined ? t('loaderDefault') : label;
+  const testo = label === undefined ? t('loading') : label;
   return (
   <div
     className={`flex flex-col items-center justify-center gap-3 text-[var(--ds-text-muted)] ${className}`}

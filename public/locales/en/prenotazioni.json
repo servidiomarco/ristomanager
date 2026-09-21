@@ -101,7 +101,6 @@
   },
   "payments": {
     "tableBill": "Table bill",
-    "loading": "Loading…",
     "noBill": "No open bill.",
     "requestDeposit": "Request a deposit",
     "sendVia": "Send the link via",

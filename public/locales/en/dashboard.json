@@ -49,7 +49,6 @@
   "breadKg": "Bread {{kg}} kg",
   "breadNoBooking": "Bread — no booking",
   "breadHint": "Follows the bookings",
-  "loading": "Loading…",
   "stockAllFine": "Every stock level is fine",
   "nobodyOnShift": "Nobody on shift",
   "staffOnDuty": "Staff on duty",
@@ -142,5 +141,9 @@
     "free": "Free up",
     "assign": "Assign",
     "confirm": "Confirm"
-  }
+  },
+  "itemsUnderThreshold_one": "{{count}} item under threshold",
+  "itemsUnderThreshold_other": "{{count}} items under threshold",
+  "outOfStockCount_one": "{{count}} out of stock",
+  "outOfStockCount_other": "{{count}} out of stock"
 }

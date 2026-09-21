@@ -2072,7 +2072,7 @@ const App: React.FC = () => {
   if (authLoading) {
     return (
       <div className="min-h-screen bg-[var(--ds-canvas)] flex items-center justify-center">
-        <Loader label={t('loading')} />
+        <Loader />
       </div>
     );
   }
