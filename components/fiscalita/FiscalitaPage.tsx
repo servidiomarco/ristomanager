@@ -4,7 +4,7 @@ import { FormCard, PanePlaceholder, SplitPane, StatusPill } from '../ds';
 import { PeriodPicker, PeriodTrigger, type Period } from '../pagamenti/PeriodPicker';
 import { formatEuro } from '../pagamenti/paymentsView';
 import { socketClient } from '../../services/socketClient';
-import { getRomeDatePart, getRomeTimePart } from '../../utils/reservationTime';
+import { datePart, timePart } from '../../utils/displayTime';
 import {
   billsApiService, downloadReportCsv, getFiscalDocumentDetail, getFiscalRegistry, getFiscalVatSummary,
   type FiscalDocumentDetail, type FiscalRegistryQuery, type FiscalRegistryResponse, type FiscalRegistryRow,
@@ -59,7 +59,7 @@ const PAGE_SIZE = 100;
 // Default: il mese in corso — è l'orizzonte delle domande vere ("com'è
 // andato il mese?", la liquidazione). Il picker copre il resto.
 const defaultPeriod = (): Period => {
-  const today = getRomeDatePart(new Date());
+  const today = datePart(new Date());
   return { from: `${today.slice(0, 8)}01`, to: today };
 };
 
@@ -280,7 +280,7 @@ const RegistroEmessi: React.FC = () => {
                           </span>
                           <span className="flex flex-shrink-0 flex-col items-end gap-1">
                             <span className="text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">{formatEuro(row.total_cents)}</span>
-                            <span className="text-[12px] tabular-nums text-[var(--ds-text-muted)]">{getRomeTimePart(row.created_at)}</span>
+                            <span className="text-[12px] tabular-nums text-[var(--ds-text-muted)]">{timePart(row.created_at)}</span>
                           </span>
                         </button>
                       </li>
@@ -356,8 +356,8 @@ const DocumentoDetail: React.FC<{ detail: FiscalDocumentDetail; onClose: () => v
       >
         <dl className="divide-y divide-[var(--ds-border)]">
           {row('Totale', <span className="font-semibold tabular-nums">{formatEuro(d.total_cents)}</span>)}
-          {row('Emesso', `${getRomeDatePart(d.created_at).split('-').reverse().join('/')} ${getRomeTimePart(d.created_at)}`)}
-          {d.voided_at && row('Annullato', `${getRomeDatePart(d.voided_at).split('-').reverse().join('/')} ${getRomeTimePart(d.voided_at)}`)}
+          {row('Emesso', `${datePart(d.created_at).split('-').reverse().join('/')} ${timePart(d.created_at)}`)}
+          {d.voided_at && row('Annullato', `${datePart(d.voided_at).split('-').reverse().join('/')} ${timePart(d.voided_at)}`)}
           {d.credit_note_number && row('Stornata da', `nota di credito ${d.credit_note_number}`)}
           {d.related && row('Storna', `${TYPE_LABEL[d.related.doc_type] ?? d.related.doc_type} ${d.related.doc_number ?? ''}`)}
           {(d.table_name || d.customer_name) && row('Conto', [d.table_name ? `tavolo ${d.table_name}` : null, d.customer_name].filter(Boolean).join(' · '))}

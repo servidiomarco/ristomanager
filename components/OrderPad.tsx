@@ -8,7 +8,7 @@ import {
 import { QRCodeSVG } from 'qrcode.react';
 import type { Dish, RestaurantMenu, Reservation, Room, Table, TableMerge, OrderWithItems, OrderItem } from '../types';
 import { Shift } from '../types';
-import { getRomeDatePart } from '../utils/reservationTime';
+import { datePart } from '../utils/displayTime';
 import { getTableMerges } from '../services/apiService';
 import {
   ordersApiService, getMenuCatalogue, newIdempotencyKey, closeOrder, updateOrder, fireCourse, deleteEmptyOrder, deleteWholeOrder,
@@ -404,7 +404,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
   // perché /reservations restituisce tutto lo storico; quello sul turno
   // perché con Pranzo selezionato le prenotazioni della cena in griglia
   // leggono come coperti già arrivati.
-  const selectedDateRome = getRomeDatePart(globalDate);
+  const selectedDateRome = datePart(globalDate);
 
   // Unioni tavoli del giorno in griglia: la prenotazione di un'unione sta su
   // UN tavolo del gruppo (di norma il primario), ma la comanda può essere
@@ -442,7 +442,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
     date: selectedDateRome,
     shift: globalShiftFilter === 'ALL' ? undefined : globalShiftFilter,
   }), [selectedDateRome, globalShiftFilter]);
-  const isTodayRome = selectedDateRome === getRomeDatePart(new Date());
+  const isTodayRome = selectedDateRome === datePart(new Date());
 
   useEffect(() => {
     if (initialTableId == null) return;

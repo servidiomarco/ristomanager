@@ -6,7 +6,7 @@ import { Reservation, Table, Dish, Room, Shift, ReservationStatus, ReservationSo
 import { ShoppingCategory, ShoppingItem } from '../services/shoppingApiService';
 import { getLowStockInventory, LowStockItem, getReservationAllergenPresets, getTableMerges, getTableHidden } from '../services/apiService';
 import { useSocket } from '../hooks/useSocket';
-import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
+import { datePart, timePart } from '../utils/displayTime';
 import { isSeated, getTimedReservationState, PulseDot } from './reservationState';
 import { DietaryChips } from './DietaryChips';
 import { stripDietaryNote } from '../utils/dietary';
@@ -678,7 +678,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const selectedDayReservations = useMemo(() => {
     return Array.isArray(reservations)
       ? reservations.filter(r =>
-          getRomeDatePart(r.reservation_time) === selectedDateStr &&
+          datePart(r.reservation_time) === selectedDateStr &&
           r.reservation_status !== ReservationStatus.CANCELLED &&
           r.reservation_status !== ReservationStatus.DECLINED
         )
@@ -900,7 +900,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     // refactor a booking at 20:00 Rome (18:00 UTC in CEST) resolved to
     // "18:00" and never matched a DINNER_SLOT — deflating every room's
     // affluenza count.
-    const getTimeFromReservation = (r: Reservation) => getRomeTimePart(r.reservation_time);
+    const getTimeFromReservation = (r: Reservation) => timePart(r.reservation_time);
 
     // Bucket a HH:MM string to the nearest earlier canonical slot. Anything
     // before the first slot bunches into the first slot; anything after the
@@ -1006,7 +1006,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       const dateStr = formatLocalDate(date);
 
       let dayReservations = Array.isArray(reservations)
-        ? reservations.filter(r => getRomeDatePart(r.reservation_time) === dateStr)
+        ? reservations.filter(r => datePart(r.reservation_time) === dateStr)
         : [];
 
       // Filter by shift if not ALL
@@ -1414,13 +1414,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 : t('channelPhone');
               // reservation_time is timestamptz; read it in Europe/Rome or a
               // 20:30 booking renders as its UTC hour.
-              const timeLabel = getRomeTimePart(res.reservation_time);
+              const timeLabel = timePart(res.reservation_time);
               // The list spans the whole DB, not just today — without the
               // requested date, a 21:00 booking for next month reads as
               // tonight's. "oggi"/"domani" keep the common cases short.
-              const resDateStr = getRomeDatePart(res.reservation_time);
-              const todayStr = getRomeDatePart(new Date());
-              const tomorrowStr = getRomeDatePart(new Date(Date.now() + 24 * 60 * 60 * 1000));
+              const resDateStr = datePart(res.reservation_time);
+              const todayStr = datePart(new Date());
+              const tomorrowStr = datePart(new Date(Date.now() + 24 * 60 * 60 * 1000));
               const dateLabel = resDateStr === todayStr ? t('today')
                 : resDateStr === tomorrowStr ? t('tomorrow')
                 : new Date(`${resDateStr}T12:00:00`).toLocaleDateString(displayLocale(), { weekday: 'short', day: 'numeric', month: 'short' });
@@ -1486,7 +1486,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         ) : (
           <div className="flex flex-col gap-2 max-h-[340px] xl:max-h-none xl:flex-1 xl:min-h-0 overflow-y-auto scrollbar-hide -mx-1 px-1">
             {reservationNotes.map(({ reservation, table, room, allergens }) => {
-              const time = getRomeTimePart(reservation.reservation_time);
+              const time = timePart(reservation.reservation_time);
               const isExpanded = expandedNoteIds.has(reservation.id);
               const noteText = stripDietaryNote(reservation.notes);
               const isTruncatable = noteText.length > 80;
@@ -2388,7 +2388,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           const dateLabel = !Number.isNaN(resDate.getTime())
             ? resDate.toLocaleDateString(displayLocale(), { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric', timeZone: 'Europe/Rome' })
             : '';
-          const timeLabel = getRomeTimePart(res.reservation_time);
+          const timeLabel = timePart(res.reservation_time);
           const closeDisabled = pendingActionBusy !== null;
           const closeModal = () => {
             if (closeDisabled) return;

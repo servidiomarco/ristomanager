@@ -1,5 +1,5 @@
 import React from 'react';
-import { getRomeTimePart } from '../../utils/reservationTime';
+import { timePart } from '../../utils/displayTime';
 import { SectionHeader } from '../ds';
 import {
   TABLE_CAPTION, TABLE_GROUPS, TABLE_TILE, TABLE_TILE_WIDE, TABLE_DOT,
@@ -58,7 +58,7 @@ export const defaultTableMeta = (row: TableRow): React.ReactNode => {
       )}
       {state === 'booked' && reservation && (
         <span className={`max-w-full truncate px-1 text-[11px] font-medium ${TABLE_CAPTION.booked}`}>
-          {getRomeTimePart(reservation.reservation_time)} · {reservation.customer_name}
+          {timePart(reservation.reservation_time)} · {reservation.customer_name}
         </span>
       )}
     </>

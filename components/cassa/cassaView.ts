@@ -1,7 +1,7 @@
 import type { OpenBillRow } from '../../services/billsApiService';
 import type { Table } from '../../types';
 import { toTitleCase } from '../../utils/text';
-import { getRomeTimePart } from '../../utils/reservationTime';
+import { timePart } from '../../utils/displayTime';
 import { formatEuro } from '../pagamenti/paymentsView';
 import type { PillTone } from '../ds';
 
@@ -49,7 +49,7 @@ export const queueSubtitle = (bill: OpenBillRow): string => {
   // I coperti sono un dato di sala: sull'asporto «1 coperto» direbbe una
   // cosa falsa.
   if (bill.takeaway_order_id == null) parts.push(`${bill.covers} copert${bill.covers === 1 ? 'o' : 'i'}`);
-  if (bill.opened_at) parts.push(`aperto ${getRomeTimePart(bill.opened_at)}`);
+  if (bill.opened_at) parts.push(`aperto ${timePart(bill.opened_at)}`);
   if (bill.paid_cents > 0) parts.push(`${euro(bill.paid_cents)} già pagati`);
   return parts.join(' · ');
 };

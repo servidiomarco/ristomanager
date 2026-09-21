@@ -6,7 +6,7 @@ import type { TableBill } from '../../types';
 import { StatusPill } from '../ds';
 import { StampaCopiaButton } from '../pagamenti/StampaCopiaButton';
 import { euro } from './cassaView';
-import { getRomeTimePart } from '../../utils/reservationTime';
+import { timePart } from '../../utils/displayTime';
 
 /* ── Passo 5 · chiusura, i tre esiti ──────────────────────────────────────
    Quando il residuo arriva a zero il conto si chiude e il tavolo si libera.
@@ -84,7 +84,7 @@ export const EsitoChiusura: React.FC<EsitoChiusuraProps> = ({
 
   const body =
     esito === 'saldato'
-      ? `Tavolo ${tableName ?? '—'} liberato${closedAt ? ` alle ${getRomeTimePart(closedAt)}` : ''}.${docNumber ? ` Scontrino emesso, numero ${docNumber}.` : ' Scontrino emesso.'}`
+      ? `Tavolo ${tableName ?? '—'} liberato${closedAt ? ` alle ${timePart(closedAt)}` : ''}.${docNumber ? ` Scontrino emesso, numero ${docNumber}.` : ' Scontrino emesso.'}`
       : esito === 'da-verificare'
         ? 'I soldi sono incassati e il tavolo è libero. Lo scontrino non è partito: si ritenta da qui o da Pagamenti.'
         : esito === 'parziale'

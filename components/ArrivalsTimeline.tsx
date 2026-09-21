@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
 import { Reservation, Table, Room, Shift, BanquetMenu, TableMerge, ArrivalStatus, ReservationStatus } from '../types';
-import { getRomeTimePart } from '../utils/reservationTime';
+import { timePart } from '../utils/displayTime';
 import { toTitleCase } from '../utils/text';
 import { applyMerges } from '../utils/tableMerge';
 import { getTableMerges } from '../services/apiService';
@@ -259,7 +259,7 @@ export const ArrivalsTimeline: React.FC<ArrivalsTimelineProps> = ({
                     and break the rhythm of the list. */}
                 <div className="flex-shrink-0 w-[68px]">
                   <div className="text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)] leading-tight">
-                    {getRomeTimePart(r.reservation_time)}
+                    {timePart(r.reservation_time)}
                   </div>
                   <div className="text-[12px] text-[var(--ds-text-muted)] leading-tight mt-0.5 whitespace-nowrap">
                     {elapsedLabel(r.reservation_time, nowTick, tr)}

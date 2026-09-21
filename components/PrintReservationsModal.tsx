@@ -4,7 +4,7 @@ import { ModalShell, dsInput, dsSelect, dsButton, Field, SegmentedControl } from
 import { Reservation, Shift, Room, Table, ArrivalStatus, BanquetMenu } from '../types';
 import { Printer, X } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
+import { datePart, timePart } from '../utils/displayTime';
 import { toTitleCase } from '../utils/text';
 import { isSeated } from './reservationState';
 
@@ -67,7 +67,7 @@ export const PrintReservationsModal: React.FC<Props> = ({
 
   const filteredReservations = useMemo(() => {
     const rows = reservations
-      .filter(r => getRomeDatePart(r.reservation_time) === printDate)
+      .filter(r => datePart(r.reservation_time) === printDate)
       .filter(r => printShift === 'ALL' || r.shift === printShift)
       .filter(r => {
         if (printRoomId === 'ALL') return true;
@@ -273,7 +273,7 @@ export const PrintReservationsModal: React.FC<Props> = ({
                 <tbody>
                   {filteredReservations.map(r => {
                     const table = r.table_id ? tableById.get(r.table_id) : null;
-                    const time = getRomeTimePart(r.reservation_time);
+                    const time = timePart(r.reservation_time);
                     const arrived = isSeated(r);
                     return (
                       <tr key={r.id} style={{ borderBottom: '1px solid var(--ds-print-rule)' }}>

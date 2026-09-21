@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ArrowLeft, ChevronDown, Loader2, Receipt } from 'lucide-react';
 import type { CashMovement, CashTransactionsView } from '../../types';
-import { getRomeTimePart } from '../../utils/reservationTime';
+import { timePart } from '../../utils/displayTime';
 import { Callout, EmptyState, SearchField, SegmentedControl, StatusPill } from '../ds';
 import { methodLabel } from '../pagamenti/settleView';
 import { euro } from './cassaView';
@@ -269,7 +269,7 @@ export const Transazioni: React.FC<TransazioniProps> = ({
                           }`}
                         >
                           <span className="w-12 flex-shrink-0 text-[13px] tabular-nums text-[var(--ds-text-muted)]">
-                            {getRomeTimePart(m.at)}
+                            {timePart(m.at)}
                           </span>
                           <span className="min-w-0 flex-1">
                             <span className={`block truncate text-[14px] font-medium ${

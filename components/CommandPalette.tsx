@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Search, X, Calendar, User, Phone, Mail, Loader2, ArrowRight } from 'lucide-react';
 import { Reservation, Customer, ReservationStatus } from '../types';
 import { getCustomers } from '../services/apiService';
-import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
+import { datePart, timePart } from '../utils/displayTime';
 import { toTitleCase } from '../utils/text';
 
 interface CommandPaletteProps {
@@ -31,7 +31,7 @@ const formatResDate = (iso: string): string => {
   });
 };
 
-const formatResTime = (iso: string): string => getRomeTimePart(iso);
+const formatResTime = (iso: string): string => timePart(iso);
 
 const statusChip = (r: Reservation): { label: string; cls: string } | null => {
   const s = r.reservation_status;

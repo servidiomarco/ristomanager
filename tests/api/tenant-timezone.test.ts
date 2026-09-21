@@ -482,3 +482,52 @@ describe('fuso per tenant — la finestra della lista prenotazioni', () => {
         expect(await nellaFinestra(londraToken, '2027-02-16')).toBe(0);
     });
 });
+
+/* Il fuso della sessione nel browser.
+ *
+ * Nel client il fuso sta in un modulo: una scheda è un tenant solo per tutta
+ * la sessione, e passarlo attraverso centoventi punti di chiamata in
+ * ventisette file è il genere di threading in cui si dimentica un posto.
+ * Sul server resta esplicito, perché lì ogni richiesta è di un tenant diverso.
+ */
+describe('fuso per tenant — il fuso della sessione nel client', () => {
+    it('finché nessuno lo imposta, vale Roma', async () => {
+        const { datePart, timePart, sessionTimeZone } = await import('../../utils/displayTime.js');
+        expect(sessionTimeZone()).toBe('Europe/Rome');
+        const istante = new Date('2027-01-15T23:30:00.000Z');
+        expect(datePart(istante)).toBe('2027-01-16');
+        expect(timePart(istante)).toBe('00:30');
+    });
+
+    it('impostato su Londra, le stesse date si leggono diverse', async () => {
+        const { datePart, timePart, setSessionTimeZone, sessionTimeZone } = await import('../../utils/displayTime.js');
+        const istante = new Date('2027-01-15T23:30:00.000Z');
+
+        setSessionTimeZone('Europe/London');
+        expect(sessionTimeZone()).toBe('Europe/London');
+        expect(datePart(istante)).toBe('2027-01-15');
+        expect(timePart(istante)).toBe('23:30');
+
+        setSessionTimeZone('Asia/Dubai');
+        expect(timePart(istante)).toBe('03:30');
+
+        // logout, o un tenant senza fuso dichiarato: si torna a Roma
+        setSessionTimeZone(null);
+        expect(sessionTimeZone()).toBe('Europe/Rome');
+        expect(timePart(istante)).toBe('00:30');
+    });
+
+    it('reservationTime resta senza stato: il server non ha un fuso «corrente»', async () => {
+        // La ragione per cui displayTime è un modulo a parte. Se queste due
+        // cambiassero comportamento dopo un setSessionTimeZone, il server
+        // formatterebbe col fuso di chi ha fatto l'ultima richiesta.
+        const { setSessionTimeZone } = await import('../../utils/displayTime.js');
+        const { getRomeDatePart, getRomeTimePart } = await import('../../utils/reservationTime.js');
+        const istante = new Date('2027-01-15T23:30:00.000Z');
+
+        setSessionTimeZone('Asia/Dubai');
+        expect(getRomeDatePart(istante)).toBe('2027-01-16');
+        expect(getRomeTimePart(istante)).toBe('00:30');
+        setSessionTimeZone(null);
+    });
+});

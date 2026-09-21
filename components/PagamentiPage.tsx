@@ -6,7 +6,7 @@ import {
   paymentsApiService, type PaymentRequest, type PaymentsListParams,
 } from '../services/paymentsApiService';
 import { getFeatureFlags } from '../services/apiService';
-import { getRomeDatePart } from '../utils/reservationTime';
+import { datePart } from '../utils/displayTime';
 import {
   Callout, PanePlaceholder, SearchField, SegmentedControl, SplitPane,
 } from './ds';
@@ -78,7 +78,7 @@ const PagamentiPage: React.FC<{
   const serviceFilter = useMemo(
     () => globalDate
       ? {
-          service_date: getRomeDatePart(globalDate),
+          service_date: datePart(globalDate),
           shift: globalShiftFilter && globalShiftFilter !== 'ALL' ? globalShiftFilter : undefined,
         }
       : undefined,
@@ -243,7 +243,7 @@ const PagamentiPage: React.FC<{
     let min = '';
     let max = '';
     for (const p of items) {
-      const day = getRomeDatePart(p.created_at);
+      const day = datePart(p.created_at);
       if (!day) continue;
       if (!min || day < min) min = day;
       if (!max || day > max) max = day;

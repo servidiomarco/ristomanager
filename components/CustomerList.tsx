@@ -7,7 +7,7 @@ import { swrConfig } from '../services/configCache';
 import { useAuth } from '../contexts/AuthContext';
 import { Search, Plus, Pencil, Trash2, Phone, Mail, MapPin, BookUser, History, UtensilsCrossed, Calendar, Sun, Moon, Users as UsersIcon, Loader2, Star, Armchair, AlertTriangle, Ban, GitMerge, Download, MessageCircle, User as UserIcon, MoreVertical, ArrowLeft } from 'lucide-react';
 import { toTitleCase } from '../utils/text';
-import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
+import { datePart, timePart } from '../utils/displayTime';
 import {
   SplitPane, PanePlaceholder, SearchField, StatusPill, StatStrip, CountBadge,
   Callout, EmptyState, ModalShell, StepNav, FormCard, Field,
@@ -110,10 +110,10 @@ const customerToForm = (c: Customer): FormState => ({
 // backend salvasse l'ora locale: la colonna è timestamptz e l'API risponde in
 // UTC, quindi lo storico mostrava le cene alle 18:30 invece che alle 20:30.
 const formatReservationDateTime = (isoString: string): { date: string; time: string } => {
-  const dateStr = getRomeDatePart(isoString); // YYYY-MM-DD
+  const dateStr = datePart(isoString); // YYYY-MM-DD
   if (!dateStr) return { date: '', time: '' };
   const [y, m, d] = dateStr.split('-');
-  return { date: `${d}/${m}/${y}`, time: getRomeTimePart(isoString) };
+  return { date: `${d}/${m}/${y}`, time: timePart(isoString) };
 };
 
 // Lowercase + strip diacritics so "cafe" matches "Café" and "d'onofrio"

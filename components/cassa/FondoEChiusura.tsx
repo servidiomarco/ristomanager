@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ArrowLeft, Loader2, Printer } from 'lucide-react';
 import type { CashSessionView } from '../../types';
-import { getRomeTimePart } from '../../utils/reservationTime';
+import { timePart } from '../../utils/displayTime';
 import { Callout, FormCard } from '../ds';
 import { methodLabel } from '../pagamenti/settleView';
 import { euro } from './cassaView';
@@ -110,7 +110,7 @@ export const FondoEChiusura: React.FC<FondoEChiusuraProps> = ({
                   {euro(session.opening_float_cents)}
                 </div>
                 <div className="text-[13px] text-[var(--ds-text-muted)]">
-                  Aperto da {session.opened_by_name} alle {getRomeTimePart(session.opened_at)}
+                  Aperto da {session.opened_by_name} alle {timePart(session.opened_at)}
                 </div>
               </div>
               {!closed && canClose && (
@@ -266,7 +266,7 @@ export const FondoEChiusura: React.FC<FondoEChiusuraProps> = ({
                   )}
                 </div>
                 <p className="text-[13px] text-[var(--ds-text-muted)]">
-                  Chiusa da {session!.closed_by_name} alle {getRomeTimePart(session!.closed_at!)}.
+                  Chiusa da {session!.closed_by_name} alle {timePart(session!.closed_at!)}.
                 </p>
                 {onOpenGiornale && (
                   <button
