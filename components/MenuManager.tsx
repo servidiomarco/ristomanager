@@ -26,11 +26,29 @@ import {
   dsInput, dsSelect, dsTextarea, dsButton, dsIconButton, dsStepArrow,
 } from './ds';
 import { moneySymbol } from '../utils/displayMoney';
+import { displayLocale } from '../utils/formatLocale';
 
 const BANQUET_DISH_CATEGORIES = ['Antipasti', 'Primi', 'Secondi', 'Contorni', 'Dolci', 'Bevande'] as const;
 
-const ITALIAN_MONTHS = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
-const ITALIAN_WEEKDAYS = ['Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab', 'Dom'];
+/* Nomi di mese e di giorno dalla lingua di chi guarda, non da un elenco
+   scritto a mano: Intl li ha già per ogni locale, e una lista in più sarebbe
+   una traduzione da mantenere a mano. La settimana parte dal lunedì, come il
+   ristorante pianifica; l'indice lo aggiusta chi la usa. */
+const monthNames = (): string[] => {
+  const f = new Intl.DateTimeFormat(displayLocale(), { month: 'long' });
+  return Array.from({ length: 12 }, (_, m) => {
+    const n = f.format(new Date(2021, m, 1));
+    return n.charAt(0).toUpperCase() + n.slice(1);
+  });
+};
+const weekdayNames = (): string[] => {
+  const f = new Intl.DateTimeFormat(displayLocale(), { weekday: 'short' });
+  // 2021-03-01 era un lunedì.
+  return Array.from({ length: 7 }, (_, i) => {
+    const n = f.format(new Date(2021, 2, 1 + i)).replace('.', '');
+    return n.charAt(0).toUpperCase() + n.slice(1);
+  });
+};
 
 const formatLocalDate = (d: Date): string => {
     const y = d.getFullYear();
@@ -86,11 +104,13 @@ const computeBanquetPaymentStatus = (menu: BanquetMenu): BanquetPaymentStatus =>
    list quietly lie about how many banquets exist. */
 type BanquetGroupKey = 'week' | 'month' | 'later' | 'past';
 
-const BANQUET_GROUP_LABEL: Record<BanquetGroupKey, string> = {
-  week:  'Questa settimana',
-  month: 'Questo mese',
-  later: 'Più avanti',
-  past:  'Passati',
+/* Pattern labelKey come TABLE_GROUPS: la chiave accanto all'italiano di
+   riserva, il testo si risolve al render. */
+const BANQUET_GROUP_LABEL: Record<BanquetGroupKey, { key: string; text: string }> = {
+  week:  { key: 'group.week',  text: 'Questa settimana' },
+  month: { key: 'group.month', text: 'Questo mese' },
+  later: { key: 'group.later', text: 'Più avanti' },
+  past:  { key: 'group.past',  text: 'Passati' },
 };
 
 // Monday-based, matching the Italian week the restaurant plans around.
@@ -597,7 +617,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     setShareEmailError(null);
     getBanquetShareLink(menu.id)
       .then(r => { setShareUrl(r.url); setShareWhatsAppReady(r.whatsapp_ready === true); })
-      .catch(err => setShareError(err?.data?.error ?? err?.message ?? 'Link non disponibile'));
+      .catch(err => setShareError(err?.data?.error ?? err?.message ?? t('err.link')));
     if (menu.customer_id) {
       getCustomers()
         .then(list => {
@@ -621,7 +641,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       const r = await sendBanquetQuoteWhatsApp(shareBanquet.id, phone);
       setSharePhoneDone(r.phone);
     } catch (err: any) {
-      setSharePhoneError(err?.data?.message ?? err?.data?.error ?? err?.message ?? 'Invio non riuscito');
+      setSharePhoneError(err?.data?.message ?? err?.data?.error ?? err?.message ?? t('err.send'));
     } finally {
       setSharePhoneBusy(false);
     }
@@ -646,7 +666,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       const r = await sendBanquetQuoteEmail(shareBanquet.id, email);
       setShareEmailDone(r.email);
     } catch (err: any) {
-      setShareEmailError(err?.data?.error ?? err?.message ?? 'Invio non riuscito');
+      setShareEmailError(err?.data?.error ?? err?.message ?? t('err.send'));
     } finally {
       setShareEmailBusy(false);
     }
@@ -1062,9 +1082,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
       const missing: string[] = [];
       if (!newBanquet.name || !newBanquet.name.trim()) missing.push(t('menuName'));
-      if (!newBanquet.event_date) missing.push('Data Evento');
+      if (!newBanquet.event_date) missing.push(t('required.eventDate'));
       if (canViewBanquetPrice && (newBanquet.price_per_person == null || isNaN(Number(newBanquet.price_per_person)) || Number(newBanquet.price_per_person) <= 0)) {
-        missing.push('Prezzo Adulti');
+        missing.push(t('required.adultPrice'));
       }
 
       if (missing.length > 0) {
@@ -1124,9 +1144,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         setBanquetDraftBanner(null);
         setNewBanquet({ name: '', description: '', price_per_person: 0, dish_ids: [], courses: [], event_date: '', shift: undefined, deposit_amount: undefined, guests: undefined, children: 0, children_price: null, customer_id: null, notes_courses: '', notes_service: '', notes_mise_en_place: '', table_ids: [], discount_type: null, discount_value: null });
       } catch (err: any) {
-        const msg = err?.message || 'Errore durante il salvataggio';
+        const msg = err?.message || t('err.saving');
         const isConflict = err?.status === 409 || /tavolo/i.test(msg);
-        setBanquetFormErrors([isConflict ? `Conflitto tavoli: ${msg}` : msg]);
+        setBanquetFormErrors([isConflict ? t('err.tableClash', { dettaglio: msg }) : msg]);
       } finally {
         setIsSavingBanquet(false);
       }
@@ -1254,10 +1274,10 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
      explain it is the reason people click it twice and then leave. */
   const banquetMissingRequired = useMemo(() => {
     const missing: string[] = [];
-    if (!newBanquet.name || !newBanquet.name.trim()) missing.push('il nome del menù');
-    if (!newBanquet.event_date) missing.push('la data dell\'evento');
+    if (!newBanquet.name || !newBanquet.name.trim()) missing.push(t('required.theName'));
+    if (!newBanquet.event_date) missing.push(t('required.theDate'));
     if (canViewBanquetPrice && (newBanquet.price_per_person == null || isNaN(Number(newBanquet.price_per_person)) || Number(newBanquet.price_per_person) <= 0)) {
-      missing.push('il prezzo adulti');
+      missing.push(t('required.thePrice'));
     }
     return missing;
   }, [newBanquet.name, newBanquet.event_date, newBanquet.price_per_person, canViewBanquetPrice]);
@@ -1530,8 +1550,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   }, [banquetMenus]);
 
   const BANQUET_SORT_OPTIONS: { value: BanquetSortBy; label: string }[] = [
-    { value: 'date-asc',    label: 'Data evento (prima → dopo)' },
-    { value: 'date-desc',   label: 'Data evento (dopo → prima)' },
+    { value: 'date-asc',    label: t('dateAsc') },
+    { value: 'date-desc',   label: t('dateDesc') },
     { value: 'name-asc',    label: t('nameAsc') },
     { value: 'name-desc',   label: t('nameDesc') },
     { value: 'guests-asc',  label: t('coversAsc') },
@@ -1759,16 +1779,16 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           <div className="flex flex-wrap items-center gap-2">
             <StatusPill tone="info" className="h-8 px-3">
               <span className="font-semibold tabular-nums">{banquetKpis.count}</span>
-              <span className="font-normal">in arrivo</span>
+              <span className="font-normal">{t('kpiUpcoming')}</span>
             </StatusPill>
             <StatusPill tone="neutral" className="h-8 px-3">
               <span className="font-semibold tabular-nums">{banquetKpis.covers}</span>
-              <span className="font-normal">coperti prenotati</span>
+              <span className="font-normal">{t('kpiCovers')}</span>
             </StatusPill>
             {canViewBanquetPrice && banquetKpis.outstanding > 0 && (
               <StatusPill tone={banquetKpis.urgent ? 'critical' : 'pending'} className="h-8 px-3">
                 <span className="font-semibold tabular-nums">{moneySymbol()} {formatEuro(banquetKpis.outstanding)}</span>
-                <span className="font-normal">da incassare</span>
+                <span className="font-normal">{t('kpiToTake')}</span>
               </StatusPill>
             )}
           </div>
@@ -2352,12 +2372,12 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 <SegmentedControl<'LIST' | 'CALENDAR'>
                   value={banquetView}
                   onChange={setBanquetView}
-                  ariaLabel="Vista banchetti"
+                  ariaLabel={t('banquetViewAria')}
                   size="sm"
                   equalWidth={false}
                   options={[
-                    { value: 'LIST', label: 'Lista', icon: <ListIcon className="h-4 w-4" /> },
-                    { value: 'CALENDAR', label: 'Calendario', icon: <Calendar className="h-4 w-4" /> },
+                    { value: 'LIST', label: t('viewList'), icon: <ListIcon className="h-4 w-4" /> },
+                    { value: 'CALENDAR', label: t('viewCalendar'), icon: <Calendar className="h-4 w-4" /> },
                   ]}
                 />
                 {banquetView === 'LIST' && (
@@ -2411,7 +2431,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 // Senza portate definite resta il solo conteggio dei piatti:
                 // "5 in 0 portate" sarebbe falso.
                 const dishesLong = courseCount != null
-                  ? `${dishCount} in ${courseCount} ${courseCount === 1 ? 'portata' : 'portate'}`
+                  ? t('dishesInCourses', { piatti: dishCount, count: courseCount })
                   : `${dishCount}`;
 
                 const eventDate = menu.event_date ? new Date(menu.event_date + 'T00:00') : null;
@@ -2447,21 +2467,21 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                               allineate fra loro ma non strozzate. */}
                           <div className={`flex min-h-[92px] w-[62px] flex-shrink-0 flex-col items-center justify-center rounded-[var(--ds-radius)] px-2 py-3 ${tileTone}`}>
                               {menu.shift && (
-                                isLunch ? <Sun className="mb-1 h-3.5 w-3.5" aria-label="Pranzo" />
-                                        : <Sunset className="mb-1 h-3.5 w-3.5" aria-label="Cena" />
+                                isLunch ? <Sun className="mb-1 h-3.5 w-3.5" aria-label={t('lunch')} />
+                                        : <Sunset className="mb-1 h-3.5 w-3.5" aria-label={t('dinner')} />
                               )}
                               {eventDate ? (
                                 <>
                                   <span className="text-[11px] font-semibold leading-none">
-                                    {ITALIAN_WEEKDAYS[(eventDate.getDay() + 6) % 7]}
+                                    {weekdayNames()[(eventDate.getDay() + 6) % 7]}
                                   </span>
                                   <span className="text-[24px] font-bold leading-tight tabular-nums">{eventDate.getDate()}</span>
                                   <span className="text-[11px] leading-none">
-                                    {ITALIAN_MONTHS[eventDate.getMonth()].slice(0, 3).toLowerCase()}
+                                    {monthNames()[eventDate.getMonth()].slice(0, 3).toLowerCase()}
                                   </span>
                                 </>
                               ) : (
-                                <span className="text-center text-[11px] font-medium leading-tight">Senza data</span>
+                                <span className="text-center text-[11px] font-medium leading-tight">{t('noDate')}</span>
                               )}
                           </div>
 
@@ -2483,7 +2503,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                           {/* pending = "in attesa di una decisione": è
                                               esattamente cosa è un preventivo. */}
                                           {isQuote && (
-                                            <StatusPill tone="pending" className="h-7 px-2.5">preventivo</StatusPill>
+                                            <StatusPill tone="pending" className="h-7 px-2.5">{t('quote')}</StatusPill>
                                           )}
                                           {notesCount > 0 && (
                                             <StatusPill tone="neutral" className="h-7 px-2.5">
@@ -2533,7 +2553,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                                 ? 'text-[var(--ds-critical-text)] hover:text-[var(--ds-critical-text)]'
                                                 : 'text-[var(--ds-pending-text)] hover:text-[var(--ds-pending-text)]'
                                           }`}
-                                          title="Pagamenti"
+                                          title={t('payments')}
                                       >
                                           <Wallet className="h-4 w-4" />
                                       </button>
@@ -2549,7 +2569,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                               type="button"
                                               onClick={e => { e.stopPropagation(); setCardMenuOpenId(cardMenuOpenId === menu.id ? null : menu.id); }}
                                               className={`${dsIconButton} h-9 w-9 bg-[var(--ds-surface-row)] shadow-none`}
-                                              aria-label="Altre azioni"
+                                              aria-label={t('moreActions')}
                                           >
                                               <MoreHorizontal className="h-4 w-4" />
                                           </button>
@@ -2563,7 +2583,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                                       className="flex w-full items-center gap-2 px-4 py-2.5 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)]"
                                                   >
                                                       <Printer className="h-3.5 w-3.5 text-[var(--ds-text-muted)]" />
-                                                      Stampa / PDF
+                                                      {t('printPdf')}
                                                   </button>
                                                   <button
                                                       type="button"
@@ -2571,7 +2591,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                                       className="flex w-full items-center gap-2 px-4 py-2.5 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)]"
                                                   >
                                                       <ChefHat className="h-3.5 w-3.5 text-[var(--ds-text-muted)]" />
-                                                      Stampa per cucina
+                                                      {t('printKitchen')}
                                                   </button>
                                                   <button
                                                       type="button"
@@ -2587,7 +2607,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                                       className="flex w-full items-center gap-2 px-4 py-2.5 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)]"
                                                   >
                                                       <Share2 className="h-3.5 w-3.5 text-[var(--ds-text-muted)]" />
-                                                      Condividi preventivo
+                                                      {t('shareQuote')}
                                                   </button>
                                                   {isQuote ? (
                                                       <button
@@ -2596,7 +2616,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                                           className="flex w-full items-center gap-2 px-4 py-2.5 text-[13px] font-medium text-[var(--ds-seated-text)] transition-colors hover:bg-[var(--ds-seated-tint)]"
                                                       >
                                                           <Check className="h-3.5 w-3.5" />
-                                                          Conferma banchetto
+                                                          {t('confirmBanquet')}
                                                       </button>
                                                   ) : (
                                                       <button
@@ -2605,7 +2625,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                                           className="flex w-full items-center gap-2 px-4 py-2.5 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)]"
                                                       >
                                                           <StickyNote className="h-3.5 w-3.5 text-[var(--ds-text-muted)]" />
-                                                          Riporta a preventivo
+                                                          {t('backToQuote')}
                                                       </button>
                                                   )}
                                                   <button
@@ -2630,14 +2650,14 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                       <div className="text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
                                         {guestsValue}
                                       </div>
-                                      <div className="text-[11px] text-[var(--ds-text-muted)]">coperti</div>
+                                      <div className="text-[11px] text-[var(--ds-text-muted)]">{t('covers')}</div>
                                   </div>
                                   {canViewBanquetPrice && (
                                     <div className="flex-1 border-l border-[var(--ds-border)] px-3 py-3 text-center">
                                         <div className="text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
                                           {priceValue}
                                         </div>
-                                        <div className="text-[11px] text-[var(--ds-text-muted)]">a persona</div>
+                                        <div className="text-[11px] text-[var(--ds-text-muted)]">{t('perPerson')}</div>
                                     </div>
                                   )}
                                   <div className="flex-1 border-l border-[var(--ds-border)] px-3 py-3 text-center">
@@ -2671,12 +2691,12 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             </p>
                           )}
                           <div className="flex items-center justify-between gap-3 border-t border-[var(--ds-border)] py-3 first:border-t-0">
-                              <span className="text-[13px] text-[var(--ds-text-muted)]">Coperti</span>
+                              <span className="text-[13px] text-[var(--ds-text-muted)]">{t('coversTitle')}</span>
                               <span className="text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">{guestsValue}</span>
                           </div>
                           {canViewBanquetPrice && (
                             <div className="flex items-center justify-between gap-3 border-t border-[var(--ds-border)] py-3 first:border-t-0">
-                                <span className="text-[13px] text-[var(--ds-text-muted)]">A persona</span>
+                                <span className="text-[13px] text-[var(--ds-text-muted)]">{t('perPersonTitle')}</span>
                                 <span className="text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">{priceValue}</span>
                             </div>
                           )}
@@ -2700,14 +2720,14 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                   <>
                                     <span className="min-w-0">
                                       <span className={`font-semibold tabular-nums ${urgent ? 'text-[var(--ds-critical-text)]' : 'text-[var(--ds-pending-text)]'}`}>{moneySymbol()} {formatEuro(outstanding)}</span>
-                                      <span className="text-[var(--ds-text-muted)]"> da incassare</span>
+                                      <span className="text-[var(--ds-text-muted)]">{t('toTake')}</span>
                                     </span>
-                                    <span className="flex-shrink-0 tabular-nums text-[var(--ds-text-muted)]">acconto {moneySymbol()} {formatEuro(paid)}</span>
+                                    <span className="flex-shrink-0 tabular-nums text-[var(--ds-text-muted)]">{t('deposit', { importo: `${moneySymbol()} ${formatEuro(paid)}` })}</span>
                                   </>
                                 ) : (
                                   <span className="min-w-0">
                                     <span className="font-semibold tabular-nums text-[var(--ds-seated-text)]">{moneySymbol()} {formatEuro(due)}</span>
-                                    <span className="text-[var(--ds-text-muted)]"> saldato</span>
+                                    <span className="text-[var(--ds-text-muted)]">{t('settled')}</span>
                                   </span>
                                 )}
                             </div>
@@ -2734,15 +2754,15 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 {statusBanquets.length === 0 && (
                   <EmptyState icon={BookOpen}>
                     {banquetStatusFilter === 'QUOTE'
-                      ? 'Nessun preventivo in corso.'
+                      ? t('noQuotes')
                       : banquetMenus.length > 0
-                        ? 'Nessun banchetto confermato: i preventivi sono nella scheda accanto.'
-                        : 'Non hai ancora creato banchetti.'}
+                        ? t('noConfirmed')
+                        : t('noBanquetsYet')}
                   </EmptyState>
                 )}
                 {statusBanquets.length > 0 && visibleGroups.length === 0 && (
                   <EmptyState icon={Search}>
-                    Nessun banchetto per «{banquetSearchTerm}».
+                    {t('noBanquetMatches', { query: banquetSearchTerm })}
                   </EmptyState>
                 )}
                 {visibleGroups.map(group => {
@@ -2759,13 +2779,13 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                         expanded={isOpen}
                         meta={
                           <>
-                            {group.items.length} {group.items.length === 1 ? 'banchetto' : 'banchetti'}
-                            {totalGuests > 0 && ` · ${totalGuests} coperti`}
-                            {canViewBanquetPrice && totalOutstanding > 0 && ` · ${moneySymbol()} ${formatEuro(totalOutstanding)} da incassare`}
+                            {t('banquetCount', { count: group.items.length })}
+                            {totalGuests > 0 && t('groupCovers', { n: totalGuests })}
+                            {canViewBanquetPrice && totalOutstanding > 0 && t('groupToTake', { importo: `${moneySymbol()} ${formatEuro(totalOutstanding)}` })}
                           </>
                         }
                       >
-                        {BANQUET_GROUP_LABEL[group.key]}
+                        {t(BANQUET_GROUP_LABEL[group.key].key, BANQUET_GROUP_LABEL[group.key].text)}
                       </SectionHeader>
                       {isOpen && (
                         <div className="mt-3 grid grid-cols-1 gap-4 xl:grid-cols-2">
@@ -2822,7 +2842,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           {/* Three cards on the canvas, not one flat run of fields: the shell's
               body is deliberately unpadded so cards inside it read as raised. */}
           <form id="dish-form" onSubmit={handleAddDishSubmit} className="space-y-4">
-            <FormCard title="Dettagli">
+            <FormCard title={t('details')}>
               <div className="space-y-4">
                 <Field label={t('name')} required>
                   <input
@@ -3421,8 +3441,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               type="button"
               onClick={() => setBanquetStep(s => Math.max(0, s - 1))}
               disabled={banquetStep === 0}
-              aria-label="Passo precedente"
-              title="Passo precedente"
+              aria-label={t('stepPrev')}
+              title={t('stepPrev')}
               className={dsStepArrow}
             >
               <ChevronLeft className="h-4 w-4" />
@@ -3440,14 +3460,14 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 className={`min-w-0 flex-1 sm:flex-none ${dsButton.primary}`}
               >
                 {isSavingBanquet && <Loader2 className="h-4 w-4 animate-spin" />}
-                {isEditingBanquet ? 'Salva modifiche' : 'Crea menu'}
+                {t(isEditingBanquet ? 'saveChanges' : 'createMenu')}
               </button>
               <button
                 type="button"
                 onClick={() => setBanquetStep(s => Math.min(BANQUET_STEPS.length - 1, s + 1))}
                 disabled={banquetStep === BANQUET_STEPS.length - 1}
-                aria-label="Passo successivo"
-                title="Passo successivo"
+                aria-label={t('stepNext')}
+                title={t('stepNext')}
                 className={dsStepArrow}
               >
                 <ChevronRight className="h-4 w-4" />
@@ -3485,14 +3505,14 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     // ReservationList.
                     className="inline-flex h-9 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-4 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
-                    Riprendi
+                    {t('resumeDraft')}
                   </button>
                   <button
                     type="button"
                     onClick={handleDiscardBanquetDraft}
                     className="inline-flex h-9 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-4 text-[13px] font-semibold text-[var(--ds-pending-text)] transition-opacity hover:opacity-90"
                   >
-                    Scarta
+                    {t('discardDraft')}
                   </button>
                 </div>
               }
@@ -3505,8 +3525,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
               {/* SECTION: Cliente */}
               <section className={banquetStep === 0 ? 'block' : 'hidden'}>
-                <FormCard title="Cliente">
-                  <p className="mb-4 text-[13px] text-[var(--ds-text-muted)]">Chi ha richiesto il banchetto. Selezionalo dalla rubrica per collegare la prenotazione.</p>
+                <FormCard title={t('customer')}>
+                  <p className="mb-4 text-[13px] text-[var(--ds-text-muted)]">{t('customerHint')}</p>
                 {selectedBanquetCustomer ? (
                   <div className="flex items-center justify-between gap-3 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-canvas)] p-3">
                     <div className="min-w-0">
@@ -3526,7 +3546,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                         onClick={() => setIsBanquetCustomerPickerOpen(true)}
                         className="px-2.5 py-1.5 text-xs font-medium text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] rounded-[var(--ds-radius)]"
                       >
-                        Cambia
+                        {t('change')}
                       </button>
                       <button
                         type="button"
@@ -3535,7 +3555,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           setNewBanquet(prev => ({ ...prev, customer_id: null }));
                         }}
                         className="p-1.5 text-[var(--ds-text-muted)] hover:text-[var(--ds-critical-text)] hover:bg-[var(--ds-critical-tint)] rounded-[var(--ds-radius)]"
-                        title="Rimuovi cliente"
+                        title={t('removeCustomer')}
                       >
                         <X className="h-4 w-4" />
                       </button>
@@ -3548,7 +3568,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     className="inline-flex items-center gap-2 px-3 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-canvas)] text-[var(--ds-text-primary)] text-sm font-medium hover:bg-[var(--ds-surface-row)]"
                   >
                     <BookUser className="h-4 w-4" />
-                    Seleziona dalla rubrica
+                    {t('pickFromBook')}
                   </button>
                 )}
                 </FormCard>
@@ -3578,7 +3598,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       />
                     </div>
                     <div>
-                      <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Data Evento <span className="text-[var(--ds-critical-text)]">*</span></label>
+                      <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{t('eventDateLabel')} <span className="text-[var(--ds-critical-text)]">*</span></label>
                       <input
                           type="date"
                           required
@@ -3595,7 +3615,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       />
                     </div>
                     <div>
-                      <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Turno</label>
+                      <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{t('shift')}</label>
                       {/* Cast covers the not-yet-chosen case: an empty value
                           matches no segment, so neither lights up until you pick
                           one — the form has never defaulted the shift. */}
@@ -3604,14 +3624,14 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                         onChange={next => setNewBanquet({ ...newBanquet, shift: next })}
                         ariaLabel="Turno"
                         options={[
-                          { value: Shift.LUNCH, label: 'Pranzo', icon: <Sun className="h-4 w-4" /> },
-                          { value: Shift.DINNER, label: 'Cena', icon: <Sunset className="h-4 w-4" /> },
+                          { value: Shift.LUNCH, label: t('lunch'), icon: <Sun className="h-4 w-4" /> },
+                          { value: Shift.DINNER, label: t('dinner'), icon: <Sunset className="h-4 w-4" /> },
                         ]}
                       />
                     </div>
                   </div>
                   <div>
-                    <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{t('commercialDescription')} <span className="font-normal text-[var(--ds-text-muted)]">— opzionale</span></label>
+                    <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{t('commercialDescription')} <span className="font-normal text-[var(--ds-text-muted)]">{t('dashOptional')}</span></label>
                     <textarea
                       placeholder={t('commercialDescriptionPlaceholder')}
                       className="w-full bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-[var(--ds-radius)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)] h-20"
@@ -3626,9 +3646,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               {/* SECTION: Coperti & Tariffa */}
               <section className={banquetStep === 1 ? 'block' : 'hidden'}>
                 <FormCard title={t('banquetStep.covers.label')}>
-                  <p className="mb-4 text-[13px] text-[var(--ds-text-muted)]">Numero di partecipanti e prezzi. Se imposti un prezzo bambini, il calcolo distingue adulti e bambini.</p>
+                  <p className="mb-4 text-[13px] text-[var(--ds-text-muted)]">{t('coversHint')}</p>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <Field label="Ospiti totali">
+                  <Field label={t('totalGuests')}>
                       {/* Children stay clamped to the headcount, same rule the
                           number inputs enforced — lowering guests below the
                           children count would otherwise price a phantom adult. */}
@@ -3640,10 +3660,10 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           }}
                           min={0}
                           max={999}
-                          ariaLabel="Ospiti totali"
+                          ariaLabel={t('totalGuests')}
                       />
                   </Field>
-                  <Field label="Di cui bambini">
+                  <Field label={t('ofWhichChildren')}>
                       <Stepper
                           value={newBanquet.children ?? 0}
                           onChange={next => {
@@ -3652,7 +3672,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           }}
                           min={0}
                           max={newBanquet.guests ?? 0}
-                          ariaLabel="Di cui bambini"
+                          ariaLabel={t('ofWhichChildren')}
                       />
                   </Field>
                   {canViewBanquetPrice && (
@@ -3678,12 +3698,12 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   )}
                   {canViewBanquetPrice && (
                   <div>
-                      <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{t('childPrice')} <span className="font-normal text-[var(--ds-text-muted)]">— opzionale</span></label>
+                      <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{t('childPrice')} <span className="font-normal text-[var(--ds-text-muted)]">{t('dashOptional')}</span></label>
                       <input
                           type="number"
                           min="0"
                           step="0.01"
-                          placeholder="Se vuoto: stesso adulti"
+                          placeholder={t('sameAsAdults')}
                           className="w-full bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-[var(--ds-radius)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)]"
                           value={newBanquet.children_price ?? ''}
                           onChange={e => setNewBanquet({...newBanquet, children_price: e.target.value === '' ? null : parseFloat(e.target.value)})}
@@ -3692,7 +3712,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   )}
                   {canViewBanquetPrice && (
                   <div>
-                      <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Acconto ({moneySymbol()}) <span className="font-normal text-[var(--ds-text-muted)]">— opzionale</span></label>
+                      <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{t('depositLabel', { valuta: moneySymbol() })} <span className="font-normal text-[var(--ds-text-muted)]">{t('dashOptional')}</span></label>
                       <input
                           type="number"
                           min="0"
@@ -3706,7 +3726,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   )}
                   {canViewBanquetPrice && (
                   <div>
-                      <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Sconto <span className="font-normal text-[var(--ds-text-muted)]">— opzionale</span></label>
+                      <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{t('discount')} <span className="font-normal text-[var(--ds-text-muted)]">{t('dashOptional')}</span></label>
                       <div className="flex gap-2">
                           <div className="inline-flex rounded-[var(--ds-radius)] border border-[var(--ds-border)] overflow-hidden flex-shrink-0">
                               <button
@@ -3748,10 +3768,10 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   return (
                     <div className="mt-5 flex flex-wrap items-center justify-between gap-2 rounded-[var(--ds-radius)] bg-[var(--ds-seated-tint)] px-4 py-3">
                       <div>
-                        <div className="text-[13px] font-semibold text-[var(--ds-seated-text)]">Totale banchetto</div>
+                        <div className="text-[13px] font-semibold text-[var(--ds-seated-text)]">{t('banquetTotal')}</div>
                         <div className="text-[13px] text-[var(--ds-seated-text)] opacity-80 tabular-nums">
                           {guests} × {moneySymbol()} {adultPrice.toFixed(2)}
-                          {discount > 0 && ` − ${moneySymbol()} ${discount.toFixed(2)} di sconto`}
+                          {discount > 0 && t('discountOff', { importo: `${moneySymbol()} ${discount.toFixed(2)}` })}
                         </div>
                       </div>
                       <div className="text-[28px] font-bold tabular-nums leading-none text-[var(--ds-seated-text)]">
@@ -3766,10 +3786,10 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               {/* SECTION: Note operative */}
               <section className={banquetStep === 4 ? 'block' : 'hidden'}>
                 <FormCard title={t('banquetStep.notes.label')}>
-                  <p className="mb-4 text-[13px] text-[var(--ds-text-muted)]">Istruzioni separate per cucina, sala e mise en place. Compariranno nelle stampe operative.</p>
+                  <p className="mb-4 text-[13px] text-[var(--ds-text-muted)]">{t('notesHint')}</p>
                 <div className="space-y-4">
                   <div>
-                    <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Note Portate <span className="font-normal normal-case tracking-normal">— cucina</span></label>
+                    <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{t('notesCourses')} <span className="font-normal normal-case tracking-normal">{t('forKitchen')}</span></label>
                     <textarea
                       placeholder={t('dietaryNotesPlaceholder')}
                       className="w-full bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-[var(--ds-radius)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)] h-28"
@@ -3778,7 +3798,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Note Servizio <span className="font-normal normal-case tracking-normal">— sala</span></label>
+                    <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{t('notesService')} <span className="font-normal normal-case tracking-normal">{t('forFloor')}</span></label>
                     <textarea
                       placeholder={t('serviceNotesPlaceholder')}
                       className="w-full bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-[var(--ds-radius)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)] h-28"
@@ -3787,9 +3807,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Note Mise en Place</label>
+                    <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{t('notesMiseEnPlace')}</label>
                     <textarea
-                      placeholder="es. Tovagliato avorio, segnaposti personalizzati, fiori bianchi al centro…"
+                      placeholder={t('miseEnPlacePlaceholder')}
                       className="w-full bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-[var(--ds-radius)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)] h-28"
                       value={newBanquet.notes_mise_en_place || ''}
                       onChange={e => setNewBanquet({...newBanquet, notes_mise_en_place: e.target.value})}
@@ -3808,11 +3828,11 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       onClick={addCourse}
                       className={`${dsButton.quiet} h-9 flex-shrink-0 px-4 text-[13px]`}
                     >
-                      <Plus className="h-3.5 w-3.5" /> Aggiungi uscita
+                      <Plus className="h-3.5 w-3.5" /> {t('addCourse')}
                     </button>
                   }
                 >
-                  <p className="mb-4 text-[13px] text-[var(--ds-text-muted)]">Crea le uscite del menu (es. Antipasti, Primi, Secondi) e assegna i piatti a ciascuna.</p>
+                  <p className="mb-4 text-[13px] text-[var(--ds-text-muted)]">{t('coursesHint')}</p>
 
                   {/* Da dove pescano le uscite: il menu Banchetti, o uno
                       stagionale. Le chip compaiono solo se c'è una scelta. */}
@@ -3870,7 +3890,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             type="text"
                             value={course.name}
                             onChange={e => renameCourse(courseIndex, e.target.value)}
-                            placeholder={`Nome uscita (es. ${courseIndex + 1}ª Uscita)`}
+                            placeholder={t('coursePlaceholder', { n: courseIndex + 1 })}
                             className="flex-1 bg-transparent border-0 focus:ring-0 outline-none text-sm font-semibold text-[var(--ds-text-primary)] px-1 py-0.5"
                           />
                           <span className="text-xs text-[var(--ds-text-muted)] whitespace-nowrap">
@@ -3894,7 +3914,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                               value={courseDishQuery[courseIndex] ?? ''}
                               onChange={q => setCourseDishQuery(prev => ({ ...prev, [courseIndex]: q }))}
                               placeholder={t('searchDish')}
-                              ariaLabel={`Cerca piatto in ${course.name || 'questa uscita'}`}
+                              ariaLabel={t('searchDishInCourse', { uscita: course.name || t('thisCourse') })}
                             />
                           </div>
                         )}
@@ -3942,7 +3962,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             if (orphan.length === 0) return null;
                             return (
                               <div>
-                                <div className="text-[11px] font-semibold tracking-[0.02em] text-[var(--ds-text-subtle)] mb-1.5">Altro</div>
+                                <div className="text-[11px] font-semibold tracking-[0.02em] text-[var(--ds-text-subtle)] mb-1.5">{t('otherCategory')}</div>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                                   {orphan.map(dish => {
                                     const checked = course.dish_ids.includes(dish.id);
@@ -3972,7 +3992,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           })()}
                           {pickerDishes.length === 0 && (
                             <div className="text-xs text-[var(--ds-text-subtle)] text-center py-4">
-                              Nessun piatto in questo menu: spuntalo dalla scheda del piatto, in Menu.
+                              {t('noDishInThisMenu')}
                             </div>
                           )}
                           {pickerDishes.length > 0 && courseDishes.length === 0 && (
@@ -4015,7 +4035,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
               <section className={banquetStep === 3 ? 'block' : 'hidden'}>
                 <FormCard title={t('banquetStep.tables.label')} aside={<span className="text-[13px] text-[var(--ds-text-muted)]">{t('optional')}</span>}>
-                  <p className="mb-4 text-[13px] text-[var(--ds-text-muted)]">Riserva i tavoli del banchetto. I tavoli occupati nello stesso turno sono disabilitati.</p>
+                  <p className="mb-4 text-[13px] text-[var(--ds-text-muted)]">{t('tablesHint')}</p>
                 {!newBanquet.event_date || !newBanquet.shift ? (
                   <p className="text-xs text-[var(--ds-text-muted)] italic">{t('pickDateAndShift')}</p>
                 ) : tables.length === 0 ? (
@@ -4028,14 +4048,14 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       if (rooms.length === 0) return null;
                       return (
                         <div>
-                          <p className="text-[11px] tracking-[0.02em] font-semibold text-[var(--ds-text-subtle)] mb-2">Sale</p>
+                          <p className="text-[11px] tracking-[0.02em] font-semibold text-[var(--ds-text-subtle)] mb-2">{t('rooms')}</p>
                           <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
                             <button
                               type="button"
                               onClick={() => setTablePickerRoomFilter('ALL')}
                               className={`px-4 py-1.5 text-sm font-medium rounded-[var(--ds-radius-control)] whitespace-nowrap transition-colors flex-shrink-0 border ${tablePickerRoomFilter === 'ALL' ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-text-primary)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)]'}`}
                             >
-                              Tutte le sale
+                              {t('allRoomsFilter')}
                             </button>
                             {rooms.map(room => (
                               <button
@@ -4134,21 +4154,21 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
                     {/* Legend */}
                     <div className="flex flex-wrap gap-4 text-[10px] text-[var(--ds-text-muted)] px-1">
-                      <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded"></div> Libero</div>
-                      <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-[var(--ds-surface-row)] border border-[var(--ds-text-primary)] rounded"></div> Selezionato</div>
-                      <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-[var(--ds-critical-tint)] border  rounded"></div> Occupato</div>
+                      <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded"></div> {t('tableFree')}</div>
+                      <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-[var(--ds-surface-row)] border border-[var(--ds-text-primary)] rounded"></div> {t('tableSelected')}</div>
+                      <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-[var(--ds-critical-tint)] border  rounded"></div> {t('tableTaken')}</div>
                     </div>
 
                     {(newBanquet.table_ids || []).length > 0 && (
                       <p className="text-xs text-[var(--ds-text-muted)] px-1">
-                        Selezionati: <span className="font-semibold text-[var(--ds-text-primary)]">{(newBanquet.table_ids || []).length}</span> tavolo/i ·{' '}
+                        {t('selectedTables')} <span className="font-semibold text-[var(--ds-text-primary)]">{(newBanquet.table_ids || []).length}</span> {t('tablesWord')} ·{' '}
                         <span className="font-semibold text-[var(--ds-text-primary)]">
                           {(newBanquet.table_ids || []).reduce((sum, tid) => {
                             const t = tables.find(tt => tt.id === tid);
                             return sum + (t ? t.seats : 0);
                           }, 0)}
                         </span>{' '}
-                        posti totali
+                        {t('seatsTotal')}
                       </p>
                     )}
                   </div>
@@ -4159,7 +4179,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           </form>
 
           {banquetFormErrors.length > 0 && (
-            <Callout tone="critical" icon={Info} title="Compila i campi obbligatori:" className="mt-4">
+            <Callout tone="critical" icon={Info} title={t('fillRequired')} className="mt-4">
               <ul className="list-inside list-disc space-y-0.5">
                 {banquetFormErrors.map(field => (
                   <li key={field}>{field}</li>
@@ -4299,7 +4319,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       <ConfirmDeleteModal
         isOpen={!!deleteBanquetConfirm}
         title={t('deleteBanquetMenu')}
-        message="Stai per eliminare il menu banchetto:"
+        message={t('deleteBanquetMessage')}
         itemName={deleteBanquetConfirm?.name}
         onCancel={() => setDeleteBanquetConfirm(null)}
         onConfirm={() => {
@@ -4373,11 +4393,11 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
             {shareError && <Callout tone="critical">{shareError}</Callout>}
 
             <div>
-              <p className="mb-1.5 text-[13px] font-medium text-[var(--ds-text-secondary)]">Link del preventivo</p>
+              <p className="mb-1.5 text-[13px] font-medium text-[var(--ds-text-secondary)]">{t('quoteLink')}</p>
               <div className="flex items-center gap-2">
                 <input
                   readOnly
-                  value={shareUrl ?? 'Genero il link…'}
+                  value={shareUrl ?? t('generatingLink')}
                   onFocus={e => e.currentTarget.select()}
                   className={`${dsInput} min-w-0 flex-1 text-[13px]`}
                 />
@@ -4392,18 +4412,18 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 </button>
               </div>
               <p className="mt-1.5 text-[12px] text-[var(--ds-text-muted)]">
-                La pagina mostra sempre la versione aggiornata: le modifiche al preventivo non richiedono un nuovo invio.
+                {t('quoteLinkHint')}
               </p>
             </div>
 
             <div className="border-t border-[var(--ds-border)] pt-4">
-              <p className="mb-1.5 text-[13px] font-medium text-[var(--ds-text-secondary)]">Invia su WhatsApp</p>
+              <p className="mb-1.5 text-[13px] font-medium text-[var(--ds-text-secondary)]">{t('sendWhatsApp')}</p>
               {shareWhatsAppReady ? (
                 <>
                   <div className="flex items-center gap-2">
                     <input
                       type="tel"
-                      placeholder="telefono del cliente"
+                      placeholder={t('customerPhone')}
                       className={`${dsInput} min-w-0 flex-1`}
                       value={sharePhone}
                       onChange={e => { setSharePhone(e.target.value); setSharePhoneDone(null); setSharePhoneError(null); }}
@@ -4415,14 +4435,14 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       className={`${dsButton.primary} flex-shrink-0 disabled:opacity-40`}
                     >
                       {sharePhoneBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessageCircle className="h-4 w-4" />}
-                      Invia
+                      {t('send')}
                     </button>
                   </div>
                   <p className="mt-1.5 text-[12px] text-[var(--ds-text-muted)]">
-                    Parte dal numero WhatsApp del ristorante.
+                    {t('fromRestaurantNumber')}
                   </p>
                   {sharePhoneDone && (
-                    <p className="mt-1.5 text-[13px] text-[var(--ds-seated-text)]">Preventivo inviato a {sharePhoneDone}.</p>
+                    <p className="mt-1.5 text-[13px] text-[var(--ds-seated-text)]">{t('quoteSentTo', { destinatario: sharePhoneDone })}</p>
                   )}
                   {sharePhoneError && (
                     <p className="mt-1.5 text-[13px] text-[var(--ds-critical-text)]">{sharePhoneError}</p>
@@ -4430,17 +4450,17 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 </>
               ) : (
                 <p className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3 py-2.5 text-[13px] text-[var(--ds-text-muted)]">
-                  L'invio dal numero WhatsApp del ristorante è in attivazione (serve l'approvazione del modello da parte di Meta). Intanto copia il link o usa l'email.
+                  {t('whatsAppPending')}
                 </p>
               )}
             </div>
 
             <div className="border-t border-[var(--ds-border)] pt-4">
-              <p className="mb-1.5 text-[13px] font-medium text-[var(--ds-text-secondary)]">Invia via email</p>
+              <p className="mb-1.5 text-[13px] font-medium text-[var(--ds-text-secondary)]">{t('sendEmail')}</p>
               <div className="flex items-center gap-2">
                 <input
                   type="email"
-                  placeholder="email del cliente"
+                  placeholder={t('customerEmail')}
                   className={`${dsInput} min-w-0 flex-1`}
                   value={shareEmail}
                   onChange={e => { setShareEmail(e.target.value); setShareEmailDone(null); setShareEmailError(null); }}
@@ -4456,7 +4476,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 </button>
               </div>
               {shareEmailDone && (
-                <p className="mt-1.5 text-[13px] text-[var(--ds-seated-text)]">Preventivo inviato a {shareEmailDone}.</p>
+                <p className="mt-1.5 text-[13px] text-[var(--ds-seated-text)]">{t('quoteSentTo', { destinatario: shareEmailDone })}</p>
               )}
               {shareEmailError && (
                 <p className="mt-1.5 text-[13px] text-[var(--ds-critical-text)]">{shareEmailError}</p>
@@ -4844,12 +4864,12 @@ const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelec
         <button
           onClick={() => setCursor(new Date(year, monthIndex - 1, 1))}
           className={`${dsIconButton} bg-[var(--ds-surface-row)] shadow-none`}
-          aria-label="Mese precedente"
+          aria-label={t('prevMonth')}
         >
           <ChevronLeft className="h-4 w-4" />
         </button>
         <h3 className="flex-1 text-center text-[19px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
-          {ITALIAN_MONTHS[monthIndex]} {year}
+          {monthNames()[monthIndex]} {year}
         </h3>
         {monthTotals.count > 0 && (
           <StatusPill tone="info" className="hidden h-8 px-3 sm:inline-flex">
@@ -4860,14 +4880,14 @@ const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelec
         <button
           onClick={() => setCursor(new Date(year, monthIndex + 1, 1))}
           className={`${dsIconButton} bg-[var(--ds-surface-row)] shadow-none`}
-          aria-label="Mese successivo"
+          aria-label={t('nextMonth')}
         >
           <ChevronRight className="h-4 w-4" />
         </button>
       </div>
 
       <div className="mb-2 grid grid-cols-7 text-center text-[13px] font-semibold text-[var(--ds-text-muted)]">
-        {ITALIAN_WEEKDAYS.map(d => <div key={d} className="py-1">{d}</div>)}
+        {weekdayNames().map(d => <div key={d} className="py-1">{d}</div>)}
       </div>
 
       <div className="grid grid-cols-7 gap-1">
@@ -4984,17 +5004,17 @@ const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelec
                           {outstanding > 0 ? (
                             <>
                               <span className={`font-semibold tabular-nums ${urgent ? 'text-[var(--ds-critical-text)]' : 'text-[var(--ds-pending-text)]'}`}>{moneySymbol()} {formatEuro(outstanding)}</span>
-                              <span className="text-[var(--ds-text-muted)]"> da incassare</span>
+                              <span className="text-[var(--ds-text-muted)]">{t('toTake')}</span>
                             </>
                           ) : (
-                            <span className="font-semibold text-[var(--ds-seated-text)]">Saldato</span>
+                            <span className="font-semibold text-[var(--ds-seated-text)]">{t('settledWord')}</span>
                           )}
                         </p>
                       )}
                       {hasNotes && (
                         <span className="mt-1 inline-flex items-center gap-1 text-[13px] text-[var(--ds-pending-text)]">
                           <StickyNote className="h-3.5 w-3.5" />
-                          Con note
+                          {t('withNotes')}
                         </span>
                       )}
                     </div>
