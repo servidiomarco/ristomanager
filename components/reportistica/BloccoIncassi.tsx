@@ -8,6 +8,7 @@ import {
   chartTooltip, BAR_MAX, CAT_DOTS,
   formatInt, formatEuroCents, shortDay, eachDayIso, methodLabel, nf,
 } from './shared';
+import { moneySymbol } from '../../utils/displayMoney';
 
 // Pranzo e cena sono categorie, non stati: due solidi categoria del ds.
 const LUNCH_FILL = 'var(--ds-cat-4-solid)';
@@ -15,7 +16,8 @@ const DINNER_FILL = 'var(--ds-cat-1-solid)';
 
 const euroTick = (v: number): string => {
   const eur = v / 100;
-  return eur >= 1000 ? `${nf.format(Math.round(eur / 100) / 10)}k €` : `${nf.format(Math.round(eur))} €`;
+  const s = moneySymbol();
+  return eur >= 1000 ? `${nf.format(Math.round(eur / 100) / 10)}k ${s}` : `${nf.format(Math.round(eur))} ${s}`;
 };
 
 export const BloccoIncassi: React.FC<{ data: RevenueReport }> = ({ data }) => {

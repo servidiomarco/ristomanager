@@ -187,7 +187,10 @@ footer { text-align: center; color: var(--ds-text-subtle); font-size: 12px; padd
 
     function t(chiave) { return UI[lang][chiave]; }
     function euro(n) {
-        return new Intl.NumberFormat(lang === 'it' ? 'it-IT' : lang, { style: 'currency', currency: 'EUR' }).format(n);
+        // La valuta arriva col menu: fino a quel momento (e se manca) l'euro,
+        // che è dove l'applicazione ha sempre vissuto.
+        var valuta = (dati && dati.currency) || 'EUR';
+        return new Intl.NumberFormat(lang === 'it' ? 'it-IT' : lang, { style: 'currency', currency: valuta }).format(n);
     }
     function testoPiatto(p) {
         var tr = p.translations && p.translations[lang];

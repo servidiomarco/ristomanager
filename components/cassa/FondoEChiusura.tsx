@@ -6,6 +6,7 @@ import { timePart } from '../../utils/displayTime';
 import { Callout, FormCard } from '../ds';
 import { methodLabel } from '../pagamenti/settleView';
 import { euro } from './cassaView';
+import { moneySymbol } from '../../utils/displayMoney';
 
 /* ── Fuori flusso · fondo e chiusura ──────────────────────────────────────
    Il cassetto di questo servizio: quanto c'era all'apertura, quanto è entrato,
@@ -153,7 +154,7 @@ export const FondoEChiusura: React.FC<FondoEChiusuraProps> = ({
                       Contante all'apertura
                     </span>
                     <div className="relative">
-                      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[17px] text-[var(--ds-text-muted)]">€</span>
+                      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[17px] text-[var(--ds-text-muted)]">{moneySymbol()}</span>
                       <input
                         type="text" inputMode="decimal" value={floatText}
                         onChange={e => setFloatText(e.target.value)} placeholder="0,00"
@@ -283,7 +284,7 @@ export const FondoEChiusura: React.FC<FondoEChiusuraProps> = ({
                 <label className="block">
                   <span className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Contato</span>
                   <div className="relative">
-                    <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[17px] text-[var(--ds-text-muted)]">€</span>
+                    <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[17px] text-[var(--ds-text-muted)]">{moneySymbol()}</span>
                     <input
                       type="text" inputMode="decimal" value={counted}
                       onChange={e => setCounted(e.target.value)} placeholder="0,00"

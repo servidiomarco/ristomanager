@@ -3,16 +3,14 @@ import { BanquetMenu, BanquetPayment, BanquetPaymentType, BanquetPaymentMethod, 
 import { X, Plus, Trash2, Wallet, Banknote, CreditCard, Building2, Loader2, Check } from 'lucide-react';
 import { Loader } from './Loader';
 import { getBanquetPayments, createBanquetPayment, deleteBanquetPayment, setBanquetStatus } from '../services/apiService';
+import { moneyUnits, moneySymbol } from '../utils/displayMoney';
 
 interface Props {
   banquet: BanquetMenu;
   onClose: () => void;
 }
 
-const formatEuro = (n: number | string | null | undefined): string => {
-  const num = Number(n ?? 0);
-  return `€ ${num.toFixed(2).replace('.', ',')}`;
-};
+const formatEuro = (n: number | string | null | undefined): string => moneyUnits(n);
 
 const formatDateIt = (iso: string): string => {
   if (!iso) return '';
@@ -332,7 +330,7 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
               <div className="text-[13px] font-semibold text-[var(--ds-arriving-text)]">Nuovo pagamento</div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-[var(--ds-text-secondary)] mb-1">Importo (€) *</label>
+                  <label className="block text-xs font-medium text-[var(--ds-text-secondary)] mb-1">Importo ({moneySymbol()}) *</label>
                   <input
                     type="number"
                     min="0"

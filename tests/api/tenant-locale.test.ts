@@ -109,3 +109,47 @@ describe('valuta per tenant — come un importo diventa testo', () => {
         expect(currencySymbol()).toBe('€');
     });
 });
+
+/* La valuta della sessione nel client: gemella del fuso di sessione, e con la
+   stessa ragione d'essere — utils/money.ts lo importa anche il server, dove
+   una valuta «corrente» a livello di modulo sarebbe quella di chiunque abbia
+   fatto l'ultima richiesta. Il terzo test è quello che protegge il confine. */
+describe('valuta per tenant — la valuta della sessione nel client', () => {
+    it('finché nessuno la imposta, vale l\'euro', async () => {
+        const { money, moneyUnits, moneySymbol, sessionCurrency } = await import('../../utils/displayMoney.js');
+        expect(sessionCurrency()).toBe('EUR');
+        expect(money(1500)).toBe('€ 15,00');
+        expect(moneyUnits(12.5)).toBe('€ 12,50');
+        expect(moneySymbol()).toBe('€');
+    });
+
+    it('impostata su sterline, gli stessi importi si leggono diversi', async () => {
+        const { money, moneyUnits, moneySymbol, setSessionCurrency, sessionCurrency } = await import('../../utils/displayMoney.js');
+
+        setSessionCurrency('GBP');
+        expect(sessionCurrency()).toBe('GBP');
+        expect(money(1500)).toBe('£15.00');
+        expect(moneyUnits(12.5)).toBe('£12.50');
+        expect(moneySymbol()).toBe('£');
+
+        setSessionCurrency('aed');   // minuscolo: arriva da un payload, non dal DB
+        expect(money(1500)).toBe('AED 15.00');
+
+        // logout, o un tenant senza valuta dichiarata: si torna all'euro
+        setSessionCurrency(null);
+        expect(sessionCurrency()).toBe('EUR');
+        expect(money(1500)).toBe('€ 15,00');
+    });
+
+    it('money.ts resta senza stato: il server non ha una valuta «corrente»', async () => {
+        const { setSessionCurrency } = await import('../../utils/displayMoney.js');
+        const { formatMoneyMinor } = await import('../../utils/money.js');
+
+        setSessionCurrency('GBP');
+        // Se questa diventasse «£15.00», i messaggi del server uscirebbero
+        // nella valuta di chiunque abbia fatto l'ultima richiesta.
+        expect(formatMoneyMinor(1500)).toBe('€ 15,00');
+        expect(formatMoneyMinor(1500, 'EUR')).toBe('€ 15,00');
+        setSessionCurrency(null);
+    });
+});

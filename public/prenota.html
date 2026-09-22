@@ -963,7 +963,28 @@ a { color: var(--ds-pending-text); }
     const publicBase = slugMatch ? '/public/' + slugMatch[1] : '/public';
 
     const $ = id => document.getElementById(id);
-    const euro = cents => (cents / 100).toFixed(2).replace('.', ',').replace(/,00$/, '') + ' €';
+    /* L'importo nella valuta del ristorante, che arriva dal bootstrap.
+     *
+     * Per l'euro la resa NON cambia: «12,50 €» / «90 €», simbolo in coda e
+     * i centesimi tondi lasciati fuori — è così da sempre su questa pagina,
+     * e la legge un ospite, non un operatore.
+     *
+     * Le altre valute seguono la loro convenzione (simbolo davanti), la
+     * stessa tabella di utils/money.ts. Restata a mano di proposito: questa
+     * pagina non passa dal bundler e non importa niente dall'app. */
+    const VALUTE = {
+        EUR: { s: '€',   dec: ',', coda: true,  spazio: true  },
+        GBP: { s: '£',   dec: '.', coda: false, spazio: false },
+        USD: { s: '$',   dec: '.', coda: false, spazio: false },
+        CHF: { s: 'CHF', dec: '.', coda: false, spazio: true  },
+        AED: { s: 'AED', dec: '.', coda: false, spazio: true  },
+    };
+    let valutaLocale = 'EUR';
+    const euro = cents => {
+        const v = VALUTE[valutaLocale] || { s: valutaLocale, dec: '.', coda: false, spazio: true };
+        const n = (cents / 100).toFixed(2).replace('.', v.dec).replace(v.dec === ',' ? /,00$/ : /\.00$/, '');
+        return v.coda ? n + ' ' + v.s : v.s + (v.spazio ? ' ' : '') + n;
+    };
 
     // ---- Lingua e traduzioni -------------------------------------------
     // Card #33 — internazionalizza SOLO questo widget. Le risorse sono JSON
@@ -1147,6 +1168,7 @@ a { color: var(--ds-pending-text); }
     // Dichiarata qui (non solo dentro il ramo prenotabile): la sezione
     // "Caparra e cancellazioni" in fondo alla pagina vive fuori dal form e
     // resta leggibile anche in manutenzione.
+    valutaLocale = contact?.currency || 'EUR';
     const deposit = contact?.deposit ?? null;
     function renderTermsIntro() {
         const amount = euro(deposit?.perPersonCents || 1000);

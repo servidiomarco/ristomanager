@@ -11,6 +11,7 @@ import {
   Lock, ChevronLeft, ChevronRight, Loader2, Trash2, AlertTriangle, Wallet
 } from 'lucide-react';
 import { ModalShell, Field, EmptyState, dsButton, dsInput, dsSelect, dsIconButton } from './ds';
+import { moneyIntl, moneySymbol } from '../utils/displayMoney';
 
 // ── Compensi ─────────────────────────────────────────────────────────────
 // La sezione economica del Personale. Il token step-up vive SOLO nello
@@ -33,13 +34,12 @@ const TYPE_ORDER: StaffType[] = [StaffType.FISSO, StaffType.STAGIONALE, StaffTyp
 
 const METHOD_LABELS = { CONTANTI: 'Contanti', BONIFICO: 'Bonifico', ALTRO: 'Altro' } as const;
 
-const formatEuro = (cents: number): string =>
-  (cents / 100).toLocaleString('it-IT', { style: 'currency', currency: 'EUR' });
+const formatEuro = (cents: number): string => moneyIntl(cents / 100);
 
 // «1.234,56», «1234,56» e «1234.56» sono tutti importi validi: la virgola
 // vince come separatore decimale quando c'è, i punti diventano migliaia.
 const parseEuroToCents = (raw: string): number | null => {
-  const s = raw.trim().replace(/[€\s]/g, '');
+  const s = raw.trim().replace(/[^\d.,-]/g, '');
   if (!s) return null;
   const normalized = s.includes(',') ? s.replace(/\./g, '').replace(',', '.') : s;
   const value = Number(normalized);
@@ -514,7 +514,7 @@ const PaymentSheet: React.FC<{
     >
       <div className="space-y-4">
         <Field label="Importo" htmlFor="comp-amount" required>
-          <input id="comp-amount" inputMode="decimal" placeholder="0,00 €" autoFocus value={amount}
+          <input id="comp-amount" inputMode="decimal" placeholder={`0,00 ${moneySymbol()}`} autoFocus value={amount}
             onChange={e => setAmount(e.target.value)} className={dsInput} />
         </Field>
         <div className="grid grid-cols-2 gap-3">
@@ -572,7 +572,7 @@ const OverrideSheet: React.FC<{
       <div className="space-y-4">
         <Field label="Dovuto del mese" htmlFor="ovr-amount" required
           hint="Sostituisce il calcolo automatico solo per questo mese.">
-          <input id="ovr-amount" inputMode="decimal" placeholder="0,00 €" autoFocus value={amount}
+          <input id="ovr-amount" inputMode="decimal" placeholder={`0,00 ${moneySymbol()}`} autoFocus value={amount}
             onChange={e => setAmount(e.target.value)} className={dsInput} />
         </Field>
         <Field label="Nota" htmlFor="ovr-note">
@@ -633,18 +633,18 @@ const RatesSheet: React.FC<{
         {isExtra ? (
           <div className="grid grid-cols-2 gap-3">
             <Field label="Servizio singolo" htmlFor="rate-single" hint="giorno con un servizio">
-              <input id="rate-single" inputMode="decimal" placeholder="0,00 €" value={single}
+              <input id="rate-single" inputMode="decimal" placeholder={`0,00 ${moneySymbol()}`} value={single}
                 onChange={e => setSingle(e.target.value)} className={dsInput} />
             </Field>
             <Field label="Servizio doppio" htmlFor="rate-double" hint="pranzo e cena, totale giorno">
-              <input id="rate-double" inputMode="decimal" placeholder="0,00 €" value={double}
+              <input id="rate-double" inputMode="decimal" placeholder={`0,00 ${moneySymbol()}`} value={double}
                 onChange={e => setDouble(e.target.value)} className={dsInput} />
             </Field>
           </div>
         ) : (
           <Field label="Mensile" htmlFor="rate-monthly"
             hint={member.staffType === StaffType.STAGIONALE ? 'pieno nei mesi di contratto' : undefined}>
-            <input id="rate-monthly" inputMode="decimal" placeholder="0,00 €" value={monthly}
+            <input id="rate-monthly" inputMode="decimal" placeholder={`0,00 ${moneySymbol()}`} value={monthly}
               onChange={e => setMonthly(e.target.value)} className={dsInput} />
           </Field>
         )}

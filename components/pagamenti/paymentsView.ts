@@ -5,6 +5,8 @@ import {
 import type { ComponentType } from 'react';
 import type { PillTone } from '../ds';
 import { sessionTimeZone } from '../../utils/displayTime';
+import { sessionCurrency } from '../../utils/displayMoney';
+import { formatMoneyMinor } from '../../utils/money';
 
 /* ── Presentation vocabulary for Pagamenti ────────────────────────────────
    Both surfaces on this page — the open bills and the payment links — used to
@@ -17,10 +19,16 @@ import { sessionTimeZone } from '../../utils/displayTime';
    status the operator cannot act on differently does not deserve a colour of
    its own. */
 
-export const formatEuro = (cents: number, currency: string = 'EUR'): string => {
-  const symbol = currency === 'EUR' ? '€' : currency;
-  return `${symbol} ${(cents / 100).toFixed(2).replace('.', ',')}`;
-};
+/* L'importo come lo scrive il ristorante. Senza valuta esplicita vale quella
+   della sessione; chi ne ha una SULLA RIGA (un pagamento, un link) passa
+   quella, perché è la valuta con cui il denaro si è mosso e non deve cambiare
+   se il locale cambia configurazione dopo.
+
+   Delega a utils/money.ts, la stessa tabella che il server usa per i messaggi:
+   prima il ramo non-euro era `${currency} 15,00` — codice davanti ma virgola
+   decimale, che non è la convenzione di nessuna delle valute previste. */
+export const formatEuro = (cents: number, currency?: string): string =>
+  formatMoneyMinor(cents, currency || sessionCurrency());
 
 export const formatDateTime = (iso: string | null | undefined): string => {
   if (!iso) return '—';

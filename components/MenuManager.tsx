@@ -25,6 +25,7 @@ import {
   ModalShell, FormCard, Field, Stepper, StepNav, useMediaQuery,
   dsInput, dsSelect, dsTextarea, dsButton, dsIconButton, dsStepArrow,
 } from './ds';
+import { moneySymbol } from '../utils/displayMoney';
 
 const BANQUET_DISH_CATEGORIES = ['Antipasti', 'Primi', 'Secondi', 'Contorni', 'Dolci', 'Bevande'] as const;
 
@@ -1766,7 +1767,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
             </StatusPill>
             {canViewBanquetPrice && banquetKpis.outstanding > 0 && (
               <StatusPill tone={banquetKpis.urgent ? 'critical' : 'pending'} className="h-8 px-3">
-                <span className="font-semibold tabular-nums">€ {formatEuro(banquetKpis.outstanding)}</span>
+                <span className="font-semibold tabular-nums">{moneySymbol()} {formatEuro(banquetKpis.outstanding)}</span>
                 <span className="font-normal">da incassare</span>
               </StatusPill>
             )}
@@ -1998,7 +1999,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                               )}
                               <div className="mt-auto flex items-center justify-between pt-3">
                                 <span className="text-[19px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
-                                  € {Number(dish.price).toFixed(2)}
+                                  {moneySymbol()} {Number(dish.price).toFixed(2)}
                                 </span>
                                 {canEdit && (
                                   <span className="flex items-center gap-1">
@@ -2092,7 +2093,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                               )}
                             </div>
                             <span className="flex-shrink-0 text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
-                              € {Number(dish.price).toFixed(2)}
+                              {moneySymbol()} {Number(dish.price).toFixed(2)}
                             </span>
                             {canEdit && (
                               <span className="flex flex-shrink-0 items-center gap-1">
@@ -2193,7 +2194,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           {viewDish.name}
                         </h3>
                         <span className="flex-shrink-0 text-[20px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
-                          € {Number(viewDish.price).toFixed(2)}
+                          {moneySymbol()} {Number(viewDish.price).toFixed(2)}
                         </span>
                       </div>
                       <div>
@@ -2400,7 +2401,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   .filter(n => n?.trim()).length;
 
                 const guestsValue = menu.guests != null && Number(menu.guests) > 0 ? Number(menu.guests) : '—';
-                const priceValue = `€ ${Number(menu.price_per_person) || 0}`;
+                const priceValue = `${moneySymbol()} ${Number(menu.price_per_person) || 0}`;
                 // Senza portate definite resta il solo conteggio dei piatti:
                 // "5 in 0 portate" sarebbe falso.
                 const dishesLong = courseCount != null
@@ -2692,14 +2693,14 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                 {outstanding > 0 ? (
                                   <>
                                     <span className="min-w-0">
-                                      <span className={`font-semibold tabular-nums ${urgent ? 'text-[var(--ds-critical-text)]' : 'text-[var(--ds-pending-text)]'}`}>€ {formatEuro(outstanding)}</span>
+                                      <span className={`font-semibold tabular-nums ${urgent ? 'text-[var(--ds-critical-text)]' : 'text-[var(--ds-pending-text)]'}`}>{moneySymbol()} {formatEuro(outstanding)}</span>
                                       <span className="text-[var(--ds-text-muted)]"> da incassare</span>
                                     </span>
-                                    <span className="flex-shrink-0 tabular-nums text-[var(--ds-text-muted)]">acconto € {formatEuro(paid)}</span>
+                                    <span className="flex-shrink-0 tabular-nums text-[var(--ds-text-muted)]">acconto {moneySymbol()} {formatEuro(paid)}</span>
                                   </>
                                 ) : (
                                   <span className="min-w-0">
-                                    <span className="font-semibold tabular-nums text-[var(--ds-seated-text)]">€ {formatEuro(due)}</span>
+                                    <span className="font-semibold tabular-nums text-[var(--ds-seated-text)]">{moneySymbol()} {formatEuro(due)}</span>
                                     <span className="text-[var(--ds-text-muted)]"> saldato</span>
                                   </span>
                                 )}
@@ -2754,7 +2755,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           <>
                             {group.items.length} {group.items.length === 1 ? 'banchetto' : 'banchetti'}
                             {totalGuests > 0 && ` · ${totalGuests} coperti`}
-                            {canViewBanquetPrice && totalOutstanding > 0 && ` · € ${formatEuro(totalOutstanding)} da incassare`}
+                            {canViewBanquetPrice && totalOutstanding > 0 && ` · ${moneySymbol()} ${formatEuro(totalOutstanding)} da incassare`}
                           </>
                         }
                       >
@@ -3266,7 +3267,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           <input
                             className={`${dsInput} text-right tabular-nums`}
                             inputMode="decimal"
-                            placeholder="sconto €"
+                            placeholder={`sconto ${moneySymbol()}`}
                             title={t('removalDiscount')}
                             value={c.sconto}
                             onChange={e => setDishComponents(prev => prev.map((x, j) => j === i ? { ...x, sconto: e.target.value } : x))}
@@ -3685,7 +3686,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   )}
                   {canViewBanquetPrice && (
                   <div>
-                      <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Acconto (€) <span className="font-normal text-[var(--ds-text-muted)]">— opzionale</span></label>
+                      <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Acconto ({moneySymbol()}) <span className="font-normal text-[var(--ds-text-muted)]">— opzionale</span></label>
                       <input
                           type="number"
                           min="0"
@@ -3713,7 +3714,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                   onClick={() => setNewBanquet({...newBanquet, discount_type: newBanquet.discount_type === 'AMOUNT' ? null : 'AMOUNT', discount_value: newBanquet.discount_type === 'AMOUNT' ? null : (newBanquet.discount_value ?? null)})}
                                   className={`px-3 py-2 text-sm font-medium border-l border-[var(--ds-border)] ${newBanquet.discount_type === 'AMOUNT' ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)]'}`}
                                   aria-pressed={newBanquet.discount_type === 'AMOUNT'}
-                              >€</button>
+                              >{moneySymbol()}</button>
                           </div>
                           <input
                               type="number"
@@ -3743,12 +3744,12 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       <div>
                         <div className="text-[13px] font-semibold text-[var(--ds-seated-text)]">Totale banchetto</div>
                         <div className="text-[13px] text-[var(--ds-seated-text)] opacity-80 tabular-nums">
-                          {guests} × € {adultPrice.toFixed(2)}
-                          {discount > 0 && ` − € ${discount.toFixed(2)} di sconto`}
+                          {guests} × {moneySymbol()} {adultPrice.toFixed(2)}
+                          {discount > 0 && ` − ${moneySymbol()} ${discount.toFixed(2)} di sconto`}
                         </div>
                       </div>
                       <div className="text-[28px] font-bold tabular-nums leading-none text-[var(--ds-seated-text)]">
-                        € {total.toFixed(2)}
+                        {moneySymbol()} {total.toFixed(2)}
                       </div>
                     </div>
                   );
@@ -3921,7 +3922,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                         </div>
                                         <div className="min-w-0">
                                           <div className="text-sm font-medium text-[var(--ds-text-primary)] truncate">{dish.name}</div>
-                                          <div className="text-xs text-[var(--ds-text-muted)]">€{dish.price}</div>
+                                          <div className="text-xs text-[var(--ds-text-muted)]">{moneySymbol()}{dish.price}</div>
                                         </div>
                                       </div>
                                     );
@@ -3954,7 +3955,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                         </div>
                                         <div className="min-w-0">
                                           <div className="text-sm font-medium text-[var(--ds-text-primary)] truncate">{dish.name}</div>
-                                          <div className="text-xs text-[var(--ds-text-muted)]">{dish.category} · €{dish.price}</div>
+                                          <div className="text-xs text-[var(--ds-text-muted)]">{dish.category} · {moneySymbol()}{dish.price}</div>
                                         </div>
                                       </div>
                                     );
@@ -4984,7 +4985,7 @@ const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelec
                         <p className="mt-1 text-[13px]">
                           {outstanding > 0 ? (
                             <>
-                              <span className={`font-semibold tabular-nums ${urgent ? 'text-[var(--ds-critical-text)]' : 'text-[var(--ds-pending-text)]'}`}>€ {formatEuro(outstanding)}</span>
+                              <span className={`font-semibold tabular-nums ${urgent ? 'text-[var(--ds-critical-text)]' : 'text-[var(--ds-pending-text)]'}`}>{moneySymbol()} {formatEuro(outstanding)}</span>
                               <span className="text-[var(--ds-text-muted)]"> da incassare</span>
                             </>
                           ) : (

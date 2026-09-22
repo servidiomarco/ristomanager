@@ -3,6 +3,7 @@ import { BanquetMenu, Dish, Shift } from '../types';
 import { X, Sun, Moon, Users, Calendar, Utensils, Printer, StickyNote, ImageIcon, ChefHat } from 'lucide-react';
 import { printBanquet } from '../utils/printBanquet';
 import { useAuth } from '../contexts/AuthContext';
+import { moneySymbol } from '../utils/displayMoney';
 
 interface Props {
   banquet: BanquetMenu;
@@ -69,9 +70,9 @@ export const BanquetCompositionModal: React.FC<Props> = ({ banquet, dishes, onCl
               )}
               {canViewBanquetPrice && (
                 <span className="inline-flex items-center gap-1 text-xs font-semibold text-[var(--ds-text-primary)]">
-                  €{banquet.price_per_person}/pax
+                  {moneySymbol()}{banquet.price_per_person}/pax
                   {banquet.children_price != null && (
-                    <span className="text-[var(--ds-text-muted)]">· €{banquet.children_price}/bambino</span>
+                    <span className="text-[var(--ds-text-muted)]">· {moneySymbol()}{banquet.children_price}/bambino</span>
                   )}
                 </span>
               )}

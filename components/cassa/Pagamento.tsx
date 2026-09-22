@@ -8,6 +8,7 @@ import { Callout, SegmentedControl, StatusPill } from '../ds';
 import { METHODS, methodLabel, nextAmountText, settleMath, settlePayments } from '../pagamenti/settleView';
 import type { SettleOpts } from '../pagamenti/BillSheet';
 import { euro } from './cassaView';
+import { moneySymbol } from '../../utils/displayMoney';
 
 /* ── Passo 4 · pagamento ──────────────────────────────────────────────────
    Prima l'importo, poi il metodo.
@@ -432,7 +433,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
                   {method === 'CONTANTI' ? 'Contanti ricevuti' : 'Importo'}
                 </span>
                 <div className="relative">
-                  <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[17px] text-[var(--ds-text-muted)]">€</span>
+                  <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[17px] text-[var(--ds-text-muted)]">{moneySymbol()}</span>
                   <input
                     type="text" inputMode="decimal" value={amount}
                     onChange={e => setAmount(e.target.value)} disabled={busy}
@@ -462,7 +463,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
               Mancia <span className="font-normal text-[var(--ds-text-muted)]">(facoltativa)</span>
             </span>
             <div className="relative">
-              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[15px] text-[var(--ds-text-muted)]">€</span>
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[15px] text-[var(--ds-text-muted)]">{moneySymbol()}</span>
               <input
                 type="text" inputMode="decimal" placeholder="0,00" value={tip}
                 onChange={e => setTip(e.target.value)} disabled={busy}

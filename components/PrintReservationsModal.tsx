@@ -7,6 +7,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { datePart, timePart } from '../utils/displayTime';
 import { toTitleCase } from '../utils/text';
 import { isSeated } from './reservationState';
+import { moneySymbol } from '../utils/displayMoney';
 
 interface Props {
   isOpen: boolean;
@@ -322,7 +323,7 @@ export const PrintReservationsModal: React.FC<Props> = ({
                     <li key={b.id} style={{ marginBottom: '0.25rem' }}>
                       <strong>{b.name}</strong>
                       {b.description && <span style={{ color: 'var(--ds-print-ink-secondary)' }}> — {b.description}</span>}
-                      {canViewBanquetPrice && <span style={{ color: 'var(--ds-print-ink-secondary)' }}> · €{b.price_per_person}/persona</span>}
+                      {canViewBanquetPrice && <span style={{ color: 'var(--ds-print-ink-secondary)' }}> · {moneySymbol()}{b.price_per_person}/persona</span>}
                     </li>
                   ))}
                 </ul>

@@ -2,6 +2,7 @@ import {
   ReservationsReport, RevenueReport, DishesReport, CommunicationsReport,
 } from '../services/reportsApiService';
 import { printHtmlDocument, PRINT_TOKENS_CSS } from './printDocument';
+import { moneyIntl } from './displayMoney';
 
 /* Foglio unico della Reportistica: KPI e tabelle, niente grafici — la carta
    serve alla riunione e al commercialista, non allo schermo. La serie per
@@ -16,8 +17,7 @@ const escapeHtml = (s: string): string =>
   }[ch]!));
 
 const nf = new Intl.NumberFormat('it-IT');
-const euro = new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' });
-const money = (cents: number | null | undefined): string => euro.format((cents ?? 0) / 100);
+const money = (cents: number | null | undefined): string => moneyIntl((cents ?? 0) / 100);
 const int = (n: number | null | undefined): string => nf.format(Math.round(n ?? 0));
 
 const dayLabel = (iso: string): string => {

@@ -8,8 +8,7 @@ import type { PillTone } from '../ds';
 // quanto manca da mandare — e va bene identico sul palmare e sul desktop.
 // ---------------------------------------------------------------------------
 
-export const euro = (cents: number): string =>
-  (cents / 100).toLocaleString('it-IT', { style: 'currency', currency: 'EUR' });
+export const euro = (cents: number): string => moneyIntl(cents / 100);
 
 /** Le uscite di cucina sono sei. Non è un limite tecnico: è quante ne regge
  *  un servizio prima che il passe smetta di leggerle. Il Bar è un'uscita a
@@ -17,6 +16,7 @@ export const euro = (cents: number): string =>
 export const MAX_COURSES = 6;
 
 import { isBarCourse } from '../../utils/courses';
+import { moneyIntl } from '../../utils/displayMoney';
 export { BAR_COURSE_NO, DESSERT_COURSE_NO, isBarCourse, isDessertCourse, ordinal, courseLabel } from '../../utils/courses';
 
 export interface CartLine {

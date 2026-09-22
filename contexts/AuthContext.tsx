@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { User, UserRole, ViewState, LoginCredentials } from '../types';
 import { authApiService } from '../services/authApiService';
 import { setSessionTimeZone } from '../utils/displayTime';
+import { setSessionCurrency } from '../utils/displayMoney';
 import { completeOnboarding as apiCompleteOnboarding } from '../services/apiService';
 import { socketClient } from '../services/socketClient';
 import { syncPushSubscription, detachPushSubscription } from '../services/pushClient';
@@ -97,7 +98,7 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-/* Il fuso del ristorante prima del primo render.
+/* Il fuso e la valuta del ristorante prima del primo render.
  *
  * L'effetto qui sotto lo aggiorna a ogni cambio di utente, ma un effetto gira
  * DOPO il mount dei figli: al rientro con una sessione già valida le prime
@@ -105,6 +106,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
  * formatter non sono reattivi. Il profilo sta in localStorage e si legge
  * sincrono, quindi qui il fuso è già quello giusto. */
 setSessionTimeZone(authApiService.getUser()?.tenant?.timezone ?? null);
+setSessionCurrency(authApiService.getUser()?.tenant?.currency ?? null);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
@@ -112,10 +114,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isLoading, setIsLoading] = useState(true);
   const [showSessionExpiredModal, setShowSessionExpiredModal] = useState(false);
 
-  // Login, «Entra» del platform admin, logout: il fuso segue l'utente.
+  // Login, «Entra» del platform admin, logout: fuso e valuta seguono l'utente.
   useEffect(() => {
     setSessionTimeZone(user?.tenant?.timezone ?? null);
-  }, [user?.tenant?.timezone]);
+    setSessionCurrency(user?.tenant?.currency ?? null);
+  }, [user?.tenant?.timezone, user?.tenant?.currency]);
 
   // Check for existing auth on mount
   useEffect(() => {

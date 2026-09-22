@@ -26,6 +26,7 @@ interface QuoteView {
     website_url: string | null;
     logo_url: string | null;
   };
+  currency?: string;
   quote: {
     name: string;
     status: 'QUOTE' | 'CONFIRMED';
@@ -43,10 +44,10 @@ interface QuoteView {
   };
 }
 
-// Stesso simbolo, formato diverso per lingua (12,34 € vs €12.34), come su
-// /pay e /scontrino: la valuta resta EUR.
-const euro = (n: number, lang: SupportedLanguage) =>
-  new Intl.NumberFormat(lang === 'en' ? 'en-US' : 'it-IT', { style: 'currency', currency: 'EUR', maximumFractionDigits: n % 1 === 0 ? 0 : 2 }).format(n);
+// Formato diverso per lingua (12,34 € vs €12.34), come su /pay: la VALUTA
+// però non dipende dalla lingua, è quella del ristorante e arriva nel payload.
+const euro = (n: number, lang: SupportedLanguage, currency: string = 'EUR') =>
+  new Intl.NumberFormat(lang === 'en' ? 'en-US' : 'it-IT', { style: 'currency', currency: currency || 'EUR', maximumFractionDigits: n % 1 === 0 ? 0 : 2 }).format(n);
 
 const dateLabel = (iso: string | null, lang: SupportedLanguage): string => {
   if (!iso) return '';
@@ -64,6 +65,8 @@ export const PublicQuotePage: React.FC = () => {
   const { t, i18n, ready } = useTranslation(QUOTE_NAMESPACE, { useSuspense: false });
   const lang: SupportedLanguage = (i18n.language || '').toLowerCase().startsWith('en') ? 'en' : 'it';
   const [view, setView] = useState<QuoteView | null>(null);
+  // La valuta del preventivo vale per tutti i suoi importi.
+  const eur = (n: number): string => euro(n, lang, view?.currency);
   const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
@@ -187,14 +190,14 @@ export const PublicQuotePage: React.FC = () => {
             <dl className="mt-2 space-y-1.5 text-[14px] text-[var(--ds-text-primary)]">
               {quote.price_per_person != null && (
                 <div className="flex items-baseline justify-between gap-3">
-                  <dt className="text-[var(--ds-text-secondary)]">{t('rates.adults', { count: adults, price: euro(quote.price_per_person, lang) })}</dt>
-                  <dd className="tabular-nums">{euro(adults * quote.price_per_person, lang)}</dd>
+                  <dt className="text-[var(--ds-text-secondary)]">{t('rates.adults', { count: adults, price: eur(quote.price_per_person) })}</dt>
+                  <dd className="tabular-nums">{eur(adults * quote.price_per_person)}</dd>
                 </div>
               )}
               {showChildrenRow && (
                 <div className="flex items-baseline justify-between gap-3">
-                  <dt className="text-[var(--ds-text-secondary)]">{t('rates.children', { count: quote.children ?? 0, price: euro(quote.children_price!, lang) })}</dt>
-                  <dd className="tabular-nums">{euro(quote.children! * quote.children_price!, lang)}</dd>
+                  <dt className="text-[var(--ds-text-secondary)]">{t('rates.children', { count: quote.children ?? 0, price: eur(quote.children_price!) })}</dt>
+                  <dd className="tabular-nums">{eur(quote.children! * quote.children_price!)}</dd>
                 </div>
               )}
               {quote.totals.discount > 0 && (
@@ -202,17 +205,17 @@ export const PublicQuotePage: React.FC = () => {
                   <dt>
                     {t('rates.discount')}{quote.discount_type === 'PERCENT' && quote.discount_value != null ? ` ${quote.discount_value}%` : ''}
                   </dt>
-                  <dd className="tabular-nums">−{euro(quote.totals.discount, lang)}</dd>
+                  <dd className="tabular-nums">−{eur(quote.totals.discount)}</dd>
                 </div>
               )}
               <div className="flex items-baseline justify-between gap-3 border-t border-[var(--ds-border)] pt-2 text-[16px] font-semibold">
                 <dt>{t('rates.total')}</dt>
-                <dd className="tabular-nums">{euro(quote.totals.total, lang)}</dd>
+                <dd className="tabular-nums">{eur(quote.totals.total)}</dd>
               </div>
               {quote.deposit_amount != null && quote.deposit_amount > 0 && (
                 <div className="flex items-baseline justify-between gap-3 text-[13px] text-[var(--ds-text-muted)]">
                   <dt>{t('rates.deposit')}</dt>
-                  <dd className="tabular-nums">{euro(quote.deposit_amount, lang)}</dd>
+                  <dd className="tabular-nums">{eur(quote.deposit_amount)}</dd>
                 </div>
               )}
             </dl>

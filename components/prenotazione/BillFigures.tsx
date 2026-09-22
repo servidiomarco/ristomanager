@@ -1,4 +1,5 @@
 import React from 'react';
+import { money } from '../../utils/displayMoney';
 
 /* ── Le tre cifre del conto ───────────────────────────────────────────────
    Totale, incassato, residuo — read as one line, which is why they share a
@@ -10,7 +11,7 @@ import React from 'react';
    the word shape that makes a label scannable, and screen readers spell short
    ones out letter by letter. */
 
-const euro = (cents: number): string => `€ ${(cents / 100).toFixed(2).replace('.', ',')}`;
+const euro = (cents: number): string => money(cents);
 
 const Figure: React.FC<{ label: string; value: string; tone?: 'positive' | 'critical' }> = ({
   label, value, tone,

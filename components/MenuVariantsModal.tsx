@@ -10,6 +10,7 @@ import {
 import { Callout, Field, ModalShell, dsButton, dsIconButton, dsInput, dsTextarea } from './ds';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { euro } from './comande/orderView';
+import { moneySymbol } from '../utils/displayMoney';
 
 // ---------------------------------------------------------------------------
 // Gestione dei gruppi di varianti — la sorella della modale «Categorie», e ne
@@ -586,7 +587,7 @@ const MemberRow: React.FC<{
                 active ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
               }`}
             >
-              {k}
+              {k === '%' ? '%' : moneySymbol()}
             </button>
           );
         })}

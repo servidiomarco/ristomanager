@@ -19,6 +19,7 @@ import {
     getDishes, createDish,
 } from '../services/apiService';
 import { type Room, type Table, type Dish, TableShape, TableStatus } from '../types';
+import { moneySymbol } from '../utils/displayMoney';
 
 const STEPS = [
     { label: 'Ristorante', icon: Building2 },
@@ -340,7 +341,7 @@ export const OnboardingWizard: React.FC = () => {
                                 {dishes.map(d => (
                                     <li key={d.id} className="flex items-center justify-between rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-4 py-2.5 text-[15px] text-[var(--ds-text-primary)]">
                                         <span>{d.name}</span>
-                                        <span className="text-[13px] text-[var(--ds-text-muted)]">{d.category} · {Number(d.price).toFixed(2)} €</span>
+                                        <span className="text-[13px] text-[var(--ds-text-muted)]">{d.category} · {Number(d.price).toFixed(2)} {moneySymbol()}</span>
                                     </li>
                                 ))}
                             </ul>

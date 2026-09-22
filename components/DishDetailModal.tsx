@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Dish } from '../types';
 import { X, ImageIcon, Tag, AlertCircle } from 'lucide-react';
+import { moneySymbol } from '../utils/displayMoney';
 
 interface Props {
   dish: Dish;
@@ -51,7 +52,7 @@ export const DishDetailModal: React.FC<Props> = ({ dish, onClose }) => {
           <div className="flex items-start justify-between gap-3 mb-2">
             <h2 className="text-xl font-bold text-[var(--ds-text-primary)]">{dish.name}</h2>
             <span className="text-xl font-bold text-[var(--ds-arriving-text)] whitespace-nowrap">
-              € {Number(dish.price).toFixed(2)}
+              {moneySymbol()} {Number(dish.price).toFixed(2)}
             </span>
           </div>
 

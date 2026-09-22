@@ -34,6 +34,17 @@ export function formatMoneyMinor(cents: number, currency: string = 'EUR'): strin
     return `${fmt.symbol}${fmt.spaced ? ' ' : ''}${amount}`;
 }
 
+/** Come sopra, ma l'importo arriva già in unità invece che in centesimi —
+ *  i prezzi dei banchetti e dei piatti si portano dietro dei numeri decimali
+ *  dal database, e passare per i centesimi introdurrebbe un arrotondamento
+ *  dove oggi non ce n'è. */
+export function formatMoneyUnits(amount: number | string | null | undefined, currency: string = 'EUR'): string {
+    const code = String(currency || 'EUR').toUpperCase();
+    const fmt = MONEY_FORMAT[code] ?? { symbol: code, decimal: '.' as const, spaced: true };
+    const value = (Number(amount ?? 0) || 0).toFixed(2).replace('.', fmt.decimal);
+    return `${fmt.symbol}${fmt.spaced ? ' ' : ''}${value}`;
+}
+
 /** Il simbolo da solo, per le etichette che l'importo lo scrivono da sé
  *  (intestazioni di colonna, campi prezzo, «/persona»). */
 export function currencySymbol(currency: string = 'EUR'): string {
