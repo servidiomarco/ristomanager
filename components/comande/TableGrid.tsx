@@ -109,7 +109,7 @@ export const TableGrid: React.FC<TableGridProps> = ({
     { value: 'ALL' as TableFilter, label: t('all'), badge: rows.length, badgeTone: 'neutral' as const },
     ...TABLE_GROUPS.map(g => ({
       value: g.state as TableFilter,
-      label: g.chip,
+      label: t(g.chipKey, g.chip),
       badge: counts[g.state],
       badgeTone: 'neutral' as const,
     })),

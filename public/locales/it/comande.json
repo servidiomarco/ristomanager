@@ -186,5 +186,51 @@
   "next": "Segue",
   "draftRows_one": "{{count}} riga da inviare",
   "draftRows_other": "{{count}} righe da inviare",
-  "openOrderAria": "Apri la comanda: {{righe}}, {{importo}}"
+  "openOrderAria": "Apri la comanda: {{righe}}, {{importo}}",
+  "grid": {
+    "bill": {
+      "label": "Conto da incassare",
+      "chip": "Da incassare",
+      "caption": "da incassare"
+    },
+    "order": {
+      "label": "Comande aperte",
+      "chip": "Comanda aperta",
+      "caption": "comanda aperta"
+    },
+    "booked": {
+      "label": "In arrivo",
+      "chip": "In arrivo"
+    },
+    "free": {
+      "label": "Liberi",
+      "chip": "Liberi"
+    }
+  },
+  "stale": {
+    "generic": "appesa",
+    "tonight": "appesa da stasera",
+    "lunch": "appesa da pranzo",
+    "yesterday": "appesa da ieri",
+    "since": "appesa dal {{giorno}}"
+  },
+  "tile": {
+    "toTakeAmount": "{{importo}} · da incassare",
+    "withAmount": "{{importo}} · {{stato}}",
+    "free": "libero",
+    "covers": "{{n}} cop."
+  },
+  "badge": {
+    "draft": "in bozza",
+    "atPass": "al passe",
+    "inKitchen": "in cucina",
+    "ready": "pronta",
+    "served": "servita",
+    "atBar": "al bar"
+  },
+  "rows_zero": "nessuna riga",
+  "rows_one": "{{count}} riga",
+  "rows_other": "{{count}} righe",
+  "emptyOrder": "vuota",
+  "rowsAndTotal": "{{righe}} · {{importo}}"
 }

@@ -17,6 +17,7 @@ export const MAX_COURSES = 6;
 
 import { isBarCourse } from '../../utils/courses';
 import { moneyIntl } from '../../utils/displayMoney';
+import { displayLocale } from '../../utils/formatLocale';
 export { BAR_COURSE_NO, DESSERT_COURSE_NO, isBarCourse, isDessertCourse, ordinal, courseLabel } from '../../utils/courses';
 
 export interface CartLine {
@@ -59,7 +60,7 @@ export const cartKey = (dishId: number, courseNo: number, modifierParts: (number
 /** «550 g» sotto il chilo, «1,2 kg» sopra: il peso come lo dice la cucina. */
 export const weightLabel = (grams: number): string =>
   grams >= 1000
-    ? `${(grams / 1000).toLocaleString('it-IT', { maximumFractionDigits: 2 })} kg`
+    ? `${(grams / 1000).toLocaleString(displayLocale(), { maximumFractionDigits: 2 })} kg`
     : `${grams} g`;
 
 export const cartUnitCents = (l: CartLine): number =>
@@ -90,8 +91,13 @@ export const rowCount = (order: OrderWithItems, cart: CartLine[]): number =>
     (s, i) => s + (isSystemLine(i) || i.status === 'VOIDED' ? 0 : i.qty), 0
   ) + cart.reduce((s, l) => s + l.qty, 0);
 
-export const rowCountLabel = (n: number): string =>
-  n === 0 ? 'nessuna riga' : n === 1 ? '1 riga' : `${n} righe`;
+type TFunc = (key: string, defaultValue: string, options?: Record<string, unknown>) => string;
+
+export const rowCountLabel = (n: number, t?: TFunc): string => {
+  if (!t) return n === 0 ? 'nessuna riga' : n === 1 ? '1 riga' : `${n} righe`;
+  // i18next risolve da sé la forma: rows_zero / rows_one / rows_other.
+  return t('rows', n === 0 ? 'nessuna riga' : `${n} righe`, { count: n });
+};
 
 // Etichetta parlante per lo stato dell'uscita. Il cameriere deve sapere a
 // colpo d'occhio se la sua seconda uscita è partita o è ferma al passe:
@@ -100,19 +106,23 @@ export const rowCountLabel = (n: number): string =>
 // I toni sono quelli del design system, e ci cascano dentro senza forzature:
 // al passe qualcuno deve agire (pending), in cucina è informativo (arriving),
 // pronta è servizio vivo (seated), servita non è più uno stato (neutral).
-export const COURSE_BADGE: Record<CourseStatus, { text: string; tone: PillTone }> = {
-  PENDING: { text: 'in bozza',  tone: 'neutral' },
-  QUEUED:  { text: 'al passe',  tone: 'pending' },
-  FIRED:   { text: 'in cucina', tone: 'info' },
-  READY:   { text: 'pronta',    tone: 'positive' },
-  SERVED:  { text: 'servita',   tone: 'neutral' },
+export const COURSE_BADGE: Record<CourseStatus, { key: string; text: string; tone: PillTone }> = {
+  PENDING: { key: 'badge.draft',     text: 'in bozza',  tone: 'neutral' },
+  QUEUED:  { key: 'badge.atPass',    text: 'al passe',  tone: 'pending' },
+  FIRED:   { key: 'badge.inKitchen', text: 'in cucina', tone: 'info' },
+  READY:   { key: 'badge.ready',     text: 'pronta',    tone: 'positive' },
+  SERVED:  { key: 'badge.served',    text: 'servita',   tone: 'neutral' },
 };
 
 /** Il badge dell'uscita, col Bar che parla la sua lingua: lanciata dice
  *  «al bar», non «in cucina» — al banco non c'è nessuna cucina. Gli altri
  *  stati restano quelli di COURSE_BADGE. */
-export const courseBadge = (status: CourseStatus, courseNo: number): { text: string; tone: PillTone } =>
-  isBarCourse(courseNo) && status === 'FIRED' ? { text: 'al bar', tone: 'info' } : COURSE_BADGE[status];
+export const courseBadge = (status: CourseStatus, courseNo: number, t?: TFunc): { text: string; tone: PillTone } => {
+  const b = isBarCourse(courseNo) && status === 'FIRED'
+    ? { key: 'badge.atBar', text: 'al bar', tone: 'info' as PillTone }
+    : COURSE_BADGE[status];
+  return { text: t ? t(b.key, b.text) : b.text, tone: b.tone };
+};
 
 /** Lo stato di un'uscita ai fini della lettura: `courses` arriva dal server e
  *  copre solo le uscite che esistono già. */

@@ -54,5 +54,6 @@
   "noBillClosedToday": "No bill closed on this day.",
   "revokeLink": "Revoke the provider link: the guest will no longer be able to pay it",
   "tableBill": "Table bill",
-  "noMessages": "No message on record."
+  "noMessages": "No message on record.",
+  "tileSeats": "{{n}} seats"
 }

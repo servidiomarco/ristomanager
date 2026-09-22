@@ -179,7 +179,7 @@ export const ComandaSheet: React.FC<ComandaSheetProps> = ({
       // A tutta pagina il titolo è il tavolo e sotto c'è chi ha preso la
       // comanda; nel cassetto classico restano «Comanda» e il conteggio.
       title={fullPage ? `Tav. ${tableName ?? ''}` : openedBy ? `Comanda ${openedBy}` : 'Comanda'}
-      subtitle={fullPage ? opener : rows === 0 ? 'vuota' : rowCountLabel(rows)}
+      subtitle={fullPage ? opener : rows === 0 ? t('emptyOrder') : rowCountLabel(rows, t)}
       ariaLabel="Comanda del tavolo"
       bodyClassName="px-4 py-4"
       fullPage={fullPage}
