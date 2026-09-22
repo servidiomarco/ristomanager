@@ -5,13 +5,14 @@ import type { PaymentRequest } from '../../types';
 import { StatusPill } from '../ds';
 import type { PillTone } from '../ds';
 import { sessionTimeZone } from '../../utils/displayTime';
+import { money } from '../../utils/displayMoney';
 
 /* ── Una richiesta di acconto già inviata ─────────────────────────────────
    Amount first, then what it was for: scanning this list is asking "did the
    150 euro deposit land?", not "what happened at 13:50". The timestamp and
    the link go right, out of the reading path. */
 
-const euro = (cents: number): string => `€ ${(cents / 100).toFixed(2).replace('.', ',')}`;
+const euro = (cents: number): string => money(cents);
 
 // Mappa di modulo: porta le chiavi, la traduzione si prende al render.
 const STATUS: Record<string, { labelKey: string; label: string; tone: PillTone }> = {

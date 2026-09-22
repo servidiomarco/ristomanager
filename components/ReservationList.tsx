@@ -49,6 +49,8 @@ import { BookingChannelsBar } from './BookingChannelsBar';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { DateNavigator } from './DateNavigator';
 import { useAuth } from '../contexts/AuthContext';
+import { moneySymbol } from '../utils/displayMoney';
+import { money } from '../utils/displayMoney';
 
 // Helpers for local-date formatting (avoid UTC shift from toISOString)
 const formatLocalDate = (date: Date): string => {
@@ -2456,7 +2458,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         pp_tavolo: tavolo,
       });
       setBill(created);
-      showToast(tv('toast.billImported', { importo: `€${(created.bill.total_cents / 100).toFixed(2).replace('.', ',')}` }), 'success');
+      showToast(tv('toast.billImported', { importo: money(created.bill.total_cents) }), 'success');
     } catch (err: any) {
       // Nome tavolo che non combacia col gestionale (il server ha già provato
       // le varianti tipografiche): si chiede all'operatore il nome esatto e
@@ -5335,7 +5337,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                 <option value="">{tv('modal.none')}</option>
                                                 {banquetsForDate.map(m => (
                                                     <option key={m.id} value={m.id}>
-                                                        {m.name}{canViewBanquetPrice && ` — €${Number(m.price_per_person).toFixed(2)}/persona`}
+                                                        {m.name}{canViewBanquetPrice && ` — ${moneySymbol()}${Number(m.price_per_person).toFixed(2)}/persona`}
                                                     </option>
                                                 ))}
                                             </select>
@@ -6022,7 +6024,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,140px)_minmax(0,120px)_auto]">
                                   <Field label={tv('form.total')}>
                                     <div className="relative">
-                                      <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[15px] text-[var(--ds-text-muted)]">€</span>
+                                      <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[15px] text-[var(--ds-text-muted)]">{moneySymbol()}</span>
                                       <input
                                         type="text"
                                         inputMode="decimal"
@@ -6184,7 +6186,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                           <span className="text-[13px] text-[var(--ds-text-muted)]">
                                             {s.status === 'PAID' ? 'Pagata' : 'In attesa'}
                                           </span>
-                                          <span className="font-medium tabular-nums text-[var(--ds-text-primary)]">€ {eur}</span>
+                                          <span className="font-medium tabular-nums text-[var(--ds-text-primary)]">{moneySymbol()} {eur}</span>
                                           {s.status === 'PAID' && hasPermission('payments:full') && (
                                             <button
                                               type="button"
@@ -6276,7 +6278,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                           <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,150px)_1fr]">
                             <Field label={tv('payments.amount')}>
                               <div className="relative">
-                                <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[15px] text-[var(--ds-text-muted)]">€</span>
+                                <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[15px] text-[var(--ds-text-muted)]">{moneySymbol()}</span>
                                 <input
                                   type="text"
                                   inputMode="decimal"

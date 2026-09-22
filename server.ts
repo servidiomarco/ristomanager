@@ -5269,6 +5269,8 @@ const handlePublicMenu = async (tenantId: number, _req: express.Request, res: ex
         lingue: ['it', ...MENU_LANGS],
         categorie: await getMenuCategoryTranslations(tenantId),
         categorie_ordine: categorieOrdine,
+        // La valuta del ristorante: la pagina scrive i prezzi con Intl.
+        currency: (await getTenantLocale(tenantId)).currency,
         piatti: rows.map((d: any) => ({
             name: d.name,
             description: d.description || null,
@@ -16058,6 +16060,8 @@ app.get('/preventivo/:token', publicPayLimiter, async (req, res) => runAsPlatfor
                 website_url: identity.websiteUrl || null,
                 logo_url: logoAbs,
             },
+            // La valuta del ristorante: la pagina ci scrive tutti gli importi.
+            currency: (await getTenantLocale(row.tenant_id)).currency,
             quote: {
                 name: row.name,
                 status: row.status === 'QUOTE' ? 'QUOTE' : 'CONFIRMED',
@@ -25689,6 +25693,7 @@ async function handlePublicTakeawayInfo(tenantId: number, _req: express.Request,
             takeawayEnabled: enabled,
             prep_minutes: settings.prepMinutes,
             timezone: (await getTenantLocale(tenantId)).timezone,
+            currency: (await getTenantLocale(tenantId)).currency,
             branding: {
                 name: identity.name || null,
                 tagline: identity.tagline || null,
@@ -28690,6 +28695,7 @@ const handlePublicContact = async (tenantId: number, _req: express.Request, res:
         voice,
         bookingsEnabled,
         timezone: (await getTenantLocale(tenantId)).timezone,
+        currency: (await getTenantLocale(tenantId)).currency,
         deposit: {
             enabled: depositPolicy.enabled,
             minGuests: depositPolicy.minGuests,

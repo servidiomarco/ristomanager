@@ -7,6 +7,7 @@ import {
 } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
 import { PaymentProviderPicker } from './PaymentProviderPicker';
+import { moneySymbol } from '../utils/displayMoney';
 
 interface Props {
     showToast: (msg: string, kind?: 'success' | 'error' | 'info') => void;
@@ -77,7 +78,7 @@ export const AutoDepositManager: React.FC<Props> = ({ showToast }) => {
             return;
         }
         if (perPersonInput.trim() !== '' && !perPersonValid) {
-            showToast('La caparra per persona deve essere tra € 1 e € 200', 'error');
+            showToast(`La caparra per persona deve essere tra ${moneySymbol()} 1 e ${moneySymbol()} 200`, 'error');
             return;
         }
         const payload: Partial<Pick<AutoDepositSettings, 'enabled' | 'min_guests' | 'per_person_cents'>> = {};
@@ -148,7 +149,7 @@ export const AutoDepositManager: React.FC<Props> = ({ showToast }) => {
                     Caparra per persona
                 </label>
                 <div className="flex items-center gap-2">
-                    <span className="text-[13px] text-[var(--ds-text-muted)]">€</span>
+                    <span className="text-[13px] text-[var(--ds-text-muted)]">{moneySymbol()}</span>
                     <input
                         type="text"
                         inputMode="decimal"

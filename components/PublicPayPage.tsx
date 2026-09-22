@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { publicPayApiService, PublicBillView, ClaimResponse } from '../services/publicPayApiService';
 import { PAY_NAMESPACE, SUPPORTED_LANGUAGES, SupportedLanguage } from '../i18n/config';
 import { Loader2, Users, CheckCircle2, AlertTriangle, ExternalLink, X, ChevronDown } from 'lucide-react';
+import { currencySymbol } from '../utils/money';
 
 // Extract the share_token from the current URL. Kept as a plain function
 // so the page can be mounted directly without a router.
@@ -11,10 +12,12 @@ const tokenFromPath = (): string => {
   return m ? decodeURIComponent(m[1]) : '';
 };
 
-// Stesso simbolo, formato diverso per lingua (12,34 € vs €12.34): l'ospite
-// straniero legge un numero che riconosce, non un'italianizzazione forzata.
-const formatEur = (cents: number, lang: SupportedLanguage): string =>
-  new Intl.NumberFormat(lang === 'en' ? 'en-US' : 'it-IT', { style: 'currency', currency: 'EUR' }).format(cents / 100);
+// Formato diverso per lingua (12,34 € vs €12.34): l'ospite straniero legge un
+// numero che riconosce, non un'italianizzazione forzata. La VALUTA invece non
+// dipende dalla lingua: è quella scritta sul conto, che arriva nel payload —
+// un inglese che paga a Roma paga in euro, non in sterline.
+const formatEur = (cents: number, lang: SupportedLanguage, currency: string = 'EUR'): string =>
+  new Intl.NumberFormat(lang === 'en' ? 'en-US' : 'it-IT', { style: 'currency', currency: currency || 'EUR' }).format(cents / 100);
 
 // Il server (services/publicPayApiService.ts → jsonRequest) restituisce
 // sempre l'`error` grezzo in inglese: senza questa mappa, un ospite con la
@@ -43,6 +46,8 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
   }, [t]);
 
   const [bill, setBill] = useState<PublicBillView | null>(null);
+  // La valuta del conto vale per tutti gli importi della pagina.
+  const eur = (cents: number): string => formatEur(cents, lang, bill?.bill?.currency);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [mode, setMode] = useState<Mode>('menu');
@@ -131,7 +136,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
       await load();
     } catch (err: any) {
       if (err?.data?.max_allowed_cents != null) {
-        setErrorMsg(t('errors.amountTooHigh', { amount: formatEur(err.data.max_allowed_cents, lang) }));
+        setErrorMsg(t('errors.amountTooHigh', { amount: eur(err.data.max_allowed_cents) }));
       } else {
         setErrorMsg(resolveErrorMessage(err, 'errors.generic'));
       }
@@ -217,9 +222,9 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
     );
   }
 
-  const totalEur = formatEur(bill.bill.total_cents, lang);
-  const paidEur = formatEur(bill.paid_cents, lang);
-  const residualEur = formatEur(bill.residual_cents, lang);
+  const totalEur = eur(bill.bill.total_cents);
+  const paidEur = eur(bill.paid_cents);
+  const residualEur = eur(bill.residual_cents);
   const paidPct = bill.bill.total_cents > 0
     ? Math.min(100, Math.round((bill.paid_cents / bill.bill.total_cents) * 100))
     : 0;
@@ -274,7 +279,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
                 <li key={idx} className="flex items-baseline gap-2 text-[13px]">
                   <span className="shrink-0 tabular-nums text-[var(--ds-text-muted)]">{it.qty}×</span>
                   <span className="min-w-0 flex-1 truncate text-[var(--ds-text-secondary)]">{it.name}</span>
-                  <span className="tabular-nums text-[var(--ds-text-secondary)]">{formatEur(it.total_cents, lang)}</span>
+                  <span className="tabular-nums text-[var(--ds-text-secondary)]">{eur(it.total_cents)}</span>
                 </li>
               ))}
               {itemsCollapsible && (
@@ -295,7 +300,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
           {bill.deposit_credit_cents != null && bill.deposit_credit_cents > 0 && (
             <div className="mt-3 flex items-baseline justify-between border-t border-[var(--ds-border)] pt-3 text-sm">
               <span className="text-[var(--ds-seated-text)]">{t('bill.depositPaid')}</span>
-              <span className="font-semibold text-[var(--ds-seated-text)] tabular-nums">− {formatEur(bill.deposit_credit_cents, lang)}</span>
+              <span className="font-semibold text-[var(--ds-seated-text)] tabular-nums">− {eur(bill.deposit_credit_cents)}</span>
             </div>
           )}
 
@@ -324,7 +329,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
                     : <Loader2 className="h-4 w-4 text-[var(--ds-pending-solid)] animate-spin-slow" aria-hidden />}
                   <span className="text-[var(--ds-text-secondary)] truncate flex-1">{s.claimant_label || t('splits.anonymous')}</span>
                   <span className="text-xs text-[var(--ds-text-muted)]">{s.status === 'PAID' ? t('splits.statusPaid') : t('splits.statusPending')}</span>
-                  <span className="text-sm font-medium tabular-nums">{formatEur(s.amount_cents, lang)}</span>
+                  <span className="text-sm font-medium tabular-nums">{eur(s.amount_cents)}</span>
                 </li>
               ))}
             </ul>
@@ -357,7 +362,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
                   onClick={handleEqualShare}
                   className="w-full h-14 rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] font-semibold text-base shadow-[var(--ds-shadow-card)] hover:bg-[var(--ds-action-bg-hover)] active:scale-[0.99] transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 >
-                  {t('menu.myShare', { amount: formatEur(equalShareCents, lang) })}
+                  {t('menu.myShare', { amount: eur(equalShareCents) })}
                 </button>
                 {/* Nascosto quando coincide con «La mia parte» (es. un solo coperto
                     o residuo sotto la quota): due bottoni con lo stesso importo
@@ -424,7 +429,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
                         {it.qty}× {it.name}
                         {it.taken && <span className="block text-[11px] text-[var(--ds-text-muted)]">{t('items.alreadyTaken')}</span>}
                       </span>
-                      <span className="text-sm tabular-nums">{formatEur(it.total_cents, lang)}</span>
+                      <span className="text-sm tabular-nums">{eur(it.total_cents)}</span>
                     </button>
                   </li>
                 );
@@ -433,8 +438,8 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
             <div className="flex items-baseline justify-between border-t border-[var(--ds-border)] pt-3">
               <span className="text-xs text-[var(--ds-text-muted)]">{t('items.yourShare')}</span>
               <span className="text-xl font-bold tabular-nums">
-                {formatEur(pickableItems.filter(i => pickedItems.includes(i.id))
-                             .reduce((n, i) => n + i.total_cents, 0), lang)}
+                {eur(pickableItems.filter(i => pickedItems.includes(i.id))
+                       .reduce((n, i) => n + i.total_cents, 0))}
               </span>
             </div>
             <div>
@@ -481,7 +486,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
               <div>
                 <label className="text-xs text-[var(--ds-text-secondary)] font-medium">{t('amountForm.amountLabel')}</label>
                 <div className="relative mt-1">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--ds-text-subtle)] text-sm">€</span>
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--ds-text-subtle)] text-sm">{currencySymbol(bill?.bill?.currency)}</span>
                   <input
                     type="text"
                     inputMode="decimal"
@@ -523,7 +528,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
           <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] p-5 space-y-4">
             <div className="text-center">
               <div className="text-xs text-[var(--ds-text-muted)] mb-1">{t('claimed.yourShare')}</div>
-              <div className="text-3xl font-bold">{formatEur(claim.amount_cents, lang)}</div>
+              <div className="text-3xl font-bold">{eur(claim.amount_cents)}</div>
               {claim.claimant_label && (
                 <div className="text-sm text-[var(--ds-text-secondary)] mt-1">{t('claimed.forName', { name: claim.claimant_label })}</div>
               )}

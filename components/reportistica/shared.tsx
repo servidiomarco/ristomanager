@@ -1,5 +1,6 @@
 import React from 'react';
 import { ArrowDownRight, ArrowUpRight, Download } from 'lucide-react';
+import { moneyIntl } from '../../utils/displayMoney';
 
 /* Elementi condivisi dei blocchi della Reportistica. Stesso linguaggio della
    pagina Consumi AI (MonitoringPage): card su --ds-surface, tile su
@@ -8,8 +9,9 @@ import { ArrowDownRight, ArrowUpRight, Download } from 'lucide-react';
 export const nf = new Intl.NumberFormat('it-IT');
 export const formatInt = (n: number | null | undefined): string => nf.format(Math.round(n ?? 0));
 
-const euro = new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' });
-export const formatEuroCents = (cents: number | null | undefined): string => euro.format((cents ?? 0) / 100);
+// Niente formatter a livello di modulo: si costruirebbe all'import, prima
+// che AuthContext sappia di quale ristorante è la sessione.
+export const formatEuroCents = (cents: number | null | undefined): string => moneyIntl((cents ?? 0) / 100);
 
 // Secondi → "1h 23m" / "12m 05s" / "42s".
 export const formatDuration = (totalSeconds: number | null | undefined): string => {

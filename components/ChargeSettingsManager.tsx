@@ -6,6 +6,7 @@ import {
     type ChargeSettings,
 } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
+import { moneySymbol } from '../utils/displayMoney';
 
 interface Props {
     showToast: (msg: string, kind?: 'success' | 'error' | 'info') => void;
@@ -65,7 +66,7 @@ export const ChargeSettingsManager: React.FC<Props> = ({ showToast }) => {
 
     const save = async () => {
         if (!canEdit || saving || !settings) return;
-        if (!coverValid) { showToast('Il coperto deve essere un importo tra 0 e 100 €', 'error'); return; }
+        if (!coverValid) { showToast(`Il coperto deve essere un importo tra 0 e 100 ${moneySymbol()}`, 'error'); return; }
         if (!serviceValid) { showToast('Il servizio deve essere un intero tra 0 e 100', 'error'); return; }
         const payload: Partial<ChargeSettings> = {};
         if (parsedCover !== settings.cover_charge_cents) payload.cover_charge_cents = parsedCover;
@@ -114,10 +115,10 @@ export const ChargeSettingsManager: React.FC<Props> = ({ showToast }) => {
                             disabled={!canEdit || saving}
                             className="w-24 px-3 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                         />
-                        <span className="text-[12px] text-[var(--ds-text-muted)]">€</span>
+                        <span className="text-[12px] text-[var(--ds-text-muted)]">{moneySymbol()}</span>
                     </div>
                     {coverInput.trim() !== '' && !coverValid && (
-                        <p className="text-[11px] text-[var(--ds-critical-text)] mt-1">Importo tra 0 e 100 €.</p>
+                        <p className="text-[11px] text-[var(--ds-critical-text)] mt-1">Importo tra 0 e 100 {moneySymbol()}.</p>
                     )}
                 </div>
 

@@ -1,6 +1,7 @@
 import type { CashSessionView } from '../types';
 import { printHtmlDocument, PRINT_TOKENS_CSS } from './printDocument';
 import { sessionTimeZone } from './displayTime';
+import { money } from './displayMoney';
 
 /* ── Il riepilogo di cassa, stampato ──────────────────────────────────────
    Il foglio che si mette nel raccoglitore a fine servizio, accanto al
@@ -21,8 +22,7 @@ const escapeHtml = (s: string): string =>
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[ch]!));
 
-const euro = (cents: number): string =>
-  `€ ${(cents / 100).toFixed(2).replace('.', ',')}`;
+const euro = (cents: number): string => money(cents);
 
 const METHOD_LABELS: Record<string, string> = {
   CONTANTI: 'Contanti',

@@ -4,6 +4,7 @@ import { ArrowLeft, Check, Minus, Plus } from 'lucide-react';
 import type { OpenBillRow } from '../../services/billsApiService';
 import { StatusPill } from '../ds';
 import { euro } from './cassaView';
+import { moneySymbol } from '../../utils/displayMoney';
 
 /* ── Passo 4a · dividi conto ──────────────────────────────────────────────
    «Definisce quanto si paga adesso, non come.»
@@ -292,7 +293,7 @@ export const DividiConto: React.FC<DividiContoProps> = ({
                 Quanto paga adesso
               </span>
               <div className="relative">
-                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[17px] text-[var(--ds-text-muted)]">€</span>
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[17px] text-[var(--ds-text-muted)]">{moneySymbol()}</span>
                 <input
                   type="text" inputMode="decimal" value={amount} autoFocus
                   onChange={e => setAmount(e.target.value)}

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2 } from 'lucide-react';
 import { ModalShell, SegmentedControl, dsButton, dsInput } from '../ds';
+import { moneySymbol } from '../../utils/displayMoney';
 
 // Estratto da OrderPad quando Cassa ha avuto bisogno dello stesso dialogo
 // (docs/cassa-plan.md §8). Lo sconto è di CONTO, non di riga — quello di riga
@@ -67,7 +68,7 @@ export const DiscountDialog: React.FC<{
         ariaLabel="Tipo di sconto"
         options={[
           { value: 'PERCENT', label: 'Percentuale' },
-          { value: 'AMOUNT', label: 'Importo €' },
+          { value: 'AMOUNT', label: `Importo ${moneySymbol()}` },
         ]}
       />
       <input

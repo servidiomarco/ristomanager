@@ -10,6 +10,7 @@ import { FormCard, PaneHeader, Sheet, StatusPill } from '../ds';
 import { formatEuro } from './paymentsView';
 import { METHODS, methodLabel, eurToCents, settleMath, settlePayments, nextAmountText } from './settleView';
 import { timePart } from '../../utils/displayTime';
+import { moneySymbol } from '../../utils/displayMoney';
 
 /** Chiusura conto: i movimenti di incasso (metodo + importo) e la mancia.
  *  Passa dritto a POST /bills/:id/close come CloseBillPayload. */
@@ -243,7 +244,7 @@ export const SettleDialog: React.FC<{
                 <label className="block flex-1">
                   <span className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Importo</span>
                   <div className="relative">
-                    <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[15px] text-[var(--ds-text-muted)]">€</span>
+                    <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[15px] text-[var(--ds-text-muted)]">{moneySymbol()}</span>
                     <input type="text" inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)} disabled={busy} className={`${field} pl-7`} />
                   </div>
                 </label>
@@ -339,7 +340,7 @@ export const SettleDialog: React.FC<{
           <label className="block">
             <span className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Mancia <span className="font-normal text-[var(--ds-text-muted)]">(facoltativa)</span></span>
             <div className="relative">
-              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[15px] text-[var(--ds-text-muted)]">€</span>
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[15px] text-[var(--ds-text-muted)]">{moneySymbol()}</span>
               <input type="text" inputMode="decimal" placeholder="0,00" value={tip} onChange={e => setTip(e.target.value)} disabled={busy} className={`${field} pl-7`} />
             </div>
           </label>

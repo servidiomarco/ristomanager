@@ -11,6 +11,7 @@ import {
 } from '../services/ordersApiService';
 import { chime } from '../utils/chime';
 import { SectionHeader, StatusPill, dsButton } from './ds';
+import { moneyIntl } from '../utils/displayMoney';
 
 // ---------------------------------------------------------------------------
 // Passe — l'unico punto in cui qualcuno vede l'uscita intera.
@@ -492,7 +493,7 @@ const KitchenStats: React.FC<{ report: KitchenReport | null }> = ({ report }) =>
                   {sc.motivo ?? 'senza motivazione'} · {sc.righe}
                 </span>
                 <span className="flex-shrink-0 tabular-nums text-[var(--ds-text-primary)]">
-                  {(sc.valore_cents / 100).toLocaleString('it-IT', { style: 'currency', currency: 'EUR' })}
+                  {moneyIntl(sc.valore_cents / 100)}
                 </span>
               </li>
             ))}

@@ -1,5 +1,6 @@
 import { BanquetMenu, Dish, Shift } from '../types';
 import { printHtmlDocument, PRINT_TOKENS_CSS } from './printDocument';
+import { moneyUnits } from './displayMoney';
 
 const ITALIAN_DATE_OPTS: Intl.DateTimeFormatOptions = {
   weekday: 'long',
@@ -13,10 +14,7 @@ const escapeHtml = (s: string): string =>
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[ch]!));
 
-const formatEuro = (n: number | string | undefined | null): string => {
-  const num = Number(n ?? 0);
-  return `€ ${num.toFixed(2).replace('.', ',')}`;
-};
+const formatEuro = (n: number | string | undefined | null): string => moneyUnits(n);
 
 const formatDate = (iso: string | undefined): string => {
   if (!iso) return '';
