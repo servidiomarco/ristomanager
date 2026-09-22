@@ -271,7 +271,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       // (una categoria vuota non muove l'anagrafica piatti).
       refreshMenuCats();
     } catch (err: any) {
-      setCatFormError(err?.data?.error ?? err?.message ?? 'Salvataggio non riuscito');
+      setCatFormError(err?.data?.error ?? err?.message ?? t('err.save'));
     } finally {
       setCatFormBusy(false);
     }
@@ -381,7 +381,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       // La lista si aggiorna da sola via socket 'dish:synced'.
       setImportEsito(await importMenuPassepartout());
     } catch (err: any) {
-      setImportError(err?.data?.message ?? err?.data?.error ?? err?.message ?? 'Import non riuscito');
+      setImportError(err?.data?.message ?? err?.data?.error ?? err?.message ?? t('err.import'));
     } finally {
       setImporting(false);
     }
@@ -448,7 +448,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     try {
       setTranslateEsito(await translateMenu());
     } catch (err: any) {
-      setTranslateError(err?.data?.message ?? err?.data?.error ?? err?.message ?? 'Traduzione non riuscita');
+      setTranslateError(err?.data?.message ?? err?.data?.error ?? err?.message ?? t('err.translate'));
     } finally {
       setTranslating(false);
     }
@@ -464,9 +464,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     } catch (err: any) {
       const code = err?.data?.error;
       setPairError(
-        code === 'ai_disabled' ? 'Funzione spenta: accendi «Abbinamenti vino AI» fra le funzioni.'
-        : code === 'no_wines' ? 'Marca prima una categoria come «Vino» nella modale Categorie.'
-        : err?.data?.message ?? err?.data?.error ?? err?.message ?? 'Abbinamento non riuscito');
+        code === 'ai_disabled' ? t('err.aiDisabled')
+        : code === 'no_wines' ? t('err.noWines')
+        : err?.data?.message ?? err?.data?.error ?? err?.message ?? t('err.pairing'));
     } finally {
       setPairingWines(false);
     }
@@ -528,7 +528,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       setMenuForm(null);
       setMenuFormName('');
     } catch (err: any) {
-      setMenuFormError(err?.data?.error ?? err?.message ?? 'Salvataggio non riuscito');
+      setMenuFormError(err?.data?.error ?? err?.message ?? t('err.save'));
     } finally {
       setMenuFormBusy(false);
     }
@@ -782,7 +782,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     setSuggestWinesError(null);
     try {
       const r = await suggestDishWinePairings(editingDishId);
-      if (r.wine_dish_ids.length === 0) setSuggestWinesError('Nessun abbinamento convincente fra i vini in carta.');
+      if (r.wine_dish_ids.length === 0) setSuggestWinesError(t('err.noPairing'));
       else {
         setDishWineIds(r.wine_dish_ids);
         // La proposta apre le sue sezioni: una spunta dietro una testata
@@ -797,9 +797,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     } catch (err: any) {
       const code = err?.data?.error;
       setSuggestWinesError(
-        code === 'ai_disabled' ? 'Funzione spenta: accendi «Abbinamenti vino AI» fra le funzioni.'
-        : code === 'no_wines' ? 'Marca prima una categoria come «Vino» nella modale Categorie.'
-        : err?.data?.message ?? err?.message ?? 'Suggerimento non riuscito');
+        code === 'ai_disabled' ? t('err.aiDisabled')
+        : code === 'no_wines' ? t('err.noWines')
+        : err?.data?.message ?? err?.message ?? t('err.suggestion'));
     } finally {
       setSuggestingWines(false);
     }
@@ -1049,7 +1049,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       const dataUrl = await resizeImageToDataUrl(file, 800, 0.8);
       setNewDish(prev => ({ ...prev, photo_url: dataUrl }));
     } catch (err: any) {
-      setPhotoUploadError(err?.message || 'Caricamento fallito');
+      setPhotoUploadError(err?.message || t('err.upload'));
     } finally {
       setPhotoUploading(false);
       if (photoFileInputRef.current) photoFileInputRef.current.value = '';
@@ -1885,7 +1885,13 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               <div className="mb-4">
                 <Callout tone={importError ? 'critical' : 'positive'}>
                   {importError
-                    ?? `Menu allineato alla cassa: ${importEsito!.creati} nuovi, ${importEsito!.aggiornati} aggiornati, ${importEsito!.disattivati} disattivati${importEsito!.eliminati ? `, ${importEsito!.eliminati} rimossi` : ''}${importEsito!.gruppi_varianti ? `, ${importEsito!.gruppi_varianti} gruppi varianti` : ''}.`}
+                    ?? t('importDone', {
+                      creati: importEsito!.creati,
+                      aggiornati: importEsito!.aggiornati,
+                      disattivati: importEsito!.disattivati,
+                      coda: (importEsito!.eliminati ? t('importRemoved', { n: importEsito!.eliminati }) : '')
+                        + (importEsito!.gruppi_varianti ? t('importVariants', { n: importEsito!.gruppi_varianti }) : ''),
+                    })}
                 </Callout>
               </div>
             )}
@@ -1917,7 +1923,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       key={cat}
                       type="button"
                       onClick={() => setCategoryFilter(isActive ? null : cat)}
-                      title={isOff ? `${cat} — spenta: non compare su comande e menu digitale` : undefined}
+                      title={isOff ? t('categoryOffTitle', { categoria: cat }) : undefined}
                       className={`${DISH_FILTER_BASE} ${isActive ? DISH_FILTER_ON : DISH_FILTER_OFF} ${isOff && !isActive ? 'opacity-50 line-through' : ''}`}
                     >
                       {cat} <span className="tabular-nums opacity-70">{count}</span>
@@ -1931,10 +1937,10 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
             {filteredDishes.length === 0 ? (
               <EmptyState icon={Utensils}>
                 {searchTerm || categoryFilter
-                  ? 'Nessun piatto corrisponde ai filtri.'
+                  ? t('noDishMatches')
                   : dishes.length > 0 && selectedMenu
-                    ? `Nessun piatto in «${selectedMenu.name}»: spuntalo dalla scheda del piatto.`
-                    : 'Non hai ancora aggiunto piatti.'}
+                    ? t('noDishInMenu', { menu: selectedMenu.name })
+                    : t('noDishesYet')}
               </EmptyState>
             ) : (
               <div className="flex gap-4">
@@ -1957,12 +1963,12 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                 <span className="absolute bottom-2 left-2 z-10 flex gap-1">
                                   {dish.is_active === false && (
                                     <span className="rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-2 py-0.5 text-[11px] font-medium text-[var(--ds-critical-text)]">
-                                      spento in cassa
+                                      {t('offAtTill')}
                                     </span>
                                   )}
                                   {dish.crm_enabled === false && (
                                     <span className="rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-2 py-0.5 text-[11px] font-medium text-[var(--ds-text-secondary)]">
-                                      spento
+                                      {t('off')}
                                     </span>
                                   )}
                                 </span>
@@ -2007,7 +2013,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                       role="switch"
                                       tabIndex={0}
                                       aria-checked={dish.crm_enabled !== false}
-                                      aria-label={`${dish.crm_enabled !== false ? 'Spegni' : 'Accendi'} ${dish.name} nel menu`}
+                                      aria-label={t('toggleDishAria', { azione: t(dish.crm_enabled !== false ? 'switchOff' : 'switchOn'), piatto: dish.name })}
                                       onClick={e => { e.stopPropagation(); if (togglingDishId !== dish.id) handleToggleDish(dish); }}
                                       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); if (togglingDishId !== dish.id) handleToggleDish(dish); } }}
                                       className={`relative mr-1 inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
@@ -2073,12 +2079,12 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             <div className={`min-w-0 flex-1 ${dish.is_active === false || dish.crm_enabled === false ? 'opacity-60' : ''}`}>
                               <div className="flex items-center gap-2">
                                 <span className="truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">{dish.name}</span>
-                                {dish.is_active === false && <StatusPill tone="critical">spento in cassa</StatusPill>}
-                                {dish.crm_enabled === false && <StatusPill tone="neutral">spento</StatusPill>}
-                                {dish.dish_type === 'COMPOSED' && <StatusPill tone="neutral">composto</StatusPill>}
+                                {dish.is_active === false && <StatusPill tone="critical">{t('offAtTill')}</StatusPill>}
+                                {dish.crm_enabled === false && <StatusPill tone="neutral">{t('off')}</StatusPill>}
+                                {dish.dish_type === 'COMPOSED' && <StatusPill tone="neutral">{t('composed')}</StatusPill>}
                                 {(() => {
                                   const n = modifierGroups.filter(g => g.is_active && g.dish_ids.includes(dish.id)).length;
-                                  return n > 0 ? <StatusPill tone="neutral">{n === 1 ? '1 variante' : `${n} varianti`}</StatusPill> : null;
+                                  return n > 0 ? <StatusPill tone="neutral">{t('variantCount', { count: n })}</StatusPill> : null;
                                 })()}
                               </div>
                               <div className="truncate text-[13px] text-[var(--ds-text-muted)]">
@@ -2089,7 +2095,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                               {dish.allergens.length > 0 ? dish.allergens.map(a => (
                                 <StatusPill key={a} tone="critical">{a}</StatusPill>
                               )) : (
-                                <span className="text-[13px] text-[var(--ds-text-subtle)]">nessun allergene</span>
+                                <span className="text-[13px] text-[var(--ds-text-subtle)]">{t('noAllergens')}</span>
                               )}
                             </div>
                             <span className="flex-shrink-0 text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
@@ -2127,7 +2133,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                   role="switch"
                                   tabIndex={0}
                                   aria-checked={dish.crm_enabled !== false}
-                                  aria-label={`${dish.crm_enabled !== false ? 'Spegni' : 'Accendi'} ${dish.name} nel menu`}
+                                  aria-label={t('toggleDishAria', { azione: t(dish.crm_enabled !== false ? 'switchOff' : 'switchOn'), piatto: dish.name })}
                                   onClick={e => { e.stopPropagation(); if (togglingDishId !== dish.id) handleToggleDish(dish); }}
                                   onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); if (togglingDishId !== dish.id) handleToggleDish(dish); } }}
                                   className={`relative mx-1 inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
@@ -2183,7 +2189,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                         type="button"
                         onClick={() => setViewDish(null)}
                         className={`${dsIconButton} absolute right-2 top-2 h-9 w-9`}
-                        aria-label="Chiudi dettaglio"
+                        aria-label={t('closeDetail')}
                       >
                         <X className="h-4 w-4" />
                       </button>
@@ -2204,7 +2210,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                         <p className="text-[14px] leading-relaxed text-[var(--ds-text-secondary)]">{viewDish.description}</p>
                       )}
                       <div>
-                        <h4 className="mb-2 text-[13px] font-semibold text-[var(--ds-critical-text)]">Allergeni</h4>
+                        <h4 className="mb-2 text-[13px] font-semibold text-[var(--ds-critical-text)]">{t('allergens')}</h4>
                         {viewDish.allergens.length > 0 ? (
                           <div className="flex flex-wrap gap-1.5">
                             {viewDish.allergens.map(a => (
@@ -2216,7 +2222,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                         )}
                       </div>
                       <div>
-                        <h4 className="mb-2 text-[13px] font-semibold text-[var(--ds-text-muted)]">Usato nei banchetti</h4>
+                        <h4 className="mb-2 text-[13px] font-semibold text-[var(--ds-text-muted)]">{t('usedInBanquets')}</h4>
                         {(() => {
                           const used = banquetMenus.filter(m => {
                             if (m.courses && m.courses.length > 0) {
@@ -2227,7 +2233,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           if (used.length === 0) {
                             return (
                               <p className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3 py-2.5 text-[13px] text-[var(--ds-text-muted)]">
-                                Non ancora inserito in un menu banchetto.
+                                {t('notInBanquetYet')}
                               </p>
                             );
                           }
@@ -2789,7 +2795,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         <ModalShell
           open={isDishFormOpen}
           onClose={() => setIsDishFormOpen(false)}
-          title={isEditingDish ? 'Modifica piatto' : 'Aggiungi nuovo piatto'}
+          title={t(isEditingDish ? 'editDish' : 'newDish')}
           size="md"
           bodyClassName="p-5 sm:p-6"
           footer={
@@ -2799,7 +2805,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 onClick={() => setIsDishFormOpen(false)}
                 className={dsButton.secondary}
               >
-                Annulla
+                {t('cancel')}
               </button>
               <button
                 type="submit"
@@ -2808,7 +2814,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 className={dsButton.primary}
               >
                 {isSavingDish && <Loader2 className="h-4 w-4 animate-spin" />}
-                Salva piatto
+                {t('saveDish')}
               </button>
             </>
           }
@@ -2879,7 +2885,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   {/* Il 10% è la somministrazione in loco: quasi ogni piatto
                       resta lì. Serve solo per i casi diversi (asporto 22,
                       pane 4…) e alimenta scontrino e fattura per aliquota. */}
-                  <Field label="Aliquota IVA">
+                  <Field label={t('vatRate')}>
                     <select
                       className={dsSelect}
                       value={newDish.vat_rate ?? defaultVatRate}
@@ -2897,7 +2903,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       buio. Ricalcolata alla battuta: le comande già lanciate
                       non si spostano. */}
                   {salaStations.length > 0 && (
-                    <Field label="Partita di cucina">
+                    <Field label={t('station')}>
                       <select
                         className={dsSelect}
                         value={newDish.station_id ?? ''}
@@ -2910,14 +2916,14 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                               .find(([c]) => c.toLowerCase() === cat)?.[1];
                             const mapped = salaStations.find(s => s.id === mappedId);
                             return mapped
-                              ? `Segui la categoria (${mapped.name})`
-                              : 'Segui la categoria (senza partita)';
+                              ? t('followCategory', { partita: mapped.name })
+                              : t('followCategoryNone');
                           })()}
                         </option>
                         {/* Le spente restano in lista solo se già assegnate
                             al piatto, o la select mentirebbe sul valore. */}
                         {salaStations.filter(s => s.is_active || s.id === newDish.station_id).map(s => (
-                          <option key={s.id} value={s.id}>{s.name}{s.is_active ? '' : ' (spenta)'}</option>
+                          <option key={s.id} value={s.id}>{s.name}{s.is_active ? '' : t('stationOff')}</option>
                         ))}
                       </select>
                     </Field>
@@ -2942,8 +2948,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               title={t('inMenus')}
               aside={
                 (newDish.menu_ids?.length ?? 0) === 0
-                  ? <span className="text-[13px] text-[var(--ds-pending-text)]">in nessun menu</span>
-                  : <span className="text-[13px] text-[var(--ds-text-muted)]">{newDish.menu_ids!.length} selezionati</span>
+                  ? <span className="text-[13px] text-[var(--ds-pending-text)]">{t('inNoMenu')}</span>
+                  : <span className="text-[13px] text-[var(--ds-text-muted)]">{t('selectedCount', { count: newDish.menu_ids!.length })}</span>
               }
             >
               <div className="flex flex-wrap gap-2">
@@ -2976,13 +2982,13 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               title={t('variants')}
               aside={
                 dishGroupIds.length === 0
-                  ? <span className="text-[13px] text-[var(--ds-text-muted)]">nessun gruppo</span>
-                  : <span className="text-[13px] text-[var(--ds-text-muted)]">{dishGroupIds.length} {dishGroupIds.length === 1 ? 'gruppo' : 'gruppi'}</span>
+                  ? <span className="text-[13px] text-[var(--ds-text-muted)]">{t('noGroup')}</span>
+                  : <span className="text-[13px] text-[var(--ds-text-muted)]">{t('groupCount', { count: dishGroupIds.length })}</span>
               }
             >
               {modifierGroups.length === 0 ? (
                 <p className="text-[13px] text-[var(--ds-text-muted)]">
-                  Nessun gruppo di varianti: crealo da «Varianti» in testa alla pagina.
+                  {t('noVariantGroups')}
                 </p>
               ) : (
                 <div className="flex flex-wrap gap-2">
@@ -2998,7 +3004,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           onClick={() => setDishGroupIds(prev =>
                             prev.includes(g.id) ? prev.filter(x => x !== g.id) : [...prev, g.id])}
                           aria-pressed={isSelected}
-                          title={pp ? 'Gruppo della cassa: le opzioni si aggiornano a ogni import' : undefined}
+                          title={pp ? t('tillGroupTitle') : undefined}
                           className={`inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3.5 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                             isSelected
                               ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
@@ -3024,7 +3030,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 aside={
                   <span className="flex items-center gap-2">
                     {dishWineIds.length === 0 && (
-                      <span className="text-[13px] text-[var(--ds-text-muted)]">nessuno</span>
+                      <span className="text-[13px] text-[var(--ds-text-muted)]">{t('none')}</span>
                     )}
                     {/* La lente: apre il campo che filtra la carta — con 60
                         etichette la fisarmonica da sola non basta. Riaperta,
@@ -3032,7 +3038,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     <button
                       type="button"
                       onClick={() => setWineSearch(prev => prev == null ? '' : null)}
-                      aria-label={wineSearch == null ? 'Cerca un vino' : 'Chiudi la ricerca'}
+                      aria-label={t(wineSearch == null ? 'searchAWine' : 'closeSearch')}
                       aria-expanded={wineSearch != null}
                       className={`inline-flex h-9 w-9 items-center justify-center rounded-[var(--ds-radius-control)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                         wineSearch != null
@@ -3059,7 +3065,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           key={`sel-${w.id}`}
                           type="button"
                           onClick={() => setDishWineIds(prev => prev.filter(x => x !== w.id))}
-                          aria-label={`Togli ${w.name}`}
+                          aria-label={t('removeNamed', { nome: w.name })}
                           className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-medium text-[var(--ds-action-fg)] transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                         >
                           <Wine size={13} aria-hidden />
@@ -3107,7 +3113,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             <span className="text-[13px] font-semibold text-[var(--ds-text-secondary)]">{cat}</span>
                             <span className="h-px min-w-0 flex-1 bg-[var(--ds-border)]" aria-hidden />
                             <span className="text-[12px] tabular-nums text-[var(--ds-text-muted)]">
-                              {chosen > 0 ? `${chosen} di ${wines.length}` : wines.length}
+                              {chosen > 0 ? t('chosenOfTotal', { scelti: chosen, totale: wines.length }) : wines.length}
                             </span>
                             <ChevronDown size={16} className={`flex-shrink-0 text-[var(--ds-text-muted)] transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden />
                           </button>
@@ -3164,9 +3170,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 pre-inclusi che il cameriere può togliere («Senza cipolla»),
                 gratis o a sconto. */}
             <FormCard
-              title="Composizione"
+              title={t('composition')}
               aside={newDish.dish_type === 'COMPOSED'
-                ? <span className="text-[13px] text-[var(--ds-text-muted)]">{dishComponents.length} {dishComponents.length === 1 ? 'ingrediente' : 'ingredienti'}</span>
+                ? <span className="text-[13px] text-[var(--ds-text-muted)]">{t('ingredientCount', { count: dishComponents.length })}</span>
                 : undefined}
             >
               <div className="space-y-3">
@@ -3205,9 +3211,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${newDish.sold_by_weight ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
                   </span>
                   <span className="min-w-0">
-                    <span className="block text-[14px] font-medium text-[var(--ds-text-primary)]">Vendita al peso</span>
+                    <span className="block text-[14px] font-medium text-[var(--ds-text-primary)]">{t('soldByWeight')}</span>
                     <span className="block text-[12px] text-[var(--ds-text-muted)]">
-                      il prezzo qui sopra vale al kg; alla battuta si chiedono i grammi, la cucina li corregge dopo la pesata
+                      {t('soldByWeightHint')}
                     </span>
                   </span>
                 </button>
@@ -3218,9 +3224,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 {newDish.sold_by_weight === true && (
                   <div className="grid grid-cols-3 gap-2">
                     {([
-                      ['weight_min_grams', 'da (g)', '300'],
-                      ['weight_max_grams', 'a (g)', '1000'],
-                      ['weight_default_grams', 'parte da (g)', '500'],
+                      ['weight_min_grams', t('weightFrom'), '300'],
+                      ['weight_max_grams', t('weightTo'), '1000'],
+                      ['weight_default_grams', t('weightDefault'), '500'],
                     ] as const).map(([field, label, ph]) => (
                       <label key={field} className="block">
                         <span className="mb-1 block text-[12px] font-medium text-[var(--ds-text-muted)]">{label}</span>
@@ -3258,7 +3264,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           <input
                             className={dsInput}
                             maxLength={100}
-                            placeholder="Ingrediente…"
+                            placeholder={t('ingredientPlaceholder')}
                             value={c.name}
                             onChange={e => setDishComponents(prev => prev.map((x, j) => j === i ? { ...x, name: e.target.value } : x))}
                           />
@@ -3277,7 +3283,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           type="button"
                           onClick={() => setDishComponents(prev => prev.filter((_, j) => j !== i))}
                           className={`${dsIconButton} h-9 w-9 flex-shrink-0 bg-[var(--ds-surface-row)] shadow-none hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)]`}
-                          title="Togli ingrediente"
+                          title={t('removeIngredient')}
                         >
                           <Trash2 className="h-4 w-4" />
                         </button>
@@ -3295,12 +3301,12 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               </div>
             </FormCard>
 
-            <FormCard title={t('photo')} aside={<span className="text-[13px] text-[var(--ds-text-muted)]">opzionale</span>}>
+            <FormCard title={t('photo')} aside={<span className="text-[13px] text-[var(--ds-text-muted)]">{t('optional')}</span>}>
               <div className="flex items-start gap-4">
                 {newDish.photo_url ? (
                   <img
                     src={newDish.photo_url}
-                    alt="Anteprima"
+                    alt={t('preview')}
                     className="h-20 w-20 flex-shrink-0 rounded-[var(--ds-radius)] object-cover"
                     onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
                   />
@@ -3332,7 +3338,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       className={`${dsButton.quiet} h-9 px-4 text-[13px] disabled:cursor-wait`}
                     >
                       {photoUploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
-                      {photoUploading ? 'Elaborazione…' : 'Carica foto'}
+                      {t(photoUploading ? 'processing' : 'uploadPhoto')}
                     </button>
                     {newDish.photo_url && (
                       <button
@@ -3341,7 +3347,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                         className="inline-flex h-9 items-center gap-1 rounded-[var(--ds-radius-control)] px-3 text-[13px] text-[var(--ds-text-muted)] transition-colors hover:text-[var(--ds-text-primary)]"
                       >
                         <X className="h-3.5 w-3.5" />
-                        Rimuovi
+                        {t('remove')}
                       </button>
                     )}
                   </div>
@@ -3356,10 +3362,10 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
             </FormCard>
 
             <FormCard
-              title="Allergeni"
+              title={t('allergens')}
               aside={
                 (newDish.allergens?.length ?? 0) > 0
-                  ? <span className="text-[13px] text-[var(--ds-text-muted)]">{newDish.allergens?.length} selezionati</span>
+                  ? <span className="text-[13px] text-[var(--ds-text-muted)]">{t('selectedCount', { count: newDish.allergens?.length ?? 0 })}</span>
                   : undefined
               }
             >
@@ -4008,7 +4014,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               </section>
 
               <section className={banquetStep === 3 ? 'block' : 'hidden'}>
-                <FormCard title={t('banquetStep.tables.label')} aside={<span className="text-[13px] text-[var(--ds-text-muted)]">opzionale</span>}>
+                <FormCard title={t('banquetStep.tables.label')} aside={<span className="text-[13px] text-[var(--ds-text-muted)]">{t('optional')}</span>}>
                   <p className="mb-4 text-[13px] text-[var(--ds-text-muted)]">Riserva i tavoli del banchetto. I tavoli occupati nello stesso turno sono disabilitati.</p>
                 {!newBanquet.event_date || !newBanquet.shift ? (
                   <p className="text-xs text-[var(--ds-text-muted)] italic">{t('pickDateAndShift')}</p>
@@ -4176,7 +4182,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         <div className="space-y-4">
           <div className="flex items-center justify-between gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-4 py-3">
             <span className="text-[14px] font-medium text-[var(--ds-text-primary)]">
-              {menuAttivo == null ? 'Stato…' : menuAttivo ? 'Menu visibile agli ospiti' : 'Menu non visibile'}
+              {menuAttivo == null ? t('state') : t(menuAttivo ? 'menuVisible' : 'menuNotVisible')}
             </span>
             <button
               type="button"
@@ -4188,7 +4194,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   : 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
               }`}
             >
-              {menuFlagBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : menuAttivo ? 'Spegni' : 'Pubblica'}
+              {menuFlagBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : t(menuAttivo ? 'switchOff' : 'publish')}
             </button>
           </div>
 
@@ -4203,7 +4209,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 onClick={copiaLinkMenu}
                 className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]"
               >
-                {linkCopiato ? <><Check className="h-4 w-4" /> Copiato</> : <><Copy className="h-4 w-4" /> Copia link</>}
+                {linkCopiato ? <><Check className="h-4 w-4" /> {t('copied')}</> : <><Copy className="h-4 w-4" /> {t('copyLink')}</>}
               </button>
               <a
                 href={menuUrl}
@@ -4211,7 +4217,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 rel="noreferrer"
                 className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]"
               >
-                Apri la pagina
+                {t('openPage')}
               </a>
             </div>
           </div>
@@ -4225,14 +4231,14 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)] disabled:opacity-40"
               >
                 {translating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Languages className="h-4 w-4" />}
-                Traduci le voci nuove
+                {t('translateNew')}
               </button>
               <p className="text-[13px] text-[var(--ds-text-muted)]">
-                Inglese, francese e tedesco. Traduce solo le voci senza traduzione: si può rilanciare dopo ogni import.
+                {t('translateHint')}
               </p>
               {translateEsito && (
                 <p className="text-[13px] text-[var(--ds-seated-text)]">
-                  {translateEsito.tradotte === 0 ? 'Tutto già tradotto.' : `${translateEsito.tradotte} voci tradotte.`}
+                  {translateEsito.tradotte === 0 ? t('allTranslated') : t('itemsTranslated', { n: translateEsito.tradotte })}
                 </p>
               )}
               {translateError && <p className="text-[13px] text-[var(--ds-critical-text)]">{translateError}</p>}
@@ -4240,7 +4246,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   senza abbinamenti, ognuno resta correggibile in scheda. */}
               <div className="flex items-center justify-between gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-4 py-3">
                 <span className="text-[14px] font-medium text-[var(--ds-text-primary)]">
-                  {wineAiAttivo == null ? 'Stato…' : wineAiAttivo ? 'Sommelier AI attivo' : 'Sommelier AI spento'}
+                  {wineAiAttivo == null ? t('state') : t(wineAiAttivo ? 'sommelierOn' : 'sommelierOff')}
                 </span>
                 <button
                   type="button"
@@ -4252,7 +4258,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       : 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                   }`}
                 >
-                  {wineAiBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : wineAiAttivo ? 'Spegni' : 'Accendi'}
+                  {wineAiBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : t(wineAiAttivo ? 'switchOff' : 'switchOn')}
                 </button>
               </div>
               <button
@@ -4262,14 +4268,14 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-tint)] px-3.5 text-[13px] font-semibold text-[var(--ds-arriving-text)] transition-opacity hover:opacity-80 disabled:opacity-40"
               >
                 {pairingWines ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
-                {pairingWines ? 'Ci penso…' : 'Abbina i vini'}
+                {t(pairingWines ? 'thinking' : 'pairWines')}
               </button>
               <p className="text-[13px] text-[var(--ds-text-muted)]">
-                Propone i vini della carta per i piatti ancora senza abbinamenti; si corregge piatto per piatto in scheda.
+                {t('pairHint')}
               </p>
               {pairEsito && (
                 <p className="text-[13px] text-[var(--ds-seated-text)]">
-                  {pairEsito.abbinati === 0 ? 'Tutto già abbinato.' : `${pairEsito.abbinati} ${pairEsito.abbinati === 1 ? 'piatto abbinato' : 'piatti abbinati'}.`}
+                  {pairEsito.abbinati === 0 ? t('allPaired') : t('pairedCount', { count: pairEsito.abbinati })}
                 </p>
               )}
               {pairError && <p className="text-[13px] text-[var(--ds-critical-text)]">{pairError}</p>}
@@ -4281,7 +4287,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       <ConfirmDeleteModal
         isOpen={!!deleteDishConfirm}
         title={t('deleteDishTitle')}
-        message="Stai per eliminare il piatto:"
+        message={t('deleteDishMessage')}
         itemName={deleteDishConfirm?.name}
         onCancel={() => setDeleteDishConfirm(null)}
         onConfirm={() => {
@@ -4307,13 +4313,13 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         <ModalShell
           open={!!menuForm}
           onClose={() => setMenuForm(null)}
-          title={menuForm.kind === 'create' ? 'Nuovo menu' : t('renameMenu')}
+          title={menuForm.kind === 'create' ? t('newSeasonalMenu') : t('renameMenu')}
           size="sm"
           bodyClassName="p-5"
           footer={
             <>
               <button type="button" onClick={() => setMenuForm(null)} className={dsButton.secondary}>
-                Annulla
+                {t('cancel')}
               </button>
               <button
                 type="submit"
@@ -4322,7 +4328,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 className={dsButton.primary}
               >
                 {menuFormBusy && <Loader2 className="h-4 w-4 animate-spin" />}
-                {menuForm.kind === 'create' ? 'Crea menu' : 'Salva'}
+                {t(menuForm.kind === 'create' ? 'createMenu' : 'save')}
               </button>
             </>
           }
@@ -4347,7 +4353,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       <ConfirmDeleteModal
         isOpen={!!deleteMenuConfirm}
         title={t('deleteMenuTitle')}
-        message="I piatti restano in anagrafica e negli altri menu. Stai per eliminare:"
+        message={t('deleteMenuMessage')}
         itemName={deleteMenuConfirm?.name}
         onCancel={() => setDeleteMenuConfirm(null)}
         onConfirm={() => { if (deleteMenuConfirm) handleDeleteMenu(deleteMenuConfirm); }}
@@ -4538,9 +4544,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           disabled={catMenuBusy === busyKey || inCat.length === 0}
                           onClick={() => handleToggleCategoryMenu(cat.name, m.id, !full)}
                           aria-pressed={full}
-                          title={full
-                            ? `Tutti i piatti di ${cat.name} sono in ${m.name} — togli tutti`
-                            : `Metti tutti i piatti di ${cat.name} in ${m.name}`}
+                          title={t(full ? 'catAllInMenu' : 'catPutAllInMenu', { categoria: cat.name, menu: m.name })}
                           className={`inline-flex h-7 items-center gap-1 rounded-[var(--ds-radius-control)] px-2.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                             full
                               ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
@@ -4560,9 +4564,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       disabled={catMenuBusy === `${cat.name}|bar`}
                       onClick={() => handleToggleCategoryBar(cat.name, cat.bar !== true)}
                       aria-pressed={cat.bar === true}
-                      title={cat.bar
-                        ? `${cat.name} esce al Bar — togli la spunta`
-                        : `In comanda ${cat.name} va dritta nell'uscita Bar`}
+                      title={t(cat.bar ? 'catBarOn' : 'catBarOff', { categoria: cat.name })}
                       className={`inline-flex h-7 items-center gap-1 rounded-[var(--ds-radius-control)] px-2.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                         cat.bar
                           ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
@@ -4579,9 +4581,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       disabled={catMenuBusy === `${cat.name}|dessert`}
                       onClick={() => handleToggleCategoryDessert(cat.name, cat.dessert !== true)}
                       aria-pressed={cat.dessert === true}
-                      title={cat.dessert
-                        ? `${cat.name} esce nell'uscita Dolci — togli la spunta`
-                        : `In comanda ${cat.name} va dritta nell'uscita Dolci`}
+                      title={t(cat.dessert ? 'catDessertOn' : 'catDessertOff', { categoria: cat.name })}
                       className={`inline-flex h-7 items-center gap-1 rounded-[var(--ds-radius-control)] px-2.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                         cat.dessert
                           ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
@@ -4598,9 +4598,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       disabled={catMenuBusy === `${cat.name}|wine`}
                       onClick={() => handleToggleCategoryWine(cat.name, cat.wine !== true)}
                       aria-pressed={cat.wine === true}
-                      title={cat.wine
-                        ? `${cat.name} è carta dei vini — togli la spunta`
-                        : `${cat.name} entra nella carta dei vini per gli abbinamenti`}
+                      title={t(cat.wine ? 'catWineOn' : 'catWineOff', { categoria: cat.name })}
                       className={`inline-flex h-7 items-center gap-1 rounded-[var(--ds-radius-control)] px-2.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                         cat.wine
                           ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
@@ -4614,7 +4612,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 </div>
                 <button
                   type="button" role="switch" aria-checked={cat.enabled}
-                  aria-label={`${cat.enabled ? 'Spegni' : 'Accendi'} ${cat.name}`}
+                  aria-label={t('toggleCategoryAria', { azione: t(cat.enabled ? 'switchOff' : 'switchOn'), categoria: cat.name })}
                   disabled={catsBusy}
                   onClick={() => {
                     const next = menuCats.map((c, j) => j === i ? { ...c, enabled: !c.enabled } : c);
@@ -4640,7 +4638,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   disabled={cat.dishes > 0}
                   onClick={() => setDeleteCatConfirm(cat.name)}
                   className={`${dsIconButton} h-9 w-9 flex-shrink-0 bg-[var(--ds-surface-row)] shadow-none disabled:opacity-30 hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)]`}
-                  title={cat.dishes > 0 ? 'Ha ancora piatti: spostali prima di eliminarla' : 'Elimina categoria'}
+                  title={t(cat.dishes > 0 ? 'catHasDishes' : 'catDelete')}
                 >
                   <Trash2 className="h-4 w-4" />
                 </button>
@@ -4675,13 +4673,13 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         <ModalShell
           open={!!catForm}
           onClose={() => setCatForm(null)}
-          title={catForm.kind === 'create' ? 'Nuova categoria' : t('renameCategory')}
+          title={catForm.kind === 'create' ? t('catNew') : t('renameCategory')}
           size="sm"
           bodyClassName="p-5"
           footer={
             <>
               <button type="button" onClick={() => setCatForm(null)} className={dsButton.secondary}>
-                Annulla
+                {t('cancel')}
               </button>
               <button
                 type="submit"
@@ -4690,7 +4688,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 className={dsButton.primary}
               >
                 {catFormBusy && <Loader2 className="h-4 w-4 animate-spin" />}
-                {catForm.kind === 'create' ? 'Crea categoria' : 'Salva'}
+                {t(catForm.kind === 'create' ? 'catCreate' : 'save')}
               </button>
             </>
           }
@@ -4709,7 +4707,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
             </Field>
             {catForm.kind === 'rename' && dishes.some(d => d.category === catForm.name && d.external_ref?.startsWith('pp:')) && (
               <Callout tone="pending">
-                Qui ci sono piatti sincronizzati dalla cassa: al prossimo «Importa da cassa» torneranno alla categoria della cassa. Per un nome definitivo rinominala anche in Passepartout.
+                {t('catFromTillWarning')}
               </Callout>
             )}
             {catFormError && <p className="text-[13px] text-[var(--ds-critical-text)]">{catFormError}</p>}
@@ -4720,7 +4718,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       <ConfirmDeleteModal
         isOpen={!!deleteCatConfirm}
         title={t('deleteCategory')}
-        message="La categoria è vuota: nessun piatto viene toccato. Stai per eliminare:"
+        message={t('catDeleteMessage')}
         itemName={deleteCatConfirm ?? undefined}
         onCancel={() => setDeleteCatConfirm(null)}
         onConfirm={() => { if (deleteCatConfirm) handleDeleteCategory(deleteCatConfirm); }}
