@@ -186,5 +186,51 @@
   "next": "Next",
   "draftRows_one": "{{count}} line to send",
   "draftRows_other": "{{count}} lines to send",
-  "openOrderAria": "Open the order: {{righe}}, {{importo}}"
+  "openOrderAria": "Open the order: {{righe}}, {{importo}}",
+  "grid": {
+    "bill": {
+      "label": "Bill to take",
+      "chip": "To take",
+      "caption": "to take"
+    },
+    "order": {
+      "label": "Open orders",
+      "chip": "Open order",
+      "caption": "open order"
+    },
+    "booked": {
+      "label": "Arriving",
+      "chip": "Arriving"
+    },
+    "free": {
+      "label": "Free",
+      "chip": "Free"
+    }
+  },
+  "stale": {
+    "generic": "left open",
+    "tonight": "left open since this evening",
+    "lunch": "left open since lunch",
+    "yesterday": "left open since yesterday",
+    "since": "left open since {{giorno}}"
+  },
+  "tile": {
+    "toTakeAmount": "{{importo}} · to take",
+    "withAmount": "{{importo}} · {{stato}}",
+    "free": "free",
+    "covers": "{{n}} cov."
+  },
+  "badge": {
+    "draft": "draft",
+    "atPass": "at the pass",
+    "inKitchen": "in the kitchen",
+    "ready": "ready",
+    "served": "served",
+    "atBar": "at the bar"
+  },
+  "rows_zero": "no lines",
+  "rows_one": "{{count}} line",
+  "rows_other": "{{count}} lines",
+  "emptyOrder": "empty",
+  "rowsAndTotal": "{{righe}} · {{importo}}"
 }

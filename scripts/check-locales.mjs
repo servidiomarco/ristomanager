@@ -130,7 +130,14 @@ const scansiona = (dir) => {
         if (e.isDirectory()) { scansiona(p); continue; }
         if (!e.name.endsWith('.tsx')) continue;
         const testo = fs.readFileSync(p, 'utf8');
-        const ns = [...new Set([...testo.matchAll(/useTranslation\(\s*'([\w-]+)'/g)].map(m => m[1]))];
+        // Una namespace sola — useTranslation('comande') — oppure una lista,
+        // useTranslation(['cassa', 'comande']): nel secondo caso la PRIMA è
+        // quella di default e le altre si leggono solo col prefisso.
+        const singola = [...testo.matchAll(/useTranslation\(\s*'([\w-]+)'/g)].map(m => m[1]);
+        const lista = [...testo.matchAll(/useTranslation\(\s*\[([^\]]+)\]/g)]
+            .flatMap(m => [...m[1].matchAll(/'([\w-]+)'/g)].map(x => x[1]));
+        const dichiarate = [...new Set([...singola, ...lista])];
+        const ns = [...new Set([...singola, ...lista.slice(0, 1)])];
         if (ns.length !== 1) continue;
         const dizionarioDi = (nome) => {
             const file = path.join(BASE, RIFERIMENTO, `${nome}.json`);
@@ -147,6 +154,13 @@ const scansiona = (dir) => {
             const grezza = m[1];
             const conPrefisso = grezza.includes(':');
             const nome = conPrefisso ? grezza.split(':')[0] : ns[0];
+            // Una chiave col prefisso di una namespace che il file non carica
+            // non risolve: i18next torna il valore di riserva e lo schermo
+            // resta nella lingua di partenza, senza che nulla protesti.
+            if (conPrefisso && nome !== 'common' && !dichiarate.includes(nome)) {
+                chiaviMancanti.push(`${p}:${testo.slice(0, m.index).split('\n').length}: "${grezza}" cita la namespace ${nome}, che questo file non dichiara in useTranslation`);
+                continue;
+            }
             const chiave = conPrefisso ? grezza.split(':').slice(1).join(':') : grezza;
             // Una chiave al plurale non esiste da sola: vale per le sue due forme.
             const v = valore(chiave, nome) ?? valore(`${chiave}_other`, nome);

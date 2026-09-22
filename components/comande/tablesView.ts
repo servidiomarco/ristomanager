@@ -2,7 +2,7 @@ import type { CourseStatus, Reservation, Table, TableMerge } from '../../types';
 import { ArrivalStatus, ReservationStatus } from '../../types';
 import { datePart, timePart } from '../../utils/displayTime';
 import { ordinal } from '../../utils/courses';
-import { COURSE_BADGE, euro } from './orderView';
+import { courseBadge, euro } from './orderView';
 import type { OpenOrderSummary } from '../../services/ordersApiService';
 import type { SectionTone } from '../ds';
 
@@ -41,26 +41,42 @@ export interface TableRow {
 
 export type TableFilter = 'ALL' | TableState;
 
+/* Pattern labelKey: questa è una costante di modulo, e una costante non può
+   chiamare un hook. Porta quindi la CHIAVE accanto all'italiano di riserva, e
+   il testo si risolve al render — come NAV_ITEMS e reservationState.tsx. */
+type TFunc = (key: string, defaultValue: string, options?: Record<string, unknown>) => string;
+
 interface GroupSpec {
   state: TableState;
   /** Titolo del gruppo in griglia. Mai maiuscolo (§5.2). */
   label: string;
+  labelKey: string;
   /** Etichetta del chip filtro: dice cosa sono, non quanti sono. */
   chip: string;
+  chipKey: string;
   tone: SectionTone;
   /** Riga di stato stampata sul riquadro. I liberi non ne hanno una: essere
    *  liberi non è uno stato, è l'assenza di tutti gli altri. */
   caption: string | null;
+  captionKey: string | null;
 }
 
 /* L'ordine di questa lista è l'ordine della pagina, ed è deliberato: si legge
    dall'alto e la prima cosa che si incontra è quella che costa soldi se resta
    lì. */
 export const TABLE_GROUPS: GroupSpec[] = [
-  { state: 'bill',   label: 'Conto da incassare', chip: 'Da incassare',   tone: 'pending',  caption: 'da incassare' },
-  { state: 'order',  label: 'Comande aperte',     chip: 'Comanda aperta', tone: 'positive', caption: 'comanda aperta' },
-  { state: 'booked', label: 'In arrivo',          chip: 'In arrivo',      tone: 'info',     caption: null },
-  { state: 'free',   label: 'Liberi',             chip: 'Liberi',         tone: 'muted',    caption: null },
+  { state: 'bill',   label: 'Conto da incassare', labelKey: 'grid.bill.label',
+    chip: 'Da incassare',   chipKey: 'grid.bill.chip',   tone: 'pending',
+    caption: 'da incassare', captionKey: 'grid.bill.caption' },
+  { state: 'order',  label: 'Comande aperte',     labelKey: 'grid.order.label',
+    chip: 'Comanda aperta', chipKey: 'grid.order.chip',  tone: 'positive',
+    caption: 'comanda aperta', captionKey: 'grid.order.caption' },
+  { state: 'booked', label: 'In arrivo',          labelKey: 'grid.booked.label',
+    chip: 'In arrivo',      chipKey: 'grid.booked.chip', tone: 'info',
+    caption: null, captionKey: null },
+  { state: 'free',   label: 'Liberi',             labelKey: 'grid.free.label',
+    chip: 'Liberi',         chipKey: 'grid.free.chip',   tone: 'muted',
+    caption: null, captionKey: null },
 ];
 
 /* Scritte per intero invece che composte: Tailwind estrae i nomi delle classi
@@ -118,21 +134,31 @@ export const tableNameLine = (row: TableRow): string =>
 /** L'etichetta di una comanda appesa (aperta in un servizio passato).
  *  Relativa a OGGI, non al servizio guardato: «da ieri» è come lo dice la
  *  sala, e non chiede di sapere che giorno la griglia sta mostrando. */
-export const staleOrderLabel = (order: OpenOrderSummary): string => {
-  if (!order.service_date) return 'appesa';
+export const staleOrderLabel = (order: OpenOrderSummary, t?: TFunc): string => {
+  const dì = (chiave: string, italiano: string, opts?: Record<string, unknown>) =>
+    t ? t(chiave, italiano, opts) : italiano;
+  if (!order.service_date) return dì('stale.generic', 'appesa');
   const today = datePart(new Date());
-  if (order.service_date === today) return order.shift === 'DINNER' ? 'appesa da stasera' : 'appesa da pranzo';
+  if (order.service_date === today) {
+    return order.shift === 'DINNER'
+      ? dì('stale.tonight', 'appesa da stasera')
+      : dì('stale.lunch', 'appesa da pranzo');
+  }
   const y = new Date(`${today}T12:00:00Z`);
   y.setUTCDate(y.getUTCDate() - 1);
-  if (order.service_date === y.toISOString().slice(0, 10)) return 'appesa da ieri';
+  if (order.service_date === y.toISOString().slice(0, 10)) return dì('stale.yesterday', 'appesa da ieri');
   const [, m, d] = order.service_date.split('-');
-  return `appesa dal ${d}/${m}`;
+  return dì('stale.since', `appesa dal ${d}/${m}`, { giorno: `${d}/${m}` });
 };
 
 /** «134,00 € · 2ª in cucina», «62,00 € · da incassare», «21:30», «libero». */
-export const tableStatusLine = (row: TableRow): string => {
+export const tableStatusLine = (row: TableRow, t?: TFunc): string => {
+  const dì = (chiave: string, italiano: string, opts?: Record<string, unknown>) =>
+    t ? t(chiave, italiano, opts) : italiano;
   if (row.state === 'bill') {
-    return typeof row.billCents === 'number' ? `${euro(row.billCents)} · da incassare` : 'da incassare';
+    return typeof row.billCents === 'number'
+      ? dì('tile.toTakeAmount', `${euro(row.billCents)} · da incassare`, { importo: euro(row.billCents) })
+      : dì('grid.bill.caption', 'da incassare');
   }
   if (row.state === 'order') {
     // Il campo può non esserci: frontend e backend si deployano separati, e
@@ -142,18 +168,20 @@ export const tableStatusLine = (row: TableRow): string => {
     // L'appesa dice DA QUANDO pende, non a che punto è l'uscita: lo stato di
     // cucina di ieri sera è storia, il conto da chiudere è la notizia.
     if (row.order?.stale) {
-      const label = staleOrderLabel(row.order);
-      return money ? `${money} · ${label}` : label;
+      const label = staleOrderLabel(row.order, t);
+      return money ? dì('tile.withAmount', `${money} · ${label}`, { importo: money, stato: label }) : label;
     }
     // Comanda aperta e ancora intonsa: nessuna uscita di cui dire lo stato.
     const course = row.order?.course;
-    const what = course ? `${ordinal(course.course_no)} ${COURSE_BADGE[course.status].text}` : 'comanda aperta';
-    return money ? `${money} · ${what}` : what;
+    const what = course
+      ? `${ordinal(course.course_no, t)} ${courseBadge(course.status, course.course_no, t).text}`
+      : dì('grid.order.caption', 'comanda aperta');
+    return money ? dì('tile.withAmount', `${money} · ${what}`, { importo: money, stato: what }) : what;
   }
   if (row.state === 'booked' && row.reservation) {
     return timePart(row.reservation.reservation_time);
   }
-  return 'libero';
+  return dì('tile.free', 'libero');
 };
 
 /** «10» prima di «9» è il difetto che rende la griglia inutilizzabile: si

@@ -54,5 +54,6 @@
   "noBillClosedToday": "Nessun conto chiuso in questo giorno.",
   "revokeLink": "Annulla il link al provider: il cliente non potrà più pagarlo",
   "tableBill": "Conto al tavolo",
-  "noMessages": "Nessuna comunicazione registrata."
+  "noMessages": "Nessuna comunicazione registrata.",
+  "tileSeats": "{{n}} posti"
 }

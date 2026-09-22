@@ -2088,7 +2088,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
                   {courseLabel(n, t)}
                   {sent && (
                     <span className="text-[11px] font-medium text-[var(--ds-text-muted)]">
-                      {courseBadge(status, n).text}
+                      {courseBadge(status, n, t).text}
                     </span>
                   )}
                 </button>

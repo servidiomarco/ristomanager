@@ -48,7 +48,7 @@ export const SelezionaTavolo: React.FC<SelezionaTavoloProps> = ({
   rows, rooms, billByTable, roomId, onRoom, filter, onFilter,
   query, onQuery, busy, onPick, onBack, view, onView,
 }) => {
-  const { t } = useTranslation('cassa', { useSuspense: false });
+  const { t } = useTranslation(['cassa', 'comande'], { useSuspense: false });
   const searchRef = useRef<HTMLInputElement | null>(null);
 
   // «/» porta il cursore nella ricerca, come ovunque nell'app. Ignorata
@@ -100,7 +100,7 @@ export const SelezionaTavolo: React.FC<SelezionaTavoloProps> = ({
     { value: 'ALL' as TableFilter, label: t('all'), badge: inRoom.length, badgeTone: 'neutral' as const },
     ...TABLE_GROUPS.map(g => ({
       value: g.state as TableFilter,
-      label: g.chip,
+      label: t(`comande:${g.chipKey}`, g.chip),
       badge: counts[g.state],
       badgeTone: 'neutral' as const,
     })),
@@ -134,7 +134,7 @@ export const SelezionaTavolo: React.FC<SelezionaTavoloProps> = ({
           </span>
         ) : (
           <span className="text-[12px] tabular-nums text-[var(--ds-text-muted)]">
-            {row.table.seats} posti
+            {t('tileSeats', { n: row.table.seats })}
           </span>
         )}
         {sala && (

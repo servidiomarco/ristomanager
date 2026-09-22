@@ -129,7 +129,7 @@ export const CourseList: React.FC<CourseListProps> = ({
       // fondo tinto (famiglia arriving, la stessa della pillola «in cucina»).
       const fired = status === 'FIRED';
       const current = n === course;
-      const badge = courseBadge(status, n);
+      const badge = courseBadge(status, n, t);
       // Righe rimaste in coda dentro un'uscita GIÀ partita (aggiunte dopo il
       // lancio in un fire mode che non le fa partire da solo, o dati vecchi):
       // il «Chiama» deve coprirle, o restano orfane — l'uscita non risulta
@@ -588,6 +588,7 @@ interface CourseColumnProps extends CourseListProps {
 }
 
 export const CourseColumn: React.FC<CourseColumnProps> = ({ onSend, onSendAll, openedBy, ...list }) => {
+  const { t } = useTranslation('comande', { useSuspense: false });
   const { order, cart, course } = list;
   const courseLines = cartForCourse(cart, course);
   const rows = rowCount(order, cart);
@@ -615,7 +616,7 @@ export const CourseColumn: React.FC<CourseColumnProps> = ({ onSend, onSendAll, o
             Comanda<span className="font-normal text-[var(--ds-text-muted)]"> {openedBy}</span>
           </h2>
           <span className="flex-shrink-0 text-[13px] tabular-nums text-[var(--ds-text-muted)]">
-            {rows === 0 ? 'vuota' : rowCountLabel(rows)}
+            {rows === 0 ? t('emptyOrder') : rowCountLabel(rows, t)}
           </span>
         </header>
       )}

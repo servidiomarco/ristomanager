@@ -507,7 +507,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
             </div>
             <div className="truncate text-[13px] tabular-nums text-[var(--ds-text-muted)]">
               {guestName ? `${guestName} · ` : ''}
-              {rows === 0 ? 'nessuna riga' : `${rowCountLabel(rows)} · ${euro(totalCents)}`}
+              {rows === 0 ? rowCountLabel(0, t) : t('rowsAndTotal', { righe: rowCountLabel(rows, t), importo: euro(totalCents) })}
             </div>
           </div>
           {/* La lente accanto ai puntini, stessa forma incassata: la ricerca

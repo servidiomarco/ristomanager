@@ -660,6 +660,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-22 | Comande; Cassa | Con la lingua inglese parlano inglese la griglia dei tavoli (titoli dei gruppi, chip dei filtri, riga di stato della tessera, «appesa da ieri») e le pastiglie di stato dell'uscita — le stesse parole in Comande e in Cassa. Il peso dei piatti al kg segue il separatore decimale della lingua. |
 | 2026-09-22 | Comande; Cucina | Con la lingua inglese parlano inglese il palmare delle comande (esiti dell'invio, chiusura, storno, eliminazione, spostamento fra uscite, foglio dello scontrino col QR) e il vocabolario delle uscite — «1ª uscita», «Bar», «Dolci» — che ora è uno solo per palmare, colonne, chip, monitor di cucina e passe: prima erano tre copie della stessa parola. |
 | 2026-09-22 | Funzionalità trasversali; Menu & Banchetti; Cassa; Reportistica | Gli importi sulle schermate, nei fogli di stampa e sulle pagine per l'ospite (prenotazione, menu digitale, ordine d'asporto, pagamento al tavolo, preventivo) sono scritti nella valuta del ristorante — simbolo dei campi importo, etichette e placeholder compresi. In euro non cambia nulla. |
 | 2026-09-22 | Funzionalità trasversali; Pagamenti; Messaggi | Gli importi nei messaggi al cliente (caparra, link di pagamento, conto, email di richiesta), nelle notifiche allo staff e nel registro attività sono scritti nella valuta del ristorante. In euro non cambia un carattere: «€ 15,00» resta «€ 15,00». |

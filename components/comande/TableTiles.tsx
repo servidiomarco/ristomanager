@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { timePart } from '../../utils/displayTime';
 import { SectionHeader } from '../ds';
 import {
@@ -38,18 +39,23 @@ interface TableTilesProps {
   variant?: 'square' | 'wide';
 }
 
-/** Il meta di Comande: quanti coperti, in che stato, e per chi è tenuto. */
-export const defaultTableMeta = (row: TableRow): React.ReactNode => {
+/** Il meta di Comande: quanti coperti, in che stato, e per chi è tenuto.
+ *  È un componente e non una funzione perché le sue parole si traducono, e
+ *  una funzione non può chiamare un hook. `renderMeta` resta però una
+ *  `(row) => ReactNode`: Cassa ne passa una sua e non deve saperlo. */
+const DefaultTableMeta: React.FC<{ row: TableRow }> = ({ row }) => {
+  const { t } = useTranslation('comande', { useSuspense: false });
   const { table, state, reservation } = row;
   // La comanda appesa di un servizio passato si presenta per quello che è:
   // «appesa da ieri», non «comanda aperta» come se fosse servizio vivo.
+  const gruppo = TABLE_GROUPS.find(g => g.state === state);
   const caption = state === 'order' && row.order?.stale
-    ? staleOrderLabel(row.order)
-    : TABLE_GROUPS.find(g => g.state === state)?.caption;
+    ? staleOrderLabel(row.order, t)
+    : (gruppo?.captionKey ? t(gruppo.captionKey, gruppo.caption ?? '') : gruppo?.caption);
   return (
     <>
       <span className="text-[12px] tabular-nums text-[var(--ds-text-muted)]">
-        {row.groupSeats ?? table.seats} cop.
+        {t('tile.covers', { n: row.groupSeats ?? table.seats })}
       </span>
       {caption && (
         <span className={`text-[11px] font-semibold ${TABLE_CAPTION[state]}`}>
@@ -65,9 +71,12 @@ export const defaultTableMeta = (row: TableRow): React.ReactNode => {
   );
 };
 
+export const defaultTableMeta = (row: TableRow): React.ReactNode => <DefaultTableMeta row={row} />;
+
 export const TableTiles: React.FC<TableTilesProps> = ({
   rows, onPick, busy, renderMeta = defaultTableMeta, grouped = true, variant = 'square',
 }) => {
+  const { t } = useTranslation('comande', { useSuspense: false });
   const squareTile = (row: TableRow) => (
     <button
       key={row.table.id}
@@ -105,13 +114,13 @@ export const TableTiles: React.FC<TableTilesProps> = ({
         <span className={`mt-1.5 h-2 w-2 flex-shrink-0 rounded-full ${TABLE_DOT[row.state]}`} aria-hidden />
       </span>
       <span className="text-[12px] tabular-nums text-[var(--ds-text-muted)]">
-        {row.groupSeats ?? row.table.seats} cop.
+        {t('tile.covers', { n: row.groupSeats ?? row.table.seats })}
       </span>
       <span className="mt-auto w-full truncate pt-1 text-[13px] font-medium text-[var(--ds-text-primary)]">
         {tableNameLine(row)}
       </span>
       <span className={`w-full text-[11px] font-semibold leading-tight ${TABLE_CAPTION[row.state]}`}>
-        {tableStatusLine(row)}
+        {tableStatusLine(row, t)}
       </span>
     </button>
   );
@@ -137,7 +146,7 @@ export const TableTiles: React.FC<TableTilesProps> = ({
         return (
           <section key={group.state} className="mt-4 first:mt-0">
             <SectionHeader tone={group.tone} meta={String(group_rows.length)}>
-              {group.label}
+              {t(group.labelKey, group.label)}
             </SectionHeader>
             <div className={`mt-2 ${gridClass}`}>
               {group_rows.map(tile)}
