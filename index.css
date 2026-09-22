@@ -1,6 +1,27 @@
 @import "tailwindcss";
 
 /* ===========================================================================
+   Cosa Tailwind NON deve leggere
+   ---------------------------------------------------------------------------
+   In v4 non c'è più `content`: Tailwind scandaglia la cartella da sé. Il che
+   nel nostro caso vuol dire anche il backend — e `server.ts` da 36k righe non
+   contiene una sola classe, ma contiene prefissi di log come `[bill:notify]`
+   (server.ts, invio del link del conto) che l'estrattore prende per proprietà
+   arbitrarie: il build avvisava «"bill" is not a known CSS property» e nel CSS
+   finiva la regola morta `.\[bill\:notify\]{bill:notify}`.
+   Escluso il backend puro. `services/` e `utils/` NON si escludono: li importa
+   anche il frontend, e `utils/print*.ts` porta stringhe di stile vere.
+   ========================================================================= */
+@source not "./server.ts";
+@source not "./db.ts";
+@source not "./platform.ts";
+@source not "./auth";
+@source not "./migrations";
+@source not "./scripts";
+@source not "./tests";
+@source not "./sala-node";
+
+/* ===========================================================================
    Class-based dark mode
    ========================================================================= */
 @custom-variant dark (&:where(.dark, .dark *));
