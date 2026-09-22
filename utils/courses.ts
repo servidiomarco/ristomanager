@@ -28,12 +28,49 @@ export const isOffSequenceCourse = (n: number): boolean =>
 
 const ORDINALS = ['', '1ª', '2ª', '3ª', '4ª', '5ª', '6ª'];
 
+/* Le etichette delle uscite si traducono QUI, una volta, e da qui le prendono
+ * il palmare, le colonne delle uscite, i chip, il monitor di cucina e il
+ * passe: sono la stessa parola sulla stessa comanda, e una divergenza fra due
+ * schermi che il cameriere guarda di fila si nota subito.
+ *
+ * `t` arriva come parametro perché queste sono funzioni pure, chiamate anche
+ * da moduli di vista senza hook — lo stesso contratto di reservationState.tsx.
+ * Senza `t` si resta in italiano: è la lingua in cui l'applicazione è nata, e
+ * un chiamante dimenticato deve leggersi, non sparire.
+ *
+ * Gli ordinali sono chiavi esplicite e non una formula: in italiano è il
+ * femminile di «uscita» (1ª), in inglese è irregolare (1st, 2nd, 3rd, 4th).
+ */
+type TFunc = (key: string, defaultValue: string, options?: Record<string, unknown>) => string;
+
 /** «1ª»…«6ª», «Bar» e «Dolci» per le uscite fuori numerazione; oltre il 6 il
  *  numero nudo (non esprimibile dal palmare, ma un client sbagliato non deve
  *  rompere nulla). */
-export const ordinal = (n: number): string =>
-    isBarCourse(n) ? 'Bar' : isDessertCourse(n) ? 'Dolci' : ORDINALS[n] ?? `${n}ª`;
+export const ordinal = (n: number, t?: TFunc): string => {
+    if (isBarCourse(n)) return t ? t('courses.bar', 'Bar') : 'Bar';
+    if (isDessertCourse(n)) return t ? t('courses.dessert', 'Dolci') : 'Dolci';
+    const it = ORDINALS[n] ?? `${n}ª`;
+    return t && n >= 1 && n <= 6 ? t(`courses.ord${n}`, it) : it;
+};
 
 /** «1ª uscita» … «6ª uscita», «Bar», «Dolci». */
-export const courseLabel = (n: number): string =>
-    isBarCourse(n) ? 'Bar' : isDessertCourse(n) ? 'Dolci' : `${ordinal(n)} uscita`;
+export const courseLabel = (n: number, t?: TFunc): string => {
+    if (isBarCourse(n) || isDessertCourse(n)) return ordinal(n, t);
+    const ord = ordinal(n, t);
+    return t ? t('courses.label', '{{ord}} uscita', { ord }) : `${ord} uscita`;
+};
+
+/** Come `courseLabel` ma stretta, per il monitor di cucina: «1ª usc.». */
+export const courseLabelShort = (n: number, t?: TFunc): string => {
+    if (isBarCourse(n) || isDessertCourse(n)) return ordinal(n, t);
+    const ord = ordinal(n, t);
+    return t ? t('courses.labelShort', '{{ord}} usc.', { ord }) : `${ord} usc.`;
+};
+
+/** «Uscita Bar» / «Uscita Dolci» / «1ª uscita»: la forma lunga che cucina e
+ *  passe mettono in testa alla colonna, dove il nome deve stare da solo. */
+export const courseLabelLong = (n: number, t?: TFunc): string => {
+    if (isBarCourse(n)) return t ? t('courses.barLong', 'Uscita Bar') : 'Uscita Bar';
+    if (isDessertCourse(n)) return t ? t('courses.dessertLong', 'Uscita Dolci') : 'Uscita Dolci';
+    return courseLabel(n, t);
+};

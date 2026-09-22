@@ -163,7 +163,7 @@ export const CourseList: React.FC<CourseListProps> = ({
               isDropTarget ? 'ring-2 ring-[var(--ds-action-bg)] border-transparent' : ''
             }`}
           >
-            <Plus size={16} aria-hidden /> {courseLabel(n)}
+            <Plus size={16} aria-hidden /> {courseLabel(n, t)}
           </button>
         );
       }
@@ -210,7 +210,7 @@ export const CourseList: React.FC<CourseListProps> = ({
                 type="button"
                 onClick={() => onMoveCourse!(n)}
                 disabled={busy}
-                aria-label={`Sposta la ${courseLabel(n)} su un'altra uscita`}
+                aria-label={t('moveCourseAria', { uscita: courseLabel(n, t) })}
                 title={t('pickCourseHint')}
                 {...grip({ kind: 'course', from: n, count: draftRows.length + serverRows.filter(i => i.status === 'DRAFT').length })}
                 className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] ring-1 ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
@@ -231,7 +231,7 @@ export const CourseList: React.FC<CourseListProps> = ({
               {/* La spunta sull'uscita servita: quella card è finita, e si
                   riconosce senza leggere lo stato dall'altra parte. */}
               {status === 'SERVED' && <Check size={14} aria-hidden />}
-              {courseLabel(n)}
+              {courseLabel(n, t)}
             </button>
           </span>
           {(sent || serverRows.length > 0 || draftRows.length > 0) && (
@@ -464,7 +464,9 @@ export const SendFooter: React.FC<SendFooterProps> = ({
       className="inline-flex h-14 w-full items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-6 text-[17px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
     >
       {busy ? <Loader2 size={18} className="animate-spin" aria-hidden /> : <Send size={18} aria-hidden />}
-      {courseCount === 0 ? `Invia ${courseLabel(course)}` : `Invia ${courseLabel(course)} · ${euro(courseTotal)}`}
+      {courseCount === 0
+        ? t('sendCourse', { uscita: courseLabel(course, t) })
+        : t('sendCourseTotal', { uscita: courseLabel(course, t), importo: euro(courseTotal) })}
     </button>
     {/* «Invia tutto» resta, e resta alla sua condizione di sempre: compare
         solo se ci sono bozze FUORI dall'uscita corrente, altrimenti sarebbe
@@ -505,7 +507,7 @@ export const SendFooter: React.FC<SendFooterProps> = ({
           className="-my-1.5 -ml-1.5 min-w-0 flex-1 rounded-[var(--ds-radius)] p-1.5 text-left transition-colors hover:bg-[var(--ds-surface-row)] active:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
         >
           <span className="flex items-center gap-1.5 text-[13px] text-[var(--ds-text-muted)]">
-            <span className="truncate">{courseLabel(course)} · da inviare</span>
+            <span className="truncate">{t('courseToSend', { uscita: courseLabel(course, t) })}</span>
             <ChevronUp size={15} className="flex-shrink-0" aria-hidden />
           </span>
           <span className="block text-[22px] font-semibold tabular-nums tracking-[-0.015em] text-[var(--ds-text-primary)]">
@@ -515,7 +517,7 @@ export const SendFooter: React.FC<SendFooterProps> = ({
       ) : (
         <div className="min-w-0 flex-1">
           <div className="truncate text-[13px] text-[var(--ds-text-muted)]">
-            Da inviare · {courseLabel(course)}
+            {t('toSendCourse', { uscita: courseLabel(course, t) })}
           </div>
           <div className="text-[22px] font-semibold tabular-nums tracking-[-0.015em] text-[var(--ds-text-primary)]">
             {euro(courseTotal)}

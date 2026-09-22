@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { isBarCourse, isDessertCourse, ordinal } from '../utils/courses';
+import { courseLabelLong, ordinal } from '../utils/courses';
 import { BarChart3, Bell, BellOff, Check, Loader2, Play, RotateCcw, TriangleAlert, WifiOff } from 'lucide-react';
 import { useNow } from '../hooks/useNow';
 import { useSalaNodeStale, formatStaleAsOf } from '../hooks/useSalaNodeStale';
@@ -25,8 +25,6 @@ import { moneyIntl } from '../utils/displayMoney';
 // se ne accorgerebbe da solo.
 // ---------------------------------------------------------------------------
 
-// «1ª uscita» … e «Uscita Bar» (utils/courses): femminile di «uscita» salvo.
-const courseName = (n: number): string => isBarCourse(n) ? 'Uscita Bar' : isDessertCourse(n) ? 'Uscita Dolci' : `${ordinal(n)} uscita`;
 const SOUND_KEY = 'passe.sound';
 
 const mmss = (seconds: number): string => {
@@ -254,7 +252,7 @@ export const ExpediterDisplay: React.FC = () => {
                       T{s.table_name ?? '—'}
                     </span>
                     <span className="min-w-0 flex-1 truncate text-[13px] text-[var(--ds-text-muted)]">
-                      {courseName(s.course_no)} · servita da {mmss(agoS)}
+                      {t('servedAgo', { uscita: courseLabelLong(s.course_no, t), tempo: mmss(agoS) })}
                     </span>
                     <button
                       type="button"
@@ -287,6 +285,7 @@ const CourseRow: React.FC<{
   onCall?: () => void;
   onServe?: () => void;
 }> = ({ course: c, stations, stationLabel, busyKey, called, onFire, onRefire, onCall, onServe }) => {
+  const { t } = useTranslation('comande', { useSuspense: false });
   const key = `${c.order_id}:${c.course_no}`;
   const busy = busyKey === key;
   const allReady = c.status === 'READY';
@@ -309,7 +308,7 @@ const CourseRow: React.FC<{
           T{c.table_name ?? '—'}
         </div>
         <div className="text-[13px] text-[var(--ds-text-muted)]">
-          {courseName(c.course_no)}
+          {courseLabelLong(c.course_no, t)}
         </div>
       </div>
 

@@ -167,7 +167,7 @@ export const ComandaSheet: React.FC<ComandaSheetProps> = ({
         className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-5 text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
       >
         <RefreshCw size={17} aria-hidden />
-        Ripeti tutto nella {ordinal(course)} uscita
+        {t('repeatAllInCourse', { uscita: courseLabel(course, t) })}
       </button>
     </>
   ) : undefined;
@@ -248,9 +248,9 @@ export const ComandaSheet: React.FC<ComandaSheetProps> = ({
                       {/* Dove è già uscito e quanto costa il singolo: le due
                           cose che servono per decidere se rifarlo. */}
                       <div className="truncate text-[13px] text-[var(--ds-text-muted)]">
-                        {l.courses.map(ordinal).join(' · ')} uscita
+                        {t('firedIn', { uscite: l.courses.map(n => ordinal(n, t)).join(' · ') })}
                         {l.modifier_labels.length > 0 && ` · ${l.modifier_labels.join(', ')}`}
-                        {' · '}{euro(l.unit_cents)} cad.
+                        {' · '}{t('eachPrice', { importo: euro(l.unit_cents) })}
                       </div>
                     </div>
                     <span className="flex-shrink-0 text-[15px] tabular-nums text-[var(--ds-text-muted)]">
@@ -260,8 +260,8 @@ export const ComandaSheet: React.FC<ComandaSheetProps> = ({
                       type="button"
                       onClick={() => onRepeat(l, l.qty)}
                       disabled={busy || l.dish === null}
-                      title={l.dish === null ? 'Il piatto non è più a menu' : undefined}
-                      aria-label={`Ripeti ${l.qty}× ${l.name} nella ${courseLabel(course)}`}
+                      title={l.dish === null ? t('dishOffMenu') : undefined}
+                      aria-label={t('repeatLineAria', { qty: l.qty, piatto: l.name, uscita: courseLabel(course, t) })}
                       className="inline-flex h-11 flex-shrink-0 items-center gap-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-3 text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     >
                       + {l.qty}×
