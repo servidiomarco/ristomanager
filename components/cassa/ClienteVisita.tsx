@@ -40,9 +40,9 @@ export const ClienteVisita: React.FC<ClienteVisitaProps> = ({
     <Sheet
       open={open}
       onClose={onClose}
-      ariaLabel="Cliente della visita"
+      ariaLabel={t('visitCustomerAria')}
       title={t('visitCustomer')}
-      subtitle={`Tavolo ${tableName} · ${hasCustomer ? 'dalla prenotazione' : 'walk-in'}`}
+      subtitle={t('visitSubtitle', { tavolo: tableName, origine: t(hasCustomer ? 'fromBooking' : 'walkInLower') })}
       bodyClassName="space-y-3 px-4 pb-5 pt-4 sm:px-5"
     >
       {error && <Callout tone="critical">{error}</Callout>}
@@ -86,7 +86,7 @@ export const ClienteVisita: React.FC<ClienteVisitaProps> = ({
               disabled={busy}
               className="inline-flex h-11 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
             >
-              Cambia cliente
+              {t('changeCustomer')}
             </button>
             <button
               type="button"
@@ -95,22 +95,21 @@ export const ClienteVisita: React.FC<ClienteVisitaProps> = ({
               className="inline-flex h-11 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
             >
               {busy ? <Loader2 size={14} className="mr-1.5 animate-spin" /> : null}
-              Rimuovi
+              {t('removeWord')}
             </button>
             <button
               type="button"
               onClick={() => onOpenProfile(null)}
               className="inline-flex h-11 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)]"
             >
-              Apri profilo <ExternalLink size={14} aria-hidden />
+              {t('openProfile')} <ExternalLink size={14} aria-hidden />
             </button>
           </div>
         </>
       ) : (
         <>
           <Callout tone="info">
-            Nessun cliente sulla visita. Si può incassare così: il cliente serve per
-            la fattura e per lo storico.
+            {t('noCustomerOnVisit')}
           </Callout>
 
           <button
@@ -120,12 +119,11 @@ export const ClienteVisita: React.FC<ClienteVisitaProps> = ({
             className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
           >
             {busy ? <Loader2 size={16} className="animate-spin" /> : <UserPlus size={16} aria-hidden />}
-            Associa un cliente
+            {t('linkACustomer')}
           </button>
 
           <p className="text-center text-[12px] text-[var(--ds-text-muted)]">
-            Associare crea una visita walk-in per questo servizio e vi collega il
-            cliente. Il tavolo non resta legato a lui.
+            {t('linkingHint')}
           </p>
 
           <button
@@ -133,7 +131,7 @@ export const ClienteVisita: React.FC<ClienteVisitaProps> = ({
             onClick={onClose}
             className="inline-flex h-11 w-full items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[14px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)]"
           >
-            Prosegui anonimo
+            {t('continueAnonymous')}
           </button>
         </>
       )}

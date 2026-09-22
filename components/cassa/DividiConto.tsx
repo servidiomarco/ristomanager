@@ -108,7 +108,7 @@ export const DividiConto: React.FC<DividiContoProps> = ({
           <button
             type="button"
             onClick={onBack}
-            aria-label="Torna al pagamento"
+            aria-label={t('backToPayment')}
             className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)]"
           >
             <ArrowLeft className="h-4 w-4" />
@@ -133,10 +133,10 @@ export const DividiConto: React.FC<DividiContoProps> = ({
                 : 'bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] hover:bg-[var(--ds-surface-row)]'
             }`}
           >
-            <div className="text-[16px] font-semibold text-[var(--ds-text-primary)]">In parti uguali</div>
-            <div className="mt-0.5 text-[13px] text-[var(--ds-text-muted)]">scegli il numero di persone</div>
+            <div className="text-[16px] font-semibold text-[var(--ds-text-primary)]">{t('equalParts')}</div>
+            <div className="mt-0.5 text-[13px] text-[var(--ds-text-muted)]">{t('pickPeopleCount')}</div>
             <div className="mt-2 text-[13px] font-medium text-[var(--ds-arriving-text)]">
-              {parts} quote da {euro(perPart)}
+              {t('partsOf', { parti: parts, importo: euro(perPart) })}
             </div>
           </button>
 
@@ -167,11 +167,11 @@ export const DividiConto: React.FC<DividiContoProps> = ({
               }`}
             >
               <div className="text-[16px] font-semibold text-[var(--ds-text-primary)]">{t('byDishes')}</div>
-              <div className="mt-0.5 text-[13px] text-[var(--ds-text-muted)]">spunta cosa ha preso</div>
+              <div className="mt-0.5 text-[13px] text-[var(--ds-text-muted)]">{t('tickWhatTheyHad')}</div>
               <div className="mt-2 text-[13px] font-medium text-[var(--ds-arriving-text)]">
                 {pickedCount > 0
-                  ? `${pickedCount} ${pickedCount === 1 ? 'piatto' : 'piatti'} · ${euro(pickedSum)}`
-                  : 'come dal QR al tavolo'}
+                  ? t('pickedDishes', { count: pickedCount, importo: euro(pickedSum) })
+                  : t('likeTableQr')}
               </div>
             </button>
           )}
@@ -180,13 +180,13 @@ export const DividiConto: React.FC<DividiContoProps> = ({
         <section className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
           {mode === 'equal' ? (
             <div className="flex items-center gap-3">
-              <span className="text-[14px] text-[var(--ds-text-secondary)]">Persone</span>
+              <span className="text-[14px] text-[var(--ds-text-secondary)]">{t('people')}</span>
               <div className="flex items-center gap-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-2 py-1">
                 <button
                   type="button"
                   onClick={() => setParts(p => Math.max(2, p - 1))}
                   disabled={parts <= 2}
-                  aria-label="Una persona in meno"
+                  aria-label={t('onePersonLess')}
                   className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
                 >
                   <Minus size={14} />
@@ -220,7 +220,7 @@ export const DividiConto: React.FC<DividiContoProps> = ({
                         <span className="block truncate text-[14px] font-medium text-[var(--ds-text-secondary)]">
                           {it.qty > 1 ? `${it.qty}× ` : ''}{it.name}
                         </span>
-                        <span className="block text-[12px] text-[var(--ds-text-muted)]">già pagata</span>
+                        <span className="block text-[12px] text-[var(--ds-text-muted)]">{t('alreadyPaidShare')}</span>
                       </span>
                       <span className="flex-shrink-0 text-[13px] tabular-nums text-[var(--ds-text-muted)]">
                         {euro(it.unit_price_cents * it.qty)}
@@ -254,7 +254,7 @@ export const DividiConto: React.FC<DividiContoProps> = ({
                           {remaining > 1 ? `${remaining}× ` : ''}{it.name}
                         </span>
                         <span className="block text-[12px] tabular-nums text-[var(--ds-text-muted)]">
-                          {euro(it.unit_price_cents)}{remaining > 1 ? ' l’uno' : ''}{taken > 0 ? ` · ${taken} già ${taken === 1 ? 'pagato' : 'pagati'}` : ''}
+                          {euro(it.unit_price_cents)}{remaining > 1 ? t('each') : ''}{taken > 0 ? t('takenUnits', { count: taken }) : ''}
                         </span>
                       </span>
                     </button>
@@ -264,7 +264,7 @@ export const DividiConto: React.FC<DividiContoProps> = ({
                           type="button"
                           onClick={() => bump(ix, -1)}
                           disabled={units <= 0}
-                          aria-label={`Un ${it.name} in meno`}
+                          aria-label={t('oneLessNamed', { piatto: it.name })}
                           className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
                         >
                           <Minus size={14} />
@@ -276,7 +276,7 @@ export const DividiConto: React.FC<DividiContoProps> = ({
                           type="button"
                           onClick={() => bump(ix, 1)}
                           disabled={units >= remaining}
-                          aria-label={`Un ${it.name} in più`}
+                          aria-label={t('oneMoreNamed', { piatto: it.name })}
                           className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
                         >
                           <Plus size={14} />
@@ -290,7 +290,7 @@ export const DividiConto: React.FC<DividiContoProps> = ({
           ) : (
             <label className="block">
               <span className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">
-                Quanto paga adesso
+                {t('howMuchNow')}
               </span>
               <div className="relative">
                 <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[17px] text-[var(--ds-text-muted)]">{moneySymbol()}</span>
@@ -319,7 +319,7 @@ export const DividiConto: React.FC<DividiContoProps> = ({
               disabled={chosen <= 0}
               className="inline-flex h-11 flex-shrink-0 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-5 text-[15px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
             >
-              Scegli metodo
+              {t('pickMethod')}
             </button>
           </div>
         </section>
@@ -332,17 +332,17 @@ export const DividiConto: React.FC<DividiContoProps> = ({
             {bill.paid_splits > 0 && (
               <div className="flex items-center justify-between gap-2 rounded-[var(--ds-radius)] bg-[var(--ds-seated-tint)] px-3 py-2.5">
                 <span className="min-w-0 truncate text-[14px] text-[var(--ds-seated-text)]">
-                  {bill.paid_splits === 1 ? '1 quota pagata al tavolo col QR' : `${bill.paid_splits} quote pagate al tavolo col QR`}
+                  {t('paidShares', { count: bill.paid_splits })}
                 </span>
-                <StatusPill tone="positive">bloccata</StatusPill>
+                <StatusPill tone="positive">{t('locked')}</StatusPill>
               </div>
             )}
             {claimed > 0 && (
               <div className="flex items-center justify-between gap-2 rounded-[var(--ds-radius)] bg-[var(--ds-pending-tint)] px-3 py-2.5">
                 <span className="min-w-0 truncate text-[14px] text-[var(--ds-pending-text)]">
-                  {euro(claimed)} prenotati dal telefono di un ospite
+                  {t('claimedByGuest', { importo: euro(claimed) })}
                 </span>
-                <StatusPill tone="pending">scade da sola</StatusPill>
+                <StatusPill tone="pending">{t('expiresAlone')}</StatusPill>
               </div>
             )}
             {deposit > 0 && (
@@ -350,11 +350,11 @@ export const DividiConto: React.FC<DividiContoProps> = ({
               // cliente: sta in fondo, come nota, non in mezzo alle altre.
               <div className="flex items-center justify-between gap-2 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3 py-2.5">
                 <span className="min-w-0 truncate text-[14px] text-[var(--ds-text-secondary)]">
-                  Caparra della prenotazione
+                  {t('bookingDepositLong')}
                 </span>
                 <span className="flex items-center gap-2">
                   <span className="text-[14px] tabular-nums text-[var(--ds-text-secondary)]">{euro(deposit)}</span>
-                  <StatusPill tone="neutral">a credito</StatusPill>
+                  <StatusPill tone="neutral">{t('asCredit')}</StatusPill>
                 </span>
               </div>
             )}
