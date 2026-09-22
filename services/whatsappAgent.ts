@@ -60,6 +60,10 @@ export interface AgentContext {
     /** Numero di telefono in formato leggibile, per i parametri degli strumenti. */
     phone: string;
     knowledge: Array<{ title: string; content: string }>;
+    /** Fuso del locale: è l'orologio su cui il modello risolve «domani» e
+     *  «venerdì». A Roma per difetto — un default sbagliato qui fa
+     *  prenotare il giorno prima. */
+    timezone?: string;
     largeGroupThreshold: number;
     restaurantName?: string;
     /**
@@ -187,21 +191,22 @@ const declarations = (threshold: number): Anthropic.Tool[] => ([
 // Prompt
 // ---------------------------------------------------------------------------
 
-const fmtDate = (d: Date | string | null | undefined): string => {
+const fmtDate = (d: Date | string | null | undefined, tz: string = 'Europe/Rome'): string => {
     if (!d) return '';
     const dt = typeof d === 'string' ? new Date(d) : d;
     if (Number.isNaN(dt.getTime())) return '';
     return dt.toLocaleString('it-IT', {
-        timeZone: 'Europe/Rome', weekday: 'long', day: '2-digit', month: '2-digit',
+        timeZone: tz, weekday: 'long', day: '2-digit', month: '2-digit',
         year: 'numeric', hour: '2-digit', minute: '2-digit',
     });
 };
 
 function buildSystem(ctx: AgentContext): string {
+    const tz = ctx.timezone || 'Europe/Rome';
     const oggi = new Date().toLocaleDateString('it-IT', {
-        timeZone: 'Europe/Rome', weekday: 'long', year: 'numeric', month: '2-digit', day: '2-digit',
+        timeZone: tz, weekday: 'long', year: 'numeric', month: '2-digit', day: '2-digit',
     });
-    const iso = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Rome' }); // YYYY-MM-DD
+    const iso = new Date().toLocaleDateString('sv-SE', { timeZone: tz }); // YYYY-MM-DD
     const regole = ctx.knowledge.length
         ? ctx.knowledge.map(k => `- ${k.title}: ${k.content}`).join('\n')
         : '(nessuna regola inserita)';
@@ -211,7 +216,7 @@ function buildSystem(ctx: AgentContext): string {
     const pren = ctx.reservation
         ? [
             `- Cliente: ${ctx.reservation.customer_name || 'n/d'}`,
-            `- Quando: ${fmtDate(ctx.reservation.reservation_time) || 'n/d'}`,
+            `- Quando: ${fmtDate(ctx.reservation.reservation_time, tz) || 'n/d'}`,
             `- Persone: ${ctx.reservation.guests ?? 'n/d'}`,
             ctx.reservation.room_name ? `- Sala: ${ctx.reservation.room_name}` : '',
             ctx.reservation.status ? `- Stato: ${ctx.reservation.status}` : '',
@@ -437,8 +442,11 @@ export interface ExtractedBooking {
 
 export async function extractBooking(input: {
     phone: string;
-    /** Oggi in Europe/Rome (YYYY-MM-DD), per risolvere "sabato 29", "domani". */
+    /** Oggi nel fuso del locale (YYYY-MM-DD), per risolvere "sabato 29",
+     *  "domani". Il nome resta todayRome: è la stessa cosa per il Frantoio. */
     todayRome: string;
+    /** Fuso del locale, solo per dirlo al modello nel prompt. */
+    timezone?: string;
     messages: Array<{ direction: 'inbound' | 'outbound'; body: string }>;
 }): Promise<{ args: ExtractedBooking | null; usage: AgentUsage }> {
     const apiKey = (process.env.ANTHROPIC_API_KEY || '').trim();
@@ -460,7 +468,7 @@ export async function extractBooking(input: {
     while (messages.length && messages[messages.length - 1].role !== 'user') messages.pop();
     if (messages.length === 0) return { args: null, usage };
 
-    const system = `Estrai i dati di UNA prenotazione dai messaggi del cliente e chiama create_reservation con i campi che riesci a ricavare. Oggi è ${input.todayRome} (fuso Europe/Rome). Regole:
+    const system = `Estrai i dati di UNA prenotazione dai messaggi del cliente e chiama create_reservation con i campi che riesci a ricavare. Oggi è ${input.todayRome} (fuso ${input.timezone || 'Europe/Rome'}). Regole:
 - date: formato YYYY-MM-DD, risolvendo le espressioni relative ("sabato 29", "domani", "questo venerdì") rispetto a oggi.
 - time: formato HH:MM 24h. Un orario serale scritto informale come "7:30"/"7.30"/"half seven" per cena è le 19:30; "8" di sera è 20:00. A pranzo l'orario resta com'è.
 - shift: LUNCH se l'orario cade fra le 11 e le 16, altrimenti DINNER.

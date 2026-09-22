@@ -4,6 +4,7 @@ import { Ban, Check, Copy, ExternalLink, Loader2 } from 'lucide-react';
 import type { PaymentRequest } from '../../types';
 import { StatusPill } from '../ds';
 import type { PillTone } from '../ds';
+import { sessionTimeZone } from '../../utils/displayTime';
 
 /* ── Una richiesta di acconto già inviata ─────────────────────────────────
    Amount first, then what it was for: scanning this list is asking "did the
@@ -45,7 +46,7 @@ export const PaymentRequestRow: React.FC<{
   const when = (() => {
     try {
       return new Date(request.created_at).toLocaleString('it-IT', {
-        timeZone: 'Europe/Rome', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+        timeZone: sessionTimeZone(), day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
       });
     } catch {
       return '';

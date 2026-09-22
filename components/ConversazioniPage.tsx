@@ -25,6 +25,7 @@ import {
   dsButton, dsTextarea, dsIconButton,
 } from './ds';
 import type { PillTone } from './ds';
+import { sessionTimeZone } from '../utils/displayTime';
 
 const formatDuration = (secs: number | null | undefined): string => {
   if (secs == null || !Number.isFinite(secs) || secs < 0) return '—';
@@ -40,7 +41,7 @@ const formatDateTime = (iso: string | null | undefined): string => {
     // the app from a different timezone (e.g. on holiday) — otherwise the
     // reservation and call times would drift by the offset.
     return new Date(iso).toLocaleString('it-IT', {
-      timeZone: 'Europe/Rome',
+      timeZone: sessionTimeZone(),
       day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
     });
   } catch {

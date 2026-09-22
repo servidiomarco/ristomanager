@@ -531,3 +531,92 @@ describe('fuso per tenant — il fuso della sessione nel client', () => {
         setSessionTimeZone(null);
     });
 });
+
+describe('fuso per tenant — «oggi» e il fuso che arriva alle pagine pubbliche', () => {
+    const ADMIN_HEADER = { 'X-Platform-Admin-Token': 'test-platform-token' };
+    const SLUG_DUBAI = 'dubai-formattatori-tz';
+    const EMAIL = 'owner.formattatori.tz@example.com';
+    let db: Client;
+    let dubaiId = 0;
+    let dubaiToken = '';
+    let roma = '';
+
+    /** Il giorno di calendario in un fuso, calcolato qui con Intl. */
+    const giornoIn = (tz: string) =>
+        new Date().toLocaleDateString('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' });
+
+    beforeAll(async () => {
+        roma = await ownerToken();
+        db = new Client({ connectionString: process.env.DATABASE_URL || 'postgresql://localhost/ristotest_api' });
+        await db.connect();
+
+        // Dubai invece di Londra: UTC+4 fisso, nessun cambio d'ora, e due o tre
+        // ore al giorno in cui il calendario è già quello dopo rispetto a Roma.
+        const creato = await api().post('/admin/tenants').set(ADMIN_HEADER).send({
+            slug: SLUG_DUBAI, name: 'Mill Dubai', timezone: 'Asia/Dubai',
+            owner_email: EMAIL, owner_full_name: 'Dubai Owner',
+        });
+        expect(creato.status).toBe(201);
+        dubaiId = Number(creato.body.tenant?.id ?? creato.body.id);
+        await db.query('UPDATE tenants SET timezone = $1 WHERE id = $2', ['Asia/Dubai', dubaiId]);
+        // Il permesso che la chiusura di cassa esige: come per Reportistica,
+        // il ruolo seminato dal provisioning non lo porta.
+        await db.query(
+            `INSERT INTO role_permissions (tenant_id, role, permission) VALUES ($1, 'OWNER', 'payments:view')
+             ON CONFLICT DO NOTHING`,
+            [dubaiId]
+        ).catch(() => {});
+        const login = await api().post('/auth/login').send({
+            email: EMAIL, password: String(creato.body.owner_temp_password),
+        });
+        expect(login.status).toBe(200);
+        dubaiToken = login.body.accessToken;
+    });
+
+    afterAll(async () => {
+        if (!db) return;
+        try {
+            for (const t of ['activity_logs', 'user_sessions', 'app_settings', 'tenant_tokens', 'users', 'tenant_features', 'role_permissions']) {
+                await db.query(`DELETE FROM ${t} WHERE tenant_id = $1`, [dubaiId]).catch(() => {});
+            }
+            await db.query('DELETE FROM tenants WHERE id = $1', [dubaiId]);
+        } finally {
+            await db.end();
+        }
+    });
+
+    it('la pagina di prenotazione riceve il fuso del ristorante', async () => {
+        // Senza questo campo prenota.html calcolava «oggi» su Roma cablata:
+        // a Dubai il calendario apriva un giorno indietro per tre ore ogni sera.
+        const dubai = await api().get(`/public/${SLUG_DUBAI}/contact`);
+        expect(dubai.status).toBe(200);
+        expect(dubai.body.timezone).toBe('Asia/Dubai');
+
+        const frantoio = await api().get('/public/contact');
+        expect(frantoio.status).toBe(200);
+        expect(frantoio.body.timezone).toBe('Europe/Rome');
+    });
+
+    it('la pagina d\'asporto riceve il fuso del ristorante', async () => {
+        const dubai = await api().get(`/public/${SLUG_DUBAI}/takeaway/info`);
+        expect(dubai.status).toBe(200);
+        expect(dubai.body.timezone).toBe('Asia/Dubai');
+
+        const frantoio = await api().get('/public/takeaway/info');
+        expect(frantoio.status).toBe(200);
+        expect(frantoio.body.timezone).toBe('Europe/Rome');
+    });
+
+    it('la chiusura di cassa senza data sceglie il giorno del ristorante', async () => {
+        // L'asserzione è esatta tutto l'anno: ciascun tenant deve tornare il
+        // PROPRIO giorno di calendario. Nelle ore in cui Roma e Dubai non sono
+        // sullo stesso giorno, una Roma cablata fallirebbe qui.
+        const dubai = await api().get('/reports/cash-closure').set(bearer(dubaiToken));
+        expect(dubai.status).toBe(200);
+        expect(dubai.body.date).toBe(giornoIn('Asia/Dubai'));
+
+        const frantoio = await api().get('/reports/cash-closure').set(bearer(roma));
+        expect(frantoio.status).toBe(200);
+        expect(frantoio.body.date).toBe(giornoIn('Europe/Rome'));
+    });
+});

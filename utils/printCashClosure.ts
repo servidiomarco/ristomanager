@@ -1,5 +1,6 @@
 import type { CashSessionView } from '../types';
 import { printHtmlDocument, PRINT_TOKENS_CSS } from './printDocument';
+import { sessionTimeZone } from './displayTime';
 
 /* ── Il riepilogo di cassa, stampato ──────────────────────────────────────
    Il foglio che si mette nel raccoglitore a fine servizio, accanto al
@@ -46,7 +47,7 @@ const time = (iso: string | null): string => {
   if (!iso) return '';
   try {
     return new Date(iso).toLocaleTimeString('it-IT', {
-      timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit',
+      timeZone: sessionTimeZone(), hour: '2-digit', minute: '2-digit',
     });
   } catch { return ''; }
 };

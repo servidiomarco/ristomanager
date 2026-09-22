@@ -660,6 +660,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-22 | Funzionalità trasversali; Asporto; Sofia; Messaggi | «Oggi» e l'ora seguono l'orologio del ristorante anche negli ultimi punti che restavano su Roma: servizio corrente della cassa, orari di ritiro dell'asporto, pagine pubbliche di prenotazione e ordine, chiusura di cassa, report, notifiche push, richieste di caparra e le date che Sofia e gli agenti di WhatsApp ed email leggono per risolvere «domani». Il registro fiscale resta sulla giornata italiana: è un documento per l'Agenzia delle Entrate. |
 | 2026-09-21 | Funzionalità trasversali | Un ristorante con un fuso orario diverso da quello italiano vede ora le proprie date e ore in tutta l app: liste, pianta, cassa, report e messaggi al cliente seguono l orologio del locale. |
 | 2026-09-21 | Sala & Tavoli; Messaggi | Con la lingua inglese parlano inglese la pianta della sala (strumenti, chiusure, legenda, avvisi di sovrapposizione) e la pagina Messaggi (lista, conversazione, allegati, proposta dell agente). |
 | 2026-09-21 | Prenotazioni | Con la lingua inglese la pagina Prenotazioni è in inglese: la lista e le sue righe, la mappa dei tavoli con la legenda, il modal in tre passi, il conto al tavolo, il foglio di conferma, l'email libera e i pannelli degli avvisi. |

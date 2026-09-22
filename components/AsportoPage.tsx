@@ -47,6 +47,7 @@ import {
   dsTextarea,
   useMediaQuery,
 } from './ds';
+import { sessionTimeZone } from '../utils/displayTime';
 
 /* ===========================================================================
    Asporto — la board del banco.
@@ -74,7 +75,7 @@ interface AsportoPageProps {
 
 /** Oggi in Italia, qualunque sia il fuso del dispositivo. */
 const todayIso = (): string =>
-  new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome' }).format(new Date());
+  new Intl.DateTimeFormat('en-CA', { timeZone: sessionTimeZone() }).format(new Date());
 
 const dateLabel = (iso: string): string => {
   if (iso === todayIso()) return 'Oggi';

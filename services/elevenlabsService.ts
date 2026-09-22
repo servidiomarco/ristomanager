@@ -3,7 +3,8 @@ import type { Request } from 'express';
 import { queryWithRetry } from '../db.js';
 import { outboxEnqueueInTx, withOutboxTx } from './outboxService.js';
 import { Shift, ReservationSource } from '../types.js';
-import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime.js';
+import { getDatePartInTz, getTimePartInTz } from '../utils/reservationTime.js';
+import { getTenantLocale } from './tenantLocale.js';
 import { spokenFirstName, phoneLast10Variants } from '../utils/text.js';
 import { getAvailableSlots } from '../utils/slots.js';
 import { getCappedRoomIds, pickSelfServiceTable, isTableStillAssignable } from './roomOccupancyService.js';
@@ -140,11 +141,11 @@ function toIsoDate(y: number, mo: number, d: number): string | null {
     return `${String(y).padStart(4, '0')}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 }
 
-// Today in Europe/Rome (server may run in UTC on Railway). Returned as a
-// UTC-anchored Date at 00:00Z so arithmetic on it stays trivial.
-function getRomeTodayUtc(): Date {
+// Oggi nel fuso del locale (il server può girare in UTC su Railway).
+// Restituito come Date ancorata a 00:00Z così l'aritmetica resta banale.
+function getRomeTodayUtc(tz: string = 'Europe/Rome'): Date {
     const parts = new Intl.DateTimeFormat('en-CA', {
-        timeZone: 'Europe/Rome',
+        timeZone: tz,
         year: 'numeric', month: '2-digit', day: '2-digit',
     }).formatToParts(new Date());
     const y = parts.find(p => p.type === 'year')!.value;
@@ -176,7 +177,7 @@ export function formatItalianDateReadback(iso: string, language?: string | null)
     return `${weekday} ${d} ${month}`;
 }
 
-export function parseFlexibleDate(input: unknown): string | null {
+export function parseFlexibleDate(input: unknown, tz: string = 'Europe/Rome'): string | null {
     if (typeof input !== 'string') return null;
     const s = input.trim();
     if (!s) return null;
@@ -229,7 +230,7 @@ export function parseFlexibleDate(input: unknown): string | null {
     // The agent is instructed to pass these verbatim instead of doing the
     // date math itself — LLMs are unreliable at weekday↔date arithmetic.
     const lower = s.toLowerCase();
-    const today = getRomeTodayUtc();
+    const today = getRomeTodayUtc(tz);
 
     // "day after tomorrow" must be checked before "tomorrow".
     if (/\bdopodomani\b/.test(lower) || /\bday\s+after\s+tomorrow\b/.test(lower)) {
@@ -636,8 +637,9 @@ async function findSecondSeatingSlot(
 // isn't offered lunch "of the same day" — lunch has long ended. Only ever
 // true for today; future dates are never "over".
 async function isShiftAlreadyOverToday(tenantId: number, date: string, shift: Shift): Promise<boolean> {
-    if (date !== getRomeDatePart(new Date())) return false;
-    const nowTime = getRomeTimePart(new Date()); // HH:MM, 24h Rome
+    const tz = (await getTenantLocale(tenantId)).timezone;
+    if (date !== getDatePartInTz(new Date(), tz)) return false;
+    const nowTime = getTimePartInTz(new Date(), tz); // HH:MM, 24h nel fuso del locale
     const slots = await getAvailableSlots(tenantId, date, shift);
     // Zero-padded 24h strings compare correctly lexicographically. Empty slot
     // list (shift closed that weekday) → nothing left to offer.
@@ -1176,9 +1178,9 @@ export async function cancelVoiceReservation(
  * Example: "Cancellazione confermata Mario, prenotazione di giovedì 14 maggio
  * alle 20:30 annullata. Le invieremo conferma su WhatsApp."
  */
-export function formatItalianCancellation(r: CancelCandidate, language?: string | null): string {
+export function formatItalianCancellation(r: CancelCandidate, language?: string | null, tz?: string): string {
     const english = isEnglishVoice(language);
-    const rome = romeWallClock(r.reservation_time, english);
+    const rome = romeWallClock(r.reservation_time, english, tz);
     const firstName = spokenFirstName(r.customer_name);
     if (english) {
         return `Cancellation confirmed ${firstName}, your reservation for ${rome.weekday} ${rome.day} ${rome.month} at ${rome.hh}:${rome.mm} has been cancelled. We will send you a confirmation on WhatsApp.`;
@@ -1186,14 +1188,14 @@ export function formatItalianCancellation(r: CancelCandidate, language?: string 
     return `Cancellazione confermata ${firstName}, la prenotazione di ${rome.weekday} ${rome.day} ${rome.month} alle ${rome.hh}:${rome.mm} è stata annullata. Le invieremo conferma su WhatsApp.`;
 }
 
-// Reads the wall-clock components of a reservation_time in Europe/Rome so that
-// voice-agent responses read the hour the caller actually booked — not the
-// UTC hour of the timestamptz value.
-function romeWallClock(iso: string | Date, english: boolean = false): {
+// Legge i componenti da orologio da parete di un reservation_time nel fuso del
+// locale, così le risposte dell'agente dicono l'ora che il cliente ha davvero
+// prenotato — non l'ora UTC del timestamptz.
+function romeWallClock(iso: string | Date, english: boolean = false, tz: string = 'Europe/Rome'): {
     weekday: string; day: number; month: string; hh: string; mm: string;
 } {
     const d = iso instanceof Date ? iso : new Date(iso);
-    const [datePart, timePart] = [getRomeDatePart(d), getRomeTimePart(d)];
+    const [datePart, timePart] = [getDatePartInTz(d, tz), getTimePartInTz(d, tz)];
     const [y, mo, dd] = datePart.split('-').map(Number);
     const [hh, mm] = (timePart || '00:00').split(':');
     // Build a naive Date with Rome components-as-local so .getDay() gives the
@@ -1287,11 +1289,12 @@ export async function modifyVoiceReservation(
     // So the current date/time we default to MUST also be read as Rome
     // wall-clock — reading the UTC parts (toISOString) shifts a guests-only
     // change back by the Rome offset (22:00 booking silently became 20:00,
-    // Vernoccoli #38950, 2026-08-25). getRomeDatePart/getRomeTimePart format
-    // the instant in Europe/Rome, which is exactly what createVoiceReservation
-    // and the dashboard store.
-    const curDate = getRomeDatePart(current.reservation_time);
-    const curTime = getRomeTimePart(current.reservation_time);
+    // Vernoccoli #38950, 2026-08-25). getDatePartInTz/getTimePartInTz format
+    // the instant in the tenant's timezone, which is exactly what
+    // createVoiceReservation and the dashboard store.
+    const fusoLocale = (await getTenantLocale(tenantId)).timezone;
+    const curDate = getDatePartInTz(current.reservation_time, fusoLocale);
+    const curTime = getTimePartInTz(current.reservation_time, fusoLocale);
 
     const newDate = input.new_date ?? curDate;
     const newTime = input.new_time ?? curTime;
@@ -1403,9 +1406,9 @@ export async function modifyVoiceReservation(
  * formatItalianConfirmation but says "aggiornata" so the caller understands
  * this is a change, not a new booking.
  */
-export function formatItalianModification(r: ModifiedReservation, language?: string | null): string {
+export function formatItalianModification(r: ModifiedReservation, language?: string | null, tz?: string): string {
     const english = isEnglishVoice(language);
-    const rome = romeWallClock(r.reservation_time, english);
+    const rome = romeWallClock(r.reservation_time, english, tz);
     const firstName = spokenFirstName(r.customer_name);
     if (english) {
         return `Reservation updated ${firstName}: ${rome.weekday} ${rome.day} ${rome.month} at ${rome.hh}:${rome.mm} for ${r.guests} ${r.guests === 1 ? 'guest' : 'guests'}. We will send you a confirmation on WhatsApp.`;
@@ -1494,9 +1497,9 @@ const ITALIAN_MONTHS = ['gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giu
  * Short Italian phrase the agent can read aloud at end of call.
  * Example: "Confermato Mario, tavolo per 4 persone giovedì 7 maggio alle 20:30."
  */
-export function formatItalianConfirmation(r: VoiceReservationOutput, language?: string | null): string {
+export function formatItalianConfirmation(r: VoiceReservationOutput, language?: string | null, tz?: string): string {
     const english = isEnglishVoice(language);
-    const rome = romeWallClock(r.reservation_time, english);
+    const rome = romeWallClock(r.reservation_time, english, tz);
     const firstName = spokenFirstName(r.customer_name);
     if (english) {
         const guestsLabel = r.guests === 1 ? 'guest' : 'guests';

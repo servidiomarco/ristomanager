@@ -20,6 +20,7 @@ import { useSocket } from '../hooks/useSocket';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { DateNavigator } from './DateNavigator';
 import { SegmentedControl, Callout, ModalShell, FormCard, Field, dsInput, dsTextarea, dsButton, dsIconButton } from './ds';
+import { sessionTimeZone } from '../utils/displayTime';
 
 console.log('🔥🔥🔥 FLOORPLAN MODULE LOADED - NEW VERSION WITH MERGE FILTER DEBUG 🔥🔥🔥');
 
@@ -617,7 +618,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   const romeClock = useMemo(() => {
       const now = new Date(nowTick);
       const todayStr = datePart(now);
-      const romeNow = now.toLocaleTimeString('it-IT', { timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit', hour12: false });
+      const romeNow = now.toLocaleTimeString('it-IT', { timeZone: sessionTimeZone(), hour: '2-digit', minute: '2-digit', hour12: false });
       const [nowH, nowM] = romeNow.split(':').map(Number);
       const currentTimeValue = nowH * 60 + nowM;
 
@@ -708,7 +709,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         const [h, m] = timePart(reservation.reservation_time).split(':').map(Number);
         const resTimeValue = h * 60 + m;
         const nowDate = new Date();
-        const [nowH, nowM] = nowDate.toLocaleTimeString('it-IT', { timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit', hour12: false }).split(':').map(Number);
+        const [nowH, nowM] = nowDate.toLocaleTimeString('it-IT', { timeZone: sessionTimeZone(), hour: '2-digit', minute: '2-digit', hour12: false }).split(':').map(Number);
         const currentTimeValue = nowH * 60 + nowM;
 
         if (currentTimeValue >= (resTimeValue - 15) && currentTimeValue <= (resTimeValue + 90)) {

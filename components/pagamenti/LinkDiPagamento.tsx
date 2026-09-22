@@ -6,6 +6,7 @@ import { EmptyState, SectionHeader, StatusPill } from '../ds';
 import type { PillTone } from '../ds';
 import { PeriodTrigger, type Period } from './PeriodPicker';
 import { formatDateTime, formatEuro, paymentStatusView } from './paymentsView';
+import { sessionTimeZone } from '../../utils/displayTime';
 
 /* ── Link di pagamento ────────────────────────────────────────────────────
    Was a table with a Stato / Importo / Cliente / Prenotazione header. A table
@@ -39,21 +40,21 @@ const STATUS_TILE: Record<PillTone, string> = {
 /** Day heading for the group a payment falls into — "Oggi", "Ieri", or the date. */
 const dayKey = (iso: string): string => {
   try {
-    return new Date(iso).toLocaleDateString('it-IT', { timeZone: 'Europe/Rome' });
+    return new Date(iso).toLocaleDateString('it-IT', { timeZone: sessionTimeZone() });
   } catch {
     return iso.slice(0, 10);
   }
 };
 
 const dayLabel = (iso: string): string => {
-  const today = new Date().toLocaleDateString('it-IT', { timeZone: 'Europe/Rome' });
-  const yesterday = new Date(Date.now() - 86_400_000).toLocaleDateString('it-IT', { timeZone: 'Europe/Rome' });
+  const today = new Date().toLocaleDateString('it-IT', { timeZone: sessionTimeZone() });
+  const yesterday = new Date(Date.now() - 86_400_000).toLocaleDateString('it-IT', { timeZone: sessionTimeZone() });
   const key = dayKey(iso);
   if (key === today) return 'Oggi';
   if (key === yesterday) return 'Ieri';
   try {
     return new Date(iso).toLocaleDateString('it-IT', {
-      timeZone: 'Europe/Rome', weekday: 'long', day: 'numeric', month: 'short',
+      timeZone: sessionTimeZone(), weekday: 'long', day: 'numeric', month: 'short',
     });
   } catch {
     return key;

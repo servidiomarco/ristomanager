@@ -438,8 +438,11 @@ button:disabled { cursor: not-allowed; }
         });
     }
 
-    // Fuso di Roma, non del telefono: il ritiro è all'ora del ristorante.
-    const romeToday = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Rome' });
+    // Il fuso del RISTORANTE, non del telefono: un cliente che ordina
+    // dall'estero vedrebbe altrimenti «oggi» sbagliato. Roma finché il
+    // bootstrap non risponde — è dove l'applicazione è sempre vissuta.
+    let fusoLocale = 'Europe/Rome';
+    const romeToday = () => new Date().toLocaleDateString('en-CA', { timeZone: fusoLocale });
     const addDays = (iso, n) => {
         const d = new Date(iso + 'T12:00:00');
         d.setDate(d.getDate() + n);
@@ -485,6 +488,7 @@ button:disabled { cursor: not-allowed; }
 
     // Identità prima della guardia: anche la pagina in manutenzione deve
     // avere il nome giusto in testata.
+    if (info?.timezone) fusoLocale = info.timezone;
     const branding = info?.branding || {};
     const restaurantName = branding.name || '';
     // Rigenerati a ogni cambio lingua: la pill «Indicazioni» è testo tradotto.

@@ -1329,12 +1329,15 @@ async function handleElevenLabsInitConversation(tenantId: number, req: express.R
     // Ferragosto siamo al completo, prenota sul sito"): se c'è un messaggio
     // custom è lui il testo, altrimenti quello automatico.
     const effectiveFirstMessage = suspended && !customFirst ? suspensionMessage : genericGreeting;
-    // Data e ora correnti in Europe/Rome, pronte da leggere. Senza questa
+    // Data e ora correnti nel fuso del locale, pronte da leggere. Senza questa
     // variabile l'agente ripiegava sull'orologio della piattaforma, che è in
     // UTC: "sono le 15:33" dette alle 17:33 (estate 2026). Il prompt la usa
     // come unica fonte per "che ore sono" e per ragionare su stasera/domani.
+    //
+    // Il nome `current_datetime_rome` resta: è cablato nel workflow ElevenLabs,
+    // dove i nodi lo citano nei loro prompt. Cambia la sorgente, non la chiave.
     const nowRome = new Intl.DateTimeFormat('it-IT', {
-        timeZone: 'Europe/Rome',
+        timeZone: (await getTenantLocale(tenantId)).timezone,
         weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
         hour: '2-digit', minute: '2-digit',
     }).format(new Date());
@@ -2521,7 +2524,7 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
 
         // reservation_time here is the client's naive Rome wall-clock string:
         // no asUtcInstant, the naive branch reads it verbatim (see fix #85).
-        const reservationLabel = reservationPushLabel(reservation_time);
+        const reservationLabel = reservationPushLabel(reservation_time, (await getTenantLocale(req.tenantId!)).timezone);
         pushSendToRoles(
             req.tenantId!,
             ['OWNER', 'GENERAL_MANAGER', 'MANAGER', 'WAITER'],
@@ -2748,7 +2751,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
         // Skip if it was already CANCELLED — avoids duplicate notifications on
         // saves that don't change the status.
         if (previousStatus !== 'CANCELLED' && reservation_status === 'CANCELLED' && updatedReservation) {
-            const reservationLabel = reservationPushLabel(asUtcInstant(updatedReservation.reservation_time));
+            const reservationLabel = reservationPushLabel(asUtcInstant(updatedReservation.reservation_time), (await getTenantLocale(req.tenantId!)).timezone);
             pushSendToRoles(
                 req.tenantId!,
                 ['OWNER', 'GENERAL_MANAGER', 'MANAGER', 'WAITER'],
@@ -5545,7 +5548,7 @@ app.post('/reservations/:id/bill', authenticate, requirePermission('payments:ful
             // tavolo della prenotazione non ha comanda, si provano gli altri
             // tavoli della sua unione per la stessa data e turno.
             if (!found && resRow.rows[0].table_id != null) {
-                const mergeDate = getRomeDatePart(resRow.rows[0].reservation_time);
+                const mergeDate = getDatePartInTz(resRow.rows[0].reservation_time, (await getTenantLocale(req.tenantId!)).timezone);
                 const siblings = await queryWithRetry(
                     `SELECT t.name
                        FROM table_merges m
@@ -5606,6 +5609,7 @@ app.post('/reservations/:id/bill', authenticate, requirePermission('payments:ful
         }
 
         const shareToken = crypto.randomBytes(24).toString('base64url');
+        const servizioConto = resolveService(new Date(), (await getTenantLocale(req.tenantId!)).timezone);
 
         const inserted = await queryWithRetry(
             `INSERT INTO table_bills
@@ -5619,7 +5623,7 @@ app.post('/reservations/:id/bill', authenticate, requirePermission('payments:ful
             [id, resRow.rows[0].table_id, totalRounded, covers, shareToken, req.user?.userId ?? null,
              ppPayload ? JSON.stringify(ppPayload.items) : null,
              ppPayload?.external_ref ?? null,
-             resolveService().service_date, resolveService().shift, req.tenantId!]
+             servizioConto.service_date, servizioConto.shift, req.tenantId!]
         );
         const bill = inserted.rows[0];
 
@@ -6377,17 +6381,19 @@ app.post('/bills/:id/payments/:paymentId/void', authenticate, requirePermission(
 app.get('/reports/cash-closure', authenticate, requirePermission('payments:view'), async (req, res) => {
     try {
         const raw = typeof req.query.date === 'string' ? req.query.date : '';
-        const date = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : getRomeDatePart(new Date());
+        const fusoLocale = (await getTenantLocale(req.tenantId!)).timezone;
+        const date = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : getDatePartInTz(new Date(), fusoLocale);
 
         // Il giorno del report è il GIORNO DI SERVIZIO del conto, non il
         // giorno solare dell'incasso: la cena chiusa all'una di notte sta
         // nella serata a cui appartiene, non nel giorno dopo. service_date e
         // shift sono stampati sul conto all'apertura; i COALESCE coprono le
         // righe di prima di quella colonna (backfill una tantum a parte).
-        const SERVICE_DAY = `COALESCE(b.service_date, (COALESCE(b.closed_at, b.opened_at) AT TIME ZONE 'Europe/Rome')::date)`;
+        const TZ = sqlTimeZone(fusoLocale);
+        const SERVICE_DAY = `COALESCE(b.service_date, (COALESCE(b.closed_at, b.opened_at) AT TIME ZONE ${TZ})::date)`;
         const SERVICE_SHIFT = `COALESCE(b.shift,
                         (SELECT o.shift FROM orders o WHERE o.table_bill_id = b.id ORDER BY o.id LIMIT 1),
-                        CASE WHEN EXTRACT(hour FROM (b.opened_at AT TIME ZONE 'Europe/Rome')) BETWEEN 5 AND 16
+                        CASE WHEN EXTRACT(hour FROM (b.opened_at AT TIME ZONE ${TZ})) BETWEEN 5 AND 16
                              THEN 'LUNCH' ELSE 'DINNER' END)`;
 
         // Ogni movimento eredita giorno e turno dal SUO conto: un sospeso
@@ -6510,6 +6516,12 @@ const parseFiscalPeriod = (req: any): { from: string; to: string } | null => {
 
 // WHERE di periodo (parametri $2=from, $3=to sul tenant $1). date::timestamp
 // AT TIME ZONE 'Europe/Rome' = l'istante UTC della mezzanotte di Roma.
+//
+// Roma è cablata di proposito, qui e nelle altre query del registro: il
+// registro è un documento per l'Agenzia delle Entrate, e la giornata fiscale
+// è quella italiana per definizione. I tenant esteri non hanno il modulo
+// (entitlement 'fiscal'), quindi non passano mai da questo codice. Non
+// parametrizzare il fuso: lo renderebbe sbagliato per il solo caso che esiste.
 const FISCAL_PERIOD_WHERE = `fd.tenant_id = $1
     AND fd.created_at >= ($2::date::timestamp AT TIME ZONE 'Europe/Rome')
     AND fd.created_at < (($3::date + 1)::timestamp AT TIME ZONE 'Europe/Rome')`;
@@ -9191,6 +9203,7 @@ app.post('/email/threads/:emailKey/suggest-booking', authenticate, requirePermis
             subject: email.subject,
             body: email.body || '',
             restaurantName: businessIdentity().name,
+            timezone: (await getTenantLocale(req.tenantId!)).timezone,
         });
 
         // Telemetria consumi, stessa tabella di suggest-reply e agente WhatsApp.
@@ -9382,6 +9395,7 @@ app.post('/reports/ai-summary', authenticate, requireReportsAccess, async (req, 
             return res.status(503).json({ error: 'not_configured', message: 'ANTHROPIC_API_KEY non configurata sul backend' });
         }
         const giorni = Math.min(90, Math.max(7, parseInt(String(req.body?.days ?? 30), 10) || 30));
+        const TZ = sqlTimeZone((await getTenantLocale(req.tenantId!)).timezone);
 
         // Finestra corrente e precedente della stessa ampiezza: senza il
         // confronto il modello non puo' dire se un numero e' buono o brutto.
@@ -9410,7 +9424,7 @@ app.post('/reports/ai-summary', authenticate, requireReportsAccess, async (req, 
             totali(`${giorni} days`, '0 days'),
             totali(`${giorni * 2} days`, `${giorni} days`),
             queryWithRetry(
-                `SELECT EXTRACT(DOW FROM reservation_time AT TIME ZONE 'Europe/Rome')::int AS giorno,
+                `SELECT EXTRACT(DOW FROM reservation_time AT TIME ZONE ${TZ})::int AS giorno,
                         COUNT(*)::int AS prenotazioni, COALESCE(SUM(guests),0)::int AS coperti
                    FROM reservations
                   WHERE reservation_time >= NOW() - $1::interval
@@ -9418,7 +9432,7 @@ app.post('/reports/ai-summary', authenticate, requireReportsAccess, async (req, 
                     AND reservation_status NOT IN ('CANCELLED','DECLINED')
                   GROUP BY 1 ORDER BY 1`, [`${giorni} days`]),
             queryWithRetry(
-                `SELECT EXTRACT(HOUR FROM reservation_time AT TIME ZONE 'Europe/Rome')::int AS ora,
+                `SELECT EXTRACT(HOUR FROM reservation_time AT TIME ZONE ${TZ})::int AS ora,
                         COUNT(*)::int AS prenotazioni, COALESCE(SUM(guests),0)::int AS coperti
                    FROM reservations
                   WHERE reservation_time >= NOW() - $1::interval
@@ -9676,6 +9690,7 @@ app.post('/messages/suggest-reply', authenticate, requirePermission('reservation
             knowledge: kb.rows as any,
             restaurantName: businessIdentity().name,
             depositPolicy: await getAutoDepositPolicy(req.tenantId!),
+            timezone: (await getTenantLocale(req.tenantId!)).timezone,
         }, {
             // Telemetria consumi Gemini dei "messaggi AI": la stessa tabella
             // che alimenta la pagina Consumi AI (feature 'suggest_reply').
@@ -9777,6 +9792,7 @@ app.post('/messages/agent/run', authenticate, requirePermission('reservations:fu
             largeGroupThreshold: soglia,
             restaurantName: businessIdentity().name,
             depositPolicy: await getAutoDepositPolicy(req.tenantId!),
+            timezone: (await getTenantLocale(req.tenantId!)).timezone,
         });
 
         // Il giro dell'agente interroga il modello da 1 a 3 volte: qui si
@@ -9854,7 +9870,8 @@ app.post('/messages/agent/extract-booking', authenticate, requirePermission('res
 
         const { args, usage } = await whatsappAgent.extractBooking({
             phone,
-            todayRome: getRomeDatePart(new Date()),
+            todayRome: getDatePartInTz(new Date(), (await getTenantLocale(req.tenantId!)).timezone),
+            timezone: (await getTenantLocale(req.tenantId!)).timezone,
             messages: messages as any,
         });
 
@@ -9870,7 +9887,7 @@ app.post('/messages/agent/extract-booking', authenticate, requirePermission('res
 
         // Normalizza data/ora col parser condiviso: robusto anche se il modello
         // restituisce "sabato 29 agosto" o "7:30" invece del formato canonico.
-        const date = args.date ? parseFlexibleDate(args.date) : null;
+        const date = args.date ? parseFlexibleDate(args.date, (await getTenantLocale(req.tenantId!)).timezone) : null;
         const time = args.time ? parseFlexibleTime(args.time) : null;
         res.json({
             booking: {
@@ -10630,8 +10647,13 @@ app.post('/payments/requests', authenticate, requirePermission('reservations:ful
         //   whatsapp/auto  → WhatsApp template, SMS fallback on WA failure
         //                    (sendBookingConfirmation's existing behaviour)
         const resvInstant = new Date(reservation.reservation_time);
-        const depositDateLabel = resvInstant.toLocaleDateString('it-IT', { timeZone: 'Europe/Rome', day: '2-digit', month: '2-digit', year: 'numeric' });
-        const depositTimeLabel = resvInstant.toLocaleTimeString('it-IT', { timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit', hour12: false });
+        // L'ora che il cliente legge nella richiesta di caparra è quella del
+        // locale: a un tenant londinese «20:30» non deve arrivare come 21:30.
+        // Il locale it-IT resta perché il formato è tutto numerico (gg/mm/aaaa,
+        // HH:MM) e en-GB lo scrive identico: cambierebbe nulla.
+        const fusoCaparra = (await getTenantLocale(req.tenantId!)).timezone;
+        const depositDateLabel = resvInstant.toLocaleDateString('it-IT', { timeZone: fusoCaparra, day: '2-digit', month: '2-digit', year: 'numeric' });
+        const depositTimeLabel = resvInstant.toLocaleTimeString('it-IT', { timeZone: fusoCaparra, hour: '2-digit', minute: '2-digit', hour12: false });
         const depositGuestsLabel = isEnglishGuest(guestLanguage)
             ? `${reservation.guests} ${Number(reservation.guests) === 1 ? 'guest' : 'guests'}`
             : `${reservation.guests} ${Number(reservation.guests) === 1 ? 'persona' : 'persone'}`;
@@ -13149,8 +13171,8 @@ const getItalianDateParts = (date: Date, tz: string = BREAD_TARGET_TZ): { year: 
     return { year: get('year'), month: get('month'), day: get('day'), hour: get('hour'), minute: get('minute') };
 };
 
-const getItalianTodayIso = (date: Date = new Date()): string => {
-    const { year, month, day } = getItalianDateParts(date);
+const getItalianTodayIso = (date: Date = new Date(), tz: string = BREAD_TARGET_TZ): string => {
+    const { year, month, day } = getItalianDateParts(date, tz);
     return `${year}-${month}-${day}`;
 };
 
@@ -13164,7 +13186,8 @@ const addDaysIso = (iso: string, days: number): string => {
 // conteggio coperti e il todo devono restare del ristorante del reminder,
 // altrimenti il pane di un locale conterebbe i tavoli dell'altro.
 async function runDailyBreadReminder(tenantId: number, targetRoles: string[] = ['OWNER']): Promise<void> {
-    const todayIso = getItalianTodayIso();
+    const fusoOggi = (await getTenantLocale(tenantId)).timezone;
+    const todayIso = getItalianTodayIso(new Date(), fusoOggi);
     const tomorrowIso = addDaysIso(todayIso, 1);
 
     // Sum guests for tomorrow's covers. Banquets live in their own table
@@ -13829,6 +13852,9 @@ const startElevenLabsQuotaWatchdog = () => {
             for (const threshold of ELEVENLABS_QUOTA_THRESHOLDS) {
                 if (pct < threshold || elevenLabsQuotaAlerted.thresholds.has(threshold)) continue;
                 elevenLabsQuotaAlerted.thresholds.add(threshold);
+                // Roma resta giusto anche coi tenant esteri: la quota è
+                // dell'abbonamento ElevenLabs della piattaforma, non di un
+                // locale, e chi legge l'avviso e ricarica è in Italia.
                 const resetLabel = resetUnix
                     ? new Intl.DateTimeFormat('it-IT', { timeZone: 'Europe/Rome', day: 'numeric', month: 'long' }).format(new Date(resetUnix * 1000))
                     : null;
@@ -20543,7 +20569,7 @@ function formatBookingDateTime(reservationTime: string | Date, tz: string = 'Eur
 // Same naive-string contract as formatBookingDateTime: a string without
 // Z/offset is Rome wall-clock (client input) and is read verbatim; DB-sourced
 // values must pass through asUtcInstant at the call site.
-function reservationPushLabel(reservationTime: string | Date): string {
+function reservationPushLabel(reservationTime: string | Date, tz: string = 'Europe/Rome'): string {
     if (typeof reservationTime === 'string') {
         const m = reservationTime.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
         const isNaive = !!m && !/Z$/.test(reservationTime) && !/[+-]\d{2}:?\d{2}$/.test(reservationTime);
@@ -20554,8 +20580,8 @@ function reservationPushLabel(reservationTime: string | Date): string {
     }
     const dt = reservationTime instanceof Date ? reservationTime : new Date(reservationTime);
     if (Number.isNaN(dt.getTime())) return String(reservationTime);
-    const date = dt.toLocaleDateString('it-IT', { timeZone: 'Europe/Rome', day: '2-digit', month: 'short' });
-    const time = dt.toLocaleTimeString('it-IT', { timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit' });
+    const date = dt.toLocaleDateString('it-IT', { timeZone: tz, day: '2-digit', month: 'short' });
+    const time = dt.toLocaleTimeString('it-IT', { timeZone: tz, hour: '2-digit', minute: '2-digit' });
     return `${date} ${time}`;
 }
 
@@ -22580,6 +22606,7 @@ app.post('/ai-usage', authenticate, async (req: any, res) => {
 // Aggregati d'uso Gemini per la finestra richiesta.
 app.get('/ai-usage/gemini', authenticate, requireDevBoardAdmin, async (req, res) => {
     try {
+        const TZ = sqlTimeZone((await getTenantLocale(req.tenantId!)).timezone);
         const days = parseUsageWindowDays(req.query.days);
 
         const totalsQ = queryWithRetry(
@@ -22597,7 +22624,7 @@ app.get('/ai-usage/gemini', authenticate, requireDevBoardAdmin, async (req, res)
             [days, req.tenantId!]
         );
         const dailyQ = queryWithRetry(
-            `SELECT to_char(created_at AT TIME ZONE 'Europe/Rome', 'YYYY-MM-DD') AS day,
+            `SELECT to_char(created_at AT TIME ZONE ${TZ}, 'YYYY-MM-DD') AS day,
                     COALESCE(SUM(prompt_tokens),0)::int AS prompt_tokens,
                     COALESCE(SUM(output_tokens),0)::int AS output_tokens,
                     COALESCE(SUM(total_tokens),0)::int  AS total_tokens,
@@ -22646,6 +22673,7 @@ app.get('/ai-usage/gemini', authenticate, requireDevBoardAdmin, async (req, res)
 // Consumo Sofia/ElevenLabs: quota live dall'API + statistiche chiamate locali.
 app.get('/ai-usage/elevenlabs', authenticate, requireDevBoardAdmin, async (req, res) => {
     try {
+        const TZ = sqlTimeZone((await getTenantLocale(req.tenantId!)).timezone);
         const days = parseUsageWindowDays(req.query.days);
 
         // --- Quota live dall'API ElevenLabs (crediti/caratteri e reset) ------
@@ -22688,7 +22716,7 @@ app.get('/ai-usage/elevenlabs', authenticate, requireDevBoardAdmin, async (req, 
             [days, req.tenantId!]
         );
         const callDailyQ = queryWithRetry(
-            `SELECT to_char(created_at AT TIME ZONE 'Europe/Rome', 'YYYY-MM-DD') AS day,
+            `SELECT to_char(created_at AT TIME ZONE ${TZ}, 'YYYY-MM-DD') AS day,
                     COUNT(*)::int AS calls,
                     COALESCE(SUM(duration_seconds),0)::int AS seconds
              FROM voice_calls
@@ -23892,10 +23920,12 @@ app.put('/settings/channels', authenticate, requirePermission('settings:full'), 
 // Read-only: no side effects, safe for any authenticated user to poll.
 app.get('/settings/rooms-occupancy', authenticate, async (req, res) => {
     const dateParam = typeof req.query.date === 'string' ? req.query.date : '';
-    const date = ISO_DATE_RE.test(dateParam)
-        ? dateParam
-        : new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Rome', year: 'numeric', month: '2-digit', day: '2-digit' });
     try {
+        // «Oggi» è oggi dove sta il locale: senza data in query un tenant a
+        // Dubai chiedeva l'occupazione di ieri per le prime tre ore del giorno.
+        const date = ISO_DATE_RE.test(dateParam)
+            ? dateParam
+            : new Date().toLocaleDateString('en-CA', { timeZone: (await getTenantLocale(req.tenantId!)).timezone, year: 'numeric', month: '2-digit', day: '2-digit' });
         const [lunch, dinner] = await Promise.all([
             computeRoomOccupancy(req.tenantId!, date, Shift.LUNCH),
             computeRoomOccupancy(req.tenantId!, date, Shift.DINNER),
@@ -24266,7 +24296,8 @@ async function maybeSuggestTableAssignment(tenantId: number, reservationId: numb
         if (['CANCELLED', 'DECLINED'].includes(reservation.reservation_status)) return;
 
         const eventDate = new Date(reservation.reservation_time).toISOString().substring(0, 10);
-        const timeLabel = getRomeTimePart(reservation.reservation_time);
+        const fusoLocale = (await getTenantLocale(tenantId)).timezone;
+        const timeLabel = getTimePartInTz(reservation.reservation_time, fusoLocale);
 
         const [tablesRes, mergesRes, occupancyRes] = await Promise.all([
             queryWithRetry(
@@ -24310,7 +24341,7 @@ async function maybeSuggestTableAssignment(tenantId: number, reservationId: numb
                 table_id: o.table_id,
                 customer_name: o.customer_name,
                 guests: o.guests,
-                time: getRomeTimePart(o.reservation_time),
+                time: getTimePartInTz(o.reservation_time, fusoLocale),
             })),
         });
 
@@ -24903,8 +24934,9 @@ async function validateTakeawaySlot(
 // lock: la POST ricontrolla comunque.
 app.get('/takeaway/slots', authenticate, requireFeature('takeaway'), requirePermission('takeaway:view'), async (req, res) => {
     try {
+        const fusoOggi = (await getTenantLocale(req.tenantId!)).timezone;
         const date = typeof req.query.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date)
-            ? req.query.date : getItalianTodayIso();
+            ? req.query.date : getItalianTodayIso(new Date(), fusoOggi);
         const [lunch, dinner, settings, counts] = await Promise.all([
             getAvailableSlots(req.tenantId!, date, Shift.LUNCH),
             getAvailableSlots(req.tenantId!, date, Shift.DINNER),
@@ -25434,7 +25466,8 @@ async function handleElevenLabsCheckTakeawaySlots(tenantId: number, req: express
         const lang = english ? 'en' : null;
         // Parse flessibile come le prenotazioni: «domani», «venerdì», una
         // data esplicita — mai far calcolare la data al modello.
-        const date = parseFlexibleDate(p.date) ?? getItalianTodayIso();
+        const fusoOggi = (await getTenantLocale(tenantId)).timezone;
+        const date = parseFlexibleDate(p.date, fusoOggi) ?? getItalianTodayIso(new Date(), fusoOggi);
         const [lunch, dinner, settings] = await Promise.all([
             getAvailableSlots(tenantId, date, Shift.LUNCH),
             getAvailableSlots(tenantId, date, Shift.DINNER),
@@ -25452,7 +25485,7 @@ async function handleElevenLabsCheckTakeawaySlots(tenantId: number, req: express
             [tenantId, date]
         );
         const booked = new Map<string, number>(counts.rows.map((r: any) => [r.pickup_time, r.n]));
-        const free = (times: string[]) => filterOrderableSlots(times, date, settings.prepMinutes)
+        const free = (times: string[]) => filterOrderableSlots(times, date, settings.prepMinutes, fusoOggi)
             .filter(t => (booked.get(t) ?? 0) < settings.capacityPerSlot);
         const lunchFree = free(lunch);
         const dinnerFree = free(dinner);
@@ -25505,7 +25538,8 @@ async function handleElevenLabsCreateTakeawayOrder(tenantId: number, req: expres
                 ? 'I need a phone number for the order: could you give it to me, please?'
                 : 'Mi serve un numero di telefono per l\'ordine: me lo detti per favore?');
         }
-        const date = parseFlexibleDate(p.date) ?? getItalianTodayIso();
+        const fusoOggi = (await getTenantLocale(tenantId)).timezone;
+        const date = parseFlexibleDate(p.date, fusoOggi) ?? getItalianTodayIso(new Date(), fusoOggi);
         const time = parseFlexibleTime(p.time);
         if (!time) return fail('missing_time', english
             ? 'What time would you like to come and collect it?'
@@ -25556,7 +25590,7 @@ async function handleElevenLabsCreateTakeawayOrder(tenantId: number, req: expres
                 : `Le ${time} non sono tra gli orari di ritiro: chiedimi gli orari disponibili.`, { next_tool: 'check_takeaway_slots' });
         }
         const settings = await getTakeawaySettings(tenantId);
-        if (!filterOrderableSlots([time], date, settings.prepMinutes).includes(time)) {
+        if (!filterOrderableSlots([time], date, settings.prepMinutes, fusoOggi).includes(time)) {
             return fail('slot_too_soon', english
                 ? `The kitchen cannot make it for ${time}: we need at least ${settings.prepMinutes} minutes from now.`
                 : `Per le ${time} la cucina non fa in tempo: serve almeno ${settings.prepMinutes} minuti da adesso.`, { next_tool: 'check_takeaway_slots' });
@@ -25652,9 +25686,9 @@ const slotMinutes = (time: string): number => {
 
 // Per OGGI uno slot è ordinabile solo se la cucina fa in tempo: ritiro ≥
 // adesso + minuti di preparazione. La griglia di domani passa intera.
-function filterOrderableSlots(slots: string[], date: string, prepMinutes: number): string[] {
-    if (date !== getItalianTodayIso()) return slots;
-    const now = new Date().toLocaleTimeString('it-IT', { timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit', hour12: false });
+function filterOrderableSlots(slots: string[], date: string, prepMinutes: number, tz: string = 'Europe/Rome'): string[] {
+    if (date !== getItalianTodayIso(new Date(), tz)) return slots;
+    const now = getTimePartInTz(new Date(), tz);
     const cutoff = slotMinutes(now) + prepMinutes;
     return slots.filter(s => slotMinutes(s) >= cutoff);
 }
@@ -25673,6 +25707,7 @@ async function handlePublicTakeawayInfo(tenantId: number, _req: express.Request,
         res.json({
             takeawayEnabled: enabled,
             prep_minutes: settings.prepMinutes,
+            timezone: (await getTenantLocale(tenantId)).timezone,
             branding: {
                 name: identity.name || null,
                 tagline: identity.tagline || null,
@@ -25739,8 +25774,9 @@ async function handlePublicTakeawaySlots(tenantId: number, req: express.Request,
         if (!(await isTakeawayOnline(tenantId))) {
             return res.status(503).json({ error: 'takeaway_disabled' });
         }
+        const fusoOggi = (await getTenantLocale(tenantId)).timezone;
         const date = typeof req.query.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date)
-            ? req.query.date : getItalianTodayIso();
+            ? req.query.date : getItalianTodayIso(new Date(), fusoOggi);
         const [lunch, dinner, settings, counts] = await Promise.all([
             getAvailableSlots(tenantId, date, Shift.LUNCH),
             getAvailableSlots(tenantId, date, Shift.DINNER),
@@ -25754,7 +25790,7 @@ async function handlePublicTakeawaySlots(tenantId: number, req: express.Request,
         ]);
         const stopped = settings.stopDate === date;
         const booked = new Map<string, number>(counts.rows.map((r: any) => [r.pickup_time, r.n]));
-        const toSlots = (times: string[]) => filterOrderableSlots(times, date, settings.prepMinutes)
+        const toSlots = (times: string[]) => filterOrderableSlots(times, date, settings.prepMinutes, fusoOggi)
             .map(time => ({ time, available: !stopped && (booked.get(time) ?? 0) < settings.capacityPerSlot }));
         res.json({ date, stopped, lunch: toSlots(lunch), dinner: toSlots(dinner) });
     } catch (err) {
@@ -25768,6 +25804,7 @@ async function handlePublicTakeawayOrderCreate(tenantId: number, req: express.Re
         if (!(await isTakeawayOnline(tenantId))) {
             return res.status(503).json({ error: 'takeaway_disabled' });
         }
+        const fusoOggi = (await getTenantLocale(tenantId)).timezone;
         const body = req.body ?? {};
         // Honeypot: accetta e scarta in silenzio, come le prenotazioni.
         if (typeof body.website === 'string' && body.website.trim() !== '') {
@@ -25785,13 +25822,13 @@ async function handlePublicTakeawayOrderCreate(tenantId: number, req: express.Re
         const date = typeof body.pickup_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(body.pickup_date) ? body.pickup_date : null;
         const time = typeof body.pickup_time === 'string' && /^\d{2}:\d{2}$/.test(body.pickup_time) ? body.pickup_time : null;
         if (!date || !time) return res.status(400).json({ error: 'invalid_slot', message: 'Servono data e orario di ritiro' });
-        if (date < getItalianTodayIso()) return res.status(400).json({ error: 'invalid_slot', message: 'La data è già passata' });
+        if (date < getItalianTodayIso(new Date(), fusoOggi)) return res.status(400).json({ error: 'invalid_slot', message: 'La data è già passata' });
 
         // Mai force da qui: stop e capienza per il web sono la regola.
         const slot = await validateTakeawaySlot(tenantId, date, time, { force: false });
         if (slot.error) return res.status(slot.error.status).json(slot.error.body);
         const settings = await getTakeawaySettings(tenantId);
-        if (!filterOrderableSlots([time], date, settings.prepMinutes).includes(time)) {
+        if (!filterOrderableSlots([time], date, settings.prepMinutes, fusoOggi).includes(time)) {
             return res.status(409).json({ error: 'slot_too_soon', message: 'La cucina non fa in tempo per questo orario' });
         }
 
@@ -25864,8 +25901,9 @@ app.post(['/public/takeaway/orders', '/public/:slug/takeaway/orders'], publicTak
 
 app.get('/takeaway/orders', authenticate, requireFeature('takeaway'), requirePermission('takeaway:view'), async (req, res) => {
     try {
+        const fusoOggi = (await getTenantLocale(req.tenantId!)).timezone;
         const date = typeof req.query.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date)
-            ? req.query.date : getItalianTodayIso();
+            ? req.query.date : getItalianTodayIso(new Date(), fusoOggi);
         const orders = await queryWithRetry(
             `SELECT t.*, o.table_bill_id AS bill_id FROM takeaway_orders t
              LEFT JOIN orders o ON o.id = t.kitchen_order_id AND o.tenant_id = t.tenant_id
@@ -28447,7 +28485,7 @@ async function buildPublicCalendar(
     tenantId: number,
     from: string,
     to: string,
-    romeToday: string,
+    oggiLocale: string,
 ): Promise<Array<{ date: string; status: 'open' | 'busy' | 'closed'; reason: string | null }>> {
     const TZ = sqlTimeZone((await getTenantLocale(tenantId)).timezone);
     const [hoursRows, closures, blocks, coversResult, seatsResult] = await Promise.all([
@@ -28494,7 +28532,7 @@ async function buildPublicCalendar(
     for (let cursor = from; cursor <= to; cursor = addDaysIso(cursor, 1)) {
         // Il passato non è "chiuso" per scelta dell'operatore, ma per il
         // cliente il pallino è lo stesso: non ci si può prenotare.
-        if (cursor < romeToday) {
+        if (cursor < oggiLocale) {
             days.push({ date: cursor, status: 'closed', reason: null });
             continue;
         }
@@ -28532,7 +28570,8 @@ const handlePublicAvailability = async (tenantId: number, req: express.Request, 
     // Roma, non il fuso del server: su Railway (UTC) `new Date()` in estate è
     // due ore indietro, e fra mezzanotte e le 02:00 "oggi" cadeva sul giorno
     // prima — il calendario avrebbe aperto una data già passata.
-    const romeToday = getItalianTodayIso();
+    const fusoOggi = (await getTenantLocale(tenantId)).timezone;
+    const oggiLocale = getItalianTodayIso(new Date(), fusoOggi);
 
     // Forma a intervallo (calendario di /prenota): stessa route, perché il
     // client chiede la stessa cosa — cosa è prenotabile — solo su più giorni.
@@ -28549,7 +28588,7 @@ const handlePublicAvailability = async (tenantId: number, req: express.Request, 
             ? addDaysIso(from, PUBLIC_CALENDAR_MAX_DAYS - 1)
             : to;
         try {
-            const days = await buildPublicCalendar(tenantId, from, cappedTo, romeToday);
+            const days = await buildPublicCalendar(tenantId, from, cappedTo, oggiLocale);
             return res.json({ from, to: cappedTo, days });
         } catch (err: any) {
             console.error('GET /public/availability (range) error:', err);
@@ -28579,7 +28618,7 @@ const handlePublicAvailability = async (tenantId: number, req: express.Request, 
         // server: su Railway (UTC, +2 d'estate) alle 21:30 italiane risultavano
         // ancora liberi gli slot delle 20:00, e la richiesta arrivava in sala
         // per un orario passato.
-        const isToday = date === romeToday;
+        const isToday = date === oggiLocale;
         const romeNow = getItalianDateParts(new Date());
         const currentMinutes = Number(romeNow.hour) * 60 + Number(romeNow.minute);
         const filterFuture = (slots: string[]) => {
@@ -28669,6 +28708,7 @@ const handlePublicContact = async (tenantId: number, _req: express.Request, res:
     res.json({
         voice,
         bookingsEnabled,
+        timezone: (await getTenantLocale(tenantId)).timezone,
         deposit: {
             enabled: depositPolicy.enabled,
             minGuests: depositPolicy.minGuests,
@@ -29647,9 +29687,12 @@ const SHIFT_OF = (col: string, tz: string = ROME_TZ) => `
 
 interface CurrentService { service_date: string; shift: 'LUNCH' | 'DINNER' }
 
-function resolveService(at: Date = new Date()): CurrentService {
+function resolveService(at: Date = new Date(), tz: string = 'Europe/Rome'): CurrentService {
+    /* Quale servizio è «adesso» dipende dall'orologio del locale: alle 2 di
+       notte a Londra si è ancora nella cena di ieri, e a quell'ora a Roma è
+       già passata l'alba del giorno dopo. */
     const parts = new Intl.DateTimeFormat('en-CA', {
-        timeZone: 'Europe/Rome',
+        timeZone: tz,
         year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23',
     }).formatToParts(at);
     const get = (t: string) => parts.find(p => p.type === t)?.value ?? '';
@@ -29668,10 +29711,10 @@ function resolveService(at: Date = new Date()): CurrentService {
 
 // Le viste di servizio accettano un override esplicito (utile per guardare un
 // turno passato); senza parametri rispondono sempre sul servizio in corso.
-function serviceFromQuery(query: any): CurrentService {
+function serviceFromQuery(query: any, tz: string = 'Europe/Rome'): CurrentService {
     const d = typeof query?.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(query.date) ? query.date : null;
     const sh = query?.shift === 'LUNCH' || query?.shift === 'DINNER' ? query.shift : null;
-    const now = resolveService();
+    const now = resolveService(new Date(), tz);
     return { service_date: d ?? now.service_date, shift: sh ?? now.shift };
 }
 
@@ -30143,7 +30186,8 @@ app.post('/orders', authenticate, requirePermission('orders:take'), async (req, 
 
         // Il servizio si stampa all'apertura e non si tocca più: una comanda
         // iniziata a pranzo resta del pranzo anche se si chiude alle 17:30.
-        const service = resolveService();
+        const fusoServizio = (await getTenantLocale(req.tenantId!)).timezone;
+        const service = resolveService(new Date(), fusoServizio);
         const orderType = req.body?.order_type === 'TAKEAWAY' ? 'TAKEAWAY' : 'DINE_IN';
         const notes = typeof req.body?.notes === 'string' ? req.body.notes.slice(0, 500) : null;
 
@@ -30277,7 +30321,8 @@ app.get('/orders/open', authenticate, requirePermission('orders:view'), async (r
             ? req.query.date : null;
         const filterShift = req.query?.shift === 'LUNCH' || req.query?.shift === 'DINNER'
             ? req.query.shift : null;
-        const now = resolveService();
+        const fusoServizio = (await getTenantLocale(req.tenantId!)).timezone;
+        const now = resolveService(new Date(), fusoServizio);
         const service = { service_date: filterDate ?? now.service_date, shift: filterShift ?? now.shift };
 
         // Oltre al servizio guardato entrano anche le comande APERTE dei
@@ -30391,7 +30436,8 @@ app.get('/orders/:id', authenticate, requirePermission('orders:view'), async (re
 app.get('/tables/bills-status', authenticate, requirePermission('orders:view'), async (req, res) => {
     try {
         if (!(await ordersEnabledGuard(req, res))) return;
-        const service = serviceFromQuery(req.query);
+        const fusoServizio = (await getTenantLocale(req.tenantId!)).timezone;
+        const service = serviceFromQuery(req.query, fusoServizio);
         const rows = await queryWithRetry(
             `SELECT b.id, b.table_id, b.total_cents, b.covers, b.status,
                     b.share_token, b.items, b.cash_settled_cents, b.external_ref,
@@ -30462,7 +30508,8 @@ app.get('/tables/:id/order', authenticate, requirePermission('orders:view'), asy
         if (!Number.isFinite(tableId)) return res.status(400).json({ error: 'id non valido' });
         // Solo il servizio in corso: una comanda dimenticata a pranzo non deve
         // riaprirsi da sola quando il tavolo si risiede a cena.
-        const service = serviceFromQuery(req.query);
+        const fusoServizio = (await getTenantLocale(req.tenantId!)).timezone;
+        const service = serviceFromQuery(req.query, fusoServizio);
         const r = await queryWithRetry(
             `SELECT id FROM orders
              WHERE table_id = $1 AND status = 'OPEN'
@@ -31289,7 +31336,8 @@ app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req,
         // Il monitor vede solo il servizio in corso: le righe rimaste appese a
         // un turno precedente sono un problema di chi chiude i conti, non del
         // cuoco che sta lavorando adesso.
-        const service = serviceFromQuery(req.query);
+        const fusoServizio = (await getTenantLocale(req.tenantId!)).timezone;
+        const service = serviceFromQuery(req.query, fusoServizio);
         const rows = await queryWithRetry(
             `SELECT oi.id, oi.order_id, oi.course_no, oi.name_snapshot, oi.qty,
                     oi.modifiers, oi.note, oi.status, oi.station_id, oi.weight_grams,
@@ -31475,7 +31523,8 @@ app.get('/kds/served', authenticate, requirePermission('orders:kds'), async (req
         if (raw != null && raw !== '' && !Number.isFinite(stationId)) {
             return res.status(400).json({ error: 'station_id non valido' });
         }
-        const service = serviceFromQuery(req.query);
+        const fusoServizio = (await getTenantLocale(req.tenantId!)).timezone;
+        const service = serviceFromQuery(req.query, fusoServizio);
         // Le uscite dove QUESTA partita ha lavorato, ma con TUTTE le righe
         // dell'uscita (station_id su ciascuna): il monitor mostra le proprie
         // in chiaro e quelle delle altre partite attenuate — la comanda
@@ -31833,7 +31882,8 @@ app.get('/kds/expediter', authenticate, requirePermission('orders:expedite'), as
     try {
         if (!(await ordersEnabledGuard(req, res))) return;
 
-        const service = serviceFromQuery(req.query);
+        const fusoServizio = (await getTenantLocale(req.tenantId!)).timezone;
+        const service = serviceFromQuery(req.query, fusoServizio);
         const rows = await queryWithRetry(
             `SELECT oi.id, oi.order_id, oi.course_no, oi.name_snapshot, oi.qty,
                     oi.status, oi.station_id, oi.queued_at, oi.fired_at,
@@ -32971,6 +33021,7 @@ app.post('/tables/:id/bill', authenticate, requirePermission('payments:full'), a
                 : Math.max(1, Number(tbl.rows[0].seats) || 1));
 
         const shareToken = crypto.randomBytes(24).toString('base64url');
+        const servizioConto = resolveService(new Date(), (await getTenantLocale(req.tenantId!)).timezone);
         let inserted;
         try {
             inserted = await queryWithRetry(
@@ -32985,7 +33036,7 @@ app.post('/tables/:id/bill', authenticate, requirePermission('payments:full'), a
                 [tableId, Math.round(totalCents), covers, shareToken, req.user?.userId ?? null,
                  ppPayload ? JSON.stringify(ppPayload.items) : null,
                  ppPayload?.external_ref ?? null,
-                 resolveService().service_date, resolveService().shift, req.tenantId!]
+                 servizioConto.service_date, servizioConto.shift, req.tenantId!]
             );
         } catch (err: any) {
             // L'indice unico ha fatto il suo lavoro: c'è già un conto attivo.
@@ -33525,7 +33576,8 @@ app.post('/orders/:id/transfer', authenticate, requirePermission('orders:take'),
 // per prenotazione, così l'UI può elencarle senza aprire la scheda cliente.
 app.get('/kitchen/service-summary', authenticate, requirePermission('orders:kds'), async (req, res) => {
     try {
-        const service = serviceFromQuery(req.query);
+        const fusoServizio = (await getTenantLocale(req.tenantId!)).timezone;
+        const service = serviceFromQuery(req.query, fusoServizio);
 
         const rows = await queryWithRetry(
             `SELECT r.id,
@@ -33800,7 +33852,8 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
         // quello della comanda, o dedotto dall'orario di apertura per i conti a mano.
         const filterDate = typeof req.query?.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date) ? req.query.date : null;
         const filterShift = req.query?.shift === 'LUNCH' || req.query?.shift === 'DINNER' ? req.query.shift : null;
-        const resolved = resolveService();
+        const fusoServizio = (await getTenantLocale(req.tenantId!)).timezone;
+        const resolved = resolveService(new Date(), fusoServizio);
         const service = { service_date: filterDate ?? resolved.service_date, shift: filterShift ?? resolved.shift };
 
         // `status=closed` mostra i conti già chiusi del servizio (rivedere gli
@@ -34159,7 +34212,8 @@ async function loadCashSession(tenantId: number, service: CurrentService) {
 
 app.get('/cash/session', authenticate, requirePermission('cash:operate'), async (req, res) => {
     try {
-        const service = serviceFromQuery(req.query);
+        const fusoServizio = (await getTenantLocale(req.tenantId!)).timezone;
+        const service = serviceFromQuery(req.query, fusoServizio);
         res.json(await loadCashSession(req.tenantId!, service));
     } catch (err: any) {
         console.error('GET /cash/session error:', err);
@@ -34169,7 +34223,8 @@ app.get('/cash/session', authenticate, requirePermission('cash:operate'), async 
 
 app.post('/cash/session', authenticate, requirePermission('cash:close_session'), async (req, res) => {
     try {
-        const service = serviceFromQuery(req.body);
+        const fusoServizio = (await getTenantLocale(req.tenantId!)).timezone;
+        const service = serviceFromQuery(req.body, fusoServizio);
         const float = Math.round(Number(req.body?.opening_float_cents ?? 0));
         if (!Number.isFinite(float) || float < 0) {
             return res.status(400).json({ error: 'Fondo di apertura non valido' });
@@ -34307,7 +34362,8 @@ app.post('/cash/session/:id/close', authenticate, requirePermission('cash:close_
 app.get('/cash/transactions', authenticate, requirePermission('cash:operate'), async (req, res) => {
     try {
         const TZ = sqlTimeZone((await getTenantLocale(req.tenantId!)).timezone);
-        const service = serviceFromQuery(req.query);
+        const fusoServizio = (await getTenantLocale(req.tenantId!)).timezone;
+        const service = serviceFromQuery(req.query, fusoServizio);
         const { service_date, shift } = service;
 
         // Movimenti del libro cassa. Un movimento appartiene al servizio in
@@ -34458,9 +34514,9 @@ const REPORT_RANGE_MAX_DAYS = 366;
 
 // Range con default "ultimi 30 giorni" e finestra precedente di pari
 // ampiezza subito prima. Risponde 400 da solo: il chiamante esce su null.
-const parseReportRange = (req: any, res: any): { from: string; to: string; prevFrom: string; prevTo: string; days: number } | null => {
+const parseReportRange = (req: any, res: any, tz: string = 'Europe/Rome'): { from: string; to: string; prevFrom: string; prevTo: string; days: number } | null => {
     const isIso = (s: any): s is string => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(s));
-    const to = isIso(req.query?.to) ? req.query.to : getRomeDatePart(new Date());
+    const to = isIso(req.query?.to) ? req.query.to : getDatePartInTz(new Date(), tz);
     const from = isIso(req.query?.from) ? req.query.from : addDaysIso(to, -29);
     if (from > to) {
         res.status(400).json({ error: 'range_non_valido', message: 'La data di inizio è dopo quella di fine.' });
@@ -34481,7 +34537,7 @@ const ROME_DAY = (col: string, tz: string = ROME_TZ) => `(${col} AT TIME ZONE ${
 
 app.get('/reports/reservations', authenticate, requireReportsAccess, async (req, res) => {
     try {
-        const range = parseReportRange(req, res);
+        const range = parseReportRange(req, res, (await getTenantLocale(req.tenantId!)).timezone);
         if (!range) return;
         const tenantId = req.tenantId!;
         const TZ = sqlTimeZone((await getTenantLocale(tenantId)).timezone);
@@ -34559,7 +34615,7 @@ app.get('/reports/reservations', authenticate, requireReportsAccess, async (req,
 
 app.get('/reports/revenue', authenticate, requireReportsAccess, async (req, res) => {
     try {
-        const range = parseReportRange(req, res);
+        const range = parseReportRange(req, res, (await getTenantLocale(req.tenantId!)).timezone);
         if (!range) return;
         const tenantId = req.tenantId!;
         const TZ = sqlTimeZone((await getTenantLocale(tenantId)).timezone);
@@ -34652,7 +34708,7 @@ app.get('/reports/revenue', authenticate, requireReportsAccess, async (req, res)
 
 app.get('/reports/dishes', authenticate, requireReportsAccess, async (req, res) => {
     try {
-        const range = parseReportRange(req, res);
+        const range = parseReportRange(req, res, (await getTenantLocale(req.tenantId!)).timezone);
         if (!range) return;
         const tenantId = req.tenantId!;
 
@@ -34698,7 +34754,7 @@ app.get('/reports/dishes', authenticate, requireReportsAccess, async (req, res) 
 
 app.get('/reports/communications', authenticate, requireReportsAccess, async (req, res) => {
     try {
-        const range = parseReportRange(req, res);
+        const range = parseReportRange(req, res, (await getTenantLocale(req.tenantId!)).timezone);
         if (!range) return;
         const tenantId = req.tenantId!;
         const TZ = sqlTimeZone((await getTenantLocale(tenantId)).timezone);
@@ -36176,6 +36232,7 @@ bookingTools.configureBookingTools({
     asUtcInstant,
     toTitleCase,
     reservationPushLabel,
+    getTenantTimeZone: async (tenantId: number) => (await getTenantLocale(tenantId)).timezone,
 
     // Dalla C2 il tenant attraversa bookingTools come primo parametro di ogni
     // tool: qui non si fissa più nulla, le dipendenze tenant-scoped si passano

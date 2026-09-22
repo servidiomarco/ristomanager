@@ -25,6 +25,7 @@ import { useShopping } from '../contexts/ShoppingContext';
 import { useTodos } from '../contexts/TodosContext';
 import { Loader } from './Loader';
 import { ArrivalsTimeline } from './ArrivalsTimeline';
+import { sessionTimeZone } from '../utils/displayTime';
 
 /* Tinte categoriali, non famiglie di stato: qui il colore non vuol dire
    niente, serve solo a distinguere una categoria dall'altra. Mapparle su
@@ -2386,7 +2387,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             : { Icon: PhoneIcon, label: t('channelPhone') };
           const resDate = new Date(res.reservation_time);
           const dateLabel = !Number.isNaN(resDate.getTime())
-            ? resDate.toLocaleDateString(displayLocale(), { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric', timeZone: 'Europe/Rome' })
+            ? resDate.toLocaleDateString(displayLocale(), { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric', timeZone: sessionTimeZone() })
             : '';
           const timeLabel = timePart(res.reservation_time);
           const closeDisabled = pendingActionBusy !== null;

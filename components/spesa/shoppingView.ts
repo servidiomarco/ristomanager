@@ -1,5 +1,6 @@
 import type { ShoppingCategory, ShoppingItem } from '../../services/shoppingApiService';
 import type { PillTone } from '../ds';
+import { sessionTimeZone } from '../../utils/displayTime';
 
 /* ── Vocabolario della lista della spesa ──────────────────────────────────
    The page used to carry three parallel colour maps — a border set, a text
@@ -72,11 +73,11 @@ export const formatAddedAt = (iso?: string | null): string => {
   if (!iso) return '';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
-  const day = (x: Date) => x.toLocaleDateString('it-IT', { timeZone: 'Europe/Rome' });
+  const day = (x: Date) => x.toLocaleDateString('it-IT', { timeZone: sessionTimeZone() });
   const now = new Date();
   if (day(d) === day(now)) return 'oggi';
   if (day(d) === day(new Date(now.getTime() - 86_400_000))) return 'ieri';
-  return d.toLocaleDateString('it-IT', { timeZone: 'Europe/Rome', day: 'numeric', month: 'short' });
+  return d.toLocaleDateString('it-IT', { timeZone: sessionTimeZone(), day: 'numeric', month: 'short' });
 };
 
 /** Newest first. `createdAt` is optional on the row, so `date` is the fallback
