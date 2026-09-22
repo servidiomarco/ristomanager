@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { displayLocale } from '../../utils/formatLocale';
 import type { Customer, Dish, RestaurantMenu, OrderItem, OrderWithItems, Reservation, Room, Table } from '../../types';
 import { ArrivalStatus, PaymentStatus, ReservationSource, ReservationStatus } from '../../types';
 import type { CashSessionView, CashTransactionsView } from '../../types';
@@ -239,10 +240,10 @@ export const CassaPage: React.FC<CassaPageProps> = ({
   }), [selectedDateRome, globalShiftFilter]);
 
   const serviceLabel = useMemo(() => {
-    const turno = globalShiftFilter === 'LUNCH' ? 'Pranzo'
-      : globalShiftFilter === 'DINNER' ? 'Cena' : 'Servizio';
-    return `${turno} · ${globalDate.toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short' })}`;
-  }, [globalShiftFilter, globalDate]);
+    const turno = globalShiftFilter === 'LUNCH' ? t('lunch')
+      : globalShiftFilter === 'DINNER' ? t('dinner') : t('service');
+    return `${turno} · ${globalDate.toLocaleDateString(displayLocale(), { weekday: 'short', day: 'numeric', month: 'short' })}`;
+  }, [globalShiftFilter, globalDate, t]);
 
   const bills = useOpenBills(serviceFilter, 'open');
   const queue = useMemo(() => buildQueue(bills.bills), [bills.bills]);
@@ -431,7 +432,7 @@ export const CassaPage: React.FC<CassaPageProps> = ({
       setEsito({ kind, bill: row ?? { ...bill, closed_at: closed.closed_at }, paidNowCents });
       setScreen('esito');
     } catch (err: any) {
-      setError(err?.data?.error ?? err?.message ?? 'Chiusura non riuscita');
+      setError(err?.data?.error ?? err?.message ?? t('err.close'));
     } finally {
       setBusyBillId(null);
     }
@@ -446,7 +447,7 @@ export const CassaPage: React.FC<CassaPageProps> = ({
       setOrder(await setOrderDiscount(order.order.id, p));
       setDiscountOpen(false);
     } catch (err: any) {
-      setError(err?.data?.error ?? err?.message ?? 'Sconto non applicato');
+      setError(err?.data?.error ?? err?.message ?? t('err.discount'));
     } finally { setBusyBillId(null); }
   }, [order]);
 
@@ -465,7 +466,7 @@ export const CassaPage: React.FC<CassaPageProps> = ({
       await bills.reload();
       setBillDiscountOpen(false);
     } catch (err: any) {
-      setError(err?.data?.error ?? err?.message ?? 'Sconto non applicato');
+      setError(err?.data?.error ?? err?.message ?? t('err.discount'));
       setBillDiscountOpen(false);
     } finally { setBusyBillId(null); }
   }, [payingBill, serviceFilter, bills]);
@@ -496,7 +497,7 @@ export const CassaPage: React.FC<CassaPageProps> = ({
       setPickerOpen(false);
       setCustomerOpen(false);
     } catch (err: any) {
-      setError(err?.data?.error ?? err?.message ?? 'Cliente non associato');
+      setError(err?.data?.error ?? err?.message ?? t('err.attach'));
     } finally { setBusyBillId(null); }
   }, [order, tableId]);
 
@@ -509,7 +510,7 @@ export const CassaPage: React.FC<CassaPageProps> = ({
       setOrder(await updateOrder(order.order.id, { reservation_id: null }));
       setCustomerOpen(false);
     } catch (err: any) {
-      setError(err?.data?.error ?? err?.message ?? 'Cliente non rimosso');
+      setError(err?.data?.error ?? err?.message ?? t('err.detach'));
     } finally { setBusyBillId(null); }
   }, [order]);
 
@@ -518,7 +519,7 @@ export const CassaPage: React.FC<CassaPageProps> = ({
     try {
       setTx(await cashApiService.getTransactions(serviceFilter));
     } catch (err: any) {
-      setError(err?.data?.error ?? err?.message ?? 'Movimenti non caricati');
+      setError(err?.data?.error ?? err?.message ?? t('err.movements'));
     } finally {
       setTxLoading(false);
     }
@@ -549,7 +550,7 @@ export const CassaPage: React.FC<CassaPageProps> = ({
         // comunque la comanda nuova sul servizio in corso, e il cassiere
         // crederebbe di averla aperta nel giorno che sta guardando.
         if (!isTodayRome) {
-          setError('Nessuna comanda in questo servizio. Le comande nuove si aprono solo nel servizio corrente.');
+          setError(t('err.noOrderThisService'));
           return;
         }
         const res = reservationForTable(id);
@@ -567,7 +568,7 @@ export const CassaPage: React.FC<CassaPageProps> = ({
       setDishQuery('');
       setScreen('table');
     } catch (err: any) {
-      setError(err?.data?.error ?? err?.message ?? 'Tavolo non aperto');
+      setError(err?.data?.error ?? err?.message ?? t('err.tableNotOpen'));
     } finally {
       setBusyBillId(null);
     }
@@ -627,7 +628,7 @@ export const CassaPage: React.FC<CassaPageProps> = ({
       .filter((c): c is NonNullable<typeof c> => c != null);
     pushLine(
       dish, chosen,
-      [...chosen.map(e => signedModifierLabel(byId.get(e.id)!.name, e.n, byId.get(e.id)!.single)), ...removed.map(c => `Senza ${c.name}`)],
+      [...chosen.map(e => signedModifierLabel(byId.get(e.id)!.name, e.n, byId.get(e.id)!.single)), ...removed.map(c => t('without', { ingrediente: c.name }))],
       chosen.reduce((s, e) => s + signedModifierDelta(deltaOf(byId.get(e.id)!), e.n), 0)
         + removed.reduce((s, c) => s + c.removal_delta_cents, 0),
       note,
@@ -701,13 +702,13 @@ export const CassaPage: React.FC<CassaPageProps> = ({
       const row = fresh.bills.find(b => b.id === closed.bill?.id)
         ?? fresh.bills.find(b => b.table_id === tableId);
       if (!row) {
-        setError('Conto non trovato dopo la chiusura della comanda.');
+        setError(t('err.billNotFound'));
         return;
       }
       setPayingBill(row);
       setScreen('payment');
     } catch (err: any) {
-      setError(err?.data?.error ?? err?.message ?? 'Invio non riuscito');
+      setError(err?.data?.error ?? err?.message ?? t('err.send'));
     } finally {
       setBusyBillId(null);
     }
@@ -721,7 +722,7 @@ export const CassaPage: React.FC<CassaPageProps> = ({
     try {
       setOrder(await updateOrder(order.order.id, { covers: next }));
     } catch (err: any) {
-      setError(err?.data?.error ?? err?.message ?? 'Coperti non aggiornati');
+      setError(err?.data?.error ?? err?.message ?? t('err.covers'));
     } finally {
       setBusyBillId(null);
     }
@@ -733,7 +734,7 @@ export const CassaPage: React.FC<CassaPageProps> = ({
       setOrder(await voidItem(item.id, reason, qty));
       setVoidTarget(null);
     } catch (err: any) {
-      setError(err?.data?.error ?? err?.message ?? 'Storno non riuscito');
+      setError(err?.data?.error ?? err?.message ?? t('err.void'));
     } finally {
       setBusyBillId(null);
     }
@@ -789,14 +790,14 @@ export const CassaPage: React.FC<CassaPageProps> = ({
           onOpen={async cents => {
             setBusyBillId(-1); setError(null);
             try { setSession(await cashApiService.openSession(cents, serviceFilter)); }
-            catch (err: any) { setError(err?.data?.error ?? err?.message ?? 'Cassa non aperta'); }
+            catch (err: any) { setError(err?.data?.error ?? err?.message ?? t('err.cashNotOpen')); }
             finally { setBusyBillId(null); }
           }}
           onUpdateFloat={async cents => {
             if (!session?.session) return;
             setBusyBillId(-1); setError(null);
             try { setSession(await cashApiService.updateFloat(session.session.id, cents)); }
-            catch (err: any) { setError(err?.data?.error ?? err?.message ?? 'Fondo non aggiornato'); }
+            catch (err: any) { setError(err?.data?.error ?? err?.message ?? t('err.float')); }
             finally { setBusyBillId(null); }
           }}
           onClose={async (cents, note) => {
@@ -807,7 +808,7 @@ export const CassaPage: React.FC<CassaPageProps> = ({
               // Il 400 della nota obbligatoria porta l'atteso RICALCOLATO dal
               // server: fra l'apertura della schermata e questo click può
               // essere entrato un incasso, e quello buono è il suo.
-              setError(err?.data?.error ?? err?.message ?? 'Chiusura non riuscita');
+              setError(err?.data?.error ?? err?.message ?? t('err.close'));
               reloadSession();
             }
             finally { setBusyBillId(null); }
@@ -835,25 +836,25 @@ export const CassaPage: React.FC<CassaPageProps> = ({
           onRetryDocument={async () => {
             setBusyBillId(esito.bill.id);
             try { await billsApiService.emitFiscalDoc(esito.bill.id); backToQueue(); }
-            catch (err: any) { setError(err?.data?.error ?? err?.message ?? 'Emissione non riuscita'); }
+            catch (err: any) { setError(err?.data?.error ?? err?.message ?? t('err.issue')); }
             finally { setBusyBillId(null); }
           }}
           onMarkProforma={async () => {
             setBusyBillId(esito.bill.id);
             try { await billsApiService.markProforma(esito.bill.id); backToQueue(); }
-            catch (err: any) { setError(err?.data?.error ?? err?.message ?? 'Non riuscito'); }
+            catch (err: any) { setError(err?.data?.error ?? err?.message ?? t('err.generic')); }
             finally { setBusyBillId(null); }
           }}
           onIssueReceipt={async () => {
             setBusyBillId(esito.bill.id);
             try { await billsApiService.emitFiscalDoc(esito.bill.id); backToQueue(); }
-            catch (err: any) { setError(err?.data?.error ?? err?.message ?? 'Emissione non riuscita'); }
+            catch (err: any) { setError(err?.data?.error ?? err?.message ?? t('err.issue')); }
             finally { setBusyBillId(null); }
           }}
           onIssueInvoice={() => {
             // La fattura vuole il cessionario: si emette dal conto in
             // Pagamenti, dove c'è il picker cliente e i dati di fatturazione.
-            setError('La fattura si emette dal conto, in Pagamenti: servono i dati del cliente.');
+            setError(t('err.invoiceFromBill'));
           }}
           onReopen={async () => {
             setBusyBillId(esito.bill.id);
@@ -862,7 +863,7 @@ export const CassaPage: React.FC<CassaPageProps> = ({
               await Promise.all([bills.reload(), reloadSession(), reloadTableState()]);
               backToQueue();
             } catch (err: any) {
-              setError(err?.data?.error ?? err?.message ?? 'Riapertura non riuscita');
+              setError(err?.data?.error ?? err?.message ?? t('err.reopen'));
             } finally { setBusyBillId(null); }
           }}
           onBackToQueue={backToQueue}
@@ -951,7 +952,7 @@ export const CassaPage: React.FC<CassaPageProps> = ({
           onClose={() => setCustomerOpen(false)}
           onAssociate={() => setPickerOpen(true)}
           onRemove={detachCustomer}
-          onOpenProfile={() => setError('Il profilo cliente si apre da Clienti.')}
+          onOpenProfile={() => setError(t('customerProfileHint'))}
         />
       )}
 
@@ -988,9 +989,9 @@ export const CassaPage: React.FC<CassaPageProps> = ({
 
       {voidTarget && (
         <ReasonDialog
-          title={voidTarget.qty > 1 ? `Storna ${voidTarget.name_snapshot}` : `Storna 1× ${voidTarget.name_snapshot}`}
-          hint="Resta in comanda come riga negativa, e la motivazione ferma la cucina."
-          confirmLabel="Storna la riga"
+          title={t(voidTarget.qty > 1 ? 'void.title' : 'void.titleOne', { piatto: voidTarget.name_snapshot })}
+          hint={t('void.hintPage')}
+          confirmLabel={t('void.confirmLine')}
           busy={busyBillId != null}
           maxQty={voidTarget.qty}
           onCancel={() => setVoidTarget(null)}

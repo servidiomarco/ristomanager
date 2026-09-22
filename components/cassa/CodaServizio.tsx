@@ -1,11 +1,12 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { ArrowRight, Banknote, Loader2, Wallet } from 'lucide-react';
 import type { OpenBillRow } from '../../services/billsApiService';
 import type { CashSessionView } from '../../types';
 import {
   Callout, EmptyState, SectionHeader, StatStrip, StatusPill, type Stat,
 } from '../ds';
-import { QUEUE_PILL, euro, queueState, queueSubtitle, residualLabel, type Queue } from './cassaView';
+import { queuePill, euro, queueState, queueSubtitle, residualLabel, type Queue } from './cassaView';
 
 /* ── Passo 1 · la coda del servizio ───────────────────────────────────────
    Il punto di partenza. Dice cosa costa soldi se resta dov'è, e apre l'unica
@@ -40,7 +41,8 @@ const QueueRow: React.FC<{
   onCollect: () => void;
 }> = ({ bill, busy, onOpen, onCollect }) => {
   const state = queueState(bill);
-  const pill = QUEUE_PILL[state];
+  const { t } = useTranslation('cassa', { useSuspense: false });
+  const pill = queuePill(state, t);
   const past = state === 'past';
 
   return (
@@ -64,20 +66,20 @@ const QueueRow: React.FC<{
           <span className={`font-semibold leading-none tracking-[-0.01em] text-[var(--ds-text-primary)] ${bill.takeaway_order_id != null ? 'text-[13px] tabular-nums sm:text-[14px]' : 'text-[17px] sm:text-[19px]'}`}>
             {bill.takeaway_order_id != null ? (bill.takeaway_time ?? '—') : (bill.table_name ?? '—')}
           </span>
-          <span className="mt-0.5 text-[10px] text-[var(--ds-text-muted)]">{bill.takeaway_order_id != null ? 'Asporto' : 'Sala'}</span>
+          <span className="mt-0.5 text-[10px] text-[var(--ds-text-muted)]">{t(bill.takeaway_order_id != null ? 'takeaway' : 'diningRoom')}</span>
         </span>
 
         <span className="min-w-0 flex-1">
           <span className="flex min-w-0 flex-wrap items-center gap-2">
             <span className="truncate text-[16px] font-semibold text-[var(--ds-text-primary)] sm:text-[17px]">
               {bill.takeaway_order_id != null
-                ? `Asporto ${bill.takeaway_time ?? ''}`
-                : `Tavolo ${bill.table_name ?? '—'}`}
+                ? t('takeawayAt', { ora: bill.takeaway_time ?? '' })
+                : t('tableNamed', { nome: bill.table_name ?? '—' })}
             </span>
             <StatusPill tone={pill.tone}>{pill.label}</StatusPill>
           </span>
           <span className="mt-0.5 block truncate text-[13px] text-[var(--ds-text-muted)]">
-            {queueSubtitle(bill)}
+            {queueSubtitle(bill, t)}
           </span>
         </span>
 
@@ -86,7 +88,7 @@ const QueueRow: React.FC<{
             {euro(bill.residual_cents)}
           </span>
           <span className="block text-[12px] text-[var(--ds-text-muted)]">
-            {residualLabel(bill)}
+            {residualLabel(bill, t)}
           </span>
         </span>
       </button>
@@ -103,7 +105,7 @@ const QueueRow: React.FC<{
           }`}
         >
           {busy ? <Loader2 size={16} className="animate-spin" /> : null}
-          {past ? 'Apri' : 'Incassa'}
+          {t(past ? 'open' : 'collect')}
         </button>
       </div>
     </div>
@@ -126,32 +128,33 @@ export const CodaServizio: React.FC<CodaServizioProps> = ({
   queue, session, tables, loading, error, busyBillId,
   onSelectTable, onOpenBill, onCollect, onTransactions, onCashDrawer,
 }) => {
+  const { t } = useTranslation('cassa', { useSuspense: false });
   const conti = queue.current.length;
   // Il tono `pending` è tinto solo quando c'è davvero qualcosa da fare: uno
   // zero in ambra direbbe che manca un incasso che non manca.
   const stats: Stat[] = [
     {
       value: euro(session?.collected_cents ?? 0),
-      label: 'incassato',
+      label: t('taken'),
       tone: 'neutral',
     },
     {
       value: euro(queue.dueCents),
-      label: conti === 1 ? 'da incassare · 1 conto' : `da incassare · ${conti} conti`,
+      label: t('dueBills', { count: conti }),
       tone: queue.dueCents > 0 ? 'pending' : 'neutral',
       tint: queue.dueCents > 0,
     },
     {
       value: `${tables.busy}/${tables.total}`,
-      label: 'tavoli in servizio',
+      label: t('tablesInService'),
       tone: 'neutral',
       hideBelow: 'sm',
     },
   ];
 
   const meta = queue.past.length > 0
-    ? `${conti} nel servizio · ${queue.past.length} in un servizio passato`
-    : conti === 1 ? '1 conto nel servizio' : `${conti} conti nel servizio`;
+    ? t('metaWithPast', { conti, passati: queue.past.length })
+    : t('metaBills', { count: conti });
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -159,7 +162,7 @@ export const CodaServizio: React.FC<CodaServizioProps> = ({
           e non sulla zona che scorre, o l'ombra dei chip verrebbe tagliata. */}
       <div className="mx-auto w-full max-w-[1400px] flex-shrink-0 px-4 pb-3 pt-4 lg:px-8 lg:pt-8">
         <h1 className="hidden text-[26px] font-semibold tracking-[-0.02em] text-[var(--ds-text-primary)] lg:block">
-          Cassa
+          {t('till')}
         </h1>
 
         <div className="flex flex-col gap-3 lg:mt-3 lg:flex-row lg:items-center">
@@ -171,7 +174,7 @@ export const CodaServizio: React.FC<CodaServizioProps> = ({
             onClick={onSelectTable}
             className="inline-flex h-12 flex-shrink-0 items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-6 text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
-            Seleziona tavolo
+            {t('pickTable')}
           </button>
         </div>
       </div>
@@ -194,17 +197,17 @@ export const CodaServizio: React.FC<CodaServizioProps> = ({
                 onClick={onSelectTable}
                 className="inline-flex h-11 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-5 text-[15px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)]"
               >
-                Vedi i tavoli in servizio
+                {t('seeTablesInService')}
               </button>
             }
           >
-            Nessun conto da incassare in questo servizio.
+            {t('noBillsToTake')}
           </EmptyState>
         ) : (
           <>
             {queue.current.length > 0 && (
               <section>
-                <SectionHeader tone="pending" meta={meta}>Da incassare</SectionHeader>
+                <SectionHeader tone="pending" meta={meta}>{t('toTake')}</SectionHeader>
                 <div className="mt-2 flex flex-col gap-3">
                   {queue.current.map(bill => (
                     <QueueRow
@@ -222,7 +225,7 @@ export const CodaServizio: React.FC<CodaServizioProps> = ({
             {queue.past.length > 0 && (
               <section className="mt-5">
                 <SectionHeader tone="muted" meta={String(queue.past.length)}>
-                  Rimasti aperti
+                  {t('leftOpen')}
                 </SectionHeader>
                 <div className="mt-2 flex flex-col gap-3">
                   {queue.past.map(bill => (
@@ -243,13 +246,13 @@ export const CodaServizio: React.FC<CodaServizioProps> = ({
         {/* Le viste fuori dal percorso di un tavolo. In fondo perché è lì che
             si va quando il servizio è finito, non mentre corre. */}
         <div className="mt-5 flex flex-col gap-3 sm:flex-row">
-          <JumpCard label="Transazioni" onClick={onTransactions} />
-          <JumpCard label="Fondo e chiusura" onClick={onCashDrawer} />
+          <JumpCard label={t('transactions')} onClick={onTransactions} />
+          <JumpCard label={t('floatAndClose')} onClick={onCashDrawer} />
         </div>
 
         {session?.session?.closed_at && (
           <Callout tone="info" icon={Banknote} className="mt-4">
-            La cassa di questo servizio è già stata chiusa.
+            {t('tillAlreadyClosed')}
           </Callout>
         )}
       </div>
