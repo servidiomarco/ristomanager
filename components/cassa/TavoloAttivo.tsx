@@ -129,23 +129,22 @@ export const TavoloAttivo: React.FC<TavoloAttivoProps> = ({
   const comanda = (
     <div className="flex h-full min-h-0 flex-col gap-3">
       <div className="flex items-baseline justify-between gap-2">
-        <h2 className="text-[17px] font-semibold text-[var(--ds-text-primary)]">Comanda</h2>
+        <h2 className="text-[17px] font-semibold text-[var(--ds-text-primary)]">{t('order')}</h2>
         <span className="text-[12px] text-[var(--ds-text-muted)]">
-          {isEmpty ? 'nuova' : `${sent.length + cart.length} righe`}
+          {isEmpty ? t('newOrder') : t('rowsCount', { count: sent.length + cart.length })}
         </span>
       </div>
 
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto">
         {isEmpty && (
           <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3 py-6 text-center text-[13px] text-[var(--ds-text-muted)]">
-            Ancora niente su questo tavolo. Scegli dal menu: le righe restano in
-            bozza finché non le invii.
+            {t('nothingYet')}
           </div>
         )}
 
         {sent.length > 0 && (
           <section className="space-y-1.5">
-            <div className="text-[12px] font-semibold text-[var(--ds-text-muted)]">Inviati</div>
+            <div className="text-[12px] font-semibold text-[var(--ds-text-muted)]">{t('sentRows')}</div>
             {sent.map(item => {
               const voided = item.status === 'VOIDED';
               return (
@@ -162,7 +161,7 @@ export const TavoloAttivo: React.FC<TavoloAttivoProps> = ({
                       disabled={busy}
                       className="flex-shrink-0 rounded-[var(--ds-radius-control)] px-2.5 py-1 text-[12px] font-medium text-[var(--ds-critical-text)] transition-colors hover:bg-[var(--ds-critical-tint)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     >
-                      Storna
+                      {t('voidLabel')}
                     </button>
                   )}
                 />
@@ -173,7 +172,7 @@ export const TavoloAttivo: React.FC<TavoloAttivoProps> = ({
 
         {hasDrafts && (
           <section className="space-y-1.5">
-            <div className="text-[12px] font-semibold text-[var(--ds-arriving-text)]">Da inviare</div>
+            <div className="text-[12px] font-semibold text-[var(--ds-arriving-text)]">{t('toSend')}</div>
             {cart.map(line => (
               <Row
                 key={line.key}
@@ -189,7 +188,7 @@ export const TavoloAttivo: React.FC<TavoloAttivoProps> = ({
                       type="button"
                       onClick={() => onCartQty(line.key, -1)}
                       disabled={busy}
-                      aria-label={line.qty === 1 ? 'Togli la riga' : 'Una in meno'}
+                      aria-label={t(line.qty === 1 ? 'removeRow' : 'oneLess')}
                       className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
                     >
                       <Minus size={14} />
@@ -259,7 +258,7 @@ export const TavoloAttivo: React.FC<TavoloAttivoProps> = ({
           disabled={busy}
           className="inline-flex h-9 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
         >
-          Sconto conto
+          {t('discountBill')}
         </button>
 
         {onOpenInComande && (
@@ -269,7 +268,7 @@ export const TavoloAttivo: React.FC<TavoloAttivoProps> = ({
             disabled={busy}
             className="inline-flex h-9 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
           >
-            Apri in Comande
+            {t('openInOrders')}
           </button>
         )}
 
@@ -282,11 +281,11 @@ export const TavoloAttivo: React.FC<TavoloAttivoProps> = ({
           className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
         >
           {busy && <Loader2 size={16} className="animate-spin" />}
-          {hasDrafts ? 'Invia e vai al pagamento' : 'Vai al pagamento'}
+          {t(hasDrafts ? 'sendAndPay' : 'goToPay')}
         </button>
         {isEmpty && (
           <p className="text-center text-[12px] text-[var(--ds-text-muted)]">
-            Si attiva alla prima riga.
+            {t('activeFromFirstRow')}
           </p>
         )}
       </div>
@@ -303,7 +302,7 @@ export const TavoloAttivo: React.FC<TavoloAttivoProps> = ({
           <button
             type="button"
             onClick={onBack}
-            aria-label="Torna indietro"
+            aria-label={t('goBack')}
             className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)]"
           >
             <ArrowLeft className="h-4 w-4" />
@@ -322,7 +321,7 @@ export const TavoloAttivo: React.FC<TavoloAttivoProps> = ({
             className="hidden max-w-[220px] flex-shrink-0 items-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-tint)] px-3 py-1.5 text-[13px] font-medium text-[var(--ds-arriving-text)] transition-colors hover:brightness-95 sm:inline-flex"
           >
             <span className="truncate">
-              {reservation?.customer_name ?? 'Associa cliente'}
+              {reservation?.customer_name ?? t('linkCustomer')}
             </span>
           </button>
 
@@ -334,7 +333,7 @@ export const TavoloAttivo: React.FC<TavoloAttivoProps> = ({
               type="button"
               onClick={() => onCovers(-1)}
               disabled={busy || order.order.covers <= 1}
-              aria-label="Un coperto in meno"
+              aria-label={t('oneCoverLess')}
               className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
             >
               <Minus size={13} />
@@ -394,8 +393,8 @@ export const TavoloAttivo: React.FC<TavoloAttivoProps> = ({
               className="flex w-full items-center justify-between gap-3 text-left"
             >
               <span className="text-[13px] text-[var(--ds-text-muted)]">
-                Comanda · {sent.length + cart.length} righe
-                {hasDrafts && <StatusPill tone="info" className="ml-2">da inviare</StatusPill>}
+                {t('orderWithRows', { righe: t('rowsCount', { count: sent.length + cart.length }) })}
+                {hasDrafts && <StatusPill tone="info" className="ml-2">{t('toSendPill')}</StatusPill>}
               </span>
               <span className="text-[22px] font-semibold tabular-nums tracking-[-0.015em] text-[var(--ds-text-primary)]">
                 {euro(totalCents)}
@@ -409,7 +408,7 @@ export const TavoloAttivo: React.FC<TavoloAttivoProps> = ({
                 onClick={() => setComandaOpen(false)}
                 className="mb-3 self-start rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-4 py-2 text-[14px] font-medium text-[var(--ds-text-primary)]"
               >
-                Chiudi
+                {t('close')}
               </button>
               <div className="min-h-0 flex-1 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4">{comanda}</div>
             </div>

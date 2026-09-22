@@ -111,7 +111,7 @@ export const SelezionaTavolo: React.FC<SelezionaTavoloProps> = ({
   // Sceglierla mostra lo stato vuoto, che dice la stessa cosa senza inventare
   // un trattamento nuovo.
   const roomOptions = [
-    { value: 'ALL', label: `Tutte le sale · ${roomCount('ALL').busy}/${roomCount('ALL').total}` },
+    { value: 'ALL', label: t('allRoomsCount', { occupati: roomCount('ALL').busy, totale: roomCount('ALL').total }) },
     ...rooms.map(r => {
       const c = roomCount(String(r.id));
       return {
@@ -153,22 +153,22 @@ export const SelezionaTavolo: React.FC<SelezionaTavoloProps> = ({
           <button
             type="button"
             onClick={onBack}
-            aria-label="Torna alla coda"
+            aria-label={t('backToQueue')}
             className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             <ArrowLeft className="h-4 w-4" />
           </button>
           <h1 className="flex-1 text-[20px] font-semibold tracking-[-0.02em] text-[var(--ds-text-primary)] lg:text-[26px]">
-            Seleziona tavolo
+            {t('pickTable')}
           </h1>
           <SegmentedControl<'griglia' | 'piantina'>
             value={view}
             onChange={onView}
             options={[
-              { value: 'griglia', label: 'Griglia' },
-              { value: 'piantina', label: 'Piantina' },
+              { value: 'griglia', label: t('grid') },
+              { value: 'piantina', label: t('floorPlan') },
             ]}
-            ariaLabel="Griglia o piantina"
+            ariaLabel={t('gridOrPlan')}
             equalWidth={false}
             size="sm"
           />
@@ -180,7 +180,7 @@ export const SelezionaTavolo: React.FC<SelezionaTavoloProps> = ({
           inputRef={searchRef}
           onKeyDown={onSearchKey}
           placeholder={t('tableOrGuest')}
-          ariaLabel="Cerca un tavolo o un ospite"
+          ariaLabel={t('searchTableOrGuest')}
           className="mt-3 w-full"
         />
 
@@ -193,7 +193,7 @@ export const SelezionaTavolo: React.FC<SelezionaTavoloProps> = ({
             value={roomId}
             onChange={onRoom}
             options={roomOptions}
-            ariaLabel="Scegli la sala"
+            ariaLabel={t('pickRoom')}
             equalWidth={false}
             overflow="scroll"
           />
@@ -204,7 +204,7 @@ export const SelezionaTavolo: React.FC<SelezionaTavoloProps> = ({
             value={filter}
             onChange={onFilter}
             options={filterOptions}
-            ariaLabel="Filtra i tavoli"
+            ariaLabel={t('filterTables')}
             equalWidth={false}
             overflow="scroll"
           />
@@ -223,7 +223,7 @@ export const SelezionaTavolo: React.FC<SelezionaTavoloProps> = ({
         ) : visible.length === 0 ? (
           <div className="mt-2">
             <EmptyState icon={UtensilsCrossed}>
-              {query.trim() ? 'Nessun tavolo con questo nome.' : 'Nessun tavolo in questo stato.'}
+              {t(query.trim() ? 'noTableByName' : 'noTableInState')}
             </EmptyState>
           </div>
         ) : (

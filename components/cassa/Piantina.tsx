@@ -1,4 +1,5 @@
 import React, { useMemo, useRef, useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { Room } from '../../types';
 import type { ServiceBill } from '../../services/ordersApiService';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from '../TableGlyph';
@@ -39,6 +40,7 @@ interface PiantinaProps {
 }
 
 export const Piantina: React.FC<PiantinaProps> = ({ rows, room, billByTable, busy, onPick }) => {
+  const { t } = useTranslation('cassa', { useSuspense: false });
   const boxRef = useRef<HTMLDivElement | null>(null);
   const [scale, setScale] = useState(1);
 
@@ -67,7 +69,7 @@ export const Piantina: React.FC<PiantinaProps> = ({ rows, room, billByTable, bus
   if (!room) {
     return (
       <div className="flex h-full items-center justify-center px-6 text-center text-[14px] text-[var(--ds-text-muted)]">
-        Scegli una sala per vederne la piantina.
+        {t('pickRoomForPlan')}
       </div>
     );
   }
@@ -96,7 +98,7 @@ export const Piantina: React.FC<PiantinaProps> = ({ rows, room, billByTable, bus
                   type="button"
                   onClick={() => onPick(table.id)}
                   disabled={busy}
-                  aria-label={`Tavolo ${table.name}`}
+                  aria-label={t('tableNamed', { nome: table.name })}
                   className="absolute flex flex-col items-center rounded-[var(--ds-radius)] transition-opacity disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   style={{ left: table.x, top: table.y, width: dims.width }}
                 >
@@ -132,10 +134,10 @@ export const Piantina: React.FC<PiantinaProps> = ({ rows, room, billByTable, bus
           schermate adiacenti si pagano subito. */}
       <div className="flex flex-shrink-0 flex-wrap items-center gap-x-4 gap-y-1 px-1 pt-3 text-[12px] text-[var(--ds-text-muted)]">
         {([
-          ['Libero', 'libera'],
-          ['Comanda aperta', 'arrivato'],
-          ['Da incassare', 'uscita'],
-          ['In arrivo', 'inarrivo'],
+          [t('legendFree'), 'libera'],
+          [t('legendOpenOrder'), 'arrivato'],
+          [t('legendToTake'), 'uscita'],
+          [t('legendArriving'), 'inarrivo'],
         ] as [string, TableDisplayStatus][]).map(([label, status]) => (
           <span key={status} className="inline-flex items-center gap-1.5">
             <span

@@ -27,30 +27,45 @@ export const queueState = (bill: OpenBillRow): QueueState => {
   return bill.paid_cents > 0 ? 'partial' : 'due';
 };
 
-export const QUEUE_PILL: Record<QueueState, { label: string; tone: PillTone }> = {
-  partial: { label: 'Parziale', tone: 'pending' },
-  due: { label: 'Da incassare', tone: 'pending' },
-  past: { label: 'Servizio passato', tone: 'neutral' },
+/* Le parole di questo modulo arrivano con `t` come parametro: è una vista
+   senza hook, lo stesso contratto di tablesView.ts e utils/courses.ts. Senza
+   `t` resta l'italiano, così un chiamante dimenticato si legge. */
+type TFunc = (key: string, defaultValue: string, options?: Record<string, unknown>) => string;
+
+const QUEUE_PILL: Record<QueueState, { key: string; label: string; tone: PillTone }> = {
+  partial: { key: 'pill.partial', label: 'Parziale', tone: 'pending' },
+  due: { key: 'pill.due', label: 'Da incassare', tone: 'pending' },
+  past: { key: 'pill.past', label: 'Servizio passato', tone: 'neutral' },
+};
+
+export const queuePill = (state: QueueState, t?: TFunc): { label: string; tone: PillTone } => {
+  const p = QUEUE_PILL[state];
+  return { label: t ? t(p.key, p.label) : p.label, tone: p.tone };
 };
 
 /** L'etichetta sotto l'importo. Mai «credito»: nel modello il credito è
  *  l'acconto portato nel conto, che è tutt'altra cosa dal residuo. */
-export const residualLabel = (bill: OpenBillRow): string =>
-  queueState(bill) === 'partial' ? 'residuo' : 'da saldare';
+export const residualLabel = (bill: OpenBillRow, t?: TFunc): string =>
+  queueState(bill) === 'partial'
+    ? (t ? t('remainder', 'residuo') : 'residuo')
+    : (t ? t('toSettle', 'da saldare') : 'da saldare');
 
 /** Chi c'è al tavolo. Un conto senza prenotazione è un walk-in — non «nessun
  *  cliente», che suonerebbe come un errore invece che come il caso normale. */
-export const guestLabel = (bill: OpenBillRow): string =>
-  bill.customer_name ? toTitleCase(bill.customer_name) : 'Walk-in';
+export const guestLabel = (bill: OpenBillRow, t?: TFunc): string =>
+  bill.customer_name ? toTitleCase(bill.customer_name) : (t ? t('walkIn', 'Walk-in') : 'Walk-in');
 
 /** La riga di dettaglio: chi, quanti, da quando, e cosa è già entrato. */
-export const queueSubtitle = (bill: OpenBillRow): string => {
-  const parts = [guestLabel(bill)];
+export const queueSubtitle = (bill: OpenBillRow, t?: TFunc): string => {
+  const parts = [guestLabel(bill, t)];
   // I coperti sono un dato di sala: sull'asporto «1 coperto» direbbe una
   // cosa falsa.
-  if (bill.takeaway_order_id == null) parts.push(`${bill.covers} copert${bill.covers === 1 ? 'o' : 'i'}`);
-  if (bill.opened_at) parts.push(`aperto ${timePart(bill.opened_at)}`);
-  if (bill.paid_cents > 0) parts.push(`${euro(bill.paid_cents)} già pagati`);
+  if (bill.takeaway_order_id == null) {
+    parts.push(t ? t('coversCount', `${bill.covers} coperti`, { count: bill.covers })
+                 : `${bill.covers} copert${bill.covers === 1 ? 'o' : 'i'}`);
+  }
+  if (bill.opened_at) parts.push(t ? t('openedAt', `aperto ${timePart(bill.opened_at)}`, { ora: timePart(bill.opened_at) }) : `aperto ${timePart(bill.opened_at)}`);
+  if (bill.paid_cents > 0) parts.push(t ? t('alreadyPaidAmount', `${euro(bill.paid_cents)} già pagati`, { importo: euro(bill.paid_cents) }) : `${euro(bill.paid_cents)} già pagati`);
   return parts.join(' · ');
 };
 
