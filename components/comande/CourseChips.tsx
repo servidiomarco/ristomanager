@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import type { OrderWithItems } from '../../types';
 import {
   BAR_COURSE_NO, DESSERT_COURSE_NO, MAX_COURSES, cartForCourse, courseLabel, courseStatus, isSent, itemsForCourse, ordinal,
@@ -29,7 +30,9 @@ export const CourseChips: React.FC<{
    *  tessera dello schermo largo: più alta, nome sopra e pallino sotto,
    *  tinta dello stato invece dell'ombra. */
   variant?: 'pill' | 'card';
-}> = ({ order, cart, course, onCourse, showBar, showDessert, variant = 'pill' }) => (
+}> = ({ order, cart, course, onCourse, showBar, showDessert, variant = 'pill' }) => {
+  const { t } = useTranslation('comande', { useSuspense: false });
+  return (
   // Margine negativo con padding uguale: lo scorrimento orizzontale ritaglia
   // anche in verticale, e senza questo l'ombra sotto le pastiglie esce tagliata.
   // Ventiquattro e non sei: --ds-shadow-card scende 8px e sfuma per 24, quindi
@@ -76,7 +79,7 @@ export const CourseChips: React.FC<{
             type="button"
             onClick={() => onCourse(n)}
             aria-pressed={active}
-            aria-label={courseLabel(n)}
+            aria-label={courseLabel(n, t)}
             className={`flex min-w-[72px] flex-1 flex-shrink-0 flex-col items-center justify-center gap-1.5 rounded-[var(--ds-radius)] px-3 py-2.5 text-[16px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
               active
                 ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
@@ -85,7 +88,7 @@ export const CourseChips: React.FC<{
                   : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
             }`}
           >
-            {ordinal(n)}
+            {ordinal(n, t)}
             {dot}
           </button>
         );
@@ -97,14 +100,14 @@ export const CourseChips: React.FC<{
           type="button"
           onClick={() => onCourse(n)}
           aria-pressed={active}
-          aria-label={courseLabel(n)}
+          aria-label={courseLabel(n, t)}
           className={`inline-flex h-11 min-w-[64px] flex-shrink-0 items-center justify-center gap-1.5 rounded-[var(--ds-radius-control)] px-4 text-[16px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
             active
               ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
               : 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]'
           }`}
         >
-          {ordinal(n)}
+          {ordinal(n, t)}
           {filled && (
             <span
               className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${
@@ -118,5 +121,6 @@ export const CourseChips: React.FC<{
         </button>
       );
     })}
-  </div>
-);
+    </div>
+  );
+};

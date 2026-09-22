@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { isBarCourse, isDessertCourse, isOffSequenceCourse, ordinal } from '../utils/courses';
+import { isBarCourse, isDessertCourse, isOffSequenceCourse, ordinal, courseLabelLong, courseLabelShort } from '../utils/courses';
 import { Bell, BellOff, BellRing, Check, ChevronRight, CookingPot, Loader2, MessagesSquare, Pencil, Play, Search, TriangleAlert, Users, WifiOff, X } from 'lucide-react';
 import { useNow } from '../hooks/useNow';
 import { useSalaNodeStale, formatStaleAsOf } from '../hooks/useSalaNodeStale';
@@ -39,10 +39,9 @@ const SOUND_KEY = 'kds.sound';
 // altre partite finiscono: il bordo lampeggia.
 const LAMP_ALERT_MIN = 4;
 
-// «1ª uscita» … e «Uscita Bar»: il Bar è un'uscita fuori numerazione
-// (utils/courses), e nelle frasi mantiene il femminile di «uscita».
-const courseName = (n: number): string => isBarCourse(n) ? 'Uscita Bar' : isDessertCourse(n) ? 'Uscita Dolci' : `${ordinal(n)} uscita`;
-const courseShort = (n: number): string => isBarCourse(n) ? 'Bar' : isDessertCourse(n) ? 'Dolci' : `${ordinal(n)} usc.`;
+// «1ª uscita» … e «Uscita Bar»: il Bar è un'uscita fuori numerazione. Le
+// etichette stanno in utils/courses, condivise col palmare e col passe —
+// erano tre copie della stessa parola e bastava che una divergesse.
 
 // Mai negativo: `now` avanza a scatti di 15 secondi e può risultare indietro
 // rispetto a un timestamp appena scritto dal server, che mostrerebbe "-1′".
@@ -989,7 +988,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                             <div key={c.course_no} className="text-[14px]">
                               <div className="flex items-baseline gap-2">
                                 <span className="flex-shrink-0 font-medium text-[var(--ds-text-primary)]">
-                                  {ordinal(c.course_no)}
+                                  {ordinal(c.course_no, t)}
                                 </span>
                                 <span className="min-w-0 flex-1 font-medium text-[var(--ds-text-primary)]">
                                   {aggregate(mine)}
@@ -1074,7 +1073,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                   className="flex-shrink-0 rounded-[var(--ds-radius)] border-2 border-dashed border-[var(--ds-border-strong)] px-3 py-2"
                 >
                   <div className="text-[15px] font-semibold text-[var(--ds-text-primary)]">
-                    T{col.table_name} · {courseShort(col.course_no)}
+                    T{col.table_name} · {courseLabelShort(col.course_no, t)}
                   </div>
                   <div className="text-[13px] text-[var(--ds-text-muted)]">
                     {summarizeItems(col.items)}
@@ -1230,7 +1229,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                 <div key={no}>
                   <div className="mb-1 flex items-baseline gap-2">
                     <span className="text-[14px] font-semibold text-[var(--ds-text-primary)]">
-                      {courseName(no)}
+                      {courseLabelLong(no, t)}
                     </span>
                     <span className="ml-auto flex-shrink-0 text-[13px] tabular-nums text-[var(--ds-text-muted)]">
                       {state}
@@ -1386,6 +1385,7 @@ const OrderCard: React.FC<{
   /** Apre l'editor del peso su una riga al peso (correzione dopo la pesata). */
   onEditWeight?: (item: KdsItem) => void;
 }> = ({ g, now, stationId, stationNames, modifierNotes, onAdvance, onCallWaiter, waiterCalled, onServeCourse, revisions, onShowRevisions, onShowOrder, onFlashDish, onEditWeight }) => {
+  const { t } = useTranslation('comande', { useSuspense: false });
   const activeByCourse = new Map(g.cols.map(c => [c.course_no, c]));
   const upcomingByCourse = new Map(g.upcomingCols.map(c => [c.course_no, c]));
   const courseNos = [...new Set([
@@ -1499,7 +1499,7 @@ const OrderCard: React.FC<{
                   <div className="rounded-[var(--ds-radius)] border-2 border-dashed border-[var(--ds-border-strong)] px-2.5 py-2">
                     <div className="flex items-baseline gap-2 text-[13px]">
                       <span className="font-semibold text-[var(--ds-text-primary)]">
-                        {courseName(no)}
+                        {courseLabelLong(no, t)}
                       </span>
                       <span className="ml-auto font-semibold tabular-nums text-[var(--ds-text-primary)]">
                         fra {Math.max(wait, 1)}′
@@ -1615,7 +1615,7 @@ const CourseSection: React.FC<{
       >
       <div className="flex items-baseline gap-2 pr-1">
         <span className="text-[14px] font-semibold text-[var(--ds-text-primary)]">
-          {courseName(col.course_no)}
+          {courseLabelLong(col.course_no, t)}
         </span>
         <span className={`ml-auto text-[17px] font-semibold tabular-nums ${timerTone(elapsed)}`}>
           {elapsed}′
@@ -1826,6 +1826,7 @@ const PassiveSection: React.FC<{
   stationId: number | null;
   stationNames?: Map<number, string>;
 }> = ({ courseNo, rows, stationId, stationNames }) => {
+  const { t } = useTranslation('comande', { useSuspense: false });
   const [open, setOpen] = useState(false);
   const served = rows.length > 0 && rows.every(r => r.status === 'SERVED');
   const queued = rows.length > 0 && rows.every(r => r.status === 'QUEUED');
@@ -1866,12 +1867,12 @@ const PassiveSection: React.FC<{
         type="button"
         onClick={() => setOpen(o => !o)}
         aria-expanded={open}
-        aria-label={`${courseName(courseNo)}: mostra i piatti`}
+        aria-label={t('showDishes', { uscita: courseLabelLong(courseNo, t) })}
         className="block w-full rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-2.5 py-2 text-left shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
       >
         <div className="flex items-baseline gap-2 pr-1 text-[13px]">
           <span className="font-medium text-[var(--ds-text-muted)]">
-            {courseName(courseNo)}
+            {courseLabelLong(courseNo, t)}
           </span>
           <span className="ml-auto flex-shrink-0 tabular-nums text-[var(--ds-text-muted)]">
             {served
@@ -2087,11 +2088,15 @@ const TimelinePane: React.FC<{
   const mins = (s: number) => Math.round(s / 60);
   const label = (e: OrderTimelineEvent): string => {
     switch (e.kind) {
-      case 'opened': return `comanda aperta${e.by ? ` · ${e.by}` : ''}`;
-      case 'course_fired': return `${courseName(e.course_no)} chiamata`;
-      case 'course_started': return `${courseName(e.course_no)} in lavorazione`;
-      case 'course_ready': return `${courseName(e.course_no)} pronta${e.sync_delta_s >= 60 ? ` · sincronia ${mins(e.sync_delta_s)}′` : ''}`;
-      case 'course_served': return `${courseName(e.course_no)} servita${e.lamp_s != null && e.lamp_s >= 60 ? ` · ${mins(e.lamp_s)}′ sotto la lampada` : ''}`;
+      case 'opened': return e.by ? t('timeline.openedBy', { chi: e.by }) : t('timeline.opened');
+      case 'course_fired': return t('timeline.fired', { uscita: courseLabelLong(e.course_no, t) });
+      case 'course_started': return t('timeline.started', { uscita: courseLabelLong(e.course_no, t) });
+      case 'course_ready': return e.sync_delta_s >= 60
+        ? t('timeline.readySync', { uscita: courseLabelLong(e.course_no, t), minuti: mins(e.sync_delta_s) })
+        : t('timeline.ready', { uscita: courseLabelLong(e.course_no, t) });
+      case 'course_served': return e.lamp_s != null && e.lamp_s >= 60
+        ? t('timeline.servedLamp', { uscita: courseLabelLong(e.course_no, t), minuti: mins(e.lamp_s) })
+        : t('timeline.served', { uscita: courseLabelLong(e.course_no, t) });
       case 'revision': return `${e.summary} · ${e.by}`;
     }
   };

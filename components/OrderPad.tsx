@@ -79,12 +79,15 @@ type CatView = 'list' | 'grid3' | 'grid4';
 
 // Banner di presenza: chi altro sta componendo su questo tavolo. Il tempo
 // solo col nome singolo — con due nomi la riga supera il dato che porta.
-const presenceLabel = (mates: { name: string; since: number }[]): string => {
+type TFunc = (key: string, options?: Record<string, unknown>) => string;
+const presenceLabel = (mates: { name: string; since: number }[], t: TFunc): string => {
   if (mates.length === 1) {
     const min = Math.floor((Date.now() - mates[0].since) / 60_000);
-    return `Ci sta lavorando anche ${mates[0].name} · ${min < 1 ? 'da ora' : `da ${min}′`}`;
+    return min < 1
+      ? t('presence.oneNow', { nome: mates[0].name })
+      : t('presence.oneSince', { nome: mates[0].name, minuti: min });
   }
-  return `Ci stanno lavorando anche ${mates.map(m => m.name).join(' e ')}`;
+  return t('presence.many', { nomi: mates.map(m => m.name).join(' e ') });
 };
 
 interface OrderPadProps {
@@ -290,9 +293,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
     const o = order?.order;
     if (!o || o.opened_by_user_id == null || !user) return null;
     if (Number(o.opened_by_user_id) === Number(user.id)) return null;
-    if (String(o.opened_by_role) === 'CASSA') return 'dalla cassa';
-    return o.opened_by_name ? `di ${o.opened_by_name}` : null;
-  }, [order, user]);
+    if (String(o.opened_by_role) === 'CASSA') return t('openedBy.till');
+    return o.opened_by_name ? t('openedBy.person', { nome: o.opened_by_name }) : null;
+  }, [order, user, t]);
   const billTables = useMemo(() => new Set(serviceBills.keys()), [serviceBills]);
   // Quanto resta da incassare per tavolo: è il numero che la tessera scrive,
   // e il residuo (non il totale) è quello che il cassiere deve ancora vedere
@@ -478,7 +481,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
         // comunque la comanda nuova sul servizio in corso, e il cameriere
         // crederebbe di averla aperta il giorno che sta guardando.
         if (!isTodayRome) {
-          setError('Nessuna comanda in questo servizio. Le nuove comande si aprono solo nel servizio corrente: torna a oggi per aprirne una.');
+          setError(t('err.noOrderThisService'));
           return;
         }
         const res = reservationForTable(id);
@@ -508,7 +511,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
       setCart(bozza);
       if (bozza.length > 0) {
         const n = bozza.reduce((sum, l) => sum + l.qty, 0);
-        setFlash(`${n} piatt${n === 1 ? 'o' : 'i'} non inviat${n === 1 ? 'o' : 'i'} dall'ultima volta: bozza ripristinata, non è in cucina.`);
+        setFlash(t('toast.draftRestored', { count: n }));
       }
       setDishQuery('');
       // Nuova uscita = quella dopo l'ultima già mandata, così il cameriere
@@ -518,7 +521,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
       const maxSent = view.courses.filter(c => c.status !== 'PENDING' && c.course_no !== BAR_COURSE_NO && c.course_no !== DESSERT_COURSE_NO).map(c => c.course_no);
       setCourse(maxSent.length ? Math.min(MAX_COURSES, Math.max(...maxSent) + 1) : 1);
     } catch (err: any) {
-      setError(err?.message ?? 'Impossibile aprire la comanda');
+      setError(err?.message ?? t('err.openOrder'));
     } finally {
       setBusy(false);
     }
@@ -748,7 +751,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
     try {
       setOrder(await ordersApiService.patchItem(item.id, { course_no: toCourse }));
     } catch (err: any) {
-      setError(err?.data?.error ?? err?.message ?? 'Spostamento non riuscito');
+      setError(err?.data?.error ?? err?.message ?? t('err.move'));
     } finally { setBusy(false); }
   };
 
@@ -765,10 +768,10 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
         for (const i of serverDrafts) view = await ordersApiService.patchItem(i.id, { course_no: to });
         if (view) setOrder(view);
       } catch (err: any) {
-        setError(err?.data?.error ?? err?.message ?? 'Spostamento non riuscito');
+        setError(err?.data?.error ?? err?.message ?? t('err.move'));
       } finally { setBusy(false); }
     }
-    setFlash(`Spostato nella ${courseLabel(to)}`);
+    setFlash(t('toast.movedTo', { uscita: courseLabel(to, t) }));
   };
 
   // Cosa si sta spostando: una riga locale, una riga server in bozza, o
@@ -925,7 +928,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
   const repeatAll = (lines: RepeatLine[]) => {
     for (const l of lines) repeatLine(l, l.qty);
     setComandaOpen(false);
-    setFlash(`Giro ripetuto nella ${courseLabel(course)} — controlla e invia`);
+    setFlash(t('toast.roundRepeated', { uscita: courseLabel(course, t) }));
   };
 
   const clearDrafts = () => {
@@ -937,13 +940,13 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
     const cleared = cart;
     const orderIdAtClear = openOrderIdRef.current;
     setCart([]);
-    addToast('Righe non inviate svuotate', 'success', {
+    addToast(t('toast.unsentCleared'), 'success', {
       icon: Trash2,
       action: {
         label: t('cancel'),
         onClick: () => {
           if (openOrderIdRef.current !== orderIdAtClear) {
-            addToast('Comanda cambiata, righe non ripristinate', 'info');
+            addToast(t('toast.orderChanged'), 'info');
             return;
           }
           setCart(prev => [...cleared, ...prev]);
@@ -1039,10 +1042,10 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
       // «Riaperta»: l'invio è passato, ma su una comanda nuova — se un
       // collega aveva eliminato apposta quella vecchia, deve saperlo.
       setFlash(
-        (recovered ? 'Comanda riaperta · ' : '') + (
-          fired && queued ? `Uscita in cucina; ${queued === 1 ? "un'altra è" : `${queued} sono`} in attesa al passe`
-          : fired ? 'Comanda in cucina'
-          : 'Proposta al passe — in attesa di lancio'
+        (recovered ? t('sent.reopened') : '') + (
+          fired && queued ? t('sent.firedWaiting', { count: queued })
+          : fired ? t('sent.inKitchen')
+          : t('sent.atPass')
         )
       );
     } catch (err: any) {
@@ -1050,8 +1053,8 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
       // le scritture vanno al cloud — dire "invio non riuscito" non basta,
       // il cameriere deve sapere che la cucina NON ha visto niente.
       setError(err instanceof TypeError && nodeStale.stale
-        ? 'Linea giù: comanda non inviata, la cucina non la vede. Riprova quando torna.'
-        : err?.data?.error ?? err?.message ?? 'Invio non riuscito');
+        ? t('err.lineDown')
+        : err?.data?.error ?? err?.message ?? t('err.send'));
     } finally {
       setBusy(false);
     }
@@ -1067,7 +1070,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
     try {
       setOrder(await updateOrder(order.order.id, { covers: next }));
     } catch (err: any) {
-      setError(err?.data?.error ?? err?.message ?? 'Coperti non aggiornati');
+      setError(err?.data?.error ?? err?.message ?? t('err.covers'));
     } finally {
       setBusy(false);
     }
@@ -1083,7 +1086,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
       dropCartDraft(order.order.id);
       setClosing(false);
       if (res.bill) setJustClosed(res.bill);
-      else setFlash('Comanda chiusa: non c\'era nulla da pagare');
+      else setFlash(t('toast.closedNothingDue'));
       // Ottimistico: la comanda sparisce subito; se è nato un conto, il
       // tavolo passa a "conto da incassare" invece che a libero.
       if (tableId != null) {
@@ -1111,10 +1114,10 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
     } catch (err: any) {
       const data = err?.data;
       if (data?.pending_items) {
-        setError(`${data.pending_items} righe non sono ancora andate in cucina. Inviale o confermale come da scartare.`);
+        setError(t('err.pendingRows', { count: data.pending_items }));
         setClosing(true);
       } else {
-        setError(data?.error ?? err?.message ?? 'Chiusura non riuscita');
+        setError(data?.error ?? err?.message ?? t('err.close'));
         setClosing(false);
       }
     } finally {
@@ -1129,7 +1132,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
       setVoidTarget(null);
       setFlash(`Stornato: ${qty ?? item.qty}× ${item.name_snapshot}`);
     } catch (err: any) {
-      setError(err?.data?.error ?? err?.message ?? 'Storno non riuscito');
+      setError(err?.data?.error ?? err?.message ?? t('err.void'));
     } finally { setBusy(false); }
   };
 
@@ -1139,9 +1142,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
     try {
       setOrder(await setOrderDiscount(order.order.id, payload));
       setDiscountOpen(false);
-      setFlash(payload ? 'Sconto applicato' : 'Sconto rimosso');
+      setFlash(t(payload ? 'toast.discountApplied' : 'toast.discountRemoved'));
     } catch (err: any) {
-      setError(err?.data?.error ?? err?.message ?? 'Sconto non applicato');
+      setError(err?.data?.error ?? err?.message ?? t('err.discount'));
     } finally { setBusy(false); }
   };
 
@@ -1153,9 +1156,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
       setOrder(moved);
       setTableId(targetId);
       setTransferOpen(false);
-      setFlash(`Comanda spostata sul tavolo ${tables.find(t => t.id === targetId)?.name ?? targetId}`);
+      setFlash(t('toast.orderMoved', { tavolo: tables.find(tb => tb.id === targetId)?.name ?? targetId }));
     } catch (err: any) {
-      setError(err?.data?.error ?? err?.message ?? 'Trasferimento non riuscito');
+      setError(err?.data?.error ?? err?.message ?? t('err.transfer'));
     } finally { setBusy(false); }
   };
 
@@ -1167,9 +1170,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
     try {
       await fireCourse(order.order.id, courseNo);
       setOrder(await ordersApiService.getOrder(order.order.id));
-      setFlash(`${courseLabel(courseNo)} chiamata in cucina`);
+      setFlash(t('toast.courseFired', { uscita: courseLabel(courseNo, t) }));
     } catch (err: any) {
-      setError(err?.data?.error ?? err?.message ?? 'Lancio non riuscito');
+      setError(err?.data?.error ?? err?.message ?? t('err.fire'));
     } finally {
       setBusy(false);
     }
@@ -1212,9 +1215,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
       setDeleteOrderOpen(false);
       setOpenTables(prev => { const n = new Set(prev); if (o.order.table_id != null) n.delete(o.order.table_id); return n; });
       setTableId(null); setOrder(null); setCart([]); setComandaOpen(false);
-      setFlash('Comanda eliminata');
+      setFlash(t('toast.orderDeleted'));
     } catch (err: any) {
-      setError(err?.data?.error ?? err?.message ?? 'Eliminazione non riuscita');
+      setError(err?.data?.error ?? err?.message ?? t('err.delete'));
       setDeleteOrderOpen(false);
     } finally { setBusy(false); }
   };
@@ -1224,9 +1227,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
     setBusy(true); setError(null);
     try {
       setOrder(await ordersApiService.recallCourse(order.order.id, courseNo));
-      setFlash(`${courseLabel(courseNo)} richiamata: torna in bozza`);
+      setFlash(t('toast.courseRecalled', { uscita: courseLabel(courseNo, t) }));
     } catch (err: any) {
-      setError(err?.data?.error ?? err?.message ?? 'Richiamo non riuscito');
+      setError(err?.data?.error ?? err?.message ?? t('err.recall'));
     } finally {
       setBusy(false);
     }
@@ -1240,9 +1243,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
     setBusy(true); setError(null);
     try {
       setOrder(await ordersApiService.unfireCourse(order.order.id, courseNo));
-      setFlash(`${courseLabel(courseNo)}: chiamata annullata, torna in coda`);
+      setFlash(t('toast.courseUnfired', { uscita: courseLabel(courseNo, t) }));
     } catch (err: any) {
-      setError(err?.data?.error ?? err?.message ?? 'Annullo non riuscito');
+      setError(err?.data?.error ?? err?.message ?? t('err.unfire'));
     } finally {
       setBusy(false);
     }
@@ -1276,7 +1279,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
       // consegnato ADESSO — il modal aspetta la conferma e mostra il QR.
       setScontrinoEsito({ billId, amountLabel: `${method === 'CONTANTI' ? 'contanti' : 'POS'} ${euro(residualCents)}`, token: null, docNumber: null, failed: null });
     } catch (err: any) {
-      setError(err?.data?.error ?? err?.message ?? 'Chiusura non riuscita');
+      setError(err?.data?.error ?? err?.message ?? t('err.close'));
     } finally {
       setBusy(false);
     }
@@ -1297,7 +1300,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
         ? doc.status === 'CONFIRMED' && doc.doc_type === 'RECEIPT'
           ? { ...prev, token: doc.public_token ?? null, docNumber: doc.doc_number ?? doc.provider_ref ?? null }
           : doc.status === 'FAILED'
-            ? { ...prev, failed: 'Lo scontrino non è partito: si ritenta dal conto, in Pagamenti.' }
+            ? { ...prev, failed: t('err.receiptNotSent') }
             : prev
         : prev);
     };
@@ -1318,9 +1321,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
   const stampaPreconto = async (billId: number) => {
     try {
       await printBill(billId, 'PRECONTO');
-      setFlash('Preconto in stampa');
+      setFlash(t('toast.preBillPrinting'));
     } catch (err: any) {
-      setError(err?.data?.error ?? err?.message ?? 'Stampa non riuscita');
+      setError(err?.data?.error ?? err?.message ?? t('err.print'));
     }
   };
 
@@ -1340,10 +1343,10 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
       if ((opts as any)?.documento === 'Scontrino') {
         setScontrinoEsito({ billId: viewBill.id, amountLabel: null, token: null, docNumber: null, failed: null });
       } else {
-        setFlash('Conto chiuso in cassa');
+        setFlash(t('toast.billClosedAtTill'));
       }
     } catch (err: any) {
-      setError(err?.data?.error ?? err?.message ?? 'Chiusura non riuscita');
+      setError(err?.data?.error ?? err?.message ?? t('err.close'));
     } finally {
       setBusy(false);
     }
@@ -1376,7 +1379,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
           window.setTimeout(() => {
             setViewBill(cur => {
               if (!cur || cur.id !== prev.id) return cur;
-              setFlash('Conto saldato · tavolo libero');
+              setFlash(t('toast.billSettled'));
               return null;
             });
           }, 2600);
@@ -1411,7 +1414,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
         chime();
         if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(30);
         const amt = Number(p?.amount_cents);
-        setFlash(Number.isFinite(amt) && amt > 0 ? `Pagamento ricevuto · ${euro(amt)}` : 'Pagamento ricevuto');
+        setFlash(Number.isFinite(amt) && amt > 0 ? t('toast.paymentReceivedAmount', { importo: euro(amt) }) : t('toast.paymentReceived'));
       }
     };
     socket.on('bill:split-paid', onPaid);
@@ -1426,7 +1429,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
       // prossima Invia. Il carrello è locale e sopravvive; l'invio riapre
       // una comanda nuova da solo.
       if (p?.order_id != null && p.order_id === openOrderIdRef.current) {
-        setError('Comanda eliminata da un altro dispositivo — le righe non inviate restano qui e ripartono con Invia.');
+        setError(t('err.orderDeletedElsewhere'));
       }
     };
     socket.on('order:deleted', onOrderDeleted);
@@ -1528,7 +1531,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
       {error && <ErrorBar message={error} onDismiss={() => setError(null)} />}
       {tableMates.length > 0 && (
         <Callout tone="info" icon={Users}>
-          {presenceLabel(tableMates)}
+          {presenceLabel(tableMates, t)}
         </Callout>
       )}
     </>
@@ -1566,7 +1569,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
                   disabled={busy}
                   className={`flex-1 ${dsButton.primary}`}
                 >
-                  Scontrino contanti
+                  {t('bill.receiptCash')}
                 </button>
                 <button
                   type="button"
@@ -1574,7 +1577,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
                   disabled={busy}
                   className={`flex-1 ${dsButton.secondary}`}
                 >
-                  Scontrino POS
+                  {t('bill.receiptCard')}
                 </button>
               </div>
               <div className="flex gap-2">
@@ -1584,7 +1587,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
                   disabled={busy}
                   className={`flex-1 ${dsButton.quiet}`}
                 >
-                  Preconto
+                  {t('bill.preBill')}
                 </button>
                 {canCassa && (
                   <button
@@ -1593,7 +1596,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
                     disabled={busy}
                     className={`flex-1 ${dsButton.quiet}`}
                   >
-                    Incassa con la cassa
+                    {t('bill.takeAtTill')}
                   </button>
                 )}
               </div>
@@ -1603,7 +1606,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
                 disabled={busy}
                 className={`w-full ${dsButton.quiet}`}
               >
-                Nuova comanda su questo tavolo
+                {t('bill.newOrderHere')}
               </button>
             </>
           }
@@ -1613,21 +1616,21 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
         <InvoiceDialog
           bill={invoiceFor}
           initialQuery={invoiceFor.initialQuery}
-          onCancel={() => { setInvoiceFor(null); setFlash('Conto chiuso, da fatturare: la fattura resta emettibile dal conto.'); }}
-          onDone={() => { setInvoiceFor(null); setFlash('Fattura emessa'); }}
+          onCancel={() => { setInvoiceFor(null); setFlash(t('toast.toInvoice')); }}
+          onDone={() => { setInvoiceFor(null); setFlash(t('toast.invoiceIssued')); }}
         />
       )}
       {scontrinoEsito && (
         <ModalShell
           open
           onClose={() => setScontrinoEsito(null)}
-          title="Conto chiuso"
+          title={t('bill.closed')}
           subtitle={scontrinoEsito.amountLabel ?? undefined}
           size="sm"
           bodyClassName="p-4"
           footer={
             <button type="button" onClick={() => setScontrinoEsito(null)} className={dsButton.primary}>
-              Fatto
+              {t('bill.done')}
             </button>
           }
         >
@@ -1637,7 +1640,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
             <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
               {scontrinoEsito.docNumber && (
                 <p className="mb-3 text-[14px] font-medium text-[var(--ds-text-primary)]">
-                  Scontrino n. {scontrinoEsito.docNumber}
+                  {t('bill.receiptNo', { numero: scontrinoEsito.docNumber })}
                 </p>
               )}
               <div className="flex items-center gap-4">
@@ -1646,7 +1649,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
                 </div>
                 <div className="min-w-0 space-y-2">
                   <p className="text-[13px] leading-snug text-[var(--ds-text-secondary)]">
-                    L'ospite lo inquadra e ha lo scontrino digitale sul telefono.
+                    {t('bill.receiptQrHint')}
                   </p>
                   {/* Esito sul bottone, non in un flash di pagina: il flash
                       resta dietro questo modal e nessuno lo vede. */}
@@ -1656,7 +1659,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
             </div>
           ) : (
             <div className="flex items-center gap-2.5 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 text-[14px] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)]">
-              <Loader2 size={16} className="animate-spin" aria-hidden /> Scontrino in emissione…
+              <Loader2 size={16} className="animate-spin" aria-hidden /> {t('bill.receiptIssuing')}
             </div>
           )}
         </ModalShell>
@@ -1700,7 +1703,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
                   disabled={busy}
                   className={`flex-1 ${dsButton.primary}`}
                 >
-                  Scontrino contanti
+                  {t('bill.receiptCash')}
                 </button>
                 <button
                   type="button"
@@ -1708,7 +1711,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
                   disabled={busy}
                   className={`flex-1 ${dsButton.secondary}`}
                 >
-                  Scontrino POS
+                  {t('bill.receiptCard')}
                 </button>
               </div>
               <div className="flex gap-2">
@@ -1718,7 +1721,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
                   disabled={busy}
                   className={`flex-1 ${dsButton.quiet}`}
                 >
-                  Preconto
+                  {t('bill.preBill')}
                 </button>
                 {canCassa && (
                   <button
@@ -1727,7 +1730,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
                     disabled={busy}
                     className={`flex-1 ${dsButton.quiet}`}
                   >
-                    Incassa con la cassa
+                    {t('bill.takeAtTill')}
                   </button>
                 )}
               </div>
@@ -1802,7 +1805,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
               {serviceBills.size > 0 && (
                 <span className="inline-flex h-8 w-fit items-baseline gap-1.5 rounded-[var(--ds-radius-control)] border border-[var(--ds-pending-solid)] bg-[var(--ds-pending-tint)] px-3 leading-8 text-[var(--ds-pending-text)]">
                   <span className="text-[15px] font-bold tabular-nums">{serviceBills.size}</span>
-                  <span className="text-[13px] font-medium">{serviceBills.size === 1 ? 'conto da incassare' : 'conti da incassare'}</span>
+                  <span className="text-[13px] font-medium">{t('billsToTake', { count: serviceBills.size })}</span>
                 </span>
               )}
             </div>
@@ -1942,7 +1945,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
         bodyClassName="space-y-3 p-5 sm:p-6"
         footerStart={
           <button type="button" onClick={() => setClosing(false)} className={dsButton.quiet}>
-            Annulla
+            {t('cancel')}
           </button>
         }
         footer={
@@ -1954,7 +1957,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
               className={dsButton.critical}
             >
               {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-              Scarta e chiudi
+              {t('close.discardAndClose')}
             </button>
           ) : (
             <button
@@ -1964,29 +1967,26 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
               className={dsButton.primary}
             >
               {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-              Apri il conto
+              {t('close.openBill')}
             </button>
           )
         }
       >
         <p className="text-[15px] leading-relaxed text-[var(--ds-text-secondary)]">
-          Il totale di {euro(order.total_cents)} passa al conto del tavolo {table?.name}.
-          Dopo non si aggiungono piatti.
+          {t('close.total', { importo: euro(order.total_cents), tavolo: table?.name })}
         </p>
         {pendingRows > 0 && (
           <Callout tone="pending" icon={TriangleAlert}>
-            {pendingRows === 1
-              ? '1 riga non è ancora andata in cucina e verrà eliminata.'
-              : `${pendingRows} righe non sono ancora andate in cucina e verranno eliminate.`}
+            {t('close.pending', { count: pendingRows })}
           </Callout>
         )}
       </ModalShell>
 
       {voidTarget && (
         <ReasonDialog
-          title={voidTarget.qty > 1 ? `Storna ${voidTarget.name_snapshot}` : `Storna 1× ${voidTarget.name_snapshot}`}
-          hint="La riga resta a bilancio come scarto, con chi l'ha stornata e perché."
-          confirmLabel="Storna"
+          title={t(voidTarget.qty > 1 ? 'void.title' : 'void.titleOne', { piatto: voidTarget.name_snapshot })}
+          hint={t('void.hint')}
+          confirmLabel={t('void.confirm')}
           busy={busy}
           maxQty={voidTarget.qty}
           onCancel={() => setVoidTarget(null)}
@@ -1996,9 +1996,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
 
       {deleteOrderOpen && (
         <ReasonDialog
-          title={`Elimina la comanda del Tav. ${table?.name ?? tableId}`}
-          hint="Via tutte le righe, anche quelle già in cucina. La motivazione resta nel registro attività."
-          confirmLabel="Elimina la comanda"
+          title={t('removeOrder.title', { tavolo: table?.name ?? tableId })}
+          hint={t('removeOrder.hint')}
+          confirmLabel={t('deleteOrder')}
           busy={busy}
           onCancel={() => setDeleteOrderOpen(false)}
           onConfirm={reason => deleteOrderNow(reason)}
@@ -2048,11 +2048,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
           open
           onClose={() => setMoveFor(null)}
           title={moveFor.kind === 'course'
-            ? `Sposta la ${courseLabel(moveFor.from)}`
-            : `Sposta ${moveFor.kind === 'item' ? moveFor.item.name_snapshot : moveFor.label}`}
-          subtitle={moveFor.kind === 'course'
-            ? 'Tutte le righe non ancora inviate cambiano uscita'
-            : 'In quale uscita va?'}
+            ? t('move.courseTitle', { uscita: courseLabel(moveFor.from, t) })
+            : t('move.lineTitle', { cosa: moveFor.kind === 'item' ? moveFor.item.name_snapshot : moveFor.label })}
+          subtitle={t(moveFor.kind === 'course' ? 'move.courseHint' : 'move.lineHint')}
           size="sm"
           closeOnEscape
           bodyClassName="p-5 sm:p-6"
@@ -2087,7 +2085,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
                   }}
                   className="flex h-16 flex-col items-center justify-center gap-0.5 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] text-[15px] font-semibold text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
                 >
-                  {courseLabel(n)}
+                  {courseLabel(n, t)}
                   {sent && (
                     <span className="text-[11px] font-medium text-[var(--ds-text-muted)]">
                       {courseBadge(status, n).text}
@@ -2129,14 +2127,14 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
           }}
           initialQty={editLine.qty}
           onDelete={() => { dropLine(editLine.key); setEditLine(null); }}
-          confirmLabel="Aggiorna"
+          confirmLabel={t('update')}
           onCancel={() => setEditLine(null)}
           onConfirm={(entries, removedIds, note, weightGrams, qty) => { updateLine(editLine.key, entries, note, removedIds, weightGrams, qty); setEditLine(null); }}
           // «Un altro come questo»: una riga nuova con la configurazione del
           // foglio, nell'uscita DELLA riga. Qty 1: il gesto dice «un altro».
           onAdd={(entries, removedIds, note, weightGrams) =>
             addToCart(editLine.dish, entries, note, removedIds, weightGrams, 1, editLine.course_no)}
-          courseName={courseLabel(editLine.course_no)}
+          courseName={courseLabel(editLine.course_no, t)}
           // Spostare cambia la chiave della riga: il foglio si chiude e la
           // scelta passa al selettore «dove va la riga».
           onCourseTap={() => {
@@ -2306,7 +2304,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
             onClick={() => setCoursePickOpen(true)}
             className="inline-flex h-11 flex-shrink-0 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-4 text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
-            {courseLabel(course)}
+            {courseLabel(course, t)}
             {courseFilled && <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--ds-action-fg)]" aria-hidden />}
             <ChevronDown size={16} aria-hidden />
           </button>
@@ -2316,7 +2314,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
             disabled={segueTarget == null}
             className="inline-flex h-11 flex-shrink-0 items-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-[18px] text-[16px] font-semibold text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
-            Segue
+            {t('next')}
             <ArrowRight size={16} aria-hidden />
           </button>
           {/* Il numero che mancava alla pagina: quanto c'è da inviare.
@@ -2325,11 +2323,11 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
             <button
               type="button"
               onClick={() => setComandaOpen(true)}
-              aria-label={`Apri la comanda: ${draftCount === 1 ? '1 riga' : `${draftCount} righe`} da inviare, ${euro(draftTotal)}`}
+              aria-label={t('openOrderAria', { righe: t('draftRows', { count: draftCount }), importo: euro(draftTotal) })}
               className="ml-auto min-w-0 rounded-[var(--ds-radius)] px-1.5 py-1 text-right transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             >
               <span className="block truncate text-[12px] leading-tight text-[var(--ds-text-muted)]">
-                {draftCount === 1 ? '1 riga da inviare' : `${draftCount} righe da inviare`}
+                {t('draftRows', { count: draftCount })}
               </span>
               <span className="block text-[15px] font-semibold leading-tight tabular-nums text-[var(--ds-text-primary)]">
                 {euro(draftTotal)}
@@ -2377,7 +2375,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
                       : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
                   }`}
                 >
-                  {courseLabel(n)}
+                  {courseLabel(n, t)}
                 </button>
               );
             })}

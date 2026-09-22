@@ -187,8 +187,8 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
     }
   };
 
-  const courseTagShort = (n: number): string =>
-    isBarCourse(n) ? 'Bar' : isDessertCourse(n) ? 'Dolci' : ordinal(n);
+  // Bar e Dolci hanno già il loro nome corto in utils/courses.
+  const courseTagShort = (n: number): string => ordinal(n, t);
 
   // Tocco lungo con ref (non closure): un re-render a metà pressione — il
   // carrello ne provoca di continuo — non deve lasciare timer orfani che
