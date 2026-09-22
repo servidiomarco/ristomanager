@@ -660,6 +660,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-22 | Banchetti | Con la lingua inglese parla inglese il lato banchetti della pagina Menu: lista con i suoi gruppi e ordinamenti, tessere e azioni, procedura in cinque passi, condivisione del preventivo via link, WhatsApp ed email, e il calendario. I nomi dei mesi e dei giorni seguono la lingua scelta. |
 | 2026-09-22 | Menu & Piatti | Con la lingua inglese parla inglese il lato piatti della pagina Menu: lista e schede, form del piatto (IVA, partita di cucina, varianti, vini abbinati, composizione, vendita al peso, foto, allergeni), barra del menu digitale con traduzione e sommelier AI, modale Categorie e i messaggi d'errore. |
 | 2026-09-22 | Comande; Cassa | Con la lingua inglese parlano inglese la griglia dei tavoli (titoli dei gruppi, chip dei filtri, riga di stato della tessera, «appesa da ieri») e le pastiglie di stato dell'uscita — le stesse parole in Comande e in Cassa. Il peso dei piatti al kg segue il separatore decimale della lingua. |
 | 2026-09-22 | Comande; Cucina | Con la lingua inglese parlano inglese il palmare delle comande (esiti dell'invio, chiusura, storno, eliminazione, spostamento fra uscite, foglio dello scontrino col QR) e il vocabolario delle uscite — «1ª uscita», «Bar», «Dolci» — che ora è uno solo per palmare, colonne, chip, monitor di cucina e passe: prima erano tre copie della stessa parola. |
