@@ -64,3 +64,48 @@ describe('valuta, fuso e paese del tenant', () => {
         await db.query(`UPDATE tenants SET currency = 'EUR' WHERE id = 1`);
     });
 });
+
+/* Il formattatore degli importi: l'unico punto dove una valuta diventa testo,
+   sia nei messaggi al cliente che sulle schermate. Vale la pena testarlo da
+   solo perché la sua prima regola non è «formatta bene»: è «non cambiare una
+   virgola di quello che i clienti italiani leggono da due anni». */
+describe('valuta per tenant — come un importo diventa testo', () => {
+    it('in euro esce esattamente come è sempre uscito', async () => {
+        const { formatMoneyMinor } = await import('../../utils/money.js');
+        expect(formatMoneyMinor(1500, 'EUR')).toBe('€ 15,00');
+        expect(formatMoneyMinor(0, 'EUR')).toBe('€ 0,00');
+        expect(formatMoneyMinor(5, 'EUR')).toBe('€ 0,05');
+        // Nessun separatore delle migliaia: è così da sempre negli SMS, e
+        // aggiungerlo cambierebbe messaggi già in produzione.
+        expect(formatMoneyMinor(123456, 'EUR')).toBe('€ 1234,56');
+    });
+
+    it('senza valuta, o con una valuta vuota, resta l\'euro', async () => {
+        const { formatMoneyMinor } = await import('../../utils/money.js');
+        // Lettura difensiva: durante una finestra di deploy il tenant può
+        // arrivare senza il campo, e un importo senza simbolo è illeggibile.
+        expect(formatMoneyMinor(1500)).toBe('€ 15,00');
+        expect(formatMoneyMinor(1500, '')).toBe('€ 15,00');
+        expect(formatMoneyMinor(1500, null as any)).toBe('€ 15,00');
+        expect(formatMoneyMinor(1500, undefined)).toBe('€ 15,00');
+    });
+
+    it('ogni altra moneta segue la sua convenzione', async () => {
+        const { formatMoneyMinor } = await import('../../utils/money.js');
+        expect(formatMoneyMinor(1500, 'GBP')).toBe('£15.00');
+        expect(formatMoneyMinor(1500, 'USD')).toBe('$15.00');
+        expect(formatMoneyMinor(1500, 'CHF')).toBe('CHF 15.00');
+        expect(formatMoneyMinor(1500, 'AED')).toBe('AED 15.00');
+        // Il codice arriva dal database in maiuscolo, ma non costa niente
+        // accettarlo com'è.
+        expect(formatMoneyMinor(1500, 'gbp')).toBe('£15.00');
+    });
+
+    it('una valuta che non conosciamo esce col suo codice, non senza simbolo', async () => {
+        const { formatMoneyMinor, currencySymbol } = await import('../../utils/money.js');
+        expect(formatMoneyMinor(1500, 'JPY')).toBe('JPY 15.00');
+        expect(currencySymbol('JPY')).toBe('JPY');
+        expect(currencySymbol('GBP')).toBe('£');
+        expect(currencySymbol()).toBe('€');
+    });
+});

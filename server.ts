@@ -196,6 +196,7 @@ import {
 import { clampModifierN, signedModifierLabel, signedModifierDelta } from './utils/modifierScale.js';
 import { BAR_COURSE_NO, DESSERT_COURSE_NO, isOffSequenceCourse } from './utils/courses.js';
 import { getRomeDatePart, getRomeTimePart, getDatePartInTz, getTimePartInTz } from './utils/reservationTime.js';
+import { formatMoneyMinor } from './utils/money.js';
 import { buildEReceiptPayload, buildFatturaPaXml, getFiscalDriver, type FiscalSeller, type InvoiceBuyer } from './services/fiscalService.js';
 import {
     getAvailableSlots,
@@ -5713,7 +5714,8 @@ app.post('/reservations/:id/bill/notify', authenticate, requirePermission('payme
                     Number(bill.covers) || 1,
                     Number(bill.total_cents),
                     bill.share_token,
-                    guestLanguage
+                    guestLanguage,
+                    { currency: tenantCurrency }
                 ),
             });
             if (req.user) {
@@ -6361,7 +6363,7 @@ app.post('/bills/:id/payments/:paymentId/void', authenticate, requirePermission(
                 req.user.userId, req.user.email, req.user.email,
                 ActivityAction.UPDATE, ResourceType.RESERVATION,
                 undefined,
-                `Stornato incasso ${voided.method} ${formatEuroMinor(voided.amount_cents)} (conto #${id}${reason ? ', motivo: ' + reason : ''})`
+                `Stornato incasso ${voided.method} ${formatMoneyMinor(voided.amount_cents, (await getTenantLocale(req.tenantId!)).currency)} (conto #${id}${reason ? ', motivo: ' + reason : ''})`
             );
         }
 
@@ -7941,7 +7943,7 @@ app.post('/bills/:id/invoices', authenticate, requirePermission('payments:full')
                 req.user.userId, req.user.email, req.user.email,
                 ActivityAction.CREATE, ResourceType.RESERVATION,
                 undefined,
-                `Fattura ${docNumber} ${finalRow.status === 'CONFIRMED' ? 'emessa' : 'NON emessa'} · ${formatEuroMinor(amountCents)} a ${buyer.name} (conto #${id}${splitId ? `, quota #${splitId}` : ''})`
+                `Fattura ${docNumber} ${finalRow.status === 'CONFIRMED' ? 'emessa' : 'NON emessa'} · ${formatMoneyMinor(amountCents, (await getTenantLocale(req.tenantId!)).currency)} a ${buyer.name} (conto #${id}${splitId ? `, quota #${splitId}` : ''})`
             );
         }
 
@@ -8074,7 +8076,7 @@ app.post('/bills/splits/:id/refund', authenticate, requirePermission('payments:f
                 req.user.userId, req.user.email, req.user.email,
                 ActivityAction.UPDATE, ResourceType.RESERVATION,
                 row.reservation_id,
-                `Rimborsata quota ${formatEuroMinor(row.amount_cents)}${row.claimant_label ? ' di ' + row.claimant_label : ''} (conto #${row.table_bill_id}${reopened ? ', conto riaperto' : ''})`
+                `Rimborsata quota ${formatMoneyMinor(row.amount_cents, row.currency || 'EUR')}${row.claimant_label ? ' di ' + row.claimant_label : ''} (conto #${row.table_bill_id}${reopened ? ', conto riaperto' : ''})`
             );
         }
 
@@ -10094,38 +10096,6 @@ app.post('/messages/send', authenticate, requireFeature('whatsapp'), requirePerm
 // PAYMENT LINK REQUESTS (Revolut hosted checkout)
 // ============================================
 
-// Un importo in centesimi, scritto come lo scrive il paese del ristorante.
-//
-// Per l'euro l'uscita è IDENTICA a quella di sempre — "€ 15,00", simbolo
-// davanti e virgola decimale: è la stringa che i clienti italiani leggono da
-// due anni in SMS, WhatsApp ed email, e non deve cambiare di un carattere.
-// Per questo la composizione resta a mano invece di passare a
-// Intl.NumberFormat, che per l'italiano produrrebbe "15,00 €" (simbolo in
-// coda) e cambierebbe ogni messaggio già in produzione.
-//
-// Le altre monete seguono la loro convenzione: simbolo attaccato e punto
-// decimale per sterlina e dollaro, codice davanti dove un simbolo non c'è.
-const MONEY_FORMAT: Record<string, { symbol: string; decimal: ',' | '.'; spaced: boolean }> = {
-    EUR: { symbol: '€',   decimal: ',', spaced: true },
-    GBP: { symbol: '£',   decimal: '.', spaced: false },
-    USD: { symbol: '$',   decimal: '.', spaced: false },
-    CHF: { symbol: 'CHF', decimal: '.', spaced: true },
-    AED: { symbol: 'AED', decimal: '.', spaced: true },
-};
-
-function formatMoneyMinor(cents: number, currency: string = 'EUR'): string {
-    const code = String(currency || 'EUR').toUpperCase();
-    const fmt = MONEY_FORMAT[code] ?? { symbol: code, decimal: '.' as const, spaced: true };
-    const amount = (cents / 100).toFixed(2).replace('.', fmt.decimal);
-    return `${fmt.symbol}${fmt.spaced ? ' ' : ''}${amount}`;
-}
-
-/** @deprecated Resta per i punti che non conoscono ancora il tenant: dove lo
- *  conoscono si usa formatMoneyMinor con la valuta del ristorante. */
-function formatEuroMinor(cents: number): string {
-    return formatMoneyMinor(cents, 'EUR');
-}
-
 // Base URL where the SPA is served (the pay-at-table page lives at
 // {base}/pay/{token}). Read from CRM_APP_BASE_URL first so it can be
 // pointed at a preview/dev deploy; falls back to the production domain
@@ -10665,7 +10635,8 @@ app.post('/payments/requests', authenticate, requirePermission('reservations:ful
             amountCents,
             order.checkoutUrl,
             guestLanguage,
-            Number(reservation.guests) || null
+            Number(reservation.guests) || null,
+            { currency: tenantCurrency }
         );
         const message = buildPaymentMessage(reservation.customer_name, amountCents, order.checkoutUrl, orderDescription, guestLanguage, tenantCurrency);
 
@@ -10677,6 +10648,7 @@ app.post('/payments/requests', authenticate, requirePermission('reservations:ful
                     checkoutUrl: order.checkoutUrl,
                     description: orderDescription,
                     language: guestLanguage,
+                    currency: tenantCurrency,
                 });
                 const emailStatus = await getSmtpConfigStatus(req.tenantId!).catch(() => null);
                 const emailProvider: 'smtp' | 'resend' = emailStatus?.provider === 'resend' ? 'resend' : 'smtp';
@@ -10729,7 +10701,7 @@ app.post('/payments/requests', authenticate, requirePermission('reservations:ful
                 ActivityAction.CREATE,
                 ResourceType.RESERVATION,
                 reservation.id,
-                `${reservation.customer_name} — richiesta pagamento ${formatEuroMinor(amountCents)}`
+                `${reservation.customer_name} — richiesta pagamento ${formatMoneyMinor(amountCents, tenantCurrency)}`
             );
         }
 
@@ -10805,7 +10777,7 @@ async function applyBillSplitTransition(
                 pushSendToRoles(tenantId, ['OWNER', 'GENERAL_MANAGER', 'MANAGER'], {
                     category: 'payment',
                     title: 'Pagamento in eccesso da rimborsare',
-                    body: `${formatEuroMinor(amount)} pagati su un conto già saldato (conto #${billId}). Serve un rimborso manuale da Revolut.`,
+                    body: `${formatMoneyMinor(amount, (await getTenantLocale(tenantId)).currency)} pagati su un conto già saldato (conto #${billId}). Serve un rimborso manuale da Revolut.`,
                     url: `/?view=PAGAMENTI`,
                     tag: `bill-overpaid-${splitId}`,
                 }, { excludeUserId: null }).catch(() => {});
@@ -10997,7 +10969,7 @@ async function applyPaymentOrderTransition(
     // deposits, not for pay-at-table splits — the split guest doesn't
     // want a "grazie, la tua prenotazione è confermata" WhatsApp.
     if (isFirstCompletion && !billSplitId) {
-        const bodyLine = `${formatEuroMinor(row.amount_cents)} da prenotazione #${row.reservation_id ?? '?'}`;
+        const bodyLine = `${formatMoneyMinor(row.amount_cents, (await getTenantLocale(Number(row.tenant_id) || PUBLIC_TENANT_ID)).currency)} da prenotazione #${row.reservation_id ?? '?'}`;
         // La push arriva allo staff del ristorante della payment_request.
         pushSendToRoles(Number(row.tenant_id) || PUBLIC_TENANT_ID, ['OWNER', 'GENERAL_MANAGER', 'MANAGER'], {
             category: 'payment',
@@ -11063,7 +11035,8 @@ async function applyPaymentOrderTransition(
                             reservation.reservation_time,
                             reservation.guests,
                             row.amount_cents,
-                            guestLanguage, { timezone: fusoMsg }),
+                            guestLanguage,
+                            { timezone: fusoMsg, currency: (await getTenantLocale(Number(row.tenant_id) || PUBLIC_TENANT_ID)).currency }),
                     });
                 }
             } catch (err: any) {
@@ -11540,7 +11513,7 @@ app.post('/payments/:id/refund', authenticate, requirePermission('payments:full'
                 ActivityAction.UPDATE,
                 ResourceType.RESERVATION,
                 payment.reservation_id ?? undefined,
-                `Rimborso ${formatEuroMinor(payment.amount_cents)} (${providerLabel(provider)}) — pagamento #${payment.id}`
+                `Rimborso ${formatMoneyMinor(payment.amount_cents, payment.currency || 'EUR')} (${providerLabel(provider)}) — pagamento #${payment.id}`
             );
         }
 
@@ -19906,8 +19879,9 @@ function whatsappHref(display: string): string {
  * preso dal database, e «20:30» dipende da dove sta il locale. Arriva come
  * campo di un oggetto e non come parametro posizionale — queste firme hanno
  * già sei o otto argomenti, e un nono in coda si sbaglia d'ordine. */
-type MsgOpts = { timezone?: string | null };
+type MsgOpts = { timezone?: string | null; currency?: string | null };
 const msgTz = (opts?: MsgOpts): string => opts?.timezone || 'Europe/Rome';
+const msgCurrency = (opts?: MsgOpts): string => opts?.currency || 'EUR';
 
 function buildConfirmationMessage(
     customerName: string | null | undefined,
@@ -20168,7 +20142,7 @@ function buildBookingDepositConfirmedTemplate(
         contentSid: picked.contentSid,
         contentVariables: {
             '1': templateName(customerName),
-            '2': formatEuroMinor(amountCents),
+            '2': formatMoneyMinor(amountCents, msgCurrency(opts)),
             '3': templateGuestsLabel(guests, picked.english),
             '4': dateLabel,
             '5': timeLabel,
@@ -20267,11 +20241,12 @@ function buildTableBillLinkTemplate(
     covers: number | null | undefined,
     amountCents: number,
     shareToken: string,
-    language?: string | null
+    language?: string | null,
+    opts?: MsgOpts
 ): WhatsAppTemplateOpts | undefined {
     if (!shareToken) return undefined;
     const name = templateName(customerName);
-    const total = formatEuroMinor(amountCents);
+    const total = formatMoneyMinor(amountCents, msgCurrency(opts));
     const cta = pickWhatsAppTemplateSid('TWILIO_WA_CONTENT_SID_TABLE_BILL_LINK_CTA', language);
     if (cta) {
         return {
@@ -20307,7 +20282,8 @@ function buildTakeawayBillLinkTemplate(
     pickupTime: string | null | undefined,
     amountCents: number,
     shareToken: string,
-    language?: string | null
+    language?: string | null,
+    opts?: MsgOpts
 ): WhatsAppTemplateOpts | undefined {
     if (!shareToken) return undefined;
     const picked = pickWhatsAppTemplateSid('TWILIO_WA_CONTENT_SID_TAKEAWAY_BILL_LINK_CTA', language);
@@ -20317,7 +20293,7 @@ function buildTakeawayBillLinkTemplate(
         contentVariables: {
             '1': templateName(customerName),
             '2': pickupTime || '—',
-            '3': formatEuroMinor(amountCents),
+            '3': formatMoneyMinor(amountCents, msgCurrency(opts)),
             '4': shareToken,
         },
     };
@@ -20374,7 +20350,8 @@ function buildBookingDepositRequestTemplate(
     amountCents: number,
     checkoutUrl: string,
     language?: string | null,
-    guestsCount?: number | null
+    guestsCount?: number | null,
+    opts?: MsgOpts
 ): WhatsAppTemplateOpts | undefined {
     const resolved = resolveDepositRequestTemplate(checkoutUrl, language);
     if (!resolved) return undefined;
@@ -20391,7 +20368,7 @@ function buildBookingDepositRequestTemplate(
             '2': guests,
             '3': dateLabel,
             '4': timeLabel,
-            '5': formatEuroMinor(amountCents),
+            '5': formatMoneyMinor(amountCents, msgCurrency(opts)),
             '6': resolved.token,
         },
     };
@@ -20603,8 +20580,10 @@ function buildBookingRequestEmail(params: {
     depositPerPersonCents?: number | null;
     language?: string | null;
     timezone?: string | null;
+    currency?: string | null;
 }): { subject: string; text: string; html: string } {
     const identity = businessIdentity();
+    const valuta = params.currency || 'EUR';
     const { dateLabel, timeLabel } = formatBookingDateTime(params.reservationTime, params.timezone || 'Europe/Rome');
     const name = toTitleCase(params.customerName);
     const guestsNum = Math.max(1, Math.trunc(Number(params.guests) || 1));
@@ -20614,7 +20593,7 @@ function buildBookingRequestEmail(params: {
     const depositUrl = (params.depositCheckoutUrl || '').trim();
     const depositCents = Number(params.depositAmountCents || 0);
     const hasDeposit = depositUrl.length > 0 && depositCents > 0;
-    const depositAmount = hasDeposit ? formatEuroMinor(depositCents) : '';
+    const depositAmount = hasDeposit ? formatMoneyMinor(depositCents, valuta) : '';
     const perPersonCents = Number(params.depositPerPersonCents || 0);
 
     if (english) {
@@ -20622,7 +20601,7 @@ function buildBookingRequestEmail(params: {
         const roomPart = room ? ` (${room})` : '';
         const subject = `We've received your request — ${dateLabel} ${timeLabel}`;
         const greetingText = name ? `Hi ${name},` : 'Hi,';
-        const perPersonPart = hasDeposit && perPersonCents > 0 ? ` (${formatEuroMinor(perPersonCents)} per person)` : '';
+        const perPersonPart = hasDeposit && perPersonCents > 0 ? ` (${formatMoneyMinor(perPersonCents, valuta)} per person)` : '';
         const depositTextBlock = hasDeposit
             ? `\n\nTo confirm the table we need a deposit of ${depositAmount}${perPersonPart}.\nPay securely here: ${depositUrl}\n\nAs soon as we receive the payment we'll confirm your reservation.`
             : "\n\nWe'll get back to you shortly to confirm it by email, phone or WhatsApp.";
@@ -20671,7 +20650,7 @@ ${identity.name}`;
     const roomPart = room ? ` (${room})` : '';
     const subject = `Abbiamo ricevuto la tua richiesta — ${dateLabel} ${timeLabel}`;
     const greetingText = name ? `Ciao ${name},` : 'Ciao,';
-    const perPersonPart = hasDeposit && perPersonCents > 0 ? ` (${formatEuroMinor(perPersonCents)} a persona)` : '';
+    const perPersonPart = hasDeposit && perPersonCents > 0 ? ` (${formatMoneyMinor(perPersonCents, valuta)} a persona)` : '';
 
     const depositTextBlock = hasDeposit
         ? `\n\nPer confermare il tavolo serve una caparra di ${depositAmount}${perPersonPart}.\nPaga in sicurezza qui: ${depositUrl}\n\nAppena riceviamo il pagamento ti confermeremo la prenotazione.`
@@ -20843,9 +20822,10 @@ function buildDepositRequestEmail(params: {
     checkoutUrl: string;
     description?: string | null;
     language?: string | null;
+    currency?: string | null;
 }): { subject: string; text: string; html: string } {
     const identity = businessIdentity();
-    const amount = formatEuroMinor(params.amountCents);
+    const amount = formatMoneyMinor(params.amountCents, params.currency || 'EUR');
     const name = toTitleCase(params.customerName);
     const desc = (params.description || '').trim();
     const text = buildPaymentMessage(params.customerName, params.amountCents, params.checkoutUrl, desc || null, params.language);
@@ -25337,7 +25317,8 @@ app.post('/takeaway/orders/:id/bill/notify', authenticate, requireFeature('takea
             // il template del tavolo, che parla di coperti e di tavolo.
             const delivery = await sendBookingConfirmation(req.tenantId!, tw.customer_phone, message, null, {
                 whatsappTemplate: buildTakeawayBillLinkTemplate(
-                    tw.customer_name, tw.pickup_time, Number(bill.total_cents), bill.share_token, guestLanguage
+                    tw.customer_name, tw.pickup_time, Number(bill.total_cents), bill.share_token, guestLanguage,
+                    { currency: (await getTenantLocale(req.tenantId!)).currency }
                 ),
                 recordConfirmation: false,
             });
@@ -28745,6 +28726,7 @@ const buildVoiceSuspensionMessage = (callbackTime: string) =>
 
 const handlePublicReservationCreate = async (tenantId: number, req: express.Request, res: express.Response) => {
     const fusoMsg = (await getTenantLocale(tenantId)).timezone;
+    const valutaMsg = (await getTenantLocale(tenantId)).currency;
     // Entitlement web_booking (C1) prima del flag operativo: stessa risposta
     // in entrambi i casi, per la pagina non cambia nulla.
     if (!(await isFeatureEnabledForTenant(tenantId, 'web_booking'))) {
@@ -29159,7 +29141,8 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
                 depositAmountCents,
                 depositCheckoutUrl,
                 language,
-                guestsNum
+                guestsNum,
+                { currency: valutaMsg }
             );
         } else if (confirmedNow) {
             waTemplate = buildBookingConfirmedTemplate(customer_name, created.reservation_time, guestsNum, language, { timezone: fusoMsg });
@@ -29201,7 +29184,7 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
                     depositAmountCents: depositAmountCents || null,
                     depositCheckoutUrl,
                     depositPerPersonCents: depositPolicy?.perPersonCents ?? null,
-                    language, timezone: fusoMsg })
+                    language, timezone: fusoMsg, currency: valutaMsg })
                 : confirmedNow
                 ? buildBookingConfirmationEmail({
                     customerName: toTitleCase(customer_name),
@@ -29215,7 +29198,7 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
                     guests: guestsNum,
                     roomName: requestedRoomName,
                     notes: userNote,
-                    language, timezone: fusoMsg }),
+                    language, timezone: fusoMsg, currency: valutaMsg }),
             kind: 'ack',
         }).catch(err => console.error('[public-booking] ack dispatch failed:', err?.message || err));
 
@@ -36228,7 +36211,7 @@ bookingTools.configureBookingTools({
     formatItalianModification,
     formatSlotListItalian,
     formatBookingDateTime,
-    formatEuroMinor,
+    formatMoneyMinor,
     asUtcInstant,
     toTitleCase,
     reservationPushLabel,
