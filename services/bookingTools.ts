@@ -101,13 +101,14 @@ export interface BookingToolsDeps {
     formatItalianModification: (r: any, language?: string | null, tz?: string) => string;
     formatSlotListItalian: (slots: string[], language?: string | null) => string;
     formatBookingDateTime: (d: any) => { dateLabel: string; timeLabel: string };
-    formatEuroMinor: (cents: number) => string;
+    formatMoneyMinor: (cents: number, currency?: string) => string;
     asUtcInstant: (v: any) => any;
     toTitleCase: (v: any) => string;
     reservationPushLabel: (d: any, tz?: string) => string;
 
     // Il fuso del locale, per i formatter che qui sono puri: senza di questo
-    // le push di un tenant londinese dicevano l'ora di Roma.
+    // le push di un tenant londinese dicevano l'ora di Roma. La valuta ha già
+    // la sua dipendenza più sotto, accanto a createPaymentOrder.
     getTenantTimeZone: (tenantId: number) => Promise<string>;
 
     findAvailability: (tenantId: number, p: any) => Promise<any>;
@@ -635,7 +636,8 @@ export async function createReservation(
                 const whatsappTemplate = d.buildBookingDepositRequestTemplate(
                     d.toTitleCase(created.customer_name), depositGuestsLabel, depositDateLabel,
                     normalizedTime, depositAmountCents, order.checkoutUrl,
-                    detectedLanguage, Math.trunc(guests)
+                    detectedLanguage, Math.trunc(guests),
+                    { currency: await d.getTenantCurrency(tenantId) }
                 );
                 d.sendBookingConfirmation(tenantId, created.phone, smsText, created.id, { whatsappTemplate }).catch((err: any) =>
                     console.error(`${channel.logPrefix} deposit link send failed:`, err?.message || err)
@@ -718,10 +720,11 @@ export async function createReservation(
         // Con la caparra la frase di chiusura cambia: il cliente deve sapere
         // che il tavolo è garantito solo dopo il pagamento.
         const firstName = spokenFirstName(d.toTitleCase(created.customer_name));
+        const valuta = await d.getTenantCurrency(tenantId);
         const confirmationPhrase = depositCheckoutUrl
             ? (english
-                ? `Registered ${firstName}: for large groups we ask for a deposit of ${d.formatEuroMinor(depositAmountCents)}. I have just sent you the payment link on WhatsApp, or by SMS. The table will be confirmed as soon as we receive the payment. Thank you!`
-                : `Registrato ${firstName}: per i gruppi numerosi chiediamo una caparra di ${d.formatEuroMinor(depositAmountCents)}. Le ho appena inviato il link di pagamento su WhatsApp, o via SMS. Il tavolo sarà confermato appena riceviamo il pagamento. Grazie!`)
+                ? `Registered ${firstName}: for large groups we ask for a deposit of ${d.formatMoneyMinor(depositAmountCents, valuta)}. I have just sent you the payment link on WhatsApp, or by SMS. The table will be confirmed as soon as we receive the payment. Thank you!`
+                : `Registrato ${firstName}: per i gruppi numerosi chiediamo una caparra di ${d.formatMoneyMinor(depositAmountCents, valuta)}. Le ho appena inviato il link di pagamento su WhatsApp, o via SMS. Il tavolo sarà confermato appena riceviamo il pagamento. Grazie!`)
             : depositRequired
                 ? (english
                     ? `Registered ${firstName}: for large groups a deposit is required. We will contact you shortly to complete the booking. Thank you!`
@@ -746,7 +749,7 @@ export async function createReservation(
                 room_name: created.room_name,
                 room_location: created.room_location,
                 deposit_required: depositRequired,
-                deposit_amount: depositRequired ? d.formatEuroMinor(depositAmountCents) : undefined,
+                deposit_amount: depositRequired ? d.formatMoneyMinor(depositAmountCents, valuta) : undefined,
                 deposit_link_sent: depositRequired ? !!depositCheckoutUrl : undefined,
             },
         };

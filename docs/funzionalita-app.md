@@ -660,6 +660,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-22 | Funzionalità trasversali; Pagamenti; Messaggi | Gli importi nei messaggi al cliente (caparra, link di pagamento, conto, email di richiesta), nelle notifiche allo staff e nel registro attività sono scritti nella valuta del ristorante. In euro non cambia un carattere: «€ 15,00» resta «€ 15,00». |
 | 2026-09-22 | Funzionalità trasversali; Asporto; Sofia; Messaggi | «Oggi» e l'ora seguono l'orologio del ristorante anche negli ultimi punti che restavano su Roma: servizio corrente della cassa, orari di ritiro dell'asporto, pagine pubbliche di prenotazione e ordine, chiusura di cassa, report, notifiche push, richieste di caparra e le date che Sofia e gli agenti di WhatsApp ed email leggono per risolvere «domani». Il registro fiscale resta sulla giornata italiana: è un documento per l'Agenzia delle Entrate. |
 | 2026-09-21 | Funzionalità trasversali | Un ristorante con un fuso orario diverso da quello italiano vede ora le proprie date e ore in tutta l app: liste, pianta, cassa, report e messaggi al cliente seguono l orologio del locale. |
 | 2026-09-21 | Sala & Tavoli; Messaggi | Con la lingua inglese parlano inglese la pianta della sala (strumenti, chiusure, legenda, avvisi di sovrapposizione) e la pagina Messaggi (lista, conversazione, allegati, proposta dell agente). |
