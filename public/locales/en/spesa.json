@@ -1,0 +1,81 @@
+{
+  "category": {
+    "CUCINA": "Kitchen",
+    "BAR": "Bar",
+    "ALTRO": "Other"
+  },
+  "today": "today",
+  "yesterday": "yesterday",
+  "row": {
+    "select": "Select {{nome}}",
+    "markTodo": "Mark {{nome}} as still to buy",
+    "markDone": "Mark {{nome}} as bought",
+    "edit": "Edit {{nome}}",
+    "delete": "Delete {{nome}}",
+    "swipeTodo": "To do",
+    "swipeDone": "Bought",
+    "swipeDelete": "Delete"
+  },
+  "bread": {
+    "title": "Today's bread {{quanto}}",
+    "covers": "{{count}} covers expected · 1 kg per 10",
+    "noCovers": "No covers expected today"
+  },
+  "add": {
+    "placeholder": "Add a product…",
+    "aria": "Add a product",
+    "button": "Add",
+    "qty": "Qty",
+    "qtyAria": "Quantity",
+    "unitAria": "Unit",
+    "categoryAria": "Category",
+    "supplierAria": "Supplier",
+    "pastItems": "Already on a past list"
+  },
+  "noSupplier": "No supplier",
+  "sup": {
+    "title": "By supplier",
+    "manage": "Manage",
+    "nothing": "Nothing to order.",
+    "itemCount": "{{count}} products",
+    "itemCount_one": "{{count}} product",
+    "print": "Print",
+    "send": "Send",
+    "orphanHint": "to assign before ordering",
+    "printAll": "Print the whole list"
+  },
+  "edit": {
+    "title": "Edit product",
+    "delete": "Delete product",
+    "save": "Save",
+    "name": "Name",
+    "qty": "Quantity",
+    "unit": "Unit",
+    "category": "Category",
+    "supplier": "Supplier"
+  },
+  "undo": "Undo",
+  "toastTodo": "still to buy",
+  "toastDone": "bought",
+  "title": "Shopping list",
+  "searchingIn": "searching {{count}} products",
+  "counts": "{{todo}} to buy · {{done}} done",
+  "suppliersButton": "Suppliers",
+  "searchPlaceholder": "Search for a product…",
+  "searchAria": "Search for a product",
+  "printList": "Print the list",
+  "allCategories": "All",
+  "noResults": "Nothing found in the whole list.",
+  "results": "{{count}} results in the whole list",
+  "results_one": "{{count}} result in the whole list",
+  "empty": "Nothing to buy. Add a product above.",
+  "selectAction": "Select",
+  "removeAll": "Remove all",
+  "bought": "Bought",
+  "tapToSelect": "Tap the products to select",
+  "selectedCount": "{{count}} selected",
+  "printSelection": "Print the selection",
+  "shareSelection": "Share the selection",
+  "deleteSelection": "Delete the selection",
+  "exitSelection": "Leave selection mode"
+}

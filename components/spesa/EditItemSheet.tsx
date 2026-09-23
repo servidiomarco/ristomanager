@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Loader2, Trash2 } from 'lucide-react';
 import type {
   ShoppingCategory, ShoppingItem, ShoppingUnit, Supplier,
 } from '../../services/shoppingApiService';
 import { SHOPPING_UNITS } from '../../services/shoppingApiService';
 import { Field, ModalShell, SegmentedControl, dsButton, dsInput, dsSelect } from '../ds';
-import { ALL_CATEGORIES, CATEGORY_LABELS, parseQty } from './shoppingView';
+import { ALL_CATEGORIES, categoryLabel, parseQty } from './shoppingView';
+import { displayLocale } from '../../utils/formatLocale';
 
 /* ── Modifica prodotto ────────────────────────────────────────────────────
    Editing used to happen in the row itself: the line turned into a cluster of
@@ -31,6 +33,7 @@ export const EditItemSheet: React.FC<{
   onDelete: () => void;
   onClose: () => void;
 }> = ({ item, suppliers, saving, onSave, onDelete, onClose }) => {
+  const { t } = useTranslation('spesa', { useSuspense: false });
   const [name, setName] = useState('');
   const [category, setCategory] = useState<ShoppingCategory>('CUCINA');
   const [supplierId, setSupplierId] = useState('');
@@ -59,7 +62,7 @@ export const EditItemSheet: React.FC<{
 
   const eligible = suppliers
     .filter(s => s.categories.includes(category))
-    .sort((a, b) => a.name.localeCompare(b.name, 'it'));
+    .sort((a, b) => a.name.localeCompare(b.name, displayLocale()));
 
   const submit = () => {
     const trimmed = name.trim();
@@ -78,7 +81,7 @@ export const EditItemSheet: React.FC<{
     <ModalShell
       open
       onClose={onClose}
-      title="Modifica prodotto"
+      title={t('edit.title', 'Modifica prodotto')}
       size="sm"
       closeOnEscape
       bodyClassName="p-5 sm:p-6"
@@ -92,8 +95,8 @@ export const EditItemSheet: React.FC<{
           <button
             type="button"
             onClick={onDelete}
-            aria-label="Elimina prodotto"
-            title="Elimina prodotto"
+            aria-label={t('edit.delete', 'Elimina prodotto')}
+            title={t('edit.delete', 'Elimina prodotto')}
             className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             <Trash2 className="h-4 w-4" aria-hidden />
@@ -105,13 +108,13 @@ export const EditItemSheet: React.FC<{
             className={`flex-1 ${dsButton.primary}`}
           >
             {saving && <Loader2 className="h-4 w-4 animate-spin" />}
-            Salva
+            {t('edit.save', 'Salva')}
           </button>
         </div>
       }
     >
       <div className="space-y-4">
-        <Field label="Nome">
+        <Field label={t('edit.name', 'Nome')}>
           <input
             type="text"
             value={name}
@@ -123,7 +126,7 @@ export const EditItemSheet: React.FC<{
         </Field>
 
         <div className="grid grid-cols-[1fr_minmax(0,120px)] gap-3">
-          <Field label="Quantità">
+          <Field label={t('edit.qty', 'Quantità')}>
             <input
               type="text"
               inputMode="decimal"
@@ -133,25 +136,25 @@ export const EditItemSheet: React.FC<{
               className={dsInput}
             />
           </Field>
-          <Field label="Unità">
+          <Field label={t('edit.unit', 'Unità')}>
             <select value={unit} onChange={e => setUnit(e.target.value as ShoppingUnit)} className={dsSelect}>
               {SHOPPING_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
             </select>
           </Field>
         </div>
 
-        <Field label="Categoria">
+        <Field label={t('edit.category', 'Categoria')}>
           <SegmentedControl<ShoppingCategory>
             value={category}
             onChange={setCategory}
-            ariaLabel="Categoria"
-            options={ALL_CATEGORIES.map(c => ({ value: c, label: CATEGORY_LABELS[c] }))}
+            ariaLabel={t('edit.category', 'Categoria')}
+            options={ALL_CATEGORIES.map(c => ({ value: c, label: categoryLabel(c, t) }))}
           />
         </Field>
 
-        <Field label="Fornitore">
+        <Field label={t('edit.supplier', 'Fornitore')}>
           <select value={supplierId} onChange={e => setSupplierId(e.target.value)} className={dsSelect}>
-            <option value="">Senza fornitore</option>
+            <option value="">{t('noSupplier', 'Senza fornitore')}</option>
             {eligible.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
         </Field>

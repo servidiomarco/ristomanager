@@ -1,9 +1,11 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { Clock, Loader2, Plus } from 'lucide-react';
 import type { ShoppingCategory, ShoppingUnit, Supplier } from '../../services/shoppingApiService';
 import { SHOPPING_UNITS } from '../../services/shoppingApiService';
 import { dsSelect } from '../ds';
-import { ALL_CATEGORIES, CATEGORY_LABELS } from './shoppingView';
+import { ALL_CATEGORIES, categoryLabel } from './shoppingView';
+import { displayLocale } from '../../utils/formatLocale';
 
 /* ── Aggiungi prodotto ────────────────────────────────────────────────────
    One line, always in reach, because the common act on this page is adding
@@ -41,9 +43,10 @@ export const AddItemBar: React.FC<{
   name, onName, qty, onQty, unit, onUnit, category, onCategory, supplierId, onSupplier,
   suppliers, suggestions, showSuggestions, onShowSuggestions, adding, disabled, onAdd, inputRef,
 }) => {
+  const { t } = useTranslation('spesa', { useSuspense: false });
   const eligible = suppliers
     .filter(s => s.categories.includes(category))
-    .sort((a, b) => a.name.localeCompare(b.name, 'it'));
+    .sort((a, b) => a.name.localeCompare(b.name, displayLocale()));
 
   // h-10, not h-9: these sit under the thumb and the row is the one place on
   // the page where four controls compete for a phone's width.
@@ -72,15 +75,15 @@ export const AddItemBar: React.FC<{
           onKeyDown={e => { if (e.key === 'Enter') onAdd(); }}
           disabled={disabled}
           tabIndex={disabled ? -1 : undefined}
-          placeholder="Aggiungi prodotto…"
-          aria-label="Aggiungi prodotto"
+          placeholder={t('add.placeholder', 'Aggiungi prodotto…')}
+          aria-label={t('add.aria', 'Aggiungi prodotto')}
           className="min-w-0 flex-1 bg-transparent text-[16px] text-[var(--ds-text-primary)] outline-none placeholder:text-[var(--ds-text-muted)]"
         />
         <button
           type="button"
           onClick={() => onAdd()}
           disabled={disabled || !name.trim() || adding}
-          aria-label="Aggiungi"
+          aria-label={t('add.button', 'Aggiungi')}
           className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
         >
           {adding ? <Loader2 className="h-5 w-5 animate-spin" /> : <Plus className="h-5 w-5" />}
@@ -93,7 +96,7 @@ export const AddItemBar: React.FC<{
           the padding the focus ring was sliced off top and bottom. */}
       <div className="-mx-1 mt-2.5 flex items-center gap-2 overflow-x-auto px-1 py-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <label className={`inline-flex flex-shrink-0 items-center gap-1.5 pr-3.5 ${control}`}>
-          <span className="text-[var(--ds-text-muted)]">Qtà</span>
+          <span className="text-[var(--ds-text-muted)]">{t('add.qty', 'Qtà')}</span>
           <input
             type="text"
             inputMode="decimal"
@@ -102,7 +105,7 @@ export const AddItemBar: React.FC<{
             placeholder="1"
             disabled={disabled}
             tabIndex={disabled ? -1 : undefined}
-            aria-label="Quantità"
+            aria-label={t('add.qtyAria', 'Quantità')}
             className="w-8 bg-transparent text-center outline-none"
           />
         </label>
@@ -111,7 +114,7 @@ export const AddItemBar: React.FC<{
           onChange={e => onUnit(e.target.value as ShoppingUnit)}
           disabled={disabled}
           tabIndex={disabled ? -1 : undefined}
-          aria-label="Unità"
+          aria-label={t('add.unitAria', 'Unità')}
           className={`flex-shrink-0 ${selectControl}`}
         >
           {SHOPPING_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
@@ -121,23 +124,23 @@ export const AddItemBar: React.FC<{
           onChange={e => onCategory(e.target.value as ShoppingCategory)}
           disabled={disabled}
           tabIndex={disabled ? -1 : undefined}
-          aria-label="Categoria"
+          aria-label={t('add.categoryAria', 'Categoria')}
           // Same quiet pill as its neighbours. The solid fill made it read as
           // the row's primary action when it is just one of four settings, and
           // the near-black is reserved for things that actually do something.
           className={`flex-shrink-0 ${selectControl}`}
         >
-          {ALL_CATEGORIES.map(c => <option key={c} value={c}>{CATEGORY_LABELS[c]}</option>)}
+          {ALL_CATEGORIES.map(c => <option key={c} value={c}>{categoryLabel(c, t)}</option>)}
         </select>
         <select
           value={supplierId}
           onChange={e => onSupplier(e.target.value)}
           disabled={disabled}
           tabIndex={disabled ? -1 : undefined}
-          aria-label="Fornitore"
+          aria-label={t('add.supplierAria', 'Fornitore')}
           className={`max-w-[11rem] flex-shrink-0 ${selectControl}`}
         >
-          <option value="">Senza fornitore</option>
+          <option value="">{t('noSupplier', 'Senza fornitore')}</option>
           {eligible.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
       </div>
@@ -145,7 +148,7 @@ export const AddItemBar: React.FC<{
       {showSuggestions && !disabled && suggestions.length > 0 && (
         <div className="absolute inset-x-3 top-full z-20 mt-1 overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)]">
           <div className="px-4 pt-3 text-[13px] font-semibold text-[var(--ds-text-muted)]">
-            Già in lista in passato
+            {t('add.pastItems', 'Già in lista in passato')}
           </div>
           {suggestions.map(s => (
             <button

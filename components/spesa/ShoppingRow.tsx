@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { Check, Edit2, Trash2 } from 'lucide-react';
 import type { ShoppingItem } from '../../services/shoppingApiService';
 import { Avatar, StatusPill, SwipeRow } from '../ds';
@@ -29,9 +30,10 @@ export const ShoppingRow: React.FC<{
   onDelete: () => void;
   onSelect: () => void;
 }> = ({ item, selectionMode, selected, hint, onToggle, onEdit, onDelete, onSelect }) => {
+  const { t } = useTranslation('spesa', { useSuspense: false });
   const qty = formatQty(item.quantity, item.unit);
   const who = personName(item.createdByUserName);
-  const added = formatAddedAt(item.createdAt || item.date);
+  const added = formatAddedAt(item.createdAt || item.date, t);
 
   const body = (
     <div
@@ -44,8 +46,10 @@ export const ShoppingRow: React.FC<{
         onClick={selectionMode ? onSelect : onToggle}
         aria-pressed={selectionMode ? selected : item.checked}
         aria-label={selectionMode
-          ? `Seleziona ${item.name}`
-          : item.checked ? `Segna ${item.name} da acquistare` : `Segna ${item.name} come preso`}
+          ? t('row.select', 'Seleziona {{nome}}', { nome: item.name })
+          : item.checked
+            ? t('row.markTodo', 'Segna {{nome}} da acquistare', { nome: item.name })
+            : t('row.markDone', 'Segna {{nome}} come preso', { nome: item.name })}
         className={`inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
           (selectionMode ? selected : item.checked)
             ? 'bg-[var(--ds-seated-solid)] text-[#ffffff]'
@@ -98,7 +102,7 @@ export const ShoppingRow: React.FC<{
           <button
             type="button"
             onClick={onEdit}
-            aria-label={`Modifica ${item.name}`}
+            aria-label={t('row.edit', 'Modifica {{nome}}', { nome: item.name })}
             className="inline-flex h-9 w-9 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             <Edit2 className="h-4 w-4" />
@@ -106,7 +110,7 @@ export const ShoppingRow: React.FC<{
           <button
             type="button"
             onClick={onDelete}
-            aria-label={`Elimina ${item.name}`}
+            aria-label={t('row.delete', 'Elimina {{nome}}', { nome: item.name })}
             className="inline-flex h-9 w-9 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             <Trash2 className="h-4 w-4" />
@@ -128,13 +132,13 @@ export const ShoppingRow: React.FC<{
     <SwipeRow
       hint={hint}
       left={{
-        label: item.checked ? 'Da fare' : 'Preso',
+        label: item.checked ? t('row.swipeTodo', 'Da fare') : t('row.swipeDone', 'Preso'),
         icon: <Check className="h-5 w-5" />,
         tone: 'confirm',
         onAction: onToggle,
       }}
       right={{
-        label: 'Elimina',
+        label: t('row.swipeDelete', 'Elimina'),
         icon: <Trash2 className="h-5 w-5" />,
         tone: 'danger',
         onAction: onDelete,
