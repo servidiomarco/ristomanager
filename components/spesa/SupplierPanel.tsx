@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { Printer, Send, Truck } from 'lucide-react';
 import type { ShoppingItem, Supplier } from '../../services/shoppingApiService';
 import { BreadBanner } from './BreadBanner';
@@ -29,6 +30,7 @@ export const SupplierPanel: React.FC<{
   suppliers, items, bread, onPrintSupplier, onShareSupplier, onPrintNoSupplier, onPrintAll,
   onManageSuppliers,
 }) => {
+  const { t } = useTranslation('spesa', { useSuspense: false });
   const withSupplier = suppliers
     .map(s => ({ supplier: s, count: items.filter(i => i.supplierId === s.id).length }))
     .filter(r => r.count > 0)
@@ -45,20 +47,20 @@ export const SupplierPanel: React.FC<{
       <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
         <div className="mb-3 flex items-center justify-between gap-2">
           <h2 className="text-[15px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
-            Per fornitore
+            {t('sup.title', 'Per fornitore')}
           </h2>
           <button
             type="button"
             onClick={onManageSuppliers}
             className="text-[13px] font-medium text-[var(--ds-text-primary)] underline underline-offset-2"
           >
-            Gestisci
+            {t('sup.manage', 'Gestisci')}
           </button>
         </div>
 
         {withSupplier.length === 0 && orphanCount === 0 ? (
           <p className="text-[14px] text-[var(--ds-text-muted)]">
-            Nessun prodotto da ordinare.
+            {t('sup.nothing', 'Nessun prodotto da ordinare.')}
           </p>
         ) : (
           <div className="space-y-3">
@@ -71,7 +73,7 @@ export const SupplierPanel: React.FC<{
                       {supplier.name}
                     </div>
                     <div className="truncate text-[13px] text-[var(--ds-text-muted)]">
-                      {count} prodott{count === 1 ? 'o' : 'i'}
+                      {t('sup.itemCount', '{{count}} prodotti', { count })}
                       {supplier.phone ? ` · ${supplier.phone}` : ''}
                     </div>
                   </div>
@@ -85,14 +87,14 @@ export const SupplierPanel: React.FC<{
                     onClick={() => onPrintSupplier(supplier.id)}
                     className={`${action} bg-[var(--ds-surface)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]`}
                   >
-                    <Printer className="h-3.5 w-3.5" aria-hidden /> Stampa
+                    <Printer className="h-3.5 w-3.5" aria-hidden /> {t('sup.print', 'Stampa')}
                   </button>
                   <button
                     type="button"
                     onClick={() => onShareSupplier(supplier.id)}
                     className={`${action} bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] hover:brightness-95`}
                   >
-                    <Send className="h-3.5 w-3.5" aria-hidden /> Invia
+                    <Send className="h-3.5 w-3.5" aria-hidden /> {t('sup.send', 'Invia')}
                   </button>
                 </div>
               </div>
@@ -103,8 +105,8 @@ export const SupplierPanel: React.FC<{
                 <div className="mb-2 flex items-start gap-2">
                   <Truck className="mt-0.5 h-4 w-4 flex-shrink-0 text-[var(--ds-critical-text)]" aria-hidden />
                   <div className="min-w-0 flex-1">
-                    <div className="text-[14px] font-semibold text-[var(--ds-critical-text)]">Senza fornitore</div>
-                    <div className="text-[13px] text-[var(--ds-critical-text)]">da assegnare prima di ordinare</div>
+                    <div className="text-[14px] font-semibold text-[var(--ds-critical-text)]">{t('noSupplier', 'Senza fornitore')}</div>
+                    <div className="text-[13px] text-[var(--ds-critical-text)]">{t('sup.orphanHint', 'da assegnare prima di ordinare')}</div>
                   </div>
                   <span className="text-[17px] font-semibold tabular-nums text-[var(--ds-critical-text)]">
                     {orphanCount}
@@ -115,7 +117,7 @@ export const SupplierPanel: React.FC<{
                   onClick={onPrintNoSupplier}
                   className={`${action} w-full bg-[var(--ds-surface)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]`}
                 >
-                  <Printer className="h-3.5 w-3.5" aria-hidden /> Stampa
+                  <Printer className="h-3.5 w-3.5" aria-hidden /> {t('sup.print', 'Stampa')}
                 </button>
               </div>
             )}
@@ -128,7 +130,7 @@ export const SupplierPanel: React.FC<{
         onClick={onPrintAll}
         className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[15px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
       >
-        <Printer className="h-4 w-4" aria-hidden /> Stampa lista completa
+        <Printer className="h-4 w-4" aria-hidden /> {t('sup.printAll', 'Stampa lista completa')}
       </button>
     </div>
   );

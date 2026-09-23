@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useShopping } from '../contexts/ShoppingContext';
 import { ShoppingItem, ShoppingCategory, ShoppingUnit } from '../services/shoppingApiService';
 import { Reservation, BanquetMenu, ReservationStatus } from '../types';
@@ -17,7 +18,7 @@ import { BreadBanner } from './spesa/BreadBanner';
 import { SupplierPanel } from './spesa/SupplierPanel';
 import { useToast } from '../contexts/ToastContext';
 import {
-  ALL_CATEGORIES, CATEGORY_ACCENT, CATEGORY_DOT, CATEGORY_LABELS, CATEGORY_TONE,
+  ALL_CATEGORIES, CATEGORY_ACCENT, CATEGORY_DOT, CATEGORY_TONE, categoryLabel,
   byNewest, itemSummary, parseQty,
 } from './spesa/shoppingView';
 
@@ -51,6 +52,7 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
   autoOpenNewShoppingItem,
   onAutoOpenNewShoppingItemHandled,
 }) => {
+  const { t } = useTranslation('spesa', { useSuspense: false });
   const { items, loading, history, suppliers, addItem, updateItem, toggleItem, deleteItem, clearChecked } = useShopping();
 
   const [search, setSearch] = useState('');
@@ -83,7 +85,7 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
   const offerUndo = (message: string, icon: typeof Check, onUndo: () => void | Promise<void>) => {
     addToast(message, 'success', {
       icon,
-      action: { label: 'Annulla', onClick: onUndo },
+      action: { label: t('undo', 'Annulla'), onClick: onUndo },
       replaceKey: 'spesa-undo',
     });
   };
@@ -193,7 +195,7 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
   const handleToggle = async (item: ShoppingItem) => {
     await toggleItem(item.id);
     offerUndo(
-      `${itemSummary(item)} ${item.checked ? 'da acquistare' : 'presa'}`,
+      `${itemSummary(item)} ${item.checked ? t('toastTodo', 'da acquistare') : t('toastDone', 'presa')}`,
       Check,
       () => toggleItem(item.id),
     );
@@ -241,13 +243,18 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
   };
   const selectedItems = useMemo(() => items.filter(i => selected.has(i.id)), [items, selected]);
 
+  /* Da qui in giù i titoli restano in italiano di proposito: finiscono sul
+     foglio stampato e nel messaggio al fornitore, e il foglio
+     (utils/printShoppingList.ts) è un cantiere a parte. Tradurre solo
+     l'intestazione darebbe una pagina mezza inglese — peggio di una pagina
+     italiana. */
   const printSelected = () => {
     if (selectedItems.length === 0) return;
     const cats = new Set(selectedItems.map(i => i.category));
     const only = cats.size === 1 ? selectedItems[0].category : null;
     printShoppingList(selectedItems, {
       title: 'Selezione',
-      eyebrow: only ? `Lista della spesa · ${CATEGORY_LABELS[only]}` : 'Lista della spesa',
+      eyebrow: only ? `Lista della spesa · ${categoryLabel(only)}` : 'Lista della spesa',
       date: todayStr,
       accent: only ? CATEGORY_ACCENT[only] : undefined,
       groupByCategory: cats.size > 1,
@@ -263,7 +270,7 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
     const only = cats.size === 1 ? selectedItems[0].category : null;
     await shareShoppingList(selectedItems, {
       title: only
-        ? `Lista della spesa — ${CATEGORY_LABELS[only]} (selezione)`
+        ? `Lista della spesa — ${categoryLabel(only)} (selezione)`
         : 'Lista della spesa (selezione)',
       date: todayStr,
       groupByCategory: cats.size > 1,
@@ -325,8 +332,8 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
     'inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-3.5 text-[13px] font-medium text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
   const categoryChips: { v: ShoppingCategory | 'ALL'; l: string; n: number }[] = [
-    { v: 'ALL', l: 'Tutte', n: filteredItems.length },
-    ...ALL_CATEGORIES.map(c => ({ v: c, l: CATEGORY_LABELS[c], n: grouped[c].length })),
+    { v: 'ALL', l: t('allCategories', 'Tutte'), n: filteredItems.length },
+    ...ALL_CATEGORIES.map(c => ({ v: c, l: categoryLabel(c, t), n: grouped[c].length })),
   ];
 
   // The first group that actually renders — Seleziona rides on its header, so
@@ -358,11 +365,11 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
                       : 'text-[var(--ds-text-secondary)] hover:bg-[var(--ds-surface)] hover:text-[var(--ds-text-primary)]'
                   }`}
                 >
-                  <ListChecks className="h-3.5 w-3.5" aria-hidden /> Seleziona
+                  <ListChecks className="h-3.5 w-3.5" aria-hidden /> {t('selectAction', 'Seleziona')}
                 </button>
               ) : undefined}
             >
-              {CATEGORY_LABELS[cat]}
+              {categoryLabel(cat, t)}
             </SectionHeader>
             {/* Each row is its own card with air around it. Joined into one
                 block with hairlines they read as a single dense table, which
@@ -405,11 +412,11 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
                 onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); clearChecked(); } }}
                 className="cursor-pointer text-[13px] font-medium text-[var(--ds-critical-text)]"
               >
-                Rimuovi tutte
+                {t('removeAll', 'Rimuovi tutte')}
               </span>
             ) : undefined}
           >
-            Preso
+            {t('bought', 'Preso')}
           </SectionHeader>
           {presoOpen && (
             <div className="space-y-2">
@@ -441,12 +448,12 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
       <div className="mb-4 flex items-center justify-between gap-3">
         <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
           <h1 className="text-[22px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)] sm:text-[26px]">
-            Lista della spesa
+            {t('title', 'Lista della spesa')}
           </h1>
           <p className="text-[15px] text-[var(--ds-text-muted)] tabular-nums">
             {searching
-              ? `ricerca in ${items.length} prodotti`
-              : `${todoCount} da acquistare · ${doneCount} fatti`}
+              ? t('searchingIn', 'ricerca in {{count}} prodotti', { count: items.length })
+              : t('counts', '{{todo}} da acquistare · {{done}} fatti', { todo: todoCount, done: doneCount })}
           </p>
         </div>
         {/* Managing suppliers is page-level admin, not list work — it belongs
@@ -458,7 +465,7 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
             onClick={() => setSupplierModalOpen(true)}
             className={`flex-shrink-0 ${topAction}`}
           >
-            <Send className="h-3.5 w-3.5" aria-hidden /> Fornitori
+            <Send className="h-3.5 w-3.5" aria-hidden /> {t('suppliersButton', 'Fornitori')}
           </button>
         )}
       </div>
@@ -473,8 +480,8 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
             <SearchField
               value={search}
               onChange={setSearch}
-              placeholder="Cerca prodotto…"
-              ariaLabel="Cerca prodotto"
+              placeholder={t('searchPlaceholder', 'Cerca prodotto…')}
+              ariaLabel={t('searchAria', 'Cerca prodotto')}
               className="min-w-0 flex-1"
             />
             {/* Icon-only: printing is a one-tap errand and the word was taking
@@ -483,8 +490,8 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
               <button
                 type="button"
                 onClick={printAll}
-                aria-label="Stampa la lista"
-                title="Stampa la lista"
+                aria-label={t('printList', 'Stampa la lista')}
+                title={t('printList', 'Stampa la lista')}
                 className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               >
                 <Printer className="h-4 w-4" />
@@ -542,8 +549,8 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
           {searching && (
             <p className="text-[14px] text-[var(--ds-text-muted)]">
               {filteredItems.length === 0
-                ? 'Nessun risultato in tutta la lista.'
-                : `${filteredItems.length} risultat${filteredItems.length === 1 ? 'o' : 'i'} in tutta la lista`}
+                ? t('noResults', 'Nessun risultato in tutta la lista.')
+                : t('results', '{{count}} risultati in tutta la lista', { count: filteredItems.length })}
             </p>
           )}
 
@@ -551,7 +558,7 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
             <SkeletonTaskList count={6} />
           ) : filteredItems.length === 0 && !searching ? (
             <EmptyState icon={ShoppingCart}>
-              Niente da acquistare. Aggiungi un prodotto qui sopra.
+              {t('empty', 'Niente da acquistare. Aggiungi un prodotto qui sopra.')}
             </EmptyState>
           ) : (
             list
@@ -582,13 +589,15 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
           style={{ bottom: 'var(--ds-bottom-nav-clear)' }}
         >
           <span className="min-w-0 flex-1 truncate text-[14px] text-[var(--ds-action-fg)]">
-            {selected.size === 0 ? 'Tocca i prodotti da selezionare' : `${selected.size} selezionati`}
+            {selected.size === 0
+              ? t('tapToSelect', 'Tocca i prodotti da selezionare')
+              : t('selectedCount', '{{count}} selezionati', { count: selected.size })}
           </span>
           <button
             type="button"
             onClick={printSelected}
             disabled={selected.size === 0}
-            aria-label="Stampa selezione"
+            aria-label={t('printSelection', 'Stampa selezione')}
             className="inline-flex h-10 w-10 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-action-fg)] transition-colors hover:bg-white/10 disabled:opacity-40"
           >
             <Printer className="h-4 w-4" />
@@ -597,7 +606,7 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
             type="button"
             onClick={shareSelected}
             disabled={selected.size === 0}
-            aria-label="Condividi selezione"
+            aria-label={t('shareSelection', 'Condividi selezione')}
             className="inline-flex h-10 w-10 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-action-fg)] transition-colors hover:bg-white/10 disabled:opacity-40"
           >
             <Share2 className="h-4 w-4" />
@@ -606,7 +615,7 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
             type="button"
             onClick={bulkDelete}
             disabled={selected.size === 0}
-            aria-label="Elimina selezione"
+            aria-label={t('deleteSelection', 'Elimina selezione')}
             className="inline-flex h-10 w-10 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-critical-fg)] transition-colors hover:bg-white/10 disabled:opacity-40"
           >
             <Trash2 className="h-4 w-4" />
@@ -614,7 +623,7 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
           <button
             type="button"
             onClick={exitSelectionMode}
-            aria-label="Esci dalla selezione"
+            aria-label={t('exitSelection', 'Esci dalla selezione')}
             className="inline-flex h-10 w-10 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-action-fg)] transition-colors hover:bg-white/10"
           >
             <X className="h-4 w-4" />

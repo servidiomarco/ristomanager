@@ -1,0 +1,81 @@
+{
+  "category": {
+    "CUCINA": "Cucina",
+    "BAR": "Bar",
+    "ALTRO": "Altro"
+  },
+  "today": "oggi",
+  "yesterday": "ieri",
+  "row": {
+    "select": "Seleziona {{nome}}",
+    "markTodo": "Segna {{nome}} da acquistare",
+    "markDone": "Segna {{nome}} come preso",
+    "edit": "Modifica {{nome}}",
+    "delete": "Elimina {{nome}}",
+    "swipeTodo": "Da fare",
+    "swipeDone": "Preso",
+    "swipeDelete": "Elimina"
+  },
+  "bread": {
+    "title": "Pane oggi {{quanto}}",
+    "covers": "{{count}} coperti previsti · 1 kg ogni 10",
+    "noCovers": "Nessun coperto previsto per oggi"
+  },
+  "add": {
+    "placeholder": "Aggiungi prodotto…",
+    "aria": "Aggiungi prodotto",
+    "button": "Aggiungi",
+    "qty": "Qtà",
+    "qtyAria": "Quantità",
+    "unitAria": "Unità",
+    "categoryAria": "Categoria",
+    "supplierAria": "Fornitore",
+    "pastItems": "Già in lista in passato"
+  },
+  "noSupplier": "Senza fornitore",
+  "sup": {
+    "title": "Per fornitore",
+    "manage": "Gestisci",
+    "nothing": "Nessun prodotto da ordinare.",
+    "itemCount": "{{count}} prodotti",
+    "itemCount_one": "{{count}} prodotto",
+    "print": "Stampa",
+    "send": "Invia",
+    "orphanHint": "da assegnare prima di ordinare",
+    "printAll": "Stampa lista completa"
+  },
+  "edit": {
+    "title": "Modifica prodotto",
+    "delete": "Elimina prodotto",
+    "save": "Salva",
+    "name": "Nome",
+    "qty": "Quantità",
+    "unit": "Unità",
+    "category": "Categoria",
+    "supplier": "Fornitore"
+  },
+  "undo": "Annulla",
+  "toastTodo": "da acquistare",
+  "toastDone": "presa",
+  "title": "Lista della spesa",
+  "searchingIn": "ricerca in {{count}} prodotti",
+  "counts": "{{todo}} da acquistare · {{done}} fatti",
+  "suppliersButton": "Fornitori",
+  "searchPlaceholder": "Cerca prodotto…",
+  "searchAria": "Cerca prodotto",
+  "printList": "Stampa la lista",
+  "allCategories": "Tutte",
+  "noResults": "Nessun risultato in tutta la lista.",
+  "results": "{{count}} risultati in tutta la lista",
+  "results_one": "{{count}} risultato in tutta la lista",
+  "empty": "Niente da acquistare. Aggiungi un prodotto qui sopra.",
+  "selectAction": "Seleziona",
+  "removeAll": "Rimuovi tutte",
+  "bought": "Preso",
+  "tapToSelect": "Tocca i prodotti da selezionare",
+  "selectedCount": "{{count}} selezionati",
+  "printSelection": "Stampa selezione",
+  "shareSelection": "Condividi selezione",
+  "deleteSelection": "Elimina selezione",
+  "exitSelection": "Esci dalla selezione"
+}

@@ -1,6 +1,7 @@
 import type { ShoppingCategory, ShoppingItem } from '../../services/shoppingApiService';
 import type { PillTone } from '../ds';
 import { sessionTimeZone } from '../../utils/displayTime';
+import { displayLocale } from '../../utils/formatLocale';
 
 /* ── Vocabolario della lista della spesa ──────────────────────────────────
    The page used to carry three parallel colour maps — a border set, a text
@@ -11,11 +12,19 @@ import { sessionTimeZone } from '../../utils/displayTime';
    Cucina takes the gold, Bar the indigo, Altro stays neutral: they are
    labels, not states, so the point is telling them apart, not ranking them. */
 
-export const CATEGORY_LABELS: Record<ShoppingCategory, string> = {
+/* `t` arriva come parametro perché questo è un modulo di vista senza hook —
+   lo stesso contratto di utils/courses.ts. Senza `t` si resta in italiano:
+   un chiamante dimenticato deve leggersi, non sparire. */
+type TFunc = (key: string, defaultValue: string, options?: Record<string, unknown>) => string;
+
+const CATEGORY_LABELS_IT: Record<ShoppingCategory, string> = {
   CUCINA: 'Cucina',
   BAR: 'Bar',
   ALTRO: 'Altro',
 };
+
+export const categoryLabel = (c: ShoppingCategory, t?: TFunc): string =>
+  t ? t(`category.${c}`, CATEGORY_LABELS_IT[c]) : CATEGORY_LABELS_IT[c];
 
 export const CATEGORY_TONE: Record<ShoppingCategory, PillTone> = {
   CUCINA: 'pending',
@@ -69,15 +78,16 @@ export const personName = (raw?: string | null): string => {
 };
 
 /** "oggi", "ieri", or "4 ago" — the list is worked through in days, not hours. */
-export const formatAddedAt = (iso?: string | null): string => {
+export const formatAddedAt = (iso?: string | null, t?: TFunc): string => {
   if (!iso) return '';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
-  const day = (x: Date) => x.toLocaleDateString('it-IT', { timeZone: sessionTimeZone() });
+  const loc = displayLocale();
+  const day = (x: Date) => x.toLocaleDateString(loc, { timeZone: sessionTimeZone() });
   const now = new Date();
-  if (day(d) === day(now)) return 'oggi';
-  if (day(d) === day(new Date(now.getTime() - 86_400_000))) return 'ieri';
-  return d.toLocaleDateString('it-IT', { timeZone: sessionTimeZone(), day: 'numeric', month: 'short' });
+  if (day(d) === day(now)) return t ? t('today', 'oggi') : 'oggi';
+  if (day(d) === day(new Date(now.getTime() - 86_400_000))) return t ? t('yesterday', 'ieri') : 'ieri';
+  return d.toLocaleDateString(loc, { timeZone: sessionTimeZone(), day: 'numeric', month: 'short' });
 };
 
 /** Newest first. `createdAt` is optional on the row, so `date` is the fallback
