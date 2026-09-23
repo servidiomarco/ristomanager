@@ -74,6 +74,9 @@ describe('zone chiuse sul canale voce (check_availability)', () => {
         expect(res.body.available).toBe(true);
         expect(res.body.free_indoor).toBeGreaterThan(0);
         expect(res.body.free_outdoor).toBeGreaterThan(0);
+        // Due zone con posto: il server dice all'agente di chiedere.
+        expect(res.body.ask_zone).toBe(true);
+        expect(res.body.location_preference).toBeUndefined();
         expect(res.body.message).not.toContain("all'interno");
         expect(res.body.message).not.toContain("all'esterno");
     });
@@ -88,6 +91,11 @@ describe('zone chiuse sul canale voce (check_availability)', () => {
         expect(res.body.free_outdoor).toBe(0);
         expect(res.body.outdoor_closed).toBe(true);
         expect(res.body.indoor_closed).toBe(false);
+        // Zona unica: la decisione sta nella risposta, non in una regola del
+        // prompt che il modello ignorava in 55 chiamate su 138 (analisi 23/09).
+        expect(res.body.ask_zone).toBe(false);
+        expect(res.body.location_preference).toBe('INDOOR');
+        expect(res.body.zone_instruction).toContain('NON chiedere la zona');
         // La zona non richiesta non entra nella frase: nominarla ha già fatto
         // improvvisare all'agente domande senza senso (chiamata Gervasi 18/09).
         expect(res.body.message).not.toContain("all'interno");

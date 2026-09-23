@@ -660,6 +660,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-23 | Agente vocale | Sofia non chiede più «interno o esterno?» quando una sola zona ha posto (la decisione arriva dal server nella verifica disponibilità) e segue sempre lo stesso flusso di prenotazione, anche coi clienti già in rubrica. |
 | 2026-09-23 | Accesso | La pagina di accesso parla inglese, e soprattutto RESTA nella lingua dell'ultimo operatore anche dopo il logout: prima tornava sempre in italiano, e in un ristorante all'estero il cameriere si ritrovava davanti una schermata che non sa leggere. La lingua scelta da un ospite sulle pagine pubbliche non la influenza. |
 | 2026-09-23 | Menu & Piatti; Asporto | Con la lingua inglese parlano inglese la modale Varianti (gruppi, opzioni, scelte minime e massime, aggancio alle categorie) e la card Asporto in Impostazioni (ordini online e al telefono, giorno della board, capienza, minuti di preparazione, stop). |
 | 2026-09-23 | Pagamenti; Cassa | Con la lingua inglese parla inglese il foglio del conto: chiusura con metodi e documento, QR per le quote, elenco dei pagamenti, dettaglio e riepilogo, e i bottoni dei documenti fiscali. Il modulo della fattura elettronica resta in italiano: è un modulo di legge italiano. |

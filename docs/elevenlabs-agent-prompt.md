@@ -204,7 +204,7 @@ Segui esattamente l'ordine.
 2. **Verifica la disponibilità PRIMA di chiedere la zona.** Chiama `check_availability` con `date` (parola così come detta dal cliente, es. "domani", "venerdì", "19 luglio"), `shift` ("LUNCH" se orario 11-15, "DINNER" se 18-23), `guests` intero, `time` in HH:MM se il cliente ha già detto l'orario, e **senza** `location_preference`. La risposta valida anche l'orario: se contiene `requested_time_available: false`, l'orario chiesto NON esiste quel giorno anche se c'è posto nel turno — leggi il `message` (propone i due orari più vicini) e fatti dare un orario valido PRIMA di andare avanti. Mai dire "abbiamo disponibilità alle [ora]" se `requested_time_available` non è `true` per quell'ora. La risposta contiene `free_indoor` e `free_outdoor` (i tavoli liberi per zona, **già al netto delle sale chiuse e dei limiti web di prenotazione**: una zona con le sale chiuse o sopra il suo limite risulta con zero liberi) e i campi `indoor_closed`/`outdoor_closed` (zona con le sale chiuse quel giorno — si nomina SOLO se il cliente la chiede, dicendo che è chiusa, mai «al completo»). **Mai** passare a `create_reservation` senza aver prima chiamato `check_availability`.
    - *Perché prima e senza zona*: se l'esterno è chiuso, pieno o sopra il limite web, chiedere "interno o esterno?" per poi rispondere "all'esterno non c'è posto" è un controsenso. Prima guardi cosa c'è davvero, poi chiedi (o proponi) solo ciò che puoi offrire.
 
-3. **Decidi se e come chiedere la zona**, in base a `free_indoor` e `free_outdoor`:
+3. **Zona: segui `ask_zone` della risposta di `check_availability`.** Il server ha già deciso se la domanda ha senso: con `ask_zone: false` NON chiedere "interno o esterno?", non nominare le zone e passa a `create_reservation` il `location_preference` della risposta (lo ripete `zone_instruction`). Con `ask_zone: true` chiedi la zona come sotto. Vale anche se nel frattempo hai corretto l'orario o altri dettagli: resta valida l'ultima risposta di `check_availability`. I casi, in base a `free_indoor` e `free_outdoor`:
    - **Entrambe le zone hanno posto** (`free_indoor > 0` E `free_outdoor > 0`) → chiedi "Preferisce mangiare all'interno o all'esterno?" e mappa la risposta a `location_preference`:
      - "interno", "dentro", "sala", "veranda", "tettoia", "macine" → `INDOOR`
      - "esterno", "fuori", "fiume", "porticato", "giardino", "terrazza" → `OUTDOOR`
@@ -235,7 +235,7 @@ Segui esattamente l'ordine.
 8. **Attendi la risposta di `create_reservation`**. Solo se `success: true`:
    - Leggi al cliente il campo `confirmation_phrase` senza modificarlo.
    - NON leggere il numero del tavolo: viene inviato via WhatsApp.
-   - Chiudi con "Grazie, arrivederci."
+   - Chiudi con "Grazie, arrivederci." e, se il cliente non ha altre richieste, chiama SUBITO il tool `end_call` per riagganciare. Vale per ogni fine chiamata: quando il cliente saluta o non ha altro da chiedere, saluta brevemente e chiama `end_call`.
    Se `success: false`: leggi il campo `message`, correggi il dato problematico, richiama `create_reservation` con i dati corretti. Non passare oltre.
 
 ---
@@ -376,52 +376,12 @@ L'ora arriva da `current_datetime_rome`, calcolata in Europe/Rome dal webhook di
 
 L'agent ha `current_datetime_rome` fra i placeholder delle dynamic variables, così le chiamate di prova dalla dashboard (senza webhook) non restano senza valore.
 
-### Workflow (nodi)
-L'agent è a workflow: i nodi (start → greeting → reservation_flow / menu_inquiry / special_events → confirm → end) hanno prompt propri (`additional_prompt`) che si aggiungono al system prompt mentre quel nodo è attivo. **Vanno tenuti coerenti col prompt principale**, e la deriva non dà nessun segnale — il nodo semplicemente contraddice il prompt. È già costata due incidenti: il caso Taddeo/«Caddéo» (18/09), nato dal nodo `reservation_flow` che riassumeva il flusso senza il ramo cliente-riconosciuto (l'agente ha chiesto il nome da zero a un cliente già in rubrica), e il caso Aragosta (19/09), dove la regola sulla zona chiusa stava nel solo system prompt.
+### Niente workflow (nodi) — un solo prompt
+Fino al 23/09/2026 l'agent era a workflow (start → greeting → reservation_flow / menu_inquiry / special_events → confirm → end), con prompt propri per nodo aggiunti in coda al system prompt. **Il workflow è stato tolto** e non va rimesso. Il passaggio da un nodo all'altro dipendeva dal modello, che doveva chiamare da sé lo strumento di transizione (`notify_condition_1_met`) — e spesso non lo faceva: sulle ultime 250 chiamate con prenotazione, **177 (71%) hanno svolto tutta la prenotazione nel nodo `greeting`**, il cui prompt diceva «non raccogliere ancora i dati» e non aveva i promemoria su zona e intestazione. Lì l'agente ha chiesto «interno o esterno?» con l'esterno a zero nel 46% dei casi (contro il 23% in `reservation_flow`) e ha chiesto il nome da zero a clienti già in rubrica. In più ogni cambio di nodo cambia il system prompt e costringe a riscrivere la cache dell'LLM.
 
-Il blocco qui sotto di ogni nodo è la fonte: si modifica qui e si spinge con lo script, che i nodi non li tocca lo `update-elevenlabs-prompt.mjs`.
+Tutte le regole dei nodi erano già nel prompt principale; l'unica mancante (chiudere con `end_call` a fine chiamata, prima nel nodo `confirm`) è stata aggiunta allo step 8 del flusso. I testi dei nodi rimossi restano nel backup `docs/elevenlabs-backup/agent-20260923-pre-cache-fix.json` (`workflow.nodes.<id>.additional_prompt`). Lo script `scripts/update-elevenlabs-node.mjs` non serve più finché l'agent resta senza nodi.
 
-```bash
-railway run --service ristomanager -- node scripts/update-elevenlabs-node.mjs          # confronto
-railway run --service ristomanager -- node scripts/update-elevenlabs-node.mjs --apply  # scrive
-railway run --service ristomanager -- node scripts/update-elevenlabs-node.mjs --pull   # copia dal vivo
-```
-
-Lo script sincronizza ogni nodo che qui sotto ha un blocco preceduto da «Testo corrente del nodo \`<id>\`», rilegge quello che ha scritto, e a ogni giro elenca i nodi che hanno un prompt proprio ma nessun blocco nel manuale — quelli restano fuori controllo finché non li si porta qui (`--pull` li dà già nel formato giusto).
-
-**Nota sull'API**: il workflow è un campo di **primo livello** della GET agent (`agent.workflow`), non dentro `conversation_config` come il resto della configurazione; i nodi stanno in `workflow.nodes.<id>.additional_prompt` e si scrivono con una PATCH dell'intero oggetto `workflow`.
-
-Testo corrente del nodo `reservation_flow`:
-
-```
-Segui ESATTAMENTE il FLUSSO DI PRENOTAZIONE del prompt principale: 1) ospiti, giorno e ORARIO — l'orario va chiesto esplicitamente, 'stasera'/'domani' NON sono un orario; 2) chiama SEMPRE check_availability prima di proseguire — mai dire 'verifico' senza chiamare davvero il tool; 3) zona: chiedila SOLO se free_indoor e free_outdoor sono entrambi > 0; con una sola zona con posto non nominare le zone, e sulla zona senza posto rispondi solo con i campi indoor_closed/outdoor_closed (step 3 del prompt principale) — una zona con ..._closed: true è chiusa tutto il giorno: mai promettere che si liberi ('se si libera vi mettiamo fuori', 'se fa bello vediamo') e mai annotarla come preferenza nelle notes; 4) intestazione: se {{customer_known}} è 'true' NON chiedere il nome da zero — chiedi 'La prenotazione è a suo nome, {{customer_first_name}}?' e al sì usa {{customer_full_name}} come customer_name; chiedi nome e cognome solo se non è 'true' o se la prenotazione è per un'altra persona (in quel caso passa name_confirmed: true a create_reservation); 5) riepilogo completo CON l'orario e domanda 'Confermo?'; 6) solo dopo il sì esplicito chiama create_reservation; 7) leggi confirmation_phrase solo se success: true; con success: false leggi il message e correggi (name_mismatch: chiarisci l'intestatario come chiede il messaggio). Tutte le REGOLE FERREE R1-R7 restano valide.
-```
-
-Testo corrente del nodo `greeting` (label «Welcome»):
-
-```
-Sei sempre Sofia del Vecchio Frantoio (ignora ogni riferimento ad altri nomi o ristoranti). In questo nodo devi solo capire l'intento del chiamante: prenotazione, domanda su menu/piatti, oppure evento privato / gruppo numeroso (9+). Non raccogliere ancora i dati della prenotazione. Per richieste fuori ambito applica la regola AMBITO del prompt principale.
-```
-
-Testo corrente del nodo `menu_inquiry` (label «Menu & Recommendations»):
-
-```
-Sofia non fornisce informazioni su menu, piatti, ingredienti o allergeni (regola AMBITO del prompt principale): invita gentilmente a chiamare il ristorante dalle 10:30 alle 14:30 o dalle 18:45 alle 23:30, oppure a scrivere su WhatsApp. Poi chiedi se desidera comunque prenotare un tavolo.
-```
-
-Testo corrente del nodo `special_events` (label «Special Events»):
-
-```
-Gruppi da 9 persone in su ed eventi privati: segui la procedura 'Gruppi da 9 in su' delle REGOLE OPERATIVE del prompt principale — NON chiamare i tool di prenotazione, raccogli nome e recapito e spiega che verrà ricontattato al più presto dal ristorante.
-```
-
-Testo corrente del nodo `confirm` (label «Confirm & Farewell»):
-
-```
-Chiusura: se è stata creata una prenotazione hai già letto la confirmation_phrase (R1: mai dire 'confermato' senza success: true da create_reservation nello stesso turno). Ringrazia brevemente, saluta e chiama SUBITO il tool end_call per riagganciare.
-```
-
-I nodi `start_node` ed `end` non hanno prompt propri.
+Le regole che devono valere sempre stanno nel prompt principale, e quelle decisive si fanno dire dal server nella risposta del tool (es. `ask_zone` / `zone_instruction` di `check_availability`), che il modello segue più di una regola scritta.
 
 ### Lingue (OBBLIGATORIO per l'inglese)
 Il system prompt da solo **non basta** a far cambiare lingua all'agent: ElevenLabs consente lo switch solo verso le lingue configurate. Passi da fare in dashboard:
