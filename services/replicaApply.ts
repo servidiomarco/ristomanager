@@ -171,7 +171,21 @@ export const applyReplicaBatch = async (opts: {
     const touched = new Set<string>();
     try {
         await client.query('BEGIN');
-        await client.query(`SET LOCAL session_replication_role = replica`);
+        try {
+            await client.query(`SET LOCAL session_replication_role = replica`);
+        } catch {
+            // Sul Postgres di Railway l'utente NON è superuser e il SET è
+            // negato (scoperto al collaudo del 23/09: ogni giro upstream
+            // moriva qui e il cursore non nasceva mai — in locale e in CI
+            // l'utente è superuser, i test non potevano vederlo). Sul cloud
+            // il replica-mode è solo una cintura: gli aggregati arrivano
+            // coi genitori già in casa, le FK vive non disturbano. Si
+            // riarma la transazione (il SET fallito la abortisce) e si
+            // applica senza. Sul NODO il SET riesce (superuser locale) e
+            // resta necessario: il carico può citare cicli di FK reali.
+            await client.query('ROLLBACK');
+            await client.query('BEGIN');
+        }
         for (const ev of events) {
             // L'import SEMPRE, anche per i tipi che non sappiamo applicare:
             // i broadcast partono dal dispatcher locale, e il log resta
