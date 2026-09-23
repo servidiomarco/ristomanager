@@ -677,8 +677,8 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
   }, [coming, now]);
 
   const stationName = stationId == null
-    ? 'Senza partita'
-    : catalogue?.stations.find(s => s.id === stationId)?.name ?? `Partita ${stationId}`;
+    ? t('kds.noStation')
+    : catalogue?.stations.find(s => s.id === stationId)?.name ?? t('kds.stationN', { n: stationId });
 
   if (loading) {
     return (
@@ -707,11 +707,11 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
             <SegmentedControl<'lavoro' | 'consegnate'>
               value={view}
               onChange={setView}
-              ariaLabel="In lavorazione o consegnate"
+              ariaLabel={t('kds.viewAria')}
               iconOnly
               options={[
-                { value: 'lavoro', label: 'In lavorazione', icon: <CookingPot size={17} aria-hidden />, badge: todo.length || undefined },
-                { value: 'consegnate', label: 'Consegnate', icon: <Check size={17} aria-hidden /> },
+                { value: 'lavoro', label: t('kds.working'), icon: <CookingPot size={17} aria-hidden />, badge: todo.length || undefined },
+                { value: 'consegnate', label: t('kds.delivered'), icon: <Check size={17} aria-hidden /> },
               ]}
             />
           </div>
@@ -725,7 +725,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                copia buona. La sala deve saperlo, non scoprirlo. */
             <StatusPill tone="pending">
               <WifiOff size={13} aria-hidden />
-              {nodeStale.asOf ? `dati fermi alle ${formatStaleAsOf(nodeStale.asOf)}` : 'dati fermi'} — cloud non raggiungibile
+              {nodeStale.asOf ? t('kds.staleAsOf', { ora: formatStaleAsOf(nodeStale.asOf) }) : t('kds.stale')} — cloud non raggiungibile
             </StatusPill>
           ) : null}
           {/* Data e orologio al centro: in Cucina la testata globale non c'è
@@ -754,7 +754,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
             type="button"
             onClick={() => setSearchOpen(o => { if (o) setSearch(''); return !o; })}
             aria-pressed={searchOpen}
-            aria-label={searchOpen ? 'Chiudi la ricerca' : 'Cerca una comanda'}
+            aria-label={t(searchOpen ? 'kds.closeSearch' : 'kds.searchOrder')}
             className={`inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
               searchOpen
                 ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)]'
@@ -779,7 +779,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
             onClick={() => setPicking(true)}
             className={`flex-shrink-0 ${dsButton.quiet}`}
           >
-            Cambia partita
+            {t('kds.changeStation')}
           </button>
         </div>
       </div>
@@ -790,7 +790,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
             value={search}
             onChange={setSearch}
             placeholder={t('searchKitchen')}
-            ariaLabel="Cerca una comanda"
+            ariaLabel={t('kds.searchOrder')}
             inputRef={searchRef}
           />
         </div>
@@ -833,7 +833,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
             {/* Solo i chip scorrono: la pill delle note sta FUORI dall'area a
                 scorrimento, sempre visibile a destra qualunque sia la coda. */}
             <div ref={barRef} className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
-              {allDay.map(([key, t]) => (
+              {allDay.map(([key, tot]) => (
                 // La card si tocca: apre i tavoli a cui è destinato il piatto.
                 // Il totale sta in un blocco accent a sinistra, a tutta
                 // altezza: da un metro si legge prima il numero, poi il nome.
@@ -842,7 +842,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                   type="button"
                   data-chip={key}
                   onClick={() => setChipDetail(key)}
-                  aria-label={`Dove va ${key}`}
+                  aria-label={t('kds.whereGoes', { piatto: key })}
                   className={`inline-flex min-h-[48px] flex-shrink-0 items-stretch overflow-hidden rounded-[var(--ds-radius)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                     litChip === key
                       ? 'bg-[var(--ds-border)] ring-2 ring-[var(--ds-action-bg)]'
@@ -850,7 +850,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                   }`}
                 >
                   <span className="flex min-w-[40px] items-center justify-center bg-[var(--ds-action-bg)] px-2 text-[18px] font-bold tabular-nums text-[var(--ds-action-fg)]">
-                    {t.ahead + t.working}
+                    {tot.ahead + tot.working}
                   </span>
                   {/* Nome sul primo rigo, varianti (peso e modifiche) sul
                       secondo nella tinta della riga «↳» — «Bistecca 500 g
@@ -858,11 +858,11 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                       d'occhio. Senza varianti il nome si centra da solo. */}
                   <span className="flex flex-col justify-center px-3 py-1 text-left">
                     <span className="text-[15px] font-semibold leading-tight text-[var(--ds-text-primary)]">
-                      {t.name}
+                      {tot.name}
                     </span>
-                    {t.variants && (
+                    {tot.variants && (
                       <span className="text-[13px] font-medium leading-tight text-[var(--ds-pending-text)]">
-                        {t.variants}
+                        {tot.variants}
                       </span>
                     )}
                   </span>
@@ -872,9 +872,9 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                       — e batte come lui. A corpo 18 su blocco pieno l'oro
                       solid regge, il problema di contrasto era del tondino
                       piccolo. */}
-                  {t.working > 0 && (
+                  {tot.working > 0 && (
                     <span className="flex min-w-[40px] animate-pulse items-center justify-center bg-[var(--ds-pending-solid)] px-2 text-[18px] font-bold tabular-nums text-white">
-                      {t.working}
+                      {tot.working}
                     </span>
                   )}
                 </button>
@@ -887,7 +887,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                   onClick={() => setSummaryOpen(true)}
                   className="inline-flex h-9 items-center gap-2 rounded-[var(--ds-radius-control)] pl-2.5 pr-1 text-[14px] font-semibold text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 >
-                  Note
+                  {t('kds.notes')}
                   <span className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-pending-solid)] text-[13px] font-semibold tabular-nums text-[var(--ds-pending-fg)]">
                     {summary.dietary.length + summary.dietary_lines.length}
                   </span>
@@ -914,7 +914,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
           <div className={`min-h-0 w-full overflow-y-auto p-1 transition-[max-width] duration-300 ease-out ${timelineFor ? 'mx-auto max-w-[340px] flex-shrink-0' : 'mx-auto max-w-[640px]'}`}>
           {servedFiltered.length === 0 ? (
             <EmptyState icon={Check}>
-              {query ? 'Nessuna uscita servita per questa ricerca.' : 'Nessuna uscita servita in questo servizio.'}
+              {t(query ? 'kds.noServedSearch' : 'kds.noServed')}
             </EmptyState>
           ) : (
             <div className="space-y-2">
@@ -945,7 +945,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                         ? null
                         : { orderId: head.order_id, tableName: head.table_name, customerName: head.customer_name })}
                       aria-pressed={timelineFor?.orderId === head.order_id}
-                      aria-label={`Storia della comanda del tavolo ${head.table_name ?? head.order_id}`}
+                      aria-label={t('kds.orderHistory', { tavolo: head.table_name ?? head.order_id })}
                       className={`block w-full rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-4 py-3 text-left shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                         timelineFor?.orderId === head.order_id ? 'ring-2 ring-[var(--ds-action-bg)]' : ''
                       }`}
@@ -1030,7 +1030,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
       <div className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden px-4 pb-4 pt-1">
         {todo.length === 0 && upcoming.length === 0 ? (
           <EmptyState icon={Check}>
-            {query ? 'Nessuna comanda per questa ricerca.' : 'Nessuna comanda in coda.'}
+            {t(query ? 'kds.noOrdersSearch' : 'kds.noOrders')}
           </EmptyState>
         ) : (
           <div className="flex h-full items-start gap-4">
@@ -1060,7 +1060,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
 
       {view === 'lavoro' && upcomingLoose.length > 0 && (
         <div className="flex-shrink-0 px-4 pb-4">
-          <div className="mb-2 text-[13px] font-semibold text-[var(--ds-text-muted)]">In arrivo</div>
+          <div className="mb-2 text-[13px] font-semibold text-[var(--ds-text-muted)]">{t('kds.incoming')}</div>
           <div className="flex gap-3 overflow-x-auto pb-1">
             {upcomingLoose.map(col => {
               const wait = minutesUntil(col.items[0]?.station_start_at ?? null, now);
@@ -1162,7 +1162,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                         <span className="truncate">T{e.table}</span>
                       </span>
                       <span className={`flex w-[72px] flex-shrink-0 items-center justify-center px-2 text-[15px] font-bold ${courseTone}`}>
-                        {isBarCourse(e.course) ? 'Bar' : isDessertCourse(e.course) ? 'Dolci' : `${e.course} Usc.`}
+                        {isBarCourse(e.course) ? t('courses.bar') : isDessertCourse(e.course) ? t('courses.dessert') : t('kds.courseShort', { n: e.course })}
                       </span>
                     </span>
                   ))}
@@ -1176,13 +1176,13 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
             // Due colonne affiancate: il fuoco a sinistra, il futuro a destra.
             <div className="grid grid-cols-2 gap-6">
               <Section
-                label="In lavorazione / chiamati"
+                label={t('kds.workingCalled')}
                 dot="animate-pulse bg-[var(--ds-pending-solid)]"
                 courseTone="animate-pulse bg-[var(--ds-pending-solid)] text-white"
                 list={group(rows.filter(r => !isWaiting(r)))}
               />
               <Section
-                label="In arrivo / da chiamare"
+                label={t('kds.comingToFire')}
                 dot="bg-[var(--ds-border-strong)]"
                 courseTone="bg-[var(--ds-border-strong)] text-[var(--ds-text-primary)]"
                 pulseCalled
@@ -1199,11 +1199,11 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
       <ModalShell
         open={detailGroup != null}
         onClose={() => setOrderDetail(null)}
-        title={`T${detailGroup?.table_name ?? '—'} · comanda`}
+        title={t('kds.orderTitle', { tavolo: detailGroup?.table_name ?? '—' })}
         subtitle={[
-          detailGroup?.covers ? `${detailGroup.covers} copert${detailGroup.covers === 1 ? 'o' : 'i'}` : null,
+          detailGroup?.covers ? t('kds.coversCount', { count: detailGroup.covers }) : null,
           detailGroup?.customer_name ?? null,
-          detailGroup?.openedBy ? `di ${detailGroup.openedBy}` : null,
+          detailGroup?.openedBy ? t('kds.openedBy', { chi: detailGroup.openedBy }) : null,
         ].filter(Boolean).join(' · ') || undefined}
         size="md"
         closeOnEscape
@@ -1221,10 +1221,10 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
               const list = detailGroup.rows.filter(r => r.course_no === no);
               const served = list.every(r => r.status === 'SERVED');
               const state = served
-                ? `servita${(() => { const at = list.reduce<string | null>((max, r) => (r.served_at && (!max || r.served_at > max) ? r.served_at : max), null); return at ? ` ${timePart(at)}` : ''; })()}`
-                : list.every(r => r.status === 'QUEUED') ? 'in coda'
-                : list.every(r => r.status === 'READY' || r.status === 'SERVED') ? 'pronta'
-                : 'in lavorazione';
+                ? (() => { const at = list.reduce<string | null>((max, r) => (r.served_at && (!max || r.served_at > max) ? r.served_at : max), null); return at ? t('kds.servedAt', { ora: timePart(at) }) : t('kds.servedWord'); })()
+                : list.every(r => r.status === 'QUEUED') ? t('kds.queued')
+                : list.every(r => r.status === 'READY' || r.status === 'SERVED') ? t('kds.ready')
+                : t('kds.inProgress');
               return (
                 <div key={no}>
                   <div className="mb-1 flex items-baseline gap-2">
@@ -1319,7 +1319,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
         open={picking}
         onClose={() => setPicking(false)}
         title={t('stationOfScreen')}
-        subtitle="Resta impostata anche dopo un riavvio del tablet."
+        subtitle={t('kds.stationSticky')}
         size="sm"
         closeOnEscape
         bodyClassName="p-5 sm:p-6"
@@ -1344,9 +1344,9 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
             className={stationOption(stationId == null)}
           >
             <span className="min-w-0 flex-1">
-              <span className="block text-[16px] font-semibold">Senza partita</span>
+              <span className="block text-[16px] font-semibold">{t('kds.noStation')}</span>
               <span className={`block text-[13px] ${stationId == null ? 'opacity-80' : 'text-[var(--ds-text-muted)]'}`}>
-                piatti non ancora assegnati
+                {t('kds.unassignedDishes')}
               </span>
             </span>
             {stationId == null && <Check size={18} className="flex-shrink-0" aria-hidden />}
@@ -1408,7 +1408,7 @@ const OrderCard: React.FC<{
         <button
           type="button"
           onClick={onShowOrder}
-          aria-label={`Comanda intera del tavolo ${g.table_name ?? '—'}`}
+          aria-label={t('kds.wholeOrder', { tavolo: g.table_name ?? '—' })}
           className="block w-full rounded-[var(--ds-radius)] px-2 py-1.5 text-left transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
         >
           <div className="flex items-baseline gap-2">
@@ -1436,7 +1436,7 @@ const OrderCard: React.FC<{
             <div className="text-[13px] text-[var(--ds-text-muted)]">
               {g.customer_name ?? ''}
               {g.customer_name && g.openedBy ? ' · ' : ''}
-              {g.openedBy ? `di ${g.openedBy}` : ''}
+              {g.openedBy ? t('kds.openedBy', { chi: g.openedBy }) : ''}
             </div>
           )}
         </button>
@@ -1655,7 +1655,7 @@ const CourseSection: React.FC<{
                     onClick={e => { e.stopPropagation(); onEditWeight(i); }}
                     onPointerDown={e => e.stopPropagation()}
                     onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onEditWeight(i); } }}
-                    aria-label={`Correggi il peso di ${i.name_snapshot} (ora ${weightLabel(i.weight_grams)})`}
+                    aria-label={t('kds.fixWeight', { piatto: i.name_snapshot, peso: weightLabel(i.weight_grams) })}
                     className="mt-0.5 inline-flex flex-shrink-0 cursor-pointer items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-pending-tint)] px-2 py-0.5 text-[12px] font-semibold tabular-nums text-[var(--ds-pending-text)] transition-colors hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
                     {weightLabel(i.weight_grams)}
@@ -1748,7 +1748,7 @@ const CourseSection: React.FC<{
                   <span className="tabular-nums">{o.qty}×</span>
                   <span className="min-w-0 truncate">{o.name_snapshot}</span>
                   <span className="ml-auto flex-shrink-0">
-                    {o.status === 'READY' ? 'pronto' : o.status === 'PREPARING' ? 'in lavorazione' : 'in coda'}
+                    {t(o.status === 'READY' ? 'kds.readyWord' : o.status === 'PREPARING' ? 'kds.inProgress' : 'kds.queued')}
                   </span>
                 </div>
               ))}
@@ -1760,7 +1760,7 @@ const CourseSection: React.FC<{
       <div className="mt-1 flex items-center gap-2">
         {allReady ? (
           <div className="min-w-0 flex-1 py-1.5 text-center text-[14px] font-semibold text-[var(--ds-seated-text)]">
-            {col.waitingOthers ? `pronto · attende le altre partite (${readySince}′)` : 'pronto'}
+            {col.waitingOthers ? t('kds.readyWaiting', { minuti: readySince }) : t('kds.readyWord')}
           </div>
         ) : (
           // Non "PRONTO": il maiuscolo non aggiunge nulla che il corpo e il
@@ -1772,7 +1772,7 @@ const CourseSection: React.FC<{
             onClick={() => col.items.filter(i => i.status !== 'READY').forEach(i => onAdvance(i, 'READY'))}
             className="min-w-0 flex-1 rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] py-3 text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
-            Tutto pronto
+            {t('kds.allReady')}
           </button>
         )}
         {/* Col passe spento i due gesti dell'uscita pronta stanno qui, come
@@ -1787,8 +1787,8 @@ const CourseSection: React.FC<{
             type="button"
             onClick={() => onCallWaiter(col)}
             disabled={called}
-            title={called ? 'Sala avvisata' : "Avvisa la sala: l'uscita è pronta al ritiro"}
-            aria-label={called ? 'Sala avvisata' : "Avvisa la sala: l'uscita è pronta al ritiro"}
+            title={t(called ? 'kds.waiterCalled' : 'kds.callWaiter')}
+            aria-label={t(called ? 'kds.waiterCalled' : 'kds.callWaiter')}
             className={`inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
               called
                 ? 'bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)]'
@@ -1921,7 +1921,7 @@ const PassiveSection: React.FC<{
           <div className="mt-0.5 pr-1 text-[13px] leading-snug text-[var(--ds-text-muted)]">
             {mine.length > 0
               ? aggregate(mine)
-              : `${rows.reduce((n, r) => n + r.qty, 0)} piatti di altre partite`}
+              : t('kds.otherStations', { n: rows.reduce((n, r) => n + r.qty, 0) })}
           </div>
         )}
       </button>
@@ -1937,6 +1937,7 @@ const WeightEditModal: React.FC<{
   onClose: () => void;
   onSaved: () => void;
 }> = ({ item, onClose, onSaved }) => {
+  const { t } = useTranslation('comande', { useSuspense: false });
   const [grams, setGrams] = useState<number>(item.weight_grams ?? 500);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1946,7 +1947,7 @@ const WeightEditModal: React.FC<{
       await ordersApiService.setItemWeight(item.id, grams);
       onSaved();
     } catch (err: any) {
-      setError(err?.data?.error ?? err?.message ?? 'Correzione non riuscita');
+      setError(err?.data?.error ?? err?.message ?? t('kds.err.weight'));
       setBusy(false);
     }
   };
@@ -1985,7 +1986,7 @@ const WeightEditModal: React.FC<{
         disabled={busy || grams === item.weight_grams}
         className={`${dsButton.primary} mt-4 w-full`}
       >
-        {busy ? 'Salvo…' : `Salva ${weightLabel(grams)}`}
+        {busy ? t('kds.saving') : t('kds.saveWeight', { peso: weightLabel(grams) })}
       </button>
     </ModalShell>
   );
@@ -1997,6 +1998,7 @@ const WeightEditModal: React.FC<{
 // (customers.dietary_notes) — non le aggreghiamo per non suggerire falsi
 // conteggi su testo non normalizzato.
 const ServiceSummaryDetail: React.FC<{ summary: KitchenServiceSummary }> = ({ summary }) => {
+  const { t } = useTranslation('comande', { useSuspense: false });
   const total = summary.dietary.reduce((s, d) => s + d.quantity, 0);
   return (
     <div className="space-y-4">
@@ -2039,7 +2041,7 @@ const ServiceSummaryDetail: React.FC<{ summary: KitchenServiceSummary }> = ({ su
       {summary.dietary_lines.length > 0 && (
         <div>
           <div className="text-[13px] font-semibold text-[var(--ds-critical-text)] mb-1.5">
-            Allergie / diete
+            {t('kds.dietary')}
           </div>
           <ul className="space-y-1">
             {summary.dietary_lines.map(l => (
