@@ -56,6 +56,12 @@ export interface ElevenLabsSubscription {
 export interface ElevenLabsCallStats {
   calls: number;
   seconds: number;
+  /** Secondi delle chiamate da 10 s in su: quelli che contano per il piano.
+   *  Opzionali: assenti dai server precedenti alla Fase 1. */
+  billable_seconds?: number;
+  cost_usd?: number;
+  /** Chiamate con il costo noto: le altre sono precedenti al backfill. */
+  priced_calls?: number;
   last_at?: string | null;
 }
 
@@ -63,6 +69,26 @@ export interface ElevenLabsCallDay {
   day: string;
   calls: number;
   seconds: number;
+  billable_seconds?: number;
+  cost_usd?: number;
+}
+
+/** Piano dei minuti inclusi nell'add-on voce (Fase 1: default uguali per tutti). */
+export interface VoicePlan {
+  priceCents: number;
+  includedMinutes: number;
+  overageCentsPerMinute: number;
+}
+
+/** Mese in corso contro il piano. */
+export interface VoiceMonthUsage {
+  calls: number;
+  billable_minutes: number;
+  projected_minutes: number;
+  cost_usd: number;
+  priced_calls: number;
+  estimated_revenue_cents: number;
+  projected_revenue_cents: number;
 }
 
 export interface ElevenLabsUsage {
@@ -74,6 +100,9 @@ export interface ElevenLabsUsage {
     daily: ElevenLabsCallDay[];
     allTime: ElevenLabsCallStats;
   };
+  usdEur?: number;
+  plan?: VoicePlan;
+  month?: VoiceMonthUsage;
 }
 
 // ---- Plumbing (stesso schema di devBoardApiService: auth + refresh su 401) ----

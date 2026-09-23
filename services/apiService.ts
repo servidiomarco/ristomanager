@@ -1873,6 +1873,19 @@ export interface AdminTenant {
   created_at: string;
   features: AdminTenantFeature[];
   user_count: number;
+  /** Sofia nel mese in corso (minuti conteggiati, costo ElevenLabs, ricavo
+   *  stimato sul piano di default). null = nessuna chiamata; assente dai
+   *  server precedenti alla Fase 1. */
+  voice_month?: {
+    calls: number;
+    billable_minutes: number;
+    included_minutes: number;
+    cost_usd: number;
+    /** Costo convertito col tasso fisso di Consumi AI. */
+    cost_eur_cents: number;
+    priced_calls: number;
+    estimated_revenue_cents: number;
+  } | null;
 }
 
 export interface AdminBillingSummary {
