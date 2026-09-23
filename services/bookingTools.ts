@@ -333,11 +333,34 @@ export async function checkAvailability(
             }
         }
 
+        // La domanda sulla zona la decide il server, non il modello. La regola
+        // "chiedila solo se entrambe hanno posto" stava nel prompt e il modello
+        // la ignorava: su 138 chiamate con l'esterno a zero, 55 hanno chiesto
+        // "interno o esterno?" (analisi 2026-09-23, chiamata di prova compresa).
+        // Un campo esplicito nella risposta del tool pesa più di una regola
+        // letta 20 righe prima.
+        const zoneFields: Record<string, any> = {};
+        if (result.available) {
+            const onlyZone = result.free_indoor > 0 && result.free_outdoor === 0 ? 'INDOOR'
+                : result.free_outdoor > 0 && result.free_indoor === 0 ? 'OUTDOOR'
+                : undefined;
+            const zone = locationPreference ?? onlyZone;
+            zoneFields.ask_zone = !zone;
+            if (zone) {
+                zoneFields.location_preference = zone;
+                zoneFields.zone_instruction = locationPreference
+                    ? `Zona già scelta dal cliente: passa location_preference ${zone} a create_reservation.`
+                    : `NON chiedere la zona e non nominarla: c'è posto solo ${zone === 'INDOOR' ? "all'interno" : "all'esterno"}. Passa location_preference ${zone} a create_reservation.`;
+            } else {
+                zoneFields.zone_instruction = "Chiedi se preferisce l'interno o l'esterno: entrambe le zone hanno posto.";
+            }
+        }
+
         console.log(`${channel.logPrefix} check-availability`, { date: normalizedDate, raw_date: p.date, shift: rawShift, guests, location_preference: locationPreference, result });
         // date_readback è la stringa "venerdì 10 luglio" che il modello DEVE
         // ripetere alla lettera: da solo sbaglia regolarmente l'accoppiata
         // giorno della settimana / giorno del mese.
-        return { body: { ...result, ...timeFields, date_readback: d.formatItalianDateReadback(normalizedDate, language) } };
+        return { body: { ...result, ...zoneFields, ...timeFields, date_readback: d.formatItalianDateReadback(normalizedDate, language) } };
     } catch (err) {
         console.error(`${channel.logPrefix} check-availability error`, err);
         return {
