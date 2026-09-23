@@ -170,3 +170,22 @@ Interruttore autorità OFF dalla card (aspetta il drenaggio), poi
 `Stop-ScheduledTask "RistoManager Sala Node 4"` e riattivare la task della
 tappa 3. Il downgrade è il failover: senza nodo i client tornano al cloud
 da soli (circuito + probe).
+
+
+### Occhi sul nodo (indurimento post-collaudo 23/09)
+
+- **Log su file**: tutto lo stdout del full-server finisce anche in
+  `SALA_NODE_STATE_DIR\sala-node.log` (rotazione a 5MB → `.old`). La task
+  SYSTEM è headless: quel file è l'unico posto dove leggere.
+- **Handshake respinti**: il bridge cloud logga ogni rifiuto con la ragione
+  (`[sala-node] handshake respinto (…)`), cercarli nei log Railway.
+- **Allarme uplink**: se un nodo con l'ibrido acceso tace oltre 5 minuti,
+  OWNER e GENERAL_MANAGER ricevono una push («Nodo di sala non si fa
+  vivo»); al rientro, la push di sollievo. Il silenzio di 90 minuti del
+  23/09 non può più passare inosservato.
+- **Guasti noti in più**: da un client, `curl` che passa e browser con
+  `ERR_ADDRESS_UNREACHABLE` = permesso «Rete locale» negato all'app
+  (macOS) oppure DNS sicuro/DoH del browser o «DNS privato» (Android) che
+  scarta il record A privato del nodo — disattivarli per i dispositivi di
+  sala. Il flip dei flag ora arriva anche ai client attaccati al socket
+  del nodo (envelope rigiocati), niente più reload a mano.

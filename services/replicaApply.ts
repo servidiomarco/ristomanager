@@ -79,6 +79,12 @@ const CONVERGENCE: Record<string, Convergence> = {
     'roomClosed:deleted': { mode: 'delete', table: 'room_closed_overrides', idFrom: 'id' },
 };
 
+/** I tipi che sul NODO arrivano ai client LAN già dal giro import→
+ *  dispatcher: per questi il replay dell'envelope relay:event NON va fatto
+ *  (raddoppierebbe i broadcast); per tutti gli altri (features:updated,
+ *  kds:*, bill:*, menu…) l'envelope è l'unica strada verso la LAN. */
+export const CONVERGED_TYPES: ReadonlySet<string> = new Set(Object.keys(CONVERGENCE));
+
 /** Upsert brutale e idempotente: via la riga con quell'id, dentro quella
  *  nuova — jsonb_populate_recordset fa i cast per nome di colonna. */
 const upsertRow = async (client: any, table: string, row: any): Promise<void> => {
