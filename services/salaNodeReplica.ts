@@ -149,7 +149,7 @@ const serveNodeRows = async (req: any, ack: (res: any) => void): Promise<void> =
     }
 };
 
-export const startSalaNodeReplica = (): void => {
+export const startSalaNodeReplica = (opts?: { getClients?: () => number }): void => {
     if (!isServiceNode) return;
     let running = false;
     let lastErrorLogged = 0;
@@ -193,6 +193,20 @@ export const startSalaNodeReplica = (): void => {
         console.log('[replica] uplink connesso al cloud');
         void drain();
     });
+    // Il battito: il bridge marca il nodo online solo se node:stats arriva
+    // entro 30s — il relay tappa-3 lo mandava, il full-server pure (trovato
+    // al collaudo del 23/09: «nodo offline da 218s» in card con l'uplink
+    // vivo e i palmari collegati — e l'interruttore autorità congelato).
+    const statsTimer = setInterval(() => {
+        if (!socket.connected) return;
+        socket.emit('node:stats', {
+            clients: opts?.getClients?.() ?? 0,
+            cache_entries: 0,
+            oldest_cache_age_s: null,
+            version: 'service-node-4',
+        });
+    }, 15_000);
+    if (typeof statsTimer.unref === 'function') statsTimer.unref();
     socket.on('relay:event', wake);
     // Lo stream inverso: il cloud tira da qui, sempre pull con cursore.
     socket.on('node:pull', (req, ack) => { if (typeof ack === 'function') void serveNodePull(req, ack); });

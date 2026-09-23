@@ -89,6 +89,14 @@ describe('profilo service-node', () => {
     it('/health resta vivo sul nodo, e il profilo cloud continua a servire il pubblico', async () => {
         const health = await fetch(`${base}/health`);
         expect(health.status).toBe(200);
+        // /healthz è la sonda del circuito client: DEVE esserci su entrambi
+        // i profili (trovato al collaudo: senza, il circuito non si richiude
+        // mai e le letture non tornano sul nodo).
+        const healthz = await fetch(`${base}/healthz`);
+        expect(healthz.status).toBe(200);
+        expect((await healthz.json()).profile).toBe('service-node');
+        const cloudHealthz = await api().get('/healthz');
+        expect(cloudHealthz.status).toBe(200);
         // Il server condiviso dei test (profilo cloud) serve /public/contact.
         const cloud = await api().get('/public/contact');
         expect(cloud.status).toBe(200);
