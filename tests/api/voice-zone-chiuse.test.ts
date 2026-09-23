@@ -74,6 +74,9 @@ describe('zone chiuse sul canale voce (check_availability)', () => {
         expect(res.body.available).toBe(true);
         expect(res.body.free_indoor).toBeGreaterThan(0);
         expect(res.body.free_outdoor).toBeGreaterThan(0);
+        // Due zone con posto: il server dice all'agente di chiedere.
+        expect(res.body.ask_zone).toBe(true);
+        expect(res.body.location_preference).toBeUndefined();
         expect(res.body.message).not.toContain("all'interno");
         expect(res.body.message).not.toContain("all'esterno");
     });
@@ -88,6 +91,11 @@ describe('zone chiuse sul canale voce (check_availability)', () => {
         expect(res.body.free_outdoor).toBe(0);
         expect(res.body.outdoor_closed).toBe(true);
         expect(res.body.indoor_closed).toBe(false);
+        // Zona unica: la decisione sta nella risposta, non in una regola del
+        // prompt che il modello ignorava in 55 chiamate su 138 (analisi 23/09).
+        expect(res.body.ask_zone).toBe(false);
+        expect(res.body.location_preference).toBe('INDOOR');
+        expect(res.body.zone_instruction).toContain('NON chiedere la zona');
         // La zona non richiesta non entra nella frase: nominarla ha già fatto
         // improvvisare all'agente domande senza senso (chiamata Gervasi 18/09).
         expect(res.body.message).not.toContain("all'interno");
@@ -168,5 +176,32 @@ describe('zone chiuse sul canale voce (check_availability)', () => {
         expect(res.body.outdoor_closed).toBe(false);
         expect(res.body.message).toContain("all'esterno è tutto prenotato");
         expect(res.body.message).toContain("all'interno abbiamo posto");
+    });
+
+    // Chiamata di prova 23/09/2026: salutato per nome, poi subito dopo la
+    // disponibilità "A che nome registro la prenotazione?". L'intestazione
+    // ora arriva nella risposta di check_availability.
+    it('chiamante in rubrica: check_availability dice di confermare il nome, non di chiederlo', async () => {
+        const creata = await api().post('/webhook/elevenlabs/create-reservation').send({
+            customer_name: 'Zona Test Rubrica',
+            phone: '3390000503',
+            date: DATA,
+            time: '20:00',
+            shift: 'DINNER',
+            guests: 2,
+        });
+        expect(creata.body.success).toBe(true);
+        await dbQuery(`DELETE FROM reservations WHERE id = $1`, [creata.body.reservation_id]);
+
+        const noto = await disponibilita({ caller_id: '+393390000503' });
+        expect(noto.body.available).toBe(true);
+        expect(noto.body.customer_known).toBe(true);
+        expect(noto.body.customer_full_name).toBe('Zona Test Rubrica');
+        expect(noto.body.name_instruction).toContain('La prenotazione è a suo nome, Zona?');
+
+        const sconosciuto = await disponibilita({ caller_id: '+393390000999' });
+        expect(sconosciuto.body.available).toBe(true);
+        expect(sconosciuto.body.customer_known).toBeUndefined();
+        expect(sconosciuto.body.name_instruction).toBeUndefined();
     });
 });

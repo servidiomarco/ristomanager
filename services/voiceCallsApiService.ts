@@ -17,6 +17,9 @@ export interface VoiceCallSummary {
   follow_up_status: FollowUpStatus | null;
   notes: string | null;
   follow_up_updated_at: string | null;
+  /** La prenotazione creata dalla chiamata è stata eliminata dal CRM. Assente
+   *  dai server precedenti alla colonna: leggerlo come falsy. */
+  reservation_deleted_at?: string | null;
   follow_up_updated_by_name: string | null;
   reservation_customer_name: string | null;
   reservation_time: string | null;
@@ -237,6 +240,7 @@ class VoiceCallsApiService {
     follow_up_status: FollowUpStatus;
     notes: string | null;
     follow_up_updated_at: string;
+    reservation_deleted_at?: string | null;
   }> {
     return apiRequest(`${API_URL}/voice-calls/${id}/follow-up`, {
       method: 'PATCH',

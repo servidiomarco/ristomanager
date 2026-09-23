@@ -2236,10 +2236,33 @@ app.get('/reservations', authenticate, requirePermission('reservations:view'), a
         // digit-only phone so "+39 333 1234567" and "3331234567" align. Used by
         // the booking card to render VIP/preferred-table chips without an extra
         // round-trip per row.
-        // LATERAL + LIMIT 1 so a rubrica with duplicate phones doesn't multiply
-        // the same reservation into N rows. Tie-break: VIP first, then anyone
-        // with a preferred_table, then oldest id.
+        // DISTINCT ON keeps one rubrica entry per number, so duplicate phones
+        // don't multiply the same reservation into N rows. Tie-break: VIP
+        // first, then anyone with a preferred_table, then oldest id.
+        //
+        // Una CTE, NON la LATERAL + LIMIT 1 delle query a riga singola. Sotto
+        // la RLS di produzione l'indice idx_customers_phone_digits non si può
+        // usare: regexp_replace non è LEAKPROOF, quindi non passa davanti alla
+        // policy, e la LATERAL riscandiva l'intera rubrica applicando la regex
+        // per OGNI prenotazione — 2.198 × 3.804 regex, 5 s su ogni avvio
+        // dell'app (la griglia Comande restava in scheletro, 23/09). Il 26/08
+        // l'EXPLAIN sembrava a posto perché girava da superuser, che la RLS la
+        // salta. Qui la regex gira una volta per cliente e l'aggancio è un hash
+        // join: 12 ms sotto RLS, righe identiche verificate sul DB live.
         const result = await queryWithRetry(`
+            WITH rubrica AS (
+                SELECT DISTINCT ON (regexp_replace(cc.phone, '\\D', '', 'g'))
+                       regexp_replace(cc.phone, '\\D', '', 'g') AS phone_digits,
+                       cc.is_vip, cc.is_blacklisted, cc.blacklist_reason, cc.preferred_table_id,
+                       cc.dietary_notes, cc.preferences_notes
+                FROM customers cc
+                -- Rubrica agganciata per telefono: senza il pin sul tenant
+                -- un numero uguale in due ristoranti mischierebbe le schede.
+                WHERE cc.tenant_id = $1
+                  AND cc.phone IS NOT NULL
+                ORDER BY regexp_replace(cc.phone, '\\D', '', 'g'),
+                         cc.is_vip DESC NULLS LAST, (cc.preferred_table_id IS NULL), cc.id ASC
+            )
             SELECT r.*, u.full_name AS created_by_user_name,
                    c.is_vip AS customer_is_vip,
                    c.is_blacklisted AS customer_is_blacklisted,
@@ -2258,18 +2281,9 @@ app.get('/reservations', authenticate, requirePermission('reservations:view'), a
                    lp.completed_at AS latest_payment_completed_at
             FROM reservations r
             LEFT JOIN users u ON r.created_by_user_id = u.id
-            LEFT JOIN LATERAL (
-                SELECT cc.is_vip, cc.is_blacklisted, cc.blacklist_reason, cc.preferred_table_id, cc.dietary_notes, cc.preferences_notes
-                FROM customers cc
-                WHERE r.phone IS NOT NULL
-                  AND cc.phone IS NOT NULL
-                  -- Rubrica agganciata per telefono: senza il pin sul tenant
-                  -- un numero uguale in due ristoranti mischierebbe le schede.
-                  AND cc.tenant_id = r.tenant_id
-                  AND regexp_replace(r.phone, '\\D', '', 'g') = regexp_replace(cc.phone, '\\D', '', 'g')
-                ORDER BY cc.is_vip DESC NULLS LAST, (cc.preferred_table_id IS NULL), cc.id ASC
-                LIMIT 1
-            ) c ON true
+            LEFT JOIN rubrica c
+                   ON r.phone IS NOT NULL
+                  AND c.phone_digits = regexp_replace(r.phone, '\\D', '', 'g')
             LEFT JOIN tables pt ON pt.id = c.preferred_table_id AND pt.tenant_id = r.tenant_id
             LEFT JOIN LATERAL (
                 SELECT pr.id, pr.status, pr.amount_cents, pr.currency, pr.provider,
@@ -2958,6 +2972,18 @@ app.delete('/reservations/:id', authenticate, requirePermission('reservations:fu
         // Fase 1c: cancellazione nel log di replica, stessa transazione.
         // Solo-log (vedi PUT): il broadcast resta diretto qui sotto.
         await runWithOutboxTx(async (txClient) => {
+            // La chiamata che l'aveva creata perde il collegamento (FK ON
+            // DELETE SET NULL) e tornerebbe fra le «Da ricontattare»: prima di
+            // eliminare la segniamo gestita e diciamo perché.
+            await txClient.query(
+                `UPDATE voice_calls
+                 SET reservation_deleted_at = NOW(),
+                     follow_up_status = 'CONTACTED',
+                     follow_up_updated_by = $3,
+                     follow_up_updated_at = NOW()
+                 WHERE reservation_id = $1 AND tenant_id = $2`,
+                [id, req.tenantId!, req.user?.userId ?? null]
+            );
             const del = await txClient.query('DELETE FROM reservations WHERE id = $1 AND tenant_id = $2 RETURNING id', [id, req.tenantId!]);
             if (del.rows[0]) {
                 await outboxEnqueueInTx(txClient, req.tenantId!, 'reservation:deleted', `reservation:${id}`,
@@ -22816,6 +22842,7 @@ app.get('/voice-calls', authenticate, requireFeature('voice'), voiceCallsAuthori
                     vc.follow_up_status,
                     vc.notes,
                     vc.follow_up_updated_at,
+                    vc.reservation_deleted_at,
                     vc.phantom_confirmation,
                     vc.phantom_recovered,
                     vc.large_group_handoff,
@@ -22937,6 +22964,9 @@ app.patch('/voice-calls/:id/follow-up', authenticate, requireFeature('voice'), v
             }
             params.push(status);
             sets.push(`follow_up_status = $${params.length}`);
+            // Riportata a mano fra le «Da ricontattare»: non è più la chiamata
+            // chiusa dall'eliminazione della prenotazione, via l'etichetta.
+            if (status === 'PENDING') sets.push('reservation_deleted_at = NULL');
         }
         if (notes !== undefined) {
             if (notes !== null && typeof notes !== 'string') {
@@ -22956,7 +22986,7 @@ app.patch('/voice-calls/:id/follow-up', authenticate, requireFeature('voice'), v
         const result = await queryWithRetry(
             `UPDATE voice_calls SET ${sets.join(', ')}
              WHERE id = $${params.length - 1} AND tenant_id = $${params.length}
-             RETURNING id, follow_up_status, notes, follow_up_updated_at`,
+             RETURNING id, follow_up_status, notes, follow_up_updated_at, reservation_deleted_at`,
             params
         );
         if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
@@ -23053,6 +23083,7 @@ app.get('/voice-calls/:id', authenticate, requireFeature('voice'), voiceCallsAut
                     vc.follow_up_status,
                     vc.notes,
                     vc.follow_up_updated_at,
+                    vc.reservation_deleted_at,
                     vc.phantom_confirmation,
                     vc.phantom_recovered,
                     vc.large_group_handoff,

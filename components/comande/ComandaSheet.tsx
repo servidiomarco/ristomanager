@@ -48,8 +48,8 @@ interface ComandaSheetProps {
   onDragCourse?: (from: number, to: number) => void;
   /** «di Luca» / «dalla cassa» quando la comanda l'ha aperta qualcun altro. */
   openedBy?: string | null;
-  onSend: () => void;
-  onSendAll: () => void;
+  onSend: (from?: DOMRect) => void;
+  onSendAll: (from?: DOMRect) => void;
   onRepeat: (line: RepeatLine, qty: number) => void;
   onRepeatAll: (lines: RepeatLine[]) => void;
   /** Sezione «Bar» in testa alla lista uscite (categorie da bar attive). */

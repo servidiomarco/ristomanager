@@ -238,6 +238,7 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
           follow_up_status: updated.follow_up_status,
           notes: updated.notes,
           follow_up_updated_at: updated.follow_up_updated_at,
+          reservation_deleted_at: updated.reservation_deleted_at ?? null,
         });
       }
       setDetail(prev => prev ? {
@@ -245,6 +246,7 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
         follow_up_status: updated.follow_up_status,
         notes: updated.notes,
         follow_up_updated_at: updated.follow_up_updated_at,
+        reservation_deleted_at: updated.reservation_deleted_at ?? null,
       } : prev);
       if (patch.notes !== undefined) setNotesDirty(false);
       onFollowUpChanged?.();
@@ -309,10 +311,14 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
         title={heading}
         subtitle={detail?.customer_name && detail.phone ? detail.phone : undefined}
         badge={detail && detail.reservation_id == null ? (
-          <StatusPill tone={detail.follow_up_status === 'CONTACTED' ? 'positive' : 'critical'}>
-            <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" aria-hidden />
-            {detail.follow_up_status === 'CONTACTED' ? 'Ricontattato' : 'Da ricontattare'}
-          </StatusPill>
+          detail.reservation_deleted_at ? (
+            <StatusPill tone="neutral">Prenotazione eliminata</StatusPill>
+          ) : (
+            <StatusPill tone={detail.follow_up_status === 'CONTACTED' ? 'positive' : 'critical'}>
+              <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" aria-hidden />
+              {detail.follow_up_status === 'CONTACTED' ? 'Ricontattato' : 'Da ricontattare'}
+            </StatusPill>
+          )
         ) : undefined}
         actions={
           /* Desktop keeps the two contact actions up here; on mobile they sit
@@ -480,7 +486,9 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
           <FormCard
             title="Follow-up"
             aside={
-              detail.follow_up_status === 'CONTACTED' ? (
+              detail.reservation_deleted_at ? (
+                <StatusPill tone="neutral">Prenotazione eliminata</StatusPill>
+              ) : detail.follow_up_status === 'CONTACTED' ? (
                 <StatusPill tone="positive">Ricontattato</StatusPill>
               ) : detail.reservation_id == null ? (
                 <StatusPill tone="pending">Da ricontattare</StatusPill>
@@ -530,7 +538,7 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
               )}
               {detail.follow_up_status === 'CONTACTED' && (detail.follow_up_updated_by_name || detail.follow_up_updated_at) && (
                 <div className="text-[13px] text-[var(--ds-text-muted)]">
-                  {detail.follow_up_updated_by_name && `Ricontattato da ${detail.follow_up_updated_by_name}`}
+                  {detail.follow_up_updated_by_name && `${detail.reservation_deleted_at ? 'Prenotazione eliminata da' : 'Ricontattato da'} ${detail.follow_up_updated_by_name}`}
                   {detail.follow_up_updated_by_name && detail.follow_up_updated_at && ' · '}
                   {detail.follow_up_updated_at && formatDateTime(detail.follow_up_updated_at)}
                 </div>
@@ -967,7 +975,10 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
                   {resBadge.label}
                 </StatusPill>
               )}
-              {!phantomOpen && item.reservation_id == null && (
+              {!phantomOpen && item.reservation_id == null && item.reservation_deleted_at && (
+                <StatusPill tone="neutral">Prenotazione eliminata</StatusPill>
+              )}
+              {!phantomOpen && item.reservation_id == null && !item.reservation_deleted_at && (
                 <StatusPill tone={item.follow_up_status === 'CONTACTED' ? 'positive' : 'critical'}>
                   <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" aria-hidden />
                   {item.follow_up_status === 'CONTACTED' ? 'Ricontattato' : 'Da ricontattare'}
