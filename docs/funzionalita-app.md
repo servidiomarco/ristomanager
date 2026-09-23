@@ -661,6 +661,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-23 | Impostazioni | Con la lingua inglese parlano inglese le due card AI delle Impostazioni: richiesta di recensione (quando e a chi inviare, profilo Google, risposte automatiche) e messaggi con AI (interruttore, regole della casa ed esempi da adottare). |
 | 2026-09-23 | Sistema (Consumi AI, Piattaforma) | Sofia: salvati durata e costo di ogni chiamata (la durata prima non arrivava quasi mai); minuti del mese contro i 250 inclusi nell'add-on, stima a fine mese, costo, ricavo stimato e margine, anche per ristorante nel pannello Piattaforma. |
 | 2026-09-23 | Comande, Cucina e Passe | Con la lingua inglese parla inglese il monitor di cucina: colonne delle uscite, coda e consegnate, scelta della partita, dettaglio della comanda, correzione del peso e avviso alla sala. |
 | 2026-09-23 | Agente vocale | Con la lingua inglese parla inglese la pagina Chiamate: lista con filtri e gruppi, scheda della chiamata con registrazione e trascrizione, avvisi di prenotazione da recuperare e di richiamata, follow-up e note. |
