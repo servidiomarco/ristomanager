@@ -35,6 +35,7 @@ import { updateReservation, createReservation, swapReservationTables } from '../
 import { datePart, timePart } from '../utils/displayTime';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
 import { useTranslation } from 'react-i18next';
+import { displayLocale } from '../utils/formatLocale';
 import { PulseDot, getReservationState, getTimedReservationState, isSeated, deriveTableDisplayStatus, useTableStatusLabel } from './reservationState';
 import { DietaryChips } from './DietaryChips';
 import { stripDietaryNote } from '../utils/dietary';
@@ -298,14 +299,14 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
     setError(null);
     try {
       const current = reservations.find(r => r.id === id);
-      if (!current) throw new Error('Prenotazione non trovata');
+      if (!current) throw new Error(t('err.notFound'));
       const body = { ...current, ...patch };
       const updated = await updateReservation(id, body);
       // Merge sulla riga corrente: la risposta del PUT non porta i campi di
       // arricchimento (customer_is_vip, latest_payment_*) che la GET aggiunge.
       onReservationChangedLocal({ ...current, ...updated });
     } catch (err) {
-      setError((err as Error)?.message || 'Errore aggiornamento');
+      setError((err as Error)?.message || t('err.update'));
     } finally {
       setBusy(false);
     }
@@ -347,7 +348,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
       }
       setShowTablePicker(false);
     } catch (err) {
-      setError((err as Error)?.message || 'Errore scambio tavoli');
+      setError((err as Error)?.message || t('err.swap'));
     } finally {
       setBusy(false);
     }
@@ -381,7 +382,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
       setShowWalkIn(false);
       setShowTablePicker(true);
     } catch (err) {
-      setError((err as Error)?.message || 'Errore creazione walk-in');
+      setError((err as Error)?.message || t('err.walkIn'));
     } finally {
       setBusy(false);
     }
@@ -512,7 +513,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
           </div>
           {band !== 'later' && (
             <div className={`text-[11px] font-medium ${clock}`}>
-              {band === 'late' ? 'in ritardo' : 'in arrivo'}
+              {t(band === 'late' ? 'late' : 'arriving')}
             </div>
           )}
         </div>
@@ -521,7 +522,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-1.5">
             <span className="truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">
-              {toTitleCase(r.customer_name) || 'Senza nome'}
+              {toTitleCase(r.customer_name) || t('noName')}
             </span>
             {r.customer_is_vip && (
               <span
@@ -536,7 +537,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
               <span
                 className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]"
                 title={stripDietaryNote(r.notes)}
-                aria-label="Ha una nota"
+                aria-label={t('hasNote')}
               >
                 <StickyNote className="h-3 w-3" />
               </span>
@@ -565,11 +566,11 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
                 : 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]'
             }`}
             title={tooSmall
-              ? `Tavolo ${table.name}: ${table.seats} posti per ${r.guests} coperti`
-              : `Tavolo ${table.name}`}
+              ? t('tableTooSmall', { tavolo: table.name, posti: table.seats, coperti: r.guests })
+              : t('tableNamed', { tavolo: table.name })}
           >
             <span className="text-[15px] font-semibold leading-none tabular-nums">{table.name}</span>
-            {tooSmall && <span className="mt-0.5 text-[10px] leading-none">{table.seats} posti</span>}
+            {tooSmall && <span className="mt-0.5 text-[10px] leading-none">{t('seatsCount', { n: table.seats })}</span>}
           </div>
         ) : (
           <button
@@ -589,8 +590,8 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
             type="button"
             disabled={busy}
             onClick={(e) => { e.stopPropagation(); handleQuickArrive(r); }}
-            aria-label={`Segna ${toTitleCase(r.customer_name) || 'prenotazione'} come arrivato`}
-            title={minsLate > 0 ? `Atteso ${minsLate} minuti fa` : 'Segna come arrivato'}
+            aria-label={t('markArrivedAria', { chi: toTitleCase(r.customer_name) || t('aReservation') })}
+            title={minsLate > 0 ? t('expectedMinsAgo', { minuti: minsLate }) : t('markArrived')}
             className={`inline-flex h-11 flex-shrink-0 items-center justify-center gap-1.5 rounded-[var(--ds-radius-control)] text-[14px] font-semibold transition-opacity disabled:opacity-50 sm:px-4 ${
               band === 'late'
                 ? 'w-11 bg-[var(--ds-seated-solid)] text-white hover:opacity-90 sm:w-auto'
@@ -598,12 +599,12 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
             }`}
           >
             <Check className="h-4 w-4" aria-hidden />
-            <span className="hidden sm:inline">Arrivato</span>
+            <span className="hidden sm:inline">{t('arrived')}</span>
           </button>
         )}
         {(seated || noShow) && (
           <StatusPill tone={noShow ? 'critical' : 'positive'} className="h-11 flex-shrink-0 rounded-[var(--ds-radius-control)] px-3">
-            {noShow ? 'No-show' : r.arrival_status === ArrivalStatus.DEPARTING ? 'In uscita' : 'Arrivato'}
+            {noShow ? 'No-show' : t(r.arrival_status === ArrivalStatus.DEPARTING ? 'departing' : 'arrived')}
           </StatusPill>
         )}
       </div>
@@ -638,10 +639,10 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
     );
   };
 
-  const shiftLabel = globalShiftFilter === 'LUNCH' ? 'Pranzo'
-    : globalShiftFilter === 'DINNER' ? 'Cena'
-    : 'Tutti i turni';
-  const dateLabel = globalDate.toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short' });
+  const shiftLabel = globalShiftFilter === 'LUNCH' ? t('lunch')
+    : globalShiftFilter === 'DINNER' ? t('dinner')
+    : t('allShifts');
+  const dateLabel = globalDate.toLocaleDateString(displayLocale(), { weekday: 'short', day: 'numeric', month: 'short' });
 
   const walkInButton = (
     <button
@@ -651,7 +652,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
       title={t('walkIn')}
     >
       <Zap className="h-4 w-4" aria-hidden />
-      Registra walk-in
+      {t('registerWalkIn')}
     </button>
   );
 
@@ -665,7 +666,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
     <section className="flex min-h-0 flex-1 flex-col rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
       <div className="mb-3 flex flex-shrink-0 items-center gap-2">
         <PulseDot dotClass="bg-[var(--ds-critical-solid)]" pulse={arrivingNow.length > 0} sizeClass="h-2 w-2" />
-        <h2 className="text-[15px] font-semibold text-[var(--ds-text-primary)]">Alla porta</h2>
+        <h2 className="text-[15px] font-semibold text-[var(--ds-text-primary)]">{t('atTheDoor')}</h2>
         <span
           className="text-[13px] text-[var(--ds-text-muted)]"
           title={t('expectedNow')}
@@ -677,7 +678,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
       <div className="-mr-2 min-h-0 flex-1 overflow-y-auto pr-2">
         {arrivingNow.length === 0 ? (
           <p className="py-8 text-center text-[14px] text-[var(--ds-text-muted)]">
-            Nessuno atteso in questo momento.
+            {t('nobodyExpected')}
           </p>
         ) : (
           <ul className="space-y-1">
@@ -700,17 +701,17 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
                       className="min-w-0 flex-1 text-left"
                     >
                       <div className="truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">
-                        {toTitleCase(r.customer_name) || 'Senza nome'}
+                        {toTitleCase(r.customer_name) || t('noName')}
                       </div>
                       <div className={`truncate text-[13px] ${late ? 'text-[var(--ds-critical-text)]' : 'text-[var(--ds-text-muted)]'}`}>
-                        {formatHHMM(r.reservation_time)} · {r.guests} · {table ? `tav. ${table.name}` : 'senza tavolo'}
+                        {formatHHMM(r.reservation_time)} · {r.guests} · {table ? t('tableShort', { tavolo: table.name }) : t('noTableShort')}
                       </div>
                     </button>
                     <button
                       type="button"
                       disabled={busy}
                       onClick={() => handleQuickArrive(r)}
-                      aria-label={`Segna ${toTitleCase(r.customer_name) || 'prenotazione'} come arrivato`}
+                      aria-label={t('markArrivedAria', { chi: toTitleCase(r.customer_name) || t('aReservation') })}
                       title={t('markArrived')}
                       className={`inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] transition-opacity hover:opacity-85 disabled:opacity-50 ${
                         late
@@ -739,14 +740,14 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
           <button
             onClick={onBack}
             className={dsIconButton}
-            aria-label="Indietro"
+            aria-label={t('back')}
           >
             <ChevronLeft className="h-4 w-4" />
           </button>
         )}
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-[20px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)]">
-            Reception
+            {t('reception')}
           </h1>
           <p className="truncate text-[13px] capitalize text-[var(--ds-text-muted)]">
             {dateLabel} · {shiftLabel}
@@ -759,7 +760,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
           title={t('walkIn')}
         >
           <Zap className="h-4 w-4" aria-hidden />
-          Walk-in
+          {t('walkInTitle')}
         </button>
       </div>
 
@@ -790,7 +791,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
                 value={search}
                 onChange={setSearch}
                 placeholder={t('searchPlaceholder')}
-                ariaLabel="Cerca prenotazioni"
+                ariaLabel={t('searchAria')}
                 className="min-w-0 flex-1"
               />
               {/* Lista / Mappa switches the canvas, not the filter, so it sits
@@ -799,11 +800,11 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
                 <SegmentedControl
                   value={viewMode}
                   onChange={(next) => setViewMode(next)}
-                  ariaLabel="Vista"
+                  ariaLabel={t('viewAria')}
                   equalWidth={false}
                   options={[
-                    { value: 'list' as const, label: 'Lista' },
-                    { value: 'map' as const, label: 'Mappa' },
+                    { value: 'list' as const, label: t('viewList') },
+                    { value: 'map' as const, label: t('viewMap') },
                   ]}
                 />
               </div>
@@ -821,12 +822,12 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
             <SegmentedControl
               value={statusFilter}
               onChange={(next) => setStatusFilter(next)}
-              ariaLabel="Filtra prenotazioni"
+              ariaLabel={t('filterAria')}
               overflow="scroll"
               options={[
                 { value: 'all' as const, label: t('allRooms'), badge: filterCounts.all, badgeTone: 'neutral' },
-                { value: 'waiting' as const, label: 'In attesa', badge: filterCounts.waiting, badgeTone: 'neutral' },
-                { value: 'arrived' as const, label: 'Arrivati', badge: filterCounts.arrived, badgeTone: 'neutral' },
+                { value: 'waiting' as const, label: t('waiting'), badge: filterCounts.waiting, badgeTone: 'neutral' },
+                { value: 'arrived' as const, label: t('arrivedPlural'), badge: filterCounts.arrived, badgeTone: 'neutral' },
                 { value: 'noTable' as const, label: t('filterNoTable'), badge: filterCounts.noTable, badgeTone: 'neutral' },
               ]}
             />
@@ -837,14 +838,14 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
               renderListSkeleton()
             ) : filtered.length === 0 ? (
               <EmptyState icon={UserPlus}>
-                Nessuna prenotazione corrisponde ai filtri.
+                {t('noMatch')}
               </EmptyState>
             ) : (
               <>
-                {renderGroup('inRitardo', 'In ritardo', grouped.inRitardo, 'attention', 'late', 'attesi e non ancora arrivati')}
-                {renderGroup('adesso', 'Adesso · prossima ora', grouped.adesso, 'pending', 'soon')}
-                {renderGroup('prossima', 'Tra 1–3 ore', grouped.prossima, 'info', 'later')}
-                {renderGroup('piuTardi', 'Più tardi', grouped.piuTardi, 'muted', 'later')}
+                {renderGroup('inRitardo', t('groupLate'), grouped.inRitardo, 'attention', 'late', t('groupLateHint'))}
+                {renderGroup('adesso', t('groupNow'), grouped.adesso, 'pending', 'soon')}
+                {renderGroup('prossima', t('groupNext'), grouped.prossima, 'info', 'later')}
+                {renderGroup('piuTardi', t('groupLater'), grouped.piuTardi, 'muted', 'later')}
               </>
             )}
           </div>
@@ -891,12 +892,12 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
               <button
                 onClick={() => setSelectedReservationId(null)}
                 className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:text-[var(--ds-text-primary)]"
-                aria-label="Torna alla lista"
+                aria-label={t('backToList')}
               >
                 <ChevronLeft className="h-4 w-4" />
               </button>
               <span className="text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
-                Dettaglio
+                {t('detail')}
               </span>
             </div>
           </div>
@@ -985,13 +986,13 @@ const WalkInModal: React.FC<WalkInModalProps> = ({ busy, onCancel, onSubmit }) =
     <ModalShell
       open
       onClose={() => { if (!busy) onCancel(); }}
-      title="Walk-in"
+      title={t('walkInTitle')}
       size="sm"
       bodyClassName="p-4 sm:p-6"
       footer={
         <>
           <button type="button" onClick={onCancel} disabled={busy} className={dsButton.quiet}>
-            Annulla
+            {t('cancel')}
           </button>
           <button
             type="button"
@@ -999,7 +1000,7 @@ const WalkInModal: React.FC<WalkInModalProps> = ({ busy, onCancel, onSubmit }) =
             disabled={busy || !canSubmit}
             className={dsButton.primary}
           >
-            Crea e assegna tavolo
+            {t('createAndSeat')}
           </button>
         </>
       }
@@ -1013,33 +1014,33 @@ const WalkInModal: React.FC<WalkInModalProps> = ({ busy, onCancel, onSubmit }) =
               type="text"
               value={name}
               onChange={e => setName(e.target.value)}
-              placeholder="Es. Mario Rossi"
+              placeholder={t('namePlaceholder')}
               className={dsInput}
             />
           </Field>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field label={t('coversLabel')} required>
-              <Stepper value={guests} onChange={setGuests} min={1} ariaLabel="Coperti" required />
+              <Stepper value={guests} onChange={setGuests} min={1} ariaLabel={t('coversAria')} required />
             </Field>
-            <Field label="Telefono" htmlFor="walkin-phone">
+            <Field label={t('phone')} htmlFor="walkin-phone">
               <input
                 id="walkin-phone"
                 type="tel"
                 value={phone}
                 onChange={e => setPhone(e.target.value)}
-                placeholder="Opzionale"
+                placeholder={t('optional')}
                 className={dsInput}
               />
             </Field>
           </div>
 
-          <Field label="Note" htmlFor="walkin-notes">
+          <Field label={t('notes')} htmlFor="walkin-notes">
             <textarea
               id="walkin-notes"
               value={notes}
               onChange={e => setNotes(e.target.value)}
-              placeholder="Allergie, preferenze, …"
+              placeholder={t('notesPlaceholder')}
               rows={2}
               className={`${dsTextarea} resize-none`}
             />
@@ -1100,7 +1101,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">
             <h2 className="truncate text-[20px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)]">
-              {toTitleCase(reservation.customer_name) || 'Senza nome'}
+              {toTitleCase(reservation.customer_name) || t('noName')}
             </h2>
             {reservation.customer_is_vip && (
               <StatusPill tone="pending" title={t('vip')}>
@@ -1139,7 +1140,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
           <span className="text-[28px] font-semibold leading-none tabular-nums">{table.name}</span>
           <div className="min-w-0 text-[13px] leading-tight">
             <div className="font-medium">{t('table')}</div>
-            <div>{table.seats} posti{tooSmall ? ` · meno dei ${reservation.guests} coperti` : ''}</div>
+            <div>{t('seatsCount', { n: table.seats })}{tooSmall ? t('fewerThanCovers', { coperti: reservation.guests }) : ''}</div>
           </div>
         </div>
       ) : (
@@ -1156,7 +1157,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
             className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-seated-solid)] text-[16px] font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
           >
             <Armchair className="h-5 w-5" aria-hidden />
-            Tavolo liberato
+            {t('tableFreedAction')}
           </button>
         ) : (
           <button
@@ -1166,7 +1167,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
             className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-seated-solid)] text-[16px] font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
           >
             <Check className="h-5 w-5" aria-hidden />
-            Arrivato
+            {t('arrived')}
           </button>
         )}
 
@@ -1177,14 +1178,14 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
             disabled={busy}
             onClick={onAssignTable}
             icon={<Shuffle className="h-4 w-4" />}
-            label={table ? 'Cambia' : 'Assegna'}
+            label={t(table ? 'changeTable' : 'assignTableShort')}
           />
           {table && (
             <SecondaryAction
               disabled={busy}
               onClick={onRemoveTable}
               icon={<MapPinOff className="h-4 w-4" />}
-              label="Rimuovi"
+              label={t('removeTable')}
             />
           )}
           {arr === ArrivalStatus.WAITING && !noShow && (
@@ -1201,7 +1202,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
               disabled={busy}
               onClick={onMarkDeparting}
               icon={<LogOut className="h-4 w-4" />}
-              label="In uscita"
+              label={t('markDeparting')}
             />
           )}
           {arr === ArrivalStatus.DEPARTING && (
@@ -1209,7 +1210,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
               disabled={busy}
               onClick={onMarkArrived}
               icon={<Check className="h-4 w-4" />}
-              label="Ancora a tavola"
+              label={t('stillAtTable')}
             />
           )}
           {arr === ArrivalStatus.ARRIVED && (
@@ -1217,7 +1218,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
               disabled={busy}
               onClick={onMarkWaiting}
               icon={<Clock className="h-4 w-4" />}
-              label="In attesa"
+              label={t('markWaiting')}
             />
           )}
           {noShow && (
@@ -1236,9 +1237,9 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
         || reservation.notes) && (
         <div className="mt-4 space-y-2 border-t border-[var(--ds-border)] pt-4">
           <DietaryChips notes={reservation.notes} />
-          {notes && <NotesLine label="Note prenotazione" text={notes} />}
+          {notes && <NotesLine label={t('bookingNotes')} text={notes} />}
           {reservation.customer_dietary_notes && (
-            <NotesLine label="Dieta / allergie" text={reservation.customer_dietary_notes} tone="pending" />
+            <NotesLine label={t('dietAllergies')} text={reservation.customer_dietary_notes} tone="pending" />
           )}
           {reservation.customer_preferences_notes && (
             <NotesLine label={t('customerPrefs')} text={reservation.customer_preferences_notes} />
@@ -1257,7 +1258,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
             <Phone className="h-4 w-4" />
           </span>
           <span className="min-w-0">
-            <span className="block text-[12px] text-[var(--ds-text-muted)]">Telefono</span>
+            <span className="block text-[12px] text-[var(--ds-text-muted)]">{t('phone')}</span>
             <span className="block truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">
               {formatPhone(reservation.phone)}
             </span>
@@ -1457,11 +1458,11 @@ const TablePicker: React.FC<TablePickerProps> = ({
   }, [isPhone, roomTables, occupiedTableIds, reservation.table_id, reservation.guests]);
 
   const LIST_PILL: Record<TableState, { text: string; tone: PillTone }> = {
-    current: { text: 'Attuale', tone: 'info' },
-    ideal: { text: 'Adatto', tone: 'positive' },
-    big: { text: 'Grande', tone: 'neutral' },
-    occupied: { text: 'Occupato', tone: 'critical' },
-    tooSmall: { text: 'Piccolo', tone: 'neutral' },
+    current: { text: t('tile.current'), tone: 'info' },
+    ideal: { text: t('tile.ideal'), tone: 'positive' },
+    big: { text: t('tile.big'), tone: 'neutral' },
+    occupied: { text: t('tile.occupied'), tone: 'critical' },
+    tooSmall: { text: t('tile.tooSmall'), tone: 'neutral' },
   };
 
   return (
@@ -1474,7 +1475,7 @@ const TablePicker: React.FC<TablePickerProps> = ({
           <div className="min-w-0 flex-1">
             <p className="text-[13px] text-[var(--ds-text-muted)]">{t('tableFor')}</p>
             <h2 className="truncate text-[18px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
-              {toTitleCase(reservation.customer_name) || 'Senza nome'}
+              {toTitleCase(reservation.customer_name) || t('noName')}
             </h2>
           </div>
           <StatusPill tone="neutral" className="h-8 px-3 text-[13px]">
@@ -1529,14 +1530,14 @@ const TablePicker: React.FC<TablePickerProps> = ({
       {isPhone ? (
         <div className="mx-4 mb-4 min-h-0 flex-1 overflow-y-auto rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)]">
           <div className="flex flex-col gap-1">
-            {listTables.map(t => {
-              const { state, occupantRes, disabled, onTap } = decorate(t);
+            {listTables.map(tav => {
+              const { state, occupantRes, disabled, onTap } = decorate(tav);
               const pill = state === 'occupied' && !disabled
-                ? { text: 'Scambia', tone: 'pending' as PillTone }
+                ? { text: t('swap'), tone: 'pending' as PillTone }
                 : LIST_PILL[state];
               return (
                 <button
-                  key={t.id}
+                  key={tav.id}
                   type="button"
                   onClick={onTap}
                   disabled={busy || disabled}
@@ -1547,13 +1548,13 @@ const TablePicker: React.FC<TablePickerProps> = ({
                   } ${state === 'current' ? 'ring-2 ring-inset ring-[var(--ds-arriving-solid)]' : ''}`}
                 >
                   <div className={`w-14 flex-shrink-0 ${state === 'tooSmall' ? 'grayscale' : ''}`}>
-                    <TableGlyph name={t.name} seats={t.seats} shape={t.shape} status="libera" fit />
+                    <TableGlyph name={tav.name} seats={tav.seats} shape={tav.shape} status="libera" fit />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="text-[15px] font-medium text-[var(--ds-text-primary)]">Tavolo {t.name}</p>
+                    <p className="text-[15px] font-medium text-[var(--ds-text-primary)]">{t('tableNamed', { tavolo: tav.name })}</p>
                     <p className="truncate text-[13px] text-[var(--ds-text-muted)]">
-                      {t.seats} posti
-                      {t.max_seats && t.max_seats !== t.seats ? ` · max ${t.max_seats}` : ''}
+                      {t('seatsCount', { n: tav.seats })}
+                      {tav.max_seats && tav.max_seats !== tav.seats ? t('maxSeats', { n: tav.max_seats }) : ''}
                       {occupantRes ? ` · ${toTitleCase(occupantRes.customer_name)}` : ''}
                     </p>
                   </div>
@@ -1581,15 +1582,15 @@ const TablePicker: React.FC<TablePickerProps> = ({
               height: extent.height * scale,
             }}
           >
-            {roomTables.map(t => {
-              const { state, swappable, disabled, onTap } = decorate(t);
-              const dim = getGlyphDimensions(t.shape, t.seats);
+            {roomTables.map(tav => {
+              const { state, swappable, disabled, onTap } = decorate(tav);
+              const dim = getGlyphDimensions(tav.shape, tav.seats);
               const glyphW = dim.width * scale;
               const glyphH = dim.height * scale;
 
               // Match the natural glyph radius so the halo follows the table
               // shape (circle ≈ pill; rectangle ≈ rounded square).
-              const haloRadius = t.shape === TableShape.CIRCLE ? '9999px' : '20px';
+              const haloRadius = tav.shape === TableShape.CIRCLE ? '9999px' : '20px';
 
               // Decoration per state. The glyph itself stays in 'libera' so the
               // room reads as a coherent floor plan — colour is conveyed by the
@@ -1601,22 +1602,22 @@ const TablePicker: React.FC<TablePickerProps> = ({
 
               if (state === 'current') {
                 haloClass = 'ring-2 ring-[var(--ds-arriving-solid)]';
-                badge = { text: 'Attuale', tone: 'info' };
+                badge = { text: t('tile.current'), tone: 'info' };
               } else if (state === 'occupied') {
                 if (swappable) {
                   haloClass = 'ring-2 ring-[var(--ds-pending-solid)] hover:ring-[3px]';
                   glyphOpacity = 'opacity-80';
-                  badge = { text: 'Scambia', tone: 'pending' };
+                  badge = { text: t('swap'), tone: 'pending' };
                 } else {
                   haloClass = 'ring-1 ring-[var(--ds-critical-solid)]';
                   glyphOpacity = 'opacity-50';
-                  badge = { text: 'Occupato', tone: 'critical' };
+                  badge = { text: t('tile.occupied'), tone: 'critical' };
                 }
               } else if (state === 'tooSmall') {
                 haloClass = '';
                 glyphOpacity = 'opacity-40';
                 grayscale = 'grayscale';
-                badge = { text: `${t.seats} posti`, tone: 'neutral' };
+                badge = { text: `${tav.seats} posti`, tone: 'neutral' };
               } else if (state === 'ideal') {
                 haloClass = 'ring-2 ring-[var(--ds-seated-solid)] hover:ring-[3px]';
               } else if (state === 'big') {
@@ -1625,19 +1626,19 @@ const TablePicker: React.FC<TablePickerProps> = ({
 
               return (
                 <button
-                  key={t.id}
+                  key={tav.id}
                   onClick={onTap}
                   disabled={busy || disabled}
                   className={`absolute transition-all duration-150 ${
                     disabled ? 'cursor-not-allowed' : 'cursor-pointer hover:-translate-y-0.5 hover:z-10'
                   }`}
                   style={{
-                    left: t.x * scale,
-                    top: t.y * scale,
+                    left: tav.x * scale,
+                    top: tav.y * scale,
                     width: glyphW,
                     height: glyphH,
                   }}
-                  title={`${t.name} · ${t.seats} posti${t.max_seats && t.max_seats !== t.seats ? ` (max ${t.max_seats})` : ''}`}
+                  title={`${tav.name} · ${tav.seats} posti${tav.max_seats && tav.max_seats !== tav.seats ? ` (max ${tav.max_seats})` : ''}`}
                 >
                   <div
                     className={`relative ${haloClass} ${glyphOpacity} ${grayscale}`}
@@ -1645,9 +1646,9 @@ const TablePicker: React.FC<TablePickerProps> = ({
                   >
                     <div className="absolute inset-0 flex items-center justify-center">
                       <TableGlyph
-                        name={t.name}
-                        seats={t.seats}
-                        shape={t.shape}
+                        name={tav.name}
+                        seats={tav.seats}
+                        shape={tav.shape}
                         status="libera"
                         fit
                       />
@@ -1681,7 +1682,7 @@ const TablePicker: React.FC<TablePickerProps> = ({
           bodyClassName="p-4 sm:p-6"
           footer={
             <button type="button" onClick={() => setSwapChoices(null)} disabled={busy} className={dsButton.quiet}>
-              Annulla
+              {t('cancel')}
             </button>
           }
         >
@@ -1695,7 +1696,7 @@ const TablePicker: React.FC<TablePickerProps> = ({
                 className="flex w-full items-center justify-between gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-3 text-left shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-50"
               >
                 <span className="min-w-0 truncate font-medium text-[var(--ds-text-primary)]">
-                  {toTitleCase(choice.customer_name) || 'Senza nome'}
+                  {toTitleCase(choice.customer_name) || t('noName')}
                 </span>
                 <span className="flex-shrink-0 text-[13px] text-[var(--ds-text-muted)]">
                   {formatHHMM(choice.reservation_time)} · {choice.guests} ospiti
@@ -1756,11 +1757,11 @@ const SwapConfirmDialog: React.FC<SwapConfirmDialogProps> = ({
       footer={
         <>
           <button type="button" onClick={onCancel} disabled={busy} className={dsButton.quiet}>
-            Annulla
+            {t('cancel')}
           </button>
           <button type="button" onClick={onConfirm} disabled={busy} className={dsButton.primary}>
             <RefreshCw className="h-4 w-4" aria-hidden />
-            Inverti tavoli
+            {t('swapTables')}
           </button>
         </>
       }
@@ -1900,7 +1901,7 @@ const RoomMap: React.FC<RoomMapProps> = ({
           <div className="min-w-0 flex-1">
             <p className="text-[13px] text-[var(--ds-text-muted)]">{t('roomStatus')}</p>
             <h2 className="truncate text-[18px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
-              {activeRoom?.name || 'Sala'}
+              {activeRoom?.name || t('room')}
             </h2>
           </div>
           <button
@@ -1934,10 +1935,10 @@ const RoomMap: React.FC<RoomMapProps> = ({
           </div>
         ) : <div />}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-[var(--ds-text-muted)]">
-          <LegendDot tone="seated" label={`${stats.arrived} arrivati`} />
-          {stats.departing > 0 && <LegendDot tone="pending" label={`${stats.departing} in uscita`} />}
-          <LegendDot tone="arriving" label={`${stats.waiting} in attesa`} />
-          <LegendDot tone="neutral" label={`${stats.free} liberi`} />
+          <LegendDot tone="seated" label={t('legendArrived', { n: stats.arrived })} />
+          {stats.departing > 0 && <LegendDot tone="pending" label={t('legendDeparting', { n: stats.departing })} />}
+          <LegendDot tone="arriving" label={t('legendWaiting', { n: stats.waiting })} />
+          <LegendDot tone="neutral" label={t('legendFree', { n: stats.free })} />
         </div>
       </div>
 
@@ -1957,12 +1958,12 @@ const RoomMap: React.FC<RoomMapProps> = ({
               height: extent.height * scale,
             }}
           >
-            {roomTables.map(t => {
-              const res = reservationByTableId.get(t.id);
-              const dim = getGlyphDimensions(t.shape, t.seats);
+            {roomTables.map(tav => {
+              const res = reservationByTableId.get(tav.id);
+              const dim = getGlyphDimensions(tav.shape, tav.seats);
               const glyphW = dim.width * scale;
               const glyphH = dim.height * scale;
-              const haloRadius = t.shape === TableShape.CIRCLE ? '9999px' : '20px';
+              const haloRadius = tav.shape === TableShape.CIRCLE ? '9999px' : '20px';
 
               // Shared, time-aware derivation so the room reads exactly like
               // the floor plan view (In arrivo pulses, In uscita reads cyan).
@@ -1973,7 +1974,7 @@ const RoomMap: React.FC<RoomMapProps> = ({
               // Un tavolo può avere due turni nella stessa serata: la mappa
               // mostrava solo la prenotazione prioritaria. Contiamo le altre per
               // segnalarle con un badge "+N" e listarle nel tooltip.
-              const otherAtTable = (reservationsByTableId.get(t.id) ?? []).filter(o => o.id !== res?.id);
+              const otherAtTable = (reservationsByTableId.get(tav.id) ?? []).filter(o => o.id !== res?.id);
               const extraCount = otherAtTable.length;
 
               if (res) {
@@ -2005,25 +2006,25 @@ const RoomMap: React.FC<RoomMapProps> = ({
 
               // Tooltip: tutte le prenotazioni del tavolo, in ordine di orario.
               const titleText = res
-                ? `${t.name} · ${[res, ...otherAtTable]
+                ? `${tav.name} · ${[res, ...otherAtTable]
                     .sort((x, y) => new Date(x.reservation_time).getTime() - new Date(y.reservation_time).getTime())
-                    .map(x => `${formatHHMM(x.reservation_time)} ${toTitleCase(x.customer_name) || 'Senza nome'} (${x.guests}p)`)
+                    .map(x => `${formatHHMM(x.reservation_time)} ${toTitleCase(x.customer_name) || t('noName')} (${x.guests}p)`)
                     .join(' · ')}`
-                : `${t.name} · libero`;
+                : t('tableFree', { tavolo: tav.name });
 
               const disabled = !res;
 
               return (
                 <button
-                  key={t.id}
+                  key={tav.id}
                   onClick={() => res && onPickReservation(res.id)}
                   disabled={disabled}
                   className={`absolute transition-all duration-150 ${
                     disabled ? 'cursor-default' : 'cursor-pointer hover:-translate-y-0.5 hover:z-10'
                   }`}
                   style={{
-                    left: t.x * scale,
-                    top: t.y * scale,
+                    left: tav.x * scale,
+                    top: tav.y * scale,
                     width: glyphW,
                     height: glyphH,
                   }}
@@ -2035,9 +2036,9 @@ const RoomMap: React.FC<RoomMapProps> = ({
                   >
                     <div className="absolute inset-0 flex items-center justify-center">
                       <TableGlyph
-                        name={t.name}
-                        seats={t.seats}
-                        shape={t.shape}
+                        name={tav.name}
+                        seats={tav.seats}
+                        shape={tav.shape}
                         status={status}
                         party={res ? res.guests : undefined}
                         fit
@@ -2048,7 +2049,7 @@ const RoomMap: React.FC<RoomMapProps> = ({
                     {extraCount > 0 && (
                       <span
                         className="absolute -right-1.5 -top-1.5 z-10 inline-flex h-5 min-w-5 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-solid)] px-1 text-[10px] font-bold text-white shadow-[var(--ds-shadow-card)]"
-                        aria-label={`${extraCount + 1} prenotazioni su questo tavolo`}
+                        aria-label={t('reservationsOnTable', { count: extraCount + 1 })}
                         title={titleText}
                       >
                         +{extraCount}

@@ -660,6 +660,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-23 | Reception | Con la lingua inglese la Reception parla inglese: lista degli arrivi coi suoi gruppi e filtri, riga della prenotazione, pannello di dettaglio con le azioni, scheda walk-in, scelta e scambio del tavolo, e la mappa della sala con la sua legenda. |
 | 2026-09-22 | Cassa | Con la lingua inglese la Cassa parla inglese anche nella seconda metà: pagamento con metodi e documento alla chiusura, divisione del conto (parti uguali, per piatto, a importo), esito della chiusura con QR dello scontrino, fondo e chiusura del cassetto, transazioni del servizio e cliente della visita. |
 | 2026-09-22 | Cassa | Con la lingua inglese parla inglese il percorso della cassa fino alla comanda: coda del servizio con i suoi conteggi, scelta del tavolo fra griglia e piantina con la sua legenda, tavolo attivo con righe inviate e da inviare, e i messaggi d'errore della pagina. |
 | 2026-09-22 | Banchetti | Con la lingua inglese parla inglese il lato banchetti della pagina Menu: lista con i suoi gruppi e ordinamenti, tessere e azioni, procedura in cinque passi, condivisione del preventivo via link, WhatsApp ed email, e il calendario. I nomi dei mesi e dei giorni seguono la lingua scelta. |
