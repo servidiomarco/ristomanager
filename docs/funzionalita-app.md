@@ -660,6 +660,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-23 | Menu & Piatti; Asporto | Con la lingua inglese parlano inglese la modale Varianti (gruppi, opzioni, scelte minime e massime, aggancio alle categorie) e la card Asporto in Impostazioni (ordini online e al telefono, giorno della board, capienza, minuti di preparazione, stop). |
 | 2026-09-23 | Pagamenti; Cassa | Con la lingua inglese parla inglese il foglio del conto: chiusura con metodi e documento, QR per le quote, elenco dei pagamenti, dettaglio e riepilogo, e i bottoni dei documenti fiscali. Il modulo della fattura elettronica resta in italiano: è un modulo di legge italiano. |
 | 2026-09-23 | Reception | Con la lingua inglese la Reception parla inglese: lista degli arrivi coi suoi gruppi e filtri, riga della prenotazione, pannello di dettaglio con le azioni, scheda walk-in, scelta e scambio del tavolo, e la mappa della sala con la sua legenda. |
 | 2026-09-22 | Cassa | Con la lingua inglese la Cassa parla inglese anche nella seconda metà: pagamento con metodi e documento alla chiusura, divisione del conto (parti uguali, per piatto, a importo), esito della chiusura con QR dello scontrino, fondo e chiusura del cassetto, transazioni del servizio e cliente della visita. |
