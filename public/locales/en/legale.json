@@ -83,5 +83,17 @@
     "terms": "Terms of service"
   },
   "businessNamePh": "The Old Mill",
-  "privacyEmailPh": "privacy@restaurant.com"
+  "privacyEmailPh": "privacy@restaurant.com",
+  "replaceLogo": "Replace",
+  "publicPhonePh": "020 7946 0958",
+  "publicWhatsappPh": "+44 7700 900461",
+  "publicAddressPh": "14 Elm Street, London",
+  "companyNamePh": "The Old Mill Ltd",
+  "companyAddressPh": "1 High Street, London EC1A 1BB",
+  "vatNumberPh": "GB123456789",
+  "privacyPhonePh": "+44 20 7946 0958",
+  "dpoContactPh": "dpo@restaurant.com",
+  "websiteUrlPh": "https://www.restaurant.com",
+  "voiceBusinessNamePh": "The Old Mill",
+  "dataProcessorsPh": "Railway (hosting)\nElevenLabs (voice assistant)\nMeta/WhatsApp (messaging)\nSMTP provider (email)"
 }

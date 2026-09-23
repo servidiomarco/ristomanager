@@ -43,6 +43,11 @@ const titolareBlock = (s: LegalSettings): string => {
   return lines.join('\n');
 };
 
+/* La data di questa riga è cablata all'italiana, come tutto il resto del
+   documento: i testi generati qui sotto sono documenti legali italiani, che
+   citano il GDPR per articolo e il D.Lgs. 196/2003. Tradurli a metà sarebbe
+   peggio che lasciarli — quindi restano in italiano, `Ultimo aggiornamento`
+   compreso, anche se l'interfaccia attorno parla inglese. */
 const dateLine = (s: LegalSettings) =>
   `Ultimo aggiornamento: ${s.last_updated && s.last_updated.trim() ? s.last_updated.trim() : new Date().toLocaleDateString('it-IT')}`;
 
@@ -317,6 +322,8 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
     if (!canEdit) return;
     setSaving(true);
     try {
+      // it-IT di proposito: questa stringa viene stampata dentro i documenti
+      // legali italiani generati sopra, non nell'interfaccia.
       const payload: LegalSettings = { ...data, last_updated: new Date().toLocaleDateString('it-IT') };
       const saved = await updateLegalSettings(payload);
       setData({ ...EMPTY, ...saved });
@@ -440,9 +447,9 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
                   <Field label={t('businessName')} value={data.business_name} onChange={set('business_name')} placeholder={t('businessNamePh')} disabled={!canEdit} />
                   <Field label={t('businessTagline')} value={data.business_tagline} onChange={set('business_tagline')} placeholder={t('businessTaglinePh')} disabled={!canEdit} />
-                  <Field label={t('publicPhone')} value={data.public_phone} onChange={set('public_phone')} placeholder="0985 876578" disabled={!canEdit} />
-                  <Field label={t('publicWhatsapp')} value={data.public_whatsapp} onChange={set('public_whatsapp')} placeholder="+39 389 591 6494" disabled={!canEdit} />
-                  <Field label={t('publicAddress')} value={data.public_address} onChange={set('public_address')} placeholder="Via dell'Olmo 14, Lucca" disabled={!canEdit} />
+                  <Field label={t('publicPhone')} value={data.public_phone} onChange={set('public_phone')} placeholder={t('publicPhonePh')} disabled={!canEdit} />
+                  <Field label={t('publicWhatsapp')} value={data.public_whatsapp} onChange={set('public_whatsapp')} placeholder={t('publicWhatsappPh')} disabled={!canEdit} />
+                  <Field label={t('publicAddress')} value={data.public_address} onChange={set('public_address')} placeholder={t('publicAddressPh')} disabled={!canEdit} />
                   <Field label={t('mapsUrl')} value={data.maps_url} onChange={set('maps_url')} placeholder="https://maps.app.goo.gl/…" disabled={!canEdit} wide />
                 </div>
 
@@ -480,7 +487,7 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
                           className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] border border-[var(--ds-border)] px-3 text-[13px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50"
                         >
                           {logoBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                          {data.logo_url ? 'Sostituisci' : t('uploadLogo')}
+                          {data.logo_url ? t('replaceLogo') : t('uploadLogo')}
                         </button>
                         {data.logo_url && (
                           <button
@@ -533,7 +540,7 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
                           className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] border border-[var(--ds-border)] px-3 text-[13px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50"
                         >
                           {logoBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                          {data.logo_dark_url ? 'Sostituisci' : t('uploadVariant')}
+                          {data.logo_dark_url ? t('replaceLogo') : t('uploadVariant')}
                         </button>
                         {data.logo_dark_url && (
                           <button
@@ -551,10 +558,10 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
                 </div>
                 <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-3">{t('controllerIdentity')}</h5>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <Field label={t('companyName')} value={data.company_name} onChange={set('company_name')} placeholder="Ristorante Da Mario S.r.l." disabled={!canEdit} />
+                  <Field label={t('companyName')} value={data.company_name} onChange={set('company_name')} placeholder={t('companyNamePh')} disabled={!canEdit} />
                   <Field label={t('appName')} value={data.app_name} onChange={set('app_name')} placeholder="RistoManager" disabled={!canEdit} />
-                  <Field label={t('companyAddress')} value={data.company_address} onChange={set('company_address')} placeholder="Via Roma 1, 00100 Roma (RM)" disabled={!canEdit} wide />
-                  <Field label={t('vatNumber')} value={data.vat_number} onChange={set('vat_number')} placeholder="IT01234567890" disabled={!canEdit} />
+                  <Field label={t('companyAddress')} value={data.company_address} onChange={set('company_address')} placeholder={t('companyAddressPh')} disabled={!canEdit} wide />
+                  <Field label={t('vatNumber')} value={data.vat_number} onChange={set('vat_number')} placeholder={t('vatNumberPh')} disabled={!canEdit} />
                   <Field label={t('fiscalCode')} value={data.fiscal_code} onChange={set('fiscal_code')} placeholder="—" disabled={!canEdit} />
                 </div>
               </div>
@@ -563,10 +570,10 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
                 <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-3">{t('privacyContacts')}</h5>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <Field label={t('privacyEmail')} value={data.privacy_email} onChange={set('privacy_email')} placeholder={t('privacyEmailPh')} disabled={!canEdit} />
-                  <Field label={t('phone')} value={data.privacy_phone} onChange={set('privacy_phone')} placeholder="+39 06 1234567" disabled={!canEdit} />
+                  <Field label={t('phone')} value={data.privacy_phone} onChange={set('privacy_phone')} placeholder={t('privacyPhonePh')} disabled={!canEdit} />
                   <Field label={t('dpoName')} value={data.dpo_name} onChange={set('dpo_name')} placeholder={t('dpoNamePh')} disabled={!canEdit} />
-                  <Field label={t('dpoContact')} value={data.dpo_contact} onChange={set('dpo_contact')} placeholder="dpo@ristorante.it" disabled={!canEdit} />
-                  <Field label={t('websiteUrl')} value={data.website_url} onChange={set('website_url')} placeholder="https://www.ristorante.it" disabled={!canEdit} wide />
+                  <Field label={t('dpoContact')} value={data.dpo_contact} onChange={set('dpo_contact')} placeholder={t('dpoContactPh')} disabled={!canEdit} />
+                  <Field label={t('websiteUrl')} value={data.website_url} onChange={set('website_url')} placeholder={t('websiteUrlPh')} disabled={!canEdit} wide />
                 </div>
               </div>
 
@@ -574,7 +581,7 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
                 <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-3">{t('processorsRetention')}</h5>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <Field label={t('dataProcessors')} value={data.data_processors} onChange={set('data_processors')} textarea wide disabled={!canEdit}
-                    placeholder={'Railway (hosting)\nElevenLabs (assistente vocale)\nMeta/WhatsApp (messaggistica)\nProvider SMTP (e-mail)'} />
+                    placeholder={t('dataProcessorsPh')} />
                   <Field label={t('retentionCustomer')} value={data.retention_customer} onChange={set('retention_customer')} placeholder={t('retentionCustomerPh')} disabled={!canEdit} />
                   <Field label={t('retentionCalls')} value={data.retention_calls} onChange={set('retention_calls')} placeholder={t('retentionCallsPh')} disabled={!canEdit} />
                   <Field label={t('retentionMarketing')} value={data.retention_marketing} onChange={set('retention_marketing')} placeholder={t('retentionMarketingPh')} disabled={!canEdit} />
@@ -586,7 +593,7 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
               <div>
                 <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-3">{t('voiceCookieTerms')}</h5>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <Field label={t('voiceBusinessName')} value={data.voice_business_name} onChange={set('voice_business_name')} placeholder="Ristorante Da Mario" disabled={!canEdit} />
+                  <Field label={t('voiceBusinessName')} value={data.voice_business_name} onChange={set('voice_business_name')} placeholder={t('voiceBusinessNamePh')} disabled={!canEdit} />
                   <Field label={t('governingLaw')} value={data.governing_law} onChange={set('governing_law')} placeholder={t('governingLawPh')} disabled={!canEdit} />
                 </div>
                 <div className="mt-3 space-y-2">

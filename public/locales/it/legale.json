@@ -83,5 +83,17 @@
     "terms": "Termini di Servizio"
   },
   "businessNamePh": "Il Vecchio Frantoio",
-  "privacyEmailPh": "privacy@ristorante.it"
+  "privacyEmailPh": "privacy@ristorante.it",
+  "replaceLogo": "Sostituisci",
+  "publicPhonePh": "0985 876578",
+  "publicWhatsappPh": "+39 389 591 6494",
+  "publicAddressPh": "Via dell'Olmo 14, Lucca",
+  "companyNamePh": "Ristorante Da Mario S.r.l.",
+  "companyAddressPh": "Via Roma 1, 00100 Roma (RM)",
+  "vatNumberPh": "IT01234567890",
+  "privacyPhonePh": "+39 06 1234567",
+  "dpoContactPh": "dpo@ristorante.it",
+  "websiteUrlPh": "https://www.ristorante.it",
+  "voiceBusinessNamePh": "Ristorante Da Mario",
+  "dataProcessorsPh": "Railway (hosting)\nElevenLabs (assistente vocale)\nMeta/WhatsApp (messaggistica)\nProvider SMTP (e-mail)"
 }
