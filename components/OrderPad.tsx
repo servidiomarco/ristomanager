@@ -975,6 +975,14 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
     if (order) saveCartDraft(order.order.id, cart);
   }, [cart, order]);
 
+  // L'uscita dal tavolo dopo l'Invia, a volo finito. Non leaveTable: la
+  // comanda non è intonsa per definizione, e la bozza l'ha già salvata
+  // l'effetto del carrello.
+  const closeAfterSend = () => {
+    setSendFlight(null);
+    setTableId(null); setOrder(null); setCart([]); setComandaOpen(false);
+  };
+
   const submit = async (scope: 'course' | 'all', from?: DOMRect) => {
     if (!order || busy) return;
     const lines = scope === 'course' ? courseLines : cart;
@@ -1041,21 +1049,24 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
         recovered = true;
       }
       // Inviato, il tavolo si chiude e si torna alla griglia (voluto da Marco
-      // il 23/09): il prossimo gesto è quasi sempre un altro tavolo. Le bozze
-      // delle ALTRE uscite restano: si salvano qui a mano, perché con la
-      // comanda chiusa l'effetto che salva il carrello non gira più, e la
-      // bozza vecchia (con le righe appena partite) tornerebbe alla riapertura.
-      const remaining = scope === 'course' ? cart.filter(l => l.course_no !== course) : [];
-      saveCartDraft(sent.order.id, remaining);
-      setTableId(null); setOrder(null); setCart([]); setComandaOpen(false);
-      if (from && kinds.length > 0) {
+      // il 23/09): il prossimo gesto è quasi sempre un altro tavolo. Prima
+      // però il volo passa sul bottone appena premuto, sulla comanda ancora
+      // aperta — sulla griglia il bottone non c'era più e il gesto non si
+      // leggeva. La comanda resta in stato per quel secondo: l'effetto della
+      // bozza salva le righe delle ALTRE uscite, che tornano alla riapertura.
+      setOrder(sent);
+      setCart(prev => (scope === 'course' ? prev.filter(l => l.course_no !== course) : []));
+      const reduceMotion = typeof window !== 'undefined'
+        && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+      if (from && kinds.length > 0 && !reduceMotion) {
         setSendFlight({
           id: Date.now(),
           from: { left: from.left, top: from.top, width: from.width, height: from.height },
           kinds,
         });
+      } else {
+        closeAfterSend();
       }
-      // L'uscita da cui ripartire la ricalcola l'apertura del tavolo.
       const fired = sent.fired_courses.length;
       const queued = sent.queued_courses.length;
       // «Riaperta»: l'invio è passato, ma su una comanda nuova — se un
@@ -1839,7 +1850,6 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
           ) : undefined}
         />
         {billSheets}
-        {sendFlight && <SendFlight flight={sendFlight} onDone={() => setSendFlight(null)} />}
       </>
     );
   }
@@ -1964,6 +1974,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
 
   const dialogs = (
     <>
+      {sendFlight && <SendFlight flight={sendFlight} onDone={closeAfterSend} />}
       <ModalShell
         open={closing}
         onClose={() => setClosing(false)}
