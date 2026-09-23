@@ -661,6 +661,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-23 | Impostazioni | Nella card legale i due bottoni del logo e gli esempi dentro i campi seguono la lingua (un indirizzo di Lucca non aiuta chi apre a Londra). I documenti generati — informativa privacy, cookie policy, termini — restano in italiano: citano il GDPR per articolo e il D.Lgs. 196/2003, e tradurli a metà sarebbe peggio che lasciarli. |
 | 2026-09-23 | Impostazioni | Con la lingua inglese parlano inglese gli orari di apertura (turni, passo degli slot, slot prenotabili e chiusure straordinarie) e la card del server email. I nomi dei giorni vengono dalla lingua, non da un elenco italiano. |
 | 2026-09-23 | Impostazioni | Con la lingua inglese parlano inglese le due card AI delle Impostazioni: richiesta di recensione (quando e a chi inviare, profilo Google, risposte automatiche) e messaggi con AI (interruttore, regole della casa ed esempi da adottare). |
 | 2026-09-23 | Comande, Cucina e Passe | Con la lingua inglese parla inglese il monitor di cucina: colonne delle uscite, coda e consegnate, scelta della partita, dettaglio della comanda, correzione del peso e avviso alla sala. |
