@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next';
+import { displayLocale } from '../utils/formatLocale';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Mail, Send, Loader2, RefreshCw, CheckCircle2, Clock, AlertTriangle, ArrowRight, Check, ArrowDownLeft, ArrowUpRight, Reply, Paperclip, X as XIcon, FolderOpen, Wand2, CalendarPlus } from 'lucide-react';
 import { Loader } from './Loader';
@@ -41,30 +43,32 @@ const formatTime = (iso: string): string => {
   } catch { return ''; }
 };
 
-const formatDayHeader = (iso: string): string => {
+type TFunc = (key: string) => string;
+
+const formatDayHeader = (iso: string, t: TFunc): string => {
   const d = new Date(iso);
   const today = new Date();
   const yesterday = new Date(today);
   yesterday.setDate(today.getDate() - 1);
   const same = (a: Date, b: Date) =>
     a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-  if (same(d, today)) return 'Oggi';
-  if (same(d, yesterday)) return 'Ieri';
-  return d.toLocaleDateString('it-IT', { weekday: 'long', day: '2-digit', month: 'short' });
+  if (same(d, today)) return t('today');
+  if (same(d, yesterday)) return t('yesterday');
+  return d.toLocaleDateString(displayLocale(), { weekday: 'long', day: '2-digit', month: 'short' });
 };
 
-const statusIcon = (m: EmailMessage) => {
+const statusIcon = (m: EmailMessage, t: TFunc) => {
   if (m.direction !== 'outbound') return null;
   const s = (m.status || '').toLowerCase();
   // On a filled bubble these ride on currentColor rather than a second colour
   // fighting the fill.
-  if (s === 'delivered' || s === 'read') return <CheckCircle2 className="h-3.5 w-3.5" aria-label="Consegnato" />;
-  if (s === 'failed' || s === 'undelivered') return <AlertTriangle className="h-3.5 w-3.5" aria-label="Non consegnato" />;
-  return <Clock className="h-3.5 w-3.5" aria-label="In invio" />;
+  if (s === 'delivered' || s === 'read') return <CheckCircle2 className="h-3.5 w-3.5" aria-label={t('delivered')} />;
+  if (s === 'failed' || s === 'undelivered') return <AlertTriangle className="h-3.5 w-3.5" aria-label={t('notDelivered')} />;
+  return <Clock className="h-3.5 w-3.5" aria-label={t('sending')} />;
 };
 
-const displayName = (t: EmailThreadSummary): string =>
-  (t.customer_name && t.customer_name.trim() && toTitleCase(t.customer_name)) || t.email;
+const displayName = (th: EmailThreadSummary): string =>
+  (th.customer_name && th.customer_name.trim() && toTitleCase(th.customer_name)) || th.email;
 
 /**
  * Corpo HTML di un'email in arrivo, isolato in un iframe sandbox.
@@ -77,6 +81,7 @@ const displayName = (t: EmailThreadSummary): string =>
  * fondo chiaro, stessa logica dei token --ds-print-*.
  */
 const EmailHtmlBody: React.FC<{ html: string }> = ({ html }) => {
+  const { t } = useTranslation('email', { useSuspense: false });
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const observerRef = useRef<ResizeObserver | null>(null);
   const [height, setHeight] = useState(80);
@@ -122,7 +127,7 @@ const EmailHtmlBody: React.FC<{ html: string }> = ({ html }) => {
       onLoad={handleLoad}
       style={{ height: `${height}px` }}
       className="w-full rounded-[var(--ds-radius)] border-0 bg-white"
-      title="Contenuto email"
+      title={t('emailContent')}
     />
   );
 };
@@ -143,6 +148,7 @@ interface EmailPageProps {
 }
 
 const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) => {
+  const { t } = useTranslation('email', { useSuspense: false });
   // Riparte dall'ultimo stato noto (cache modulo-level, pre-riempita al
   // login): la pagina viene smontata a ogni cambio vista e senza questo ogni
   // rientro mostrava lo spinner. Il fetch parte comunque e rimpiazza in
@@ -196,7 +202,7 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
       const { threads } = await emailApiService.listThreads();
       setThreads(threads);
     } catch (err: any) {
-      setThreadsError(err?.message || 'Errore caricamento thread');
+      setThreadsError(err?.message || t('err.threads'));
     } finally {
       setThreadsLoading(false);
     }
@@ -235,7 +241,7 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
         .catch(() => {});
     } catch (err: any) {
       if (selectedKeyRef.current === emailKey) {
-        setMsgError(err?.message || 'Errore caricamento email');
+        setMsgError(err?.message || t('err.messages'));
       }
     } finally {
       if (selectedKeyRef.current === emailKey) setMsgLoading(false);
@@ -372,9 +378,9 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
     try {
       const r = await emailApiService.suggestBooking(selected.email_key);
       setBookingSuggestion(r.booking);
-      if (!r.booking) setBookingSuggestError(r.reason || 'Nessuna richiesta di prenotazione trovata in questa email.');
+      if (!r.booking) setBookingSuggestError(r.reason || t('err.noBooking'));
     } catch (err: any) {
-      setBookingSuggestError(err?.data?.message || err?.message || 'Suggerimento non riuscito');
+      setBookingSuggestError(err?.data?.message || err?.message || t('err.suggestion'));
     } finally {
       setSuggestingBooking(false);
     }
@@ -407,7 +413,7 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
       }
       setAttachments(prev => [...prev, ...uploaded]);
     } catch (err: any) {
-      setSendError(err?.message || 'Caricamento allegato non riuscito');
+      setSendError(err?.message || t('err.upload'));
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -421,7 +427,7 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
       const { files } = await listMedia();
       setLibreria(files);
     } catch (err: any) {
-      setSendError(err?.data?.error || 'Libreria non caricata');
+      setSendError(err?.data?.error || t('err.library'));
       setLibreria([]);
     }
   }, [libreria]);
@@ -434,7 +440,7 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
       setAttachments(prev => [...prev, allegato as UploadedAttachment]);
       setLibreriaAperta(false);
     } catch (err: any) {
-      setSendError(err?.data?.error || 'Allegato non preparato');
+      setSendError(err?.data?.error || t('err.attachment'));
     } finally {
       setUploading(false);
     }
@@ -463,7 +469,7 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
       loadThread(selected.email_key);
       loadThreads();
     } catch (err: any) {
-      setSendError(err?.message || 'Errore invio email');
+      setSendError(err?.message || t('err.send'));
     } finally {
       setSending(false);
     }
@@ -492,7 +498,7 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
       setSelectedKey(key);
       loadThreads();
     } catch (err: any) {
-      setSendError(err?.message || 'Errore invio email');
+      setSendError(err?.message || t('err.send'));
     } finally {
       setSending(false);
     }
@@ -555,7 +561,7 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
   const grouped = useMemo(() => {
     const out: { day: string; items: EmailMessage[] }[] = [];
     for (const m of messages) {
-      const day = formatDayHeader(m.sent_at);
+      const day = formatDayHeader(m.sent_at, t);
       const last = out[out.length - 1];
       if (last && last.day === day) last.items.push(m);
       else out.push({ day, items: [m] });
@@ -565,8 +571,8 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
 
   // A thread wants attention when the customer replied and nobody has opened
   // it. Derived from threads already loaded — the section only reorders.
-  const needsAttention = (t: EmailThreadSummary) =>
-    t.unread_count > 0 && t.last_direction !== 'outbound';
+  const needsAttention = (th: EmailThreadSummary) =>
+    th.unread_count > 0 && th.last_direction !== 'outbound';
   const customerReplies = visibleThreads.filter(needsAttention);
   const restOfThreads = visibleThreads.filter(t => !needsAttention(t));
   const swipeHint = useFirstRunHint('ds-swipe-hint-email');
@@ -580,53 +586,53 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
     } catch { /* badge stays stale until the next refresh */ }
   }, []);
 
-  const renderThread = (t: EmailThreadSummary, hint: boolean) => {
-    const active = selectedKey === t.email_key;
-    const outbound = t.last_direction === 'outbound';
+  const renderThread = (th: EmailThreadSummary, hint: boolean) => {
+    const active = selectedKey === th.email_key;
+    const outbound = th.last_direction === 'outbound';
     return (
       <SwipeRow
-        key={t.email_key}
+        key={th.email_key}
         hint={hint}
-        left={t.unread_count > 0 ? {
-          label: 'Letto',
+        left={th.unread_count > 0 ? {
+          label: t('markRead'),
           tone: 'confirm',
           icon: <Check className="h-4 w-4" aria-hidden />,
-          onAction: () => markThreadRead(t.email_key),
+          onAction: () => markThreadRead(th.email_key),
         } : undefined}
         right={{
-          label: 'Rispondi',
+          label: t('reply'),
           tone: 'primary',
           icon: <ArrowRight className="h-4 w-4" aria-hidden />,
-          onAction: () => { setSelectedKey(t.email_key); },
+          onAction: () => { setSelectedKey(th.email_key); },
         }}
       >
         <button
           type="button"
-          onClick={() => setSelectedKey(t.email_key)}
+          onClick={() => setSelectedKey(th.email_key)}
           className={`flex w-full gap-3 p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)] ${
             active ? 'bg-[var(--ds-surface-row)]' : 'bg-[var(--ds-surface)] hover:bg-[var(--ds-surface-row)]'
           }`}
         >
-          <Avatar name={t.customer_name || t.email} icon={t.customer_name ? undefined : Mail} />
+          <Avatar name={th.customer_name || th.email} icon={th.customer_name ? undefined : Mail} />
           <div className="min-w-0 flex-1">
             <div className="flex items-baseline justify-between gap-2">
-              <span className="truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">{displayName(t)}</span>
+              <span className="truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">{displayName(th)}</span>
               <span className="flex items-center gap-1.5">
-                <span className="whitespace-nowrap text-[13px] text-[var(--ds-text-muted)]">{formatRelative(t.last_sent_at)}</span>
-                {t.unread_count > 0 && (
-                  <CountBadge tone="alert" count={t.unread_count} />
+                <span className="whitespace-nowrap text-[13px] text-[var(--ds-text-muted)]">{formatRelative(th.last_sent_at)}</span>
+                {th.unread_count > 0 && (
+                  <CountBadge tone="alert" count={th.unread_count} />
                 )}
               </span>
             </div>
-            {t.customer_name && (
-              <div className="truncate text-[13px] text-[var(--ds-text-muted)]">{t.email}</div>
+            {th.customer_name && (
+              <div className="truncate text-[13px] text-[var(--ds-text-muted)]">{th.email}</div>
             )}
-            {t.last_subject && (
-              <div className="truncate text-[14px] font-semibold text-[var(--ds-text-primary)]">{t.last_subject}</div>
+            {th.last_subject && (
+              <div className="truncate text-[14px] font-semibold text-[var(--ds-text-primary)]">{th.last_subject}</div>
             )}
             <p className="mt-0.5 flex items-center gap-1 truncate text-[14px] text-[var(--ds-text-muted)]">
               <span aria-hidden>{outbound ? '↗' : '↙'}</span>
-              <span className="truncate">{outbound ? `Tu: ${t.last_body}` : t.last_body}</span>
+              <span className="truncate">{outbound ? `Tu: ${th.last_body}` : th.last_body}</span>
             </p>
           </div>
         </button>
@@ -652,7 +658,7 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
           <div className="space-y-3">
             {/* No visible page title: the sidebar and the mobile switcher
                 both already name this screen. */}
-            <h1 className="sr-only">Email</h1>
+            <h1 className="sr-only">{t('pageTitle')}</h1>
             <div className="flex items-center gap-2">
               <SearchField
                 className="min-w-0 flex-1"
@@ -664,8 +670,8 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
                 type="button"
                 onClick={loadThreads}
                 className={dsIconButton}
-                title="Aggiorna"
-                aria-label="Aggiorna"
+                title={t('refresh')}
+                aria-label={t('refresh')}
               >
                 <RefreshCw className={`h-4 w-4 ${threadsLoading ? 'animate-spin' : ''}`} />
               </button>
@@ -673,11 +679,11 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
                 type="button"
                 onClick={() => { setNewEmailOpen(true); setSubject(''); setBodyText(''); setNewRecipient(''); }}
                 className={`${dsButton.primary} flex-shrink-0 max-lg:w-11 max-lg:px-0`}
-                aria-label="Nuova email"
-                title="Nuova email"
+                aria-label={t('newEmail')}
+                title={t('newEmail')}
               >
                 <Mail className="h-4 w-4" />
-                <span className="max-lg:hidden">Nuova</span>
+                <span className="max-lg:hidden">{t('newShort')}</span>
               </button>
             </div>
           </div>
@@ -689,13 +695,13 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
             <Callout tone="critical" icon={AlertTriangle}>{threadsError}</Callout>
           ) : visibleThreads.length === 0 ? (
             <EmptyState icon={Mail}>
-              {searchQuery ? 'Nessun risultato' : 'Nessuna email al momento.'}
+              {t(searchQuery ? 'noResults' : 'noEmails')}
             </EmptyState>
           ) : (
             <div className="space-y-1">
               {customerReplies.length > 0 && (
                 <>
-                  <SectionHeader tone="positive">Risposte dei clienti</SectionHeader>
+                  <SectionHeader tone="positive">{t('customerReplies')}</SectionHeader>
                   <div className="space-y-2 pb-2">
                     {customerReplies.map((t, i) => renderThread(t, swipeHint && i === 0))}
                   </div>
@@ -703,7 +709,7 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
               )}
               {restOfThreads.length > 0 && (
                 <>
-                  <SectionHeader>Tutte le email</SectionHeader>
+                  <SectionHeader>{t('allEmails')}</SectionHeader>
                   <div className="space-y-2">
                     {restOfThreads.map((t, i) => renderThread(t, swipeHint && customerReplies.length === 0 && i === 0))}
                   </div>
@@ -717,7 +723,7 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
             <>
               <PaneHeader
                 onBack={() => setSelectedKey(null)}
-                backLabel="Torna alle email"
+                backLabel={t('backToEmails')}
                 title={displayName(selected)}
                 subtitle={selected.email}
                 actions={
@@ -727,15 +733,15 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
                         type="button"
                         onClick={handleSuggestBooking}
                         disabled={suggestingBooking}
-                        title="Cerca una richiesta di prenotazione nell'ultima email e proponi i dettagli"
+                        title={t('suggestTitle')}
                         className={dsIconButton}
-                        aria-label="Suggerisci prenotazione dall'email"
+                        aria-label={t('suggestAria')}
                       >
                         {suggestingBooking ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
                       </button>
                     )}
                     <button type="button" onClick={openReply} className={dsButton.secondary}>
-                      Rispondi
+                      {t('reply')}
                     </button>
                   </div>
                 }
@@ -754,30 +760,30 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
                         <Wand2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-[var(--ds-text-secondary)]" aria-hidden />
                         <div className="min-w-0 flex-1">
                           <p className="text-[13px] font-semibold text-[var(--ds-text-primary)]">
-                            Richiesta di prenotazione trovata nell'email
+                            {t('bookingFound')}
                           </p>
                           <dl className="mt-1.5 space-y-0.5 text-[14px] text-[var(--ds-text-primary)]">
                             {bookingSuggestion.customer_name && (
-                              <div><dt className="inline text-[var(--ds-text-muted)]">Cliente: </dt><dd className="inline">{bookingSuggestion.customer_name}</dd></div>
+                              <div><dt className="inline text-[var(--ds-text-muted)]">{t('field.customer')}</dt><dd className="inline">{bookingSuggestion.customer_name}</dd></div>
                             )}
                             {(bookingSuggestion.date || bookingSuggestion.time) && (
                               <div>
-                                <dt className="inline text-[var(--ds-text-muted)]">Quando: </dt>
+                                <dt className="inline text-[var(--ds-text-muted)]">{t('field.when')}</dt>
                                 <dd className="inline">{[bookingSuggestion.date, bookingSuggestion.time].filter(Boolean).join(' · ')}</dd>
                               </div>
                             )}
                             {bookingSuggestion.guests != null && (
-                              <div><dt className="inline text-[var(--ds-text-muted)]">Persone: </dt><dd className="inline">{bookingSuggestion.guests}</dd></div>
+                              <div><dt className="inline text-[var(--ds-text-muted)]">{t('field.people')}</dt><dd className="inline">{bookingSuggestion.guests}</dd></div>
                             )}
                             {bookingSuggestion.phone && (
-                              <div><dt className="inline text-[var(--ds-text-muted)]">Telefono: </dt><dd className="inline">{bookingSuggestion.phone}</dd></div>
+                              <div><dt className="inline text-[var(--ds-text-muted)]">{t('field.phone')}</dt><dd className="inline">{bookingSuggestion.phone}</dd></div>
                             )}
                             {bookingSuggestion.notes && (
-                              <div><dt className="inline text-[var(--ds-text-muted)]">Note: </dt><dd className="inline">{bookingSuggestion.notes}</dd></div>
+                              <div><dt className="inline text-[var(--ds-text-muted)]">{t('field.notes')}</dt><dd className="inline">{bookingSuggestion.notes}</dd></div>
                             )}
                           </dl>
                           <p className="mt-1 text-[12px] text-[var(--ds-text-muted)]">
-                            Niente è ancora salvato: il form si apre già compilato, da controllare.
+                            {t('nothingSavedYet')}
                           </p>
                           <div className="mt-2.5 flex flex-wrap items-center gap-2">
                             <button
@@ -820,7 +826,7 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
                         const isOut = m.direction === 'outbound';
                         const isReply = !isOut && !!m.in_reply_to;
                         const DirIcon = isOut ? ArrowUpRight : isReply ? Reply : ArrowDownLeft;
-                        const dirLabel = isOut ? 'Uscita' : isReply ? 'Risposta' : 'Entrata';
+                        const dirLabel = t(isOut ? 'dir.out' : isReply ? 'dir.reply' : 'dir.in');
                         // Le email HTML sono impaginate a ~600px: la bolla al
                         // 70% le strozzerebbe, qui prende tutta la larghezza
                         // fino a quel formato.
@@ -866,7 +872,7 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
                               )}
                               <div className={`mt-1.5 flex items-center gap-1.5 text-[12px] ${isOut ? 'text-white/75' : 'text-[var(--ds-text-muted)]'}`}>
                                 <span className="tabular-nums">{formatTime(m.sent_at)}</span>
-                                {statusIcon(m)}
+                                {statusIcon(m, t)}
                                 {m.error_message && <span>· {m.error_message}</span>}
                               </div>
                             </div>
@@ -887,8 +893,8 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
                   type="text"
                   value={subject}
                   onChange={e => setSubject(e.target.value.slice(0, 200))}
-                  placeholder="Oggetto"
-                  aria-label="Oggetto"
+                  placeholder={t('subject')}
+                  aria-label={t('subject')}
                   className="h-11 w-full rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-4 text-[15px] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] placeholder:text-[var(--ds-text-muted)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 />
                 <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-shadow focus-within:ring-2 focus-within:ring-[var(--ds-border-focus)]">
@@ -900,8 +906,8 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={uploading || sending}
-                    aria-label="Allega un file"
-                    title="Allega foto, PDF o audio"
+                    aria-label={t('attachFile')}
+                    title={t('attachFileTitle')}
                     className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
                     {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
@@ -910,8 +916,8 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
                     type="button"
                     onClick={handleApriLibreria}
                     disabled={uploading || sending}
-                    aria-label="Allega un file dalla libreria"
-                    title="Allega un file già caricato (menù, piantina…)"
+                    aria-label={t('attachFromLibrary')}
+                    title={t('attachFromLibraryTitle')}
                     className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
                     <FolderOpen className="h-4 w-4" />
@@ -921,15 +927,15 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
                     value={bodyText}
                     onChange={e => setBodyText(e.target.value.slice(0, 5000))}
                     rows={2}
-                    placeholder="Scrivi la risposta…"
-                    aria-label="Risposta"
+                    placeholder={t('writeReply')}
+                    aria-label={t('replyAria')}
                     className="max-h-48 min-w-0 flex-1 resize-none border-0 bg-transparent px-3 py-2 text-[15px] leading-snug text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] focus:outline-none"
                   />
                   <button
                     type="button"
                     onClick={handleSendReply}
                     disabled={!subject.trim() || !bodyText.trim() || sending}
-                    aria-label="Invia risposta"
+                    aria-label={t('sendReply')}
                     className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-solid)] text-[var(--ds-arriving-fg)] transition-all hover:brightness-95 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:cursor-not-allowed disabled:bg-[var(--ds-surface-row)] disabled:text-[var(--ds-text-subtle)]"
                   >
                     {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
@@ -942,7 +948,7 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
               </div>
             </>
           ) : (
-            <PanePlaceholder icon={Mail}>Seleziona una conversazione dalla lista</PanePlaceholder>
+            <PanePlaceholder icon={Mail}>{t('pickConversation')}</PanePlaceholder>
           )
         }
       />
@@ -951,12 +957,12 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
       <ModalShell
         open={newEmailOpen}
         onClose={() => { if (!sending) setNewEmailOpen(false); }}
-        title="Nuova email"
+        title={t('newEmail')}
         bodyClassName="p-4 sm:p-5"
         footer={
           <>
             <button type="button" onClick={() => setNewEmailOpen(false)} disabled={sending} className={dsButton.quiet}>
-              Annulla
+              {t('cancel')}
             </button>
             <button
               type="button"
@@ -964,45 +970,45 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
               disabled={!newRecipient.trim() || !subject.trim() || !bodyText.trim() || sending}
               className={dsButton.primary}
             >
-              {sending ? <><Loader2 className="h-4 w-4 animate-spin" /> Invio…</> : <><Send className="h-4 w-4" /> Invia</>}
+              {sending ? <><Loader2 className="h-4 w-4 animate-spin" /> {t('sendingShort')}</> : <><Send className="h-4 w-4" /> {t('send')}</>}
             </button>
           </>
         }
       >
         <FormCard>
           <div className="flex flex-col gap-4">
-            <Field label="Destinatario" htmlFor="new-email-to">
+            <Field label={t('recipient')} htmlFor="new-email-to">
               <input
                 id="new-email-to"
                 type="email"
                 value={newRecipient}
                 onChange={e => setNewRecipient(e.target.value)}
-                placeholder="cliente@esempio.com"
+                placeholder={t('recipientPlaceholder')}
                 className={dsInput}
                 autoFocus
               />
             </Field>
-            <Field label="Oggetto" htmlFor="new-email-subject">
+            <Field label={t('subject')} htmlFor="new-email-subject">
               <input
                 id="new-email-subject"
                 type="text"
                 value={subject}
                 onChange={e => setSubject(e.target.value.slice(0, 200))}
-                placeholder="Es. Promemoria prenotazione"
+                placeholder={t('subjectPlaceholder')}
                 className={dsInput}
               />
             </Field>
-            <Field label="Messaggio" htmlFor="new-email-body">
+            <Field label={t('message')} htmlFor="new-email-body">
               <textarea
                 id="new-email-body"
                 value={bodyText}
                 onChange={e => setBodyText(e.target.value.slice(0, 5000))}
                 rows={8}
-                placeholder="Ciao, ci scriviamo per…"
+                placeholder={t('messagePlaceholder')}
                 className={`${dsTextarea} resize-y`}
               />
             </Field>
-            <Field label="Allegati">
+            <Field label={t('attachments')}>
               <div className="space-y-2">
                 {attachments.length > 0 && (
                   <div className="flex flex-wrap gap-1.5">{renderAttachmentRows()}</div>
@@ -1015,7 +1021,7 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
                     className={dsButton.quiet}
                   >
                     {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
-                    Allega file
+                    {t('attachFileBtn')}
                   </button>
                   <button
                     type="button"
