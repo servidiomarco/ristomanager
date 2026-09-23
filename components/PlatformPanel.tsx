@@ -9,7 +9,7 @@ import { authApiService } from '../services/authApiService';
 import {
   adminListTenants, adminCreateTenant, adminUpdateTenant, adminImpersonateTenant, adminEnterTenant,
   adminGetPermissionLocks, adminSetPermissionLocks,
-  adminBillingCheckout, adminBillingPortal, adminBillingSummary, adminUpdateAddons,
+  adminBillingCheckout, adminBillingPortal, adminBillingSummary, adminUpdateAddons, adminUpdateVoicePlan,
   ADMIN_TENANT_FEATURES,
   type AdminTenant, type AdminTenantFeature, type AdminTenantProvisioned, type AdminBillingSummary,
 } from '../services/apiService';
@@ -202,6 +202,11 @@ const TenantCard: React.FC<{
   const [locksDraft, setLocksDraft] = useState<string[]>([]);
   const [locksRevoke, setLocksRevoke] = useState(false);
   const [locksBusy, setLocksBusy] = useState<'load' | 'save' | null>(null);
+  // Piano minuti di Sofia: editor inline come i permessi. Campo vuoto =
+  // listino (null al server), così un accordo si toglie svuotandolo.
+  const [planOpen, setPlanOpen] = useState(false);
+  const [planDraft, setPlanDraft] = useState({ price: '', included: '', overage: '' });
+  const [planBusy, setPlanBusy] = useState(false);
   const suspended = tenant.status === 'suspended';
   const billing = billingPill(tenant.billing_status);
   const abbonato = tenant.billing_status !== null;
@@ -380,17 +385,83 @@ const TenantCard: React.FC<{
         {' · '}creato il {formatDate(tenant.created_at)}
       </p>
 
-      {/* Sofia nel mese: minuti contro gli inclusi, costo ElevenLabs e
-          ricavo stimato — tutti i numeri arrivano dal server. */}
-      {tenant.voice_month && (() => {
+      {/* Sofia: piano del ristorante e mese in corso (minuti, costo
+          ElevenLabs, ricavo stimato). I numeri arrivano dal server. */}
+      {(tenant.features.includes('voice') || tenant.voice_month) && (() => {
+        const eur = (cents: number) => `${(cents / 100).toFixed(2).replace('.', ',').replace(/,00$/, '')} €`;
+        const plan = tenant.voice_plan;
         const v = tenant.voice_month;
-        const costCents = v.cost_eur_cents;
-        const eur = (cents: number) => `${(cents / 100).toFixed(2).replace('.', ',')} €`;
+        const toCents = (x: string) => (x.trim() === '' ? null : Math.round(Number(x.replace(',', '.')) * 100));
+        const toInt = (x: string) => (x.trim() === '' ? null : Number(x));
+        const openPlan = () => {
+          setPlanDraft({
+            price: plan?.custom ? String((plan.priceCents) / 100) : '',
+            included: plan?.custom ? String(plan.includedMinutes) : '',
+            overage: plan?.custom ? String(plan.overageCentsPerMinute / 100) : '',
+          });
+          setPlanOpen(true);
+        };
+        const savePlan = async () => {
+          const body = {
+            price_cents: toCents(planDraft.price),
+            included_minutes: toInt(planDraft.included),
+            overage_cents_per_minute: toCents(planDraft.overage),
+          };
+          if (Object.values(body).some(n => n !== null && (!Number.isInteger(n) || n < 0))) {
+            showToast('Valori del piano non validi', 'error');
+            return;
+          }
+          setPlanBusy(true);
+          try {
+            const next = await adminUpdateVoicePlan(tenant.id, body);
+            onPatched({ ...tenant, voice_plan: next });
+            setPlanOpen(false);
+            showToast('Piano Sofia aggiornato', 'success');
+          } catch (err) {
+            showToast((err as ApiError).message || 'Aggiornamento piano non riuscito', 'error');
+          } finally {
+            setPlanBusy(false);
+          }
+        };
         return (
-          <p className="mt-1 text-[13px] tabular-nums text-[var(--ds-text-secondary)]">
-            Sofia questo mese: {v.billable_minutes} / {v.included_minutes} min · costo {eur(costCents)} · ricavo stimato {eur(v.estimated_revenue_cents)} · margine {eur(v.estimated_revenue_cents - costCents)}
-            {v.priced_calls < v.calls && <span className="text-[var(--ds-text-muted)]"> (costo noto per {v.priced_calls} chiamate su {v.calls})</span>}
-          </p>
+          <div className="mt-2 text-[13px] tabular-nums text-[var(--ds-text-secondary)]">
+            <p>
+              {plan
+                ? <>Piano Sofia: {eur(plan.priceCents)} · {plan.includedMinutes} min · {eur(plan.overageCentsPerMinute)}/min extra · tetto {eur(plan.extraCapCents)}{plan.custom ? ' (su misura)' : ''}</>
+                : 'Piano Sofia: listino'}
+              {!planOpen && (
+                <button type="button" onClick={openPlan} className="ml-2 font-medium text-[var(--ds-text-primary)] underline underline-offset-4 hover:no-underline">
+                  Modifica
+                </button>
+              )}
+            </p>
+            {v && (
+              <p className="mt-0.5">
+                Questo mese: {v.billable_minutes} / {v.included_minutes} min · costo {eur(v.cost_eur_cents)} · ricavo stimato {eur(v.estimated_revenue_cents)} · margine {eur(v.estimated_revenue_cents - v.cost_eur_cents)}
+                {v.priced_calls < v.calls && <span className="text-[var(--ds-text-muted)]"> (costo noto per {v.priced_calls} chiamate su {v.calls})</span>}
+              </p>
+            )}
+            {planOpen && (
+              <div className="mt-2 rounded-[var(--ds-radius-sm)] bg-[var(--ds-surface-row)] p-3">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  <Field label="Canone (€/mese)">
+                    <input className={dsInput} inputMode="decimal" placeholder="listino" value={planDraft.price} onChange={e => setPlanDraft(d => ({ ...d, price: e.target.value }))} />
+                  </Field>
+                  <Field label="Minuti inclusi">
+                    <input className={dsInput} inputMode="numeric" placeholder="listino" value={planDraft.included} onChange={e => setPlanDraft(d => ({ ...d, included: e.target.value }))} />
+                  </Field>
+                  <Field label="Minuto extra (€)">
+                    <input className={dsInput} inputMode="decimal" placeholder="listino" value={planDraft.overage} onChange={e => setPlanDraft(d => ({ ...d, overage: e.target.value }))} />
+                  </Field>
+                </div>
+                <p className="mt-1.5 text-[12px] text-[var(--ds-text-muted)]">Campo vuoto = listino. Il tetto degli extra lo sceglie il ristoratore.</p>
+                <div className="mt-2 flex gap-2">
+                  <button type="button" onClick={savePlan} disabled={planBusy} className={`${dsButton.primary} h-10 px-4 text-[14px]`}>Salva piano</button>
+                  <button type="button" onClick={() => setPlanOpen(false)} disabled={planBusy} className={`${dsButton.secondary} h-10 px-4 text-[14px]`}>Annulla</button>
+                </div>
+              </div>
+            )}
+          </div>
         );
       })()}
 
