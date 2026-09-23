@@ -2958,6 +2958,18 @@ app.delete('/reservations/:id', authenticate, requirePermission('reservations:fu
         // Fase 1c: cancellazione nel log di replica, stessa transazione.
         // Solo-log (vedi PUT): il broadcast resta diretto qui sotto.
         await runWithOutboxTx(async (txClient) => {
+            // La chiamata che l'aveva creata perde il collegamento (FK ON
+            // DELETE SET NULL) e tornerebbe fra le «Da ricontattare»: prima di
+            // eliminare la segniamo gestita e diciamo perché.
+            await txClient.query(
+                `UPDATE voice_calls
+                 SET reservation_deleted_at = NOW(),
+                     follow_up_status = 'CONTACTED',
+                     follow_up_updated_by = $3,
+                     follow_up_updated_at = NOW()
+                 WHERE reservation_id = $1 AND tenant_id = $2`,
+                [id, req.tenantId!, req.user?.userId ?? null]
+            );
             const del = await txClient.query('DELETE FROM reservations WHERE id = $1 AND tenant_id = $2 RETURNING id', [id, req.tenantId!]);
             if (del.rows[0]) {
                 await outboxEnqueueInTx(txClient, req.tenantId!, 'reservation:deleted', `reservation:${id}`,
@@ -22816,6 +22828,7 @@ app.get('/voice-calls', authenticate, requireFeature('voice'), voiceCallsAuthori
                     vc.follow_up_status,
                     vc.notes,
                     vc.follow_up_updated_at,
+                    vc.reservation_deleted_at,
                     vc.phantom_confirmation,
                     vc.phantom_recovered,
                     vc.large_group_handoff,
@@ -22937,6 +22950,9 @@ app.patch('/voice-calls/:id/follow-up', authenticate, requireFeature('voice'), v
             }
             params.push(status);
             sets.push(`follow_up_status = $${params.length}`);
+            // Riportata a mano fra le «Da ricontattare»: non è più la chiamata
+            // chiusa dall'eliminazione della prenotazione, via l'etichetta.
+            if (status === 'PENDING') sets.push('reservation_deleted_at = NULL');
         }
         if (notes !== undefined) {
             if (notes !== null && typeof notes !== 'string') {
@@ -22956,7 +22972,7 @@ app.patch('/voice-calls/:id/follow-up', authenticate, requireFeature('voice'), v
         const result = await queryWithRetry(
             `UPDATE voice_calls SET ${sets.join(', ')}
              WHERE id = $${params.length - 1} AND tenant_id = $${params.length}
-             RETURNING id, follow_up_status, notes, follow_up_updated_at`,
+             RETURNING id, follow_up_status, notes, follow_up_updated_at, reservation_deleted_at`,
             params
         );
         if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
@@ -23053,6 +23069,7 @@ app.get('/voice-calls/:id', authenticate, requireFeature('voice'), voiceCallsAut
                     vc.follow_up_status,
                     vc.notes,
                     vc.follow_up_updated_at,
+                    vc.reservation_deleted_at,
                     vc.phantom_confirmation,
                     vc.phantom_recovered,
                     vc.large_group_handoff,
