@@ -63,10 +63,10 @@ interface EsitoChiusuraProps {
 
 // Mappa di modulo: porta la chiave accanto all'italiano, come le altre.
 const HEAD: Record<Esito, { label: string; labelKey?: string; tone: 'positive' | 'pending' | 'neutral' }> = {
-  saldato: { label: 'Saldato', tone: 'positive' },
-  'da-verificare': { label: 'Pagato · da verificare fiscale', tone: 'pending' },
+  saldato: { label: 'Saldato', labelKey: 'esito.settled', tone: 'positive' },
+  'da-verificare': { label: 'Pagato · da verificare fiscale', labelKey: 'esito.toVerify', tone: 'pending' },
   proforma: { label: 'Chiuso con proforma', labelKey: 'closedWithProforma', tone: 'neutral' },
-  parziale: { label: 'Incassata una parte', tone: 'pending' },
+  parziale: { label: 'Incassata una parte', labelKey: 'esito.partial', tone: 'pending' },
 };
 
 export const EsitoChiusura: React.FC<EsitoChiusuraProps> = ({
@@ -84,12 +84,16 @@ export const EsitoChiusura: React.FC<EsitoChiusuraProps> = ({
 
   const body =
     esito === 'saldato'
-      ? `Tavolo ${tableName ?? '—'} liberato${closedAt ? ` alle ${timePart(closedAt)}` : ''}.${docNumber ? ` Scontrino emesso, numero ${docNumber}.` : ' Scontrino emesso.'}`
+      ? t('esitoSettledBody', {
+          tavolo: tableName ?? '—',
+          quando: closedAt ? t('esitoAtTime', { ora: timePart(closedAt) }) : '',
+          documento: docNumber ? t('esitoReceiptNo', { numero: docNumber }) : t('esitoReceiptIssued'),
+        })
       : esito === 'da-verificare'
-        ? 'I soldi sono incassati e il tavolo è libero. Lo scontrino non è partito: si ritenta da qui o da Pagamenti.'
+        ? t('esitoToVerifyBody')
         : esito === 'parziale'
-          ? `Restano ${euro(residuo)} su ${euro(totalCents)}. Il conto resta fra quelli da incassare; scontrino o fattura si emettono a saldo.`
-          : 'Nessun documento fiscale. Scontrino e fattura restano emettibili dal conto, anche nei giorni successivi.';
+          ? t('esitoPartialBody', { residuo: euro(residuo), totale: euro(totalCents) })
+          : t('esitoProformaBody');
 
   const secondary =
     esito === 'saldato'
@@ -97,10 +101,10 @@ export const EsitoChiusura: React.FC<EsitoChiusuraProps> = ({
       : esito === 'da-verificare'
         ? [{ label: t('closeWithProforma'), onClick: onMarkProforma }]
         : esito === 'parziale'
-          ? [{ label: 'Riapri e continua', onClick: onReopen }]
+          ? [{ label: t('reopenAndContinue'), onClick: onReopen }]
           : [
               { label: t('issueReceipt'), onClick: onIssueReceipt },
-              { label: 'Emetti fattura', onClick: onIssueInvoice },
+              { label: t('issueInvoice'), onClick: onIssueInvoice },
             ];
 
   return (
@@ -123,7 +127,7 @@ export const EsitoChiusura: React.FC<EsitoChiusuraProps> = ({
             </div>
             <div className="min-w-0 space-y-2">
               <p className="text-[13px] leading-snug text-[var(--ds-text-secondary)]">
-                L'ospite lo inquadra e ha lo scontrino digitale sul telefono.
+                {t('receiptQrHint')}
               </p>
               {onPrintReceipt && (
                 <StampaCopiaButton onPrint={onPrintReceipt} variant="outline" />
@@ -136,7 +140,7 @@ export const EsitoChiusura: React.FC<EsitoChiusuraProps> = ({
           <StampaCopiaButton
             onPrint={onPrintProforma}
             label={t('printProforma')}
-            sentLabel="Proforma in stampa"
+            sentLabel={t('proformaPrinting')}
             className="mt-4"
           />
         )}
@@ -162,7 +166,7 @@ export const EsitoChiusura: React.FC<EsitoChiusuraProps> = ({
           className="mt-3 inline-flex h-12 w-full items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
         >
           {busy && <Loader2 size={16} className="animate-spin" />}
-          {esito === 'da-verificare' ? 'Ritenta lo scontrino' : 'Torna alla coda'}
+          {t(esito === 'da-verificare' ? 'retryReceipt' : 'backToQueue')}
         </button>
       </div>
     </div>

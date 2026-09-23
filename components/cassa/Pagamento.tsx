@@ -156,7 +156,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
       {/* Il secondo gruppo: apre un canale, non registra denaro. */}
       <h2 className="mt-5 text-[13px] font-semibold text-[var(--ds-text-muted)]">{t('askCustomer')}</h2>
       <p className="mt-1 text-[12px] text-[var(--ds-text-muted)]">
-        Il conto resta aperto: il residuo scende quando l'ospite paga.
+        {t('billStaysOpen')}
       </p>
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <button
@@ -165,7 +165,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
           disabled={busy || !bill.share_token}
           className="inline-flex h-11 items-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
         >
-          <QrCode size={16} aria-hidden /> {bill.takeaway_order_id != null ? 'QR del conto' : 'QR al tavolo'}
+          <QrCode size={16} aria-hidden /> {t(bill.takeaway_order_id != null ? 'qrOfBill' : 'qrAtTable')}
         </button>
         {bill.takeaway_order_id != null && (
           <button
@@ -177,48 +177,46 @@ export const Pagamento: React.FC<PagamentoProps> = ({
             {linkSend.state === 'sending'
               ? <Loader2 size={16} className="animate-spin" aria-hidden />
               : <Send size={16} aria-hidden />}
-            {linkSend.state === 'sent' ? 'Reinvia il link' : 'Invia link al cliente'}
+            {t(linkSend.state === 'sent' ? 'resendLink' : 'sendLink')}
           </button>
         )}
       </div>
       {linkSend.state === 'sent' && (
-        <p className="mt-1 text-[12px] text-[var(--ds-seated-text)]">Inviato via {linkSend.detail}.</p>
+        <p className="mt-1 text-[12px] text-[var(--ds-seated-text)]">{t('sentVia', { canale: linkSend.detail })}</p>
       )}
       {linkSend.state === 'error' && (
-        <p className="mt-1 text-[12px] text-[var(--ds-critical-text)]">{linkSend.detail || 'Invio non riuscito, riprova.'}</p>
+        <p className="mt-1 text-[12px] text-[var(--ds-critical-text)]">{linkSend.detail || t('sendFailedRetry')}</p>
       )}
 
       <div className="mt-5">
         <span className="mb-1.5 block text-[13px] font-medium text-[var(--ds-text-secondary)]">
-          Documento alla chiusura
+          {t('docAtClose')}
         </span>
         <SegmentedControl<Doc>
           value={doc}
           onChange={setDoc}
           options={[
             { value: 'Scontrino', label: t('receipt') },
-            { value: 'Proforma', label: 'Proforma' },
-            { value: 'Fattura', label: 'Fattura' },
+            { value: 'Proforma', label: t('proforma') },
+            { value: 'Fattura', label: t('invoice') },
           ]}
-          ariaLabel="Documento alla chiusura"
+          ariaLabel={t('docAtClose')}
           equalWidth={false}
           size="sm"
         />
         {doc === 'Proforma' && (
           <p className="mt-1.5 text-[13px] text-[var(--ds-text-muted)]">
-            Il conto si chiude senza documento fiscale. Scontrino e fattura restano
-            emettibili da questo conto, anche domani.
+            {t('proformaHint')}
           </p>
         )}
         {doc === 'Fattura' && (
           <p className="mt-1.5 text-[13px] text-[var(--ds-text-muted)]">
-            Il conto si chiude con proforma e la fattura si emette dal conto, dove
-            ci sono i dati del cessionario. Scontrino e fattura non coesistono.
+            {t('invoiceHint')}
           </p>
         )}
         {doc === 'Scontrino' && !fiscalReady && (
           <p className="mt-1.5 text-[13px] text-[var(--ds-text-muted)]">
-            Nessun provider fiscale configurato: lo scontrino non parte davvero.
+            {t('noFiscalProvider')}
           </p>
         )}
       </div>
@@ -227,8 +225,8 @@ export const Pagamento: React.FC<PagamentoProps> = ({
 
       <p className={`mt-3 text-[13px] ${math.willSettle ? 'text-[var(--ds-seated-text)]' : 'text-[var(--ds-critical-text)]'}`}>
         {math.willSettle
-          ? `Il conto risulterà saldato${tipCents > 0 ? ` · mancia ${euro(tipCents)}` : ''}.`
-          : `Ammanco ${euro(math.shortfall)}: il conto resterà parziale.`}
+          ? (tipCents > 0 ? t('willSettleTip', { mancia: euro(tipCents) }) : t('willSettle'))
+          : t('shortfall', { importo: euro(math.shortfall) })}
       </p>
 
       {/* flex-wrap: con Correggi e Sconto insieme, su telefono la conferma
@@ -241,7 +239,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
             disabled={busy}
             className="inline-flex h-12 flex-shrink-0 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-5 text-[15px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
           >
-            Correggi
+            {t('fix')}
           </button>
         )}
         {onDiscount && (
@@ -251,7 +249,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
             disabled={busy}
             className="inline-flex h-12 flex-shrink-0 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-5 text-[15px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
           >
-            Sconto
+            {t('discount')}
           </button>
         )}
         <button
@@ -260,7 +258,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
           disabled={busy || residual <= 0}
           className="inline-flex h-12 flex-shrink-0 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-5 text-[15px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
         >
-          Dividi conto
+          {t('splitBill')}
         </button>
         <button
           type="button"
@@ -283,17 +281,17 @@ export const Pagamento: React.FC<PagamentoProps> = ({
           <button
             type="button"
             onClick={onBack}
-            aria-label="Torna alla comanda"
+            aria-label={t('goBack')}
             className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)]"
           >
             <ArrowLeft className="h-4 w-4" />
           </button>
           <div className="min-w-0 flex-1">
-            <h1 className="truncate text-[17px] font-semibold text-[var(--ds-text-primary)]">Pagamento</h1>
+            <h1 className="truncate text-[17px] font-semibold text-[var(--ds-text-primary)]">{t('payment')}</h1>
             <p className="truncate text-[13px] text-[var(--ds-text-muted)]">
               {bill.takeaway_order_id != null
-                ? `Asporto ${bill.takeaway_time ?? ''} · ${bill.customer_name ?? ''}`
-                : `Tavolo ${bill.table_name ?? '—'} · ${bill.covers} copert${bill.covers === 1 ? 'o' : 'i'}`}
+                ? t('takeawayHead', { ora: bill.takeaway_time ?? '', cliente: bill.customer_name ?? '' })
+                : t('tableHead', { nome: bill.table_name ?? '—', coperti: t('coversCount', { count: bill.covers }) })}
             </p>
           </div>
           <StatusPill tone={residual > 0 ? 'pending' : 'positive'}>
@@ -308,7 +306,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
         : 'mx-auto grid w-full min-h-0 max-w-[1200px] flex-1 gap-4 overflow-y-auto px-4 pb-6 lg:grid-cols-2 lg:px-8'}>
         {/* Riepilogo */}
         <section className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
-          <h2 className="text-[13px] font-semibold text-[var(--ds-text-muted)]">Riepilogo</h2>
+          <h2 className="text-[13px] font-semibold text-[var(--ds-text-muted)]">{t('summary')}</h2>
           {/* Le righe del conto: cosa si sta incassando, non solo quanto.
               Tetto in altezza con scroll interno — un banchetto lungo non
               deve spingere il residuo fuori dallo schermo. */}
@@ -339,7 +337,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
           <div className="mt-3 space-y-1.5 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3 text-[13px]">
             {deposit > 0 && (
               <div className="flex justify-between gap-2">
-                <span className="text-[var(--ds-text-secondary)]">Caparra prenotazione</span>
+                <span className="text-[var(--ds-text-secondary)]">{t('bookingDeposit')}</span>
                 <span className="tabular-nums text-[var(--ds-text-secondary)]">{euro(deposit)}</span>
               </div>
             )}
@@ -351,7 +349,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
             )}
             {online > 0 && (
               <div className={`flex justify-between gap-2 ${flashCls}`}>
-                <span className="text-[var(--ds-text-secondary)]">Pagato online</span>
+                <span className="text-[var(--ds-text-secondary)]">{t('paidOnline')}</span>
                 <span className="tabular-nums text-[var(--ds-text-secondary)]">{euro(online)}</span>
               </div>
             )}
@@ -370,7 +368,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
           )}
 
           <div className={`mt-4 ${flash ? 'animate-flash-row rounded-[var(--ds-radius)] p-2 -m-2' : ''}`}>
-            <div className="text-[13px] text-[var(--ds-pending-text)]">Residuo</div>
+            <div className="text-[13px] text-[var(--ds-pending-text)]">{t('remaining')}</div>
             <div className="text-[40px] font-semibold leading-none tabular-nums tracking-[-0.02em] text-[var(--ds-text-primary)]">
               {euro(math.remaining)}
             </div>
@@ -379,7 +377,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
 
         {/* Come si paga */}
         <section className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
-          <h2 className="text-[13px] font-semibold text-[var(--ds-text-muted)]">Incassa</h2>
+          <h2 className="text-[13px] font-semibold text-[var(--ds-text-muted)]">{t('collectHere')}</h2>
           <div className="mt-2 flex flex-wrap gap-1.5">
             {METHODS.map(m => {
               // Un sospeso su un tavolo senza cliente è un credito che nessuno
@@ -391,7 +389,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
                   type="button"
                   onClick={() => setMethod(m.value)}
                   disabled={busy || blocked}
-                  title={blocked ? 'Serve un cliente sulla visita' : undefined}
+                  title={blocked ? t('needsCustomer') : undefined}
                   className={`inline-flex h-11 items-center rounded-[var(--ds-radius-control)] px-3.5 text-[14px] font-medium transition-colors disabled:opacity-40 ${
                     method === m.value
                       ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
@@ -413,7 +411,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
                     <span className="tabular-nums">{euro(m.amount_cents)}</span>
                     <button
                       type="button"
-                      aria-label="Togli movimento"
+                      aria-label={t('removeMovement')}
                       onClick={() => setMovements(prev => prev.filter((_, j) => j !== i))}
                       disabled={busy}
                       className="rounded-[var(--ds-radius-control)] px-2 text-[var(--ds-text-muted)] hover:bg-[var(--ds-border)] disabled:opacity-40"
@@ -430,7 +428,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
             <div className="mt-3 flex items-end gap-2">
               <label className="block flex-1">
                 <span className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">
-                  {method === 'CONTANTI' ? 'Contanti ricevuti' : 'Importo'}
+                  {t(method === 'CONTANTI' ? 'cashReceived' : 'amount')}
                 </span>
                 <div className="relative">
                   <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[17px] text-[var(--ds-text-muted)]">{moneySymbol()}</span>
@@ -447,7 +445,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
                 disabled={busy || math.applied <= 0 || math.applied >= math.remaining}
                 className="h-12 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)] disabled:opacity-40"
               >
-                Aggiungi
+                {t('add')}
               </button>
             </div>
           )}

@@ -68,9 +68,9 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
         if (cancelled) return;
         const row = r.bills.find(b => b.id === billId) ?? null;
         if (row) setBill(row);
-        else setLoadError('Conto non trovato fra quelli aperti del servizio.');
+        else setLoadError(t('err.billNotInOpen'));
       })
-      .catch(err => { if (!cancelled) setLoadError(err?.message ?? 'Conto non caricato'); });
+      .catch(err => { if (!cancelled) setLoadError(err?.message ?? t('err.billNotLoaded')); });
     billsApiService.getFiscalSettings()
       .then(f => { if (!cancelled) setFiscalReady(f.provider !== 'none'); })
       .catch(() => {});
@@ -118,7 +118,7 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
       setEditOrder(await getBillOrder(billId));
       setScreen('correggi');
     } catch (err: any) {
-      setError(err?.data?.error ?? err?.message ?? 'Comanda non trovata');
+      setError(err?.data?.error ?? err?.message ?? t('err.orderNotFound'));
     }
   }, [billId]);
 
@@ -129,7 +129,7 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
       setVoidTarget(null);
       await reloadBill();
     } catch (err: any) {
-      setError(err?.data?.error ?? err?.message ?? 'Storno non riuscito');
+      setError(err?.data?.error ?? err?.message ?? t('err.void'));
     } finally {
       setBusy(false);
     }
@@ -145,7 +145,7 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
       await reloadBill();
       setDiscountOpen(false);
     } catch (err: any) {
-      setError(err?.data?.error ?? err?.message ?? 'Sconto non applicato');
+      setError(err?.data?.error ?? err?.message ?? t('err.discount'));
       // Il dialog copre il Callout dell'errore: si chiude per farlo leggere.
       setDiscountOpen(false);
     } finally { setBusy(false); }
@@ -175,7 +175,7 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
       // sola, precompilata col cliente della visita se c'è.
       if (meta?.invoiceIntent) setInvoiceOpen(true);
     } catch (err: any) {
-      setError(err?.data?.error ?? err?.message ?? 'Chiusura non riuscita');
+      setError(err?.data?.error ?? err?.message ?? t('err.close'));
     } finally {
       setBusy(false);
     }
@@ -185,7 +185,7 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
     <ModalShell
       open
       onClose={onClose}
-      title={bill?.table_name ? `Incasso · T${bill.table_name}` : 'Incasso'}
+      title={bill?.table_name ? t('takingTitleTable', { tavolo: bill.table_name }) : t('takingTitle')}
       // Due colonne (scelta di Marco, 30/08: le tre a tutta larghezza erano
       // dispersive): lg le fa respirare senza occupare l'intero schermo.
       size="lg"
@@ -210,26 +210,26 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
           onRetryDocument={async () => {
             setBusy(true);
             try { await billsApiService.emitFiscalDoc(esito.bill.id); onClose(); }
-            catch (err: any) { setError(err?.data?.error ?? err?.message ?? 'Emissione non riuscita'); }
+            catch (err: any) { setError(err?.data?.error ?? err?.message ?? t('err.issue')); }
             finally { setBusy(false); }
           }}
           onMarkProforma={async () => {
             setBusy(true);
             try { await billsApiService.markProforma(esito.bill.id); onClose(); }
-            catch (err: any) { setError(err?.data?.error ?? err?.message ?? 'Non riuscito'); }
+            catch (err: any) { setError(err?.data?.error ?? err?.message ?? t('err.generic')); }
             finally { setBusy(false); }
           }}
           onIssueReceipt={async () => {
             setBusy(true);
             try { await billsApiService.emitFiscalDoc(esito.bill.id); onClose(); }
-            catch (err: any) { setError(err?.data?.error ?? err?.message ?? 'Emissione non riuscita'); }
+            catch (err: any) { setError(err?.data?.error ?? err?.message ?? t('err.issue')); }
             finally { setBusy(false); }
           }}
           onIssueInvoice={() => setInvoiceOpen(true)}
           onReopen={async () => {
             setBusy(true);
             try { await billsApiService.reopenBill(esito.bill.id); onBillClosed(); onClose(); }
-            catch (err: any) { setError(err?.data?.error ?? err?.message ?? 'Riapertura non riuscita'); }
+            catch (err: any) { setError(err?.data?.error ?? err?.message ?? t('err.reopen')); }
             finally { setBusy(false); }
           }}
           onBackToQueue={onClose}
@@ -237,8 +237,7 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
       ) : screen === 'correggi' && editOrder ? (
         <div className="space-y-3">
           <p className="text-[14px] text-[var(--ds-text-secondary)]">
-            Storna la portata contestata: resta in comanda come riga annullata con la
-            motivazione, e il totale del conto si riallinea da solo.
+            {t('voidDisputedHint')}
           </p>
           <ul className="divide-y divide-[var(--ds-border)] rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3">
             {editOrder.items.filter(i => !isSystemLine(i)).map(i => (
@@ -259,14 +258,14 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
                     disabled={busy}
                     className="flex-shrink-0 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-3 py-1.5 text-[13px] font-medium text-[var(--ds-critical-text)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-critical-tint)] disabled:opacity-40"
                   >
-                    Storna
+                    {t('voidLabel')}
                   </button>
                 )}
               </li>
             ))}
           </ul>
           <div className="flex items-center justify-between rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3.5 py-2.5">
-            <span className="text-[14px] font-semibold text-[var(--ds-text-primary)]">Residuo aggiornato</span>
+            <span className="text-[14px] font-semibold text-[var(--ds-text-primary)]">{t('remainingUpdated')}</span>
             <span className="text-[17px] font-semibold tabular-nums text-[var(--ds-text-primary)]">{euro(bill.residual_cents)}</span>
           </div>
           <button
@@ -274,7 +273,7 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
             onClick={() => setScreen('payment')}
             className="inline-flex h-12 w-full items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)]"
           >
-            Torna al pagamento
+            {t('backToPayment')}
           </button>
         </div>
       ) : screen === 'split' ? (
@@ -329,9 +328,9 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
 
       {voidTarget && (
         <ReasonDialog
-          title={voidTarget.qty > 1 ? `Storna ${voidTarget.name_snapshot}` : `Storna 1× ${voidTarget.name_snapshot}`}
-          hint="Il cliente non l'ha ricevuta: la motivazione resta sul conto e in cucina."
-          confirmLabel="Storna la riga"
+          title={t(voidTarget.qty > 1 ? 'void.title' : 'void.titleOne', { piatto: voidTarget.name_snapshot })}
+          hint={t('void.hintSheet')}
+          confirmLabel={t('void.confirmLine')}
           busy={busy}
           maxQty={voidTarget.qty}
           onCancel={() => setVoidTarget(null)}

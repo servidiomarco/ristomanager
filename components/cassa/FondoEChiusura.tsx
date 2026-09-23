@@ -81,13 +81,13 @@ export const FondoEChiusura: React.FC<FondoEChiusuraProps> = ({
           <button
             type="button"
             onClick={onBack}
-            aria-label="Torna alla coda"
+            aria-label={t('backToQueue')}
             className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)]"
           >
             <ArrowLeft className="h-4 w-4" />
           </button>
           <h1 className="flex-1 text-[20px] font-semibold tracking-[-0.02em] text-[var(--ds-text-primary)] lg:text-[26px]">
-            Fondo e chiusura
+            {t('floatAndClose')}
           </h1>
           <button
             type="button"
@@ -103,7 +103,7 @@ export const FondoEChiusura: React.FC<FondoEChiusuraProps> = ({
         {error && <Callout tone="critical">{error}</Callout>}
 
         {/* Il fondo di apertura */}
-        <FormCard title="Fondo di apertura">
+        <FormCard title={t('openingFloat')}>
           {session ? (
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="min-w-0">
@@ -128,7 +128,7 @@ export const FondoEChiusura: React.FC<FondoEChiusuraProps> = ({
                       disabled={busy}
                       className="h-12 rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] px-4 text-[14px] font-semibold text-[var(--ds-action-fg)] disabled:opacity-40"
                     >
-                      Salva
+                      {t('save')}
                     </button>
                   </div>
                 ) : (
@@ -137,7 +137,7 @@ export const FondoEChiusura: React.FC<FondoEChiusuraProps> = ({
                     onClick={() => { setFloatText((session.opening_float_cents / 100).toFixed(2)); setEditingFloat(true); }}
                     className="inline-flex h-11 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]"
                   >
-                    Modifica
+                    {t('edit')}
                   </button>
                 )
               )}
@@ -145,13 +145,13 @@ export const FondoEChiusura: React.FC<FondoEChiusuraProps> = ({
           ) : (
             <div className="space-y-3">
               <p className="text-[14px] text-[var(--ds-text-muted)]">
-                Nessun fondo dichiarato per questo servizio.
+                {t('noFloatDeclared')}
               </p>
               {canClose && (
                 <div className="flex items-end gap-2">
                   <label className="block flex-1 max-w-[200px]">
                     <span className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">
-                      Contante all'apertura
+                      {t('cashAtOpening')}
                     </span>
                     <div className="relative">
                       <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[17px] text-[var(--ds-text-muted)]">{moneySymbol()}</span>
@@ -168,7 +168,7 @@ export const FondoEChiusura: React.FC<FondoEChiusuraProps> = ({
                     disabled={busy}
                     className="h-12 rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] px-5 text-[15px] font-semibold text-[var(--ds-action-fg)] disabled:opacity-40"
                   >
-                    Apri la cassa
+                    {t('openTill')}
                   </button>
                 </div>
               )}
@@ -202,21 +202,21 @@ export const FondoEChiusura: React.FC<FondoEChiusuraProps> = ({
 
             {out && (out.deposits_cents > 0 || out.omaggio_cents > 0 || out.sospeso_cents > 0 || out.voided_cents > 0) && (
               <div className="mt-4 space-y-1.5 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3 text-[13px]">
-                <div className="font-semibold text-[var(--ds-text-secondary)]">Fuori dai totali</div>
+                <div className="font-semibold text-[var(--ds-text-secondary)]">{t('outOfTotals')}</div>
                 <div className="flex justify-between gap-2">
-                  <span className="text-[var(--ds-text-secondary)]">Caparre a credito · {out.deposits_count}</span>
+                  <span className="text-[var(--ds-text-secondary)]">{t('depositsAsCredit', { n: out.deposits_count })}</span>
                   <span className="tabular-nums text-[var(--ds-text-secondary)]">{euro(out.deposits_cents)}</span>
                 </div>
                 <div className="flex justify-between gap-2">
-                  <span className="text-[var(--ds-text-secondary)]">Omaggio</span>
+                  <span className="text-[var(--ds-text-secondary)]">{t('freebie')}</span>
                   <span className="tabular-nums text-[var(--ds-text-secondary)]">{euro(out.omaggio_cents)}</span>
                 </div>
                 <div className="flex justify-between gap-2">
-                  <span className="text-[var(--ds-text-secondary)]">Sospeso</span>
+                  <span className="text-[var(--ds-text-secondary)]">{t('onAccount')}</span>
                   <span className="tabular-nums text-[var(--ds-text-secondary)]">{euro(out.sospeso_cents)}</span>
                 </div>
                 <div className="flex justify-between gap-2">
-                  <span className="text-[var(--ds-critical-text)]">Storni · {out.voided_count}</span>
+                  <span className="text-[var(--ds-critical-text)]">{t('voidedCount', { n: out.voided_count })}</span>
                   <span className="tabular-nums text-[var(--ds-critical-text)]">−{euro(out.voided_cents)}</span>
                 </div>
               </div>
@@ -227,7 +227,7 @@ export const FondoEChiusura: React.FC<FondoEChiusuraProps> = ({
           <FormCard title={t('cashInDrawer')}>
             <dl className="space-y-1.5 text-[14px]">
               <div className="flex justify-between gap-2">
-                <dt className="text-[var(--ds-text-secondary)]">Fondo di apertura</dt>
+                <dt className="text-[var(--ds-text-secondary)]">{t('openingFloat')}</dt>
                 <dd className="tabular-nums text-[var(--ds-text-secondary)]">
                   {euro(session?.opening_float_cents ?? 0)}
                 </dd>
@@ -237,7 +237,7 @@ export const FondoEChiusura: React.FC<FondoEChiusuraProps> = ({
                 <dd className="tabular-nums text-[var(--ds-text-secondary)]">{euro(view?.cash_cents ?? 0)}</dd>
               </div>
               <div className="flex justify-between gap-2 border-t border-[var(--ds-border)] pt-2 text-[16px] font-semibold">
-                <dt className="text-[var(--ds-text-primary)]">Atteso</dt>
+                <dt className="text-[var(--ds-text-primary)]">{t('expected')}</dt>
                 <dd className="tabular-nums text-[var(--ds-text-primary)]">{euro(expected)}</dd>
               </div>
             </dl>
@@ -246,7 +246,7 @@ export const FondoEChiusura: React.FC<FondoEChiusuraProps> = ({
               <div className="mt-4 space-y-2">
                 <dl className="space-y-1.5 text-[14px]">
                   <div className="flex justify-between gap-2">
-                    <dt className="text-[var(--ds-text-secondary)]">Contato</dt>
+                    <dt className="text-[var(--ds-text-secondary)]">{t('counted')}</dt>
                     <dd className="tabular-nums text-[var(--ds-text-primary)]">{euro(session!.counted_cents ?? 0)}</dd>
                   </div>
                 </dl>
@@ -256,7 +256,7 @@ export const FondoEChiusura: React.FC<FondoEChiusuraProps> = ({
                 }`}>
                   <div className="flex justify-between gap-2 text-[15px] font-semibold">
                     <span className={(session!.difference_cents ?? 0) === 0 ? 'text-[var(--ds-seated-text)]' : 'text-[var(--ds-critical-text)]'}>
-                      Differenza
+                      {t('difference')}
                     </span>
                     <span className={`tabular-nums ${(session!.difference_cents ?? 0) === 0 ? 'text-[var(--ds-seated-text)]' : 'text-[var(--ds-critical-text)]'}`}>
                       {(session!.difference_cents ?? 0) > 0 ? '+' : ''}{euro(session!.difference_cents ?? 0)}
@@ -275,14 +275,14 @@ export const FondoEChiusura: React.FC<FondoEChiusuraProps> = ({
                     onClick={onOpenGiornale}
                     className="inline-flex min-h-[44px] items-center text-[14px] font-semibold text-[var(--ds-text-primary)] underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
-                    Chiusura del giorno in Pagamenti
+                    {t('dayCloseInPayments')}
                   </button>
                 )}
               </div>
             ) : session && canClose ? (
               <div className="mt-4 space-y-3">
                 <label className="block">
-                  <span className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Contato</span>
+                  <span className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{t('counted')}</span>
                   <div className="relative">
                     <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[17px] text-[var(--ds-text-muted)]">{moneySymbol()}</span>
                     <input
@@ -297,7 +297,7 @@ export const FondoEChiusura: React.FC<FondoEChiusuraProps> = ({
                   <div className={`rounded-[var(--ds-radius)] p-3 ${difference === 0 ? 'bg-[var(--ds-seated-tint)]' : 'bg-[var(--ds-critical-tint)]'}`}>
                     <div className="flex justify-between gap-2 text-[15px] font-semibold">
                       <span className={difference === 0 ? 'text-[var(--ds-seated-text)]' : 'text-[var(--ds-critical-text)]'}>
-                        Differenza
+                        {t('difference')}
                       </span>
                       <span className={`tabular-nums ${difference === 0 ? 'text-[var(--ds-seated-text)]' : 'text-[var(--ds-critical-text)]'}`}>
                         {difference > 0 ? '+' : ''}{euro(difference)}
@@ -316,17 +316,15 @@ export const FondoEChiusura: React.FC<FondoEChiusuraProps> = ({
                       className="w-full rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] p-3 text-[14px] text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]"
                     />
                     <span className="mt-1 block text-[12px] text-[var(--ds-text-muted)]">
-                      Resta a registro con il tuo nome.
+                      {t('noteOnRecord')}
                     </span>
                   </label>
                 )}
 
                 {open && open.count > 0 && (
                   <Callout tone="pending">
-                    {open.count === 1
-                      ? `1 tavolo è ancora da incassare per ${euro(open.residual_cents)}.`
-                      : `${open.count} tavoli sono ancora da incassare per ${euro(open.residual_cents)}.`}
-                    {' '}La cassa si chiude comunque, ma quei conti restano aperti nel servizio.
+                    {t('openTablesLeft', { count: open.count, importo: euro(open.residual_cents) })}
+                    {' '}{t('closesAnyway')}
                   </Callout>
                 )}
 
@@ -337,16 +335,16 @@ export const FondoEChiusura: React.FC<FondoEChiusuraProps> = ({
                   className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
                 >
                   {busy && <Loader2 size={16} className="animate-spin" />}
-                  Chiudi la cassa del servizio
+                  {t('closeServiceTill')}
                 </button>
               </div>
             ) : !session ? (
               <p className="mt-4 text-[13px] text-[var(--ds-text-muted)]">
-                Il conteggio si fa dopo aver dichiarato il fondo.
+                {t('countAfterFloat')}
               </p>
             ) : (
               <p className="mt-4 text-[13px] text-[var(--ds-text-muted)]">
-                La chiusura del cassetto è riservata alla direzione.
+                {t('drawerForManagers')}
               </p>
             )}
           </FormCard>
