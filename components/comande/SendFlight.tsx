@@ -3,13 +3,13 @@ import { createPortal } from 'react-dom';
 import { BottleWine, CakeSlice, Soup } from 'lucide-react';
 
 /* ── SendFlight ───────────────────────────────────────────────────────────
-   Dopo l'Invia il palmare esce dal tavolo e torna alla griglia: il bottone
-   sparisce nello stesso istante in cui la comanda parte. Il piattino (e la
-   bottiglia, e la fetta di torta) che attraversano il posto dove stava il
-   bottone sono la ricevuta visiva di COSA è partito — cucina, bar, dolci —
-   senza leggere il toast. Vive in un portale, a posizione fissa sul
-   rettangolo del bottone preso al tocco, così sopravvive allo smontaggio
-   della vista tavolo. Decorativo: con riduzione del movimento non si vede. */
+   Dopo l'Invia il piattino (e la bottiglia, e la fetta di torta) attraversano
+   il bottone appena premuto: la ricevuta visiva di COSA è partito — cucina,
+   bar, dolci — senza leggere il toast. Sta sulla comanda ancora aperta; a
+   volo finito `onDone` chiude il tavolo e si torna alla griglia. Portale a
+   posizione fissa sul rettangolo del bottone preso al tocco, così non
+   dipende da dove il bottone sta nell'albero (colonna, foglio, pagina).
+   Con riduzione del movimento non si monta: si torna ai tavoli subito. */
 
 export type SendKind = 'food' | 'drink' | 'dessert';
 
@@ -47,28 +47,34 @@ export const SendFlight: React.FC<{ flight: SendFlightData; onDone: () => void }
   const dist = Math.max(0, width - CHIP);
 
   return createPortal(
-    <div
-      aria-hidden
-      className="pointer-events-none fixed z-[100]"
-      style={{ left, top: from.top + from.height / 2 - CHIP / 2, width, height: CHIP }}
-    >
-      {kinds.map((kind, i) => {
-        const { icon: Icon, chip } = KIND_CHROME[kind];
-        return (
-          <span
-            key={kind}
-            className={`ds-send-flight absolute left-0 top-0 inline-flex h-9 w-9 items-center justify-center rounded-full shadow-[var(--ds-shadow-raised)] ${chip}`}
-            style={{
-              '--send-flight-dist': `${dist}px`,
-              animationDelay: `${i * STAGGER_MS}ms`,
-              animationDuration: `${FLIGHT_MS}ms`,
-            } as React.CSSProperties}
-          >
-            <Icon size={18} strokeWidth={2} />
-          </span>
-        );
-      })}
-    </div>,
+    <>
+      {/* Per il secondo del volo la comanda è già partita e sta per chiudersi:
+          un tocco qui (un altro piatto, «Conto») finirebbe su un tavolo che
+          sparisce sotto il dito. Velo trasparente, niente da vedere. */}
+      <div aria-hidden className="fixed inset-0 z-[99]" />
+      <div
+        aria-hidden
+        className="pointer-events-none fixed z-[100]"
+        style={{ left, top: from.top + from.height / 2 - CHIP / 2, width, height: CHIP }}
+      >
+        {kinds.map((kind, i) => {
+          const { icon: Icon, chip } = KIND_CHROME[kind];
+          return (
+            <span
+              key={kind}
+              className={`ds-send-flight absolute left-0 top-0 inline-flex h-9 w-9 items-center justify-center rounded-full shadow-[var(--ds-shadow-raised)] ${chip}`}
+              style={{
+                '--send-flight-dist': `${dist}px`,
+                animationDelay: `${i * STAGGER_MS}ms`,
+                animationDuration: `${FLIGHT_MS}ms`,
+              } as React.CSSProperties}
+            >
+              <Icon size={18} strokeWidth={2} />
+            </span>
+          );
+        })}
+      </div>
+    </>,
     document.body,
   );
 };

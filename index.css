@@ -1184,7 +1184,7 @@ body {
   animation-fill-mode: both;
 }
 
-/* Decorativo: il toast dice già cosa è partito. */
+/* Decorativo: il toast dice già cosa è partito (e OrderPad non monta il volo). */
 @media (prefers-reduced-motion: reduce) {
   .ds-send-flight { display: none; }
 }
