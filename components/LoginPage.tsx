@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import React, { useState, useEffect } from 'react';
 import { AlertCircle, Loader2, Eye, EyeOff, Check, CheckCircle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
@@ -21,26 +22,28 @@ const SAVED_CREDENTIALS_KEY = 'ristocrm_saved_credentials';
    Callout di form, come nel flusso di recupero. */
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-const validateEmail = (value: string): string => {
-  if (!value.trim()) return 'Inserisci la tua email.';
-  if (!EMAIL_RE.test(value.trim())) return 'Email non valida. Controlla il formato (esempio: nome@dominio.it).';
+type TFunc = (key: string) => string;
+
+const validateEmail = (value: string, t: TFunc): string => {
+  if (!value.trim()) return t('err.emailMissing');
+  if (!EMAIL_RE.test(value.trim())) return t('err.emailInvalid');
   return '';
 };
 
 // Sul login si controlla solo che ci sia: la lunghezza minima la impone il
 // reset, e un account storico con una password più corta deve poter entrare.
-const validateCurrentPassword = (value: string): string =>
-  value ? '' : 'Inserisci la password.';
+const validateCurrentPassword = (value: string, t: TFunc): string =>
+  value ? '' : t('err.passwordMissing');
 
-const validateNewPassword = (value: string): string => {
-  if (!value) return 'Scegli una password.';
-  if (value.length < 8) return 'La password deve avere almeno 8 caratteri.';
+const validateNewPassword = (value: string, t: TFunc): string => {
+  if (!value) return t('err.newPasswordMissing');
+  if (value.length < 8) return t('err.passwordTooShort');
   return '';
 };
 
-const validateConfirmPassword = (value: string, against: string): string => {
-  if (!value) return 'Ripeti la nuova password.';
-  if (value !== against) return 'Le due password non coincidono.';
+const validateConfirmPassword = (value: string, against: string, t: TFunc): string => {
+  if (!value) return t('err.repeatPassword');
+  if (value !== against) return t('err.passwordsDiffer');
   return '';
 };
 
@@ -60,6 +63,7 @@ const revealClass =
   'absolute inset-y-0 right-0 pr-4 flex items-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] transition-colors duration-150 disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
 export const LoginPage: React.FC = () => {
+  const { t } = useTranslation('login', { useSuspense: false });
   const { login } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -107,7 +111,7 @@ export const LoginPage: React.FC = () => {
     e.preventDefault();
     // Submit vale come "campo lasciato": se era invalido, l'errore compare ora.
     setTouched((t) => ({ ...t, forgotEmail: true }));
-    if (validateEmail(forgotEmail)) return;
+    if (validateEmail(forgotEmail, t)) return;
     setError('');
     setIsLoading(true);
     try {
@@ -117,7 +121,7 @@ export const LoginPage: React.FC = () => {
       setForgotSent(true);
     } catch (err: any) {
       // Solo rate limit o rete: la risposta non dice mai se l'account esiste.
-      setError(err?.data?.message || 'Richiesta non riuscita, riprova tra qualche minuto.');
+      setError(err?.data?.message || t('err.requestFailed'));
     } finally {
       setIsLoading(false);
     }
@@ -129,7 +133,7 @@ export const LoginPage: React.FC = () => {
     // l'input che li causa. Al Callout resta solo la risposta del server
     // (token scaduto, rete).
     setTouched((t) => ({ ...t, newPassword: true, confirmPassword: true }));
-    if (validateNewPassword(newPassword) || validateConfirmPassword(confirmPassword, newPassword)) return;
+    if (validateNewPassword(newPassword, t) || validateConfirmPassword(confirmPassword, newPassword, t)) return;
     setError('');
     setIsLoading(true);
     try {
@@ -140,10 +144,10 @@ export const LoginPage: React.FC = () => {
       setNewPassword('');
       setConfirmPassword('');
       setTouched({});
-      setInfo('Password aggiornata. Accedi con la nuova password.');
+      setInfo(t('passwordUpdated'));
       setMode('login');
     } catch (err: any) {
-      setError(err?.data?.message || 'Il link non è più valido. Richiedi un nuovo reset.');
+      setError(err?.data?.message || t('err.linkExpired'));
     } finally {
       setIsLoading(false);
     }
@@ -161,7 +165,7 @@ export const LoginPage: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setTouched((t) => ({ ...t, email: true, password: true }));
-    if (validateEmail(email) || validateCurrentPassword(password)) return;
+    if (validateEmail(email, t) || validateCurrentPassword(password, t)) return;
     setError('');
     setInfo('');
     setIsLoading(true);
@@ -177,7 +181,7 @@ export const LoginPage: React.FC = () => {
         localStorage.removeItem(SAVED_CREDENTIALS_KEY);
       }
     } catch (err: any) {
-      setError(err.message || 'Credenziali non valide');
+      setError(err.message || t('err.badCredentials'));
     } finally {
       setIsLoading(false);
     }
@@ -189,16 +193,16 @@ export const LoginPage: React.FC = () => {
   // appena correggi invece di aspettare il blur successivo.
   const shown = (name: string, message: string) => (touched[name] ? message : '');
 
-  const emailError = validateEmail(email);
-  const passwordError = validateCurrentPassword(password);
+  const emailError = validateEmail(email, t);
+  const passwordError = validateCurrentPassword(password, t);
   const emailErr = shown('email', emailError);
   const passwordErr = shown('password', passwordError);
 
-  const forgotEmailError = validateEmail(forgotEmail);
+  const forgotEmailError = validateEmail(forgotEmail, t);
   const forgotEmailErr = shown('forgotEmail', forgotEmailError);
 
-  const newPasswordError = validateNewPassword(newPassword);
-  const confirmPasswordError = validateConfirmPassword(confirmPassword, newPassword);
+  const newPasswordError = validateNewPassword(newPassword, t);
+  const confirmPasswordError = validateConfirmPassword(confirmPassword, newPassword, t);
   const newPasswordErr = shown('newPassword', newPasswordError);
   const confirmPasswordErr = shown('confirmPassword', confirmPasswordError);
 
@@ -248,13 +252,11 @@ export const LoginPage: React.FC = () => {
                 ? 'sr-only'
                 : 'mt-10 text-[26px] leading-[32px] font-semibold tracking-tight text-[var(--ds-text-primary)] text-center mb-1.5'}
             >
-              {mode === 'forgot' ? 'Recupera la password'
-                : mode === 'reset' ? 'Scegli una nuova password'
-                : 'Accedi al tuo ristorante'}
+              {t(mode === 'forgot' ? 'title.forgot' : mode === 'reset' ? 'title.reset' : 'title.login')}
             </h1>
             {mode !== 'login' && (
               <p className="text-[15px] leading-[22px] text-[var(--ds-text-secondary)] text-center mb-8">
-                {mode === 'forgot' ? 'Ti mandiamo un link per sceglierne una nuova.' : 'Minimo 8 caratteri.'}
+                {t(mode === 'forgot' ? 'sub.forgot' : 'sub.reset')}
               </p>
             )}
             {mode === 'login' && <div className="mb-10" />}
@@ -266,12 +268,12 @@ export const LoginPage: React.FC = () => {
                       la UI non conferma mai quali indirizzi hanno un account. */}
                   <div role="status">
                     <Callout tone="positive" icon={CheckCircle}>
-                      Se l'indirizzo esiste, riceverai un'email con il link per reimpostare la password. Il link vale 1 ora.
+                      {t('resetSent')}
                     </Callout>
                   </div>
                   <div className="text-center">
                     <button type="button" onClick={goToLogin} className={linkClass}>
-                      Torna al login
+                      {t('backToLogin')}
                     </button>
                   </div>
                 </div>
@@ -280,7 +282,7 @@ export const LoginPage: React.FC = () => {
                   {errorCallout}
 
                   <Field htmlFor="forgot-email" error={forgotEmailErr}>
-                    <label htmlFor="forgot-email" className="sr-only">Email</label>
+                    <label htmlFor="forgot-email" className="sr-only">{t('email')}</label>
                     <input
                       id="forgot-email"
                       type="email"
@@ -288,7 +290,7 @@ export const LoginPage: React.FC = () => {
                       value={forgotEmail}
                       onChange={(e) => setForgotEmail(e.target.value)}
                       onBlur={() => markTouched('forgotEmail')}
-                      placeholder="Email"
+                      placeholder={t('email')}
                       className={`${dsInput} ${forgotEmailErr ? dsInputError : ''}`}
                       required
                       aria-invalid={!!forgotEmailErr}
@@ -302,16 +304,16 @@ export const LoginPage: React.FC = () => {
                     {isLoading ? (
                       <>
                         <Loader2 className="h-4 w-4 animate-spin" />
-                        Invio in corso...
+                        {t('sending')}
                       </>
                     ) : (
-                      'Invia il link'
+                      t('sendLink')
                     )}
                   </button>
 
                   <div className="text-center mt-3">
                     <button type="button" onClick={goToLogin} disabled={isLoading} className={linkClass}>
-                      Torna al login
+                      {t('backToLogin')}
                     </button>
                   </div>
                 </form>
@@ -323,7 +325,7 @@ export const LoginPage: React.FC = () => {
                 {errorCallout}
 
                 <Field htmlFor="new-password" error={newPasswordErr}>
-                  <label htmlFor="new-password" className="sr-only">Nuova password</label>
+                  <label htmlFor="new-password" className="sr-only">{t('newPassword')}</label>
                   <div className="relative">
                     <input
                       id="new-password"
@@ -332,7 +334,7 @@ export const LoginPage: React.FC = () => {
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
                       onBlur={() => markTouched('newPassword')}
-                      placeholder="Nuova password"
+                      placeholder={t('newPassword')}
                       className={`${dsInput} pr-12 ${newPasswordErr ? dsInputError : ''}`}
                       required
                       minLength={8}
@@ -346,7 +348,7 @@ export const LoginPage: React.FC = () => {
                       onClick={() => setShowNewPassword((p) => !p)}
                       disabled={isLoading}
                       className={revealClass}
-                      aria-label={showNewPassword ? 'Nascondi password' : 'Mostra password'}
+                      aria-label={t(showNewPassword ? 'hidePassword' : 'showPassword')}
                       tabIndex={-1}
                     >
                       {showNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -355,7 +357,7 @@ export const LoginPage: React.FC = () => {
                 </Field>
 
                 <Field htmlFor="confirm-password" error={confirmPasswordErr}>
-                  <label htmlFor="confirm-password" className="sr-only">Conferma password</label>
+                  <label htmlFor="confirm-password" className="sr-only">{t('confirmPassword')}</label>
                   <input
                     id="confirm-password"
                     type={showNewPassword ? 'text' : 'password'}
@@ -363,7 +365,7 @@ export const LoginPage: React.FC = () => {
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     onBlur={() => markTouched('confirmPassword')}
-                    placeholder="Conferma password"
+                    placeholder={t('confirmPassword')}
                     className={`${dsInput} ${confirmPasswordErr ? dsInputError : ''}`}
                     required
                     minLength={8}
@@ -377,10 +379,10 @@ export const LoginPage: React.FC = () => {
                   {isLoading ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      Salvataggio...
+                      {t('saving')}
                     </>
                   ) : (
-                    'Salva la nuova password'
+                    t('saveNewPassword')
                   )}
                 </button>
 
@@ -394,7 +396,7 @@ export const LoginPage: React.FC = () => {
                     disabled={isLoading}
                     className={linkClass}
                   >
-                    Torna al login
+                    {t('backToLogin')}
                   </button>
                 </div>
               </form>
@@ -415,7 +417,7 @@ export const LoginPage: React.FC = () => {
 
               {/* Email */}
               <Field htmlFor="email" error={emailErr}>
-                <label htmlFor="email" className="sr-only">Email</label>
+                <label htmlFor="email" className="sr-only">{t('email')}</label>
                 <input
                   id="email"
                   type="email"
@@ -423,7 +425,7 @@ export const LoginPage: React.FC = () => {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   onBlur={() => markTouched('email')}
-                  placeholder="Email"
+                  placeholder={t('email')}
                   className={`${dsInput} ${emailErr ? dsInputError : ''}`}
                   required
                   aria-invalid={!!emailErr}
@@ -434,7 +436,7 @@ export const LoginPage: React.FC = () => {
 
               {/* Password */}
               <Field htmlFor="password" error={passwordErr}>
-                <label htmlFor="password" className="sr-only">Password</label>
+                <label htmlFor="password" className="sr-only">{t('password')}</label>
                 <div className="relative">
                   <input
                     id="password"
@@ -443,7 +445,7 @@ export const LoginPage: React.FC = () => {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     onBlur={() => markTouched('password')}
-                    placeholder="Password"
+                    placeholder={t('password')}
                     className={`${dsInput} pr-12 ${passwordErr ? dsInputError : ''}`}
                     required
                     aria-invalid={!!passwordErr}
@@ -455,7 +457,7 @@ export const LoginPage: React.FC = () => {
                     onClick={() => setShowPassword((p) => !p)}
                     disabled={isLoading}
                     className={revealClass}
-                    aria-label={showPassword ? 'Nascondi password' : 'Mostra password'}
+                    aria-label={t(showPassword ? 'hidePassword' : 'showPassword')}
                     tabIndex={-1}
                   >
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -487,7 +489,7 @@ export const LoginPage: React.FC = () => {
                   />
                 </span>
                 <span className="text-[13px] leading-[18px] text-[var(--ds-text-secondary)]">
-                  Ricorda le mie credenziali
+                  {t('rememberMe')}
                 </span>
               </label>
 
@@ -496,10 +498,10 @@ export const LoginPage: React.FC = () => {
                 {isLoading ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    Accesso in corso...
+                    {t('signingIn')}
                   </>
                 ) : (
-                  'Accedi'
+                  t('signIn')
                 )}
               </button>
 
@@ -519,7 +521,7 @@ export const LoginPage: React.FC = () => {
                   }}
                   className={linkClass}
                 >
-                  Password dimenticata?
+                  {t('forgotPassword')}
                 </button>
               </div>
             </form>
