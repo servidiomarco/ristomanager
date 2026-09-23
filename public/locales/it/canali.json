@@ -369,5 +369,28 @@
     "testButton": "Invia test",
     "saveFirst": "Salva prima una configurazione completa per poter inviare un test.",
     "adminsOnly": "Solo gli amministratori possono modificare la configurazione."
+  },
+  "vu": {
+    "title": "Minuti di Sofia",
+    "plan": "{{price}} al mese · {{included}} minuti inclusi · poi {{overage}} al minuto",
+    "used": "{{used}} / {{included}} minuti",
+    "projected": "A questo ritmo circa {{minutes}} minuti a fine mese",
+    "noProjection": "Stima a fine mese non ancora disponibile",
+    "calls": "Chiamate",
+    "bookings": "Prenotazioni",
+    "extra": "Extra",
+    "daily": "Minuti al giorno",
+    "dayTip": "{{day}}: {{minutes}} min, {{calls}} chiamate",
+    "overCap": "Gli extra hanno raggiunto il tetto di {{cap}}: alzalo per non perdere prenotazioni.",
+    "capLabel": "Tetto di spesa per i minuti extra",
+    "capHint": "Al mese, oltre il canone. 0 = nessun minuto extra.",
+    "capInvalid": "Inserisci un importo da 0 a 1.000 €.",
+    "capSaved": "Tetto aggiornato",
+    "save": "Salva",
+    "loading": "Caricamento…",
+    "err": {
+      "load": "Errore nel caricamento dei minuti",
+      "save": "Salvataggio non riuscito"
+    }
   }
 }

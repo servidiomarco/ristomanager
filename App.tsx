@@ -46,6 +46,7 @@ import { PushNotificationsCard } from './components/PushNotificationsCard';
 import { StaffChatPresetsCard } from './components/StaffChatPresetsCard';
 import { OpeningHoursManager } from './components/OpeningHoursManager';
 import { FeatureTogglesManager } from './components/FeatureTogglesManager';
+import { VoiceUsageCard } from './components/VoiceUsageCard';
 import { ScheduledClosuresManager } from './components/ScheduledClosuresManager';
 import { RemindersManager } from './components/RemindersManager';
 import { ReservationNotesManager } from './components/ReservationNotesManager';
@@ -3551,6 +3552,13 @@ const App: React.FC = () => {
             <SettingsSection id="imp-ai" label="AI">
               <div className="space-y-3">
                 <FeatureTogglesManager showToast={addToast} only="voice" />
+                {/* Minuti del mese contro quelli inclusi nell'add-on e tetto
+                    degli extra: solo per chi ha Sofia. */}
+                {hasFeature('voice') && (
+                  <CardErrorBoundary label={t('settings.voiceUsage', 'Minuti di Sofia')}>
+                    <VoiceUsageCard showToast={addToast} />
+                  </CardErrorBoundary>
+                )}
                 <CardErrorBoundary label={t('settings.aiMessages')}>
                   <AiMessagesSettingsManager showToast={addToast} />
                 </CardErrorBoundary>

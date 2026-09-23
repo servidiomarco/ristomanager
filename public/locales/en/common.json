@@ -133,7 +133,8 @@
     "activityLogHint": "What users did",
     "tabAi": "AI",
     "floorAndKitchen": "Floor & kitchen",
-    "autoDepositHint": "For web bookings above a set number of covers, sends a Revolut deposit link (€10 per person) by SMS."
+    "autoDepositHint": "For web bookings above a set number of covers, sends a Revolut deposit link (€10 per person) by SMS.",
+    "voiceUsage": "Sofia minutes"
   },
   "aria": {
     "openMenu": "Open menu",

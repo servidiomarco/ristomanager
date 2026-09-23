@@ -1353,6 +1353,50 @@ export const updateChannelSettings = async (updates: Partial<ChannelSettings>): 
 };
 
 // ============================================
+// MINUTI DI SOFIA (piano e consumi del mese)
+// ============================================
+export interface VoicePlanInfo {
+  priceCents: number;
+  includedMinutes: number;
+  overageCentsPerMinute: number;
+  /** Tetto di spesa per gli extra del mese, scelto dal ristoratore. */
+  extraCapCents: number;
+  /** true se il ristorante ha un piano diverso dal listino. */
+  custom: boolean;
+}
+
+export interface VoiceMonthUsageInfo {
+  month: string;
+  calls: number;
+  billable_minutes: number;
+  projected_minutes: number;
+  extra_minutes: number;
+  extra_cents: number;
+  over_cap: boolean;
+  bookings: number;
+  daily: { day: string; calls: number; billable_minutes: number }[];
+}
+
+export interface VoiceUsageResponse {
+  plan: VoicePlanInfo;
+  month: VoiceMonthUsageInfo;
+}
+
+export const getVoiceUsage = async (): Promise<VoiceUsageResponse> => {
+  return apiRequest<VoiceUsageResponse>(`${API_URL}/voice-usage`, {
+    headers: getHeaders(false),
+  });
+};
+
+export const updateVoiceExtraCap = async (extraCapCents: number): Promise<VoiceUsageResponse> => {
+  return apiRequest<VoiceUsageResponse>(`${API_URL}/voice-usage/cap`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify({ extra_cap_cents: extraCapCents }),
+  });
+};
+
+// ============================================
 // INTEGRATION SETTINGS (Revolut)
 // ============================================
 export type RevolutEnvironment = 'sandbox' | 'production';
@@ -1876,6 +1920,9 @@ export interface AdminTenant {
   /** Sofia nel mese in corso (minuti conteggiati, costo ElevenLabs, ricavo
    *  stimato sul piano di default). null = nessuna chiamata; assente dai
    *  server precedenti alla Fase 1. */
+  /** Piano dei minuti di Sofia effettivo (listino + eccezioni). Assente dai
+   *  server precedenti alla Fase 2. */
+  voice_plan?: VoicePlanInfo;
   voice_month?: {
     calls: number;
     billable_minutes: number;
@@ -1910,6 +1957,18 @@ export interface AdminTenantProvisioned {
   print_agent_token: string;
   booking_url: string;
 }
+
+// Piano dei minuti di Sofia di un ristorante (null = listino).
+export const adminUpdateVoicePlan = async (
+  id: number,
+  plan: { price_cents: number | null; included_minutes: number | null; overage_cents_per_minute: number | null },
+): Promise<VoicePlanInfo> => {
+  return apiRequest<VoicePlanInfo>(`${API_URL}/admin/tenants/${id}/voice-plan`, {
+    method: 'PATCH',
+    headers: getHeaders(),
+    body: JSON.stringify(plan),
+  });
+};
 
 export const adminListTenants = async (): Promise<AdminTenant[]> => {
   return apiRequest<AdminTenant[]>(`${API_URL}/admin/tenants`, {

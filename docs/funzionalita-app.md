@@ -168,6 +168,12 @@ Agente conversazionale AI (ElevenLabs) che **risponde al telefono del ristorante
 **Controllo operativo**
 - Interruttore on/off, sospensione immediata ("richiamare dopo le ..."), **sospensioni programmate** per data/turno/fascia oraria, giorni gestiti solo da operatore.
 
+**Minuti inclusi e consumi**
+- L'add-on include un pacchetto di **minuti di conversazione al mese** (listino: 49 €/mese, 250 minuti, poi 0,20 € al minuto; le chiamate sotto i 10 secondi non contano). La piattaforma può fare un piano su misura per singolo ristorante.
+- In **Impostazioni → AI** la card «Minuti di Sofia» mostra i minuti del mese contro quelli inclusi, la stima a fine mese al ritmo attuale, chiamate e prenotazioni prese da Sofia, gli extra maturati e un grafico dei minuti al giorno.
+- Il ristoratore sceglie il **tetto di spesa per i minuti extra** del mese (default 50 €, 0 = nessun extra).
+- **Avvisi** push al titolare e alla direzione (ed email al titolare) all'80% e al 100% dei minuti inclusi e all'80% e al 100% del tetto, una volta per soglia al mese.
+
 **Sezione Chiamate nel CRM**
 - Elenco chiamate con schede Tutte / Da ricontattare / Ricontattati / Con prenotazione.
 - Per ogni chiamata: **riassunto AI, trascrizione completa, registrazione audio** riascoltabile, durata, esito.
@@ -661,6 +667,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-23 | Agente vocale "Sofia"; Impostazioni | Minuti di Sofia: card in Impostazioni → AI con minuti del mese contro i 250 inclusi, stima a fine mese, prenotazioni prese da Sofia, extra e grafico giornaliero; tetto di spesa degli extra scelto dal ristoratore; avvisi all'80% e al 100% dei minuti inclusi e del tetto; piano su misura per ristorante dal pannello Piattaforma. |
 | 2026-09-23 | Lista della spesa | Con la lingua inglese parla inglese la lista della spesa: aggiungi prodotto con i suoi quattro controlli e i suggerimenti, le righe con spunta e swipe, la scheda di modifica, la colonna «Per fornitore», il pane di oggi e la modalità selezione. Il foglio stampato e il messaggio al fornitore restano in italiano (cantiere della stampa, a parte). |
 | 2026-09-23 | Primo accesso | Il wizard di primo accesso parla la lingua dell'operatore: i quattro passi, i dati del ristorante, sale e tavoli, orari e menu minimo. Le categorie dei piatti si salvano nella lingua della casa («Starters», non «Antipasti»), e i nomi dei giorni vengono dalla lingua. |
 | 2026-09-23 | Impostazioni | Nella card legale i due bottoni del logo e gli esempi dentro i campi seguono la lingua (un indirizzo di Lucca non aiuta chi apre a Londra). I documenti generati — informativa privacy, cookie policy, termini — restano in italiano: citano il GDPR per articolo e il D.Lgs. 196/2003, e tradurli a metà sarebbe peggio che lasciarli. |

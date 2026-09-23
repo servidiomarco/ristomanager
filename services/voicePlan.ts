@@ -1,9 +1,9 @@
 // Piano dei minuti di Sofia inclusi nell'add-on voce.
 //
-// Fase 1 (settembre 2026): valori unici per tutti i tenant, scritti qui.
-// Servono a misurare — minuti conteggiati, costo, ricavo stimato e margine —
-// prima di fatturare qualcosa. Con la Fase 2 diventano impostazioni per
-// tenant nel DB e questi restano i default.
+// Questi sono i DEFAULT: ogni ristorante può avere una riga in voice_plans
+// che ne sovrascrive alcuni (accordi particolari, tetto scelto dal
+// ristoratore). Una colonna NULL lì vale il valore di qui — cambiare il
+// listino per tutti è cambiare questo file.
 //
 // Numeri decisi il 23/09/2026 sui consumi reali del Vecchio Frantoio
 // (≈ 300 min in un mese normale, 1.048 ad agosto) e su un costo ElevenLabs
@@ -16,7 +16,12 @@ export const VOICE_PLAN_DEFAULTS = {
     includedMinutes: 250,
     /** Prezzo del minuto oltre gli inclusi, in centesimi di euro. */
     overageCentsPerMinute: 20,
-} as const;
+    /** Tetto di spesa per i minuti extra del mese, in centesimi. Lo sceglie
+     *  il ristoratore; 0 = nessun minuto extra. */
+    extraCapCents: 5000,
+};
+
+export type VoicePlan = typeof VOICE_PLAN_DEFAULTS;
 
 /** Le chiamate più corte non si contano: riagganci e chiamate per errore
  *  costano pochi centesimi e contarle farebbe solo discutere. */
@@ -31,9 +36,19 @@ export const BILLABLE_SECONDS_SQL =
 export const billableMinutes = (billableSeconds: number): number =>
     Math.ceil(Math.max(0, billableSeconds) / 60);
 
-/** Ricavo stimato del mese in centesimi: canone + minuti oltre gli inclusi.
- *  Nessun tetto in Fase 1: è una stima di quanto si fatturerebbe. */
-export const estimatedRevenueCents = (minutes: number, plan = VOICE_PLAN_DEFAULTS): number => {
-    const extra = Math.max(0, minutes - plan.includedMinutes);
-    return plan.priceCents + extra * plan.overageCentsPerMinute;
+/** Minuti oltre gli inclusi e quanto valgono, col tetto del ristoratore:
+ *  oltre il tetto i minuti non si fatturano (dalla Fase 4 Sofia si ferma
+ *  prima di arrivarci). */
+export const extraCharge = (minutes: number, plan: VoicePlan = VOICE_PLAN_DEFAULTS) => {
+    const extraMinutes = Math.max(0, minutes - plan.includedMinutes);
+    const rawCents = extraMinutes * plan.overageCentsPerMinute;
+    return {
+        extraMinutes,
+        extraCents: Math.min(rawCents, plan.extraCapCents),
+        overCap: rawCents > plan.extraCapCents,
+    };
 };
+
+/** Ricavo stimato del mese in centesimi: canone + extra entro il tetto. */
+export const estimatedRevenueCents = (minutes: number, plan: VoicePlan = VOICE_PLAN_DEFAULTS): number =>
+    plan.priceCents + extraCharge(minutes, plan).extraCents;

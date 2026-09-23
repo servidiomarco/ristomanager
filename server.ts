@@ -22,7 +22,8 @@ import * as tableAssignmentAgent from './services/tableAssignmentAgent.js';
 import * as aiReport from './services/aiReportService.js';
 import { renderPrenota } from './services/prenotaSeo.js';
 import { COST_USD_SQL, UNPRICED_SQL, USD_EUR } from './services/aiPricing.js';
-import { VOICE_PLAN_DEFAULTS, BILLABLE_SECONDS_SQL, billableMinutes, estimatedRevenueCents } from './services/voicePlan.js';
+import { BILLABLE_SECONDS_SQL, billableMinutes, estimatedRevenueCents } from './services/voicePlan.js';
+import { getVoicePlan, getVoiceMonthUsage, mergeVoicePlan, claimNewVoiceUsageAlerts } from './services/voiceUsage.js';
 import { outboxEnqueueInTx, outboxKick, outboxRegister, startOutboxDispatcher } from './services/outboxService.js';
 import { SERVER_PROFILE, isServiceNode } from './services/topology.js';
 import { scheduleSalaNodeBootstrap } from './services/salaNodeBootstrap.js';
@@ -119,6 +120,8 @@ import {
     sendMail,
     verifySmtpConnection,
     getResendInboundContext,
+    isPlatformMailConfigured,
+    sendPlatformMail,
 } from './services/smtpService.js';
 import {
     parseFromAddress,
@@ -1735,6 +1738,33 @@ app.post('/webhook/t/:tenantToken/elevenlabs/save-callback-request', async (req,
 //   { event: "post_call_transcript", data: { conversation_id, transcript: [...] } }
 // and extract conversation_id / transcript / summary / phone / duration from
 // wherever they live.
+// Avvisi di consumo dei minuti di Sofia al ristoratore: push a titolare e
+// direzione, email ai titolari dal mittente di piattaforma (quello del
+// tenant può non essere configurato). La dedup è in voice_usage_alerts.
+async function notifyVoiceUsageThresholds(tenantId: number): Promise<void> {
+    const claimed = await claimNewVoiceUsageAlerts(tenantId);
+    if (!claimed) return;
+    const owners = isPlatformMailConfigured()
+        ? await queryWithRetry(
+            `SELECT email FROM users WHERE tenant_id = $1 AND role = 'OWNER' AND is_active = TRUE AND email IS NOT NULL`,
+            [tenantId])
+        : { rows: [] as any[] };
+    for (const alert of claimed.alerts) {
+        console.log('[voice-usage] alert', { tenant_id: tenantId, threshold: alert.threshold, minutes: claimed.usage.billable_minutes });
+        await pushSendToRoles(tenantId, ['OWNER', 'GENERAL_MANAGER'], {
+            category: 'voice',
+            title: alert.title,
+            body: alert.body,
+            url: '/?view=SETTINGS',
+            tag: `voice-usage-${claimed.usage.month}-${alert.threshold}`,
+        }, { excludeUserId: null }).catch(err => console.warn('[voice-usage] push failed:', err?.message || err));
+        for (const o of owners.rows) {
+            await sendPlatformMail({ to: o.email, subject: alert.title, text: alert.body })
+                .catch(err => console.warn('[voice-usage] email failed:', err?.message || err));
+        }
+    }
+}
+
 async function handleElevenLabsPostCall(tenantId: number, req: express.Request, res: express.Response): Promise<void> {
     if (!authorizeElevenLabs(req, res)) return;
     const fusoMsg = (await getTenantLocale(tenantId)).timezone;
@@ -1831,6 +1861,11 @@ async function handleElevenLabsPostCall(tenantId: number, req: express.Request, 
     } catch (err: any) {
         console.warn('[ElevenLabs] post-call recordVoiceCall failed:', err?.message || err);
     }
+
+    // Minuti di Sofia: avvisi all'80%/100% dei minuti inclusi e del tetto
+    // extra, una volta per soglia per mese. Dopo la risposta, mai bloccante.
+    notifyVoiceUsageThresholds(tenantId).catch(err =>
+        console.warn('[ElevenLabs] post-call usage alerts failed:', err?.message || err));
 
     // Safety net for LLM hallucinations: the agent sometimes says
     // "prenotazione confermata" to the caller without ever invoking
@@ -22776,28 +22811,11 @@ app.get('/ai-usage/elevenlabs', authenticate, requireDevBoardAdmin, async (req, 
             [req.tenantId!]
         );
 
-        // Mese in corso nel fuso del ristorante, contro il piano dei minuti
-        // inclusi (Fase 1: valori di default uguali per tutti, solo misura).
-        const callMonthQ = queryWithRetry(
-            `SELECT COUNT(*)::int AS calls,
-                    COALESCE(SUM(${BILLABLE_SECONDS_SQL}),0)::int AS billable_seconds,
-                    COALESCE(SUM(cost_usd),0)::float AS cost_usd,
-                    COUNT(cost_usd)::int AS priced_calls,
-                    EXTRACT(DAY FROM (NOW() AT TIME ZONE ${TZ}))::int AS day_of_month,
-                    EXTRACT(DAY FROM (date_trunc('month', NOW() AT TIME ZONE ${TZ}) + INTERVAL '1 month - 1 day'))::int AS days_in_month
-             FROM voice_calls
-             WHERE tenant_id = $1
-               AND created_at >= (date_trunc('month', NOW() AT TIME ZONE ${TZ}) AT TIME ZONE ${TZ})`,
-            [req.tenantId!]
-        );
-
-        const [callTotals, callDaily, callAllTime, callMonth] = await Promise.all([callTotalsQ, callDailyQ, callAllTimeQ, callMonthQ]);
-        const m = callMonth.rows[0];
-        const monthMinutes = billableMinutes(Number(m.billable_seconds));
-        // Proiezione lineare a fine mese sul ritmo dei giorni trascorsi.
-        const projectedMinutes = m.day_of_month > 0
-            ? Math.round(monthMinutes / m.day_of_month * m.days_in_month)
-            : monthMinutes;
+        // Mese in corso contro il piano del ristorante (default + voice_plans).
+        const plan = await getVoicePlan(req.tenantId!);
+        const [callTotals, callDaily, callAllTime, month] = await Promise.all([
+            callTotalsQ, callDailyQ, callAllTimeQ, getVoiceMonthUsage(req.tenantId!, plan),
+        ]);
         res.json({
             days,
             subscription,
@@ -22808,19 +22826,62 @@ app.get('/ai-usage/elevenlabs', authenticate, requireDevBoardAdmin, async (req, 
                 daily: callDaily.rows,
                 allTime: callAllTime.rows[0],
             },
-            plan: VOICE_PLAN_DEFAULTS,
-            month: {
-                calls: m.calls,
-                billable_minutes: monthMinutes,
-                projected_minutes: projectedMinutes,
-                cost_usd: Number(m.cost_usd),
-                priced_calls: m.priced_calls,
-                estimated_revenue_cents: estimatedRevenueCents(monthMinutes),
-                projected_revenue_cents: estimatedRevenueCents(projectedMinutes),
-            },
+            plan,
+            month,
         });
     } catch (err) {
         console.error('GET /ai-usage/elevenlabs error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ============================================
+// MINUTI DI SOFIA (piano e consumi del ristorante)
+// ============================================
+// Il ristoratore vede i minuti del mese contro quelli inclusi e sceglie il
+// tetto di spesa per gli extra; prezzo, minuti inclusi e costo al minuto li
+// decide la piattaforma (PATCH /admin/tenants/:id/voice-plan).
+app.get('/voice-usage', authenticate, requireFeature('voice'), requirePermission('settings:view'), async (req, res) => {
+    try {
+        const plan = await getVoicePlan(req.tenantId!);
+        const month = await getVoiceMonthUsage(req.tenantId!, plan);
+        res.json({ plan, month });
+    } catch (err) {
+        console.error('GET /voice-usage error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Tetto oltre il quale gli extra del mese non si fatturano (e dalla Fase 4
+// Sofia smette di prendere prenotazioni). Massimo 1.000 € per non far
+// passare uno zero di troppo.
+const VOICE_CAP_MAX_CENTS = 100000;
+app.put('/voice-usage/cap', authenticate, requireFeature('voice'), requirePermission('settings:full'), async (req, res) => {
+    try {
+        const cents = Number(req.body?.extra_cap_cents);
+        if (!Number.isInteger(cents) || cents < 0 || cents > VOICE_CAP_MAX_CENTS) {
+            return res.status(400).json({ error: 'invalid_value', message: 'Il tetto va da 0 a 1.000 €.' });
+        }
+        await queryWithRetry(
+            `INSERT INTO voice_plans (tenant_id, extra_cap_cents, updated_at, updated_by)
+             VALUES ($1, $2, NOW(), $3)
+             ON CONFLICT (tenant_id) DO UPDATE
+                SET extra_cap_cents = EXCLUDED.extra_cap_cents, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
+            [req.tenantId!, cents, req.user?.userId ?? null]
+        );
+        // Con un tetto nuovo gli avvisi sul tetto del mese ripartono: il
+        // vecchio «80% del tetto» non dice niente sul nuovo.
+        await queryWithRetry(
+            `DELETE FROM voice_usage_alerts
+              WHERE tenant_id = $1 AND threshold IN ('cap_80', 'cap_100')
+                AND month = to_char(date_trunc('month', NOW() AT TIME ZONE $2), 'YYYY-MM-DD')::date`,
+            [req.tenantId!, (await getTenantLocale(req.tenantId!)).timezone]
+        );
+        const plan = await getVoicePlan(req.tenantId!);
+        const month = await getVoiceMonthUsage(req.tenantId!, plan);
+        res.json({ plan, month });
+    } catch (err) {
+        console.error('PUT /voice-usage/cap error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -26805,7 +26866,7 @@ app.get('/admin/tenants', platformAdminAuth, async (_req, res) => {
         );
         // Minuti e costo di Sofia nel mese in corso, nel fuso di ogni tenant:
         // il conto ElevenLabs è unico, il consumo per ristorante esiste solo
-        // in voice_calls. Ricavo stimato sul piano di default (Fase 1).
+        // in voice_calls. Ricavo stimato sul piano di ciascun ristorante.
         const voiceMonth = await queryWithRetry(
             `SELECT vc.tenant_id,
                     COUNT(*)::int AS calls,
@@ -26818,6 +26879,10 @@ app.get('/admin/tenants', platformAdminAuth, async (_req, res) => {
              GROUP BY vc.tenant_id`
         );
         const voiceByTenant = new Map<number, any>(voiceMonth.rows.map((r: any) => [Number(r.tenant_id), r]));
+        const plans = await queryWithRetry(
+            `SELECT tenant_id, price_cents, included_minutes, overage_cents_per_minute, extra_cap_cents FROM voice_plans`
+        );
+        const planRowByTenant = new Map<number, any>(plans.rows.map((p: any) => [Number(p.tenant_id), p]));
         res.json(result.rows.map((r: any) => ({
             id: Number(r.id),
             slug: r.slug,
@@ -26832,18 +26897,20 @@ app.get('/admin/tenants', platformAdminAuth, async (_req, res) => {
             created_at: r.created_at,
             features: r.features,
             user_count: r.user_count,
+            voice_plan: mergeVoicePlan(planRowByTenant.get(Number(r.id))),
             voice_month: (() => {
                 const v = voiceByTenant.get(Number(r.id));
                 if (!v) return null;
                 const minutes = billableMinutes(Number(v.billable_seconds));
+                const plan = mergeVoicePlan(planRowByTenant.get(Number(r.id)));
                 return {
                     calls: v.calls,
                     billable_minutes: minutes,
-                    included_minutes: VOICE_PLAN_DEFAULTS.includedMinutes,
+                    included_minutes: plan.includedMinutes,
                     cost_usd: Number(v.cost_usd),
                     cost_eur_cents: Math.round(Number(v.cost_usd) * USD_EUR * 100),
                     priced_calls: v.priced_calls,
-                    estimated_revenue_cents: estimatedRevenueCents(minutes),
+                    estimated_revenue_cents: estimatedRevenueCents(minutes, plan),
                 };
             })(),
         })));
@@ -27244,6 +27311,44 @@ app.post('/admin/tenants/:id/billing/portal', platformAdminAuth, async (req, res
 // tenant (item aggiunti/rimossi con prorazione). Le feature a DB si
 // allineano subito dallo stato Stripe risultante — il webhook che seguirà è
 // una conferma, non un'attesa.
+// Piano dei minuti di Sofia per un ristorante: prezzo, minuti inclusi,
+// costo al minuto extra. null = torna al default di services/voicePlan.ts.
+// Il tetto extra resta del ristoratore (PUT /voice-usage/cap).
+app.patch('/admin/tenants/:id/voice-plan', platformAdminAuth, async (req, res) => {
+    try {
+        const tenantId = Number(req.params.id);
+        if (!Number.isInteger(tenantId) || tenantId <= 0) return res.status(400).json({ error: 'Invalid tenant id' });
+        const fields = ['price_cents', 'included_minutes', 'overage_cents_per_minute'] as const;
+        const values: (number | null)[] = [];
+        for (const k of fields) {
+            const v = req.body?.[k];
+            if (v === null || v === undefined) { values.push(null); continue; }
+            const n = Number(v);
+            if (!Number.isInteger(n) || n < 0 || n > 1_000_000) {
+                return res.status(400).json({ error: 'invalid_value', message: `${k} non valido` });
+            }
+            values.push(n);
+        }
+        const exists = await queryWithRetry('SELECT 1 FROM tenants WHERE id = $1', [tenantId]);
+        if (!exists.rowCount) return res.status(404).json({ error: 'Tenant not found' });
+        const r = await queryWithRetry(
+            `INSERT INTO voice_plans (tenant_id, price_cents, included_minutes, overage_cents_per_minute, updated_at)
+             VALUES ($1, $2, $3, $4, NOW())
+             ON CONFLICT (tenant_id) DO UPDATE
+                SET price_cents = EXCLUDED.price_cents,
+                    included_minutes = EXCLUDED.included_minutes,
+                    overage_cents_per_minute = EXCLUDED.overage_cents_per_minute,
+                    updated_at = NOW()
+             RETURNING price_cents, included_minutes, overage_cents_per_minute, extra_cap_cents`,
+            [tenantId, ...values]
+        );
+        res.json(mergeVoicePlan(r.rows[0]));
+    } catch (err) {
+        console.error('PATCH /admin/tenants/:id/voice-plan error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 app.patch('/admin/tenants/:id/billing/addons', platformAdminAuth, async (req, res) => {
     const tenantId = Number(req.params.id);
     if (!Number.isInteger(tenantId) || tenantId <= 0) {
