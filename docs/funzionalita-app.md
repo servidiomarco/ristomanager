@@ -661,6 +661,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-23 | Primo accesso | Il wizard di primo accesso parla la lingua dell'operatore: i quattro passi, i dati del ristorante, sale e tavoli, orari e menu minimo. Le categorie dei piatti si salvano nella lingua della casa («Starters», non «Antipasti»), e i nomi dei giorni vengono dalla lingua. |
 | 2026-09-23 | Impostazioni | Nella card legale i due bottoni del logo e gli esempi dentro i campi seguono la lingua (un indirizzo di Lucca non aiuta chi apre a Londra). I documenti generati — informativa privacy, cookie policy, termini — restano in italiano: citano il GDPR per articolo e il D.Lgs. 196/2003, e tradurli a metà sarebbe peggio che lasciarli. |
 | 2026-09-23 | Impostazioni | Con la lingua inglese parlano inglese gli orari di apertura (turni, passo degli slot, slot prenotabili e chiusure straordinarie) e la card del server email. I nomi dei giorni vengono dalla lingua, non da un elenco italiano. |
 | 2026-09-23 | Impostazioni | Con la lingua inglese parlano inglese le due card AI delle Impostazioni: richiesta di recensione (quando e a chi inviare, profilo Google, risposte automatiche) e messaggi con AI (interruttore, regole della casa ed esempi da adottare). |
