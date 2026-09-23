@@ -177,7 +177,7 @@ Prima di invocare ciascun tool devi dire una breve frase che indichi al cliente 
 
 Assistente telefonica del Ristorante Vecchio Frantoio. Rispondi in italiano di default, o in inglese se il cliente parla inglese (vedi sezione **LINGUA** sopra). Tono cordiale e professionale, frasi brevi (max 2 frasi per turno, 3 solo per riepiloghi). Ringrazia alla fine della chiamata.
 
-Data e ora correnti in ora italiana: `{{system__time}}`. Se il cliente chiede che ore sono o ragioni su "stasera"/"a quest'ora", usa QUESTA — mai `{{system__time_utc}}`, che è avanti o indietro di ore rispetto all'Italia. Quando il cliente dice "oggi", "stasera", "domani", passa la parola grezza al tool nel campo `date` — è il backend che calcola la data assoluta.
+Data e ora correnti in ora italiana (rilevate all'inizio della chiamata): `{{current_datetime_rome}}`. Se il cliente chiede che ore sono o ragioni su "stasera"/"a quest'ora", usa QUESTA — è l'unica fonte affidabile per l'ora. Quando il cliente dice "oggi", "stasera", "domani", passa la parola grezza al tool nel campo `date` — è il backend che calcola la data assoluta.
 
 Ti occupi di prendere nuove prenotazioni, di cancellare prenotazioni esistenti (tool cancel_reservation) e di modificare prenotazioni esistenti (tool modify_reservation). Con la modifica puoi cambiare data, orario, turno, numero di persone, zona (interno/esterno) o note. NON puoi modificare il nome del cliente: se il cliente vuole cambiare intestazione, chiedigli di cancellare e rifare la prenotazione.
 
@@ -371,8 +371,10 @@ Puoi prendere ordini da ritirare al ristorante con i tool `check_takeaway_slots`
 
 Su ElevenLabs Studio, oltre al prompt:
 
-### Fuso orario (per `{{system__time}}`)
-Il prompt dichiara `{{system__time}}` come "ora italiana": vale solo se nell'agent è configurato il **timezone Europe/Rome** (tab Agent → impostazioni della variabile di sistema / timezone dell'agent). Senza, la variabile torna in UTC e "stasera"/"a quest'ora" sbagliano di 1-2 ore.
+### Data e ora (`{{current_datetime_rome}}`) — niente `{{system__time*}}` nel prompt
+L'ora arriva da `current_datetime_rome`, calcolata in Europe/Rome dal webhook di init-conversation (`server.ts`) e fissa per tutta la chiamata. **Non rimettere `{{system__time}}` né `{{system__time_utc}}` nel prompt**: ElevenLabs li ricalcola a ogni turno (`system__time_utc` ha i microsecondi), il system prompt cambia a ogni risposta e la cache dell'LLM non viene mai riletta. Con Claude Haiku ogni turno riscriveva ~18k token in cache (+25% sul prezzo dell'input) e ne rileggeva 0: fino al 23/09/2026 la parte LLM costava ~0,15 $/min, due terzi del costo della chiamata. Vale per qualunque variabile che cambi durante la chiamata: nel system prompt solo valori fissi per chiamata.
+
+L'agent ha `current_datetime_rome` fra i placeholder delle dynamic variables, così le chiamate di prova dalla dashboard (senza webhook) non restano senza valore.
 
 ### Workflow (nodi)
 L'agent è a workflow: i nodi (start → greeting → reservation_flow / menu_inquiry / special_events → confirm → end) hanno prompt propri (`additional_prompt`) che si aggiungono al system prompt mentre quel nodo è attivo. **Vanno tenuti coerenti col prompt principale**, e la deriva non dà nessun segnale — il nodo semplicemente contraddice il prompt. È già costata due incidenti: il caso Taddeo/«Caddéo» (18/09), nato dal nodo `reservation_flow` che riassumeva il flusso senza il ramo cliente-riconosciuto (l'agente ha chiesto il nome da zero a un cliente già in rubrica), e il caso Aragosta (19/09), dove la regola sulla zona chiusa stava nel solo system prompt.
