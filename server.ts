@@ -2236,10 +2236,33 @@ app.get('/reservations', authenticate, requirePermission('reservations:view'), a
         // digit-only phone so "+39 333 1234567" and "3331234567" align. Used by
         // the booking card to render VIP/preferred-table chips without an extra
         // round-trip per row.
-        // LATERAL + LIMIT 1 so a rubrica with duplicate phones doesn't multiply
-        // the same reservation into N rows. Tie-break: VIP first, then anyone
-        // with a preferred_table, then oldest id.
+        // DISTINCT ON keeps one rubrica entry per number, so duplicate phones
+        // don't multiply the same reservation into N rows. Tie-break: VIP
+        // first, then anyone with a preferred_table, then oldest id.
+        //
+        // Una CTE, NON la LATERAL + LIMIT 1 delle query a riga singola. Sotto
+        // la RLS di produzione l'indice idx_customers_phone_digits non si può
+        // usare: regexp_replace non è LEAKPROOF, quindi non passa davanti alla
+        // policy, e la LATERAL riscandiva l'intera rubrica applicando la regex
+        // per OGNI prenotazione — 2.198 × 3.804 regex, 5 s su ogni avvio
+        // dell'app (la griglia Comande restava in scheletro, 23/09). Il 26/08
+        // l'EXPLAIN sembrava a posto perché girava da superuser, che la RLS la
+        // salta. Qui la regex gira una volta per cliente e l'aggancio è un hash
+        // join: 12 ms sotto RLS, righe identiche verificate sul DB live.
         const result = await queryWithRetry(`
+            WITH rubrica AS (
+                SELECT DISTINCT ON (regexp_replace(cc.phone, '\\D', '', 'g'))
+                       regexp_replace(cc.phone, '\\D', '', 'g') AS phone_digits,
+                       cc.is_vip, cc.is_blacklisted, cc.blacklist_reason, cc.preferred_table_id,
+                       cc.dietary_notes, cc.preferences_notes
+                FROM customers cc
+                -- Rubrica agganciata per telefono: senza il pin sul tenant
+                -- un numero uguale in due ristoranti mischierebbe le schede.
+                WHERE cc.tenant_id = $1
+                  AND cc.phone IS NOT NULL
+                ORDER BY regexp_replace(cc.phone, '\\D', '', 'g'),
+                         cc.is_vip DESC NULLS LAST, (cc.preferred_table_id IS NULL), cc.id ASC
+            )
             SELECT r.*, u.full_name AS created_by_user_name,
                    c.is_vip AS customer_is_vip,
                    c.is_blacklisted AS customer_is_blacklisted,
@@ -2258,18 +2281,9 @@ app.get('/reservations', authenticate, requirePermission('reservations:view'), a
                    lp.completed_at AS latest_payment_completed_at
             FROM reservations r
             LEFT JOIN users u ON r.created_by_user_id = u.id
-            LEFT JOIN LATERAL (
-                SELECT cc.is_vip, cc.is_blacklisted, cc.blacklist_reason, cc.preferred_table_id, cc.dietary_notes, cc.preferences_notes
-                FROM customers cc
-                WHERE r.phone IS NOT NULL
-                  AND cc.phone IS NOT NULL
-                  -- Rubrica agganciata per telefono: senza il pin sul tenant
-                  -- un numero uguale in due ristoranti mischierebbe le schede.
-                  AND cc.tenant_id = r.tenant_id
-                  AND regexp_replace(r.phone, '\\D', '', 'g') = regexp_replace(cc.phone, '\\D', '', 'g')
-                ORDER BY cc.is_vip DESC NULLS LAST, (cc.preferred_table_id IS NULL), cc.id ASC
-                LIMIT 1
-            ) c ON true
+            LEFT JOIN rubrica c
+                   ON r.phone IS NOT NULL
+                  AND c.phone_digits = regexp_replace(r.phone, '\\D', '', 'g')
             LEFT JOIN tables pt ON pt.id = c.preferred_table_id AND pt.tenant_id = r.tenant_id
             LEFT JOIN LATERAL (
                 SELECT pr.id, pr.status, pr.amount_cents, pr.currency, pr.provider,
