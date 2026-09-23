@@ -380,6 +380,20 @@ const TenantCard: React.FC<{
         {' · '}creato il {formatDate(tenant.created_at)}
       </p>
 
+      {/* Sofia nel mese: minuti contro gli inclusi, costo ElevenLabs e
+          ricavo stimato — tutti i numeri arrivano dal server. */}
+      {tenant.voice_month && (() => {
+        const v = tenant.voice_month;
+        const costCents = v.cost_eur_cents;
+        const eur = (cents: number) => `${(cents / 100).toFixed(2).replace('.', ',')} €`;
+        return (
+          <p className="mt-1 text-[13px] tabular-nums text-[var(--ds-text-secondary)]">
+            Sofia questo mese: {v.billable_minutes} / {v.included_minutes} min · costo {eur(costCents)} · ricavo stimato {eur(v.estimated_revenue_cents)} · margine {eur(v.estimated_revenue_cents - costCents)}
+            {v.priced_calls < v.calls && <span className="text-[var(--ds-text-muted)]"> (costo noto per {v.priced_calls} chiamate su {v.calls})</span>}
+          </p>
+        );
+      })()}
+
       {/* Feature: le tre chip sono i toggle. Accesa = tinta seated con spunta,
           il colore non è l'unico segnale. */}
       <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label={`Feature di ${tenant.name}`}>
