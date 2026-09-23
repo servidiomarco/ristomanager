@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronDown, Loader2, Mail, Save, Eye, EyeOff, Send } from 'lucide-react';
 import { Loader } from './Loader';
 import {
@@ -10,15 +11,17 @@ import {
     type EmailProvider,
 } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
+import { displayLocale } from '../utils/formatLocale';
 
 interface Props {
     showToast: (msg: string, kind?: 'success' | 'error' | 'info') => void;
 }
 
-const maskPlaceholder = (last4: string | null): string =>
-    last4 ? `•••••••••••• ${last4}` : 'Non impostata';
+const maskPlaceholder = (last4: string | null, nonImpostata: string): string =>
+    last4 ? `•••••••••••• ${last4}` : nonImpostata;
 
 export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
+    const { t } = useTranslation('canali', { useSuspense: false });
     const { hasPermission } = useAuth();
     const canEdit = hasPermission('settings:full');
 
@@ -61,7 +64,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                     setTestRecipient(data.from_email || '');
                 }
             } catch (err: any) {
-                if (!cancelled) showToastRef.current(err?.message || 'Errore nel caricamento email', 'error');
+                if (!cancelled) showToastRef.current(err?.message || t('smtp.err.load', 'Errore nel caricamento email'), 'error');
             } finally {
                 if (!cancelled) setLoading(false);
             }
@@ -79,18 +82,20 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
             return (
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[var(--ds-radius-control)] text-[11px] font-medium bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] border border-[var(--ds-border)]">
                     <span className="w-1.5 h-1.5 rounded-full bg-[var(--ds-border-strong)]"></span>
-                    Non configurato
+                    {t('smtp.notConfigured', 'Non configurato')}
                 </span>
             );
         }
-        const label = status.provider === 'resend' ? 'Attivo (Resend)' : 'Attivo (SMTP)';
+        const label = status.provider === 'resend'
+            ? t('smtp.activeResend', 'Attivo (Resend)')
+            : t('smtp.activeSmtp', 'Attivo (SMTP)');
         return (
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[var(--ds-radius-control)] text-[11px] font-medium border bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] border-[var(--ds-seated-solid)]">
                 <span className="w-1.5 h-1.5 rounded-full bg-[var(--ds-seated-solid)]"></span>
                 {label}
             </span>
         );
-    }, [status]);
+    }, [status, t]);
 
     const hasChanges = useMemo(() => {
         if (!status) return false;
@@ -122,7 +127,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
             if (portInput.trim() !== (status.port ? String(status.port) : '')) {
                 const n = Number(portInput);
                 if (!Number.isInteger(n) || n < 1 || n > 65535) {
-                    showToast('Porta non valida (1-65535)', 'error');
+                    showToast(t('smtp.err.badPort', 'Porta non valida (1-65535)'), 'error');
                     return;
                 }
                 payload.port = n;
@@ -142,9 +147,9 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
             setSecureInput(null);
             setPasswordInput('');
             setResendKeyInput('');
-            showToast('Configurazione email aggiornata', 'success');
+            showToast(t('smtp.saved', 'Configurazione email aggiornata'), 'success');
         } catch (err: any) {
-            showToast(err?.message || 'Errore aggiornamento email', 'error');
+            showToast(err?.message || t('smtp.err.save', 'Errore aggiornamento email'), 'error');
         } finally {
             setSaving(false);
         }
@@ -154,15 +159,15 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
         if (!canEdit || testing) return;
         const to = testRecipient.trim();
         if (!to || !to.includes('@')) {
-            showToast('Inserisci un indirizzo email di destinazione', 'error');
+            showToast(t('smtp.err.noRecipient', 'Inserisci un indirizzo email di destinazione'), 'error');
             return;
         }
         setTesting(true);
         try {
             await sendSmtpTestEmail(to);
-            showToast(`Email di test inviata a ${to}`, 'success');
+            showToast(t('smtp.testSent', 'Email di test inviata a {{indirizzo}}', { indirizzo: to }), 'success');
         } catch (err: any) {
-            showToast(err?.message || 'Invio email di test fallito', 'error');
+            showToast(err?.message || t('smtp.err.testFailed', 'Invio email di test fallito'), 'error');
         } finally {
             setTesting(false);
         }
@@ -190,8 +195,8 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                         <Mail className="w-5 h-5 text-[var(--ds-text-primary)]" />
                     </div>
                     <div className="min-w-0">
-                        <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">Server Email</h4>
-                        <p className="text-[13px] text-[var(--ds-text-muted)] truncate">Invio conferme email ai clienti</p>
+                        <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">{t('smtp.title', 'Server Email')}</h4>
+                        <p className="text-[13px] text-[var(--ds-text-muted)] truncate">{t('smtp.subtitle', 'Invio conferme email ai clienti')}</p>
                     </div>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
@@ -207,11 +212,11 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                     {/* Provider switch */}
                     <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0">
-                            <p className="text-[13px] font-medium text-[var(--ds-text-primary)]">Provider</p>
+                            <p className="text-[13px] font-medium text-[var(--ds-text-primary)]">{t('smtp.provider', 'Provider')}</p>
                             <p className="text-[12px] text-[var(--ds-text-muted)]">
                                 {effectiveProvider === 'resend'
-                                    ? 'Invio via API HTTPS Resend. Consigliato in cloud.'
-                                    : 'Invio SMTP diretto (Aruba, Gmail, server on-prem…).'}
+                                    ? t('smtp.providerResendHint', 'Invio via API HTTPS Resend. Consigliato in cloud.')
+                                    : t('smtp.providerSmtpHint', 'Invio SMTP diretto (Aruba, Gmail, server on-prem…).')}
                             </p>
                         </div>
                         <div className="inline-flex rounded-[var(--ds-radius)] border border-[var(--ds-border)] overflow-hidden text-[12px] font-medium">
@@ -246,12 +251,12 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                         <>
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                                 <div className="sm:col-span-2">
-                                    <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">Host SMTP</label>
+                                    <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">{t('smtp.host', 'Host SMTP')}</label>
                                     <input
                                         type="text"
                                         value={hostInput}
                                         onChange={(e) => setHostInput(e.target.value)}
-                                        placeholder="smtps.aruba.it"
+                                        placeholder={t('smtp.hostPlaceholder', 'smtps.aruba.it')}
                                         disabled={!canEdit || saving}
                                         autoComplete="off"
                                         spellCheck={false}
@@ -259,7 +264,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">Porta</label>
+                                    <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">{t('smtp.port', 'Porta')}</label>
                                     <input
                                         type="number"
                                         min={1}
@@ -275,11 +280,11 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
 
                             <div className="flex items-center justify-between gap-3">
                                 <div className="min-w-0">
-                                    <p className="text-[13px] font-medium text-[var(--ds-text-primary)]">Connessione sicura (TLS)</p>
+                                    <p className="text-[13px] font-medium text-[var(--ds-text-primary)]">{t('smtp.secure', 'Connessione sicura (TLS)')}</p>
                                     <p className="text-[12px] text-[var(--ds-text-muted)]">
                                         {effectiveSecure
-                                            ? 'SSL implicito (di solito porta 465).'
-                                            : 'STARTTLS o non cifrato (di solito porta 587).'}
+                                            ? t('smtp.secureOnHint', 'SSL implicito (di solito porta 465).')
+                                            : t('smtp.secureOffHint', 'STARTTLS o non cifrato (di solito porta 587).')}
                                     </p>
                                 </div>
                                 <div className="inline-flex rounded-[var(--ds-radius)] border border-[var(--ds-border)] overflow-hidden text-[12px] font-medium">
@@ -311,12 +316,12 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                             </div>
 
                             <div>
-                                <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">Utente</label>
+                                <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">{t('smtp.user', 'Utente')}</label>
                                 <input
                                     type="text"
                                     value={userInput}
                                     onChange={(e) => setUserInput(e.target.value)}
-                                    placeholder="noreply@ristorante.it"
+                                    placeholder={t('smtp.userPlaceholder', 'noreply@ristorante.it')}
                                     disabled={!canEdit || saving}
                                     autoComplete="off"
                                     spellCheck={false}
@@ -325,13 +330,13 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                             </div>
 
                             <div>
-                                <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">Password</label>
+                                <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">{t('smtp.password', 'Password')}</label>
                                 <div className="relative">
                                     <input
                                         type={showPassword ? 'text' : 'password'}
                                         value={passwordInput}
                                         onChange={(e) => setPasswordInput(e.target.value)}
-                                        placeholder={maskPlaceholder(status.password_last4)}
+                                        placeholder={maskPlaceholder(status.password_last4, t('smtp.notSet', 'Non impostata'))}
                                         disabled={!canEdit || saving}
                                         autoComplete="new-password"
                                         spellCheck={false}
@@ -341,14 +346,14 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                         type="button"
                                         onClick={() => setShowPassword((v) => !v)}
                                         className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[var(--ds-text-subtle)] hover:text-[var(--ds-text-primary)]"
-                                        aria-label={showPassword ? 'Nascondi' : 'Mostra'}
+                                        aria-label={showPassword ? t('smtp.hide', 'Nascondi') : t('smtp.show', 'Mostra')}
                                         tabIndex={-1}
                                     >
                                         {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                                     </button>
                                 </div>
                                 <p className="text-[11px] text-[var(--ds-text-subtle)] mt-1">
-                                    Lascia vuoto per mantenere quella attuale.
+                                    {t('smtp.keepPassword', 'Lascia vuoto per mantenere quella attuale.')}
                                 </p>
                             </div>
                         </>
@@ -356,13 +361,13 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
 
                     {effectiveProvider === 'resend' && (
                         <div>
-                            <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">API Key Resend</label>
+                            <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">{t('smtp.resendKey', 'API Key Resend')}</label>
                             <div className="relative">
                                 <input
                                     type={showResendKey ? 'text' : 'password'}
                                     value={resendKeyInput}
                                     onChange={(e) => setResendKeyInput(e.target.value)}
-                                    placeholder={maskPlaceholder(status.resend_api_key_last4)}
+                                    placeholder={maskPlaceholder(status.resend_api_key_last4, t('smtp.notSet', 'Non impostata'))}
                                     disabled={!canEdit || saving}
                                     autoComplete="off"
                                     spellCheck={false}
@@ -372,26 +377,26 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                     type="button"
                                     onClick={() => setShowResendKey((v) => !v)}
                                     className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[var(--ds-text-subtle)] hover:text-[var(--ds-text-primary)]"
-                                    aria-label={showResendKey ? 'Nascondi' : 'Mostra'}
+                                    aria-label={showResendKey ? t('smtp.hide', 'Nascondi') : t('smtp.show', 'Mostra')}
                                     tabIndex={-1}
                                 >
                                     {showResendKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                                 </button>
                             </div>
                             <p className="text-[11px] text-[var(--ds-text-subtle)] mt-1">
-                                Ottieni la chiave da resend.com → API Keys. Il dominio del mittente deve essere verificato lì (SPF+DKIM).
+                                {t('smtp.resendKeyHint', 'Ottieni la chiave da resend.com → API Keys. Il dominio del mittente deve essere verificato lì (SPF+DKIM).')}
                             </p>
                         </div>
                     )}
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
-                            <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">Email mittente</label>
+                            <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">{t('smtp.fromEmail', 'Email mittente')}</label>
                             <input
                                 type="email"
                                 value={fromEmailInput}
                                 onChange={(e) => setFromEmailInput(e.target.value)}
-                                placeholder="prenotazioni@ristorante.it"
+                                placeholder={t('smtp.fromEmailPlaceholder', 'prenotazioni@ristorante.it')}
                                 disabled={!canEdit || saving}
                                 autoComplete="off"
                                 spellCheck={false}
@@ -399,12 +404,12 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                             />
                         </div>
                         <div>
-                            <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">Nome mittente</label>
+                            <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">{t('smtp.fromName', 'Nome mittente')}</label>
                             <input
                                 type="text"
                                 value={fromNameInput}
                                 onChange={(e) => setFromNameInput(e.target.value)}
-                                placeholder="Nome del ristorante"
+                                placeholder={t('smtp.fromNamePlaceholder', 'Nome del ristorante')}
                                 disabled={!canEdit || saving}
                                 className="w-full px-3 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                             />
@@ -412,25 +417,25 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                     </div>
 
                     <div>
-                        <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">Reply-To (dove ricevi le risposte)</label>
+                        <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">{t('smtp.replyTo', 'Reply-To (dove ricevi le risposte)')}</label>
                         <input
                             type="email"
                             value={replyToInput}
                             onChange={(e) => setReplyToInput(e.target.value)}
-                            placeholder="prenotazioni@ristorante.it"
+                            placeholder={t('smtp.fromEmailPlaceholder', 'prenotazioni@ristorante.it')}
                             disabled={!canEdit || saving}
                             autoComplete="off"
                             spellCheck={false}
                             className="w-full px-3 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                         />
                         <p className="text-[11px] text-[var(--ds-text-subtle)] mt-1">
-                            Quando il cliente clicca “Rispondi”, la mail va a questo indirizzo. Deve essere la casella pollata via IMAP.
+                            {t('smtp.replyToHint', 'Quando il cliente clicca “Rispondi”, la mail va a questo indirizzo. Deve essere la casella pollata via IMAP.')}
                         </p>
                     </div>
 
                     {status.updated_at && (
                         <p className="text-[11px] text-[var(--ds-text-subtle)]">
-                            Ultima modifica: {new Date(status.updated_at).toLocaleString('it-IT')}
+                            {t('smtp.lastChange', 'Ultima modifica: {{quando}}', { quando: new Date(status.updated_at).toLocaleString(displayLocale()) })}
                             {status.updated_by ? ` · ${status.updated_by}` : ''}
                         </p>
                     )}
@@ -443,21 +448,21 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                             className="inline-flex items-center gap-2 px-3 py-1.5 rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[13px] font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                            Salva
+                            {t('smtp.save', 'Salva')}
                         </button>
                     </div>
 
                     <div className="border-t border-[var(--ds-border)] pt-4">
-                        <p className="text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">Invia email di test</p>
+                        <p className="text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">{t('smtp.sendTest', 'Invia email di test')}</p>
                         <p className="text-[11px] text-[var(--ds-text-subtle)] mb-2">
-                            Usa la configurazione attualmente salvata (le modifiche non ancora salvate non contano).
+                            {t('smtp.sendTestHint', 'Usa la configurazione attualmente salvata (le modifiche non ancora salvate non contano).')}
                         </p>
                         <div className="flex flex-col sm:flex-row gap-2">
                             <input
                                 type="email"
                                 value={testRecipient}
                                 onChange={(e) => setTestRecipient(e.target.value)}
-                                placeholder="destinatario@esempio.it"
+                                placeholder={t('smtp.testPlaceholder', 'destinatario@esempio.it')}
                                 disabled={!canEdit || testing || !status.configured}
                                 className="flex-1 px-3 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                             />
@@ -468,19 +473,19 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                 className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 {testing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                                Invia test
+                                {t('smtp.testButton', 'Invia test')}
                             </button>
                         </div>
                         {!status.configured && (
                             <p className="text-[11px] text-[var(--ds-pending-text)] mt-2">
-                                Salva prima una configurazione completa per poter inviare un test.
+                                {t('smtp.saveFirst', 'Salva prima una configurazione completa per poter inviare un test.')}
                             </p>
                         )}
                     </div>
 
                     {!canEdit && (
                         <p className="text-[12px] text-[var(--ds-text-subtle)]">
-                            Solo gli amministratori possono modificare la configurazione.
+                            {t('smtp.adminsOnly', 'Solo gli amministratori possono modificare la configurazione.')}
                         </p>
                     )}
                 </div>

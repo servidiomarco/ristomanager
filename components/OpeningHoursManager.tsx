@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Clock, CalendarOff, Plus, Save, Trash2, Loader2, Sun, Moon } from 'lucide-react';
 import { Loader } from './Loader';
 import { Shift } from '../types';
@@ -12,9 +13,18 @@ import {
     SpecialClosure,
 } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
+import { displayLocale } from '../utils/formatLocale';
 
-const WEEKDAY_LABELS = ['Domenica', 'Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato'];
-const SHORT_WEEKDAY_LABELS = ['Dom', 'Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab'];
+/* I nomi dei giorni vengono dalla lingua, non da un dizionario: è l'unica
+   lista che il locale conosce già meglio di noi. Il 7 gennaio 2024 era una
+   domenica, così l'indice combacia con Date.getDay() e con weekday del DB. */
+const weekdayLabels = (): string[] => {
+    const fmt = new Intl.DateTimeFormat(displayLocale(), { weekday: 'long', timeZone: 'UTC' });
+    return Array.from({ length: 7 }, (_, i) => {
+        const nome = fmt.format(new Date(Date.UTC(2024, 0, 7 + i)));
+        return nome.charAt(0).toUpperCase() + nome.slice(1);
+    });
+};
 
 interface Props {
     showToast: (msg: string, kind?: 'success' | 'error' | 'info') => void;
@@ -22,10 +32,10 @@ interface Props {
 
 type DraftMap = Record<number, OpeningHoursRow>;
 
-function formatItalianDate(iso: string): string {
+function formatClosureDate(iso: string): string {
     try {
         const d = new Date(iso + 'T00:00:00');
-        return d.toLocaleDateString('it-IT', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
+        return d.toLocaleDateString(displayLocale(), { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
     } catch {
         return iso;
     }
@@ -57,8 +67,10 @@ function arraysEqual(a: readonly string[], b: readonly string[]): boolean {
 }
 
 export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
+    const { t, i18n } = useTranslation(['canali', 'common'], { useSuspense: false });
     const { hasPermission } = useAuth();
     const canEdit = hasPermission('settings:full');
+    const giorni = useMemo(() => weekdayLabels(), [i18n.language]);
 
     const [hours, setHours] = useState<OpeningHoursRow[]>([]);
     const [drafts, setDrafts] = useState<DraftMap>({});
@@ -92,7 +104,7 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
                 setDrafts(draft);
                 setClosures(c);
             } catch (err: any) {
-                if (!cancelled) showToastRef.current(err?.message || 'Errore nel caricamento orari', 'error');
+                if (!cancelled) showToastRef.current(err?.message || t('orari.err.load', 'Errore nel caricamento orari'), 'error');
             } finally {
                 if (!cancelled) setLoading(false);
             }
@@ -168,9 +180,9 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
             });
             setHours(prev => prev.map(r => r.weekday === weekday ? updated : r));
             setDrafts(prev => ({ ...prev, [weekday]: updated }));
-            showToast(`Orari di ${WEEKDAY_LABELS[weekday]} aggiornati`, 'success');
+            showToast(t('orari.saved', 'Orari di {{giorno}} aggiornati', { giorno: giorni[weekday] }), 'success');
         } catch (err: any) {
-            showToast(err?.message || 'Errore nel salvataggio', 'error');
+            showToast(err?.message || t('orari.err.save', 'Errore nel salvataggio'), 'error');
         } finally {
             setSavingWeekday(null);
         }
@@ -178,7 +190,7 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
 
     const handleAddClosure = async () => {
         if (!newDate) {
-            showToast('Seleziona una data', 'error');
+            showToast(t('orari.pickDate', 'Seleziona una data'), 'error');
             return;
         }
         setAddingClosure(true);
@@ -195,9 +207,9 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
             setNewDate('');
             setNewShift('ALL');
             setNewReason('');
-            showToast('Chiusura aggiunta', 'success');
+            showToast(t('orari.closureAdded', 'Chiusura aggiunta'), 'success');
         } catch (err: any) {
-            showToast(err?.message || 'Errore aggiunta chiusura', 'error');
+            showToast(err?.message || t('orari.err.addClosure', 'Errore aggiunta chiusura'), 'error');
         } finally {
             setAddingClosure(false);
         }
@@ -207,21 +219,22 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
         try {
             await deleteClosure(id);
             setClosures(prev => prev.filter(c => c.id !== id));
-            showToast('Chiusura rimossa', 'success');
+            showToast(t('orari.closureRemoved', 'Chiusura rimossa'), 'success');
         } catch (err: any) {
-            showToast(err?.message || 'Errore rimozione', 'error');
+            showToast(err?.message || t('orari.err.remove', 'Errore rimozione'), 'error');
         }
     };
 
     if (loading) {
         return (
             <div className="flex items-center gap-2 text-[13px] text-[var(--ds-text-muted)] py-4">
-                <Loader label="Caricamento orari…" size={40} />
+                <Loader label={t('orari.loading', 'Caricamento orari…')} size={40} />
             </div>
         );
     }
 
-    // Display weekdays starting from Monday (1..6,0) for Italian convention
+    // Settimana che parte da lunedì (1..6,0): è la convenzione europea, e
+    // l'indice resta quello del DB.
     const ordered = [1, 2, 3, 4, 5, 6, 0];
 
     return (
@@ -230,11 +243,10 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
             <div>
                 <h4 className="text-[12px] font-semibold text-[var(--ds-text-primary)] mb-2 flex items-center gap-1.5">
                     <Clock className="h-3.5 w-3.5" />
-                    Orari settimanali
+                    {t('orari.weekly', 'Orari settimanali')}
                 </h4>
                 <p className="text-[12px] text-[var(--ds-text-muted)] mb-3">
-                    Imposta apertura e chiusura per ogni turno. Lascia vuoti i campi per disattivare un turno.
-                    Il passo degli slot determina la durata fra un orario prenotabile e il successivo.
+                    {t('orari.weeklyHint', 'Imposta apertura e chiusura per ogni turno. Lascia vuoti i campi per disattivare un turno. Il passo degli slot determina la durata fra un orario prenotabile e il successivo.')}
                 </p>
                 <div className="space-y-2">
                     {ordered.map(weekday => {
@@ -249,7 +261,7 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
                             >
                                 <div className="flex items-center justify-between mb-2">
                                     <span className="text-[13px] font-semibold text-[var(--ds-text-primary)]">
-                                        {WEEKDAY_LABELS[weekday]}
+                                        {giorni[weekday]}
                                     </span>
                                     {canEdit && (
                                         <button
@@ -259,14 +271,14 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
                                             className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[var(--ds-radius)] text-[12px] font-medium bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed"
                                         >
                                             {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-                                            Salva
+                                            {t('orari.save', 'Salva')}
                                         </button>
                                     )}
                                 </div>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                     <div className="border border-[var(--ds-border)] rounded-[var(--ds-radius)] p-2 bg-[var(--ds-pending-tint)]">
                                         <div className="flex items-center gap-1.5 text-[11px] font-semibold text-[var(--ds-pending-text)] mb-1.5">
-                                            <Sun className="h-3 w-3" /> Pranzo
+                                            <Sun className="h-3 w-3" /> {t('common:shift.lunch', 'Pranzo')}
                                         </div>
                                         <div className="flex items-center gap-1.5">
                                             <input
@@ -290,7 +302,7 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
                                     </div>
                                     <div className="border border-[var(--ds-border)] rounded-[var(--ds-radius)] p-2 bg-[var(--ds-arriving-tint)]">
                                         <div className="flex items-center gap-1.5 text-[11px] font-semibold text-[var(--ds-arriving-text)] mb-1.5">
-                                            <Moon className="h-3 w-3" /> Cena
+                                            <Moon className="h-3 w-3" /> {t('common:shift.dinner', 'Cena')}
                                         </div>
                                         <div className="flex items-center gap-1.5">
                                             <input
@@ -314,7 +326,7 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
                                     </div>
                                 </div>
                                 <div className="mt-2 flex items-center gap-2">
-                                    <label className="text-[12px] text-[var(--ds-text-muted)]">Passo slot (min)</label>
+                                    <label className="text-[12px] text-[var(--ds-text-muted)]">{t('orari.slotStep', 'Passo slot (min)')}</label>
                                     <input
                                         type="number"
                                         min={5}
@@ -345,7 +357,7 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
                                                 type="button"
                                                 disabled={!canEdit}
                                                 onClick={() => toggleDisabledSlot(weekday, shift, slot)}
-                                                title={enabled ? 'Disattiva slot' : 'Riattiva slot'}
+                                                title={enabled ? t('orari.slotOff', 'Disattiva slot') : t('orari.slotOn', 'Riattiva slot')}
                                                 className={`${base} ${enabled ? on : off} ${canEdit ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}`}
                                             >
                                                 {slot}
@@ -356,19 +368,19 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
                                         <div className="mt-2 pt-2 border-t border-[var(--ds-border)]">
                                             <div className="flex items-center justify-between mb-1.5">
                                                 <span className="text-[12px] font-semibold text-[var(--ds-text-muted)] tracking-wide">
-                                                    Slot prenotabili
+                                                    {t('orari.bookableSlots', 'Slot prenotabili')}
                                                 </span>
                                                 <span className="text-[10px] text-[var(--ds-text-muted)]">
-                                                    Clicca per attivare/disattivare
+                                                    {t('orari.clickToToggle', 'Clicca per attivare/disattivare')}
                                                 </span>
                                             </div>
                                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                                 <div>
                                                     <div className="flex items-center gap-1 text-[12px] font-semibold text-[var(--ds-pending-text)] mb-1 tracking-wide">
-                                                        <Sun className="h-2.5 w-2.5" /> Pranzo
+                                                        <Sun className="h-2.5 w-2.5" /> {t('common:shift.lunch', 'Pranzo')}
                                                     </div>
                                                     {lunchSlots.length === 0 ? (
-                                                        <p className="text-[11px] text-[var(--ds-text-muted)] italic">Turno non attivo</p>
+                                                        <p className="text-[11px] text-[var(--ds-text-muted)] italic">{t('orari.shiftOff', 'Turno non attivo')}</p>
                                                     ) : (
                                                         <div className="flex flex-wrap gap-1">
                                                             {lunchSlots.map(s => renderChip(s, Shift.LUNCH, disabledLunch.has(s)))}
@@ -377,10 +389,10 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
                                                 </div>
                                                 <div>
                                                     <div className="flex items-center gap-1 text-[12px] font-semibold text-[var(--ds-arriving-text)] mb-1 tracking-wide">
-                                                        <Moon className="h-2.5 w-2.5" /> Cena
+                                                        <Moon className="h-2.5 w-2.5" /> {t('common:shift.dinner', 'Cena')}
                                                     </div>
                                                     {dinnerSlots.length === 0 ? (
-                                                        <p className="text-[11px] text-[var(--ds-text-muted)] italic">Turno non attivo</p>
+                                                        <p className="text-[11px] text-[var(--ds-text-muted)] italic">{t('orari.shiftOff', 'Turno non attivo')}</p>
                                                     ) : (
                                                         <div className="flex flex-wrap gap-1">
                                                             {dinnerSlots.map(s => renderChip(s, Shift.DINNER, disabledDinner.has(s)))}
@@ -401,17 +413,17 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
             <div>
                 <h4 className="text-[12px] font-semibold text-[var(--ds-text-primary)] mb-2 flex items-center gap-1.5">
                     <CalendarOff className="h-3.5 w-3.5" />
-                    Chiusure straordinarie
+                    {t('orari.closures', 'Chiusure straordinarie')}
                 </h4>
                 <p className="text-[12px] text-[var(--ds-text-muted)] mb-3">
-                    Date specifiche in cui il ristorante è chiuso (es. festività, ferie). Puoi chiudere l'intera giornata o solo un turno.
+                    {t('orari.closuresHint', "Date specifiche in cui il ristorante è chiuso (es. festività, ferie). Puoi chiudere l'intera giornata o solo un turno.")}
                 </p>
 
                 {canEdit && (
                     <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] border border-[var(--ds-border)] p-3 mb-3">
                         <div className="grid grid-cols-1 sm:grid-cols-[1fr,1fr,2fr,auto] gap-2 items-end">
                             <div>
-                                <label className="block text-[11px] font-medium text-[var(--ds-text-muted)] mb-1">Data</label>
+                                <label className="block text-[11px] font-medium text-[var(--ds-text-muted)] mb-1">{t('orari.date', 'Data')}</label>
                                 <input
                                     type="date"
                                     value={newDate}
@@ -420,24 +432,24 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
                                 />
                             </div>
                             <div>
-                                <label className="block text-[11px] font-medium text-[var(--ds-text-muted)] mb-1">Turno</label>
+                                <label className="block text-[11px] font-medium text-[var(--ds-text-muted)] mb-1">{t('orari.shift', 'Turno')}</label>
                                 <select
                                     value={newShift}
                                     onChange={e => setNewShift(e.target.value as any)}
                                     className="w-full rounded border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5 text-[13px] text-[var(--ds-text-primary)]"
                                 >
-                                    <option value="ALL">Tutto il giorno</option>
-                                    <option value={Shift.LUNCH}>Solo pranzo</option>
-                                    <option value={Shift.DINNER}>Solo cena</option>
+                                    <option value="ALL">{t('orari.allDay', 'Tutto il giorno')}</option>
+                                    <option value={Shift.LUNCH}>{t('orari.lunchOnly', 'Solo pranzo')}</option>
+                                    <option value={Shift.DINNER}>{t('orari.dinnerOnly', 'Solo cena')}</option>
                                 </select>
                             </div>
                             <div>
-                                <label className="block text-[11px] font-medium text-[var(--ds-text-muted)] mb-1">Motivo (opzionale)</label>
+                                <label className="block text-[11px] font-medium text-[var(--ds-text-muted)] mb-1">{t('orari.reason', 'Motivo (opzionale)')}</label>
                                 <input
                                     type="text"
                                     value={newReason}
                                     onChange={e => setNewReason(e.target.value)}
-                                    placeholder="es. Ferragosto, ferie"
+                                    placeholder={t('orari.reasonPlaceholder', 'es. Ferragosto, ferie')}
                                     className="w-full rounded border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5 text-[13px] text-[var(--ds-text-primary)]"
                                 />
                             </div>
@@ -448,14 +460,14 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
                                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--ds-radius)] text-[13px] font-medium bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed"
                             >
                                 {addingClosure ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
-                                Aggiungi
+                                {t('orari.add', 'Aggiungi')}
                             </button>
                         </div>
                     </div>
                 )}
 
                 {closures.length === 0 ? (
-                    <p className="text-[13px] text-[var(--ds-text-muted)] italic">Nessuna chiusura programmata.</p>
+                    <p className="text-[13px] text-[var(--ds-text-muted)] italic">{t('orari.noClosures', 'Nessuna chiusura programmata.')}</p>
                 ) : (
                     <ul className="divide-y divide-[var(--ds-border)] bg-[var(--ds-surface)] rounded-[var(--ds-radius)] border border-[var(--ds-border)]">
                         {closures.map(c => (
@@ -463,21 +475,21 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
                                 <div className="min-w-0 flex-1">
                                     <div className="flex items-center gap-2 flex-wrap">
                                         <span className="text-[13px] font-medium text-[var(--ds-text-primary)]">
-                                            {formatItalianDate(c.date)}
+                                            {formatClosureDate(c.date)}
                                         </span>
                                         {c.shift === null && (
                                             <span className="text-[12px] font-semibold px-1.5 py-0.5 rounded bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)]">
-                                                Tutto il giorno
+                                                {t('orari.allDay', 'Tutto il giorno')}
                                             </span>
                                         )}
                                         {c.shift === Shift.LUNCH && (
                                             <span className="inline-flex items-center gap-1 text-[12px] font-semibold px-1.5 py-0.5 rounded bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]">
-                                                <Sun className="h-2.5 w-2.5" /> Pranzo
+                                                <Sun className="h-2.5 w-2.5" /> {t('common:shift.lunch', 'Pranzo')}
                                             </span>
                                         )}
                                         {c.shift === Shift.DINNER && (
                                             <span className="inline-flex items-center gap-1 text-[12px] font-semibold px-1.5 py-0.5 rounded bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]">
-                                                <Moon className="h-2.5 w-2.5" /> Cena
+                                                <Moon className="h-2.5 w-2.5" /> {t('common:shift.dinner', 'Cena')}
                                             </span>
                                         )}
                                     </div>
@@ -490,7 +502,7 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
                                         type="button"
                                         onClick={() => handleDeleteClosure(c.id)}
                                         className="p-1.5 rounded-[var(--ds-radius)] text-[var(--ds-text-muted)] hover:text-[var(--ds-critical-text)] hover:bg-[var(--ds-critical-tint)] dark:hover:bg-[var(--ds-critical-tint)]"
-                                        title="Rimuovi"
+                                        title={t('orari.remove', 'Rimuovi')}
                                     >
                                         <Trash2 className="h-4 w-4" />
                                     </button>
