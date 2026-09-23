@@ -431,8 +431,10 @@ interface SendFooterProps {
   allCount: number;
   allTotal: number;
   busy: boolean;
-  onSend: () => void;
-  onSendAll: () => void;
+  /** Col rettangolo del bottone premuto: l'invio ci fa partire il volo
+   *  (SendFlight) dopo che la vista tavolo si è già chiusa. */
+  onSend: (from?: DOMRect) => void;
+  onSendAll: (from?: DOMRect) => void;
   /** Sul palmare l'etichetta è anche la maniglia della comanda: non c'è una
    *  seconda colonna, e questo è il posto dove la mano è già appoggiata. */
   onExpand?: () => void;
@@ -459,7 +461,7 @@ export const SendFooter: React.FC<SendFooterProps> = ({
         a guardare da un'altra parte per sapere quale uscita stava partendo. */}
     <button
       type="button"
-      onClick={onSend}
+      onClick={e => onSend(e.currentTarget.getBoundingClientRect())}
       disabled={busy || courseCount === 0}
       className="inline-flex h-14 w-full items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-6 text-[17px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
     >
@@ -474,7 +476,7 @@ export const SendFooter: React.FC<SendFooterProps> = ({
     {allCount > courseCount && (
       <button
         type="button"
-        onClick={onSendAll}
+        onClick={e => onSendAll(e.currentTarget.getBoundingClientRect())}
         disabled={busy}
         className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[15px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
       >
@@ -528,7 +530,7 @@ export const SendFooter: React.FC<SendFooterProps> = ({
           grassetto non diano già, e si legge peggio (§5.2). */}
       <button
         type="button"
-        onClick={onSend}
+        onClick={e => onSend(e.currentTarget.getBoundingClientRect())}
         disabled={busy || courseCount === 0}
         className="inline-flex h-12 flex-shrink-0 items-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-6 text-[17px] font-semibold text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
       >
@@ -539,7 +541,7 @@ export const SendFooter: React.FC<SendFooterProps> = ({
     {allCount > courseCount && (
       <button
         type="button"
-        onClick={onSendAll}
+        onClick={e => onSendAll(e.currentTarget.getBoundingClientRect())}
         disabled={busy}
         className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[15px] font-medium text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
       >
@@ -580,8 +582,8 @@ const qtyChipClass = (n: number | null | undefined): string =>
   n == null ? NEUTRAL_QTY : CAT_QTY[n % 6];
 
 interface CourseColumnProps extends CourseListProps {
-  onSend: () => void;
-  onSendAll: () => void;
+  onSend: (from?: DOMRect) => void;
+  onSendAll: (from?: DOMRect) => void;
   /** «di Luca» / «dalla cassa» quando la comanda l'ha aperta qualcun altro:
    *  chi tocca un tavolo non suo lo legge in testa, prima di battere. */
   openedBy?: string | null;

@@ -40,6 +40,8 @@ import { CourseChips } from './comande/CourseChips';
 import { PadTabs } from './comande/PadTabs';
 import { CourseColumn, CourseList, SendFooter } from './comande/CourseColumn';
 import { ComandaSheet } from './comande/ComandaSheet';
+import { SendFlight, type SendFlightData, type SendKind } from './comande/SendFlight';
+import { isBarCourse, isDessertCourse, isOffSequenceCourse } from '../utils/courses';
 import { ReasonDialog } from './comande/ReasonDialog';
 import { DiscountDialog } from './comande/DiscountDialog';
 import { buildRows, buildMergeGroups, makeReservationForTable, type TableFilter } from './comande/tablesView';
@@ -248,6 +250,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
   // Il conto appena aperto: il QR va mostrato subito, non cercato altrove
   // mentre il tavolo aspetta.
   const [justClosed, setJustClosed] = useState<CloseOrderResult['bill'] | null>(null);
+  const [sendFlight, setSendFlight] = useState<SendFlightData | null>(null);
   const [openTables, setOpenTables] = useState<Set<number>>(new Set());
   // false finché /orders/open non ha risposto la prima volta: la griglia
   // mostra le tessere scheletro invece dei tavoli tutti «liberi» (o del
@@ -972,15 +975,22 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
     if (order) saveCartDraft(order.order.id, cart);
   }, [cart, order]);
 
-  const submit = async (scope: 'course' | 'all') => {
+  const submit = async (scope: 'course' | 'all', from?: DOMRect) => {
     if (!order || busy) return;
     const lines = scope === 'course' ? courseLines : cart;
     // Righe rimaste in bozza SUL SERVER (uscita richiamata, invio interrotto):
     // l'Invia deve poterle rimandare anche a carrello vuoto, o l'uscita resta
     // irrecuperabile dal palmare (successo al tavolo 40).
-    const serverDrafts = order.items.some(i =>
+    const serverDraftItems = order.items.filter(i =>
       i.status === 'DRAFT' && !isSystemLine(i) && (scope === 'all' || i.course_no === course));
+    const serverDrafts = serverDraftItems.length > 0;
     if (lines.length === 0 && !serverDrafts) return;
+    // Cosa parte, per il volo: cucina, bar, dolci — dalle uscite delle righe.
+    const sentCourses = [...lines.map(l => l.course_no), ...serverDraftItems.map(i => i.course_no)];
+    const kinds: SendKind[] = [];
+    if (sentCourses.some(c => !isOffSequenceCourse(c))) kinds.push('food');
+    if (sentCourses.some(isBarCourse)) kinds.push('drink');
+    if (sentCourses.some(isDessertCourse)) kinds.push('dessert');
     setBusy(true); setError(null);
     try {
       const payload: NewOrderItem[] = lines.map(l => ({
@@ -1030,13 +1040,22 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
         sent = await sendTo(freshView.order.id);
         recovered = true;
       }
-      setOrder(sent);
-      setCart(prev => (scope === 'course' ? prev.filter(l => l.course_no !== course) : []));
-      setComandaOpen(false);
-      // Si riparte dalla prima uscita libera: il cameriere non deve ricordarsi
-      // dove era arrivato, e non riapre per sbaglio un'uscita già partita.
-      const maxSent = sent.courses.filter(c => c.status !== 'PENDING' && c.course_no !== BAR_COURSE_NO && c.course_no !== DESSERT_COURSE_NO).map(c => c.course_no);
-      setCourse(Math.min(MAX_COURSES, (maxSent.length ? Math.max(...maxSent) : 0) + 1));
+      // Inviato, il tavolo si chiude e si torna alla griglia (voluto da Marco
+      // il 23/09): il prossimo gesto è quasi sempre un altro tavolo. Le bozze
+      // delle ALTRE uscite restano: si salvano qui a mano, perché con la
+      // comanda chiusa l'effetto che salva il carrello non gira più, e la
+      // bozza vecchia (con le righe appena partite) tornerebbe alla riapertura.
+      const remaining = scope === 'course' ? cart.filter(l => l.course_no !== course) : [];
+      saveCartDraft(sent.order.id, remaining);
+      setTableId(null); setOrder(null); setCart([]); setComandaOpen(false);
+      if (from && kinds.length > 0) {
+        setSendFlight({
+          id: Date.now(),
+          from: { left: from.left, top: from.top, width: from.width, height: from.height },
+          kinds,
+        });
+      }
+      // L'uscita da cui ripartire la ricalcola l'apertura del tavolo.
       const fired = sent.fired_courses.length;
       const queued = sent.queued_courses.length;
       // «Riaperta»: l'invio è passato, ma su una comanda nuova — se un
@@ -1490,7 +1509,15 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
     if (!socket || openOrderId == null) return;
     const onCourse = (payload: any) => {
       if (payload?.order_id !== openOrderId) return;
-      ordersApiService.getOrder(openOrderId).then(setOrder).catch(() => { /* al prossimo evento */ });
+      // Si applica solo se la comanda è ANCORA quella aperta all'arrivo della
+      // risposta. L'Invia chiude il tavolo mentre il suo stesso course:fired
+      // è in volo: senza questo controllo la comanda tornava in stato a
+      // tavolo chiuso, col carrello vuoto, e l'effetto della bozza salvava il
+      // vuoto sopra la bozza delle altre uscite (il vino lasciato al Bar
+      // spariva alla riapertura).
+      ordersApiService.getOrder(openOrderId).then(view => {
+        if (openOrderIdRef.current === view.order.id) setOrder(view);
+      }).catch(() => { /* al prossimo evento */ });
     };
     socket.on('course:fired', onCourse);
     socket.on('course:ready', onCourse);
@@ -1812,6 +1839,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
           ) : undefined}
         />
         {billSheets}
+        {sendFlight && <SendFlight flight={sendFlight} onDone={() => setSendFlight(null)} />}
       </>
     );
   }
@@ -2201,8 +2229,8 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
       onDragItem={moveServerItem}
       onDragCourse={moveCourseTo}
       openedBy={openedByOther}
-      onSend={() => submit('course')}
-      onSendAll={() => submit('all')}
+      onSend={from => submit('course', from)}
+      onSendAll={from => submit('all', from)}
       onRepeat={repeatLine}
       onRepeatAll={repeatAll}
     />
@@ -2254,8 +2282,8 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
           <CourseColumn
             {...listProps}
             openedBy={openedByOther}
-            onSend={() => submit('course')}
-            onSendAll={() => submit('all')}
+            onSend={from => submit('course', from)}
+            onSendAll={from => submit('all', from)}
           />
         </div>
         {dialogs}
@@ -2432,8 +2460,8 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
             allTotal={cartTotal
               + (order?.items.reduce((s, i) => s + (i.status === 'DRAFT' && !isSystemLine(i) ? i.unit_price_cents * i.qty : 0), 0) ?? 0)}
             busy={busy}
-            onSend={() => submit('course')}
-            onSendAll={() => submit('all')}
+            onSend={from => submit('course', from)}
+            onSendAll={from => submit('all', from)}
             onExpand={() => setComandaOpen(true)}
           />
         </div>
