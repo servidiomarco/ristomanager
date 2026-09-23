@@ -1,0 +1,40 @@
+{
+  "err": {
+    "emailMissing": "Enter your email.",
+    "emailInvalid": "Invalid email. Check the format (example: name@domain.com).",
+    "passwordMissing": "Enter your password.",
+    "newPasswordMissing": "Choose a password.",
+    "passwordTooShort": "The password must be at least 8 characters.",
+    "repeatPassword": "Repeat the new password.",
+    "passwordsDiffer": "The two passwords do not match.",
+    "requestFailed": "The request failed, try again in a few minutes.",
+    "linkExpired": "The link is no longer valid. Ask for a new reset.",
+    "badCredentials": "Invalid credentials"
+  },
+  "passwordUpdated": "Password updated. Sign in with the new one.",
+  "title": {
+    "forgot": "Recover your password",
+    "reset": "Choose a new password",
+    "login": "Sign in to your restaurant"
+  },
+  "sub": {
+    "forgot": "We will send you a link to choose a new one.",
+    "reset": "At least 8 characters."
+  },
+  "resetSent": "If the address exists, you will get an email with the link to reset the password. The link lasts 1 hour.",
+  "backToLogin": "Back to sign in",
+  "email": "Email",
+  "password": "Password",
+  "sending": "Sending...",
+  "sendLink": "Send the link",
+  "newPassword": "New password",
+  "confirmPassword": "Confirm password",
+  "hidePassword": "Hide the password",
+  "showPassword": "Show the password",
+  "saving": "Saving...",
+  "saveNewPassword": "Save the new password",
+  "rememberMe": "Remember my credentials",
+  "signingIn": "Signing in...",
+  "signIn": "Sign in",
+  "forgotPassword": "Forgotten your password?"
+}

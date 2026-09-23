@@ -1,0 +1,40 @@
+{
+  "err": {
+    "emailMissing": "Inserisci la tua email.",
+    "emailInvalid": "Email non valida. Controlla il formato (esempio: nome@dominio.it).",
+    "passwordMissing": "Inserisci la password.",
+    "newPasswordMissing": "Scegli una password.",
+    "passwordTooShort": "La password deve avere almeno 8 caratteri.",
+    "repeatPassword": "Ripeti la nuova password.",
+    "passwordsDiffer": "Le due password non coincidono.",
+    "requestFailed": "Richiesta non riuscita, riprova tra qualche minuto.",
+    "linkExpired": "Il link non è più valido. Richiedi un nuovo reset.",
+    "badCredentials": "Credenziali non valide"
+  },
+  "passwordUpdated": "Password aggiornata. Accedi con la nuova password.",
+  "title": {
+    "forgot": "Recupera la password",
+    "reset": "Scegli una nuova password",
+    "login": "Accedi al tuo ristorante"
+  },
+  "sub": {
+    "forgot": "Ti mandiamo un link per sceglierne una nuova.",
+    "reset": "Minimo 8 caratteri."
+  },
+  "resetSent": "Se l'indirizzo esiste, riceverai un'email con il link per reimpostare la password. Il link vale 1 ora.",
+  "backToLogin": "Torna al login",
+  "email": "Email",
+  "password": "Password",
+  "sending": "Invio in corso...",
+  "sendLink": "Invia il link",
+  "newPassword": "Nuova password",
+  "confirmPassword": "Conferma password",
+  "hidePassword": "Nascondi password",
+  "showPassword": "Mostra password",
+  "saving": "Salvataggio...",
+  "saveNewPassword": "Salva la nuova password",
+  "rememberMe": "Ricorda le mie credenziali",
+  "signingIn": "Accesso in corso...",
+  "signIn": "Accedi",
+  "forgotPassword": "Password dimenticata?"
+}

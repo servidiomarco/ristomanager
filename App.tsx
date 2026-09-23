@@ -243,6 +243,10 @@ const COMMS_VIEWS: ViewState[] = [ViewState.CONVERSAZIONI, ViewState.MESSAGGI, V
 // Stato aperto/chiuso della sidebar desktop. Scritto solo dalla linguetta.
 const SIDEBAR_COLLAPSED_KEY = 'ristocrm_sidebar_collapsed';
 
+// La lingua dell'ultimo operatore: chiave SUA, separata da quella del
+// detector i18n — che sulle pagine pubbliche la scrive l'ospite.
+const OPERATOR_LANG_KEY = 'ristocrm_operator_lang';
+
 // Viste del modulo Sala & Cucina: oltre al permesso serve il modulo attivo
 // (flag table_orders_enabled) — spento, le voci spariscono dalla sidebar.
 const SALA_VIEWS: ViewState[] = [ViewState.COMANDE, ViewState.CASSA, ViewState.CUCINA, ViewState.PASSE];
@@ -977,15 +981,28 @@ const App: React.FC = () => {
 
   // Lingua dell'interfaccia: scelta dell'operatore, altrimenti il default del
   // ristorante, altrimenti italiano. Vince sulla lingua salvata dal detector
-  // in localStorage (che sulle pagine pubbliche la sceglie l'ospite: stessa
-  // istanza i18n, stesso dispositivo). Al logout si torna a italiano, così la
-  // pagina di login non eredita l'inglese dell'ultimo operatore.
+  // in localStorage, che NON è affidabile qui: sulle pagine pubbliche la
+  // sceglie l'ospite, e l'istanza i18n e il dispositivo sono gli stessi.
+  //
+  // Al logout però non si torna più a italiano d'ufficio. Era giusto finché
+  // l'inglese era un'eccezione; in un ristorante a Londra vuol dire mostrare
+  // al cameriere una pagina di login che non sa leggere. Si ricorda invece
+  // la lingua DELL'ULTIMO OPERATORE, sotto una chiave sua: l'ospite di /pay
+  // non la tocca, ed è questa la proprietà che il vecchio reset difendeva.
   useEffect(() => {
-    const preferita = user?.language ?? user?.tenant?.default_language ?? 'it';
+    const salvata = (() => {
+      try { return localStorage.getItem(OPERATOR_LANG_KEY); } catch { return null; }
+    })();
+    const preferita = user
+      ? (user.language ?? user.tenant?.default_language ?? 'it')
+      : (salvata ?? 'it');
     const scelta = SUPPORTED_LANGUAGES.includes(preferita as any) ? preferita : 'it';
+    if (user) {
+      try { localStorage.setItem(OPERATOR_LANG_KEY, scelta); } catch { /* quota o modalità privata */ }
+    }
     if (i18n.language !== scelta) i18n.changeLanguage(scelta);
     document.documentElement.lang = scelta;
-  }, [i18n, user?.language, user?.tenant?.default_language]);
+  }, [i18n, user, user?.language, user?.tenant?.default_language]);
 
   // Redirect to first accessible view when user changes or doesn't have access to current view.
   // Also honors a ?view= query param so a notification click that opens a fresh tab lands on
