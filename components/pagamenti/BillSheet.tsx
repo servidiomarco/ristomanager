@@ -76,16 +76,18 @@ const isSettled = (bill: BillLike) =>
 const billTitle = (bill: BillLike) => euro(bill.total_cents);
 /** «Tavolo 12» oppure «Asporto #4»: dove sta il conto. Un asporto non ha
  *  tavolo e i suoi covers sono un 1 tecnico, non persone — mai mostrarli. */
-const billPlace = (bill: BillLike) =>
+type TFunc = (key: string, options?: Record<string, unknown>) => string;
+
+const billPlace = (bill: BillLike, t: TFunc) =>
   bill.takeaway_order_id != null
-    ? `Asporto${bill.takeaway_daily_number != null ? ` #${bill.takeaway_daily_number}` : ''}`
-    : `Tavolo ${bill.table_name ?? '—'}`;
-const billSubtitle = (bill: BillLike) =>
+    ? (bill.takeaway_daily_number != null ? t('takeawayNo', { numero: bill.takeaway_daily_number }) : t('takeawayWord'))
+    : t('tableNamed', { nome: bill.table_name ?? '—' });
+const billSubtitle = (bill: BillLike, t: TFunc) =>
   bill.takeaway_order_id != null
-    ? [billPlace(bill),
-       bill.takeaway_time ? `ritiro ${bill.takeaway_time}` : null,
+    ? [billPlace(bill, t),
+       bill.takeaway_time ? t('pickupAt', { ora: bill.takeaway_time }) : null,
        bill.customer_name || null].filter(Boolean).join(' · ')
-    : `${billPlace(bill)} · ${bill.covers} copert${bill.covers === 1 ? 'o' : 'i'}`;
+    : `${billPlace(bill, t)} · ${t('coversCount', { count: bill.covers })}`;
 
 /** The two standing facts about a bill: what is left on it, and whether the
  *  total can still move. Shown beside the title in both containers. */
@@ -95,10 +97,10 @@ const BillMeta: React.FC<{ bill: BillLike }> = ({ bill }) => {
   <>
     {bill.residual_cents != null && (
       isSettled(bill)
-        ? <StatusPill tone="positive">saldato</StatusPill>
+        ? <StatusPill tone="positive">{t('settledPill')}</StatusPill>
         : bill.residual_cents === 0
-          ? <StatusPill tone="pending" title={t('remainderInCheckout')}>quote in pagamento</StatusPill>
-          : <StatusPill tone="critical">{`residuo ${euro(bill.residual_cents)}`}</StatusPill>
+          ? <StatusPill tone="pending" title={t('remainderInCheckout')}>{t('sharesPaying')}</StatusPill>
+          : <StatusPill tone="critical">{t('remainderPill', { importo: euro(bill.residual_cents) })}</StatusPill>
     )}
     {bill.open_orders != null && bill.open_orders > 0 && (
       <StatusPill tone="pending" title={t('totalMayChange')}>
@@ -183,7 +185,7 @@ export const SettleDialog: React.FC<{
       <div className="w-full max-w-lg overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)]" onClick={e => e.stopPropagation()}>
         <div className="border-b border-[var(--ds-border)] p-5">
           <h3 className="text-[18px] font-semibold text-[var(--ds-text-primary)]">{t('closeAtTill')}</h3>
-          <p className="mt-1 text-[14px] text-[var(--ds-text-muted)]">{billPlace(bill)} · totale {euro(bill.total_cents)}</p>
+          <p className="mt-1 text-[14px] text-[var(--ds-text-muted)]">{billPlace(bill, t)} · totale {euro(bill.total_cents)}</p>
         </div>
         <div className="space-y-3 p-5">
           <dl className="space-y-1.5 text-[14px]">
@@ -193,7 +195,7 @@ export const SettleDialog: React.FC<{
               </div>
             )}
             <div className="flex items-baseline justify-between font-medium text-[var(--ds-text-primary)]">
-              <dt className="text-[15px]">Residuo da incassare</dt>
+              <dt className="text-[15px]">{t('remainingToTake')}</dt>
               <dd className="text-[28px] font-semibold tabular-nums tracking-[-0.02em]">{euro(remaining)}</dd>
             </div>
           </dl>
@@ -207,7 +209,7 @@ export const SettleDialog: React.FC<{
                     <span className="tabular-nums">{euro(m.amount_cents)}</span>
                     <button
                       type="button"
-                      aria-label="Togli movimento"
+                      aria-label={t('removeMovement')}
                       onClick={() => setMovements(prev => prev.filter((_, j) => j !== i))}
                       disabled={busy}
                       className="rounded-[var(--ds-radius-control)] p-1 text-[var(--ds-text-muted)] hover:bg-[var(--ds-border)] disabled:opacity-40"
@@ -242,7 +244,7 @@ export const SettleDialog: React.FC<{
 
               <div className="flex items-end gap-2">
                 <label className="block flex-1">
-                  <span className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Importo</span>
+                  <span className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{t('amount')}</span>
                   <div className="relative">
                     <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[15px] text-[var(--ds-text-muted)]">{moneySymbol()}</span>
                     <input type="text" inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)} disabled={busy} className={`${field} pl-7`} />
@@ -254,7 +256,7 @@ export const SettleDialog: React.FC<{
                   disabled={busy || applied <= 0 || applied >= remaining}
                   className="h-12 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-4 text-[15px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)] disabled:opacity-40"
                 >
-                  Aggiungi
+                  {t('add')}
                 </button>
               </div>
               {change > 0 && (
@@ -265,7 +267,7 @@ export const SettleDialog: React.FC<{
 
           {showDocChoice && (
             <div>
-              <span className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{isPP ? 'Documento in cassa' : 'Documento fiscale'}</span>
+              <span className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{t(isPP ? 'doc.tillDoc' : 'doc.fiscalDoc')}</span>
               <div className="flex gap-1.5">
                 {((isPP ? ['Scontrino', 'Proforma'] : ['Scontrino', 'Cassa', 'Proforma', 'Fattura']) as ('Scontrino' | 'Cassa' | 'Proforma' | 'Fattura')[]).map(d => (
                   <button
@@ -279,20 +281,20 @@ export const SettleDialog: React.FC<{
                         : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'
                     }`}
                   >
-                    {d}
+                    {t(`doc.${d}`)}
                   </button>
                 ))}
               </div>
               {ppDoc === 'Proforma' && (
                 <p className="mt-1.5 text-[13px] text-[var(--ds-text-muted)]">
                   {isPP
-                    ? 'Niente scontrino: in cassa esce la proforma.'
-                    : 'Nessun documento adesso: scontrino o fattura si emettono dopo, dal conto.'}
+                    ? t('noReceiptProforma')
+                    : t('noDocNow')}
                 </p>
               )}
               {!isPP && ppDoc === 'Scontrino' && (
                 <label className="mt-2.5 block">
-                  <span className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Codice lotteria <span className="font-normal text-[var(--ds-text-muted)]">(facoltativo)</span></span>
+                  <span className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{t('lotteryCode')} <span className="font-normal text-[var(--ds-text-muted)]">{t('optionalM')}</span></span>
                   <input
                     type="text"
                     maxLength={8}
@@ -313,7 +315,7 @@ export const SettleDialog: React.FC<{
               {!isPP && ppDoc === 'Cassa' && (
                 <div className="mt-2.5 space-y-1.5">
                   <p className="text-[13px] text-[var(--ds-text-muted)]">
-                    Batti lo scontrino sul registratore e riporta qui il numero.
+                    {t('ringOnRegister')}
                   </p>
                   <input
                     type="text"
@@ -330,15 +332,14 @@ export const SettleDialog: React.FC<{
               )}
               {ppDoc === 'Fattura' && (
                 <p className="mt-1.5 text-[13px] text-[var(--ds-text-muted)]">
-                  Il conto si chiude con proforma e la fattura si emette dal conto, dove
-                  ci sono i dati del cessionario. Scontrino e fattura non coesistono.
+                  {t('invoiceFromBillHint')}
                 </p>
               )}
             </div>
           )}
 
           <label className="block">
-            <span className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Mancia <span className="font-normal text-[var(--ds-text-muted)]">(facoltativa)</span></span>
+            <span className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{t('tip')} <span className="font-normal text-[var(--ds-text-muted)]">{t('optionalF')}</span></span>
             <div className="relative">
               <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[15px] text-[var(--ds-text-muted)]">{moneySymbol()}</span>
               <input type="text" inputMode="decimal" placeholder="0,00" value={tip} onChange={e => setTip(e.target.value)} disabled={busy} className={`${field} pl-7`} />
@@ -347,8 +348,8 @@ export const SettleDialog: React.FC<{
 
           <p className={`text-[14px] ${willSettle ? 'text-[var(--ds-seated-text)]' : 'text-[var(--ds-critical-text)]'}`}>
             {willSettle
-              ? `Il conto risulterà saldato${tipCents > 0 ? ` · mancia ${euro(tipCents)}` : ''}.`
-              : `Ammanco ${euro(shortfall)}: il conto resterà parziale.`}
+              ? (tipCents > 0 ? t('willSettleTip', { mancia: euro(tipCents) }) : t('willSettle'))
+              : t('shortfall', { importo: euro(shortfall) })}
           </p>
         </div>
         <div className="flex items-center justify-end gap-2 border-t border-[var(--ds-border)] bg-[var(--ds-surface)] px-4 py-3">
@@ -360,7 +361,7 @@ export const SettleDialog: React.FC<{
             className="inline-flex h-11 items-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-6 text-[15px] font-semibold text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
           >
             {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-            Chiudi conto
+            {t('closeBill')}
           </button>
         </div>
       </div>
@@ -409,6 +410,7 @@ const SettleButton: React.FC<{
    movimento a dire "sta succedendo" prima ancora del numero. `live` accende
    la lama di luce sul tratto scoperto (QR attivo, si aspettano pagamenti). */
 const PaymentProgress: React.FC<{ bill: BillLike; live: boolean }> = ({ bill, live }) => {
+  const { t } = useTranslation('cassa', { useSuspense: false });
   if (bill.residual_cents == null || bill.total_cents <= 0) return null;
   const paid = Math.max(0, Math.min(bill.total_cents, bill.paid_cents ?? (bill.total_cents - bill.residual_cents)));
   if (paid === 0 && !live) return null;
@@ -418,7 +420,7 @@ const PaymentProgress: React.FC<{ bill: BillLike; live: boolean }> = ({ bill, li
     <div className="w-full">
       <div className="flex items-baseline justify-between text-[13px]">
         <span className={settled ? 'font-medium text-[var(--ds-seated-text)]' : 'text-[var(--ds-text-muted)]'}>
-          {settled ? 'Saldato' : <>Pagato <span className="tabular-nums">{euro(paid)}</span></>}
+          {settled ? t('settledWord') : <>{t('paidWord')} <span className="tabular-nums">{euro(paid)}</span></>}
         </span>
         <span className="tabular-nums text-[var(--ds-text-muted)]">{pct}%</span>
       </div>
@@ -427,7 +429,7 @@ const PaymentProgress: React.FC<{ bill: BillLike; live: boolean }> = ({ bill, li
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={pct}
-        aria-label="Avanzamento pagamenti"
+        aria-label={t('paymentProgress')}
         className="relative mt-1.5 h-2 overflow-hidden rounded-full bg-[var(--ds-surface-row)]"
       >
         <div
@@ -490,12 +492,12 @@ const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
               <QRCodeSVG value={url} size={168} level="M" />
             </div>
             <p className="text-center text-[13px] text-[var(--ds-text-muted)]">
-              L'ospite inquadra e paga la sua parte.
+              {t('guestScansPays')}
             </p>
             <PaymentProgress bill={bill} live />
             <div className="flex w-full items-center gap-2">
               <button type="button" onClick={copy} className={quiet}>
-                {copied ? <><Check className="h-4 w-4" /> Link copiato</> : <><Copy className="h-4 w-4" /> Copia link</>}
+                {copied ? <><Check className="h-4 w-4" /> {t('linkCopied')}</> : <><Copy className="h-4 w-4" /> {t('copyLink')}</>}
               </button>
               <button type="button" onClick={() => print('QR')} disabled={printState === 'sending'} className={quiet}>
                 {printingKind === 'QR' && printState === 'sending' ? <><Loader2 className="h-4 w-4 animate-spin" /> Invio…</>
@@ -517,8 +519,8 @@ const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
             <p className="flex items-center gap-2 text-[14px] text-[var(--ds-text-muted)]">
               <QrCode className="h-4 w-4 flex-shrink-0" aria-hidden />
               {(bill.residual_cents ?? 0) > 0
-                ? 'QR non più attivo: incassa il resto in cassa e chiudi il conto.'
-                : 'Conto saldato: il codice non è più attivo.'}
+                ? t('qrNoLongerActive')
+                : t('billSettledCode')}
             </p>
           </div>
         )}
@@ -535,7 +537,7 @@ const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
         const staffPayments = (bill.payments ?? []).filter((p) => !p.online);
         if (splits.length === 0 && staffPayments.length === 0) return null;
         return (
-          <FormCard title="Pagamenti quote">
+          <FormCard title={t('sharePayments')}>
             <ul>
               {splits.map((s) => {
                 const failed = s.status === 'ABANDONED';
@@ -555,7 +557,7 @@ const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
                           : <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin text-[var(--ds-pending-text)]" aria-hidden />}
                       <span className="min-w-0">
                         <span className={`block truncate ${failed ? 'text-[var(--ds-text-muted)]' : 'text-[var(--ds-text-primary)]'}`}>
-                          {s.claimant_label || 'Ospite'}
+                          {s.claimant_label || t('guest')}
                         </span>
                         {s.payment && (
                           <span className="block truncate text-[12px] text-[var(--ds-text-muted)]">
@@ -566,9 +568,9 @@ const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
                     </span>
                     <span className="flex flex-shrink-0 items-center gap-3">
                       {failed
-                        ? <span className="text-[13px] text-[var(--ds-critical-text)]">non riuscito</span>
+                        ? <span className="text-[13px] text-[var(--ds-critical-text)]">{t('failedWord')}</span>
                         : s.status === 'CLAIMED'
-                          ? <span className="text-[13px] text-[var(--ds-pending-text)]">sta pagando</span>
+                          ? <span className="text-[13px] text-[var(--ds-pending-text)]">{t('paying')}</span>
                           : s.paid_at && <span className="text-[13px] text-[var(--ds-text-muted)]">{timePart(s.paid_at)}</span>}
                       <span className={`tabular-nums ${s.status === 'PAID' ? 'text-[var(--ds-text-secondary)]' : 'text-[var(--ds-text-muted)]'}`}>
                         {euro(s.amount_cents)}
@@ -578,8 +580,8 @@ const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
                           href={s.payment.url}
                           target="_blank"
                           rel="noreferrer"
-                          aria-label="Ricevuta del pagamento"
-                          title="Ricevuta del pagamento"
+                          aria-label={t('paymentReceipt')}
+                          title={t('paymentReceipt')}
                           className="-my-2 inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                         >
                           <ExternalLink className="h-4 w-4" aria-hidden />
@@ -607,7 +609,7 @@ const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
       })()}
 
       {bill.items && bill.items.length > 0 && (
-        <FormCard title="Dettaglio">
+        <FormCard title={t('detail')}>
           <ul>
             {bill.items.map((i, idx) => (
               <li
@@ -654,7 +656,7 @@ const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
           })()}
           {bill.paid_cents != null && (bill.paid_cents - (bill.deposit_credit_cents ?? 0)) > 0 && (
             <div className="flex justify-between text-[var(--ds-text-muted)]">
-              <dt>Incassato dai clienti</dt>
+              <dt>{t('takenFromGuests')}</dt>
               <dd className="tabular-nums">−{euro(bill.paid_cents - (bill.deposit_credit_cents ?? 0))}</dd>
             </div>
           )}
@@ -666,14 +668,14 @@ const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
           )}
           {bill.residual_cents != null && (
             <div className={`flex justify-between font-medium ${settled ? 'text-[var(--ds-seated-text)]' : 'text-[var(--ds-critical-text)]'}`}>
-              <dt>Da pagare</dt>
+              <dt>{t('toPay')}</dt>
               <dd className="tabular-nums">{euro(bill.residual_cents)}</dd>
             </div>
           )}
         </dl>
         {bill.open_orders != null && bill.open_orders > 0 && (
           <p className="mt-3 text-[13px] text-[var(--ds-pending-text)]">
-            Il tavolo ha ancora una comanda aperta: il totale può cambiare.
+            {t('openOrderMayChange')}
           </p>
         )}
       </FormCard>
@@ -683,6 +685,15 @@ const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
 };
 
 /* ── Fattura elettronica ──────────────────────────────────────────────────
+   RESTA IN ITALIANO, di proposito. Non è una schermata: è un modulo di legge
+   italiano, e i suoi campi sono istituti con un nome solo — P.IVA, Codice
+   SDI, PEC, «Invia a SDI», Agenzia delle Entrate. Tradurne metà (Comune,
+   Indirizzo) e lasciare l'altra metà sarebbe peggio che lasciarlo tutto.
+
+   Attenzione a NON scrivere qui che i tenant esteri non ci arrivano: il gate
+   'fiscal' è pianificato ma non esiste ancora, quindi ci arriverebbero. Il
+   motivo per cui resta italiano è il modulo in sé, non un permesso mancante.
+
    Il cliente chiede fattura invece dello scontrino. Si parte dalla rubrica
    (i dati di fatturazione stanno sul cliente) e ogni campo resta
    correggibile al volo: quello che si digita qui vince, ma NON riscrive
@@ -806,7 +817,7 @@ export const InvoiceDialog: React.FC<{
       <div className="flex max-h-[90vh] w-full max-w-md flex-col overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)]" onClick={e => e.stopPropagation()}>
         <div className="border-b border-[var(--ds-border)] p-5">
           <h3 className="text-[16px] font-semibold text-[var(--ds-text-primary)]">Fattura elettronica</h3>
-          <p className="mt-1 text-[13px] text-[var(--ds-text-muted)]">{billPlace(bill)} · {euro(bill.total_cents)} · sostituisce lo scontrino</p>
+          <p className="mt-1 text-[13px] text-[var(--ds-text-muted)]">{billPlace(bill, t)} · {euro(bill.total_cents)} · sostituisce lo scontrino</p>
         </div>
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-5">
           <label className="relative block">
@@ -962,12 +973,12 @@ export const FiscalCard: React.FC<{
   );
   const pill =
     st === 'CONFIRMED' && creditNote ? { tone: 'neutral' as const, label: t('voidedWithCreditNote') }
-    : st === 'CONFIRMED' && proforma ? { tone: 'neutral' as const, label: 'proforma' }
-    : st === 'CONFIRMED' && invoice ? { tone: 'positive' as const, label: 'fattura emessa' }
-    : st === 'CONFIRMED' ? { tone: 'positive' as const, label: viaPP || viaRT ? 'emesso in cassa' : 'emesso' }
-    : st === 'PENDING' ? { tone: 'pending' as const, label: 'in emissione' }
-    : st === 'FAILED' ? { tone: 'critical' as const, label: creditNote ? 'errore nota di credito' : invoice ? 'errore fattura' : 'errore' }
-    : st === 'VOIDED' ? { tone: 'neutral' as const, label: 'annullato' }
+    : st === 'CONFIRMED' && proforma ? { tone: 'neutral' as const, label: t('docPill.proforma') }
+    : st === 'CONFIRMED' && invoice ? { tone: 'positive' as const, label: t('docPill.invoiceIssued') }
+    : st === 'CONFIRMED' ? { tone: 'positive' as const, label: t(viaPP || viaRT ? 'docPill.issuedAtTill' : 'docPill.issued') }
+    : st === 'PENDING' ? { tone: 'pending' as const, label: t('docPill.issuing') }
+    : st === 'FAILED' ? { tone: 'critical' as const, label: t(creditNote ? 'docPill.creditNoteError' : invoice ? 'docPill.invoiceError' : 'docPill.error') }
+    : st === 'VOIDED' ? { tone: 'neutral' as const, label: t('docPill.cancelled') }
     : isPP ? { tone: 'pending' as const, label: t('toCloseAtTill') }
     : { tone: 'neutral' as const, label: t('notIssued') };
 
@@ -982,7 +993,7 @@ export const FiscalCard: React.FC<{
       // 409 in_progress: l'altra emissione è in volo — il reload mostrerà
       // l'esito; non è un errore da urlare.
       if (err?.data?.reason === 'in_progress') onChanged?.();
-      else setError(err?.data?.message ?? err?.data?.error ?? err?.message ?? 'Operazione non riuscita');
+      else setError(err?.data?.message ?? err?.data?.error ?? err?.message ?? t('err.operation'));
     } finally {
       setBusy(false);
     }
@@ -997,8 +1008,8 @@ export const FiscalCard: React.FC<{
         {st === 'CONFIRMED' && proforma && (
           <p className="text-[13px] text-[var(--ds-text-muted)]">
             {viaPP
-              ? 'Chiuso in cassa con proforma, senza scontrino.'
-              : 'Chiuso con proforma, senza documento fiscale. Scontrino o fattura lo sostituiscono.'}
+              ? t('closedAtTillProforma')
+              : t('closedProformaNoDoc')}
           </p>
         )}
         {st === 'CONFIRMED' && invoice && (
@@ -1013,14 +1024,14 @@ export const FiscalCard: React.FC<{
         )}
         {st === 'FAILED' && creditNote && (
           <p className="text-[13px] text-[var(--ds-text-muted)]">
-            La nota di credito non è partita: la fattura resta valida.
+            {t('creditNoteFailed')}
           </p>
         )}
         {st === 'CONFIRMED' && !proforma && !invoice && (bill.fiscal_doc_number || bill.fiscal_ref || viaRT) && (
           <p className="text-[13px] text-[var(--ds-text-muted)]">
             {viaRT
-              ? `Scontrino di cassa${bill.fiscal_doc_number ? ` n. ${bill.fiscal_doc_number}` : ''} · battuto sul registratore`
-              : <>Scontrino {bill.fiscal_doc_number ?? bill.fiscal_ref}{viaPP ? ' · emesso via Passepartout' : ''}</>}
+              ? (bill.fiscal_doc_number ? t('tillReceiptNo', { numero: bill.fiscal_doc_number }) : t('tillReceipt'))
+              : <>{t('receiptNumbered', { numero: bill.fiscal_doc_number ?? bill.fiscal_ref })}{viaPP ? t('viaPassepartout') : ''}</>}
           </p>
         )}
         {/* Il documento emesso si consegna: QR per l'ospite (pagina pubblica
@@ -1034,7 +1045,7 @@ export const FiscalCard: React.FC<{
             </div>
             <div className="min-w-0 space-y-2">
               <p className="text-[13px] leading-snug text-[var(--ds-text-secondary)]">
-                L'ospite lo inquadra e ha lo scontrino digitale sul telefono.
+                {t('receiptQrHintBill')}
               </p>
               <button
                 type="button"
@@ -1047,7 +1058,7 @@ export const FiscalCard: React.FC<{
                 className={quiet}
               >
                 {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
-                {printedFlash ? 'Copia in stampa' : 'Stampa copia'}
+                {t(printedFlash ? 'copyPrinting' : 'printCopy')}
               </button>
             </div>
           </div>
@@ -1072,7 +1083,7 @@ export const FiscalCard: React.FC<{
               className={quiet}
             >
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
-              {printedFlash ? 'Proforma in stampa' : 'Stampa proforma'}
+              {t(printedFlash ? 'proformaPrinting' : 'printProformaBtn')}
             </button>
           )}
           {isPP && st !== 'CONFIRMED' && st !== 'PENDING' && bill.status === 'CLOSED' && (
@@ -1083,7 +1094,7 @@ export const FiscalCard: React.FC<{
               className={quiet}
             >
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
-              Chiudi in cassa
+              {t('closeAtTillBtn')}
             </button>
           )}
           {!isPP && slotFree && (
@@ -1094,7 +1105,7 @@ export const FiscalCard: React.FC<{
               className={quiet}
             >
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
-              {st === 'FAILED' && !invoice ? 'Riprova emissione' : st === 'VOIDED' ? 'Emetti di nuovo' : 'Emetti scontrino'}
+              {t(st === 'FAILED' && !invoice ? 'retryIssue' : st === 'VOIDED' ? 'issueAgain' : 'issueReceiptBtn')}
             </button>
           )}
           {/* Fattura al posto dello scontrino: stesso prerequisito (nessun
@@ -1103,7 +1114,7 @@ export const FiscalCard: React.FC<{
           {!isPP && slotFree && (
             <button type="button" disabled={busy} onClick={() => setInvoiceOpen(true)} className={quiet}>
               <FileText className="h-4 w-4" />
-              {st === 'FAILED' && invoice ? 'Riprova fattura' : 'Emetti fattura'}
+              {t(st === 'FAILED' && invoice ? 'retryInvoice' : 'issueInvoiceBtn')}
             </button>
           )}
           {/* La nota fallita si ritenta sulla STESSA fattura (related_doc_id):
@@ -1117,7 +1128,7 @@ export const FiscalCard: React.FC<{
               className={quiet}
             >
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
-              Riprova nota di credito
+              {t('retryCreditNote')}
             </button>
           )}
           {/* Marcatura a posteriori: il conto chiuso "senza scontrino"
@@ -1129,7 +1140,7 @@ export const FiscalCard: React.FC<{
               onClick={() => run(() => billsApiService.markProforma(bill.id))}
               className={quiet}
             >
-              Segna proforma
+              {t('markProformaBtn')}
             </button>
           )}
           {/* Scontrino battuto in cassa ma non registrato alla chiusura (o
@@ -1155,15 +1166,15 @@ export const FiscalCard: React.FC<{
                   className={quiet}
                 >
                   {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                  Registra
+                  {t('record')}
                 </button>
                 <button type="button" disabled={busy} onClick={() => setRtArmed(false)} className={quiet}>
-                  Annulla
+                  {t('cancel')}
                 </button>
               </span>
             ) : (
               <button type="button" disabled={busy} onClick={() => setRtArmed(true)} className={quiet}>
-                Scontrino di cassa
+                {t('tillReceiptBtn')}
               </button>
             )
           )}
@@ -1177,16 +1188,16 @@ export const FiscalCard: React.FC<{
                   className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-solid)] px-4 text-[13px] font-semibold text-white transition-colors disabled:opacity-40"
                 >
                   {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
-                  Confermo l'annullo
+                  {t('confirmVoid')}
                 </button>
                 <button type="button" disabled={busy} onClick={() => setArmed(false)} className={quiet}>
-                  Lascia stare
+                  {t('leaveIt')}
                 </button>
               </>
             ) : (
               <button type="button" disabled={busy} onClick={() => setArmed(true)} className={quiet}>
                 <X className="h-4 w-4" />
-                Annulla scontrino
+                {t('voidReceipt')}
               </button>
             )
           )}
@@ -1202,16 +1213,16 @@ export const FiscalCard: React.FC<{
                   className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-solid)] px-4 text-[13px] font-semibold text-white transition-colors disabled:opacity-40"
                 >
                   {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
-                  Confermo lo storno
+                  {t('confirmReversal')}
                 </button>
                 <button type="button" disabled={busy} onClick={() => setArmed(false)} className={quiet}>
-                  Lascia stare
+                  {t('leaveIt')}
                 </button>
               </>
             ) : (
               <button type="button" disabled={busy} onClick={() => setArmed(true)} className={quiet}>
                 <FileText className="h-4 w-4" />
-                Nota di credito
+                {t('creditNoteBtn')}
               </button>
             )
           )}
@@ -1245,13 +1256,15 @@ export const BillDetail: React.FC<{
   onSettle?: (opts?: SettleOpts, meta?: { invoiceIntent?: boolean }) => void;
   /** Ricarica la lista dopo emissione/annullo dello scontrino. */
   onFiscalChanged?: () => void;
-}> = ({ bill, busy, onClose, onSettle, onFiscalChanged }) => (
+}> = ({ bill, busy, onClose, onSettle, onFiscalChanged }) => {
+  const { t } = useTranslation('cassa', { useSuspense: false });
+  return (
   <>
     <PaneHeader
       onBack={onClose}
-      backLabel="Torna ai conti"
+      backLabel={t('backToBills')}
       title={billTitle(bill)}
-      subtitle={billSubtitle(bill)}
+      subtitle={billSubtitle(bill, t)}
       badge={<BillMeta bill={bill} />}
     />
     <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 pb-5 sm:px-6 lg:px-8">
@@ -1264,7 +1277,8 @@ export const BillDetail: React.FC<{
       </div>
     )}
   </>
-);
+  );
+};
 
 /** Overlay form, for the places that open a bill on top of another task. */
 export const BillSheet: React.FC<{
@@ -1274,13 +1288,15 @@ export const BillSheet: React.FC<{
   onSettle?: (opts?: SettleOpts, meta?: { invoiceIntent?: boolean }) => void;
   /** Azione aggiuntiva in coda al footer (es. "nuova comanda" dal palmare). */
   footerExtra?: React.ReactNode;
-}> = ({ bill, busy, onClose, onSettle, footerExtra }) => (
+}> = ({ bill, busy, onClose, onSettle, footerExtra }) => {
+  const { t } = useTranslation('cassa', { useSuspense: false });
+  return (
   <Sheet
     open
     onClose={onClose}
-    ariaLabel={`Conto tavolo ${bill.table_name ?? ''}`}
+    ariaLabel={t('tableBillAria', { tavolo: bill.table_name ?? '' })}
     title={billTitle(bill)}
-    subtitle={billSubtitle(bill)}
+    subtitle={billSubtitle(bill, t)}
     meta={<BillMeta bill={bill} />}
     bodyClassName="space-y-3 px-4 pb-5 pt-4 sm:px-5"
     footer={(onSettle || footerExtra) && (
@@ -1292,4 +1308,5 @@ export const BillSheet: React.FC<{
   >
     <BillBody bill={bill} />
   </Sheet>
-);
+  );
+};

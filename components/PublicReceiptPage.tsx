@@ -50,8 +50,12 @@ const dateLabel = (iso: string | null, lang: SupportedLanguage): string => {
   // ristorante, non del telefono che lo legge.
   //
   // Roma è cablata di proposito, come la valuta sopra: lo scontrino è un
-  // documento fiscale italiano e i tenant esteri non hanno il modulo
-  // (entitlement 'fiscal'), quindi da questa pagina non ci passano.
+  // documento fiscale italiano, con la sua giornata e la sua moneta.
+  //
+  // Non è però vero, come diceva un commento precedente, che i tenant esteri
+  // non ci arrivino: l'entitlement 'fiscal' che li terrebbe fuori è pianificato
+  // ma non costruito. Oggi la pagina è raggiungibile da chiunque abbia il
+  // token di uno scontrino.
   return new Intl.DateTimeFormat(lang === 'en' ? 'en-GB' : 'it-IT', {
     day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
     timeZone: 'Europe/Rome',

@@ -6523,9 +6523,14 @@ const parseFiscalPeriod = (req: any): { from: string; to: string } | null => {
 //
 // Roma è cablata di proposito, qui e nelle altre query del registro: il
 // registro è un documento per l'Agenzia delle Entrate, e la giornata fiscale
-// è quella italiana per definizione. I tenant esteri non hanno il modulo
-// (entitlement 'fiscal'), quindi non passano mai da questo codice. Non
-// parametrizzare il fuso: lo renderebbe sbagliato per il solo caso che esiste.
+// è quella italiana per definizione. Non parametrizzare il fuso: lo renderebbe
+// sbagliato per il solo caso che esiste.
+//
+// ATTENZIONE: queste route NON sono ancora dietro un entitlement. Il gate
+// 'fiscal' è pianificato (Cantiere C2) ma non costruito, quindi oggi un tenant
+// non italiano ci arriverebbe eccome — e leggerebbe un registro sulla giornata
+// di Roma. Finché il gate non c'è, questa è una porta aperta, non una scelta
+// protetta. Un commento precedente qui affermava il contrario: era sbagliato.
 const FISCAL_PERIOD_WHERE = `fd.tenant_id = $1
     AND fd.created_at >= ($2::date::timestamp AT TIME ZONE 'Europe/Rome')
     AND fd.created_at < (($3::date + 1)::timestamp AT TIME ZONE 'Europe/Rome')`;
