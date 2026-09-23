@@ -1427,6 +1427,36 @@ export interface VoiceCallRecord {
     transcript?: string;
     summary?: string;
     reservation_id?: number;
+    /** Costo della conversazione come lo riporta ElevenLabs (vedi
+     *  extractVoiceCallCost). Assente = non noto, la riga resta NULL. */
+    cost_credits?: number;
+    cost_usd?: number;
+    llm_cost_usd?: number;
+    platform_cost_usd?: number;
+}
+
+const finiteOrUndefined = (v: unknown): number | undefined => {
+    const n = Number(v);
+    return v !== null && v !== undefined && v !== '' && Number.isFinite(n) ? n : undefined;
+};
+
+/**
+ * Costo di una conversazione dal blocco `metadata` di ElevenLabs — lo stesso
+ * nel webhook post-call e nel GET /convai/conversations/:id. `cost` è in
+ * crediti; `charging.llm_price` e `charging.platform_price` in dollari (voce,
+ * trascrizione e piattaforma stanno nel secondo). Senza nessuno dei tre non
+ * si inventa uno zero: tutto undefined, la riga resta a NULL.
+ */
+export function extractVoiceCallCost(metadata: any): Pick<VoiceCallRecord, 'cost_credits' | 'cost_usd' | 'llm_cost_usd' | 'platform_cost_usd'> {
+    const credits = finiteOrUndefined(metadata?.cost);
+    const llm = finiteOrUndefined(metadata?.charging?.llm_price);
+    const platform = finiteOrUndefined(metadata?.charging?.platform_price);
+    return {
+        cost_credits: credits !== undefined ? Math.round(credits) : undefined,
+        cost_usd: llm !== undefined || platform !== undefined ? (llm ?? 0) + (platform ?? 0) : undefined,
+        llm_cost_usd: llm,
+        platform_cost_usd: platform,
+    };
 }
 
 // tenantId obbligatorio sull'INSERT. conversation_id resta unico GLOBALE
@@ -1434,14 +1464,19 @@ export interface VoiceCallRecord {
 // l'ON CONFLICT non cambia: la scopatura per tenant vive nelle query.
 export async function recordVoiceCall(tenantId: number, record: VoiceCallRecord): Promise<void> {
     await queryWithRetry(`
-        INSERT INTO voice_calls (tenant_id, conversation_id, phone, duration_seconds, transcript, summary, reservation_id)
-        VALUES ($7, $1, $2, $3, $4, $5, $6)
+        INSERT INTO voice_calls (tenant_id, conversation_id, phone, duration_seconds, transcript, summary, reservation_id,
+                                 cost_credits, cost_usd, llm_cost_usd, platform_cost_usd)
+        VALUES ($7, $1, $2, $3, $4, $5, $6, $8, $9, $10, $11)
         ON CONFLICT (conversation_id) DO UPDATE SET
             phone = COALESCE(EXCLUDED.phone, voice_calls.phone),
             duration_seconds = COALESCE(EXCLUDED.duration_seconds, voice_calls.duration_seconds),
             transcript = COALESCE(EXCLUDED.transcript, voice_calls.transcript),
             summary = COALESCE(EXCLUDED.summary, voice_calls.summary),
-            reservation_id = COALESCE(EXCLUDED.reservation_id, voice_calls.reservation_id)
+            reservation_id = COALESCE(EXCLUDED.reservation_id, voice_calls.reservation_id),
+            cost_credits = COALESCE(EXCLUDED.cost_credits, voice_calls.cost_credits),
+            cost_usd = COALESCE(EXCLUDED.cost_usd, voice_calls.cost_usd),
+            llm_cost_usd = COALESCE(EXCLUDED.llm_cost_usd, voice_calls.llm_cost_usd),
+            platform_cost_usd = COALESCE(EXCLUDED.platform_cost_usd, voice_calls.platform_cost_usd)
     `, [
         record.conversation_id,
         record.phone ?? null,
@@ -1449,7 +1484,11 @@ export async function recordVoiceCall(tenantId: number, record: VoiceCallRecord)
         record.transcript ?? null,
         record.summary ?? null,
         record.reservation_id ?? null,
-        tenantId
+        tenantId,
+        record.cost_credits ?? null,
+        record.cost_usd ?? null,
+        record.llm_cost_usd ?? null,
+        record.platform_cost_usd ?? null,
     ]);
 }
 

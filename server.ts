@@ -22,6 +22,7 @@ import * as tableAssignmentAgent from './services/tableAssignmentAgent.js';
 import * as aiReport from './services/aiReportService.js';
 import { renderPrenota } from './services/prenotaSeo.js';
 import { COST_USD_SQL, UNPRICED_SQL, USD_EUR } from './services/aiPricing.js';
+import { VOICE_PLAN_DEFAULTS, BILLABLE_SECONDS_SQL, billableMinutes, estimatedRevenueCents } from './services/voicePlan.js';
 import { outboxEnqueueInTx, outboxKick, outboxRegister, startOutboxDispatcher } from './services/outboxService.js';
 import { SERVER_PROFILE, isServiceNode } from './services/topology.js';
 import { scheduleSalaNodeBootstrap } from './services/salaNodeBootstrap.js';
@@ -141,6 +142,7 @@ import {
     cancelVoiceReservation,
     modifyVoiceReservation,
     recordVoiceCall,
+    extractVoiceCallCost,
     recordCallbackRequest,
     formatItalianConfirmation,
     formatItalianCancellation,
@@ -1783,7 +1785,15 @@ async function handleElevenLabsPostCall(tenantId: number, req: express.Request, 
         (typeof data.analysis?.summary === 'string' ? data.analysis.summary : undefined) ??
         (typeof body.summary === 'string' ? body.summary : undefined);
 
-    const duration = Number(data.duration_seconds ?? body.duration_seconds ?? data.metadata?.call_duration_seconds);
+    // ElevenLabs manda la durata in metadata.call_duration_secs: leggendo solo
+    // call_duration_seconds la durata non arrivava mai (su 1.542 chiamate di
+    // agosto 2026, 36 con la durata salvata) e Consumi AI contava zero minuti.
+    const duration = Number(
+        data.duration_seconds ?? body.duration_seconds
+        ?? data.metadata?.call_duration_secs ?? data.metadata?.call_duration_seconds
+    );
+    // Costo della conversazione: base dei minuti inclusi nell'add-on voce.
+    const cost = extractVoiceCallCost(data.metadata ?? body.metadata);
     // For SIP calls the number lives at metadata.phone_call.external_number;
     // the other keys are legacy/dashboard-set fallbacks.
     const phoneRaw: string | undefined =
@@ -1805,6 +1815,7 @@ async function handleElevenLabsPostCall(tenantId: number, req: express.Request, 
         has_transcript: !!transcript,
         has_summary: !!summary,
         duration_seconds: Number.isFinite(duration) ? duration : null,
+        cost_usd: cost.cost_usd ?? null,
         phone: phoneRaw || null,
     });
 
@@ -1815,6 +1826,7 @@ async function handleElevenLabsPostCall(tenantId: number, req: express.Request, 
             duration_seconds: Number.isFinite(duration) ? Math.trunc(duration) : undefined,
             transcript,
             summary,
+            ...cost,
         });
     } catch (err: any) {
         console.warn('[ElevenLabs] post-call recordVoiceCall failed:', err?.message || err);
@@ -22734,6 +22746,9 @@ app.get('/ai-usage/elevenlabs', authenticate, requireDevBoardAdmin, async (req, 
         const callTotalsQ = queryWithRetry(
             `SELECT COUNT(*)::int AS calls,
                     COALESCE(SUM(duration_seconds),0)::int AS seconds,
+                    COALESCE(SUM(${BILLABLE_SECONDS_SQL}),0)::int AS billable_seconds,
+                    COALESCE(SUM(cost_usd),0)::float AS cost_usd,
+                    COUNT(cost_usd)::int AS priced_calls,
                     MAX(created_at) AS last_at
              FROM voice_calls
              WHERE tenant_id = $2
@@ -22743,7 +22758,9 @@ app.get('/ai-usage/elevenlabs', authenticate, requireDevBoardAdmin, async (req, 
         const callDailyQ = queryWithRetry(
             `SELECT to_char(created_at AT TIME ZONE ${TZ}, 'YYYY-MM-DD') AS day,
                     COUNT(*)::int AS calls,
-                    COALESCE(SUM(duration_seconds),0)::int AS seconds
+                    COALESCE(SUM(duration_seconds),0)::int AS seconds,
+                    COALESCE(SUM(${BILLABLE_SECONDS_SQL}),0)::int AS billable_seconds,
+                    COALESCE(SUM(cost_usd),0)::float AS cost_usd
              FROM voice_calls
              WHERE tenant_id = $2
                AND created_at >= NOW() - make_interval(days => $1::int)
@@ -22759,15 +22776,47 @@ app.get('/ai-usage/elevenlabs', authenticate, requireDevBoardAdmin, async (req, 
             [req.tenantId!]
         );
 
-        const [callTotals, callDaily, callAllTime] = await Promise.all([callTotalsQ, callDailyQ, callAllTimeQ]);
+        // Mese in corso nel fuso del ristorante, contro il piano dei minuti
+        // inclusi (Fase 1: valori di default uguali per tutti, solo misura).
+        const callMonthQ = queryWithRetry(
+            `SELECT COUNT(*)::int AS calls,
+                    COALESCE(SUM(${BILLABLE_SECONDS_SQL}),0)::int AS billable_seconds,
+                    COALESCE(SUM(cost_usd),0)::float AS cost_usd,
+                    COUNT(cost_usd)::int AS priced_calls,
+                    EXTRACT(DAY FROM (NOW() AT TIME ZONE ${TZ}))::int AS day_of_month,
+                    EXTRACT(DAY FROM (date_trunc('month', NOW() AT TIME ZONE ${TZ}) + INTERVAL '1 month - 1 day'))::int AS days_in_month
+             FROM voice_calls
+             WHERE tenant_id = $1
+               AND created_at >= (date_trunc('month', NOW() AT TIME ZONE ${TZ}) AT TIME ZONE ${TZ})`,
+            [req.tenantId!]
+        );
+
+        const [callTotals, callDaily, callAllTime, callMonth] = await Promise.all([callTotalsQ, callDailyQ, callAllTimeQ, callMonthQ]);
+        const m = callMonth.rows[0];
+        const monthMinutes = billableMinutes(Number(m.billable_seconds));
+        // Proiezione lineare a fine mese sul ritmo dei giorni trascorsi.
+        const projectedMinutes = m.day_of_month > 0
+            ? Math.round(monthMinutes / m.day_of_month * m.days_in_month)
+            : monthMinutes;
         res.json({
             days,
             subscription,
             subscriptionError,
+            usdEur: USD_EUR,
             calls: {
                 window: callTotals.rows[0],
                 daily: callDaily.rows,
                 allTime: callAllTime.rows[0],
+            },
+            plan: VOICE_PLAN_DEFAULTS,
+            month: {
+                calls: m.calls,
+                billable_minutes: monthMinutes,
+                projected_minutes: projectedMinutes,
+                cost_usd: Number(m.cost_usd),
+                priced_calls: m.priced_calls,
+                estimated_revenue_cents: estimatedRevenueCents(monthMinutes),
+                projected_revenue_cents: estimatedRevenueCents(projectedMinutes),
             },
         });
     } catch (err) {
@@ -23238,11 +23287,18 @@ app.post('/voice-calls/sync', authenticate, requireFeature('voice'), voiceCallsA
         const conversations: any[] = Array.isArray(listJson?.conversations) ? listJson.conversations : [];
 
         const existing = await queryWithRetry(
-            `SELECT conversation_id, phone FROM voice_calls WHERE conversation_id = ANY($1::text[]) AND tenant_id = $2`,
+            `SELECT conversation_id, phone, duration_seconds, cost_usd FROM voice_calls WHERE conversation_id = ANY($1::text[]) AND tenant_id = $2`,
             [conversations.map(c => c.conversation_id).filter(Boolean), req.tenantId!]
         );
-        const savedWithPhone = new Set<string>(existing.rows.filter(r => r.phone).map(r => r.conversation_id));
-        const savedWithoutPhone = new Set<string>(existing.rows.filter(r => !r.phone).map(r => r.conversation_id));
+        // Completa = numero, durata e costo presenti. Le righe a cui manca
+        // qualcosa si riprendono dal dettaglio ElevenLabs (durata e costo
+        // mancavano a quasi tutte le chiamate fino a settembre 2026).
+        const complete = new Set<string>(existing.rows
+            .filter(r => r.phone && r.duration_seconds != null && r.cost_usd != null)
+            .map(r => r.conversation_id));
+        const savedIncomplete = new Set<string>(existing.rows
+            .filter(r => !complete.has(r.conversation_id))
+            .map(r => r.conversation_id));
 
         let imported = 0;
         let backfilled = 0;
@@ -23252,7 +23308,7 @@ app.post('/voice-calls/sync', authenticate, requireFeature('voice'), voiceCallsA
         for (const conv of conversations) {
             const conversationId: string | undefined = conv.conversation_id;
             if (!conversationId) { failed++; continue; }
-            if (savedWithPhone.has(conversationId)) { skipped++; continue; }
+            if (complete.has(conversationId)) { skipped++; continue; }
 
             try {
                 const detailRes = await fetch(
@@ -23291,14 +23347,16 @@ app.post('/voice-calls/sync', authenticate, requireFeature('voice'), voiceCallsA
                     detail?.metadata?.phone_number ||
                     detail?.metadata?.phone;
 
-                if (savedWithoutPhone.has(conversationId)) {
-                    // Backfill only the phone — leave transcript/summary/duration
-                    // untouched to preserve any staff edits or fields already set
-                    // by the post-call webhook.
-                    if (!phoneRaw) { skipped++; continue; }
+                const cost = extractVoiceCallCost(detail?.metadata);
+
+                if (savedIncomplete.has(conversationId)) {
+                    // Solo i campi mancanti (numero, durata, costo): transcript
+                    // e riassunto restano quelli già salvati dal post-call.
                     await recordVoiceCall(req.tenantId!, {
                         conversation_id: conversationId,
-                        phone: normalizeItalianPhone(phoneRaw),
+                        phone: phoneRaw ? normalizeItalianPhone(phoneRaw) : undefined,
+                        duration_seconds: Number.isFinite(duration) ? Math.trunc(duration) : undefined,
+                        ...cost,
                     });
                     backfilled++;
                 } else {
@@ -23308,6 +23366,7 @@ app.post('/voice-calls/sync', authenticate, requireFeature('voice'), voiceCallsA
                         duration_seconds: Number.isFinite(duration) ? Math.trunc(duration) : undefined,
                         transcript,
                         summary,
+                        ...cost,
                     });
                     imported++;
                 }
@@ -26744,6 +26803,21 @@ app.get('/admin/tenants', platformAdminAuth, async (_req, res) => {
              GROUP BY t.id
              ORDER BY t.id`
         );
+        // Minuti e costo di Sofia nel mese in corso, nel fuso di ogni tenant:
+        // il conto ElevenLabs è unico, il consumo per ristorante esiste solo
+        // in voice_calls. Ricavo stimato sul piano di default (Fase 1).
+        const voiceMonth = await queryWithRetry(
+            `SELECT vc.tenant_id,
+                    COUNT(*)::int AS calls,
+                    COALESCE(SUM(${BILLABLE_SECONDS_SQL}),0)::int AS billable_seconds,
+                    COALESCE(SUM(vc.cost_usd),0)::float AS cost_usd,
+                    COUNT(vc.cost_usd)::int AS priced_calls
+             FROM voice_calls vc
+             JOIN tenants t ON t.id = vc.tenant_id
+             WHERE vc.created_at >= (date_trunc('month', NOW() AT TIME ZONE t.timezone) AT TIME ZONE t.timezone)
+             GROUP BY vc.tenant_id`
+        );
+        const voiceByTenant = new Map<number, any>(voiceMonth.rows.map((r: any) => [Number(r.tenant_id), r]));
         res.json(result.rows.map((r: any) => ({
             id: Number(r.id),
             slug: r.slug,
@@ -26758,6 +26832,20 @@ app.get('/admin/tenants', platformAdminAuth, async (_req, res) => {
             created_at: r.created_at,
             features: r.features,
             user_count: r.user_count,
+            voice_month: (() => {
+                const v = voiceByTenant.get(Number(r.id));
+                if (!v) return null;
+                const minutes = billableMinutes(Number(v.billable_seconds));
+                return {
+                    calls: v.calls,
+                    billable_minutes: minutes,
+                    included_minutes: VOICE_PLAN_DEFAULTS.includedMinutes,
+                    cost_usd: Number(v.cost_usd),
+                    cost_eur_cents: Math.round(Number(v.cost_usd) * USD_EUR * 100),
+                    priced_calls: v.priced_calls,
+                    estimated_revenue_cents: estimatedRevenueCents(minutes),
+                };
+            })(),
         })));
     } catch (err) {
         console.error('GET /admin/tenants error:', err);
