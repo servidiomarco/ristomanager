@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Phone, RefreshCw, Loader2, ListFilter, ArrowRight,
@@ -49,17 +50,19 @@ const formatDateTime = (iso: string | null | undefined): string => {
   }
 };
 
-const formatPhone = (phone: string | null | undefined): string => {
-  if (!phone) return 'Numero sconosciuto';
+type TFunc = (key: string, options?: Record<string, unknown>) => string;
+
+const formatPhone = (phone: string | null | undefined, t: TFunc): string => {
+  if (!phone) return t('unknownNumber');
   return phone;
 };
 
-const messageStatusBadge = (status: string | null | undefined): { label: string; tone: PillTone } => {
+const messageStatusBadge = (status: string | null | undefined, t: TFunc): { label: string; tone: PillTone } => {
   const s = (status || '').toLowerCase();
-  if (s === 'delivered' || s === 'read') return { label: 'Consegnato', tone: 'positive' };
-  if (s === 'sent' || s === 'queued' || s === 'accepted' || s === 'sending') return { label: 'Inviato', tone: 'info' };
-  if (s === 'failed' || s === 'undelivered') return { label: 'Fallito', tone: 'critical' };
-  return { label: s || 'In coda', tone: 'neutral' };
+  if (s === 'delivered' || s === 'read') return { label: t('msg.delivered'), tone: 'positive' };
+  if (s === 'sent' || s === 'queued' || s === 'accepted' || s === 'sending') return { label: t('msg.sent'), tone: 'info' };
+  if (s === 'failed' || s === 'undelivered') return { label: t('msg.failed'), tone: 'critical' };
+  return { label: s || t('msg.queued'), tone: 'neutral' };
 };
 
 const channelLabel = (channel: string): string => {
@@ -68,12 +71,12 @@ const channelLabel = (channel: string): string => {
   return channel;
 };
 
-const reservationStatusBadge = (status: string | null | undefined): { label: string; tone: PillTone } | null => {
+const reservationStatusBadge = (status: string | null | undefined, t: TFunc): { label: string; tone: PillTone } | null => {
   if (!status) return null;
   switch (status) {
-    case 'CONFIRMED': return { label: 'Confermata', tone: 'positive' };
-    case 'CANCELLED': return { label: 'Annullata', tone: 'critical' };
-    case 'PENDING': return { label: 'In attesa', tone: 'pending' };
+    case 'CONFIRMED': return { label: t('res.confirmed'), tone: 'positive' };
+    case 'CANCELLED': return { label: t('res.cancelled'), tone: 'critical' };
+    case 'PENDING': return { label: t('res.pending'), tone: 'pending' };
     default: return { label: status, tone: 'neutral' };
   }
 };
@@ -116,6 +119,7 @@ interface CallDetailProps {
 }
 
 const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, onFollowUpChanged, onCreateReservation, onOpenCustomerProfile, refreshTick, siblingPendingIds }) => {
+  const { t } = useTranslation('chiamate', { useSuspense: false });
   const [detail, setDetail] = useState<VoiceCallDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -282,7 +286,7 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
   }, [audioUrl, audioLoading, callId]);
 
   const turns = useMemo(() => parseTranscript(detail?.transcript ?? null), [detail]);
-  const resBadge = reservationStatusBadge(detail?.reservation_status);
+  const resBadge = reservationStatusBadge(detail?.reservation_status, t);
 
   // Reservations for this phone number — includes reservations that weren't
   // explicitly linked to the call but were later created for the same number
@@ -301,22 +305,22 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
   }, [reservations, callDigits]);
   const hasReservationsForPhone = reservationsForPhone.length > 0;
 
-  const heading = detail ? (toTitleCase(detail.customer_name) || formatPhone(detail.phone)) : 'Conversazione';
+  const heading = detail ? (toTitleCase(detail.customer_name) || formatPhone(detail.phone, t)) : t('conversation');
 
   return (
     <>
       <PaneHeader
         onBack={onClose}
-        backLabel="Torna alle chiamate"
+        backLabel={t('backToCalls')}
         title={heading}
         subtitle={detail?.customer_name && detail.phone ? detail.phone : undefined}
         badge={detail && detail.reservation_id == null ? (
           detail.reservation_deleted_at ? (
-            <StatusPill tone="neutral">Prenotazione eliminata</StatusPill>
+            <StatusPill tone="neutral">{t('reservationDeleted')}</StatusPill>
           ) : (
             <StatusPill tone={detail.follow_up_status === 'CONTACTED' ? 'positive' : 'critical'}>
               <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" aria-hidden />
-              {detail.follow_up_status === 'CONTACTED' ? 'Ricontattato' : 'Da ricontattare'}
+              {t(detail.follow_up_status === 'CONTACTED' ? 'contacted' : 'toContact')}
             </StatusPill>
           )
         ) : undefined}
@@ -329,16 +333,16 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
                 type="button"
                 onClick={() => onOpenCustomerProfile({ phone: detail.phone! })}
                 className={dsButton.secondary}
-                title="Apri anagrafica cliente"
+                title={t('openCustomer')}
               >
                 <BookUser className="h-4 w-4" />
-                Anagrafica
+                {t('customerRecord')}
               </button>
             )}
             {detail?.phone && (
               <a href={`tel:${detail.phone.replace(/[^\d+]/g, '')}`} className={dsButton.primary}>
                 <Phone className="h-4 w-4" />
-                Chiama
+                {t('call')}
               </a>
             )}
           </div>
@@ -363,11 +367,11 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
           <FormCard>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <div className="text-[13px] text-[var(--ds-text-muted)]">Data</div>
+                <div className="text-[13px] text-[var(--ds-text-muted)]">{t('date')}</div>
                 <div className="mt-0.5 text-[15px] text-[var(--ds-text-primary)]">{formatDateTime(detail.created_at)}</div>
               </div>
               <div>
-                <div className="text-[13px] text-[var(--ds-text-muted)]">Durata</div>
+                <div className="text-[13px] text-[var(--ds-text-muted)]">{t('duration')}</div>
                 <div className="mt-0.5 text-[15px] tabular-nums text-[var(--ds-text-primary)]">{formatDuration(detail.duration_seconds)}</div>
               </div>
             </div>
@@ -375,21 +379,21 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
 
           {hasReservationsForPhone && (
             <FormCard
-              title="Prenotazioni per questo numero"
+              title={t('reservationsForNumber')}
               aside={<CountBadge count={reservationsForPhone.length} />}
             >
               <div className="flex flex-col gap-2">
                 {reservationsForPhone.map(res => {
-                  const badge = reservationStatusBadge(res.reservation_status ?? null);
+                  const badge = reservationStatusBadge(res.reservation_status ?? null, t);
                   const isLinked = detail.reservation_id === res.id;
                   return (
                     <div key={res.id} className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3">
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex min-w-0 items-center gap-2 text-[15px] text-[var(--ds-text-primary)]">
                           <CheckCircle2 className="h-4 w-4 flex-shrink-0 text-[var(--ds-seated-solid)]" aria-hidden />
-                          <span className="truncate font-medium">{toTitleCase(res.customer_name) || 'Prenotazione'}</span>
+                          <span className="truncate font-medium">{toTitleCase(res.customer_name) || t('aReservation')}</span>
                           {badge && <StatusPill tone={badge.tone}>{badge.label}</StatusPill>}
-                          {isLinked && <StatusPill tone="info">Collegata</StatusPill>}
+                          {isLinked && <StatusPill tone="info">{t('linked')}</StatusPill>}
                         </div>
                         <a
                           href={`/?view=RESERVATIONS&reservationId=${res.id}`}
@@ -400,7 +404,7 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
                       </div>
                       <div className="mt-1 text-[13px] text-[var(--ds-text-muted)]">
                         {formatDateTime(res.reservation_time)}
-                        {res.guests != null && ` · ${res.guests} ospiti`}
+                        {res.guests != null && ` · ${t('guestsCount', { n: res.guests })}`}
                       </div>
                     </div>
                   );
@@ -417,7 +421,7 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
               <div className="flex items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2 text-[15px] text-[var(--ds-text-primary)]">
                   <CheckCircle2 className="h-4 w-4 flex-shrink-0 text-[var(--ds-seated-solid)]" aria-hidden />
-                  <span className="truncate font-medium">{toTitleCase(detail.reservation_customer_name) || 'Prenotazione'}</span>
+                  <span className="truncate font-medium">{toTitleCase(detail.reservation_customer_name) || t('aReservation')}</span>
                   {resBadge && <StatusPill tone={resBadge.tone}>{resBadge.label}</StatusPill>}
                 </div>
                 <a
@@ -430,15 +434,15 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
               {detail.reservation_time && (
                 <div className="mt-1 text-[13px] text-[var(--ds-text-muted)]">
                   {formatDateTime(detail.reservation_time)}
-                  {detail.reservation_guests != null && ` · ${detail.reservation_guests} ospiti`}
+                  {detail.reservation_guests != null && ` · ${t('guestsCount', { n: detail.reservation_guests })}`}
                 </div>
               )}
             </FormCard>
           )}
 
           {detail.phantom_confirmation && !detail.phantom_recovered && (
-            <Callout tone="critical" icon={AlertCircle} title="Prenotazione da recuperare">
-              L'agent ha detto al cliente che la prenotazione è confermata, ma non è mai stata invocata la creazione nel CRM. Richiama il cliente per confermare o annullare, poi crea manualmente la prenotazione.
+            <Callout tone="critical" icon={AlertCircle} title={t('phantom.title')}>
+              {t('phantom.body')}
               <div className="mt-3">
                 <button
                   type="button"
@@ -447,14 +451,14 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
                   className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-4 text-[14px] font-medium text-[var(--ds-critical-text)] transition-colors hover:brightness-95 disabled:opacity-50"
                 >
                   {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-                  Segna come recuperata
+                  {t('phantom.markRecovered')}
                 </button>
               </div>
             </Callout>
           )}
           {detail.phantom_confirmation && detail.phantom_recovered && (
-            <Callout tone="positive" icon={CheckCircle2} title="Prenotazione recuperata">
-              La conferma fantasma dell'agent è stata gestita.
+            <Callout tone="positive" icon={CheckCircle2} title={t('phantom.recoveredTitle')}>
+              {t('phantom.recoveredBody')}
             </Callout>
           )}
           {/* Promemoria strutturato salvato dall'agente in chiamata
@@ -462,12 +466,12 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
               Più preciso del badge "gruppo grande" dedotto dal transcript,
               che resta come rete per le chiamate senza promemoria. */}
           {detail.callback_requested && (
-            <Callout tone="info" icon={Phone} title="Da richiamare — promemoria dell'agente">
+            <Callout tone="info" icon={Phone} title={t('callback.title')}>
               {[
                 detail.callback_name ? toTitleCase(detail.callback_name) : null,
                 detail.phone,
                 detail.callback_reason,
-              ].filter(Boolean).join(' · ') || 'Il cliente aspetta una richiamata.'}
+              ].filter(Boolean).join(' · ') || t('callback.fallback')}
               {detail.callback_details && (
                 <div className="mt-1 text-[13px] opacity-80">{detail.callback_details}</div>
               )}
@@ -478,20 +482,20 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
               Distinct from phantom (which is an agent hallucination);
               this one is expected behavior and just needs a callback. */}
           {!detail.callback_requested && detail.large_group_handoff && !detail.reservation_id && (
-            <Callout tone="info" icon={Users} title="Gruppo grande — richiamare">
-              Il cliente voleva prenotare per un gruppo oltre la soglia dell'agent. Sofia ha detto che avremmo richiamato: concorda con lui data, orario e mise en place.
+            <Callout tone="info" icon={Users} title={t('largeGroup.title')}>
+              {t('largeGroup.body')}
             </Callout>
           )}
 
           <FormCard
-            title="Follow-up"
+            title={t('followUp')}
             aside={
               detail.reservation_deleted_at ? (
-                <StatusPill tone="neutral">Prenotazione eliminata</StatusPill>
+                <StatusPill tone="neutral">{t('reservationDeleted')}</StatusPill>
               ) : detail.follow_up_status === 'CONTACTED' ? (
-                <StatusPill tone="positive">Ricontattato</StatusPill>
+                <StatusPill tone="positive">{t('contacted')}</StatusPill>
               ) : detail.reservation_id == null ? (
-                <StatusPill tone="pending">Da ricontattare</StatusPill>
+                <StatusPill tone="pending">{t('toContact')}</StatusPill>
               ) : null
             }
           >
@@ -517,7 +521,7 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
                       className={`${dsButton.primary} h-10 flex-shrink-0 px-4 text-[14px]`}
                     >
                       <CalendarPlus className="h-4 w-4" aria-hidden />
-                      Crea prenotazione
+                      {t('createReservation')}
                     </button>
                   )}
                   {/* The toggle drops to a text action so the primary keeps its
@@ -532,13 +536,13 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
                     disabled={saving}
                     className="flex-shrink-0 rounded-[var(--ds-radius-control)] text-[14px] font-medium text-[var(--ds-text-primary)] underline underline-offset-4 transition-opacity hover:no-underline disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
-                    {detail.follow_up_status === 'CONTACTED' ? 'Da ricontattare' : 'Segna ricontattato'}
+                    {t(detail.follow_up_status === 'CONTACTED' ? 'toContact' : 'markContacted')}
                   </button>
                 </div>
               )}
               {detail.follow_up_status === 'CONTACTED' && (detail.follow_up_updated_by_name || detail.follow_up_updated_at) && (
                 <div className="text-[13px] text-[var(--ds-text-muted)]">
-                  {detail.follow_up_updated_by_name && `${detail.reservation_deleted_at ? 'Prenotazione eliminata da' : 'Ricontattato da'} ${detail.follow_up_updated_by_name}`}
+                  {detail.follow_up_updated_by_name && `${t(detail.reservation_deleted_at ? 'deletedBy' : 'contactedBy')} ${detail.follow_up_updated_by_name}`}
                   {detail.follow_up_updated_by_name && detail.follow_up_updated_at && ' · '}
                   {detail.follow_up_updated_at && formatDateTime(detail.follow_up_updated_at)}
                 </div>
@@ -547,7 +551,7 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
                 <textarea
                   value={notesDraft}
                   onChange={(e) => { setNotesDraft(e.target.value); setNotesDirty(true); }}
-                  placeholder="Note utili per la prenotazione…"
+                  placeholder={t('notesPlaceholder')}
                   rows={3}
                   className={`${dsTextarea} resize-y`}
                 />
@@ -563,7 +567,7 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
                           disabled={saving}
                           className={dsButton.quiet}
                         >
-                          Annulla
+                          {t('cancel')}
                         </button>
                       )}
                       <button
@@ -572,7 +576,7 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
                         className={dsButton.primary}
                       >
                         {saving && <Loader2 className="h-4 w-4 animate-spin" />}
-                        Salva note
+                        {t('saveNotes')}
                       </button>
                     </div>
                   </div>
@@ -581,7 +585,7 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
             </div>
           </FormCard>
 
-          <FormCard title="Registrazione">
+          <FormCard title={t('recording')}>
             {audioError ? (
               <Callout tone="critical" icon={AlertCircle}>{audioError}</Callout>
             ) : (
@@ -598,19 +602,19 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
               chiamata è la cosa che si guarda per prima. Entrambe collassabili
               per accorciare la colonna quando servono i messaggi. */}
           <FormCard
-            title="Trascrizione"
-            aside={<span className="text-[13px] text-[var(--ds-text-muted)]">Agente vocale</span>}
+            title={t('transcript')}
+            aside={<span className="text-[13px] text-[var(--ds-text-muted)]">{t('voiceAgent')}</span>}
             collapsible
             defaultOpen
           >
             {detail.summary && (
               <div className="mb-4 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3">
-                <div className="mb-1 text-[13px] font-medium text-[var(--ds-text-secondary)]">Riassunto</div>
+                <div className="mb-1 text-[13px] font-medium text-[var(--ds-text-secondary)]">{t('summary')}</div>
                 <p className="text-[15px] leading-relaxed text-[var(--ds-text-primary)]">{detail.summary}</p>
               </div>
             )}
             {turns.length === 0 ? (
-              <p className="text-[14px] text-[var(--ds-text-muted)]">Trascrizione non disponibile.</p>
+              <p className="text-[14px] text-[var(--ds-text-muted)]">{t('noTranscript')}</p>
             ) : (
               <div className="flex flex-col gap-2">
                 {turns.map((turn, idx) => (
@@ -633,7 +637,7 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
           </FormCard>
 
           <FormCard
-            title="Messaggi inviati"
+            title={t('sentMessages')}
             aside={messages.length > 0 ? <CountBadge count={messages.length} /> : undefined}
             collapsible
             defaultOpen={false}
@@ -641,16 +645,16 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
             {messagesLoading ? (
               <div className="flex items-center gap-2 text-[14px] text-[var(--ds-text-muted)]">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                <span>Carico messaggi…</span>
+                <span>{t('loadingMessages')}</span>
               </div>
             ) : messagesError ? (
               <Callout tone="critical" icon={AlertCircle}>{messagesError}</Callout>
             ) : messages.length === 0 ? (
-              <p className="text-[14px] text-[var(--ds-text-muted)]">Nessun messaggio inviato a questo numero.</p>
+              <p className="text-[14px] text-[var(--ds-text-muted)]">{t('noMessagesToNumber')}</p>
             ) : (
               <div className="flex flex-col gap-2">
                 {messages.map(msg => {
-                  const badge = messageStatusBadge(msg.status);
+                  const badge = messageStatusBadge(msg.status, t);
                   return (
                     <div key={msg.id} className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3">
                       <div className="mb-1.5 flex items-center justify-between gap-2">
@@ -688,12 +692,12 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
               className={`${dsButton.secondary} flex-1`}
             >
               <BookUser className="h-4 w-4" />
-              Anagrafica
+              {t('customerRecord')}
             </button>
           )}
           <a href={`tel:${detail.phone.replace(/[^\d+]/g, '')}`} className={`${dsButton.primary} flex-1`}>
             <Phone className="h-4 w-4" />
-            Chiama
+            {t('call')}
           </a>
         </div>
       )}
@@ -713,6 +717,7 @@ interface ConversazioniPageProps {
 }
 
 const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onFollowUpChanged, onCreateReservationFromCall, onOpenCustomerProfile, refreshTick }) => {
+  const { t } = useTranslation('chiamate', { useSuspense: false });
   // Riparte dall'ultimo stato noto della vista di partenza (cache
   // modulo-level, pre-riempita al login): la pagina viene smontata a ogni
   // cambio vista e senza questo ogni rientro mostrava lo spinner. Il fetch
@@ -821,7 +826,7 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
       addToast(`Importate ${result.imported} · numeri recuperati ${result.backfilled} · saltate ${result.skipped}${result.failed ? ` · errori ${result.failed}` : ''}`, 'success');
       await fetchItems();
     } catch (err) {
-      addToast(`Errore: ${(err as Error).message}`, 'error');
+      addToast(t('errorPrefix', { dettaglio: (err as Error).message }), 'error');
     } finally {
       setSyncing(false);
     }
@@ -847,12 +852,12 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
     try {
       const { updated } = await voiceCallsApiService.markAllContacted();
       addToast(updated > 0
-        ? `${updated} conversazion${updated === 1 ? 'e segnata' : 'i segnate'} come ricontattat${updated === 1 ? 'a' : 'e'}`
-        : 'Nessuna conversazione da ricontattare', updated > 0 ? 'success' : 'info');
+        ? t('markedAll', { count: updated })
+        : t('nothingToContact'), updated > 0 ? 'success' : 'info');
       await fetchItems();
       onFollowUpChanged?.();
     } catch (err) {
-      addToast(`Errore: ${(err as Error).message}`, 'error');
+      addToast(t('errorPrefix', { dettaglio: (err as Error).message }), 'error');
     } finally {
       setMarkingAll(false);
     }
@@ -874,11 +879,11 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
   }, [fetchItems, onFollowUpChanged]);
 
   const statusChips = [
-    { value: 'all' as const, label: 'Tutte' },
-    { value: 'phantom' as const, label: 'Da recuperare', dot: 'bg-[var(--ds-critical-solid)]' },
-    { value: 'linked' as const, label: 'Con prenotazione', dot: 'bg-[var(--ds-seated-solid)]' },
-    { value: 'to-contact' as const, label: 'Da ricontattare', dot: 'bg-[var(--ds-pending-solid)]' },
-    { value: 'contacted' as const, label: 'Ricontattati', dot: 'bg-[var(--ds-seated-solid)]' },
+    { value: 'all' as const, label: t('chip.all') },
+    { value: 'phantom' as const, label: t('chip.phantom'), dot: 'bg-[var(--ds-critical-solid)]' },
+    { value: 'linked' as const, label: t('chip.linked'), dot: 'bg-[var(--ds-seated-solid)]' },
+    { value: 'to-contact' as const, label: t('toContact'), dot: 'bg-[var(--ds-pending-solid)]' },
+    { value: 'contacted' as const, label: t('chip.contacted'), dot: 'bg-[var(--ds-seated-solid)]' },
   ];
   const hasActiveFilters = statusFilter !== 'all' || !!from || !!to;
   const resetAll = () => {
@@ -917,7 +922,7 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
   })();
 
   const renderCall = (item: VoiceCallSummary, hint: boolean, group: VoiceCallSummary[] = [item]) => {
-    const resBadge = reservationStatusBadge(item.reservation_status);
+    const resBadge = reservationStatusBadge(item.reservation_status, t);
     const phantomOpen = item.phantom_confirmation && !item.phantom_recovered;
     const pending = needsCallback(item);
     const tel = (item.phone || '').replace(/[^\d+]/g, '');
@@ -926,13 +931,13 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
         key={item.id}
         hint={hint}
         left={pending ? {
-          label: 'Ricontattato',
+          label: t('contacted'),
           tone: 'confirm',
           icon: <Check className="h-4 w-4" aria-hidden />,
           onAction: () => markContacted(group),
         } : undefined}
         right={tel ? {
-          label: 'Richiama',
+          label: t('callBack'),
           tone: 'primary',
           icon: <ArrowRight className="h-4 w-4" aria-hidden />,
           onAction: () => { window.location.href = `tel:${tel}`; },
@@ -947,7 +952,7 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
           <div className="min-w-0 flex-1">
             <div className="flex items-baseline justify-between gap-2">
               <span className="truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">
-                {toTitleCase(item.customer_name) || formatPhone(item.phone)}
+                {toTitleCase(item.customer_name) || formatPhone(item.phone, t)}
               </span>
               <span className="flex-shrink-0 whitespace-nowrap text-[13px] tabular-nums text-[var(--ds-text-muted)]">
                 {formatDateTime(item.created_at)}
@@ -963,10 +968,10 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
               {phantomOpen && (
                 <StatusPill
                   tone="critical"
-                  title="L'agent ha detto 'confermata' senza creare davvero la prenotazione — richiamare il cliente"
+                  title={t('phantomTitle')}
                 >
                   <span className="h-1.5 w-1.5 rounded-full bg-[var(--ds-critical-solid)]" aria-hidden />
-                  Da recuperare
+                  {t('chip.phantom')}
                 </StatusPill>
               )}
               {resBadge && (
@@ -976,28 +981,28 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
                 </StatusPill>
               )}
               {!phantomOpen && item.reservation_id == null && item.reservation_deleted_at && (
-                <StatusPill tone="neutral">Prenotazione eliminata</StatusPill>
+                <StatusPill tone="neutral">{t('reservationDeleted')}</StatusPill>
               )}
               {!phantomOpen && item.reservation_id == null && !item.reservation_deleted_at && (
                 <StatusPill tone={item.follow_up_status === 'CONTACTED' ? 'positive' : 'critical'}>
                   <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" aria-hidden />
-                  {item.follow_up_status === 'CONTACTED' ? 'Ricontattato' : 'Da ricontattare'}
+                  {t(item.follow_up_status === 'CONTACTED' ? 'contacted' : 'toContact')}
                 </StatusPill>
               )}
               {group.length > 1 && (
                 <StatusPill
                   tone="pending"
-                  title={`Lo stesso numero ha chiamato ${group.length} volte — "Ricontattato" le segna tutte`}
+                  title={t('sameNumberTitle', { n: group.length })}
                 >
-                  {group.length} chiamate
+                  {t('callsCount', { n: group.length })}
                 </StatusPill>
               )}
               {item.callback_requested && (
                 <StatusPill
                   tone="info"
-                  title={[item.callback_name, item.callback_reason].filter(Boolean).join(' · ') || 'Promemoria di richiamata salvato dall\'agente'}
+                  title={[item.callback_name, item.callback_reason].filter(Boolean).join(' · ') || t('callbackReminderFallback')}
                 >
-                  Da richiamare
+                  {t('toCallBack')}
                 </StatusPill>
               )}
               {/* Handoff reason badge: shown alongside the follow-up status so
@@ -1006,12 +1011,12 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
               {!item.callback_requested && !phantomOpen && item.reservation_id == null && item.large_group_handoff && (
                 <StatusPill
                   tone="info"
-                  title="Il cliente voleva prenotare per un gruppo grande — l'agent ha promesso una richiamata"
+                  title={t('largeGroupTitle')}
                 >
-                  Gruppo grande
+                  {t('largeGroupPill')}
                 </StatusPill>
               )}
-              <StatusPill tone="neutral" title="Durata">
+              <StatusPill tone="neutral" title={t('duration')}>
                 {formatDuration(item.duration_seconds)}
               </StatusPill>
             </div>
@@ -1025,7 +1030,7 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
     <>
       {/* No visible page title: the desktop sidebar and the mobile switcher
           both already name this screen. The heading stays for screen readers. */}
-      <h1 className="sr-only">Chiamate</h1>
+      <h1 className="sr-only">{t('pageTitle')}</h1>
       <SplitPane
         detailOpen={selectedId !== null}
         toolbar={
@@ -1044,8 +1049,8 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
                 type="button"
                 onClick={() => setFiltersOpen(v => !v)}
                 aria-expanded={filtersOpen}
-                aria-label="Filtri"
-                title="Filtri"
+                aria-label={t('filters')}
+                title={t('filters')}
                 className={filtersOpen
                   ? 'relative inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] shadow-[var(--ds-shadow-card)] transition-colors'
                   : `relative ${dsIconButton}`}
@@ -1060,8 +1065,8 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
                 type="button"
                 onClick={handleSync}
                 disabled={syncing}
-                aria-label="Sincronizza"
-                title="Sincronizza"
+                aria-label={t('sync')}
+                title={t('sync')}
                 className={dsIconButton}
               >
                 <RefreshCw className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`} />
@@ -1073,7 +1078,7 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
                 <SegmentedControl
                   value={statusFilter}
                   onChange={next => setStatusFilter(next)}
-                  ariaLabel="Filtra per stato"
+                  ariaLabel={t('filterByStatus')}
                   overflow="scroll"
                   size="sm"
                   options={statusChips.map(c => ({
@@ -1109,7 +1114,7 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
                       onClick={resetAll}
                       className="font-medium text-[var(--ds-text-primary)] underline-offset-4 hover:underline"
                     >
-                      Reimposta filtri
+                      {t('resetFilters')}
                     </button>
                   )}
                 </div>
@@ -1126,12 +1131,12 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
             ) : visibleItems.length === 0 ? (
               <EmptyState icon={Phone}>
                 {statusFilter === 'to-contact'
-                  ? 'Nessuna chiamata da ricontattare.'
+                  ? t('empty.toContact')
                   : statusFilter === 'contacted'
-                    ? 'Nessuna chiamata ricontattata.'
+                    ? t('empty.contacted')
                     : statusFilter === 'linked'
-                      ? 'Nessuna chiamata collegata a una prenotazione.'
-                      : 'Nessuna conversazione. Prova a sincronizzare se ne hai di recenti.'}
+                      ? t('empty.linked')
+                      : t('empty.none')}
               </EmptyState>
             ) : (
               <div className="space-y-1">
@@ -1143,16 +1148,16 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
                         <button
                           onClick={handleMarkAllContacted}
                           disabled={markingAll}
-                          title="Segna tutte le conversazioni in attesa come ricontattate"
+                          title={t('markAllTitle')}
                           className={`flex-shrink-0 text-[13px] font-semibold underline-offset-4 hover:underline disabled:opacity-50 ${
                             markAllArmed ? 'text-[var(--ds-critical-text)]' : 'text-[var(--ds-text-primary)]'
                           }`}
                         >
-                          {markingAll ? 'Attendi…' : markAllArmed ? 'Confermi?' : 'Segna tutte'}
+                          {t(markingAll ? 'wait' : markAllArmed ? 'confirmQ' : 'markAll')}
                         </button>
                       }
                     >
-                      Da ricontattare
+                      {t('toContact')}
                     </SectionHeader>
                     <div className="space-y-2 pb-2">
                       {pendingGroups.map((group, i) => renderCall(group[0], swipeHint && i === 0, group))}
@@ -1164,7 +1169,7 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
                     {/* Always the same label, whether or not "Da ricontattare"
                         sits above it — Messaggi and Email name their remainder
                         section the same way at both times. */}
-                    <SectionHeader>Tutte le chiamate</SectionHeader>
+                    <SectionHeader>{t('allCalls')}</SectionHeader>
                     <div className="space-y-2">
                       {handledCalls.map((c, i) => renderCall(c, swipeHint && pendingCalls.length === 0 && i === 0))}
                     </div>
@@ -1190,7 +1195,7 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
                 .map(c => c.id)}
             />
           ) : (
-            <PanePlaceholder icon={Phone}>Seleziona una chiamata dalla lista</PanePlaceholder>
+            <PanePlaceholder icon={Phone}>{t('pickCall')}</PanePlaceholder>
           )
         }
       />
