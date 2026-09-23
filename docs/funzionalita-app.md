@@ -569,7 +569,7 @@ Tutte le funzioni AI girano sul server (nessuna chiave nel browser) e seguono un
 | Abbinamenti vino | Propone i vini della carta da abbinare ai piatti (in scheda o su tutta la carta); il ristoratore cura e salva |
 | Report Dashboard | Spiega in italiano l'andamento del periodo (i numeri li calcola il database, l'AI li racconta) |
 
-**Consumi AI**: pagina di monitoraggio (riservata) con generazioni, token e **costi in euro** per funzione, più i crediti dell'agente vocale.
+**Consumi AI**: pagina di monitoraggio (riservata) con generazioni, token e **costi in euro** per funzione, più i crediti dell'agente vocale. Per Sofia mostra il **costo reale di ogni chiamata** (dai dati ElevenLabs) e i **minuti del mese contro i 250 inclusi nell'add-on**, con stima a fine mese, ricavo stimato e margine; il pannello Piattaforma riporta gli stessi numeri per ogni ristorante.
 
 ---
 
@@ -663,6 +663,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 |---|---|---|
 | 2026-09-23 | Impostazioni | Con la lingua inglese parlano inglese gli orari di apertura (turni, passo degli slot, slot prenotabili e chiusure straordinarie) e la card del server email. I nomi dei giorni vengono dalla lingua, non da un elenco italiano. |
 | 2026-09-23 | Impostazioni | Con la lingua inglese parlano inglese le due card AI delle Impostazioni: richiesta di recensione (quando e a chi inviare, profilo Google, risposte automatiche) e messaggi con AI (interruttore, regole della casa ed esempi da adottare). |
+| 2026-09-23 | Sistema (Consumi AI, Piattaforma) | Sofia: salvati durata e costo di ogni chiamata (la durata prima non arrivava quasi mai); minuti del mese contro i 250 inclusi nell'add-on, stima a fine mese, costo, ricavo stimato e margine, anche per ristorante nel pannello Piattaforma. |
 | 2026-09-23 | Comande, Cucina e Passe | Con la lingua inglese parla inglese il monitor di cucina: colonne delle uscite, coda e consegnate, scelta della partita, dettaglio della comanda, correzione del peso e avviso alla sala. |
 | 2026-09-23 | Agente vocale | Con la lingua inglese parla inglese la pagina Chiamate: lista con filtri e gruppi, scheda della chiamata con registrazione e trascrizione, avvisi di prenotazione da recuperare e di richiamata, follow-up e note. |
 | 2026-09-23 | Email | Con la lingua inglese parla inglese la pagina Email: elenco dei thread, conversazione, proposta AI di prenotazione dall'email, composizione con allegati e nuova email. |
