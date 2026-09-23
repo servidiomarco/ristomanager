@@ -567,6 +567,16 @@ app.get('/health', (req, res) => {
   });
 });
 
+// /healthz è la sonda del CIRCUITO client verso il nodo di sala (apiRouting
+// probeNode/refreshNodeConfig): il relay tappa-3 la serviva, il full-server
+// deve servirla uguale — senza, ogni probe fa 404, il circuito resta aperto
+// e le letture non tornano MAI sul nodo (trovato al collaudo del 23/09:
+// socket sul nodo per la gara del boot, GET tutte al cloud). Sul cloud è un
+// alias innocuo di /health.
+app.get('/healthz', (req, res) => {
+  res.status(200).json({ ok: true, profile: SERVER_PROFILE });
+});
+
 // Readiness vera: 200 solo a migrazioni completate E database raggiungibile.
 // /health qui sopra risponde 200 appena la listen è su — prima ancora che
 // lo schema esista — ed è la trappola documentata in CLAUDE.md. È QUESTO
@@ -36593,7 +36603,13 @@ const startServer = async () => {
                     // (bootstrap in corso) i suoi giri sono no-op; appena la
                     // riga appare, drena il log e resta agganciata alla
                     // sveglia del canale /sala-node. Sul cloud è un no-op.
-                    startSalaNodeReplica();
+                    startSalaNodeReplica({
+                        // I dispositivi collegati al socket del nodo, per la
+                        // card («nodo online · N dispositivi»).
+                        getClients: () => {
+                            try { return socketService?.getIO().engine.clientsCount ?? 0; } catch { return 0; }
+                        },
+                    });
                 }))
                 .catch((dbError) => {
                     console.error('Database initialization failed:', dbError);
