@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import React, { useEffect, useState } from 'react';
 import { Check, ChevronDown, ChevronLeft, ChevronUp, Edit2, Loader2, Plus, Trash2 } from 'lucide-react';
 import type { Dish, Modifier } from '../types';
@@ -25,7 +26,8 @@ import { moneySymbol } from '../utils/displayMoney';
 
 const isPP = (g: AdminModifierGroup): boolean => !!g.external_ref?.startsWith('pp:varianti:');
 
-const errMsg = (e: any): string => e?.data?.error ?? e?.message ?? 'Operazione non riuscita';
+type TFunc = (key: string, options?: Record<string, unknown>) => string;
+const errMsg = (e: any, t: TFunc): string => e?.data?.error ?? e?.message ?? t('var.err');
 
 /** «+2,50 €» / «−1,00 €» / «+10%» — il sovrapprezzo come lo legge l'operatore. */
 const deltaLabel = (m: Modifier): string | null => {
@@ -49,6 +51,7 @@ export const MenuVariantsModal: React.FC<{
    *  con l'editor piatto. */
   onChanged: () => void;
 }> = ({ open, onClose, groups, dishes, categories, onChanged }) => {
+  const { t } = useTranslation('menu', { useSuspense: false });
   const [editingId, setEditingId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -63,7 +66,7 @@ export const MenuVariantsModal: React.FC<{
   const run = async (fn: () => Promise<unknown>) => {
     setBusy(true); setError(null);
     try { await fn(); onChanged(); }
-    catch (e: any) { setError(errMsg(e)); }
+    catch (e: any) { setError(errMsg(e, t)); }
     finally { setBusy(false); }
   };
 
@@ -89,15 +92,15 @@ export const MenuVariantsModal: React.FC<{
       <ModalShell
         open
         onClose={onClose}
-        title="Varianti"
-        subtitle="Si agganciano dalla scheda del piatto, o qui a intere categorie"
+        title={t('var.title')}
+        subtitle={t('var.subtitle')}
         size="sm"
         bodyClassName="p-2"
       >
         <div className="divide-y divide-[var(--ds-border)]">
           {groups.length === 0 && (
             <p className="px-3 py-8 text-center text-[14px] text-[var(--ds-text-muted)]">
-              Nessun gruppo di varianti. Creane uno, o importali dalla cassa.
+              {t('var.empty')}
             </p>
           )}
           {groups.map((g, i) => (
@@ -110,7 +113,7 @@ export const MenuVariantsModal: React.FC<{
                     groups.map(x => x.id).map((id, j) => j === i - 1 ? groups[i].id : j === i ? groups[i - 1].id : id)
                   ))}
                   className={`${dsIconButton} h-9 w-8 bg-transparent shadow-none disabled:opacity-30`}
-                  title="Sposta su"
+                  title={t('var.moveUp')}
                 >
                   <ChevronUp className="h-4 w-4" />
                 </button>
@@ -121,7 +124,7 @@ export const MenuVariantsModal: React.FC<{
                     groups.map(x => x.id).map((id, j) => j === i ? groups[i + 1].id : j === i + 1 ? groups[i].id : id)
                   ))}
                   className={`${dsIconButton} h-9 w-8 bg-transparent shadow-none disabled:opacity-30`}
-                  title="Sposta giù"
+                  title={t('var.moveDown')}
                 >
                   <ChevronDown className="h-4 w-4" />
                 </button>
@@ -134,13 +137,13 @@ export const MenuVariantsModal: React.FC<{
                 <div className="flex flex-wrap items-center gap-x-1.5 text-[12px] tabular-nums text-[var(--ds-text-muted)]">
                   {isPP(g) && (
                     <span className="rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-1.5 py-0.5 text-[11px] font-medium">
-                      dalla cassa
+                      {t('var.fromTill')}
                     </span>
                   )}
                   <span>
-                    {g.dish_ids.length} {g.dish_ids.length === 1 ? 'piatto' : 'piatti'} · {g.modifiers.length} {g.modifiers.length === 1 ? 'opzione' : 'opzioni'}
+                    {t('var.dishes', { count: g.dish_ids.length })} · {t('var.options', { count: g.modifiers.length })}
                   </span>
-                  {g.min_select > 0 && <span className="text-[var(--ds-pending-text)]">· obbligatorio</span>}
+                  {g.min_select > 0 && <span className="text-[var(--ds-pending-text)]">{t('var.required')}</span>}
                 </div>
               </div>
               <button
@@ -159,7 +162,7 @@ export const MenuVariantsModal: React.FC<{
                 type="button"
                 onClick={() => { setEditingId(g.id); setError(null); }}
                 className={`${dsIconButton} h-9 w-9 flex-shrink-0 bg-[var(--ds-surface-row)] shadow-none`}
-                title="Apri il gruppo"
+                title={t('var.openGroup')}
               >
                 <Edit2 className="h-4 w-4" />
               </button>
@@ -168,9 +171,8 @@ export const MenuVariantsModal: React.FC<{
                 disabled={isPP(g) || g.dish_ids.length > 0}
                 onClick={() => setDeleteConfirm(g)}
                 className={`${dsIconButton} h-9 w-9 flex-shrink-0 bg-[var(--ds-surface-row)] shadow-none disabled:opacity-30 hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)]`}
-                title={isPP(g)
-                  ? 'Lo gestisce la cassa: verrebbe ricreato al prossimo import'
-                  : g.dish_ids.length > 0 ? 'È usato da piatti: sgancialo prima di eliminarlo' : 'Elimina gruppo'}
+                title={t(isPP(g) ? 'var.ppManaged'
+                  : g.dish_ids.length > 0 ? 'var.inUse' : 'var.deleteGroup')}
               >
                 <Trash2 className="h-4 w-4" />
               </button>
@@ -193,13 +195,13 @@ export const MenuVariantsModal: React.FC<{
         <ModalShell
           open
           onClose={() => setCreateName(null)}
-          title="Nuovo gruppo di varianti"
+          title={t('var.newGroup')}
           size="sm"
           bodyClassName="p-5"
           footer={
             <>
               <button type="button" onClick={() => setCreateName(null)} className={dsButton.secondary}>
-                Annulla
+                {t('var.cancel')}
               </button>
               <button
                 type="submit"
@@ -208,7 +210,7 @@ export const MenuVariantsModal: React.FC<{
                 className={dsButton.primary}
               >
                 {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-                Crea gruppo
+                {t('var.createGroup')}
               </button>
             </>
           }
@@ -225,12 +227,12 @@ export const MenuVariantsModal: React.FC<{
                 onChanged();
                 setCreateName(null);
                 setEditingId(g.id);
-              } catch (err: any) { setError(errMsg(err)); }
+              } catch (err: any) { setError(errMsg(err, t)); }
               finally { setBusy(false); }
             }}
             className="space-y-3"
           >
-            <Field label="Nome" required>
+            <Field label={t('var.name')} required>
               <input
                 autoFocus
                 required
@@ -248,8 +250,8 @@ export const MenuVariantsModal: React.FC<{
 
       <ConfirmDeleteModal
         isOpen={!!deleteConfirm}
-        title="Elimina gruppo"
-        message="Le righe già battute non si toccano (portano una copia delle varianti). Stai per eliminare:"
+        title={t('var.deleteGroup')}
+        message={t('var.deleteMessage')}
         itemName={deleteConfirm?.name}
         onCancel={() => setDeleteConfirm(null)}
         onConfirm={() => {
@@ -275,6 +277,7 @@ const GroupEditor: React.FC<{
   onClose: () => void;
   run: (fn: () => Promise<unknown>) => Promise<void>;
 }> = ({ group, dishes, categories, busy, error, onBack, onClose, run }) => {
+  const { t } = useTranslation('menu', { useSuspense: false });
   const pp = isPP(group);
   const [name, setName] = useState(group.name);
   const [note, setNote] = useState(group.note ?? '');
@@ -301,25 +304,24 @@ const GroupEditor: React.FC<{
       open
       onClose={onClose}
       title={group.name}
-      subtitle={pp ? undefined : 'Le modifiche si salvano da sole'}
+      subtitle={pp ? undefined : t('var.autosave')}
       // md, non sm: la riga opzione porta importo, €/%, frecce, interruttore
       // e cestino — nei 448px del sm al nome restavano due lettere.
       size="md"
       bodyClassName="space-y-4 p-5"
       footerStart={
         <button type="button" onClick={onBack} className={dsButton.quiet}>
-          <ChevronLeft className="h-4 w-4" /> Tutti i gruppi
+          <ChevronLeft className="h-4 w-4" /> {t('var.allGroups')}
         </button>
       }
     >
       {pp && (
         <Callout tone="pending">
-          Le opzioni e il massimo arrivano dalla cassa e si riallineano a ogni
-          import. Qui puoi rinominarlo, renderlo obbligatorio o spegnerlo.
+          {t('var.ppHint')}
         </Callout>
       )}
 
-      <Field label="Nome">
+      <Field label={t('var.name')}>
         <input
           className={dsInput}
           maxLength={100}
@@ -332,7 +334,7 @@ const GroupEditor: React.FC<{
       </Field>
 
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Scelte minime">
+        <Field label={t('var.minChoices')}>
           <select
             className={dsInput}
             value={group.min_select}
@@ -340,31 +342,31 @@ const GroupEditor: React.FC<{
             onChange={e => run(() => updateModifierGroup(group.id, { min_select: Number(e.target.value) }))}
           >
             {[0, 1, 2, 3].filter(n => n <= group.max_select).map(n => (
-              <option key={n} value={n}>{n === 0 ? '0 · facoltativo' : n === 1 ? '1 · obbligatorio' : n}</option>
+              <option key={n} value={n}>{n === 0 ? t('var.optionalOpt') : n === 1 ? t('var.requiredOpt') : n}</option>
             ))}
           </select>
         </Field>
-        <Field label="Scelte massime">
+        <Field label={t('var.maxChoices')}>
           <select
             className={dsInput}
             value={group.max_select}
             disabled={busy || pp}
-            title={pp ? 'Il massimo lo decide la cassa' : undefined}
+            title={pp ? t('var.maxFromTill') : undefined}
             onChange={e => run(() => updateModifierGroup(group.id, { max_select: Number(e.target.value) }))}
           >
             {[1, 2, 3, 4, 5, 6, 8, 10].filter(n => n >= group.min_select || n === group.max_select).map(n => (
-              <option key={n} value={n}>{n === 1 ? '1 · scelta singola' : n}</option>
+              <option key={n} value={n}>{n === 1 ? t('var.singleOpt') : n}</option>
             ))}
           </select>
         </Field>
       </div>
 
-      <Field label="Note per sala e cucina">
+      <Field label={t('var.notes')}>
         <textarea
           rows={4}
           className={`${dsTextarea} resize-none`}
           maxLength={2000}
-          placeholder="es. i gradi di cottura spiegati, con l'avvertenza sulle carni bianche…"
+          placeholder={t('var.notesPlaceholder')}
           value={note}
           disabled={busy}
           onChange={e => setNote(e.target.value)}
@@ -373,10 +375,10 @@ const GroupEditor: React.FC<{
       </Field>
 
       <div>
-        <div className="mb-1 text-[13px] font-semibold text-[var(--ds-text-muted)]">Opzioni</div>
+        <div className="mb-1 text-[13px] font-semibold text-[var(--ds-text-muted)]">{t('var.options')}</div>
         <div className="divide-y divide-[var(--ds-border)] rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3">
           {group.modifiers.length === 0 && (
-            <p className="py-4 text-center text-[13px] text-[var(--ds-text-muted)]">Nessuna opzione.</p>
+            <p className="py-4 text-center text-[13px] text-[var(--ds-text-muted)]">{t('var.noOptions')}</p>
           )}
           {group.modifiers.map((m, i) => (
             <MemberRow
@@ -426,9 +428,9 @@ const GroupEditor: React.FC<{
           piatti nuovi nasceranno col gruppo. Ogni scheda resta libera di
           sganciarsi dopo: la copertura parziale si legge nel conteggio. */}
       <div>
-        <div className="mb-1 text-[13px] font-semibold text-[var(--ds-text-muted)]">Categorie</div>
+        <div className="mb-1 text-[13px] font-semibold text-[var(--ds-text-muted)]">{t('var.categories')}</div>
         {categories.length === 0 ? (
-          <p className="text-[13px] text-[var(--ds-text-muted)]">Nessuna categoria nel menu.</p>
+          <p className="text-[13px] text-[var(--ds-text-muted)]">{t('var.noCategories')}</p>
         ) : (
           <div className="flex flex-wrap gap-2">
             {categories.map(c => {
@@ -445,7 +447,7 @@ const GroupEditor: React.FC<{
                   disabled={busy}
                   aria-pressed={full}
                   onClick={() => run(() => setCategoryModifierGroup(c.name, group.id, !full))}
-                  title={partial ? `La spunta completa la categoria` : undefined}
+                  title={partial ? t('var.tickCompletes') : undefined}
                   className={`inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3.5 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50 ${
                     full
                       ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
@@ -454,14 +456,14 @@ const GroupEditor: React.FC<{
                 >
                   {full && <Check size={13} />}
                   {c.name}
-                  {partial && <span className="text-[11px] tabular-nums opacity-70">{covered} di {inCat.length}</span>}
+                  {partial && <span className="text-[11px] tabular-nums opacity-70">{t('var.coveredOf', { coperti: covered, totale: inCat.length })}</span>}
                 </button>
               );
             })}
           </div>
         )}
         <p className="mt-1.5 text-[12px] text-[var(--ds-text-muted)]">
-          La spunta aggancia tutti i piatti della categoria, anche i futuri; toglierla li sgancia tutti.
+          {t('var.categoriesHint')}
         </p>
       </div>
 
@@ -483,6 +485,7 @@ const MemberRow: React.FC<{
   onMove: (dir: 'up' | 'down') => void;
   run: (fn: () => Promise<unknown>) => Promise<void>;
 }> = ({ modifier: m, readOnly, busy, first, last, onMove, run }) => {
+  const { t } = useTranslation('menu', { useSuspense: false });
   const isPct = m.price_delta_pct != null;
   const [name, setName] = useState(m.name);
   const [note, setNote] = useState(m.note ?? '');
@@ -598,7 +601,7 @@ const MemberRow: React.FC<{
           disabled={busy || first}
           onClick={() => onMove('up')}
           className={`${dsIconButton} h-9 w-8 bg-transparent shadow-none disabled:opacity-30`}
-          title="Sposta su"
+          title={t('var.moveUp')}
         >
           <ChevronUp className="h-4 w-4" />
         </button>
@@ -607,7 +610,7 @@ const MemberRow: React.FC<{
           disabled={busy || last}
           onClick={() => onMove('down')}
           className={`${dsIconButton} h-9 w-8 bg-transparent shadow-none disabled:opacity-30`}
-          title="Sposta giù"
+          title={t('var.moveDown')}
         >
           <ChevronDown className="h-4 w-4" />
         </button>
@@ -615,11 +618,11 @@ const MemberRow: React.FC<{
           type="button"
           role="switch"
           aria-checked={m.is_active}
-          aria-label={`${m.is_active ? 'Spegni' : 'Accendi'} ${m.name}`}
+          aria-label={t('var.toggleAria', { azione: t(m.is_active ? 'switchOff' : 'switchOn'), opzione: m.name })}
           disabled={busy}
           onClick={() => run(() => updateModifier(m.id, { is_active: !m.is_active }))}
           className={`${dsIconButton} h-9 w-9 bg-transparent shadow-none ${m.is_active ? 'text-[var(--ds-seated-text)]' : 'text-[var(--ds-text-subtle)]'}`}
-          title={m.is_active ? 'Attiva — tocca per spegnere' : 'Spenta — tocca per accendere'}
+          title={t(m.is_active ? 'var.activeTap' : 'var.offTap')}
         >
           <Check className="h-4 w-4" />
         </button>
@@ -628,7 +631,7 @@ const MemberRow: React.FC<{
           disabled={busy}
           onClick={() => run(() => deleteModifier(m.id))}
           className={`${dsIconButton} h-9 w-9 bg-transparent shadow-none hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)]`}
-          title="Elimina opzione"
+          title={t('var.deleteOption')}
         >
           <Trash2 className="h-4 w-4" />
         </button>
@@ -640,7 +643,7 @@ const MemberRow: React.FC<{
         <input
           className="h-8 min-w-0 flex-1 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-3 text-[13px] text-[var(--ds-text-secondary)] placeholder:text-[var(--ds-text-subtle)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           maxLength={300}
-          placeholder="Nota (es. 48–52°C al cuore)"
+          placeholder={t('var.notePlaceholder')}
           value={note}
           disabled={busy}
           onChange={e => setNote(e.target.value)}
@@ -650,8 +653,8 @@ const MemberRow: React.FC<{
         <input
           className="h-8 w-36 flex-none rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-3 text-[13px] text-[var(--ds-text-secondary)] placeholder:text-[var(--ds-text-subtle)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           maxLength={100}
-          placeholder="Inglese (es. Rare)"
-          title="Traduzione per il cameriere: in cucina non esce"
+          placeholder={t('var.englishPlaceholder')}
+          title={t('var.englishHint')}
           value={nameEn}
           disabled={busy}
           onChange={e => setNameEn(e.target.value)}
