@@ -661,6 +661,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-23 | Comande, Cucina e Passe | Il volo dopo «Invia» è più grande (icone da 52px) e più fluido: avanzamento, salto e dissolvenza scorrono ognuno su una curva continua, senza gli scatti di prima. |
 | 2026-09-23 | Agente vocale | Se il cliente chiede un piatto in anticipo (es. lo stinco), Sofia annota la richiesta «da verificare» nella prenotazione senza garantire che sarà disponibile. |
 | 2026-09-23 | Comande, Cucina e Passe | Il volo di piatto, bottiglia e torta dopo «Invia» ora passa sul bottone, sulla comanda ancora aperta; solo a volo finito (circa un secondo) si torna ai tavoli. Prima partiva sulla griglia, dove il bottone non c'era più. |
 | 2026-09-23 | Agente vocale | Con un cliente già in rubrica Sofia conferma l'intestazione («La prenotazione è a suo nome, Marco?») invece di chiedere il nome: glielo indica il server insieme alla disponibilità. |

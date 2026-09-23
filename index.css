@@ -1168,25 +1168,42 @@ body {
 
 /* Il volo dell'Invia (comande/SendFlight): piatto, bottiglia, torta
    attraversano il bottone da sinistra a destra con un piccolo salto, come
-   portati a mano, e si dissolvono all'arrivo. La distanza la dà il
-   componente (--send-flight-dist), la larghezza del bottone premuto. */
-@keyframes ds-send-flight {
-  0%   { transform: translate(0, 0) scale(0.5); opacity: 0; }
-  15%  { transform: translate(calc(var(--send-flight-dist) * 0.12), -10px) scale(1); opacity: 1; }
-  50%  { transform: translate(calc(var(--send-flight-dist) * 0.5), -16px) scale(1); opacity: 1; }
-  82%  { transform: translate(calc(var(--send-flight-dist) * 0.88), -6px) scale(1); opacity: 1; }
-  100% { transform: translate(var(--send-flight-dist), 0) scale(0.7); opacity: 0; }
+   portati a mano, e si dissolvono all'arrivo. Tre movimenti su tre elementi
+   annidati, ognuno con la sua curva continua: l'avanzamento (una sola
+   ease-in-out), l'arco (su in decelerazione, giù in accelerazione) e la
+   comparsa. In un'unica animazione a cinque tappe la velocità cambiava a
+   ogni tappa e il volo andava a scatti. La distanza la dà il componente
+   (--send-flight-dist), la larghezza del bottone premuto. */
+@keyframes ds-send-flight-x {
+  from { transform: translate3d(0, 0, 0); }
+  to   { transform: translate3d(var(--send-flight-dist), 0, 0); }
 }
-.ds-send-flight {
-  opacity: 0;
-  animation-name: ds-send-flight;
-  animation-timing-function: cubic-bezier(0.45, 0, 0.25, 1);
+@keyframes ds-send-flight-arc {
+  0%   { transform: translate3d(0, 0, 0); animation-timing-function: cubic-bezier(0.33, 0, 0.67, 1); }
+  50%  { transform: translate3d(0, -22px, 0); animation-timing-function: cubic-bezier(0.33, 0, 0.67, 1); }
+  100% { transform: translate3d(0, 0, 0); }
+}
+@keyframes ds-send-flight-pop {
+  0%   { transform: scale(0.4); opacity: 0; }
+  18%  { transform: scale(1); opacity: 1; }
+  78%  { transform: scale(1); opacity: 1; }
+  100% { transform: scale(0.75); opacity: 0; }
+}
+.ds-send-flight-x,
+.ds-send-flight-arc,
+.ds-send-flight-pop {
+  animation-duration: inherit;
+  animation-delay: inherit;
   animation-fill-mode: both;
+  will-change: transform;
 }
+.ds-send-flight-x   { animation-name: ds-send-flight-x; animation-timing-function: cubic-bezier(0.45, 0, 0.3, 1); }
+.ds-send-flight-arc { animation-name: ds-send-flight-arc; }
+.ds-send-flight-pop { animation-name: ds-send-flight-pop; animation-timing-function: ease-in-out; opacity: 0; }
 
 /* Decorativo: il toast dice già cosa è partito (e OrderPad non monta il volo). */
 @media (prefers-reduced-motion: reduce) {
-  .ds-send-flight { display: none; }
+  .ds-send-flight-x { display: none; }
 }
 
 /* Native select chevrons sit hard against the right edge and can't be inset
