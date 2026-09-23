@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Wand2, Loader2, Plus, Trash2, ChevronDown, Pencil, Check, X } from 'lucide-react';
 import { getFeatureFlags, updateFeatureFlags, FeatureFlags } from '../services/apiService';
 import {
@@ -19,14 +20,15 @@ interface Props {
 
 // Esempi mostrati a scheda vuota: più di una spiegazione, fanno capire in tre
 // secondi che ci si aspetta una frase secca, non un regolamento.
-const ESEMPI: Array<{ title: string; content: string }> = [
-    { title: 'Torte da fuori', content: 'Sì, si può portare la torta da casa o dalla pasticceria, purché il cliente porti anche lo scontrino del pasticcere. Nessun costo di servizio.' },
-    { title: 'Bambini', content: 'Benvenuti. Abbiamo seggioloni e un menù bambini. Meglio avvisare in anticipo quanti sono.' },
-    { title: 'Parcheggio', content: 'Parcheggio gratuito davanti al ristorante, non serve prenotarlo.' },
-    { title: 'Cani', content: 'I cani sono ammessi solo negli spazi esterni (tettoia e fiume), al guinzaglio.' },
+const ESEMPI: Array<{ titleKey: string; title: string; contentKey: string; content: string }> = [
+    { titleKey: 'ai.example.cake', title: 'Torte da fuori', contentKey: 'ai.example.cakeBody', content: 'Sì, si può portare la torta da casa o dalla pasticceria, purché il cliente porti anche lo scontrino del pasticcere. Nessun costo di servizio.' },
+    { titleKey: 'ai.example.kids', title: 'Bambini', contentKey: 'ai.example.kidsBody', content: 'Benvenuti. Abbiamo seggioloni e un menù bambini. Meglio avvisare in anticipo quanti sono.' },
+    { titleKey: 'ai.example.parking', title: 'Parcheggio', contentKey: 'ai.example.parkingBody', content: 'Parcheggio gratuito davanti al ristorante, non serve prenotarlo.' },
+    { titleKey: 'ai.example.dogs', title: 'Cani', contentKey: 'ai.example.dogsBody', content: 'I cani sono ammessi solo negli spazi esterni (tettoia e fiume), al guinzaglio.' },
 ];
 
 export const AiMessagesSettingsManager: React.FC<Props> = ({ showToast }) => {
+    const { t } = useTranslation('canali', { useSuspense: false });
     const { hasPermission } = useAuth();
     const canEdit = hasPermission('settings:full');
 
@@ -53,7 +55,7 @@ export const AiMessagesSettingsManager: React.FC<Props> = ({ showToast }) => {
                 setFlags(f);
                 setEntries(k.entries);
             } catch (err: any) {
-                if (!cancelled) showToastRef.current(err?.message || 'Errore nel caricamento', 'error');
+                if (!cancelled) showToastRef.current(err?.message || t('ai.err.load', 'Errore nel caricamento'), 'error');
             } finally {
                 if (!cancelled) setLoading(false);
             }
@@ -71,7 +73,7 @@ export const AiMessagesSettingsManager: React.FC<Props> = ({ showToast }) => {
             await fn();
             if (okMsg) showToast(okMsg, 'success');
         } catch (err: any) {
-            showToast(err?.message || 'Operazione non riuscita', 'error');
+            showToast(err?.message || t('ai.err.operation', 'Operazione non riuscita'), 'error');
         } finally {
             setSaving(false);
         }
@@ -80,24 +82,24 @@ export const AiMessagesSettingsManager: React.FC<Props> = ({ showToast }) => {
     const toggle = () => act(async () => {
         const updated = await updateFeatureFlags({ ai_messages_enabled: !enabled });
         setFlags(updated);
-    }, `Messaggi con AI: ${!enabled ? 'attivi' : 'disattivati'}`);
+    }, !enabled ? t('ai.toastOn', 'Messaggi con AI: attivi') : t('ai.toastOff', 'Messaggi con AI: disattivati'));
 
     const add = (title: string, content: string) => act(async () => {
         const created = await createKnowledge({ title, content });
         setEntries(prev => [...prev, created]);
         setNewTitle(''); setNewContent('');
-    }, 'Regola aggiunta');
+    }, t('ai.ruleAdded', 'Regola aggiunta'));
 
     const saveEdit = (id: number) => act(async () => {
         const updated = await updateKnowledge(id, { title: editTitle.trim(), content: editContent.trim() });
         setEntries(prev => prev.map(e => (e.id === id ? updated : e)));
         setEditingId(null);
-    }, 'Regola aggiornata');
+    }, t('ai.ruleUpdated', 'Regola aggiornata'));
 
     if (loading) {
         return (
             <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] border border-[var(--ds-border)] px-4 py-3 flex items-center gap-2 text-[13px] text-[var(--ds-text-muted)]">
-                <Loader2 className="h-4 w-4 animate-spin" /> Caricamento…
+                <Loader2 className="h-4 w-4 animate-spin" /> {t('ai.loading', 'Caricamento…')}
             </div>
         );
     }
@@ -110,19 +112,19 @@ export const AiMessagesSettingsManager: React.FC<Props> = ({ showToast }) => {
                         <Wand2 className="w-5 h-5" />
                     </div>
                     <div className="min-w-0">
-                        <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">Messaggi con AI</h4>
+                        <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">{t('ai.title', 'Messaggi con AI')}</h4>
                         <p className="text-[13px] text-[var(--ds-text-muted)] truncate">
-                            Risposte suggerite ai clienti, basate sulle regole che scrivi tu.
+                            {t('ai.subtitle', 'Risposte suggerite ai clienti, basate sulle regole che scrivi tu.')}
                         </p>
                     </div>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
                     <span className={`text-[12px] font-medium ${enabled ? 'text-[var(--ds-seated-text)]' : 'text-[var(--ds-text-subtle)]'}`}>
-                        {enabled ? 'Attivo' : 'Disattivato'}
+                        {enabled ? t('ai.on', 'Attivo') : t('ai.off', 'Disattivato')}
                     </span>
                     <button
                         type="button" role="switch" aria-checked={enabled}
-                        aria-label={`${enabled ? 'Disattiva' : 'Attiva'} messaggi con AI`}
+                        aria-label={t('ai.toggleAria', '{{azione}} messaggi con AI', { azione: enabled ? t('ai.switchOff', 'Disattiva') : t('ai.switchOn', 'Attiva') })}
                         onClick={e => { e.preventDefault(); e.stopPropagation(); if (canEdit) toggle(); }}
                         disabled={!canEdit || saving}
                         className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
@@ -138,25 +140,25 @@ export const AiMessagesSettingsManager: React.FC<Props> = ({ showToast }) => {
 
             <div className="border-t border-[var(--ds-border)] px-4 py-4 space-y-5">
                 <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] border border-[var(--ds-border)] px-3 py-2.5 text-[13px] leading-relaxed text-[var(--ds-text-muted)]">
-                    Nella pagina Messaggi comparirà <strong className="text-[var(--ds-text-primary)]">Suggerisci risposta</strong>:
-                    l'AI legge la conversazione e la prenotazione collegata e propone una frase.
-                    <strong className="text-[var(--ds-text-primary)]"> Nessun messaggio parte da solo</strong> — leggi, correggi se serve, invii tu.
-                    Su disponibilità dei tavoli e allergie non risponde mai: quelle restano a una persona.
+                    {t('ai.hintIntro', 'Nella pagina Messaggi comparirà')} <strong className="text-[var(--ds-text-primary)]">{t('ai.suggestReply', 'Suggerisci risposta')}</strong>:{' '}
+                    {t('ai.hintReads', "l'AI legge la conversazione e la prenotazione collegata e propone una frase.")}
+                    <strong className="text-[var(--ds-text-primary)]">{t('ai.hintNothingAuto', ' Nessun messaggio parte da solo')}</strong>{t('ai.hintYouSend', ' — leggi, correggi se serve, invii tu.')}{' '}
+                    {t('ai.hintNever', 'Su disponibilità dei tavoli e allergie non risponde mai: quelle restano a una persona.')}
                 </div>
 
                 <section>
                     <div className="flex items-center justify-between mb-2">
                         <h5 className="text-[13px] font-semibold text-[var(--ds-text-secondary)]">
-                            Regole della casa
+                            {t('ai.houseRules', 'Regole della casa')}
                         </h5>
                         <span className="text-[12px] text-[var(--ds-text-muted)]">
-                            {activeCount} attiv{activeCount === 1 ? 'a' : 'e'}
+                            {t('ai.activeCount', '{{count}} attive', { count: activeCount })}
                         </span>
                     </div>
 
                     {enabled && activeCount === 0 && (
                         <p className="mb-2 rounded-[var(--ds-radius)] bg-[var(--ds-pending-tint)] px-3 py-2 text-[13px] text-[var(--ds-pending-text)]">
-                            La funzione è attiva ma non c'è nessuna regola: senza, l'AI non ha da cosa rispondere e non proporrà nulla.
+                            {t('ai.noRulesWarning', "La funzione è attiva ma non c'è nessuna regola: senza, l'AI non ha da cosa rispondere e non proporrà nulla.")}
                         </p>
                     )}
 
@@ -180,11 +182,11 @@ export const AiMessagesSettingsManager: React.FC<Props> = ({ showToast }) => {
                                             <button type="button" disabled={!editTitle.trim() || !editContent.trim() || saving}
                                                 onClick={() => saveEdit(e.id)}
                                                 className="inline-flex items-center gap-1 text-[13px] px-2.5 py-1.5 rounded-[var(--ds-radius)] border border-[var(--ds-border)] disabled:opacity-50">
-                                                <Check size={13} /> Salva
+                                                <Check size={13} /> {t('ai.save', 'Salva')}
                                             </button>
                                             <button type="button" onClick={() => setEditingId(null)}
                                                 className="inline-flex items-center gap-1 text-[13px] px-2.5 py-1.5 rounded-[var(--ds-radius)] text-[var(--ds-text-muted)]">
-                                                <X size={13} /> Annulla
+                                                <X size={13} /> {t('ai.cancel', 'Annulla')}
                                             </button>
                                         </div>
                                     </div>
@@ -196,7 +198,7 @@ export const AiMessagesSettingsManager: React.FC<Props> = ({ showToast }) => {
                                         </div>
                                         {canEdit && (
                                             <div className="flex items-center gap-1 flex-shrink-0">
-                                                <button type="button" aria-label={`Modifica ${e.title}`} disabled={saving}
+                                                <button type="button" aria-label={t('ai.editNamed', 'Modifica {{titolo}}', { titolo: e.title })} disabled={saving}
                                                     onClick={() => { setEditingId(e.id); setEditTitle(e.title); setEditContent(e.content); }}
                                                     className="p-1.5 rounded-[var(--ds-radius)] text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] disabled:opacity-50">
                                                     <Pencil size={13} />
@@ -207,13 +209,13 @@ export const AiMessagesSettingsManager: React.FC<Props> = ({ showToast }) => {
                                                         setEntries(prev => prev.map(x => (x.id === e.id ? u : x)));
                                                     })}
                                                     className="text-[12px] px-1.5 text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] disabled:opacity-50">
-                                                    {e.is_active ? 'disattiva' : 'riattiva'}
+                                                    {e.is_active ? t('ai.deactivate', 'disattiva') : t('ai.reactivate', 'riattiva')}
                                                 </button>
-                                                <button type="button" aria-label={`Elimina ${e.title}`} disabled={saving}
+                                                <button type="button" aria-label={t('ai.deleteNamed', 'Elimina {{titolo}}', { titolo: e.title })} disabled={saving}
                                                     onClick={() => act(async () => {
                                                         await deleteKnowledge(e.id);
                                                         setEntries(prev => prev.filter(x => x.id !== e.id));
-                                                    }, 'Regola eliminata')}
+                                                    }, t('ai.ruleDeleted', 'Regola eliminata'))}
                                                     className="p-1.5 rounded-[var(--ds-radius)] text-[var(--ds-critical-solid)] hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50">
                                                     <Trash2 size={13} />
                                                 </button>
@@ -227,15 +229,15 @@ export const AiMessagesSettingsManager: React.FC<Props> = ({ showToast }) => {
                         {entries.length === 0 && (
                             <div className="px-3 py-3 space-y-2">
                                 <p className="text-[13px] text-[var(--ds-text-muted)]">
-                                    Nessuna regola. Parti da questi esempi, poi aggiungi le tue:
+                                    {t('ai.noRules', 'Nessuna regola. Parti da questi esempi, poi aggiungi le tue:')}
                                 </p>
                                 {canEdit && (
                                     <div className="flex flex-wrap gap-1.5">
                                         {ESEMPI.map(ex => (
-                                            <button key={ex.title} type="button" disabled={saving}
-                                                onClick={() => add(ex.title, ex.content)}
+                                            <button key={ex.titleKey} type="button" disabled={saving}
+                                                onClick={() => add(t(ex.titleKey, ex.title), t(ex.contentKey, ex.content))}
                                                 className="text-[12px] px-2 py-1 rounded-[var(--ds-radius-control)] border border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)] disabled:opacity-50">
-                                                <Plus size={11} className="inline mr-0.5" />{ex.title}
+                                                <Plus size={11} className="inline mr-0.5" />{t(ex.titleKey, ex.title)}
                                             </button>
                                         ))}
                                     </div>
@@ -248,26 +250,26 @@ export const AiMessagesSettingsManager: React.FC<Props> = ({ showToast }) => {
                                 <input
                                     value={newTitle}
                                     onChange={e => setNewTitle(e.target.value)}
-                                    placeholder="Argomento (es. Torte da fuori)"
+                                    placeholder={t('ai.topicPlaceholder', 'Argomento (es. Torte da fuori)')}
                                     className="w-full text-[13px] rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5"
                                 />
                                 <textarea
                                     value={newContent}
                                     onChange={e => setNewContent(e.target.value)}
-                                    placeholder="La regola, come la diresti a un cliente: “Sì, si può portare la torta purché porti anche lo scontrino del pasticcere.”"
+                                    placeholder={t('ai.rulePlaceholder', 'La regola, come la diresti a un cliente: “Sì, si può portare la torta purché porti anche lo scontrino del pasticcere.”')}
                                     rows={2}
                                     className="w-full text-[13px] rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5 resize-y"
                                 />
                                 <button type="button" disabled={!newTitle.trim() || !newContent.trim() || saving}
                                     onClick={() => add(newTitle.trim(), newContent.trim())}
                                     className="text-[13px] px-2.5 py-1.5 rounded-[var(--ds-radius)] border border-[var(--ds-border)] flex items-center gap-1 disabled:opacity-50">
-                                    <Plus size={13} /> Aggiungi regola
+                                    <Plus size={13} /> {t('ai.addRule', 'Aggiungi regola')}
                                 </button>
                             </div>
                         )}
                     </div>
                     <p className="text-[12px] text-[var(--ds-text-muted)] mt-1.5">
-                        Scrivi frasi brevi e concrete. Quello che non è scritto qui, l'AI non lo dirà: quando non sa, non propone nulla e rispondi tu.
+                        {t('ai.writeShort', "Scrivi frasi brevi e concrete. Quello che non è scritto qui, l'AI non lo dirà: quando non sa, non propone nulla e rispondi tu.")}
                     </p>
                 </section>
             </div>
