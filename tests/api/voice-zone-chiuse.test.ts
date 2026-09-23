@@ -177,4 +177,31 @@ describe('zone chiuse sul canale voce (check_availability)', () => {
         expect(res.body.message).toContain("all'esterno è tutto prenotato");
         expect(res.body.message).toContain("all'interno abbiamo posto");
     });
+
+    // Chiamata di prova 23/09/2026: salutato per nome, poi subito dopo la
+    // disponibilità "A che nome registro la prenotazione?". L'intestazione
+    // ora arriva nella risposta di check_availability.
+    it('chiamante in rubrica: check_availability dice di confermare il nome, non di chiederlo', async () => {
+        const creata = await api().post('/webhook/elevenlabs/create-reservation').send({
+            customer_name: 'Zona Test Rubrica',
+            phone: '3390000503',
+            date: DATA,
+            time: '20:00',
+            shift: 'DINNER',
+            guests: 2,
+        });
+        expect(creata.body.success).toBe(true);
+        await dbQuery(`DELETE FROM reservations WHERE id = $1`, [creata.body.reservation_id]);
+
+        const noto = await disponibilita({ caller_id: '+393390000503' });
+        expect(noto.body.available).toBe(true);
+        expect(noto.body.customer_known).toBe(true);
+        expect(noto.body.customer_full_name).toBe('Zona Test Rubrica');
+        expect(noto.body.name_instruction).toContain('La prenotazione è a suo nome, Zona?');
+
+        const sconosciuto = await disponibilita({ caller_id: '+393390000999' });
+        expect(sconosciuto.body.available).toBe(true);
+        expect(sconosciuto.body.customer_known).toBeUndefined();
+        expect(sconosciuto.body.name_instruction).toBeUndefined();
+    });
 });
