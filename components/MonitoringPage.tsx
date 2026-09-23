@@ -63,6 +63,12 @@ const formatResetDate = (unix: number | null | undefined): string => {
 };
 
 // Etichetta d'asse compatta dal giorno ISO (YYYY-MM-DD → "12/08").
+// Centesimi di euro → "61 €" / "12,40 €".
+const formatCents = (cents: number): string => {
+  const eur = cents / 100;
+  return Number.isInteger(eur) ? `${nf.format(eur)} €` : `${eur.toFixed(2).replace('.', ',')} €`;
+};
+
 const shortDay = (iso: string): string => {
   const parts = iso.split('-');
   return parts.length === 3 ? `${parts[2]}/${parts[1]}` : iso;
@@ -247,7 +253,9 @@ export const MonitoringPage: React.FC = () => {
                     icon={<Clock className="h-3.5 w-3.5" />}
                     label={`Durata (${days}g)`}
                     value={formatDuration(eleven?.calls.window.seconds)}
-                    hint={`${formatDuration(eleven?.calls.allTime.seconds)} totali`}
+                    hint={typeof eleven?.calls.window.cost_usd === 'number'
+                      ? `costo ${formatEuro(eleven.calls.window.cost_usd, eleven.usdEur ?? 0.92)}`
+                      : `${formatDuration(eleven?.calls.allTime.seconds)} totali`}
                   />
                   <StatTile
                     icon={<Coins className="h-3.5 w-3.5" />}
@@ -262,6 +270,53 @@ export const MonitoringPage: React.FC = () => {
                     hint={formatResetDate(eleven?.subscription?.next_reset_unix)}
                   />
                 </div>
+
+                {/* Mese in corso contro i minuti inclusi nell'add-on (Fase 1:
+                    solo misura, niente di fatturato). Il costo vero viene dai
+                    dati ElevenLabs di ogni chiamata; il ricavo è una stima sul
+                    piano di default. */}
+                {eleven?.plan && eleven.month && (() => {
+                  const { plan, month } = eleven;
+                  const tasso = eleven.usdEur ?? 0.92;
+                  const pct = Math.min(100, Math.round((month.billable_minutes / plan.includedMinutes) * 100));
+                  const costCents = Math.round(month.cost_usd * tasso * 100);
+                  const extraMinutes = Math.max(0, month.billable_minutes - plan.includedMinutes);
+                  const monthName = new Date().toLocaleDateString('it-IT', { month: 'long' });
+                  return (
+                    <div className="mb-4 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3">
+                      <div className="mb-1.5 flex items-center justify-between gap-2 text-[13px]">
+                        <span className="font-medium text-[var(--ds-text-secondary)]">Minuti di {monthName}</span>
+                        <span className="tabular font-semibold text-[var(--ds-text-primary)]">
+                          {formatInt(month.billable_minutes)} / {formatInt(plan.includedMinutes)} inclusi
+                        </span>
+                      </div>
+                      <div className="h-2.5 w-full overflow-hidden rounded-full bg-[var(--ds-border)]">
+                        <div
+                          className={`h-full rounded-[var(--ds-radius-control)] ${pct >= 100 ? 'bg-[var(--ds-critical-solid)]' : pct >= 80 ? 'bg-[var(--ds-pending-solid)]' : 'bg-[var(--ds-seated-solid)]'}`}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      <div className="mt-2 grid grid-cols-1 gap-1 text-[12px] text-[var(--ds-text-muted)] sm:grid-cols-2">
+                        <span>
+                          A fine mese ~{formatInt(month.projected_minutes)} min · ricavo stimato {formatCents(month.projected_revenue_cents)}
+                        </span>
+                        <span className="sm:text-right">
+                          Finora: costo {formatCents(costCents)} · ricavo {formatCents(month.estimated_revenue_cents)}
+                          {extraMinutes > 0 && ` (${formatInt(extraMinutes)} min extra)`}
+                          {` · margine ${formatCents(month.estimated_revenue_cents - costCents)}`}
+                        </span>
+                      </div>
+                      {month.priced_calls < month.calls && (
+                        <p className="mt-1.5 text-[12px] text-[var(--ds-pending-text)]">
+                          Costo noto per {formatInt(month.priced_calls)} chiamate su {formatInt(month.calls)}: le altre sono precedenti al recupero dello storico.
+                        </p>
+                      )}
+                      <p className="mt-1.5 text-[12px] text-[var(--ds-text-muted)]">
+                        Piano: {formatCents(plan.priceCents)} al mese, {formatInt(plan.includedMinutes)} minuti inclusi, poi {formatCents(plan.overageCentsPerMinute)}/min. Non contano le chiamate sotto i 10 secondi.
+                      </p>
+                    </div>
+                  );
+                })()}
 
                 {/* Barra quota crediti del piano ElevenLabs */}
                 {quotaPct != null && (
