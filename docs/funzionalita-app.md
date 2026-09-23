@@ -661,6 +661,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-23 | Email | Con la lingua inglese parla inglese la pagina Email: elenco dei thread, conversazione, proposta AI di prenotazione dall'email, composizione con allegati e nuova email. |
 | 2026-09-23 | Prenotazioni; Comande, Cucina e Passe | L'app si apre più in fretta: il caricamento delle prenotazioni all'avvio passa da circa 5 secondi a pochi decimi, e la griglia tavoli delle Comande non resta più in attesa. Stessi dati di prima (VIP, tavolo preferito, note dalla rubrica). |
 | 2026-09-23 | Agente vocale | Se si elimina una prenotazione nata da una telefonata, la chiamata non torna fra le «Da ricontattare»: resta gestita con l'etichetta «Prenotazione eliminata». |
 | 2026-09-23 | Comande, Cucina e Passe | Il volo dopo «Invia» è più grande (icone da 52px) e più fluido: avanzamento, salto e dissolvenza scorrono ognuno su una curva continua, senza gli scatti di prima. |
