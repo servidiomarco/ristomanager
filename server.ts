@@ -26,8 +26,13 @@ import { BILLABLE_SECONDS_SQL, billableMinutes, estimatedRevenueCents } from './
 import { getVoicePlan, getVoiceMonthUsage, mergeVoicePlan, claimNewVoiceUsageAlerts } from './services/voiceUsage.js';
 import { outboxEnqueueInTx, outboxKick, outboxRegister, startOutboxDispatcher } from './services/outboxService.js';
 import { SERVER_PROFILE, isServiceNode } from './services/topology.js';
+// Prima di ogni altra riga di log: sul nodo la task è headless e il file è
+// l'unico posto dove leggere (lezione del 23/09).
+initSalaNodeFileLog();
 import { scheduleSalaNodeBootstrap } from './services/salaNodeBootstrap.js';
 import { loadNodeTlsMaterial, startNodeTlsRefresh } from './services/salaNodeLocalTls.js';
+import { initSalaNodeFileLog } from './services/salaNodeLog.js';
+import { startSalaNodeWatchdog } from './services/salaNodeWatchdog.js';
 import { createServer as createHttpsServer, type Server as HttpsServer } from 'https';
 import { startSalaNodeReplica } from './services/salaNodeReplica.js';
 import { VOICE_CHANNEL, WHATSAPP_CHANNEL, type ToolOutcome } from './services/bookingTools.js';
@@ -36802,7 +36807,19 @@ const startServer = async () => {
                         getClients: () => {
                             try { return socketService?.getIO().engine.clientsCount ?? 0; } catch { return 0; }
                         },
+                        // Il replay degli envelope verso la LAN: room per
+                        // room, nomi già composti dal cloud.
+                        relayToLocal: (rooms, event, data) => {
+                            try {
+                                const io = socketService?.getIO();
+                                if (!io) return;
+                                for (const room of rooms) io.to(room).emit(event, data);
+                            } catch { /* mai rompere il giro */ }
+                        },
                     });
+                    // Il cane da guardia dell'uplink (no-op sul nodo): push a
+                    // OWNER/GM se un nodo con l'ibrido acceso tace oltre soglia.
+                    startSalaNodeWatchdog();
                 }))
                 .catch((dbError) => {
                     console.error('Database initialization failed:', dbError);

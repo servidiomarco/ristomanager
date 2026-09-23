@@ -55,16 +55,23 @@ export function setupSalaNodeBridge(io: SocketIOServer, resolveToken: TokenResol
     const nsp = io.of('/sala-node');
 
     nsp.use((socket, next) => {
+        // Ogni rifiuto si LOGGA: il 23/09 un uplink muto per 90 minuti non
+        // ha lasciato un rigo da nessuna parte — mai più un handshake
+        // respinto in silenzio.
+        const reject = (reason: string) => {
+            console.warn(`[sala-node] handshake respinto (${reason}) da ${socket.handshake.address}`);
+            next(new Error(reason));
+        };
         const provided = String(socket.handshake.auth?.token || '');
-        if (!provided) return next(new Error('Token nodo mancante'));
+        if (!provided) return reject('Token nodo mancante');
         resolveToken(provided)
             .then(async tenantId => {
-                if (tenantId == null) return next(new Error('Token nodo non valido'));
-                if (!(await isAuthorized(tenantId))) return next(new Error('Tenant sospeso o add-on non attivo'));
+                if (tenantId == null) return reject('Token nodo non valido');
+                if (!(await isAuthorized(tenantId))) return reject('Tenant sospeso o add-on non attivo');
                 (socket as any).salaNodeTenantId = tenantId;
                 next();
             })
-            .catch(() => next(new Error('Token nodo non verificabile')));
+            .catch(err => reject(`Token nodo non verificabile: ${err?.message || err}`));
     });
 
     nsp.on('connection', (socket) => {

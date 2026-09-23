@@ -5,6 +5,8 @@ import path from 'node:path';
 import { existsSync } from 'node:fs';
 import { Client } from 'pg';
 import { api, bearer, ownerToken } from './helpers';
+import { io as ioClient } from 'socket.io-client';
+import os from 'node:os';
 
 // Fase 3 della tappa 4, end-to-end: un nodo vero (secondo dist/server.js,
 // profilo service-node, DB fresco) si bootstrappa dal server di test e poi
@@ -37,6 +39,8 @@ describe('replica cloud→nodo', () => {
     let nodeDb: Client | null = null;
     let nodeLog = '';
     let tableOrdersPrima = false;
+    let stateDir = '';
+    let nodeBase = '';
 
     const finoA = async (cond: () => Promise<boolean>, descr: string, timeoutMs = 20_000): Promise<void> => {
         const deadline = Date.now() + timeoutMs;
@@ -72,9 +76,11 @@ describe('replica cloud→nodo', () => {
         await admin.end();
 
         const nodeDbUrl = (() => { const u = new URL(cloudDbUrl); u.pathname = `/${NODE_DB}`; return u.toString(); })();
+        stateDir = path.join(os.tmpdir(), `sala-node-state-${Date.now()}`);
         const distServer = path.resolve('dist/server.js');
         expect(existsSync(distServer)).toBe(true);
         const port = await freePort();
+        nodeBase = `http://127.0.0.1:${port}`;
         child = spawn('node', [distServer], {
             env: {
                 ...process.env,
@@ -84,6 +90,7 @@ describe('replica cloud→nodo', () => {
                 SALA_NODE_CLOUD_URL: process.env.TEST_BASE_URL,
                 SALA_NODE_TOKEN: nodeToken,
                 SALA_NODE_PULL_INTERVAL_MS: '1000',
+                SALA_NODE_STATE_DIR: stateDir,
                 JWT_SECRET: 'test-jwt-secret',
                 JWT_REFRESH_SECRET: 'test-jwt-refresh-secret',
             },
@@ -249,6 +256,45 @@ describe('replica cloud→nodo', () => {
             const items = await nodeDb!.query('SELECT qty FROM order_items WHERE order_id = $1', [orderId]);
             return items.rows.length === 1 && Number(items.rows[0].qty) === 2;
         }, 'comanda e righe replicate');
+    });
+
+    it('il log del nodo vive su file: la task headless non è più cieca (occhi-sul-nodo)', async () => {
+        expect(existsSync(path.join(stateDir, 'sala-node.log'))).toBe(true);
+    });
+
+    it('il flip di un flag arriva ai client attaccati al socket DEL NODO (occhi-sul-nodo)', async () => {
+        // Il 23/09 l'interruttore autorità non arrivava mai ai palmari in
+        // LAN: features:updated viaggiava solo sul socket del cloud. Ora il
+        // nodo rigioca gli envelope non-convergiuti ai propri client.
+        const socket = ioClient(nodeBase, {
+            transports: ['websocket', 'polling'],
+            auth: { token },
+            timeout: 10_000,
+        });
+        try {
+            await new Promise<void>((resolve, reject) => {
+                const t = setTimeout(() => reject(new Error('socket del nodo non connesso')), 10_000);
+                socket.on('connect', () => { clearTimeout(t); resolve(); });
+                socket.on('connect_error', (e) => { clearTimeout(t); reject(e); });
+            });
+            const flagsPrima = await api().get('/settings/features').set(bearer(token));
+            const passePrima = flagsPrima.body.passe_enabled !== false;
+            const arrivato = new Promise<any>((resolve, reject) => {
+                const t = setTimeout(() => reject(new Error('features:updated mai arrivato dal nodo')), 15_000);
+                socket.on('features:updated', (flags: any) => { clearTimeout(t); resolve(flags); });
+            });
+            // Il flip parte dal CLOUD; l'envelope specchiato deve rimbalzare
+            // dal nodo fino a questo client.
+            await api().put('/settings/features').set(bearer(token)).send({ passe_enabled: !passePrima });
+            try {
+                const flags = await arrivato;
+                expect(typeof flags.passe_enabled).toBe('boolean');
+            } finally {
+                await api().put('/settings/features').set(bearer(token)).send({ passe_enabled: passePrima });
+            }
+        } finally {
+            socket.close();
+        }
     });
 
     it('il cursore del nodo raggiunge la testa del log del cloud', async () => {

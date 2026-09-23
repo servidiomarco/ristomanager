@@ -19,7 +19,7 @@
 import { io, type Socket } from 'socket.io-client';
 import pool, { runAsPlatform } from '../db.js';
 import { isServiceNode } from './topology.js';
-import { applyReplicaBatch, type ReplicaEvent, type WantedRows, type FetchedRows } from './replicaApply.js';
+import { applyReplicaBatch, CONVERGED_TYPES, type ReplicaEvent, type WantedRows, type FetchedRows } from './replicaApply.js';
 
 const PULL_LIMIT = 500;
 const POLL_MS = Math.max(1_000, Number(process.env.SALA_NODE_PULL_INTERVAL_MS) || 15_000);
@@ -149,7 +149,14 @@ const serveNodeRows = async (req: any, ack: (res: any) => void): Promise<void> =
     }
 };
 
-export const startSalaNodeReplica = (opts?: { getClients?: () => number }): void => {
+export interface SalaNodeReplicaOpts {
+    getClients?: () => number;
+    /** Rigioca un envelope relay:event ai client LAN del nodo (room per
+     *  room, come faceva il relay tappa-3). Iniettato da server.ts. */
+    relayToLocal?: (rooms: string[], event: string, data: any) => void;
+}
+
+export const startSalaNodeReplica = (opts?: SalaNodeReplicaOpts): void => {
     if (!isServiceNode) return;
     let running = false;
     let lastErrorLogged = 0;
@@ -207,7 +214,22 @@ export const startSalaNodeReplica = (opts?: { getClients?: () => number }): void
         });
     }, 15_000);
     if (typeof statsTimer.unref === 'function') statsTimer.unref();
-    socket.on('relay:event', wake);
+    socket.on('relay:event', (envelope: any) => {
+        // Doppio mestiere dell'envelope: sveglia il pull, e per i tipi che
+        // NON passano dal giro import→dispatcher (features:updated, kds:*,
+        // bill:*, menu…) è l'unica strada verso i client LAN — il 23/09 il
+        // flip dell'interruttore non arrivava mai ai palmari attaccati al
+        // nodo, serviva il reload a mano. I tipi convergiuti si saltano:
+        // il loro broadcast lo fa il dispatcher all'import (catch-up
+        // post-outage compreso), e raddoppiarli = doppi toast.
+        wake();
+        try {
+            if (envelope && Array.isArray(envelope.rooms) && typeof envelope.event === 'string'
+                && !CONVERGED_TYPES.has(envelope.event)) {
+                opts?.relayToLocal?.(envelope.rooms, envelope.event, envelope.data);
+            }
+        } catch { /* il replay non deve mai rompere la sveglia */ }
+    });
     // Lo stream inverso: il cloud tira da qui, sempre pull con cursore.
     socket.on('node:pull', (req, ack) => { if (typeof ack === 'function') void serveNodePull(req, ack); });
     socket.on('node:rows', (req, ack) => { if (typeof ack === 'function') void serveNodeRows(req, ack); });
