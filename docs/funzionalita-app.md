@@ -661,6 +661,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-23 | Agente vocale | Con un cliente già in rubrica Sofia conferma l'intestazione («La prenotazione è a suo nome, Marco?») invece di chiedere il nome: glielo indica il server insieme alla disponibilità. |
 | 2026-09-23 | Comande, Cucina e Passe | «Invia» e «Invia tutto» chiudono la comanda e riportano alla griglia tavoli, con un'animazione sul bottone che mostra cosa è partito: piatto (cucina), bottiglia (bar), torta (dolci e gelati). Corretto anche un caso in cui le bozze non inviate di un tavolo si perdevano se l'uscita dal tavolo coincideva con la chiamata di un'uscita in cucina. |
 | 2026-09-23 | Agente vocale | Sofia non chiede più «interno o esterno?» quando una sola zona ha posto (la decisione arriva dal server nella verifica disponibilità) e segue sempre lo stesso flusso di prenotazione, anche coi clienti già in rubrica. |
 | 2026-09-23 | Accesso | La pagina di accesso parla inglese, e soprattutto RESTA nella lingua dell'ultimo operatore anche dopo il logout: prima tornava sempre in italiano, e in un ristorante all'estero il cameriere si ritrovava davanti una schermata che non sa leggere. La lingua scelta da un ospite sulle pagine pubbliche non la influenza. |

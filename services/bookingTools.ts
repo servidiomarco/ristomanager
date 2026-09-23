@@ -120,7 +120,7 @@ export interface BookingToolsDeps {
     recordCallbackRequest: (tenantId: number, p: any) => Promise<any>;
     upsertCustomerFromReservation: (tenantId: number, name: string, phone: string, a: any, b: any, language?: string | null) => Promise<string | null>;
     /** Rubrica per numero (last-10-digits, stessa regola dell'upsert). */
-    findCustomerByPhone: (tenantId: number, phone: string) => Promise<{ exists: boolean; customer_name?: string }>;
+    findCustomerByPhone: (tenantId: number, phone: string) => Promise<{ exists: boolean; customer_name?: string; first_name?: string }>;
     /** Card #27 — true se il numero appartiene a un cliente in blacklist. */
     isPhoneBlacklisted: (tenantId: number, phone: string) => Promise<boolean>;
     /** Comportamento della blacklist per fonte, deciso dal tenant. */
@@ -225,6 +225,9 @@ export interface CheckAvailabilityParams {
     /** Card #34 — lingua della chiamata (elevenLabsParams la inoltra sempre):
      *  'en' accende messaggi e date_readback inglesi. */
     language?: any;
+    /** Numero del chiamante (voce: system__caller_id). Serve a dire
+     *  all'agente, nella risposta, se il cliente è già in rubrica. */
+    caller_id?: any;
 }
 
 /** I due orari della griglia più vicini a quello richiesto, per proporli a
@@ -356,11 +359,35 @@ export async function checkAvailability(
             }
         }
 
+        // Intestazione decisa dal server, come la zona. Con il cliente in
+        // rubrica il prompt dice di chiedere solo "La prenotazione è a suo
+        // nome, Marco?", ma subito dopo la disponibilità il modello chiedeva
+        // "A che nome registro?" (18 clienti noti su 34 nell'analisi del
+        // 23/09, e la chiamata di prova dello stesso giorno). La risposta del
+        // tool arriva proprio nel turno in cui il nome va chiesto.
+        const nameFields: Record<string, any> = {};
+        const callerId = String(p.caller_id ?? '').trim();
+        if (result.available && callerId) {
+            try {
+                const known = await d.findCustomerByPhone(tenantId, callerId);
+                const fullName = (known.customer_name || '').trim();
+                if (known.exists && fullName) {
+                    const firstName = (known.first_name || '').trim() || fullName.split(/\s+/)[0];
+                    nameFields.customer_known = true;
+                    nameFields.customer_full_name = fullName;
+                    nameFields.name_instruction = `NON chiedere "a che nome": il numero è in rubrica. Chiedi solo "La prenotazione è a suo nome, ${firstName}?". Al sì passa customer_name "${fullName}" a create_reservation; se è per un'altra persona chiedi nome e cognome e passa name_confirmed: true.`;
+                }
+            } catch (err) {
+                // Come in create_reservation: la rubrica non blocca mai.
+                console.warn(`${channel.logPrefix} check-availability rubrica lookup failed (non-blocking):`, (err as Error)?.message || err);
+            }
+        }
+
         console.log(`${channel.logPrefix} check-availability`, { date: normalizedDate, raw_date: p.date, shift: rawShift, guests, location_preference: locationPreference, result });
         // date_readback è la stringa "venerdì 10 luglio" che il modello DEVE
         // ripetere alla lettera: da solo sbaglia regolarmente l'accoppiata
         // giorno della settimana / giorno del mese.
-        return { body: { ...result, ...zoneFields, ...timeFields, date_readback: d.formatItalianDateReadback(normalizedDate, language) } };
+        return { body: { ...result, ...zoneFields, ...nameFields, ...timeFields, date_readback: d.formatItalianDateReadback(normalizedDate, language) } };
     } catch (err) {
         console.error(`${channel.logPrefix} check-availability error`, err);
         return {
