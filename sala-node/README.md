@@ -189,3 +189,21 @@ da soli (circuito + probe).
   scarta il record A privato del nodo — disattivarli per i dispositivi di
   sala. Il flip dei flag ora arriva anche ai client attaccati al socket
   del nodo (envelope rigiocati), niente più reload a mano.
+
+
+### Stampe dal nodo (fase stampe, 24/09)
+
+Con l'autorità in sala le comande nascono sul nodo e i loro ticket stanno
+nella SUA coda print_jobs: l'agente di stampa deve pollare ANCHE il nodo.
+In `run-print-agent.cmd` aggiungere:
+
+```bat
+set NODE_URL=https://sala.<slug>.sympotia.com:8443
+```
+
+e riavviare la task «RistoManager Print Agent». L'agente conferma ogni job
+alla fonte che gliel'ha dato (cloud o nodo); la config arriva dal cloud con
+ripiego sul nodo — a linea giù le stampe delle comande battute al buio
+ESCONO comunque. Il nodo riconosce il token dell'agente grazie alla riga
+`tenants` (nello snapshot per i nodi nuovi; sincronizzata a ogni avvio per
+quelli già installati).
