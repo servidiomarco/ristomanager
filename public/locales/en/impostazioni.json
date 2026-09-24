@@ -164,5 +164,89 @@
     "cancel": "Cancel",
     "confirm": "Confirm",
     "remove": "Remove the closure"
+  },
+  "card": {
+    "adminsOnly": "Only administrators can change this setting.",
+    "save": "Save changes",
+    "errLoad": "Could not load the settings"
+  },
+  "dep": {
+    "badGuests": "The number of covers must be a whole number between 1 and 100",
+    "saved": "Automatic deposit updated",
+    "errSave": "Could not update the automatic deposit",
+    "intro": "For requests from the /prenota form the system generates a {{provider}} payment link automatically and texts it to the customer. The amount and threshold below also apply to phone bookings and to the terms published on /prenota.",
+    "switchOff": "Switch the automatic deposit off",
+    "switchOn": "Switch the automatic deposit on",
+    "enable": "Switch the automatic deposit on",
+    "perPerson": "Deposit per person",
+    "perPersonHint": "Multiplied by the number of covers. It appears in the messages to the customer and in the \"Deposit and cancellations\" section of the booking page.",
+    "threshold": "Ask for a deposit from (number of covers)",
+    "thresholdHint": "Bookings with at least this many people get the payment link. Below the threshold nothing changes."
+  },
+  "exp": {
+    "badHours": "The hours must be a whole number between 1 and 168",
+    "saved": "Payment link expiry updated",
+    "errSave": "Could not update the link expiry",
+    "title": "Automatic link expiry",
+    "intro": "After the threshold the link can no longer be paid and a booking waiting on a deposit is declined. It applies to links from the last 7 days; table bill shares are excluded.",
+    "switchOff": "Switch the automatic expiry off",
+    "switchOn": "Switch the automatic expiry on",
+    "after": "The link expires after",
+    "message": "Message to the customer",
+    "msgDeclined": "Booking not confirmed (the same wording as a manual decline)",
+    "msgNone": "No message",
+    "msgHint": "It goes out on the channel set in the source's Reply channels (WhatsApp falling back to SMS, email)."
+  },
+  "bl": {
+    "source": {
+      "MANUAL": "By hand (CRM)",
+      "MANUALHint": "With blocking on, saving is refused to the staff too.",
+      "GOOGLE": "Web booking",
+      "GOOGLEHint": "With blocking on, the form answers with an invitation to call.",
+      "VOICE": "Voice agent",
+      "VOICEHint": "With blocking on, Sofia declines with a polite sentence.",
+      "WHATSAPP": "WhatsApp agent",
+      "WHATSAPPHint": "With blocking on, booking proposals are refused."
+    },
+    "saved": "Blacklist behaviour updated",
+    "errSave": "Could not update the blacklist",
+    "intro": "What happens when a booking comes from a number on the blacklist. The signs in the dining room (banner, badge, address book) stay visible whatever you choose.",
+    "block": "Block the booking",
+    "warn": "Allow with a warning",
+    "behaviourAria": "Blacklist behaviour for {{fonte}}"
+  },
+  "chg": {
+    "badService": "The service charge must be a whole number between 0 and 100",
+    "saved": "Cover and service charge updated",
+    "errSave": "Saving failed",
+    "intro": "They appear as bill lines and get discounted like the others. At zero they do not appear. Open orders adjust at the next entry.",
+    "cover": "Cover charge per person",
+    "service": "Service charge",
+    "vatHint": "The VAT rates for cover and service are set in the VAT mapping, under Tax."
+  },
+  "push": {
+    "off": "Push notifications switched off.",
+    "on": "Push notifications switched on.",
+    "errToggle": "The operation failed",
+    "testSent": "Test notification sent.",
+    "errTest": "Sending failed",
+    "section": "Notifications",
+    "title": "Push notifications",
+    "subtitle": "Get alerts on this device for new bookings and tasks assigned to you.",
+    "active": "On",
+    "activate": "Switch on",
+    "unsupported": "Your browser does not support push notifications.",
+    "denied": "Notification permission denied. To switch them on, change the browser settings for this site.",
+    "ios": "On iPhone/iPad push notifications need iOS 16.4+ and the app installed on the Home screen (Safari → Share → \"Add to Home Screen\").",
+    "sendTest": "Send a test notification"
+  },
+  "all": {
+    "errLoad": "Could not load the intolerances",
+    "dup": "That intolerance is already there",
+    "saved": "Intolerances updated",
+    "errSave": "Could not update the intolerances",
+    "remove": "Remove",
+    "add": "Add an intolerance (e.g. Strawberries)",
+    "adminsOnly": "Only administrators can change this list."
   }
 }

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Loader2, Save } from 'lucide-react';
 import {
     getPaymentLinkExpirySettings,
@@ -18,6 +19,7 @@ interface Props {
    prenotazioni non confermate. Spenta di default: la si accende consapevoli
    che da quel momento i link pendenti oltre la soglia scadono davvero. */
 export const PaymentLinkExpiryManager: React.FC<Props> = ({ showToast }) => {
+    const { t } = useTranslation('impostazioni', { useSuspense: false });
     const { hasPermission } = useAuth();
     const canEdit = hasPermission('settings:full');
 
@@ -37,7 +39,7 @@ export const PaymentLinkExpiryManager: React.FC<Props> = ({ showToast }) => {
                 setSettings(data);
                 setHoursInput(String(data.hours));
             } catch (err: any) {
-                if (!cancelled) showToast(err?.message || 'Errore nel caricamento delle impostazioni', 'error');
+                if (!cancelled) showToast(err?.message || t('card.errLoad', 'Errore nel caricamento delle impostazioni'), 'error');
             } finally {
                 if (!cancelled) setLoading(false);
             }
@@ -60,7 +62,7 @@ export const PaymentLinkExpiryManager: React.FC<Props> = ({ showToast }) => {
     const save = async () => {
         if (!canEdit || saving || !settings) return;
         if (hoursInput.trim() !== '' && !hoursValid) {
-            showToast('Le ore devono essere un intero tra 1 e 168', 'error');
+            showToast(t('exp.badHours', 'Le ore devono essere un intero tra 1 e 168'), 'error');
             return;
         }
         const payload: Partial<PaymentLinkExpirySettings> = {};
@@ -75,9 +77,9 @@ export const PaymentLinkExpiryManager: React.FC<Props> = ({ showToast }) => {
             setDraftEnabled(null);
             setDraftMessage(null);
             setHoursInput(String(updated.hours));
-            showToast('Scadenza link di pagamento aggiornata', 'success');
+            showToast(t('exp.saved', 'Scadenza link di pagamento aggiornata'), 'success');
         } catch (err: any) {
-            showToast(err?.message || 'Errore aggiornamento scadenza link', 'error');
+            showToast(err?.message || t('exp.errSave', 'Errore aggiornamento scadenza link'), 'error');
         } finally {
             setSaving(false);
         }
@@ -96,16 +98,16 @@ export const PaymentLinkExpiryManager: React.FC<Props> = ({ showToast }) => {
         <div className="space-y-4">
             <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                    <p className="text-[13px] font-medium text-[var(--ds-text-primary)]">Scadenza automatica dei link</p>
+                    <p className="text-[13px] font-medium text-[var(--ds-text-primary)]">{t('exp.title', 'Scadenza automatica dei link')}</p>
                     <p className="text-[12px] text-[var(--ds-text-muted)]">
-                        Dopo la soglia il link non è più pagabile e la prenotazione in attesa di caparra viene declinata. Vale per i link degli ultimi 7 giorni; le quote del conto al tavolo sono escluse.
+                        {t('exp.intro', 'Dopo la soglia il link non è più pagabile e la prenotazione in attesa di caparra viene declinata. Vale per i link degli ultimi 7 giorni; le quote del conto al tavolo sono escluse.')}
                     </p>
                 </div>
                 <button
                     type="button"
                     role="switch"
                     aria-checked={effectiveEnabled}
-                    aria-label={effectiveEnabled ? 'Disattiva scadenza automatica' : 'Attiva scadenza automatica'}
+                    aria-label={effectiveEnabled ? t('exp.switchOff', 'Disattiva scadenza automatica') : t('exp.switchOn', 'Attiva scadenza automatica')}
                     onClick={() => canEdit && setDraftEnabled(!effectiveEnabled)}
                     disabled={!canEdit || saving}
                     className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
@@ -123,7 +125,7 @@ export const PaymentLinkExpiryManager: React.FC<Props> = ({ showToast }) => {
 
             <div>
                 <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">
-                    Il link scade dopo
+                    {t('exp.after', 'Il link scade dopo')}
                 </label>
                 <div className="flex items-center gap-2">
                     <input
@@ -143,7 +145,7 @@ export const PaymentLinkExpiryManager: React.FC<Props> = ({ showToast }) => {
 
             <div>
                 <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">
-                    Messaggio al cliente
+                    {t('exp.message', 'Messaggio al cliente')}
                 </label>
                 <select
                     value={effectiveMessage}
@@ -151,11 +153,11 @@ export const PaymentLinkExpiryManager: React.FC<Props> = ({ showToast }) => {
                     disabled={!canEdit || saving || !effectiveEnabled}
                     className="w-full max-w-xs px-3 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                 >
-                    <option value="declined">Prenotazione non confermata (stessi testi del rifiuto manuale)</option>
-                    <option value="none">Nessun messaggio</option>
+                    <option value="declined">{t('exp.msgDeclined', 'Prenotazione non confermata (stessi testi del rifiuto manuale)')}</option>
+                    <option value="none">{t('exp.msgNone', 'Nessun messaggio')}</option>
                 </select>
                 <p className="text-[11px] text-[var(--ds-text-subtle)] mt-1">
-                    Parte sul canale previsto dai Canali di risposta della fonte (WhatsApp con ripiego SMS, email).
+                    {t('exp.msgHint', 'Parte sul canale previsto dai Canali di risposta della fonte (WhatsApp con ripiego SMS, email).')}
                 </p>
             </div>
 
@@ -168,14 +170,14 @@ export const PaymentLinkExpiryManager: React.FC<Props> = ({ showToast }) => {
                         className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[13px] font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                         {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                        Salva modifiche
+                        {t('card.save', 'Salva modifiche')}
                     </button>
                 </div>
             )}
 
             {!canEdit && (
                 <p className="text-[12px] text-[var(--ds-text-subtle)]">
-                    Solo gli amministratori possono modificare questa impostazione.
+                    {t('card.adminsOnly', 'Solo gli amministratori possono modificare questa impostazione.')}
                 </p>
             )}
         </div>

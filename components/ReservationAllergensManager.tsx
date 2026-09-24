@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Plus, Trash2, Loader2, Save, GripVertical } from 'lucide-react';
 import { Loader } from './Loader';
 import {
@@ -20,6 +21,7 @@ let draftCounter = 0;
 const makeKey = () => `allergen-draft-${++draftCounter}`;
 
 export const ReservationAllergensManager: React.FC<Props> = ({ showToast }) => {
+    const { t } = useTranslation('impostazioni', { useSuspense: false });
     const { hasPermission } = useAuth();
     const canEdit = hasPermission('settings:full');
 
@@ -41,7 +43,7 @@ export const ReservationAllergensManager: React.FC<Props> = ({ showToast }) => {
                 setDrafts(rows);
                 setInitial(rows.map(r => ({ ...r, key: r.key })));
             } catch (err: any) {
-                if (!cancelled) showToast(err?.message || 'Errore nel caricamento delle intolleranze', 'error');
+                if (!cancelled) showToast(err?.message || t('all.errLoad', 'Errore nel caricamento delle intolleranze'), 'error');
             } finally {
                 if (!cancelled) setLoading(false);
             }
@@ -70,7 +72,7 @@ export const ReservationAllergensManager: React.FC<Props> = ({ showToast }) => {
         }
         const dup = drafts.some(d => d.label.trim().toLowerCase() === trimmed.toLowerCase());
         if (dup) {
-            showToast('Intolleranza già presente', 'error');
+            showToast(t('all.dup', 'Intolleranza già presente'), 'error');
             return;
         }
         setDrafts(prev => [...prev, { key: makeKey(), label: trimmed }]);
@@ -125,9 +127,9 @@ export const ReservationAllergensManager: React.FC<Props> = ({ showToast }) => {
             const rows = updated.map(d => ({ key: makeKey(), label: d.label, existingId: d.id }));
             setDrafts(rows);
             setInitial(rows.map(r => ({ ...r, key: r.key })));
-            showToast('Intolleranze aggiornate', 'success');
+            showToast(t('all.saved', 'Intolleranze aggiornate'), 'success');
         } catch (err: any) {
-            showToast(err?.message || 'Errore aggiornamento intolleranze', 'error');
+            showToast(err?.message || t('all.errSave', 'Errore aggiornamento intolleranze'), 'error');
         } finally {
             setSaving(false);
         }
@@ -173,7 +175,7 @@ export const ReservationAllergensManager: React.FC<Props> = ({ showToast }) => {
                                     type="button"
                                     onClick={() => removeAt(i)}
                                     className="p-1.5 rounded-[var(--ds-radius)] text-[var(--ds-critical-solid)] hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                                    title="Rimuovi"
+                                    title={t('all.remove', 'Rimuovi')}
                                     aria-label={`Rimuovi ${d.label}`}
                                 >
                                     <Trash2 className="w-4 h-4" />
@@ -189,7 +191,7 @@ export const ReservationAllergensManager: React.FC<Props> = ({ showToast }) => {
                     <input
                         type="text"
                         value={newLabel}
-                        placeholder="Aggiungi intolleranza (es. Fragole)"
+                        placeholder={t('all.add', 'Aggiungi intolleranza (es. Fragole)')}
                         maxLength={MAX_LABEL_LENGTH}
                         onChange={(e) => setNewLabel(e.target.value)}
                         onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addLabel(); } }}
@@ -218,14 +220,14 @@ export const ReservationAllergensManager: React.FC<Props> = ({ showToast }) => {
                         className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[13px] font-medium hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                         {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                        Salva modifiche
+                        {t('card.save', 'Salva modifiche')}
                     </button>
                 </div>
             )}
 
             {!canEdit && (
                 <p className="text-[12px] text-[var(--ds-text-subtle)]">
-                    Solo gli amministratori possono modificare la lista.
+                    {t('all.adminsOnly', 'Solo gli amministratori possono modificare la lista.')}
                 </p>
             )}
         </div>

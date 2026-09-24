@@ -452,5 +452,28 @@
     "apiKey": "API Key",
     "webhookSecret": "Webhook Signing Secret",
     "apiVersion": "API Version"
+  },
+  "reply": {
+    "source": {
+      "GOOGLE": "Prenotazioni web",
+      "GOOGLEHint": "dal form pubblico",
+      "VOICE": "Agente vocale",
+      "VOICEHint": "prenotate al telefono",
+      "WHATSAPPHint": "nate in chat",
+      "MANUAL": "Inserite a mano",
+      "MANUALHint": "create dallo staff"
+    },
+    "errLoad": "Errore nel caricamento dei canali",
+    "saved": "Canali di risposta salvati",
+    "errSave": "Salvataggio non riuscito",
+    "emailCc": "Email sempre in copia, quando c'è",
+    "hint": "Vince il primo canale disponibile: recapito lasciato dall'ospite e provider configurato. Se l'invio fallisce si passa al successivo.",
+    "needOne": "Serve almeno un canale per ogni fonte.",
+    "save": "Salva",
+    "moveUp": "{{canale}} più in alto",
+    "moveDown": "{{canale}} più in basso",
+    "channelState": "{{canale}} {{stato}}",
+    "on": "attivo",
+    "off": "spento"
   }
 }

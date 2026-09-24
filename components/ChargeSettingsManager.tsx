@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Loader2, Save } from 'lucide-react';
 import {
     getChargeSettings,
@@ -28,6 +29,7 @@ const formatCents = (cents: number): string =>
    dei piatti. A zero la riga non compare. Le aliquote IVA delle due righe
    restano nella mappatura IVA (sezione Fiscalità). */
 export const ChargeSettingsManager: React.FC<Props> = ({ showToast }) => {
+    const { t } = useTranslation('impostazioni', { useSuspense: false });
     const { hasPermission } = useAuth();
     const canEdit = hasPermission('settings:full');
 
@@ -47,7 +49,7 @@ export const ChargeSettingsManager: React.FC<Props> = ({ showToast }) => {
                 setCoverInput(formatCents(data.cover_charge_cents));
                 setServiceInput(String(data.service_charge_percent));
             } catch (err: any) {
-                if (!cancelled) showToast(err?.message || 'Errore nel caricamento delle impostazioni', 'error');
+                if (!cancelled) showToast(err?.message || t('card.errLoad', 'Errore nel caricamento delle impostazioni'), 'error');
             } finally {
                 if (!cancelled) setLoading(false);
             }
@@ -67,7 +69,7 @@ export const ChargeSettingsManager: React.FC<Props> = ({ showToast }) => {
     const save = async () => {
         if (!canEdit || saving || !settings) return;
         if (!coverValid) { showToast(`Il coperto deve essere un importo tra 0 e 100 ${moneySymbol()}`, 'error'); return; }
-        if (!serviceValid) { showToast('Il servizio deve essere un intero tra 0 e 100', 'error'); return; }
+        if (!serviceValid) { showToast(t('chg.badService', 'Il servizio deve essere un intero tra 0 e 100'), 'error'); return; }
         const payload: Partial<ChargeSettings> = {};
         if (parsedCover !== settings.cover_charge_cents) payload.cover_charge_cents = parsedCover;
         if (parsedService !== settings.service_charge_percent) payload.service_charge_percent = parsedService;
@@ -78,9 +80,9 @@ export const ChargeSettingsManager: React.FC<Props> = ({ showToast }) => {
             setSettings(updated);
             setCoverInput(formatCents(updated.cover_charge_cents));
             setServiceInput(String(updated.service_charge_percent));
-            showToast('Coperto e servizio aggiornati', 'success');
+            showToast(t('chg.saved', 'Coperto e servizio aggiornati'), 'success');
         } catch (err: any) {
-            showToast(err?.data?.error ?? err?.message ?? 'Salvataggio non riuscito', 'error');
+            showToast(err?.data?.error ?? err?.message ?? t('chg.errSave', 'Salvataggio non riuscito'), 'error');
         } finally {
             setSaving(false);
         }
@@ -98,13 +100,13 @@ export const ChargeSettingsManager: React.FC<Props> = ({ showToast }) => {
     return (
         <div className="space-y-4">
             <p className="text-[12px] text-[var(--ds-text-muted)]">
-                Compaiono come righe del conto e si scontano come le altre. A zero non compaiono. Le comande aperte si adeguano alla prossima battitura.
+                {t('chg.intro', 'Compaiono come righe del conto e si scontano come le altre. A zero non compaiono. Le comande aperte si adeguano alla prossima battitura.')}
             </p>
 
             <div className="flex flex-wrap gap-4">
                 <div>
                     <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">
-                        Coperto a persona
+                        {t('chg.cover', 'Coperto a persona')}
                     </label>
                     <div className="flex items-center gap-2">
                         <input
@@ -124,7 +126,7 @@ export const ChargeSettingsManager: React.FC<Props> = ({ showToast }) => {
 
                 <div>
                     <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">
-                        Servizio
+                        {t('chg.service', 'Servizio')}
                     </label>
                     <div className="flex items-center gap-2">
                         <input
@@ -147,7 +149,7 @@ export const ChargeSettingsManager: React.FC<Props> = ({ showToast }) => {
             </div>
 
             <p className="text-[11px] text-[var(--ds-text-subtle)]">
-                Le aliquote IVA di coperto e servizio si regolano nella mappatura IVA, in Fiscalità.
+                {t('chg.vatHint', 'Le aliquote IVA di coperto e servizio si regolano nella mappatura IVA, in Fiscalità.')}
             </p>
 
             {canEdit && (
@@ -159,14 +161,14 @@ export const ChargeSettingsManager: React.FC<Props> = ({ showToast }) => {
                         className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[13px] font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                         {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                        Salva modifiche
+                        {t('card.save', 'Salva modifiche')}
                     </button>
                 </div>
             )}
 
             {!canEdit && (
                 <p className="text-[12px] text-[var(--ds-text-subtle)]">
-                    Solo gli amministratori possono modificare questa impostazione.
+                    {t('card.adminsOnly', 'Solo gli amministratori possono modificare questa impostazione.')}
                 </p>
             )}
         </div>

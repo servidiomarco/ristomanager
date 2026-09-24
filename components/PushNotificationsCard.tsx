@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Bell, BellOff, Loader2 } from 'lucide-react';
 import {
     isPushSupported,
@@ -11,6 +12,7 @@ import {
 import { useToast } from '../contexts/ToastContext';
 
 export const PushNotificationsCard: React.FC = () => {
+    const { t } = useTranslation('impostazioni', { useSuspense: false });
     const [supported, setSupported] = useState(false);
     const [enabled, setEnabled] = useState(false);
     const [permission, setPermission] = useState<NotificationPermission | 'unsupported'>('default');
@@ -33,15 +35,15 @@ export const PushNotificationsCard: React.FC = () => {
             if (enabled) {
                 await disablePushNotifications();
                 setEnabled(false);
-                addToast('Notifiche push disattivate.', 'info');
+                addToast(t('push.off', 'Notifiche push disattivate.'), 'info');
             } else {
                 await enablePushNotifications();
                 setEnabled(true);
                 setPermission(getNotificationPermission());
-                addToast('Notifiche push attivate.', 'success');
+                addToast(t('push.on', 'Notifiche push attivate.'), 'success');
             }
         } catch (err: any) {
-            addToast(err?.message || 'Operazione fallita', 'error');
+            addToast(err?.message || t('push.errToggle', 'Operazione fallita'), 'error');
             setPermission(getNotificationPermission());
         } finally {
             setBusy(false);
@@ -52,9 +54,9 @@ export const PushNotificationsCard: React.FC = () => {
         setBusy(true);
         try {
             await sendTestPush();
-            addToast('Notifica di test inviata.', 'success');
+            addToast(t('push.testSent', 'Notifica di test inviata.'), 'success');
         } catch (err: any) {
-            addToast(err?.message || 'Invio fallito', 'error');
+            addToast(err?.message || t('push.errTest', 'Invio fallito'), 'error');
         } finally {
             setBusy(false);
         }
@@ -68,7 +70,7 @@ export const PushNotificationsCard: React.FC = () => {
 
     return (
         <section className="mb-6">
-            <h3 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-2 px-1">Notifiche</h3>
+            <h3 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-2 px-1">{t('push.section', 'Notifiche')}</h3>
             <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] p-4">
                 <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-3 min-w-0">
@@ -76,9 +78,9 @@ export const PushNotificationsCard: React.FC = () => {
                             {enabled ? <Bell className="w-5 h-5 text-[var(--ds-text-primary)]" /> : <BellOff className="w-5 h-5 text-[var(--ds-text-primary)]" />}
                         </div>
                         <div className="min-w-0">
-                            <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">Notifiche push</h4>
+                            <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">{t('push.title', 'Notifiche push')}</h4>
                             <p className="text-[13px] text-[var(--ds-text-muted)]">
-                                Ricevi avvisi su questo dispositivo per nuove prenotazioni e todo assegnati.
+                                {t('push.subtitle', 'Ricevi avvisi su questo dispositivo per nuove prenotazioni e todo assegnati.')}
                             </p>
                         </div>
                     </div>
@@ -93,25 +95,25 @@ export const PushNotificationsCard: React.FC = () => {
                         } disabled:opacity-50 disabled:cursor-not-allowed`}
                     >
                         {busy && <Loader2 className="h-3 w-3 animate-spin" />}
-                        {enabled ? 'Attive' : 'Attiva'}
+                        {enabled ? t('push.active', 'Attive') : t('push.activate', 'Attiva')}
                     </button>
                 </div>
 
                 {!supported && (
                     <p className="mt-3 text-xs text-[var(--ds-critical-text)] bg-[var(--ds-critical-tint)] border border-[var(--ds-critical-solid)] rounded-[var(--ds-radius)] px-2.5 py-1.5">
-                        Il tuo browser non supporta le notifiche push.
+                        {t('push.unsupported', 'Il tuo browser non supporta le notifiche push.')}
                     </p>
                 )}
 
                 {supported && permission === 'denied' && (
                     <p className="mt-3 text-xs text-[var(--ds-pending-text)] bg-[var(--ds-pending-tint)] border border-[var(--ds-pending-solid)] rounded-[var(--ds-radius)] px-2.5 py-1.5">
-                        Permesso notifiche negato. Per attivarle modifica le impostazioni del browser per questo sito.
+                        {t('push.denied', 'Permesso notifiche negato. Per attivarle modifica le impostazioni del browser per questo sito.')}
                     </p>
                 )}
 
                 {iosPwaWarning && (
                     <p className="mt-3 text-xs text-[var(--ds-text-muted)] bg-[var(--ds-surface-row)] border border-[var(--ds-border)] rounded-[var(--ds-radius)] px-2.5 py-1.5">
-                        Su iPhone/iPad le notifiche push richiedono iOS 16.4+ e che l'app sia installata sulla schermata Home (Safari → Condividi → "Aggiungi alla schermata Home").
+                        {t('push.ios', 'Su iPhone/iPad le notifiche push richiedono iOS 16.4+ e che l\'app sia installata sulla schermata Home (Safari → Condividi → "Aggiungi alla schermata Home").')}
                     </p>
                 )}
 
@@ -123,7 +125,7 @@ export const PushNotificationsCard: React.FC = () => {
                             disabled={busy}
                             className="text-xs font-medium text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] disabled:opacity-50"
                         >
-                            Invia notifica di test
+                            {t('push.sendTest', 'Invia notifica di test')}
                         </button>
                     </div>
                 )}
