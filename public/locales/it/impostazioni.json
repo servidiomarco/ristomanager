@@ -164,5 +164,89 @@
     "cancel": "Annulla",
     "confirm": "Conferma",
     "remove": "Rimuovi chiusura"
+  },
+  "card": {
+    "adminsOnly": "Solo gli amministratori possono modificare questa impostazione.",
+    "save": "Salva modifiche",
+    "errLoad": "Errore nel caricamento delle impostazioni"
+  },
+  "dep": {
+    "badGuests": "Il numero di coperti deve essere un intero tra 1 e 100",
+    "saved": "Caparra automatica aggiornata",
+    "errSave": "Errore aggiornamento caparra automatica",
+    "intro": "Per le richieste dal modulo /prenota il sistema genera automaticamente un link di pagamento {{provider}} inviato via SMS al cliente. Importo e soglia qui sotto valgono anche per le prenotazioni telefoniche e per le condizioni pubblicate su /prenota.",
+    "switchOff": "Disattiva caparra automatica",
+    "switchOn": "Attiva caparra automatica",
+    "enable": "Attiva caparra automatica",
+    "perPerson": "Caparra per persona",
+    "perPersonHint": "Moltiplicato per il numero di coperti. Compare nei messaggi al cliente e nella sezione \"Caparra e cancellazioni\" della pagina di prenotazione.",
+    "threshold": "Richiedi caparra da (numero di coperti)",
+    "thresholdHint": "Le prenotazioni con almeno questo numero di persone riceveranno il link di pagamento. Sotto la soglia il flusso è invariato."
+  },
+  "exp": {
+    "badHours": "Le ore devono essere un intero tra 1 e 168",
+    "saved": "Scadenza link di pagamento aggiornata",
+    "errSave": "Errore aggiornamento scadenza link",
+    "title": "Scadenza automatica dei link",
+    "intro": "Dopo la soglia il link non è più pagabile e la prenotazione in attesa di caparra viene declinata. Vale per i link degli ultimi 7 giorni; le quote del conto al tavolo sono escluse.",
+    "switchOff": "Disattiva scadenza automatica",
+    "switchOn": "Attiva scadenza automatica",
+    "after": "Il link scade dopo",
+    "message": "Messaggio al cliente",
+    "msgDeclined": "Prenotazione non confermata (stessi testi del rifiuto manuale)",
+    "msgNone": "Nessun messaggio",
+    "msgHint": "Parte sul canale previsto dai Canali di risposta della fonte (WhatsApp con ripiego SMS, email)."
+  },
+  "bl": {
+    "source": {
+      "MANUAL": "Manuale (CRM)",
+      "MANUALHint": "Con il blocco il salvataggio viene rifiutato anche allo staff.",
+      "GOOGLE": "Booking web",
+      "GOOGLEHint": "Con il blocco il form risponde con un invito a chiamare.",
+      "VOICE": "Agente vocale",
+      "VOICEHint": "Con il blocco Sofia declina con una frase di cortesia.",
+      "WHATSAPP": "Agente WhatsApp",
+      "WHATSAPPHint": "Con il blocco le proposte di prenotazione vengono rifiutate."
+    },
+    "saved": "Comportamento blacklist aggiornato",
+    "errSave": "Errore aggiornamento blacklist",
+    "intro": "Cosa succede quando arriva una prenotazione da un numero segnato in blacklist. Gli indicatori in sala (banner, badge, rubrica) restano sempre visibili, qualunque sia la scelta.",
+    "block": "Blocca la prenotazione",
+    "warn": "Consenti con avviso",
+    "behaviourAria": "Comportamento blacklist per {{fonte}}"
+  },
+  "chg": {
+    "badService": "Il servizio deve essere un intero tra 0 e 100",
+    "saved": "Coperto e servizio aggiornati",
+    "errSave": "Salvataggio non riuscito",
+    "intro": "Compaiono come righe del conto e si scontano come le altre. A zero non compaiono. Le comande aperte si adeguano alla prossima battitura.",
+    "cover": "Coperto a persona",
+    "service": "Servizio",
+    "vatHint": "Le aliquote IVA di coperto e servizio si regolano nella mappatura IVA, in Fiscalità."
+  },
+  "push": {
+    "off": "Notifiche push disattivate.",
+    "on": "Notifiche push attivate.",
+    "errToggle": "Operazione fallita",
+    "testSent": "Notifica di test inviata.",
+    "errTest": "Invio fallito",
+    "section": "Notifiche",
+    "title": "Notifiche push",
+    "subtitle": "Ricevi avvisi su questo dispositivo per nuove prenotazioni e todo assegnati.",
+    "active": "Attive",
+    "activate": "Attiva",
+    "unsupported": "Il tuo browser non supporta le notifiche push.",
+    "denied": "Permesso notifiche negato. Per attivarle modifica le impostazioni del browser per questo sito.",
+    "ios": "Su iPhone/iPad le notifiche push richiedono iOS 16.4+ e che l'app sia installata sulla schermata Home (Safari → Condividi → \"Aggiungi alla schermata Home\").",
+    "sendTest": "Invia notifica di test"
+  },
+  "all": {
+    "errLoad": "Errore nel caricamento delle intolleranze",
+    "dup": "Intolleranza già presente",
+    "saved": "Intolleranze aggiornate",
+    "errSave": "Errore aggiornamento intolleranze",
+    "remove": "Rimuovi",
+    "add": "Aggiungi intolleranza (es. Fragole)",
+    "adminsOnly": "Solo gli amministratori possono modificare la lista."
   }
 }

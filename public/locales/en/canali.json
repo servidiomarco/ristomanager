@@ -452,5 +452,28 @@
     "apiKey": "API key",
     "webhookSecret": "Webhook signing secret",
     "apiVersion": "API version"
+  },
+  "reply": {
+    "source": {
+      "GOOGLE": "Web bookings",
+      "GOOGLEHint": "from the public form",
+      "VOICE": "Voice agent",
+      "VOICEHint": "booked over the phone",
+      "WHATSAPPHint": "started in chat",
+      "MANUAL": "Entered by hand",
+      "MANUALHint": "created by the staff"
+    },
+    "errLoad": "Could not load the channels",
+    "saved": "Reply channels saved",
+    "errSave": "Saving failed",
+    "emailCc": "Always copy the email, when there is one",
+    "hint": "The first available channel wins: a contact left by the guest and a configured provider. If sending fails it moves to the next one.",
+    "needOne": "Each source needs at least one channel.",
+    "save": "Save",
+    "moveUp": "{{canale}} higher up",
+    "moveDown": "{{canale}} lower down",
+    "channelState": "{{canale}} {{stato}}",
+    "on": "on",
+    "off": "off"
   }
 }

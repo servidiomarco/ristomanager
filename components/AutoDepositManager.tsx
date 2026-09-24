@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Loader2, Save } from 'lucide-react';
 import {
     getAutoDepositSettings,
@@ -17,6 +18,7 @@ const centsToInput = (cents: number): string =>
     (cents / 100).toFixed(2).replace('.', ',').replace(/,00$/, '');
 
 export const AutoDepositManager: React.FC<Props> = ({ showToast }) => {
+    const { t } = useTranslation('impostazioni', { useSuspense: false });
     const { hasPermission } = useAuth();
     const canEdit = hasPermission('settings:full');
 
@@ -37,7 +39,7 @@ export const AutoDepositManager: React.FC<Props> = ({ showToast }) => {
                 setMinGuestsInput(String(data.min_guests));
                 setPerPersonInput(centsToInput(data.per_person_cents ?? 1000));
             } catch (err: any) {
-                if (!cancelled) showToast(err?.message || 'Errore nel caricamento delle impostazioni', 'error');
+                if (!cancelled) showToast(err?.message || t('card.errLoad', 'Errore nel caricamento delle impostazioni'), 'error');
             } finally {
                 if (!cancelled) setLoading(false);
             }
@@ -74,7 +76,7 @@ export const AutoDepositManager: React.FC<Props> = ({ showToast }) => {
     const save = async () => {
         if (!canEdit || saving || !settings) return;
         if (minGuestsInput.trim() !== '' && !minGuestsValid) {
-            showToast('Il numero di coperti deve essere un intero tra 1 e 100', 'error');
+            showToast(t('dep.badGuests', 'Il numero di coperti deve essere un intero tra 1 e 100'), 'error');
             return;
         }
         if (perPersonInput.trim() !== '' && !perPersonValid) {
@@ -93,9 +95,9 @@ export const AutoDepositManager: React.FC<Props> = ({ showToast }) => {
             setDraftEnabled(null);
             setMinGuestsInput(String(updated.min_guests));
             setPerPersonInput(centsToInput(updated.per_person_cents ?? 1000));
-            showToast('Caparra automatica aggiornata', 'success');
+            showToast(t('dep.saved', 'Caparra automatica aggiornata'), 'success');
         } catch (err: any) {
-            showToast(err?.message || 'Errore aggiornamento caparra automatica', 'error');
+            showToast(err?.message || t('dep.errSave', 'Errore aggiornamento caparra automatica'), 'error');
         } finally {
             setSaving(false);
         }
@@ -119,16 +121,16 @@ export const AutoDepositManager: React.FC<Props> = ({ showToast }) => {
         <div className="space-y-4">
             <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                    <p className="text-[13px] font-medium text-[var(--ds-text-primary)]">Attiva caparra automatica</p>
+                    <p className="text-[13px] font-medium text-[var(--ds-text-primary)]">{t('dep.enable', 'Attiva caparra automatica')}</p>
                     <p className="text-[12px] text-[var(--ds-text-muted)]">
-                        Per le richieste dal modulo /prenota il sistema genera automaticamente un link di pagamento {providerLabel} inviato via SMS al cliente. Importo e soglia qui sotto valgono anche per le prenotazioni telefoniche e per le condizioni pubblicate su /prenota.
+                        {t('dep.intro', 'Per le richieste dal modulo /prenota il sistema genera automaticamente un link di pagamento {{provider}} inviato via SMS al cliente. Importo e soglia qui sotto valgono anche per le prenotazioni telefoniche e per le condizioni pubblicate su /prenota.', { provider: providerLabel })}
                     </p>
                 </div>
                 <button
                     type="button"
                     role="switch"
                     aria-checked={effectiveEnabled}
-                    aria-label={effectiveEnabled ? 'Disattiva caparra automatica' : 'Attiva caparra automatica'}
+                    aria-label={effectiveEnabled ? t('dep.switchOff', 'Disattiva caparra automatica') : t('dep.switchOn', 'Attiva caparra automatica')}
                     onClick={() => canEdit && setDraftEnabled(!effectiveEnabled)}
                     disabled={!canEdit || saving}
                     className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
@@ -146,7 +148,7 @@ export const AutoDepositManager: React.FC<Props> = ({ showToast }) => {
 
             <div>
                 <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">
-                    Caparra per persona
+                    {t('dep.perPerson', 'Caparra per persona')}
                 </label>
                 <div className="flex items-center gap-2">
                     <span className="text-[13px] text-[var(--ds-text-muted)]">{moneySymbol()}</span>
@@ -161,13 +163,13 @@ export const AutoDepositManager: React.FC<Props> = ({ showToast }) => {
                     <span className="text-[12px] text-[var(--ds-text-muted)]">a persona</span>
                 </div>
                 <p className="text-[11px] text-[var(--ds-text-subtle)] mt-1">
-                    Moltiplicato per il numero di coperti. Compare nei messaggi al cliente e nella sezione "Caparra e cancellazioni" della pagina di prenotazione.
+                    {t('dep.perPersonHint', 'Moltiplicato per il numero di coperti. Compare nei messaggi al cliente e nella sezione "Caparra e cancellazioni" della pagina di prenotazione.')}
                 </p>
             </div>
 
             <div>
                 <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">
-                    Richiedi caparra da (numero di coperti)
+                    {t('dep.threshold', 'Richiedi caparra da (numero di coperti)')}
                 </label>
                 <div className="flex items-center gap-2">
                     <input
@@ -184,7 +186,7 @@ export const AutoDepositManager: React.FC<Props> = ({ showToast }) => {
                     <span className="text-[12px] text-[var(--ds-text-muted)]">coperti o più</span>
                 </div>
                 <p className="text-[11px] text-[var(--ds-text-subtle)] mt-1">
-                    Le prenotazioni con almeno questo numero di persone riceveranno il link di pagamento. Sotto la soglia il flusso è invariato.
+                    {t('dep.thresholdHint', 'Le prenotazioni con almeno questo numero di persone riceveranno il link di pagamento. Sotto la soglia il flusso è invariato.')}
                 </p>
                 {!settings.revolut_configured && effectiveEnabled && (
                     <p className="text-[11px] text-[var(--ds-pending-text)] mt-1">
@@ -206,14 +208,14 @@ export const AutoDepositManager: React.FC<Props> = ({ showToast }) => {
                         className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[13px] font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                         {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                        Salva modifiche
+                        {t('card.save', 'Salva modifiche')}
                     </button>
                 </div>
             )}
 
             {!canEdit && (
                 <p className="text-[12px] text-[var(--ds-text-subtle)]">
-                    Solo gli amministratori possono modificare questa impostazione.
+                    {t('card.adminsOnly', 'Solo gli amministratori possono modificare questa impostazione.')}
                 </p>
             )}
         </div>

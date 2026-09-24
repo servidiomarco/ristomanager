@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Loader2, Save } from 'lucide-react';
 import {
     getBlacklistPolicySettings,
@@ -28,6 +29,7 @@ const SOURCES: { key: BlacklistPolicySource; label: string; hint: string }[] = [
 ];
 
 export const BlacklistPolicyManager: React.FC<Props> = ({ showToast }) => {
+    const { t } = useTranslation('impostazioni', { useSuspense: false });
     const { hasPermission } = useAuth();
     const canEdit = hasPermission('settings:full');
 
@@ -43,7 +45,7 @@ export const BlacklistPolicyManager: React.FC<Props> = ({ showToast }) => {
                 const data = await getBlacklistPolicySettings();
                 if (!cancelled) setSettings(data);
             } catch (err: any) {
-                if (!cancelled) showToast(err?.message || 'Errore nel caricamento delle impostazioni', 'error');
+                if (!cancelled) showToast(err?.message || t('card.errLoad', 'Errore nel caricamento delle impostazioni'), 'error');
             } finally {
                 if (!cancelled) setLoading(false);
             }
@@ -69,9 +71,9 @@ export const BlacklistPolicyManager: React.FC<Props> = ({ showToast }) => {
             const updated = await updateBlacklistPolicySettings(payload);
             setSettings(updated);
             setDraft({});
-            showToast('Comportamento blacklist aggiornato', 'success');
+            showToast(t('bl.saved', 'Comportamento blacklist aggiornato'), 'success');
         } catch (err: any) {
-            showToast(err?.message || 'Errore aggiornamento blacklist', 'error');
+            showToast(err?.message || t('bl.errSave', 'Errore aggiornamento blacklist'), 'error');
         } finally {
             setSaving(false);
         }
@@ -89,28 +91,31 @@ export const BlacklistPolicyManager: React.FC<Props> = ({ showToast }) => {
     return (
         <div className="space-y-4">
             <p className="text-[12px] text-[var(--ds-text-muted)]">
-                Cosa succede quando arriva una prenotazione da un numero segnato in blacklist. Gli indicatori in sala (banner, badge, rubrica) restano sempre visibili, qualunque sia la scelta.
+                {t('bl.intro', 'Cosa succede quando arriva una prenotazione da un numero segnato in blacklist. Gli indicatori in sala (banner, badge, rubrica) restano sempre visibili, qualunque sia la scelta.')}
             </p>
 
             <div className="space-y-3">
-                {SOURCES.map(s => (
+                {SOURCES.map(s => {
+                  const nome = t(`bl.source.${s.key}`, s.label);
+                  return (
                     <div key={s.key} className="flex items-center justify-between gap-3">
                         <div className="min-w-0">
-                            <p className="text-[13px] font-medium text-[var(--ds-text-primary)]">{s.label}</p>
-                            <p className="text-[11px] text-[var(--ds-text-subtle)]">{s.hint}</p>
+                            <p className="text-[13px] font-medium text-[var(--ds-text-primary)]">{nome}</p>
+                            <p className="text-[11px] text-[var(--ds-text-subtle)]">{t(`bl.source.${s.key}Hint`, s.hint)}</p>
                         </div>
                         <select
                             value={effective(s.key)}
                             onChange={e => setDraft(prev => ({ ...prev, [s.key]: e.target.value as BlacklistBehavior }))}
                             disabled={!canEdit || saving}
-                            aria-label={`Comportamento blacklist per ${s.label}`}
+                            aria-label={t('bl.behaviourAria', 'Comportamento blacklist per {{fonte}}', { fonte: nome })}
                             className="w-56 flex-shrink-0 px-3 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                         >
-                            <option value="block">Blocca la prenotazione</option>
-                            <option value="warn">Consenti con avviso</option>
+                            <option value="block">{t('bl.block', 'Blocca la prenotazione')}</option>
+                            <option value="warn">{t('bl.warn', 'Consenti con avviso')}</option>
                         </select>
                     </div>
-                ))}
+                  );
+                })}
             </div>
 
             {canEdit && (
@@ -122,14 +127,14 @@ export const BlacklistPolicyManager: React.FC<Props> = ({ showToast }) => {
                         className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[13px] font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                         {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                        Salva modifiche
+                        {t('card.save', 'Salva modifiche')}
                     </button>
                 </div>
             )}
 
             {!canEdit && (
                 <p className="text-[12px] text-[var(--ds-text-subtle)]">
-                    Solo gli amministratori possono modificare questa impostazione.
+                    {t('card.adminsOnly', 'Solo gli amministratori possono modificare questa impostazione.')}
                 </p>
             )}
         </div>

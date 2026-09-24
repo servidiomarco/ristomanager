@@ -1,4 +1,5 @@
 // Canali di risposta — per ogni fonte di prenotazione, con quale strumento
+import { useTranslation } from 'react-i18next';
 // rispondere all'ospite (richiesta, conferma, disdetta) e in che ordine.
 //
 // Il modello è una lista di priorità: il primo canale DISPONIBILE vince —
@@ -22,6 +23,8 @@ interface Props {
     showToast: (msg: string, kind?: 'success' | 'error' | 'info') => void;
 }
 
+/* Le fonti portano la chiave accanto all'italiano: costanti di modulo, non
+   possono chiamare hook. WhatsApp non ha chiave — è un nome proprio. */
 const SOURCES: Array<{ source: BookingSource; label: string; hint: string }> = [
     { source: 'GOOGLE', label: 'Prenotazioni web', hint: 'dal form pubblico' },
     { source: 'VOICE', label: 'Agente vocale', hint: 'prenotate al telefono' },
@@ -61,6 +64,7 @@ const fromDraft = (draft: SourceDraft): { priority: BookingChannel[]; email_copy
 });
 
 export const BookingChannelsManager: React.FC<Props> = ({ showToast }) => {
+    const { t } = useTranslation('canali', { useSuspense: false });
     const { hasPermission } = useAuth();
     const canEdit = hasPermission('settings:full');
 
@@ -83,7 +87,7 @@ export const BookingChannelsManager: React.FC<Props> = ({ showToast }) => {
                     MANUAL: toDraft(data.MANUAL),
                 });
             } catch (err: any) {
-                if (!cancelled) showToast(err?.message || 'Errore nel caricamento dei canali', 'error');
+                if (!cancelled) showToast(err?.message || t('reply.errLoad', 'Errore nel caricamento dei canali'), 'error');
             } finally {
                 if (!cancelled) setLoading(false);
             }
@@ -140,9 +144,9 @@ export const BookingChannelsManager: React.FC<Props> = ({ showToast }) => {
             };
             const next = await updateBookingChannelSettings(payload);
             setSaved(next);
-            showToast('Canali di risposta salvati', 'success');
+            showToast(t('reply.saved', 'Canali di risposta salvati'), 'success');
         } catch (err: any) {
-            showToast(err?.message || 'Salvataggio non riuscito', 'error');
+            showToast(err?.message || t('reply.errSave', 'Salvataggio non riuscito'), 'error');
         } finally {
             setSaving(false);
         }
@@ -161,13 +165,15 @@ export const BookingChannelsManager: React.FC<Props> = ({ showToast }) => {
         <div className="space-y-4">
             <div className="grid gap-3 md:grid-cols-2">
                 {SOURCES.map(({ source, label, hint }) => {
+                    const nomeFonte = t(`reply.source.${source}`, label);
+                    const notaFonte = t(`reply.source.${source}Hint`, hint);
                     const draft = drafts[source];
                     const activeCount = draft.order.filter(c => draft.enabled[c]).length;
                     return (
                         <section key={source} className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-4">
                             <div className="mb-3 flex items-baseline justify-between gap-2">
-                                <h4 className="text-[14px] font-semibold text-[var(--ds-text-primary)]">{label}</h4>
-                                <span className="text-[12px] text-[var(--ds-text-muted)]">{hint}</span>
+                                <h4 className="text-[14px] font-semibold text-[var(--ds-text-primary)]">{nomeFonte}</h4>
+                                <span className="text-[12px] text-[var(--ds-text-muted)]">{notaFonte}</span>
                             </div>
                             <ol className="space-y-1.5">
                                 {draft.order.map((channel, i) => {
@@ -183,17 +189,17 @@ export const BookingChannelsManager: React.FC<Props> = ({ showToast }) => {
                                             <span className="flex-1 text-[14px] text-[var(--ds-text-primary)]">{CHANNEL_LABEL[channel]}</span>
                                             {canEdit && (
                                                 <>
-                                                    <button type="button" className={dsIconButton} onClick={() => move(source, i, -1)} disabled={i === 0} aria-label={`${CHANNEL_LABEL[channel]} più in alto`}>
+                                                    <button type="button" className={dsIconButton} onClick={() => move(source, i, -1)} disabled={i === 0} aria-label={t('reply.moveUp', '{{canale}} più in alto', { canale: CHANNEL_LABEL[channel] })}>
                                                         <ChevronUp className="h-4 w-4" aria-hidden />
                                                     </button>
-                                                    <button type="button" className={dsIconButton} onClick={() => move(source, i, 1)} disabled={i === draft.order.length - 1} aria-label={`${CHANNEL_LABEL[channel]} più in basso`}>
+                                                    <button type="button" className={dsIconButton} onClick={() => move(source, i, 1)} disabled={i === draft.order.length - 1} aria-label={t('reply.moveDown', '{{canale}} più in basso', { canale: CHANNEL_LABEL[channel] })}>
                                                         <ChevronDown className="h-4 w-4" aria-hidden />
                                                     </button>
                                                     <button
                                                         type="button"
                                                         role="switch"
                                                         aria-checked={on}
-                                                        aria-label={`${CHANNEL_LABEL[channel]} ${on ? 'attivo' : 'spento'}`}
+                                                        aria-label={t('reply.channelState', '{{canale}} {{stato}}', { canale: CHANNEL_LABEL[channel], stato: on ? t('reply.on', 'attivo') : t('reply.off', 'spento') })}
                                                         onClick={() => toggle(source, channel)}
                                                         disabled={on && activeCount === 1}
                                                         className={`relative h-6 w-11 flex-shrink-0 rounded-full transition-colors disabled:cursor-not-allowed ${on ? 'bg-[var(--ds-action-bg)]' : 'bg-[var(--ds-border)]'}`}
@@ -214,21 +220,20 @@ export const BookingChannelsManager: React.FC<Props> = ({ showToast }) => {
                                     disabled={!canEdit}
                                     className="h-4 w-4 accent-[var(--ds-action-bg)]"
                                 />
-                                Email sempre in copia, quando c'è
+                                {t('reply.emailCc', "Email sempre in copia, quando c'è")}
                             </label>
                         </section>
                     );
                 })}
             </div>
             <p className="text-[13px] leading-snug text-[var(--ds-text-muted)]">
-                Vince il primo canale disponibile: recapito lasciato dall'ospite e provider configurato.
-                Se l'invio fallisce si passa al successivo.
+                {t('reply.hint', "Vince il primo canale disponibile: recapito lasciato dall'ospite e provider configurato. Se l'invio fallisce si passa al successivo.")}
             </p>
             {canEdit && (
                 <div className="flex items-center justify-end gap-3">
                     {invalidSources.length > 0 && (
                         <span className="text-[13px] text-[var(--ds-critical-text)]">
-                            Serve almeno un canale per ogni fonte.
+                            {t('reply.needOne', 'Serve almeno un canale per ogni fonte.')}
                         </span>
                     )}
                     <button
@@ -238,7 +243,7 @@ export const BookingChannelsManager: React.FC<Props> = ({ showToast }) => {
                         disabled={!dirty || saving || invalidSources.length > 0}
                     >
                         {saving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Save className="h-4 w-4" aria-hidden />}
-                        Salva
+                        {t('reply.save', 'Salva')}
                     </button>
                 </div>
             )}
