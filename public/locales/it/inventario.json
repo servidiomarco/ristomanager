@@ -93,5 +93,37 @@
   "close": "Chiudi",
   "add": "Aggiungi",
   "cancel": "Annulla",
-  "saveProduct": "Salva prodotto"
+  "saveProduct": "Salva prodotto",
+  "stampa": {
+    "area": {
+      "CUCINA": "Cucina",
+      "SALA": "Sala"
+    },
+    "title": "Stampa inventario",
+    "cancel": "Annulla",
+    "print": "Stampa",
+    "what": "Cosa stampare",
+    "wholeArea": "Tutta l'area (totale per prodotto)",
+    "onlyOne": "Solo {{posto}}",
+    "category": "Categoria",
+    "allCategories": "Tutte le categorie",
+    "uncategorized": "Senza categoria",
+    "totalAllAreas": "Totale (tutte le aree)",
+    "areaFallback": "Area",
+    "categoryFallback": "Categoria",
+    "wholeAreaShort": "Tutta l'area",
+    "counts": "{{prodotti}} · {{sezioni}}",
+    "products": "{{count}} prodotti",
+    "products_one": "{{count}} prodotto",
+    "sections": "{{count}} sezioni",
+    "sections_one": "{{count}} sezione",
+    "sheetTitle": "Inventario — {{area}}",
+    "empty": "Nessun prodotto corrispondente ai filtri.",
+    "colProduct": "Prodotto",
+    "colUnit": "Unità",
+    "colQtyTotal": "Q.tà totale",
+    "colQty": "Quantità",
+    "colSpread": "Distribuzione",
+    "printedOn": "Stampato il {{quando}}"
+  }
 }

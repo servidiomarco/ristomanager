@@ -1,4 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
+import { displayLocale } from '../utils/formatLocale';
 import { createPortal } from 'react-dom';
 import {
   InventoryArea,
@@ -30,6 +32,13 @@ const AREA_LABEL: Record<InventoryArea, string> = {
   [InventoryArea.BAR]: 'Bar',
 };
 
+/* `t` a parametro: AREA_LABEL è una costante di modulo. Il valore
+   (CUCINA, SALA) è dell'enum e non si tocca. */
+type TFunc = (key: string, defaultValue: string, options?: Record<string, unknown>) => string;
+
+const areaLabel = (a: InventoryArea, t?: TFunc): string =>
+  t ? t(`stampa.area.${a}`, AREA_LABEL[a]) : AREA_LABEL[a];
+
 const UNCATEGORIZED_ID = -1;
 
 const stockKey = (productId: number, locationId: number) => `${productId}:${locationId}`;
@@ -45,6 +54,7 @@ export const PrintInventoryModal: React.FC<Props> = ({
   initialLocationId,
   initialCategoryFilter,
 }) => {
+  const { t } = useTranslation('inventario', { useSuspense: false });
   const [locationId, setLocationId] = useState<number | null>(initialLocationId);
   const [categoryFilter, setCategoryFilter] = useState<number | null>(initialCategoryFilter);
 
@@ -93,31 +103,31 @@ export const PrintInventoryModal: React.FC<Props> = ({
       if (categoryFilter != null && categoryFilter !== UNCATEGORIZED_ID && categoryFilter !== cat.id) continue;
       const inCat = candidate
         .filter(p => p.category_id === cat.id)
-        .sort((a, b) => a.name.localeCompare(b.name, 'it', { sensitivity: 'base' }));
+        .sort((a, b) => a.name.localeCompare(b.name, displayLocale(), { sensitivity: 'base' }));
       if (inCat.length > 0) out.push({ id: cat.id, name: cat.name, products: inCat });
     }
 
     if (categoryFilter == null || categoryFilter === UNCATEGORIZED_ID) {
       const uncat = candidate
         .filter(p => p.category_id == null)
-        .sort((a, b) => a.name.localeCompare(b.name, 'it', { sensitivity: 'base' }));
-      if (uncat.length > 0) out.push({ id: UNCATEGORIZED_ID, name: 'Senza categoria', products: uncat });
+        .sort((a, b) => a.name.localeCompare(b.name, displayLocale(), { sensitivity: 'base' }));
+      if (uncat.length > 0) out.push({ id: UNCATEGORIZED_ID, name: t('stampa.uncategorized', 'Senza categoria'), products: uncat });
     }
 
     return out;
-  }, [products, categories, categoryFilter]);
+  }, [products, categories, categoryFilter, t]);
 
   const totalProducts = groups.reduce((acc, g) => acc + g.products.length, 0);
 
   const locationLabel = locationId == null
-    ? 'Totale (tutte le aree)'
-    : (locations.find(l => l.id === locationId)?.name || 'Area');
+    ? t('stampa.totalAllAreas', 'Totale (tutte le aree)')
+    : (locations.find(l => l.id === locationId)?.name || t('stampa.areaFallback', 'Area'));
 
   const categoryLabel = categoryFilter == null
-    ? 'Tutte le categorie'
+    ? t('stampa.allCategories', 'Tutte le categorie')
     : categoryFilter === UNCATEGORIZED_ID
-      ? 'Senza categoria'
-      : (categories.find(c => c.id === categoryFilter)?.name || 'Categoria');
+      ? t('stampa.uncategorized', 'Senza categoria')
+      : (categories.find(c => c.id === categoryFilter)?.name || t('stampa.categoryFallback', 'Categoria'));
 
   if (!isOpen) return null;
 
@@ -133,15 +143,15 @@ export const PrintInventoryModal: React.FC<Props> = ({
       <ModalShell
         open={isOpen}
         onClose={onClose}
-        title="Stampa inventario"
-        subtitle={`${AREA_LABEL[area]} · ${new Date().toLocaleDateString('it-IT', { day: 'numeric', month: 'long', year: 'numeric' })}`}
+        title={t('stampa.title', 'Stampa inventario')}
+        subtitle={`${areaLabel(area, t)} · ${new Date().toLocaleDateString(displayLocale(), { day: 'numeric', month: 'long', year: 'numeric' })}`}
         size="sm"
         closeOnEscape
         bodyClassName="px-5 py-5 sm:px-6"
         footer={
           <>
             <button type="button" onClick={onClose} className={dsButton.secondary}>
-              Annulla
+              {t('stampa.cancel', 'Annulla')}
             </button>
             <button
               type="button"
@@ -150,27 +160,27 @@ export const PrintInventoryModal: React.FC<Props> = ({
               className={dsButton.primary}
             >
               <Printer className="h-4 w-4" aria-hidden />
-              Stampa
+              {t('stampa.print', 'Stampa')}
             </button>
           </>
         }
       >
         <FormCard className="space-y-4">
-          <Field label="Cosa stampare" htmlFor="print-location">
+          <Field label={t('stampa.what', 'Cosa stampare')} htmlFor="print-location">
             <select
               id="print-location"
               value={locationId == null ? 'ALL' : String(locationId)}
               onChange={(e) => setLocationId(e.target.value === 'ALL' ? null : Number(e.target.value))}
               className={dsSelect}
             >
-              <option value="ALL">Tutta l'area (totale per prodotto)</option>
+              <option value="ALL">{t('stampa.wholeArea', "Tutta l'area (totale per prodotto)")}</option>
               {locations.map(loc => (
-                <option key={loc.id} value={loc.id}>Solo {toTitleCase(loc.name)}</option>
+                <option key={loc.id} value={loc.id}>{t('stampa.onlyOne', 'Solo {{posto}}', { posto: toTitleCase(loc.name) })}</option>
               ))}
             </select>
           </Field>
 
-          <Field label="Categoria" htmlFor="print-category">
+          <Field label={t('stampa.category', 'Categoria')} htmlFor="print-category">
             <select
               id="print-category"
               value={categoryFilter == null ? 'ALL' : String(categoryFilter)}
@@ -180,12 +190,12 @@ export const PrintInventoryModal: React.FC<Props> = ({
               }}
               className={dsSelect}
             >
-              <option value="ALL">Tutte le categorie</option>
+              <option value="ALL">{t('stampa.allCategories', 'Tutte le categorie')}</option>
               {[...categories].sort((a, b) => a.sort_order - b.sort_order).map(cat => (
                 <option key={cat.id} value={cat.id}>{cat.name}</option>
               ))}
               {products.some(p => p.category_id == null) && (
-                <option value={UNCATEGORIZED_ID}>Senza categoria</option>
+                <option value={UNCATEGORIZED_ID}>{t('stampa.uncategorized', 'Senza categoria')}</option>
               )}
             </select>
           </Field>
@@ -193,11 +203,14 @@ export const PrintInventoryModal: React.FC<Props> = ({
           {/* What will come out of the printer, before the paper is spent. */}
           <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-4">
             <p className="text-[15px] font-medium text-[var(--ds-text-primary)]">
-              {AREA_LABEL[area]} · {locationId == null ? "Tutta l'area" : toTitleCase(locationLabel)}
+              {areaLabel(area, t)} · {locationId == null ? t('stampa.wholeAreaShort', "Tutta l'area") : toTitleCase(locationLabel)}
             </p>
             <p className="mt-0.5 text-[14px] text-[var(--ds-text-muted)]">{categoryLabel}</p>
             <p className="mt-0.5 text-[14px] text-[var(--ds-text-muted)]">
-              {totalProducts} {totalProducts === 1 ? 'prodotto' : 'prodotti'} · {groups.length} {groups.length === 1 ? 'sezione' : 'sezioni'}
+              {t('stampa.counts', '{{prodotti}} · {{sezioni}}', {
+                prodotti: t('stampa.products', '{{count}} prodotti', { count: totalProducts }),
+                sezioni: t('stampa.sections', '{{count}} sezioni', { count: groups.length }),
+              })}
             </p>
           </div>
         </FormCard>
@@ -211,14 +224,14 @@ export const PrintInventoryModal: React.FC<Props> = ({
         <div className="print-portal">
           <div id="print-area" className="print-only">
             <header style={{ marginBottom: '1.25rem', paddingBottom: '0.75rem', borderBottom: '2px solid var(--ds-print-ink)' }}>
-              <h1 style={{ fontSize: '1.5rem', fontWeight: 700, margin: 0 }}>Inventario — {AREA_LABEL[area]}</h1>
+              <h1 style={{ fontSize: '1.5rem', fontWeight: 700, margin: 0 }}>{t('stampa.sheetTitle', 'Inventario — {{area}}', { area: areaLabel(area, t) })}</h1>
               <p style={{ margin: '0.25rem 0 0', fontSize: '0.95rem', color: 'var(--ds-print-ink-secondary)' }}>
                 {locationLabel} · {categoryLabel}
               </p>
             </header>
 
         {totalProducts === 0 ? (
-          <p style={{ fontStyle: 'italic', color: 'var(--ds-print-ink-muted)' }}>Nessun prodotto corrispondente ai filtri.</p>
+          <p style={{ fontStyle: 'italic', color: 'var(--ds-print-ink-muted)' }}>{t('stampa.empty', 'Nessun prodotto corrispondente ai filtri.')}</p>
         ) : (
           groups.map(group => (
             <section key={group.id} style={{ marginBottom: '1.25rem' }}>
@@ -231,13 +244,13 @@ export const PrintInventoryModal: React.FC<Props> = ({
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
                 <thead>
                   <tr style={{ background: 'var(--ds-print-fill)', borderBottom: '1px solid var(--ds-print-rule-strong)' }}>
-                    <th style={{ padding: '0.4rem 0.5rem', textAlign: 'left' }}>Prodotto</th>
-                    <th style={{ padding: '0.4rem 0.5rem', textAlign: 'left', width: '80px' }}>Unità</th>
+                    <th style={{ padding: '0.4rem 0.5rem', textAlign: 'left' }}>{t('stampa.colProduct', 'Prodotto')}</th>
+                    <th style={{ padding: '0.4rem 0.5rem', textAlign: 'left', width: '80px' }}>{t('stampa.colUnit', 'Unità')}</th>
                     <th style={{ padding: '0.4rem 0.5rem', textAlign: 'right', width: '100px' }}>
-                      {locationId == null ? 'Q.tà Totale' : 'Quantità'}
+                      {locationId == null ? t('stampa.colQtyTotal', 'Q.tà totale') : t('stampa.colQty', 'Quantità')}
                     </th>
                     {locationId == null && (
-                      <th style={{ padding: '0.4rem 0.5rem', textAlign: 'left' }}>Distribuzione</th>
+                      <th style={{ padding: '0.4rem 0.5rem', textAlign: 'left' }}>{t('stampa.colSpread', 'Distribuzione')}</th>
                     )}
                   </tr>
                 </thead>
@@ -267,7 +280,7 @@ export const PrintInventoryModal: React.FC<Props> = ({
         )}
 
             <footer style={{ marginTop: '2rem', paddingTop: '0.5rem', borderTop: '1px solid var(--ds-print-rule)', fontSize: '0.7rem', color: 'var(--ds-print-ink-subtle)', textAlign: 'right' }}>
-              Stampato il {new Date().toLocaleString('it-IT')}
+              {t('stampa.printedOn', 'Stampato il {{quando}}', { quando: new Date().toLocaleString(displayLocale()) })}
             </footer>
           </div>
         </div>,
