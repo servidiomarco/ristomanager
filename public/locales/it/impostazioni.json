@@ -261,5 +261,21 @@
     "namePlaceholder": "Come lo chiami? (es. Menù di Ferragosto)",
     "uploading": "Carico…",
     "pickFile": "Scegli un file"
+  },
+  "ai": {
+    "errLoadPrompt": "Impossibile caricare il prompt logica tavoli",
+    "promptSaved": "Prompt logica tavoli salvato",
+    "errSavePrompt": "Errore durante il salvataggio",
+    "loading": "Carico…",
+    "promptPlaceholder": "Es: privilegia i tavoli vicino alla vetrata per i gruppi oltre 6 persone; non assegnare il tavolo 12 dopo le 21:00; per gli habitué usa sempre il tavolo preferito se libero…",
+    "saving": "Salvataggio…",
+    "save": "Salva"
+  },
+  "preset": {
+    "errLoad": "Impossibile caricare i messaggi rapidi",
+    "saved": "Messaggi rapidi salvati",
+    "restored": "Ripristinati i messaggi rapidi predefiniti",
+    "errSave": "Errore durante il salvataggio",
+    "needOne": "Serve almeno un messaggio, oppure usa \"Torna ai predefiniti\""
   }
 }

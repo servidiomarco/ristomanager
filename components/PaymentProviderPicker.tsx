@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { CreditCard, Loader2 } from 'lucide-react';
 import {
     getActivePaymentProvider,
@@ -29,6 +30,7 @@ const PROVIDER_LABELS: Record<PaymentProviderId, string> = {
 };
 
 export const PaymentProviderPicker: React.FC<Props> = ({ flow, showToast, canEdit }) => {
+  const { t } = useTranslation('pagamenti', { useSuspense: false });
     const [state, setState] = useState<ActivePaymentProvider | null>(null);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -41,7 +43,7 @@ export const PaymentProviderPicker: React.FC<Props> = ({ flow, showToast, canEdi
             const data = await getActivePaymentProvider();
             setState(data);
         } catch (err: any) {
-            showToastRef.current(err?.message || 'Errore nel caricamento del provider', 'error');
+            showToastRef.current(err?.message || t('provider.errLoad', 'Errore nel caricamento del provider'), 'error');
         } finally {
             setLoading(false);
         }
@@ -62,7 +64,7 @@ export const PaymentProviderPicker: React.FC<Props> = ({ flow, showToast, canEdi
                 : PROVIDER_LABELS[next];
             showToast(`Provider ${flow === 'deposit' ? 'caparre' : 'conti al tavolo'}: ${label}`, 'success');
         } catch (err: any) {
-            showToast(err?.message || 'Errore aggiornamento provider', 'error');
+            showToast(err?.message || t('provider.errSave', 'Errore aggiornamento provider'), 'error');
         } finally {
             setSaving(false);
         }
@@ -81,7 +83,7 @@ export const PaymentProviderPicker: React.FC<Props> = ({ flow, showToast, canEdi
         <div>
             <label className="flex items-center gap-1.5 text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">
                 <CreditCard className="w-3.5 h-3.5 text-[var(--ds-text-muted)]" aria-hidden />
-                Provider di pagamento
+                {t('provider.title', 'Provider di pagamento')}
             </label>
             <div className="flex items-center gap-2">
                 <select

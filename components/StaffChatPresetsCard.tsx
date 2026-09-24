@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { MessagesSquare, Save, Loader2, ChevronDown, Plus, X as XIcon, RotateCcw } from 'lucide-react';
 import { Loader } from './Loader';
 import { staffChatApiService } from '../services/staffChatApiService';
@@ -15,6 +16,7 @@ const MAX_PRESETS = 12;
 // I messaggi rapidi della chat staff: un tap e partono, quindi vanno scritti
 // come li direbbe la brigata di QUESTO ristorante. Tabella vuota = default.
 export const StaffChatPresetsCard: React.FC<Props> = ({ showToast }) => {
+  const { t } = useTranslation('impostazioni', { useSuspense: false });
   const { hasPermission } = useAuth();
   const canEdit = hasPermission('settings:full');
 
@@ -35,7 +37,7 @@ export const StaffChatPresetsCard: React.FC<Props> = ({ showToast }) => {
         setLabels(presets.map(p => p.label));
         setCustom(custom);
       })
-      .catch(() => { if (!cancelled) showToastRef.current('Impossibile caricare i messaggi rapidi', 'error'); })
+      .catch(() => { if (!cancelled) showToastRef.current(t('preset.errLoad', 'Impossibile caricare i messaggi rapidi'), 'error'); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, []);
@@ -46,9 +48,9 @@ export const StaffChatPresetsCard: React.FC<Props> = ({ showToast }) => {
       const { presets, custom } = await staffChatApiService.savePresets(next);
       setLabels(presets.map(p => p.label));
       setCustom(custom);
-      showToast(custom ? 'Messaggi rapidi salvati' : 'Ripristinati i messaggi rapidi predefiniti', 'success');
+      showToast(custom ? t('preset.saved', 'Messaggi rapidi salvati') : t('preset.restored', 'Ripristinati i messaggi rapidi predefiniti'), 'success');
     } catch (err: any) {
-      showToast(err?.message || 'Errore durante il salvataggio', 'error');
+      showToast(err?.message || t('preset.errSave', 'Errore durante il salvataggio'), 'error');
     } finally {
       setSaving(false);
     }
@@ -57,7 +59,7 @@ export const StaffChatPresetsCard: React.FC<Props> = ({ showToast }) => {
   const handleSave = () => {
     const cleaned = labels.map(l => l.trim()).filter(Boolean);
     if (cleaned.length === 0) {
-      showToast('Serve almeno un messaggio, oppure usa "Torna ai predefiniti"', 'error');
+      showToast(t('preset.needOne', 'Serve almeno un messaggio, oppure usa "Torna ai predefiniti"'), 'error');
       return;
     }
     save(cleaned);

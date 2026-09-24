@@ -667,6 +667,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-24 | Pagamenti, Menu, Impostazioni | Con la lingua inglese parlano inglese gli ultimi pezzi: link di pagamento con i loro filtri e raggruppamenti per giorno, provider di pagamento, conto al tavolo coi parametri tecnici, prompt AI dei tavoli, messaggi rapidi della chat, composizione del menù banchetto e scheda del piatto. |
 | 2026-09-24 | Tutte le schermate | Con la lingua inglese parlano inglese la coda dei pezzi condivisi: conferma di eliminazione, banner di nuova versione, selettore del periodo, libreria media, barra dei canali per turno, scelta del cliente, foglio delle varianti e lettore delle registrazioni. |
 | 2026-09-24 | Reportistica | Con la lingua inglese parla inglese la Reportistica: i quattro blocchi (prenotazioni e canali, incassi, cucina, Sofia e comunicazioni), le tabelle, i grafici e il report AI. Numeri e iniziali dei giorni seguono le convenzioni della lingua. |
 | 2026-09-24 | Impostazioni | Con la lingua inglese parlano inglese le sette card che restavano: canali di risposta per fonte, caparra automatica, scadenza dei link di pagamento, comportamento blacklist, coperto e servizio, notifiche push e lista delle intolleranze. |
