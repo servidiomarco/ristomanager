@@ -72,6 +72,7 @@
   },
   "toast": {
     "unsentCleared": "Unsent lines cleared",
+    "courseDeleted": "{{uscita}} deleted",
     "orderChanged": "Order changed, lines not restored",
     "closedNothingDue": "Order closed: nothing was due",
     "discountApplied": "Discount applied",
@@ -180,7 +181,11 @@
     "courseTitle": "Move the {{uscita}}",
     "lineTitle": "Move {{cosa}}",
     "courseHint": "Every unsent line changes course",
-    "lineHint": "Which course does it go to?"
+    "lineHint": "Which course does it go to?",
+    "deleteCourse": "Delete the {{uscita}}",
+    "deleteCourseConfirm_one": "Delete {{count}} line",
+    "deleteCourseConfirm_other": "Delete {{count}} lines",
+    "deleteCourseSentStay": "Lines already sent stay: void them from the order."
   },
   "update": "Update",
   "next": "Next",
