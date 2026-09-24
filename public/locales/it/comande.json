@@ -72,6 +72,7 @@
   },
   "toast": {
     "unsentCleared": "Righe non inviate svuotate",
+    "courseDeleted": "{{uscita}} eliminata",
     "orderChanged": "Comanda cambiata, righe non ripristinate",
     "closedNothingDue": "Comanda chiusa: non c'era nulla da pagare",
     "discountApplied": "Sconto applicato",
@@ -180,7 +181,11 @@
     "courseTitle": "Sposta la {{uscita}}",
     "lineTitle": "Sposta {{cosa}}",
     "courseHint": "Tutte le righe non ancora inviate cambiano uscita",
-    "lineHint": "In quale uscita va?"
+    "lineHint": "In quale uscita va?",
+    "deleteCourse": "Elimina la {{uscita}}",
+    "deleteCourseConfirm_one": "Elimina {{count}} riga",
+    "deleteCourseConfirm_other": "Elimina {{count}} righe",
+    "deleteCourseSentStay": "Le righe già inviate restano: si stornano dalla comanda."
   },
   "update": "Aggiorna",
   "next": "Segue",
