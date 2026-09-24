@@ -1,4 +1,6 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
+import { displayLocale } from '../../utils/formatLocale';
 
 // ---------------------------------------------------------------------------
 // Lo stato della connessione e l'ora, in una pastiglia sola.
@@ -27,7 +29,8 @@ interface LivePillProps {
 }
 
 export const LivePill: React.FC<LivePillProps> = ({ connected, time, variant = 'pill', className = '' }) => {
-  const label = connected ? 'Connesso' : 'Non connesso';
+  const { t } = useTranslation(undefined, { useSuspense: false });
+  const label = connected ? t('live.connected', 'Connesso') : t('live.disconnected', 'Non connesso');
 
   if (variant === 'dot') {
     return (
@@ -68,8 +71,8 @@ export const LivePill: React.FC<LivePillProps> = ({ connected, time, variant = '
       </span>
       <span className="whitespace-nowrap tabular-nums">
         {connected
-          ? `Live ${time.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`
-          : 'Offline'}
+          ? t('live.at', 'Live {{ora}}', { ora: time.toLocaleTimeString(displayLocale(), { hour: '2-digit', minute: '2-digit' }) })
+          : t('live.offline', 'Offline')}
       </span>
     </div>
   );

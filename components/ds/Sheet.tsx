@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 
@@ -75,6 +76,7 @@ export const Sheet: React.FC<SheetProps> = ({
   ariaLabel,
   children,
 }) => {
+  const { t } = useTranslation(undefined, { useSuspense: false });
   useEffect(() => {
     if (!open) return;
     const prev = document.body.style.overflow;
@@ -135,7 +137,7 @@ export const Sheet: React.FC<SheetProps> = ({
             <button
               type="button"
               onClick={onClose}
-              aria-label="Chiudi"
+              aria-label={t('actions.close', 'Chiudi')}
               className={fullPage
                 ? 'inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]'
                 : 'inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]'}

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 /**
  * A list row with a revealed action on each side.
@@ -64,6 +65,7 @@ export const SwipeRow: React.FC<{
   className?: string;
   children: React.ReactNode;
 }> = ({ left, right, hint, className = '', children }) => {
+  const { t } = useTranslation(undefined, { useSuspense: false });
   const [dx, setDx] = useState(0);
   const [dragging, setDragging] = useState(false);
   const start = useRef<{ x: number; y: number; base: number } | null>(null);
@@ -173,7 +175,7 @@ export const SwipeRow: React.FC<{
         {open && (
           <button
             type="button"
-            aria-label="Chiudi azioni"
+            aria-label={t('aria.closeActions', 'Chiudi azioni')}
             onClick={close}
             className="absolute inset-0 z-10 bg-transparent"
           />

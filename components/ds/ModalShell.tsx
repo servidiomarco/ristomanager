@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 
@@ -86,6 +87,7 @@ export const ModalShell: React.FC<ModalShellProps> = ({
   className = '',
   children,
 }) => {
+  const { t } = useTranslation(undefined, { useSuspense: false });
   // Lock the page behind the modal so a scroll gesture over the backdrop
   // doesn't move the list underneath.
   useEffect(() => {
@@ -129,7 +131,7 @@ export const ModalShell: React.FC<ModalShellProps> = ({
           <button
             type="button"
             onClick={onClose}
-            aria-label="Chiudi"
+            aria-label={t('actions.close', 'Chiudi')}
             className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             <X className="h-4 w-4" />

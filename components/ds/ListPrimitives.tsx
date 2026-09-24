@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, ChevronDown, ChevronRight, Search, X } from 'lucide-react';
 
@@ -118,7 +119,10 @@ export const PaneHeader: React.FC<{
   /** Sits inline after the title: a channel or status pill. */
   badge?: React.ReactNode;
   actions?: React.ReactNode;
-}> = ({ onBack, backLabel = 'Indietro', title, subtitle, badge, actions }) => (
+}> = ({ onBack, backLabel, title, subtitle, badge, actions }) => {
+  const { t } = useTranslation(undefined, { useSuspense: false });
+  const etichettaIndietro = backLabel ?? t('aria.back', 'Indietro');
+  return (
   // pb-4 is load-bearing. Below this sits an opaque scrolling region that
   // paints later, so with no bottom padding it covers this card's shadow and
   // cuts it with a hard line — and slices whatever card is scrolling past.
@@ -152,7 +156,8 @@ export const PaneHeader: React.FC<{
       {actions && <div className="flex flex-shrink-0 items-center gap-2">{actions}</div>}
     </div>
   </div>
-);
+  );
+};
 
 /* ── PanePlaceholder ──────────────────────────────────────────────────────
    What the detail side shows before anything is picked. Icon over one line,
@@ -254,7 +259,9 @@ export const SearchField: React.FC<{
    *  white box, shadow and all. Same two-treatment rule as DateNavigator's
    *  `onCanvas`, from the other side. */
   recessed?: boolean;
-}> = ({ value, onChange, placeholder, ariaLabel = 'Cerca', className = '', inputRef, onKeyDown, hint, recessed = false }) => (
+}> = ({ value, onChange, placeholder, ariaLabel, className = '', inputRef, onKeyDown, hint, recessed = false }) => {
+  const { t } = useTranslation(undefined, { useSuspense: false });
+  return (
   <div className={`relative ${className}`}>
     <Search
       className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ds-text-muted)]"
@@ -267,7 +274,7 @@ export const SearchField: React.FC<{
       onChange={e => onChange(e.target.value)}
       onKeyDown={onKeyDown}
       placeholder={placeholder}
-      aria-label={ariaLabel}
+      aria-label={ariaLabel ?? t('aria.searchField', 'Cerca')}
       className={`h-11 w-full rounded-[var(--ds-radius-control)] pl-11 pr-11 text-[15px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] transition-shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
         recessed
           ? 'bg-[var(--ds-surface-row)]'
@@ -283,14 +290,15 @@ export const SearchField: React.FC<{
       <button
         type="button"
         onClick={() => onChange('')}
-        aria-label="Svuota ricerca"
+        aria-label={t('aria.clearSearch', 'Svuota ricerca')}
         className="absolute right-3 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]"
       >
         <X className="h-4 w-4" />
       </button>
     )}
   </div>
-);
+  );
+};
 
 /* ── SectionHeader ────────────────────────────────────────────────────────
    The eyebrow above a group of rows. A leading dot marks a group that wants
