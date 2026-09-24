@@ -12,6 +12,12 @@
 //     node scripts/print-agent.mjs
 // Env:
 //   API_URL           default http://localhost:3005
+//   NODE_URL          facoltativa: il nodo di sala (stesso PC). Con la
+//                     modalità ibrida in autorità le comande NASCONO sul
+//                     nodo e i loro ticket stanno nella SUA coda: l'agente
+//                     polla entrambe le fonti e conferma ciascun job alla
+//                     fonte che gliel'ha dato. A cloud giù restano vive le
+//                     stampe del nodo: la comanda battuta al buio ESCE.
 //   PRINT_AGENT_TOKEN obbligatorio, deve combaciare con quello del backend
 //   PRINTERS          mappa nome=ip[:porta] separata da virgole; ogni job
 //                     porta il nome della sua stampante di destinazione
@@ -20,8 +26,16 @@
 import net from 'net';
 
 const API_URL = process.env.API_URL || 'http://localhost:3005';
+const NODE_URL = (process.env.NODE_URL || '').trim().replace(/\/+$/, '');
 const TOKEN = process.env.PRINT_AGENT_TOKEN;
 const POLL_MS = Number(process.env.POLL_MS || 2500);
+
+// Le fonti, in ordine di fiducia per la CONFIG (il cloud è il registro
+// principale; il nodo ne ha una replica e vale da ripiego a linea giù).
+const SOURCES = [
+  { name: 'cloud', base: API_URL },
+  ...(NODE_URL ? [{ name: 'nodo', base: NODE_URL }] : []),
+];
 
 // Mappa di partenza dall'env: serve solo finché il backend non risponde.
 // La fonte di verità è il registro a DB (Impostazioni → Sala & Cucina),
@@ -400,8 +414,8 @@ const sendToPrinter = ({ host, port }, payload) => new Promise((resolve, reject)
   sock.on('close', () => resolve());
 });
 
-const api = async (path, options = {}) => {
-  const res = await fetch(`${API_URL}${path}`, {
+const api = async (base, path, options = {}) => {
+  const res = await fetch(`${base}${path}`, {
     ...options,
     headers: { 'Content-Type': 'application/json', 'x-print-agent-token': TOKEN, ...options.headers },
   });
@@ -412,7 +426,8 @@ const api = async (path, options = {}) => {
 // ---------------------------------------------------------------------------
 // Loop
 // ---------------------------------------------------------------------------
-let apiDown = false;
+// Stato «giù» per fonte, per non allagare il log durante un outage.
+const sourceDown = new Map();
 const warnedUnknown = new Set();
 
 // Lavora la coda di UNA stampante: si ferma al primo errore di connessione
@@ -432,7 +447,7 @@ async function drainPrinter(name, dest, jobs) {
       if (!rendered) throw new Error(`kind sconosciuto: ${job.kind}`);
     } catch (err) {
       log(`job ${job.id} [${name}]: payload non stampabile (${err.message})`);
-      await api(`/print-agent/jobs/${job.id}/ack`, { method: 'POST', body: JSON.stringify({ ok: false, error: err.message }) }).catch(() => {});
+      await api(job.__base, `/print-agent/jobs/${job.id}/ack`, { method: 'POST', body: JSON.stringify({ ok: false, error: err.message }) }).catch(() => {});
       continue;
     }
     try {
@@ -440,8 +455,8 @@ async function drainPrinter(name, dest, jobs) {
       // taglio avvenuto.
       const payload = dest.buzzer ? Buffer.concat([BEEP, rendered]) : rendered;
       await sendToPrinter(dest, payload);
-      log(`job ${job.id} [${name}]: stampato (${rendered.length} byte${dest.buzzer ? ', con cicalino' : ''})`);
-      await api(`/print-agent/jobs/${job.id}/ack`, { method: 'POST', body: JSON.stringify({ ok: true }) });
+      log(`job ${job.id} [${name}/${job.__source}]: stampato (${rendered.length} byte${dest.buzzer ? ', con cicalino' : ''})`);
+      await api(job.__base, `/print-agent/jobs/${job.id}/ack`, { method: 'POST', body: JSON.stringify({ ok: true }) });
     } catch (err) {
       log(`job ${job.id} [${name}]: stampante non raggiungibile (${err.message}), ritento`);
       return;
@@ -516,7 +531,7 @@ async function handleRtFiscale(job) {
   // Claim atomico PRIMA di toccare il registratore: un documento fiscale non
   // si emette due volte. Se un altro poll/agente ha già preso il job, esce.
   try {
-    const c = await api(`/print-agent/jobs/${job.id}/claim`, { method: 'POST' });
+    const c = await api(job.__base, `/print-agent/jobs/${job.id}/claim`, { method: 'POST' });
     if (!c?.claimed) return;
   } catch (err) {
     log(`job ${job.id} [rt]: claim fallito (${err.message}), ritento`);
@@ -527,7 +542,7 @@ async function handleRtFiscale(job) {
     xml = buildRtXml(job.payload?.payload ?? {});
   } catch (err) {
     log(`job ${job.id} [rt]: documento non componibile (${err.message})`);
-    await api(`/print-agent/jobs/${job.id}/ack`, { method: 'POST', body: JSON.stringify({ ok: false, error: err.message }) }).catch(() => {});
+    await api(job.__base, `/print-agent/jobs/${job.id}/ack`, { method: 'POST', body: JSON.stringify({ ok: false, error: err.message }) }).catch(() => {});
     return;
   }
   try {
@@ -543,7 +558,7 @@ async function handleRtFiscale(job) {
       const code = text.match(/code\s*=\s*"([^"]*)"/i)?.[1] ?? `HTTP ${res.status}`;
       const status = text.match(/status\s*=\s*"([^"]*)"/i)?.[1] ?? '';
       log(`job ${job.id} [rt]: il registratore ha rifiutato (${code} ${status})`);
-      await api(`/print-agent/jobs/${job.id}/ack`, { method: 'POST', body: JSON.stringify({ ok: false, error: `RT: ${code} ${status}`.trim() }) });
+      await api(job.__base, `/print-agent/jobs/${job.id}/ack`, { method: 'POST', body: JSON.stringify({ ok: false, error: `RT: ${code} ${status}`.trim() }) });
       return;
     }
     // addInfo: zRepNumber + fiscalReceiptNumber compongono il numero del
@@ -554,7 +569,7 @@ async function handleRtFiscale(job) {
     const num = tag('fiscalReceiptNumber');
     const docNumber = zrep && num ? `${zrep.padStart(4, '0')}-${num.padStart(4, '0')}` : (num || null);
     log(`job ${job.id} [rt]: documento ${docNumber ?? '(numero non letto)'} emesso`);
-    await api(`/print-agent/jobs/${job.id}/ack`, {
+    await api(job.__base, `/print-agent/jobs/${job.id}/ack`, {
       method: 'POST',
       body: JSON.stringify({ ok: true, result: { doc_number: docNumber, zrep_number: zrep || null, receipt_number: num || null, receipt_date: tag('fiscalReceiptDate') || null, receipt_time: tag('fiscalReceiptTime') || null, receipt_amount: tag('fiscalReceiptAmount') || null } }),
     });
@@ -566,27 +581,38 @@ async function handleRtFiscale(job) {
 }
 
 async function tick() {
-  let jobs;
-  try {
-    applyConfig(await api('/print-agent/config').catch(() => null));
-    ({ jobs } = await api('/print-agent/jobs'));
-    if (apiDown) { apiDown = false; log('backend di nuovo raggiungibile'); }
-  } catch (err) {
-    if (!apiDown) { apiDown = true; log('backend non raggiungibile:', err.message); }
-    return;
+  // La coda si raccoglie da OGNI fonte raggiungibile; ogni job si ricorda
+  // da dove viene (__base) e lì tornerà il suo ack. La config si prende
+  // dalla prima fonte che risponde, in ordine di fiducia (cloud, poi nodo).
+  const jobs = [];
+  let configApplied = false;
+  for (const source of SOURCES) {
+    try {
+      if (!configApplied) {
+        const cfg = await api(source.base, '/print-agent/config').catch(() => null);
+        if (cfg) { applyConfig(cfg); configApplied = true; }
+      }
+      const batch = await api(source.base, '/print-agent/jobs');
+      for (const job of (batch.jobs || [])) {
+        jobs.push({ ...job, __base: source.base, __source: source.name });
+      }
+      if (sourceDown.get(source.name)) { sourceDown.set(source.name, false); log(`${source.name} di nuovo raggiungibile`); }
+    } catch (err) {
+      if (!sourceDown.get(source.name)) { sourceDown.set(source.name, true); log(`${source.name} non raggiungibile:`, err.message); }
+    }
   }
+  if (jobs.length === 0) return;
 
   // I documenti fiscali del registratore viaggiano su un canale proprio,
   // in serie (l'RT è transazionale: un documento alla volta).
   for (const job of jobs.filter(j => j.kind === 'RT_FISCALE')) {
     await handleRtFiscale(job);
   }
-  jobs = jobs.filter(j => j.kind !== 'RT_FISCALE');
 
   // Raggruppa per stampante: ogni destinazione ha la sua coda indipendente,
   // una termica spenta in cucina non blocca i preconti al banco.
   const byPrinter = new Map();
-  for (const job of jobs) {
+  for (const job of jobs.filter(j => j.kind !== 'RT_FISCALE')) {
     const name = job.printer || 'preconti';
     if (!PRINTERS.has(name)) {
       // Mappatura assente: il job resta in coda (niente ack) e uscirà appena
@@ -612,6 +638,6 @@ async function safeTick() {
   try { await tick(); } finally { ticking = false; }
 }
 
-log(`print-agent avviato: backend ${API_URL}, stampanti [${[...PRINTERS.entries()].map(([n, d]) => `${n}=${d.host}:${d.port}`).join(', ')}], poll ${POLL_MS}ms`);
+log(`print-agent avviato: fonti [${SOURCES.map(s => `${s.name}=${s.base}`).join(', ')}], stampanti [${[...PRINTERS.entries()].map(([n, d]) => `${n}=${d.host}:${d.port}`).join(', ')}], poll ${POLL_MS}ms`);
 setInterval(safeTick, POLL_MS);
 safeTick();

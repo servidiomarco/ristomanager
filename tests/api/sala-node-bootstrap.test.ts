@@ -32,6 +32,7 @@ const NODE_DB = 'ristotest_node_bootstrap';
 describe('bootstrap del nodo di sala', () => {
     let child: ChildProcess | null = null;
     let nodeDb: Client | null = null;
+    let nodeBaseUrl = '';
     let roomId = 0;
     let cloudSeqPrima = 0;
 
@@ -67,6 +68,7 @@ describe('bootstrap del nodo di sala', () => {
         const distServer = path.resolve('dist/server.js');
         expect(existsSync(distServer)).toBe(true);
         const port = await freePort();
+        nodeBaseUrl = `http://127.0.0.1:${port}`;
         child = spawn('node', [distServer], {
             env: {
                 ...process.env,
@@ -133,6 +135,28 @@ describe('bootstrap del nodo di sala', () => {
         );
         expect(users.rows[0].n).toBeGreaterThan(0);
         expect(users.rows[0].con_hash).toBe(0);
+    });
+
+    it("il nodo riconosce il token dell'agente di stampa (riga tenants nello snapshot)", async () => {
+        // Il flusso stampe-dal-nodo: l'agente polla ANCHE il nodo con lo
+        // stesso token — che il nodo può verificare solo se la riga tenants
+        // (coi token degli agenti LAN) è arrivata con lo snapshot.
+        const cloudDb = new Client({ connectionString: process.env.DATABASE_URL || 'postgresql://localhost/ristotest_api' });
+        await cloudDb.connect();
+        const t = await cloudDb.query('SELECT print_agent_token FROM tenants WHERE id = 1');
+        await cloudDb.end();
+        const tokenAgente = t.rows[0].print_agent_token as string;
+        expect(tokenAgente).toBeTruthy();
+
+        const nodeTenants = await nodeDb!.query('SELECT print_agent_token FROM tenants WHERE id = 1');
+        expect(nodeTenants.rows[0].print_agent_token).toBe(tokenAgente);
+
+        const jobs = await fetch(`${nodeBaseUrl}/print-agent/jobs`, { headers: { 'x-print-agent-token': tokenAgente } });
+        expect(jobs.status).toBe(200);
+        const cfg = await fetch(`${nodeBaseUrl}/print-agent/config`, { headers: { 'x-print-agent-token': tokenAgente } });
+        expect(cfg.status).toBe(200);
+        const sbagliato = await fetch(`${nodeBaseUrl}/print-agent/jobs`, { headers: { 'x-print-agent-token': 'token-sbagliato' } });
+        expect(sbagliato.status).toBe(401);
     });
 
     it('le sequence locali sono oltre gli id del cloud: un INSERT nativo non collide', async () => {

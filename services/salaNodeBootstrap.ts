@@ -85,7 +85,8 @@ const loadSnapshot = async (snap: Snapshot): Promise<void> => {
         // DELETE in ordine inverso (figli prima) — non necessario in
         // replica-mode, ma tiene il carico leggibile e rigiocabile a mano.
         for (const name of [...names].reverse()) {
-            await client.query(`DELETE FROM ${name} WHERE tenant_id = $1`, [snap.tenant_id]);
+            const tenantColumn = name === 'tenants' ? 'id' : 'tenant_id';
+            await client.query(`DELETE FROM ${name} WHERE ${tenantColumn} = $1`, [snap.tenant_id]);
         }
         for (const name of names) {
             let rows = snap.tables[name];
@@ -136,11 +137,49 @@ const loadSnapshot = async (snap: Snapshot): Promise<void> => {
     }
 };
 
+/** La riga tenants dal cloud, upsertata sul nodo: i token degli agenti LAN
+ *  (print agent in testa) si riconoscono anche qui. Gira a OGNI avvio —
+ *  anche sui nodi già installati che il bootstrap pieno lo saltano. */
+const syncTenantRow = async (): Promise<void> => {
+    const base = cloudUrl();
+    const token = process.env.SALA_NODE_TOKEN || '';
+    if (!base || !token) return;
+    const res = await fetch(`${base}/sala-node/tenant`, {
+        headers: { 'X-Sala-Node-Token': token, accept: 'application/json' },
+    });
+    if (!res.ok) throw new Error(`tenant dal cloud: HTTP ${res.status}`);
+    const body: any = await res.json();
+    if (!body?.tenant?.id) return;
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        try {
+            await client.query(`SET LOCAL session_replication_role = replica`);
+        } catch {
+            await client.query('ROLLBACK');
+            await client.query('BEGIN');
+        }
+        await client.query(`DELETE FROM tenants WHERE id = $1`, [body.tenant.id]);
+        await client.query(
+            `INSERT INTO tenants SELECT * FROM jsonb_populate_recordset(NULL::tenants, $1::jsonb)`,
+            [JSON.stringify([body.tenant])]
+        );
+        await client.query('COMMIT');
+        console.log(`[bootstrap] riga tenants sincronizzata (id ${body.tenant.id})`);
+    } catch (err) {
+        await client.query('ROLLBACK').catch(() => { /* noop */ });
+        throw err;
+    } finally {
+        client.release();
+    }
+};
+
 const attempt = async (): Promise<boolean> => runAsPlatform(async () => {
     if (process.env.SALA_NODE_BOOTSTRAP !== 'force') {
         const cur = await pool.query(`SELECT applied_seq FROM replication_cursor WHERE stream = 'cloud' LIMIT 1`);
         if (cur.rows.length > 0) {
             console.log(`[bootstrap] cursore già presente (seq ${cur.rows[0].applied_seq}): niente da fare, il riallineamento è del replay`);
+            await syncTenantRow();
             return true;
         }
     }
