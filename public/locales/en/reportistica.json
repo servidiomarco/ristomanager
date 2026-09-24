@@ -1,0 +1,68 @@
+{
+  "errLoad": "Could not load",
+  "errAi": "Could not generate the report",
+  "compareHint": "Every figure is compared with the previous period of the same length.",
+  "printReport": "Print the report",
+  "reload": "Refresh",
+  "aiDays": "It always covers the last {{giorni}} days from today, not the period chosen above.",
+  "aiThinking": "Working on it…",
+  "aiRegen": "Regenerate",
+  "aiGen": "Generate",
+  "exportCsv": "Export csv",
+  "csv": "csv",
+  "pren": {
+    "title": "Bookings and channels",
+    "subtitle": "By calendar day of the booking · cancelled and no-shows count in the rates, not in the trends",
+    "bookings": "Bookings",
+    "covers": "Covers",
+    "noShow": "No-shows",
+    "cancelled": "Cancelled"
+  },
+  "inc": {
+    "title": "Takings and till",
+    "subtitle": "From the cash book, by service day: a bill taken after midnight belongs to the evening before",
+    "taken": "Taken",
+    "avgBill": "Average bill",
+    "avgCover": "Average per cover",
+    "tips": "Tips"
+  },
+  "cuc": {
+    "title": "Kitchen and dishes",
+    "subtitleEmpty": "Best sellers, times per station and waste",
+    "subtitle": "From the orders fired in the period · voided lines are out of the sales and counted as waste",
+    "qty": "Quantity",
+    "revenue": "Revenue",
+    "dish": "Dish",
+    "station": "Station",
+    "lines": "Lines",
+    "mean": "Mean",
+    "median": "Median",
+    "wasteByReason": "Waste by reason"
+  },
+  "com": {
+    "title": "Sofia and messages",
+    "subtitle": "Voice agent calls and outgoing messages in the period",
+    "calls": "Calls",
+    "minutes": "Minutes on the phone",
+    "converted": "Converted",
+    "toReview": "To re-check"
+  },
+  "src": {
+    "MANUAL": "Entered by the staff",
+    "VOICE": "Sofia (phone)",
+    "GOOGLE": "Booking page"
+  },
+  "met": {
+    "CONTANTI": "Cash",
+    "POS_FISICO": "Card terminal",
+    "BUONO_PASTO": "Meal vouchers",
+    "GIFT_CARD": "Gift card",
+    "SOSPESO": "On hold",
+    "OMAGGIO": "On the house",
+    "LINK_ONLINE": "Online link"
+  },
+  "shift": {
+    "lunch": "Lunch",
+    "dinner": "Dinner"
+  }
+}

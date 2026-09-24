@@ -667,6 +667,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-24 | Reportistica | Con la lingua inglese parla inglese la Reportistica: i quattro blocchi (prenotazioni e canali, incassi, cucina, Sofia e comunicazioni), le tabelle, i grafici e il report AI. Numeri e iniziali dei giorni seguono le convenzioni della lingua. |
 | 2026-09-24 | Impostazioni | Con la lingua inglese parlano inglese le sette card che restavano: canali di risposta per fonte, caparra automatica, scadenza dei link di pagamento, comportamento blacklist, coperto e servizio, notifiche push e lista delle intolleranze. |
 | 2026-09-24 | Prenotazioni, Inventario | Con la lingua inglese parlano inglese la stampa della lista prenotazioni e la stampa dell'inventario, dialogo e foglio: i due fogli sono il contenuto stesso della pagina, quindi escono nella lingua dell'operatore. L'ordine alfabetico di prodotti e tavoli segue le regole della lingua scelta. |
 | 2026-09-24 | Banchetti, Recensioni, Pagamenti | Con la lingua inglese parlano inglese i pagamenti dei banchetti (acconti, saldi, metodi, residuo), la pagina Recensioni con gli esiti delle richieste, e le intestazioni della pagina Pagamenti. |

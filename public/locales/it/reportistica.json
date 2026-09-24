@@ -1,0 +1,68 @@
+{
+  "errLoad": "Errore nel caricamento",
+  "errAi": "Errore nella generazione del report",
+  "compareHint": "Ogni numero è confrontato col periodo precedente di pari durata.",
+  "printReport": "Stampa il report",
+  "reload": "Aggiorna",
+  "aiDays": "Copre sempre gli ultimi {{giorni}} giorni da oggi, non il periodo scelto sopra.",
+  "aiThinking": "Ci penso…",
+  "aiRegen": "Rigenera",
+  "aiGen": "Genera",
+  "exportCsv": "Esporta csv",
+  "csv": "csv",
+  "pren": {
+    "title": "Prenotazioni e canali",
+    "subtitle": "Per giorno solare della prenotazione · cancellate e no-show contano nei tassi, non nei trend",
+    "bookings": "Prenotazioni",
+    "covers": "Coperti",
+    "noShow": "No-show",
+    "cancelled": "Cancellate"
+  },
+  "inc": {
+    "title": "Incassi e cassa",
+    "subtitle": "Dal libro cassa, per giorno di servizio: un conto incassato dopo mezzanotte appartiene alla sera prima",
+    "taken": "Incassato",
+    "avgBill": "Scontrino medio",
+    "avgCover": "Coperto medio",
+    "tips": "Mance"
+  },
+  "cuc": {
+    "title": "Cucina e piatti",
+    "subtitleEmpty": "Piatti più venduti, tempi per partita e scarti",
+    "subtitle": "Dalle comande lanciate nel periodo · righe stornate escluse dai venduti, contate negli scarti",
+    "qty": "Quantità",
+    "revenue": "Ricavo",
+    "dish": "Piatto",
+    "station": "Partita",
+    "lines": "Righe",
+    "mean": "Media",
+    "median": "Mediana",
+    "wasteByReason": "Scarti per motivo"
+  },
+  "com": {
+    "title": "Sofia e comunicazioni",
+    "subtitle": "Chiamate dell'agente vocale e messaggi in uscita nel periodo",
+    "calls": "Chiamate",
+    "minutes": "Minuti al telefono",
+    "converted": "Convertite",
+    "toReview": "Da ricontrollare"
+  },
+  "src": {
+    "MANUAL": "Inserite dallo staff",
+    "VOICE": "Sofia (telefono)",
+    "GOOGLE": "Pagina di prenotazione"
+  },
+  "met": {
+    "CONTANTI": "Contanti",
+    "POS_FISICO": "Pos",
+    "BUONO_PASTO": "Buoni pasto",
+    "GIFT_CARD": "Gift card",
+    "SOSPESO": "Sospeso",
+    "OMAGGIO": "Omaggio",
+    "LINK_ONLINE": "Link online"
+  },
+  "shift": {
+    "lunch": "Pranzo",
+    "dinner": "Cena"
+  }
+}
