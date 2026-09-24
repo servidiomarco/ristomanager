@@ -1,11 +1,17 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
 import { Search, X, Calendar, User, Phone, Mail, Loader2, ArrowRight } from 'lucide-react';
-import { Reservation, Customer, ReservationStatus } from '../types';
+import { Reservation, Customer } from '../types';
 import { getCustomers } from '../services/apiService';
 import { datePart, timePart } from '../utils/displayTime';
 import { toTitleCase } from '../utils/text';
 import { sessionTimeZone } from '../utils/displayTime';
+import { displayLocale } from '../utils/formatLocale';
+import {
+  getReservationState, reservationStateDs, reservationStateLabel,
+  type ReservationStateKey,
+} from './reservationState';
 
 interface CommandPaletteProps {
   isOpen: boolean;
@@ -24,7 +30,7 @@ const MAX_PER_GROUP = 25;
 const formatResDate = (iso: string): string => {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleDateString('it-IT', {
+  return d.toLocaleDateString(displayLocale(), {
     timeZone: sessionTimeZone(),
     day: '2-digit',
     month: 'short',
@@ -34,18 +40,21 @@ const formatResDate = (iso: string): string => {
 
 const formatResTime = (iso: string): string => timePart(iso);
 
-const statusChip = (r: Reservation): { label: string; cls: string } | null => {
-  const s = r.reservation_status;
-  if (s === ReservationStatus.CANCELLED || s === ReservationStatus.DECLINED) {
-    return { label: 'Annullata', cls: 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)]' };
-  }
-  if (s === ReservationStatus.NO_SHOW) {
-    return { label: 'No show', cls: 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)]' };
-  }
-  if (s === ReservationStatus.PENDING) {
-    return { label: 'Da confermare', cls: 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]' };
-  }
-  return null;
+/* Il palette mette un chip SOLO quando c'è qualcosa che non va: annullata,
+   no show, da confermare. Il resto lo si vede dalla data e dall'ora, e un
+   chip su ogni riga sarebbe rumore.
+
+   Quello che il palette NON fa più è riscriversi etichetta e colore a mano:
+   li prende da reservationState.tsx, che è la fonte unica di entrambi
+   (CLAUDE.md, «Never re-derive state colour locally»). Prima qui «Annullata»
+   e il rosa critical erano una seconda copia, e una seconda copia di un
+   colore di stato è il modo in cui due schermate finiscono a mostrare lo
+   stesso stato in due tinte. */
+const CHIP_STATES = new Set<ReservationStateKey>(['cancelled', 'declined', 'noshow', 'pending']);
+
+const chipState = (r: Reservation): ReservationStateKey | null => {
+  const state = getReservationState(r);
+  return CHIP_STATES.has(state) ? state : null;
 };
 
 export const CommandPalette: React.FC<CommandPaletteProps> = ({
@@ -55,6 +64,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   onSelectReservation,
   onSelectCustomer,
 }) => {
+  const { t } = useTranslation('common', { useSuspense: false });
   const [query, setQuery] = useState('');
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [customersLoaded, setCustomersLoaded] = useState(false);
@@ -201,7 +211,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       onClick={onClose}
       role="dialog"
       aria-modal="true"
-      aria-label="Ricerca globale"
+      aria-label={t('palette.aria', 'Ricerca globale')}
     >
       <div className="absolute inset-0 bg-[var(--ds-backdrop)]" style={{ animation: 'fadeIn 200ms ease-out both' }} />
 
@@ -245,7 +255,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
               value={query}
               onChange={e => setQuery(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Cerca prenotazioni o clienti…"
+              placeholder={t('palette.placeholder', 'Cerca prenotazioni o clienti…')}
               className="h-12 w-full rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] pl-11 pr-11 text-[16px] text-[var(--ds-text-primary)] outline-none placeholder:text-[var(--ds-text-muted)] focus-visible:outline-none sm:bg-[var(--ds-surface)] sm:text-[15px] sm:shadow-[var(--ds-shadow-raised)]"
             />
             {customersLoading && (
@@ -257,7 +267,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
               <button
                 type="button"
                 onClick={() => setQuery('')}
-                aria-label="Svuota ricerca"
+                aria-label={t('aria.clearSearch', 'Svuota ricerca')}
                 className="absolute right-3 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               >
                 <X className="h-4 w-4" />
@@ -286,10 +296,10 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
             {reservationHits.length > 0 && (
               <div>
                 <div className="px-4 pt-4 pb-1 text-[13px] font-semibold text-[var(--ds-text-muted)]">
-                  Prenotazioni · {reservationHits.length}
+                  {t('palette.reservations', 'Prenotazioni · {{count}}', { count: reservationHits.length })}
                 </div>
                 {reservationHits.map((r, i) => {
-                  const chip = statusChip(r);
+                  const chip = chipState(r);
                   const isActive = i === activeIndex;
                   return (
                     <button
@@ -310,14 +320,17 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                           <span className="text-[15px] sm:text-[14px] font-medium text-[var(--ds-text-primary)] truncate">
                             {toTitleCase(r.customer_name) || '—'}
                           </span>
-                          {chip && (
-                            <span className={`flex-shrink-0 rounded-[var(--ds-radius-control)] px-2 py-0.5 text-[11px] font-medium ${chip.cls}`}>
-                              {chip.label}
-                            </span>
-                          )}
+                          {chip && (() => {
+                            const ds = reservationStateDs(chip);
+                            return (
+                              <span className={`flex-shrink-0 rounded-[var(--ds-radius-control)] px-2 py-0.5 text-[11px] font-medium ${ds.tint} ${ds.text}`}>
+                                {reservationStateLabel(chip, t)}
+                              </span>
+                            );
+                          })()}
                         </div>
                         <div className="text-[13px] sm:text-[12px] text-[var(--ds-text-muted)] truncate tabular">
-                          {formatResDate(r.reservation_time)} · {formatResTime(r.reservation_time)} · {r.guests || 0} {r.guests === 1 ? 'ospite' : 'ospiti'}
+                          {formatResDate(r.reservation_time)} · {formatResTime(r.reservation_time)} · {t('palette.guests', '{{count}} ospiti', { count: r.guests || 0 })}
                           {r.phone ? ` · ${r.phone}` : ''}
                         </div>
                       </div>

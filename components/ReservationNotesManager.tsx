@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Plus, Trash2, Loader2, Save, GripVertical, Smile, X, ChevronDown, ChevronRight } from 'lucide-react';
 import { Loader } from './Loader';
 import {
@@ -56,6 +57,7 @@ const draftEquals = (a: Draft, b: Draft): boolean => {
 };
 
 export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
+  const { t } = useTranslation('impostazioni', { useSuspense: false });
     const { hasPermission } = useAuth();
     const canEdit = hasPermission('settings:full');
 
@@ -88,7 +90,7 @@ export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
                     variants: r.variants.map(v => ({ ...v })),
                 })));
             } catch (err: any) {
-                if (!cancelled) showToast(err?.message || 'Errore nel caricamento delle note', 'error');
+                if (!cancelled) showToast(err?.message || t('note.errLoad', 'Errore nel caricamento delle note'), 'error');
             } finally {
                 if (!cancelled) setLoading(false);
             }
@@ -126,7 +128,7 @@ export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
         }
         const dup = drafts.some(d => d.label.trim().toLowerCase() === trimmed.toLowerCase());
         if (dup) {
-            showToast('Nota già presente', 'error');
+            showToast(t('note.dupNote', 'Nota già presente'), 'error');
             return;
         }
         setDrafts(prev => [
@@ -181,7 +183,7 @@ export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
         }
         const dup = target?.variants.some(v => v.label.trim().toLowerCase() === label.toLowerCase());
         if (dup) {
-            showToast('Variante già presente', 'error');
+            showToast(t('note.dupVariant', 'Variante già presente'), 'error');
             return;
         }
         setDrafts(prev => prev.map((d, i) => i === idx
@@ -261,9 +263,9 @@ export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
                 ...r,
                 variants: r.variants.map(v => ({ ...v })),
             })));
-            showToast('Note aggiornate', 'success');
+            showToast(t('note.saved', 'Note aggiornate'), 'success');
         } catch (err: any) {
-            showToast(err?.message || 'Errore aggiornamento note', 'error');
+            showToast(err?.message || t('note.errSave', 'Errore aggiornamento note'), 'error');
         } finally {
             setSaving(false);
         }
@@ -288,8 +290,8 @@ export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
                             ? 'border-[var(--ds-arriving-solid)] bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]'
                             : 'border-[var(--ds-border)] text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)]'
                     } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-                    title={currentIcon ? RESERVATION_NOTE_ICON_LABELS[currentIcon] || currentIcon : 'Scegli icona'}
-                    aria-label="Scegli icona"
+                    title={currentIcon ? RESERVATION_NOTE_ICON_LABELS[currentIcon] || currentIcon : t('note.pickIcon', 'Scegli icona')}
+                    aria-label={t('note.pickIcon', 'Scegli icona')}
                 >
                     {Icon ? <Icon className="w-4 h-4" /> : <Smile className="w-4 h-4" />}
                 </button>
@@ -394,8 +396,8 @@ export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
                                         type="button"
                                         onClick={() => toggleExpanded(d.key)}
                                         className="p-1.5 rounded-[var(--ds-radius)] text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)] transition-colors"
-                                        title={isExpanded ? 'Nascondi varianti' : 'Mostra varianti'}
-                                        aria-label={isExpanded ? 'Nascondi varianti' : 'Mostra varianti'}
+                                        title={isExpanded ? t('note.hideVariants', 'Nascondi varianti') : t('note.showVariants', 'Mostra varianti')}
+                                        aria-label={isExpanded ? t('note.hideVariants', 'Nascondi varianti') : t('note.showVariants', 'Mostra varianti')}
                                         aria-expanded={isExpanded}
                                     >
                                         {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
@@ -408,7 +410,7 @@ export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
                                             type="button"
                                             onClick={() => removeAt(i)}
                                             className="p-1.5 rounded-[var(--ds-radius)] text-[var(--ds-critical-solid)] hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                                            title="Rimuovi"
+                                            title={t('note.remove', 'Rimuovi')}
                                             aria-label={`Rimuovi ${d.label}`}
                                         >
                                             <Trash2 className="w-4 h-4" />
@@ -421,8 +423,8 @@ export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
                                         variants={d.variants}
                                         canEdit={canEdit}
                                         hint={hasStructure
-                                            ? 'Es. "Maiale", "Vitello". Se la nota non ha varianti, viene chiesta solo la quantità.'
-                                            : 'Attiva "Quantità" per contare gli ordini di questa nota. Aggiungi varianti se ci sono più tipologie.'}
+                                            ? t('note.variantHint', 'Es. "Maiale", "Vitello". Se la nota non ha varianti, viene chiesta solo la quantità.')
+                                            : t('note.qtyHint', 'Attiva "Quantità" per contare gli ordini di questa nota. Aggiungi varianti se ci sono più tipologie.')}
                                         onAdd={(label) => addVariantAt(i, label)}
                                         onUpdate={(vIdx, value) => updateVariantLabelAt(i, vIdx, value)}
                                         onRemove={(vIdx) => removeVariantAt(i, vIdx)}
@@ -440,7 +442,7 @@ export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
                     <input
                         type="text"
                         value={newLabel}
-                        placeholder="Aggiungi nota (es. Tavolo esterno)"
+                        placeholder={t('note.addNote', 'Aggiungi nota (es. Tavolo esterno)')}
                         maxLength={MAX_LABEL_LENGTH}
                         onChange={(e) => setNewLabel(e.target.value)}
                         onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addLabel(); } }}
@@ -469,7 +471,7 @@ export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
                         className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[13px] font-medium hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                         {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                        Salva modifiche
+                        {t('note.saveChanges', 'Salva modifiche')}
                     </button>
                 </div>
             )}
@@ -493,6 +495,7 @@ interface VariantEditorProps {
 }
 
 const VariantEditor: React.FC<VariantEditorProps> = ({ variants, canEdit, hint, onAdd, onUpdate, onRemove }) => {
+  const { t } = useTranslation('impostazioni', { useSuspense: false });
     const [pending, setPending] = useState('');
     const commit = () => {
         const v = pending.trim();
@@ -521,7 +524,7 @@ const VariantEditor: React.FC<VariantEditorProps> = ({ variants, canEdit, hint, 
                                     type="button"
                                     onClick={() => onRemove(i)}
                                     className="p-1 rounded-[var(--ds-radius)] text-[var(--ds-critical-solid)] hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                                    title="Rimuovi variante"
+                                    title={t('note.removeVariant', 'Rimuovi variante')}
                                     aria-label={`Rimuovi variante ${v.label}`}
                                 >
                                     <X className="w-3.5 h-3.5" />
@@ -536,7 +539,7 @@ const VariantEditor: React.FC<VariantEditorProps> = ({ variants, canEdit, hint, 
                     <input
                         type="text"
                         value={pending}
-                        placeholder="Aggiungi variante (es. Maiale)"
+                        placeholder={t('note.addVariant', 'Aggiungi variante (es. Maiale)')}
                         maxLength={MAX_LABEL_LENGTH}
                         onChange={(e) => setPending(e.target.value)}
                         onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } }}

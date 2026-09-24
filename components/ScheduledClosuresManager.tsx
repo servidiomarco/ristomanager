@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { displayLocale } from '../utils/formatLocale';
 import { Loader2, Plus, Trash2, DoorClosed, EyeOff, Calendar } from 'lucide-react';
 import { Loader } from './Loader';
 import {
@@ -24,12 +26,18 @@ type ClosureRow =
     | { kind: 'room'; id: number; date: string; shift: Shift; room_id: number }
     | { kind: 'table'; id: number; date: string; shift: Shift; table_id: number };
 
-const shiftLabel = (s: Shift): string => (s === Shift.LUNCH ? 'Pranzo' : 'Cena');
+/* `t` a parametro: funzione di modulo, nessun hook qui. */
+type TFunc = (key: string, defaultValue: string) => string;
+
+const shiftLabel = (s: Shift, t?: TFunc): string =>
+  s === Shift.LUNCH
+    ? (t ? t('chiu.lunch', 'Pranzo') : 'Pranzo')
+    : (t ? t('chiu.dinner', 'Cena') : 'Cena');
 
 const formatDate = (isoDate: string): string => {
     const [y, m, d] = isoDate.split('-').map(Number);
     const dt = new Date(y, (m || 1) - 1, d || 1);
-    return dt.toLocaleDateString('it-IT', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
+    return dt.toLocaleDateString(displayLocale(), { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
 };
 
 const todayISO = (): string => {
@@ -41,6 +49,7 @@ const todayISO = (): string => {
 };
 
 export const ScheduledClosuresManager: React.FC<Props> = ({ showToast }) => {
+  const { t } = useTranslation('impostazioni', { useSuspense: false });
     const { hasPermission } = useAuth();
     const canEdit = hasPermission('floorplan:full');
 
@@ -85,7 +94,7 @@ export const ScheduledClosuresManager: React.FC<Props> = ({ showToast }) => {
             });
             setRows(combined);
         } catch (err: any) {
-            showToast(err?.message || 'Errore nel caricamento delle chiusure', 'error');
+            showToast(err?.message || t('chiu.errLoad', 'Errore nel caricamento delle chiusure'), 'error');
         } finally {
             setLoading(false);
         }
@@ -106,9 +115,9 @@ export const ScheduledClosuresManager: React.FC<Props> = ({ showToast }) => {
                 await deleteTableHidden(row.date, row.shift, row.table_id);
             }
             setRows(prev => prev.filter(r => !(r.kind === row.kind && r.id === row.id)));
-            showToast('Chiusura rimossa', 'success');
+            showToast(t('chiu.removed', 'Chiusura rimossa'), 'success');
         } catch (err: any) {
-            showToast(err?.message || 'Impossibile rimuovere la chiusura', 'error');
+            showToast(err?.message || t('chiu.errRemove', 'Impossibile rimuovere la chiusura'), 'error');
         }
     };
 
@@ -122,11 +131,11 @@ export const ScheduledClosuresManager: React.FC<Props> = ({ showToast }) => {
 
     const handleAdd = async () => {
         if (formKind === 'room' && !formRoomId) {
-            showToast('Seleziona una sala', 'error');
+            showToast(t('chiu.pickRoom', 'Seleziona una sala'), 'error');
             return;
         }
         if (formKind === 'table' && !formTableId) {
-            showToast('Seleziona un tavolo', 'error');
+            showToast(t('chiu.pickTable', 'Seleziona un tavolo'), 'error');
             return;
         }
         setSaving(true);
@@ -136,12 +145,12 @@ export const ScheduledClosuresManager: React.FC<Props> = ({ showToast }) => {
             } else {
                 await createTableHidden(formDate, formShift, Number(formTableId));
             }
-            showToast('Chiusura aggiunta', 'success');
+            showToast(t('chiu.added', 'Chiusura aggiunta'), 'success');
             setShowForm(false);
             resetForm();
             await load(showPast ? 'all' : 'future');
         } catch (err: any) {
-            showToast(err?.message || 'Impossibile aggiungere la chiusura', 'error');
+            showToast(err?.message || t('chiu.errAdd', 'Impossibile aggiungere la chiusura'), 'error');
         } finally {
             setSaving(false);
         }
@@ -158,7 +167,7 @@ export const ScheduledClosuresManager: React.FC<Props> = ({ showToast }) => {
                             onChange={e => setShowPast(e.target.checked)}
                             className="rounded"
                         />
-                        Mostra passate
+                        {t('chiu.showPast', 'Mostra passate')}
                     </label>
                 </div>
                 {canEdit && (
@@ -167,7 +176,7 @@ export const ScheduledClosuresManager: React.FC<Props> = ({ showToast }) => {
                         className="flex items-center gap-2 px-3 py-1.5 rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-sm font-medium hover:opacity-90"
                     >
                         <Plus className="h-4 w-4" />
-                        Nuova chiusura
+                        {t('chiu.new', 'Nuova chiusura')}
                     </button>
                 )}
             </div>
@@ -216,7 +225,7 @@ export const ScheduledClosuresManager: React.FC<Props> = ({ showToast }) => {
                         </div>
                         <div>
                             <label className="block text-xs text-[var(--ds-text-muted)] mb-1">
-                                {formKind === 'room' ? 'Sala' : 'Tavolo'}
+                                {formKind === 'room' ? t('chiu.room', 'Sala') : t('chiu.table', 'Tavolo')}
                             </label>
                             {formKind === 'room' ? (
                                 <select
@@ -254,7 +263,7 @@ export const ScheduledClosuresManager: React.FC<Props> = ({ showToast }) => {
                             className="px-3 py-1.5 rounded-[var(--ds-radius)] text-sm text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)]"
                             disabled={saving}
                         >
-                            Annulla
+                            {t('chiu.cancel', 'Annulla')}
                         </button>
                         <button
                             onClick={handleAdd}
@@ -262,7 +271,7 @@ export const ScheduledClosuresManager: React.FC<Props> = ({ showToast }) => {
                             className="px-3 py-1.5 rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-sm font-medium hover:opacity-90 disabled:opacity-50 flex items-center gap-2"
                         >
                             {saving && <Loader2 className="h-4 w-4 animate-spin" />}
-                            Conferma
+                            {t('chiu.confirm', 'Conferma')}
                         </button>
                     </div>
                 </div>
@@ -297,7 +306,7 @@ export const ScheduledClosuresManager: React.FC<Props> = ({ showToast }) => {
                                     <div className="min-w-0">
                                         <div className="text-sm font-medium text-[var(--ds-text-primary)] truncate">{label}</div>
                                         <div className="text-xs text-[var(--ds-text-muted)]">
-                                            {formatDate(row.date)} · {shiftLabel(row.shift)}
+                                            {formatDate(row.date)} · {shiftLabel(row.shift, t)}
                                         </div>
                                     </div>
                                 </div>
@@ -305,7 +314,7 @@ export const ScheduledClosuresManager: React.FC<Props> = ({ showToast }) => {
                                     <button
                                         onClick={() => handleDelete(row)}
                                         className="p-1.5 rounded-[var(--ds-radius)] text-[var(--ds-critical-text)] hover:bg-[var(--ds-critical-tint)] dark:hover:bg-[var(--ds-critical-tint)] transition"
-                                        title="Rimuovi chiusura"
+                                        title={t('chiu.remove', 'Rimuovi chiusura')}
                                     >
                                         <Trash2 className="h-4 w-4" />
                                     </button>

@@ -129,5 +129,40 @@
     "deleteMsg": "Stai per eliminare l'utente:",
     "cannotDelete": "Non è stato possibile eliminare",
     "gotIt": "Ho capito"
+  },
+  "note": {
+    "errLoad": "Errore nel caricamento delle note",
+    "dupNote": "Nota già presente",
+    "dupVariant": "Variante già presente",
+    "saved": "Note aggiornate",
+    "errSave": "Errore aggiornamento note",
+    "pickIcon": "Scegli icona",
+    "hideVariants": "Nascondi varianti",
+    "showVariants": "Mostra varianti",
+    "remove": "Rimuovi",
+    "variantHint": "Es. \"Maiale\", \"Vitello\". Se la nota non ha varianti, viene chiesta solo la quantità.",
+    "qtyHint": "Attiva \"Quantità\" per contare gli ordini di questa nota. Aggiungi varianti se ci sono più tipologie.",
+    "addNote": "Aggiungi nota (es. Tavolo esterno)",
+    "saveChanges": "Salva modifiche",
+    "removeVariant": "Rimuovi variante",
+    "addVariant": "Aggiungi variante (es. Maiale)"
+  },
+  "chiu": {
+    "lunch": "Pranzo",
+    "dinner": "Cena",
+    "errLoad": "Errore nel caricamento delle chiusure",
+    "removed": "Chiusura rimossa",
+    "errRemove": "Impossibile rimuovere la chiusura",
+    "pickRoom": "Seleziona una sala",
+    "pickTable": "Seleziona un tavolo",
+    "added": "Chiusura aggiunta",
+    "errAdd": "Impossibile aggiungere la chiusura",
+    "showPast": "Mostra passate",
+    "new": "Nuova chiusura",
+    "room": "Sala",
+    "table": "Tavolo",
+    "cancel": "Annulla",
+    "confirm": "Conferma",
+    "remove": "Rimuovi chiusura"
   }
 }
