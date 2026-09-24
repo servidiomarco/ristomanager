@@ -576,10 +576,37 @@ describe('fuso per tenant — «oggi» e il fuso che arriva alle pagine pubblich
     afterAll(async () => {
         if (!db) return;
         try {
-            for (const t of ['activity_logs', 'user_sessions', 'app_settings', 'tenant_tokens', 'users', 'tenant_features', 'role_permissions']) {
+            for (const t of ['user_sessions', 'app_settings', 'tenant_tokens', 'users', 'tenant_features', 'role_permissions']) {
                 await db.query(`DELETE FROM ${t} WHERE tenant_id = $1`, [dubaiId]).catch(() => {});
             }
-            await db.query('DELETE FROM tenants WHERE id = $1', [dubaiId]);
+            /* activity_logs per ultimo, e con un secondo giro.
+             *
+             * LogService.logActivity NON è attesa in 88 dei 91 punti che la
+             * chiamano: è fire-and-forget di proposito, perché nessuna
+             * risposta al cliente deve aspettare una riga di registro. Il
+             * prezzo è qui: la riga di log dell'ultima richiesta del test può
+             * atterrare DOPO che la pulizia ha svuotato la tabella, e allora
+             * la DELETE sul tenant sbatte contro activity_logs_tenant_id_fkey
+             * — 651 test verdi e la suite rossa per lo smontaggio.
+             *
+             * Il primo giro svuota, il secondo raccoglie chi è arrivato
+             * tardi: fra i due c'è il round-trip della DELETE fallita, che in
+             * pratica basta. È una mitigazione, non una prova: la chiusura
+             * vera è un ON DELETE CASCADE sulla foreign key, che però è una
+             * migration sullo schema di produzione per un problema di
+             * smontaggio di un test. */
+            let ultimo: unknown = null;
+            for (let tentativo = 0; tentativo < 2; tentativo++) {
+                await db.query('DELETE FROM activity_logs WHERE tenant_id = $1', [dubaiId]).catch(() => {});
+                try {
+                    await db.query('DELETE FROM tenants WHERE id = $1', [dubaiId]);
+                    ultimo = null;
+                    break;
+                } catch (err) {
+                    ultimo = err;
+                }
+            }
+            if (ultimo) throw ultimo;
         } finally {
             await db.end();
         }
