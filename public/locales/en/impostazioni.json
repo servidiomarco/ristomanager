@@ -129,5 +129,40 @@
     "deleteMsg": "You are about to delete this user:",
     "cannotDelete": "The deletion did not go through",
     "gotIt": "Got it"
+  },
+  "note": {
+    "errLoad": "Could not load the notes",
+    "dupNote": "That note is already there",
+    "dupVariant": "That variant is already there",
+    "saved": "Notes updated",
+    "errSave": "Could not update the notes",
+    "pickIcon": "Pick an icon",
+    "hideVariants": "Hide the variants",
+    "showVariants": "Show the variants",
+    "remove": "Remove",
+    "variantHint": "E.g. \"Pork\", \"Veal\". If the note has no variants, only the quantity is asked.",
+    "qtyHint": "Switch \"Quantity\" on to count the orders for this note. Add variants if there is more than one kind.",
+    "addNote": "Add a note (e.g. Outside table)",
+    "saveChanges": "Save changes",
+    "removeVariant": "Remove the variant",
+    "addVariant": "Add a variant (e.g. Pork)"
+  },
+  "chiu": {
+    "lunch": "Lunch",
+    "dinner": "Dinner",
+    "errLoad": "Could not load the closures",
+    "removed": "Closure removed",
+    "errRemove": "The closure could not be removed",
+    "pickRoom": "Pick a room",
+    "pickTable": "Pick a table",
+    "added": "Closure added",
+    "errAdd": "The closure could not be added",
+    "showPast": "Show past ones",
+    "new": "New closure",
+    "room": "Room",
+    "table": "Table",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "remove": "Remove the closure"
   }
 }
