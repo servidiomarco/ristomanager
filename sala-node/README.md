@@ -206,4 +206,8 @@ alla fonte che gliel'ha dato (cloud o nodo); la config arriva dal cloud con
 ripiego sul nodo — a linea giù le stampe delle comande battute al buio
 ESCONO comunque. Il nodo riconosce il token dell'agente grazie alla riga
 `tenants` (nello snapshot per i nodi nuovi; sincronizzata a ogni avvio per
-quelli già installati).
+quelli già installati). Il **token legacy** dell'agente (env
+`PRINT_AGENT_TOKEN` del cloud, tenant 1) il nodo lo eredita da solo via
+`/sala-node/credentials`: dai nodi nuovi NON serve più copiarlo a mano nel
+`.cmd` (sul PC del Frantoio, installato prima di questo fix, la riga
+copiata a mano resta e non dà fastidio).
