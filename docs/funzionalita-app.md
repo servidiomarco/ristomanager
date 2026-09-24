@@ -667,6 +667,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-24 | Piattaforma, Roadmap, Development | Con la lingua inglese parlano inglese anche le tre console di piattaforma: pannello clienti (feature, abbonamento, piano Sofia, sospensione, nuovo cliente), roadmap del lancio e board di sviluppo. |
 | 2026-09-24 | Log attività, Consumi AI | Con la lingua inglese parlano inglese il log attività (filtri, colonne, azioni e risorse) e la pagina Consumi AI (quota ElevenLabs, minuti del mese col margine, costi dei modelli di testo). |
 | 2026-09-24 | Pagamenti, Menu, Impostazioni | Con la lingua inglese parlano inglese gli ultimi pezzi: link di pagamento con i loro filtri e raggruppamenti per giorno, provider di pagamento, conto al tavolo coi parametri tecnici, prompt AI dei tavoli, messaggi rapidi della chat, composizione del menù banchetto e scheda del piatto. |
 | 2026-09-24 | Tutte le schermate | Con la lingua inglese parlano inglese la coda dei pezzi condivisi: conferma di eliminazione, banner di nuova versione, selettore del periodo, libreria media, barra dei canali per turno, scelta del cliente, foglio delle varianti e lettore delle registrazioni. |

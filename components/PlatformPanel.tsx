@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { displayLocale } from '../utils/formatLocale';
 import { AlertTriangle, Building2, Check, Copy, Lock, Plus, RefreshCw } from 'lucide-react';
 import {
   ModalShell, FormCard, Field, Callout, EmptyState, StatusPill, CountBadge, StatStrip,
@@ -109,6 +111,10 @@ export const ImpersonationBanner: React.FC = () => {
 
 /* ── Etichette ────────────────────────────────────────────────────────── */
 
+/* I valori (voice, pay_at_table…) sono entitlement: si traduce l'etichetta,
+   mai la chiave. `t` a parametro perché queste sono costanti di modulo. */
+type TFunc = (key: string, defaultValue: string, options?: Record<string, unknown>) => string;
+
 const FEATURE_LABEL: Record<AdminTenantFeature, string> = {
   voice: 'voce',
   whatsapp: 'whatsapp',
@@ -119,16 +125,20 @@ const FEATURE_LABEL: Record<AdminTenantFeature, string> = {
   sala_node: 'nodo di sala',
 };
 
+const featureLabel = (f: AdminTenantFeature, t?: TFunc): string =>
+  t ? t(`feature.${f}`, FEATURE_LABEL[f]) : FEATURE_LABEL[f];
+
 // billing_status arriva da Stripe via webhook; NULL è il tenant storico senza
 // piano, che non è un moroso — per lui niente pill.
-const billingPill = (status: string | null): { label: string; tone: 'positive' | 'pending' | 'critical' | 'neutral' } | null => {
+const billingPill = (status: string | null, t?: TFunc): { label: string; tone: 'positive' | 'pending' | 'critical' | 'neutral' } | null => {
+  const lab = (k: string, it: string) => (t ? t(k, it) : it);
   if (!status) return null;
   switch (status) {
-    case 'active': return { label: 'abbonato', tone: 'positive' };
-    case 'trialing': return { label: 'in prova', tone: 'pending' };
+    case 'active': return { label: lab('billing.active', 'abbonato'), tone: 'positive' };
+    case 'trialing': return { label: lab('billing.trialing', 'in prova'), tone: 'pending' };
     case 'past_due':
-    case 'unpaid': return { label: 'pagamento scaduto', tone: 'critical' };
-    case 'canceled': return { label: 'disdetto', tone: 'neutral' };
+    case 'unpaid': return { label: lab('billing.past_due', 'pagamento scaduto'), tone: 'critical' };
+    case 'canceled': return { label: lab('billing.canceled', 'disdetto'), tone: 'neutral' };
     default: return { label: status, tone: 'neutral' };
   }
 };
@@ -137,7 +147,7 @@ const formatDate = (iso: string): string => {
   const d = new Date(iso);
   return Number.isNaN(d.getTime())
     ? '—'
-    : d.toLocaleDateString('it-IT', { day: 'numeric', month: 'short', year: 'numeric' });
+    : d.toLocaleDateString(displayLocale(), { day: 'numeric', month: 'short', year: 'numeric' });
 };
 
 const slugify = (name: string): string =>
@@ -155,6 +165,7 @@ type ShowToast = (message: string, type?: 'success' | 'error' | 'info') => void;
 
 /* ── Riga copiabile del pannello una-tantum ─────────────────────────────── */
 const SecretRow: React.FC<{ label: string; value: string; showToast: ShowToast }> = ({ label, value, showToast }) => {
+  const { t } = useTranslation('piattaforma', { useSuspense: false });
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     try {
@@ -162,7 +173,7 @@ const SecretRow: React.FC<{ label: string; value: string; showToast: ShowToast }
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
-      showToast('Copia non riuscita — seleziona e copia a mano', 'error');
+      showToast(t('errCopy', 'Copia non riuscita — seleziona e copia a mano'), 'error');
     }
   };
   return (
@@ -190,6 +201,7 @@ const TenantCard: React.FC<{
   onRevert: (prev: AdminTenant) => void;
   showToast: ShowToast;
 }> = ({ tenant, onPatched, onRevert, showToast }) => {
+  const { t } = useTranslation('piattaforma', { useSuspense: false });
   const [confirmingStatus, setConfirmingStatus] = useState(false);
   const [busy, setBusy] = useState<'status' | 'enter' | 'impersonate' | 'billing' | 'addon' | null>(null);
   // Add-on in attesa di conferma: su un tenant abbonato la chip non scatta
@@ -208,7 +220,7 @@ const TenantCard: React.FC<{
   const [planDraft, setPlanDraft] = useState({ price: '', included: '', overage: '' });
   const [planBusy, setPlanBusy] = useState(false);
   const suspended = tenant.status === 'suspended';
-  const billing = billingPill(tenant.billing_status);
+  const billing = billingPill(tenant.billing_status, t);
   const abbonato = tenant.billing_status !== null;
 
   // Toggle feature: PATCH ottimistico — la chip si accende subito, e se il
@@ -239,7 +251,7 @@ const TenantCard: React.FC<{
       });
     } catch (err) {
       onRevert(prev);
-      showToast((err as ApiError).message || 'Aggiornamento feature non riuscito', 'error');
+      showToast((err as ApiError).message || t('errFeature', 'Aggiornamento feature non riuscito'), 'error');
     }
   };
 
@@ -257,10 +269,10 @@ const TenantCard: React.FC<{
         billing_status: res.billing_status,
         features: ADMIN_TENANT_FEATURES.filter(f => res.features[f]),
       });
-      showToast(`Modulo ${FEATURE_LABEL[feature]} ${enabling ? 'aggiunto' : 'rimosso'} dall'abbonamento`, 'success');
+      showToast(t('moduleToggled', "Modulo {{modulo}} {{azione}} dall'abbonamento", { modulo: featureLabel(feature, t), azione: enabling ? t('added', 'aggiunto') : t('removed', 'rimosso') }), 'success');
       setPendingAddon(null);
     } catch (err) {
-      showToast((err as ApiError).message || 'Aggiornamento abbonamento non riuscito', 'error');
+      showToast((err as ApiError).message || t('errSub', 'Aggiornamento abbonamento non riuscito'), 'error');
     } finally {
       setBusy(null);
     }
@@ -274,7 +286,7 @@ const TenantCard: React.FC<{
       onPatched({ ...tenant, status: next });
       showToast(next === 'suspended' ? `${tenant.name} sospeso` : `${tenant.name} riattivato`, 'success');
     } catch (err) {
-      showToast((err as ApiError).message || 'Cambio stato non riuscito', 'error');
+      showToast((err as ApiError).message || t('errStatus', 'Cambio stato non riuscito'), 'error');
     } finally {
       setBusy(null);
       setConfirmingStatus(false);
@@ -291,7 +303,7 @@ const TenantCard: React.FC<{
       setLocksRevoke(false);
       setLocksOpen(true);
     } catch (err) {
-      showToast((err as ApiError).message || 'Permessi riservati non caricati', 'error');
+      showToast((err as ApiError).message || t('errLocks', 'Permessi riservati non caricati'), 'error');
     } finally {
       setLocksBusy(null);
     }
@@ -307,9 +319,9 @@ const TenantCard: React.FC<{
       const res = await adminSetPermissionLocks(tenant.id, locksDraft, locksRevoke);
       setLocksDraft(res.locks);
       setLocksOpen(false);
-      showToast(locksRevoke ? 'Permessi riservati salvati e revocati ai ruoli' : 'Permessi riservati salvati', 'success');
+      showToast(locksRevoke ? t('locksSavedRevoked', 'Permessi riservati salvati e revocati ai ruoli') : t('locksSaved', 'Permessi riservati salvati'), 'success');
     } catch (err) {
-      showToast((err as ApiError).message || 'Salvataggio non riuscito', 'error');
+      showToast((err as ApiError).message || t('errSave', 'Salvataggio non riuscito'), 'error');
     } finally {
       setLocksBusy(null);
     }
@@ -331,7 +343,7 @@ const TenantCard: React.FC<{
       window.location.reload();
     } catch (err) {
       setBusy(null);
-      showToast((err as ApiError).message || 'Ingresso non riuscito', 'error');
+      showToast((err as ApiError).message || t('errEnter', 'Ingresso non riuscito'), 'error');
     }
   };
 
@@ -350,7 +362,7 @@ const TenantCard: React.FC<{
       window.location.reload();
     } catch (err) {
       setBusy(null);
-      showToast((err as ApiError).message || 'Impersonation non riuscita', 'error');
+      showToast((err as ApiError).message || t('errImpersonate', 'Impersonation non riuscita'), 'error');
     }
   };
 
@@ -366,7 +378,7 @@ const TenantCard: React.FC<{
     } catch (err) {
       const apiErr = err as ApiError;
       if (apiErr.status === 503) showToast('billing non configurato', 'info');
-      else showToast(apiErr.message || 'Apertura billing non riuscita', 'error');
+      else showToast(apiErr.message || t('errBilling', 'Apertura billing non riuscita'), 'error');
     } finally {
       setBusy(null);
     }
@@ -408,7 +420,7 @@ const TenantCard: React.FC<{
             overage_cents_per_minute: toCents(planDraft.overage),
           };
           if (Object.values(body).some(n => n !== null && (!Number.isInteger(n) || n < 0))) {
-            showToast('Valori del piano non validi', 'error');
+            showToast(t('badPlan', 'Valori del piano non validi'), 'error');
             return;
           }
           setPlanBusy(true);
@@ -416,9 +428,9 @@ const TenantCard: React.FC<{
             const next = await adminUpdateVoicePlan(tenant.id, body);
             onPatched({ ...tenant, voice_plan: next });
             setPlanOpen(false);
-            showToast('Piano Sofia aggiornato', 'success');
+            showToast(t('planSaved', 'Piano Sofia aggiornato'), 'success');
           } catch (err) {
-            showToast((err as ApiError).message || 'Aggiornamento piano non riuscito', 'error');
+            showToast((err as ApiError).message || t('errPlan', 'Aggiornamento piano non riuscito'), 'error');
           } finally {
             setPlanBusy(false);
           }
@@ -427,11 +439,11 @@ const TenantCard: React.FC<{
           <div className="mt-2 text-[13px] tabular-nums text-[var(--ds-text-secondary)]">
             <p>
               {plan
-                ? <>Piano Sofia: {eur(plan.priceCents)} · {plan.includedMinutes} min · {eur(plan.overageCentsPerMinute)}/min extra · tetto {eur(plan.extraCapCents)}{plan.custom ? ' (su misura)' : ''}</>
-                : 'Piano Sofia: listino'}
+                ? <>{t('plan.summary', 'Piano Sofia: {{prezzo}} · {{minuti}} min · {{extra}}/min extra · tetto {{tetto}}', { prezzo: eur(plan.priceCents), minuti: plan.includedMinutes, extra: eur(plan.overageCentsPerMinute), tetto: eur(plan.extraCapCents) })}{plan.custom ? t('plan.custom', ' (su misura)') : ''}</>
+                : t('plan.listPrice', 'Piano Sofia: listino')}
               {!planOpen && (
                 <button type="button" onClick={openPlan} className="ml-2 font-medium text-[var(--ds-text-primary)] underline underline-offset-4 hover:no-underline">
-                  Modifica
+                  {t('plan.edit', 'Modifica')}
                 </button>
               )}
             </p>
@@ -444,14 +456,14 @@ const TenantCard: React.FC<{
             {planOpen && (
               <div className="mt-2 rounded-[var(--ds-radius-sm)] bg-[var(--ds-surface-row)] p-3">
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                  <Field label="Canone (€/mese)">
-                    <input className={dsInput} inputMode="decimal" placeholder="listino" value={planDraft.price} onChange={e => setPlanDraft(d => ({ ...d, price: e.target.value }))} />
+                  <Field label={t('plan.fee', 'Canone (€/mese)')}>
+                    <input className={dsInput} inputMode="decimal" placeholder={t('plan.listHint', 'listino')} value={planDraft.price} onChange={e => setPlanDraft(d => ({ ...d, price: e.target.value }))} />
                   </Field>
-                  <Field label="Minuti inclusi">
-                    <input className={dsInput} inputMode="numeric" placeholder="listino" value={planDraft.included} onChange={e => setPlanDraft(d => ({ ...d, included: e.target.value }))} />
+                  <Field label={t('plan.included', 'Minuti inclusi')}>
+                    <input className={dsInput} inputMode="numeric" placeholder={t('plan.listHint', 'listino')} value={planDraft.included} onChange={e => setPlanDraft(d => ({ ...d, included: e.target.value }))} />
                   </Field>
-                  <Field label="Minuto extra (€)">
-                    <input className={dsInput} inputMode="decimal" placeholder="listino" value={planDraft.overage} onChange={e => setPlanDraft(d => ({ ...d, overage: e.target.value }))} />
+                  <Field label={t('plan.overage', 'Minuto extra (€)')}>
+                    <input className={dsInput} inputMode="decimal" placeholder={t('plan.listHint', 'listino')} value={planDraft.overage} onChange={e => setPlanDraft(d => ({ ...d, overage: e.target.value }))} />
                   </Field>
                 </div>
                 <p className="mt-1.5 text-[12px] text-[var(--ds-text-muted)]">Campo vuoto = listino. Il tetto degli extra lo sceglie il ristoratore.</p>
@@ -467,7 +479,7 @@ const TenantCard: React.FC<{
 
       {/* Feature: le tre chip sono i toggle. Accesa = tinta seated con spunta,
           il colore non è l'unico segnale. */}
-      <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label={`Feature di ${tenant.name}`}>
+      <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label={t('featuresAria', 'Feature di {{nome}}', { nome: tenant.name })}>
         {ADMIN_TENANT_FEATURES.map(feature => {
           const on = tenant.features.includes(feature);
           return (
@@ -483,7 +495,7 @@ const TenantCard: React.FC<{
               }`}
             >
               {on && <Check className="h-3.5 w-3.5" aria-hidden />}
-              {FEATURE_LABEL[feature]}
+              {featureLabel(feature, t)}
             </button>
           );
         })}
@@ -496,15 +508,15 @@ const TenantCard: React.FC<{
         <div className="mt-3 flex flex-wrap items-center gap-2 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3">
           <p className="min-w-0 flex-1 text-[14px] text-[var(--ds-text-primary)]">
             {tenant.features.includes(pendingAddon)
-              ? `Rimuovere «${FEATURE_LABEL[pendingAddon]}» dall'abbonamento? Il credito residuo viene prorato.`
-              : `Aggiungere «${FEATURE_LABEL[pendingAddon]}» all'abbonamento? L'addebito parte prorato da oggi.`}
+              ? t('addonRemove', "Rimuovere «{{modulo}}» dall'abbonamento? Il credito residuo viene prorato.", { modulo: featureLabel(pendingAddon, t) })
+              : t('addonAdd', "Aggiungere «{{modulo}}» all'abbonamento? L'addebito parte prorato da oggi.", { modulo: featureLabel(pendingAddon, t) })}
           </p>
           <div className="flex flex-shrink-0 gap-2">
             <button type="button" className={dsButton.secondary} onClick={() => setPendingAddon(null)} disabled={busy === 'addon'}>
-              Annulla
+              {t('cancel', 'Annulla')}
             </button>
             <button type="button" className={dsButton.primary} onClick={confirmAddon} disabled={busy === 'addon'}>
-              {busy === 'addon' ? 'Aggiorno…' : 'Conferma'}
+              {busy === 'addon' ? t('updating', 'Aggiorno…') : t('confirm', 'Conferma')}
             </button>
           </div>
         </div>
@@ -515,8 +527,8 @@ const TenantCard: React.FC<{
           del tenant; «revoca anche ai ruoli» è l'isolamento in un gesto. */}
       {locksOpen && (
         <div className="mt-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3">
-          <p className="text-[13px] font-semibold text-[var(--ds-text-secondary)]">Permessi riservati alla piattaforma</p>
-          <p className="mt-0.5 text-[13px] text-[var(--ds-text-muted)]">La matrice del tenant li mostra col lucchetto e non può toccarli.</p>
+          <p className="text-[13px] font-semibold text-[var(--ds-text-secondary)]">{t('locks.title', 'Permessi riservati alla piattaforma')}</p>
+          <p className="mt-0.5 text-[13px] text-[var(--ds-text-muted)]">{t('locks.hint', 'La matrice del tenant li mostra col lucchetto e non può toccarli.')}</p>
           <div className="mt-3 space-y-2.5">
             {locksCatalog.map(group => (
               <div key={group.feature}>
@@ -553,14 +565,14 @@ const TenantCard: React.FC<{
                 onChange={() => setLocksRevoke(v => !v)}
                 className="h-4 w-4 rounded accent-[var(--ds-action-bg)]"
               />
-              Revoca anche a tutti i ruoli del tenant
+              {t('locks.revokeAll', 'Revoca anche a tutti i ruoli del tenant')}
             </label>
             <div className="flex flex-shrink-0 gap-2">
               <button type="button" className={dsButton.secondary} onClick={() => setLocksOpen(false)} disabled={locksBusy === 'save'}>
-                Annulla
+                {t('cancel', 'Annulla')}
               </button>
               <button type="button" className={dsButton.primary} onClick={saveLocks} disabled={locksBusy === 'save'}>
-                {locksBusy === 'save' ? 'Salvo…' : 'Salva'}
+                {locksBusy === 'save' ? t('locks.saving', 'Salvo…') : t('locks.save', 'Salva')}
               </button>
             </div>
           </div>
@@ -573,12 +585,12 @@ const TenantCard: React.FC<{
         <div className="mt-3 flex flex-wrap items-center gap-2 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3">
           <p className="min-w-0 flex-1 text-[14px] text-[var(--ds-text-primary)]">
             {suspended
-              ? `Riattivare ${tenant.name}?`
-              : `Sospendere ${tenant.name}? Gli accessi e la pagina pubblica si bloccano subito.`}
+              ? t('reactivateAsk', 'Riattivare {{nome}}?', { nome: tenant.name })
+              : t('suspendAsk', 'Sospendere {{nome}}? Gli accessi e la pagina pubblica si bloccano subito.', { nome: tenant.name })}
           </p>
           <div className="flex flex-shrink-0 gap-2">
             <button type="button" className={dsButton.secondary} onClick={() => setConfirmingStatus(false)}>
-              Annulla
+              {t('cancel', 'Annulla')}
             </button>
             <button
               type="button"
@@ -586,24 +598,24 @@ const TenantCard: React.FC<{
               onClick={changeStatus}
               disabled={busy === 'status'}
             >
-              {suspended ? 'Riattiva' : 'Sospendi'}
+              {suspended ? t('reactivate', 'Riattiva') : t('suspend', 'Sospendi')}
             </button>
           </div>
         </div>
       ) : (
         <div className="mt-3 flex flex-wrap gap-2">
           <button type="button" className={dsButton.secondary} onClick={enterTenant} disabled={busy === 'enter'}>
-            Entra
+            {t('enter', 'Entra')}
           </button>
-          <button type="button" className={dsButton.quiet} onClick={impersonate} disabled={busy === 'impersonate'} title="Sessione di 15 minuti come il titolare">
-            Entra come
+          <button type="button" className={dsButton.quiet} onClick={impersonate} disabled={busy === 'impersonate'} title={t('enterAsTitle', 'Sessione di 15 minuti come il titolare')}>
+            {t('enterAs', 'Entra come')}
           </button>
           <button type="button" className={dsButton.quiet} onClick={openLocks} disabled={locksBusy === 'load'} aria-expanded={locksOpen}>
             <Lock className="h-3.5 w-3.5" aria-hidden />
-            Permessi
+            {t('permissions', 'Permessi')}
           </button>
           <button type="button" className={dsButton.quiet} onClick={openBilling} disabled={busy === 'billing'}>
-            {tenant.billing_status ? 'Fatturazione' : 'Attiva abbonamento'}
+            {tenant.billing_status ? t('billingBtn', 'Fatturazione') : t('activateSub', 'Attiva abbonamento')}
           </button>
           {tenant.stripe_customer_url && (
             <a
@@ -611,13 +623,13 @@ const TenantCard: React.FC<{
               target="_blank"
               rel="noreferrer"
               className={dsButton.quiet}
-              title="Apri il customer sul Dashboard Stripe"
+              title={t('stripeTitle', 'Apri il customer sul Dashboard Stripe')}
             >
               Stripe
             </a>
           )}
           <button type="button" className={dsButton.quiet} onClick={() => setConfirmingStatus(true)}>
-            {suspended ? 'Riattiva' : 'Sospendi'}
+            {suspended ? t('reactivate', 'Riattiva') : t('suspend', 'Sospendi')}
           </button>
         </div>
       )}
@@ -635,6 +647,7 @@ const NewTenantModal: React.FC<{
   onCreated: () => void;
   showToast: ShowToast;
 }> = ({ open, onClose, onCreated, showToast }) => {
+  const { t } = useTranslation('piattaforma', { useSuspense: false });
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
   const [slugTouched, setSlugTouched] = useState(false);
@@ -670,7 +683,7 @@ const NewTenantModal: React.FC<{
       setCreated(res);
       onCreated();
     } catch (err) {
-      setError((err as ApiError).message || 'Creazione non riuscita');
+      setError((err as ApiError).message || t('errCreate', 'Creazione non riuscita'));
     } finally {
       setSubmitting(false);
     }
@@ -684,12 +697,12 @@ const NewTenantModal: React.FC<{
         open
         onClose={close}
         title={created.tenant.name}
-        subtitle="Dati di accesso del nuovo cliente"
+        subtitle={t('created.subtitle', 'Dati di accesso del nuovo cliente')}
         size="md"
         bodyClassName="p-5 sm:p-6"
         footer={
           <button type="button" className={dsButton.primary} onClick={close}>
-            Fatto
+            {t('created.done', 'Fatto')}
           </button>
         }
       >
@@ -699,10 +712,10 @@ const NewTenantModal: React.FC<{
           </Callout>
           <FormCard>
             <div className="divide-y divide-[var(--ds-border)]">
-              <SecretRow label="Password temporanea dell'owner" value={created.owner_temp_password} showToast={showToast} />
-              <SecretRow label="Token webhook" value={created.webhook_token} showToast={showToast} />
-              <SecretRow label="Token print agent" value={created.print_agent_token} showToast={showToast} />
-              <SecretRow label="URL prenotazioni" value={created.booking_url} showToast={showToast} />
+              <SecretRow label={t('created.tempPassword', "Password temporanea dell'owner")} value={created.owner_temp_password} showToast={showToast} />
+              <SecretRow label={t('created.webhookToken', 'Token webhook')} value={created.webhook_token} showToast={showToast} />
+              <SecretRow label={t('created.printToken', 'Token print agent')} value={created.print_agent_token} showToast={showToast} />
+              <SecretRow label={t('created.bookingUrl', 'URL prenotazioni')} value={created.booking_url} showToast={showToast} />
             </div>
           </FormCard>
         </div>
@@ -714,16 +727,16 @@ const NewTenantModal: React.FC<{
     <ModalShell
       open
       onClose={close}
-      title="Nuovo cliente"
+      title={t('newTenant', 'Nuovo cliente')}
       size="md"
       bodyClassName="p-5 sm:p-6"
       footer={
         <>
           <button type="button" className={dsButton.secondary} onClick={close}>
-            Annulla
+            {t('cancel', 'Annulla')}
           </button>
           <button type="button" className={dsButton.primary} onClick={submit} disabled={!valid || submitting}>
-            {submitting ? 'Creazione…' : 'Crea cliente'}
+            {submitting ? t('creating', 'Creazione…') : t('createTenant', 'Crea cliente')}
           </button>
         </>
       }
@@ -734,7 +747,7 @@ const NewTenantModal: React.FC<{
         )}
         <FormCard>
           <div className="space-y-4">
-            <Field label="Nome del ristorante" htmlFor="pt-name" required>
+            <Field label={t('restaurantName', 'Nome del ristorante')} htmlFor="pt-name" required>
               <input
                 id="pt-name"
                 type="text"
@@ -748,10 +761,10 @@ const NewTenantModal: React.FC<{
               />
             </Field>
             <Field
-              label="Slug"
+              label={t('slug', 'Slug')}
               htmlFor="pt-slug"
               required
-              hint="Nell'URL pubblico delle prenotazioni: minuscole, cifre e trattini."
+              hint={t('slugHint', "Nell'URL pubblico delle prenotazioni: minuscole, cifre e trattini.")}
             >
               <input
                 id="pt-slug"
@@ -761,7 +774,7 @@ const NewTenantModal: React.FC<{
                 onChange={e => { setSlugTouched(true); setSlug(e.target.value.toLowerCase()); }}
               />
             </Field>
-            <Field label="Email dell'owner" htmlFor="pt-email" required>
+            <Field label={t('ownerEmail', "Email dell'owner")} htmlFor="pt-email" required>
               <input
                 id="pt-email"
                 type="email"
@@ -772,7 +785,7 @@ const NewTenantModal: React.FC<{
             </Field>
           </div>
         </FormCard>
-        <FormCard title="Feature attive">
+        <FormCard title={t('activeFeatures', 'Feature attive')}>
           <div className="flex flex-wrap gap-2">
             {ADMIN_TENANT_FEATURES.map(feature => {
               const on = features[feature];
@@ -789,7 +802,7 @@ const NewTenantModal: React.FC<{
                   }`}
                 >
                   {on && <Check className="h-3.5 w-3.5" aria-hidden />}
-                  {FEATURE_LABEL[feature]}
+                  {featureLabel(feature, t)}
                 </button>
               );
             })}
@@ -802,6 +815,7 @@ const NewTenantModal: React.FC<{
 
 /* ── Pannello ────────────────────────────────────────────────────────── */
 export const PlatformPanel: React.FC<{ showToast: ShowToast }> = ({ showToast }) => {
+  const { t } = useTranslation('piattaforma', { useSuspense: false });
   const [tenants, setTenants] = useState<AdminTenant[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -815,7 +829,7 @@ export const PlatformPanel: React.FC<{ showToast: ShowToast }> = ({ showToast })
       setError(null);
       setTenants(await adminListTenants());
     } catch (err) {
-      setError((err as ApiError).message || 'Caricamento non riuscito');
+      setError((err as ApiError).message || t('errLoad', 'Caricamento non riuscito'));
     } finally {
       setLoading(false);
     }
@@ -834,7 +848,7 @@ export const PlatformPanel: React.FC<{ showToast: ShowToast }> = ({ showToast })
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-4xl p-4 sm:p-6 lg:p-8">
           <div className="mb-4 flex items-center gap-3">
-            <h2 className="text-[20px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">Clienti</h2>
+            <h2 className="text-[20px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">{t('customers', 'Clienti')}</h2>
             {!loading && !error && <CountBadge count={tenants.length} />}
             <button
               type="button"
@@ -842,7 +856,7 @@ export const PlatformPanel: React.FC<{ showToast: ShowToast }> = ({ showToast })
               onClick={() => setShowNew(true)}
             >
               <Plus className="h-4 w-4" aria-hidden />
-              Nuovo cliente
+              {t('newTenant', 'Nuovo cliente')}
             </button>
           </div>
 
@@ -855,18 +869,21 @@ export const PlatformPanel: React.FC<{ showToast: ShowToast }> = ({ showToast })
               className="mb-4"
               stats={[
                 {
-                  value: `€ ${(summary.mrr_cents / 100).toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`,
+                  /* L'euro resta: è il ricavo di Sympotia, che fattura in
+                     euro qualunque lingua legga chi guarda. Il separatore
+                     decimale invece segue la lingua. */
+                  value: `€ ${(summary.mrr_cents / 100).toLocaleString(displayLocale(), { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`,
                   label: 'MRR',
                 },
-                { value: summary.paying_tenants, label: 'paganti' },
+                { value: summary.paying_tenants, label: t('stat.paying', 'paganti') },
                 {
                   value: summary.past_due_tenants,
-                  label: 'past due',
+                  label: t('stat.pastDue', 'past due'),
                   tone: summary.past_due_tenants > 0 ? 'critical' : undefined,
                   tint: summary.past_due_tenants > 0,
                 },
-                { value: summary.trialing_tenants, label: 'in prova', hideBelow: 'sm' },
-                { value: summary.grandfathered_tenants, label: 'senza billing', hideBelow: 'sm' },
+                { value: summary.trialing_tenants, label: t('stat.trialing', 'in prova'), hideBelow: 'sm' },
+                { value: summary.grandfathered_tenants, label: t('stat.noBilling', 'senza billing'), hideBelow: 'sm' },
               ]}
             />
           )}
@@ -886,7 +903,7 @@ export const PlatformPanel: React.FC<{ showToast: ShowToast }> = ({ showToast })
               action={
                 <button type="button" className={dsButton.secondary} onClick={() => { setLoading(true); load(); }}>
                   <RefreshCw className="h-4 w-4" aria-hidden />
-                  Riprova
+                  {t('retry', 'Riprova')}
                 </button>
               }
             >
@@ -895,7 +912,7 @@ export const PlatformPanel: React.FC<{ showToast: ShowToast }> = ({ showToast })
           )}
 
           {!loading && !error && tenants.length === 0 && (
-            <EmptyState icon={Building2}>Nessun cliente ancora.</EmptyState>
+            <EmptyState icon={Building2}>{t('empty', 'Nessun cliente ancora.')}</EmptyState>
           )}
 
           {!loading && !error && tenants.length > 0 && (

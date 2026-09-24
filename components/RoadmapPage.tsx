@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Plus, X, Trash2, Loader2, RefreshCw, Bot, Check, Undo2, Wand2 } from 'lucide-react';
 import {
   RoadmapTask, RoadmapPhaseKey, RoadmapTaskStatus,
@@ -45,6 +46,7 @@ interface EditDraft {
 }
 
 export const RoadmapPage: React.FC = () => {
+  const { t } = useTranslation('dev', { useSuspense: false });
   const [tasks, setTasks] = useState<RoadmapTask[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -60,7 +62,7 @@ export const RoadmapPage: React.FC = () => {
       const data = await getRoadmapTasks();
       setTasks(data);
     } catch (err: any) {
-      setError(err?.message || 'Errore caricamento roadmap');
+      setError(err?.message || t('road.errLoad', 'Errore caricamento roadmap'));
     } finally {
       setIsLoading(false);
     }
@@ -107,7 +109,7 @@ export const RoadmapPage: React.FC = () => {
       const updated = await updateRoadmapTask(task.id, { status });
       setTasks(prev => prev.map(t => t.id === updated.id ? updated : t));
     } catch (err: any) {
-      setError(err?.message || 'Errore aggiornamento');
+      setError(err?.message || t('road.errUpdate', 'Errore aggiornamento'));
       load();
     } finally {
       setBusyTaskId(null);
@@ -140,7 +142,7 @@ export const RoadmapPage: React.FC = () => {
       }
       setEditDraft(null);
     } catch (err: any) {
-      setError(err?.message || 'Errore salvataggio');
+      setError(err?.message || t('road.errSave', 'Errore salvataggio'));
     } finally {
       setIsDraftSaving(false);
     }
@@ -155,7 +157,7 @@ export const RoadmapPage: React.FC = () => {
     try {
       await deleteRoadmapTask(task.id);
     } catch (err: any) {
-      setError(err?.message || 'Errore eliminazione');
+      setError(err?.message || t('road.errDelete', 'Errore eliminazione'));
       load();
     }
   };
@@ -166,10 +168,10 @@ export const RoadmapPage: React.FC = () => {
       <div className="flex flex-shrink-0 items-start justify-between gap-3 px-4 pb-3 pt-4 lg:px-6 lg:pt-6">
         <div className="min-w-0">
           <h2 className="text-[20px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)]">
-            Roadmap
+            {t('road.title', 'Roadmap')}
           </h2>
           <p className="mt-0.5 text-[13px] text-[var(--ds-text-muted)]">
-            Lancio Sympotia · {doneCount}/{tasks.length} fatti
+            {t('road.subtitle', 'Lancio Sympotia · {{fatti}}/{{totale}} fatti', { fatti: doneCount, totale: tasks.length })}
             {queuedCount > 0 && <> · {queuedCount} in mano a Claude</>}
             {' '}· visibile solo a questo account
           </p>
@@ -177,8 +179,8 @@ export const RoadmapPage: React.FC = () => {
         <button
           type="button"
           onClick={() => { setIsLoading(true); load(); }}
-          aria-label="Ricarica la roadmap"
-          title="Ricarica"
+          aria-label={t('road.reloadAria', 'Ricarica la roadmap')}
+          title={t('road.reload', 'Ricarica')}
           className={dsIconButton}
         >
           <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
@@ -193,7 +195,7 @@ export const RoadmapPage: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setError(null)}
-                aria-label="Chiudi l'errore"
+                aria-label={t('road.closeError', "Chiudi l'errore")}
                 className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-critical-text)] transition-[filter] hover:brightness-90"
               >
                 <X className="h-4 w-4" />
@@ -237,9 +239,9 @@ export const RoadmapPage: React.FC = () => {
                   </span>
                   <div className="min-w-0">
                     <h3 className="truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">
-                      {phase.label}
+                      {t(`road.phase.${phase.key}`, phase.label)}
                     </h3>
-                    <p className="truncate text-[12px] text-[var(--ds-text-muted)]">{phase.trigger}</p>
+                    <p className="truncate text-[12px] text-[var(--ds-text-muted)]">{t(`road.phase.${phase.key}When`, phase.trigger)}</p>
                   </div>
                 </div>
                 <div className="flex flex-none items-center gap-1.5">
@@ -248,8 +250,8 @@ export const RoadmapPage: React.FC = () => {
                   </span>
                   <button
                     type="button"
-                    title={`Aggiungi task in ${phase.label}`}
-                    aria-label={`Aggiungi task in ${phase.label}`}
+                    title={t('road.addIn', 'Aggiungi task in {{fase}}', { fase: t(`road.phase.${phase.key}`, phase.label) })}
+                    aria-label={t('road.addIn', 'Aggiungi task in {{fase}}', { fase: t(`road.phase.${phase.key}`, phase.label) })}
                     onClick={() => setEditDraft({ id: null, title: '', description: '', phase_key: phase.key, claude_prompt: '', result_note: '' })}
                     className="inline-flex h-9 w-9 flex-none items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
@@ -275,8 +277,8 @@ export const RoadmapPage: React.FC = () => {
                         <button
                           type="button"
                           disabled={isBusy}
-                          aria-label={task.status === 'done' ? 'Riapri il task' : 'Segna come fatto'}
-                          title={task.status === 'done' ? 'Riapri' : 'Segna fatto'}
+                          aria-label={task.status === 'done' ? t('road.reopen', 'Riapri il task') : t('road.markDone', 'Segna come fatto')}
+                          title={task.status === 'done' ? t('road.reopenShort', 'Riapri') : t('road.doneShort', 'Segna fatto')}
                           onClick={() => setStatus(task, task.status === 'done' ? 'todo' : 'done')}
                           className={`mt-0.5 flex h-5 w-5 flex-none items-center justify-center rounded-[var(--ds-radius-control)] border transition-colors ${
                             task.status === 'done'
@@ -312,7 +314,7 @@ export const RoadmapPage: React.FC = () => {
                             {task.status !== 'todo' && task.status !== 'done' && (
                               <span className={`inline-flex items-center gap-1.5 rounded-[var(--ds-radius-control)] px-2 py-0.5 text-[11px] font-semibold leading-none ${meta.chipClass}`}>
                                 <span className={`h-1.5 w-1.5 rounded-full ${meta.dot} ${task.status === 'in_progress' ? 'animate-pulse' : ''}`} aria-hidden />
-                                {meta.label}
+                                {t(`road.status.${task.status}`, meta.label)}
                               </span>
                             )}
                           </div>
@@ -338,14 +340,14 @@ export const RoadmapPage: React.FC = () => {
                             className="inline-flex h-9 flex-none items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
                           >
                             {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Bot className="h-3.5 w-3.5" aria-hidden />}
-                            Approva per Claude
+                            {t('road.approve', 'Approva per Claude')}
                           </button>
                         )}
                         {isClaudeTask && task.status === 'queued' && (
                           <button
                             type="button"
                             disabled={isBusy}
-                            title="Ritira dalla coda"
+                            title={t('road.withdraw', 'Ritira dalla coda')}
                             onClick={() => setStatus(task, 'todo')}
                             className="inline-flex h-9 flex-none items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 text-[13px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface)] disabled:opacity-40"
                           >
@@ -362,7 +364,7 @@ export const RoadmapPage: React.FC = () => {
                     onClick={() => setEditDraft({ id: null, title: '', description: '', phase_key: phase.key, claude_prompt: '', result_note: '' })}
                     className="w-full rounded-[var(--ds-radius)] border border-dashed border-[var(--ds-border-strong)] px-3 py-4 text-[13px] text-[var(--ds-text-muted)] transition-colors hover:border-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]"
                   >
-                    Nessun task — aggiungi il primo
+                    {t('road.empty', 'Nessun task — aggiungi il primo')}
                   </button>
                 )}
               </div>
@@ -384,7 +386,7 @@ export const RoadmapPage: React.FC = () => {
       <ModalShell
         open={!!editDraft}
         onClose={() => setEditDraft(null)}
-        title={editDraft?.id == null ? 'Nuovo task' : 'Modifica task'}
+        title={editDraft?.id == null ? t('road.newTask', 'Nuovo task') : t('road.editTask', 'Modifica task')}
         size="sm"
         closeOnEscape
         bodyClassName="space-y-4 p-5 sm:p-6"
@@ -412,7 +414,7 @@ export const RoadmapPage: React.FC = () => {
       >
         {editDraft && (
           <>
-            <Field label="Titolo" htmlFor="roadmap-title" required>
+            <Field label={t('road.fieldTitle', 'Titolo')} htmlFor="roadmap-title" required>
               <input
                 id="roadmap-title"
                 type="text"
@@ -422,17 +424,17 @@ export const RoadmapPage: React.FC = () => {
                 className={dsInput}
               />
             </Field>
-            <Field label="Descrizione" htmlFor="roadmap-description" aside="opzionale">
+            <Field label={t('road.description', 'Descrizione')} htmlFor="roadmap-description" aside={t('road.optional', 'opzionale')}>
               <textarea
                 id="roadmap-description"
                 value={editDraft.description}
                 onChange={(e) => setEditDraft(d => d ? { ...d, description: e.target.value } : d)}
                 rows={3}
-                placeholder="Dettagli, costi, note…"
+                placeholder={t('road.descPlaceholder', 'Dettagli, costi, note…')}
                 className={`${dsTextarea} resize-y leading-relaxed`}
               />
             </Field>
-            <Field label="Fase">
+            <Field label={t('road.phaseLabel', 'Fase')}>
               <div className="grid grid-cols-2 gap-2">
                 {PHASES.map(p => {
                   const active = editDraft.phase_key === p.key;
@@ -448,28 +450,28 @@ export const RoadmapPage: React.FC = () => {
                           : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'
                       }`}
                     >
-                      <span className="truncate">{p.label}</span>
+                      <span className="truncate">{t(`road.phase.${p.key}`, p.label)}</span>
                     </button>
                   );
                 })}
               </div>
             </Field>
             <Field
-              label="Prompt per Claude"
+              label={t('road.prompt', 'Prompt per Claude')}
               htmlFor="roadmap-prompt"
-              aside="vuoto = task manuale"
+              aside={t('road.promptAside', 'vuoto = task manuale')}
             >
               <textarea
                 id="roadmap-prompt"
                 value={editDraft.claude_prompt}
                 onChange={(e) => setEditDraft(d => d ? { ...d, claude_prompt: e.target.value } : d)}
                 rows={3}
-                placeholder="Cosa deve fare Claude quando prende in carico questo task…"
+                placeholder={t('road.promptPlaceholder', 'Cosa deve fare Claude quando prende in carico questo task…')}
                 className={`${dsTextarea} resize-y leading-relaxed`}
               />
             </Field>
             {editDraft.id != null && editDraft.result_note && (
-              <Field label="Esito" htmlFor="roadmap-note">
+              <Field label={t('road.outcome', 'Esito')} htmlFor="roadmap-note">
                 <textarea
                   id="roadmap-note"
                   value={editDraft.result_note}
@@ -486,7 +488,7 @@ export const RoadmapPage: React.FC = () => {
       <ModalShell
         open={!!deleteCandidate}
         onClose={() => setDeleteCandidate(null)}
-        title="Elimina task"
+        title={t('road.deleteTitle', 'Elimina task')}
         size="sm"
         closeOnEscape
         bodyClassName="p-5 sm:p-6"
@@ -501,7 +503,7 @@ export const RoadmapPage: React.FC = () => {
         }
       >
         <p className="text-[15px] text-[var(--ds-text-primary)]">
-          Eliminare il task <strong className="font-semibold">{deleteCandidate?.title}</strong>?
+          <span dangerouslySetInnerHTML={{ __html: t('road.deleteAsk', 'Eliminare il task <strong>{{titolo}}</strong>?', { titolo: deleteCandidate?.title ?? '' }) }} />
         </p>
       </ModalShell>
     </div>
