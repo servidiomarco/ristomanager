@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { AlertTriangle, Check, Loader2, Lock } from 'lucide-react';
 import { UserRole } from '../types';
 import { Loader } from './Loader';
@@ -15,7 +16,10 @@ interface RolePermissionsProps {
   onClose: () => void;
 }
 
-const ROLE_LABELS: Record<string, string> = {
+/* I nomi dei ruoli vivono in common.role e si traducono una volta sola:
+   erano duplicati in sei file, e due di quei sei non andavano d'accordo
+   («Direttore» contro «General Manager» per lo stesso ruolo). */
+const ROLE_LABELS_IT: Record<string, string> = {
   OWNER: 'Proprietario',
   GENERAL_MANAGER: 'General Manager',
   MANAGER: 'Manager',
@@ -25,40 +29,53 @@ const ROLE_LABELS: Record<string, string> = {
   CASSA: 'Cassa'
 };
 
-const PERMISSION_LABELS: Record<string, string> = {
-  'dashboard:view': 'Visualizza',
-  'dashboard:full': 'Modifica',
-  'floorplan:view': 'Visualizza',
-  'floorplan:update_status': 'Aggiorna stato tavoli',
-  'floorplan:full': 'Modifica completa',
-  'menu:view': 'Visualizza',
-  'menu:full': 'Modifica',
-  'banquet:view_price': 'Visualizza prezzo banchetti',
-  'reservations:view': 'Visualizza',
-  'reservations:full': 'Modifica',
-  'staff:view': 'Visualizza',
-  'staff:full': 'Modifica',
-  'staff:payments': 'Compensi e acconti',
-  'settings:view': 'Visualizza',
-  'settings:full': 'Modifica',
-  'users:view': 'Visualizza',
-  'users:full': 'Gestione completa',
-  'reports:view': 'Visualizza',
-  'reports:full': 'Modifica',
-  'fiscal:view': 'Registro e report fiscali',
-  'orders:view': 'Visualizza comande',
-  'orders:take': 'Prende e invia comande',
-  'orders:kds': 'Monitor di partita',
-  'orders:expedite': 'Passe — lancia le uscite',
-  'orders:void': 'Storna righe inviate',
-  'takeaway:view': 'Visualizza ordini asporto',
-  'takeaway:manage': 'Gestisce ordini asporto'
+/* Otto permessi si chiamano «Visualizza» e cinque «Modifica»: la chiave
+   accanto all'italiano tiene i sinonimi in una voce sola di dizionario. */
+const PERMISSION_LABELS: Record<string, { key: string; it: string }> = {
+  'dashboard:view':          { key: 'perm.p.view', it: 'Visualizza' },
+  'dashboard:full':          { key: 'perm.p.edit', it: 'Modifica' },
+  'floorplan:view':          { key: 'perm.p.view', it: 'Visualizza' },
+  'floorplan:update_status': { key: 'perm.p.tableStatus', it: 'Aggiorna stato tavoli' },
+  'floorplan:full':          { key: 'perm.p.fullEdit', it: 'Modifica completa' },
+  'menu:view':               { key: 'perm.p.view', it: 'Visualizza' },
+  'menu:full':               { key: 'perm.p.edit', it: 'Modifica' },
+  'banquet:view_price':      { key: 'perm.p.banquetPrice', it: 'Visualizza prezzo banchetti' },
+  'reservations:view':       { key: 'perm.p.view', it: 'Visualizza' },
+  'reservations:full':       { key: 'perm.p.edit', it: 'Modifica' },
+  'staff:view':              { key: 'perm.p.view', it: 'Visualizza' },
+  'staff:full':              { key: 'perm.p.edit', it: 'Modifica' },
+  'staff:payments':          { key: 'perm.p.staffPayments', it: 'Compensi e acconti' },
+  'settings:view':           { key: 'perm.p.view', it: 'Visualizza' },
+  'settings:full':           { key: 'perm.p.edit', it: 'Modifica' },
+  'users:view':              { key: 'perm.p.view', it: 'Visualizza' },
+  'users:full':              { key: 'perm.p.usersFull', it: 'Gestione completa' },
+  'reports:view':            { key: 'perm.p.view', it: 'Visualizza' },
+  'reports:full':            { key: 'perm.p.edit', it: 'Modifica' },
+  'fiscal:view':             { key: 'perm.p.fiscalView', it: 'Registro e report fiscali' },
+  'orders:view':             { key: 'perm.p.ordersView', it: 'Visualizza comande' },
+  'orders:take':             { key: 'perm.p.ordersTake', it: 'Prende e invia comande' },
+  'orders:kds':              { key: 'perm.p.ordersKds', it: 'Monitor di partita' },
+  'orders:expedite':         { key: 'perm.p.ordersExpedite', it: 'Passe — lancia le uscite' },
+  'orders:void':             { key: 'perm.p.ordersVoid', it: 'Storna righe inviate' },
+  'takeaway:view':           { key: 'perm.p.takeawayView', it: 'Visualizza ordini asporto' },
+  'takeaway:manage':         { key: 'perm.p.takeawayManage', it: 'Gestisce ordini asporto' }
 };
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';
 
 export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClose }) => {
+  const { t } = useTranslation(['impostazioni', 'common'], { useSuspense: false });
   const [features, setFeatures] = useState<FeaturePermissions[]>([]);
+
+  const roleLabel = (r: string): string => t(`common:role.${r}`, ROLE_LABELS_IT[r] ?? r);
+  /* I gruppi arrivano dal server come stringhe italiane. Se il server ne
+     cambia una — o ne aggiunge una che qui non c'è — si legge l'italiano
+     che è arrivato: lo stesso fallback di ogni t() di questo cantiere. */
+  const groupLabel = (g: string): string => t(`perm.group.${g}`, g);
+  const permissionLabel = (p: string): string => {
+    const l = PERMISSION_LABELS[p];
+    return l ? t(l.key, l.it) : p;
+  };
   const [roles] = useState<string[]>(['OWNER', 'GENERAL_MANAGER', 'MANAGER', 'RECEPTION', 'WAITER', 'KITCHEN']);
   const [rolePermissions, setRolePermissions] = useState<Record<string, string[]>>({});
   // Permessi riservati alla piattaforma: qui si mostrano col lucchetto e
@@ -105,7 +122,7 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
       setLocked(permissionsData.locked || []);
       setRolePermissions(rolePermsData);
     } catch (err) {
-      setError('Errore nel caricamento dei permessi');
+      setError(t('perm.errLoad', 'Errore nel caricamento dei permessi'));
       console.error(err);
     } finally {
       setLoading(false);
@@ -147,9 +164,9 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
         throw new Error(data.error || 'Failed to save permissions');
       }
 
-      addToast(`Permessi per ${ROLE_LABELS[selectedRole]} salvati`, 'success');
+      addToast(t('perm.saved', 'Permessi per {{ruolo}} salvati', { ruolo: roleLabel(selectedRole) }), 'success');
     } catch (err: any) {
-      setError(err.message || 'Errore nel salvataggio dei permessi');
+      setError(err.message || t('perm.errSave', 'Errore nel salvataggio dei permessi'));
     } finally {
       setSaving(false);
     }
@@ -165,14 +182,14 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
     <ModalShell
       open={isOpen}
       onClose={onClose}
-      title="Gestione Permessi Ruoli"
-      subtitle="Configura i permessi per ogni ruolo utente"
+      title={t('perm.title', 'Gestione permessi ruoli')}
+      subtitle={t('perm.subtitle', 'Configura i permessi per ogni ruolo utente')}
       size="lg"
       bodyClassName="px-5 py-5 sm:px-6"
       footer={
         <>
           <button type="button" onClick={onClose} className={dsButton.secondary}>
-            Chiudi
+            {t('perm.close', 'Chiudi')}
           </button>
           {selectedRole !== 'OWNER' && (
             <button
@@ -184,12 +201,12 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
               {saving ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                  Salvataggio...
+                  {t('perm.saving', 'Salvataggio…')}
                 </>
               ) : (
                 <>
                   <Check className="h-4 w-4" aria-hidden />
-                  Salva Permessi
+                  {t('perm.save', 'Salva permessi')}
                 </>
               )}
             </button>
@@ -222,7 +239,7 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
                     : 'text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
                 }`}
               >
-                {ROLE_LABELS[role]}
+                {roleLabel(role)}
               </button>
             ))}
           </div>
@@ -230,7 +247,7 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
           {selectedRole === 'OWNER' && (
             <div className="mb-6 flex items-start gap-2.5 rounded-[var(--ds-radius)] bg-[var(--ds-pending-tint)] p-4 text-[14px] leading-relaxed text-[var(--ds-pending-text)]">
               <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" aria-hidden />
-              <span>Il ruolo Proprietario ha sempre tutti i permessi e non può essere modificato.</span>
+              <span>{t('perm.ownerNote', 'Il ruolo Proprietario ha sempre tutti i permessi e non può essere modificato.')}</span>
             </div>
           )}
 
@@ -239,7 +256,7 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
             {features.map(feature => (
               <div key={feature.feature} className="overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
                 <div className="border-b border-[var(--ds-border)] px-4 py-2.5">
-                  <h3 className="text-[13px] font-semibold text-[var(--ds-text-secondary)]">{feature.feature}</h3>
+                  <h3 className="text-[13px] font-semibold text-[var(--ds-text-secondary)]">{groupLabel(feature.feature)}</h3>
                 </div>
                 <div className="p-4">
                   <div className="flex flex-wrap gap-2">
@@ -248,7 +265,7 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
                       return (
                         <label
                           key={permission}
-                          title={isLocked ? 'Riservato alla piattaforma' : undefined}
+                          title={isLocked ? t('perm.reserved', 'Riservato alla piattaforma') : undefined}
                           className={`flex min-h-11 cursor-pointer items-center gap-2 rounded-[var(--ds-radius-control)] px-3.5 text-[14px] font-medium transition-colors ${
                             hasPermission(permission)
                               ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
@@ -263,9 +280,9 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
                             className="h-4 w-4 rounded accent-[var(--ds-action-bg)]"
                           />
                           <span>
-                            {PERMISSION_LABELS[permission] || permission}
+                            {permissionLabel(permission)}
                           </span>
-                          {isLocked && <Lock className="h-3.5 w-3.5 flex-shrink-0" aria-label="Riservato alla piattaforma" />}
+                          {isLocked && <Lock className="h-3.5 w-3.5 flex-shrink-0" aria-label={t('perm.reserved', 'Riservato alla piattaforma')} />}
                         </label>
                       );
                     })}

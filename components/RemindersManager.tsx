@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
 import { Bell, Plus, Pencil, Trash2, X, Loader2, Clock, Calendar, Repeat, CheckCircle2, AlertCircle } from 'lucide-react';
 import {
@@ -9,47 +10,73 @@ import {
   ReminderFrequency,
   ReminderRole,
 } from '../services/remindersApiService';
+import { displayLocale } from '../utils/formatLocale';
 
-const WEEKDAYS: { code: string; short: string; long: string }[] = [
-  { code: 'MON', short: 'Lun', long: 'Lunedì' },
-  { code: 'TUE', short: 'Mar', long: 'Martedì' },
-  { code: 'WED', short: 'Mer', long: 'Mercoledì' },
-  { code: 'THU', short: 'Gio', long: 'Giovedì' },
-  { code: 'FRI', short: 'Ven', long: 'Venerdì' },
-  { code: 'SAT', short: 'Sab', long: 'Sabato' },
-  { code: 'SUN', short: 'Dom', long: 'Domenica' },
-];
+/* `t` a parametro per le funzioni di modulo: qui non ci sono hook. Senza
+   `t` si resta in italiano. Lo stesso contratto di utils/courses.ts. */
+type TFunc = (key: string, defaultValue: string, options?: Record<string, unknown>) => string;
 
-const ROLE_OPTIONS: { code: ReminderRole; label: string }[] = [
-  { code: 'OWNER', label: 'Proprietario' },
-  { code: 'GENERAL_MANAGER', label: 'Direttore' },
-  { code: 'MANAGER', label: 'Responsabile' },
-  { code: 'RECEPTION', label: 'Reception' },
-  { code: 'WAITER', label: 'Camerieri' },
-  { code: 'KITCHEN', label: 'Cucina' },
-];
+/* I codici MON..SUN sono persistiti e non si toccano; i nomi vengono dalla
+   lingua, non da un elenco italiano. L'8 gennaio 2024 era un lunedì, così
+   l'indice combacia con l'ordine di questa lista. */
+const WEEKDAY_CODES = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'] as const;
 
-const formatSchedule = (r: Reminder): string => {
+const weekdays = (): { code: string; short: string; long: string }[] => {
+  const loc = displayLocale();
+  const breve = new Intl.DateTimeFormat(loc, { weekday: 'short', timeZone: 'UTC' });
+  const lungo = new Intl.DateTimeFormat(loc, { weekday: 'long', timeZone: 'UTC' });
+  const su = (s: string) => s.replace('.', '').charAt(0).toUpperCase() + s.replace('.', '').slice(1);
+  return WEEKDAY_CODES.map((code, i) => {
+    const d = new Date(Date.UTC(2024, 0, 8 + i));
+    return { code, short: su(breve.format(d)), long: su(lungo.format(d)) };
+  });
+};
+
+/* I ruoli hanno un nome solo, e sta in common.role. Qui c'erano «Direttore»,
+   «Responsabile» e «Camerieri» mentre la matrice dei permessi diceva
+   «General Manager», «Manager» e «Cameriere»: lo stesso ruolo con due nomi su
+   due schermate. */
+const ROLE_CODES: ReminderRole[] = ['OWNER', 'GENERAL_MANAGER', 'MANAGER', 'RECEPTION', 'WAITER', 'KITCHEN'];
+const ROLE_LABELS_IT: Record<string, string> = {
+  OWNER: 'Proprietario',
+  GENERAL_MANAGER: 'General Manager',
+  MANAGER: 'Manager',
+  RECEPTION: 'Reception',
+  WAITER: 'Cameriere',
+  KITCHEN: 'Cucina',
+};
+const roleLabel = (r: string, t?: TFunc): string =>
+  t ? t(`common:role.${r}`, ROLE_LABELS_IT[r] ?? r) : (ROLE_LABELS_IT[r] ?? r);
+
+const formatSchedule = (r: Reminder, t?: TFunc): string => {
   if (r.kind === 'ONE_OFF') {
     if (!r.schedule_date) return r.schedule_time;
     const [y, m, d] = r.schedule_date.split('-');
     return `${d}/${m}/${y} · ${r.schedule_time}`;
   }
-  if (r.frequency === 'DAILY') return `Ogni giorno · ${r.schedule_time}`;
+  if (r.frequency === 'DAILY') {
+    return t ? t('prom.everyDay', 'Ogni giorno · {{ora}}', { ora: r.schedule_time })
+             : `Ogni giorno · ${r.schedule_time}`;
+  }
   if (r.frequency === 'WEEKLY') {
+    const nomi = weekdays();
     const days = (r.weekdays || [])
-      .map(c => WEEKDAYS.find(w => w.code === c)?.short || c)
+      .map(c => nomi.find(w => w.code === c)?.short || c)
       .join(', ');
     return `${days} · ${r.schedule_time}`;
   }
-  if (r.frequency === 'MONTHLY') return `Ogni mese il ${r.month_day} · ${r.schedule_time}`;
+  if (r.frequency === 'MONTHLY') {
+    return t ? t('prom.everyMonth', 'Ogni mese il {{giorno}} · {{ora}}', { giorno: r.month_day, ora: r.schedule_time })
+             : `Ogni mese il ${r.month_day} · ${r.schedule_time}`;
+  }
   return r.schedule_time;
 };
 
-const kindBadge = (r: Reminder): { label: string; cls: string } => {
-  if (r.system_key) return { label: 'Sistema', cls: 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)] ring-[var(--ds-arriving-solid)]' };
-  if (r.kind === 'ONE_OFF') return { label: 'Temporaneo', cls: 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] ring-[var(--ds-pending-solid)]' };
-  return { label: 'Ricorrente', cls: 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)] ring-[var(--ds-arriving-solid)]' };
+const kindBadge = (r: Reminder, t?: TFunc): { label: string; cls: string } => {
+  const lab = (k: string, it: string) => (t ? t(k, it) : it);
+  if (r.system_key) return { label: lab('prom.badgeSystem', 'Sistema'), cls: 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)] ring-[var(--ds-arriving-solid)]' };
+  if (r.kind === 'ONE_OFF') return { label: lab('prom.badgeOneOff', 'Temporaneo'), cls: 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] ring-[var(--ds-pending-solid)]' };
+  return { label: lab('prom.badgeRecurring', 'Ricorrente'), cls: 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)] ring-[var(--ds-arriving-solid)]' };
 };
 
 interface EditorState {
@@ -106,6 +133,8 @@ interface Props {
 }
 
 export const RemindersManager: React.FC<Props> = ({ showToast }) => {
+  const { t, i18n } = useTranslation(['impostazioni', 'common'], { useSuspense: false });
+  const giorni = useMemo(() => weekdays(), [i18n.language]);
   const [items, setItems] = useState<Reminder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -120,7 +149,7 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
       const { reminders } = await remindersApiService.list();
       setItems(reminders);
     } catch (err: any) {
-      setError(err?.message || 'Errore caricamento promemoria');
+      setError(err?.message || t('prom.errLoad', 'Errore caricamento promemoria'));
     } finally {
       setLoading(false);
     }
@@ -154,15 +183,15 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
       if (editor.id) {
         const saved = await remindersApiService.update(editor.id, input);
         setItems(prev => prev.map(x => x.id === saved.id ? saved : x));
-        showToast('Promemoria aggiornato', 'success');
+        showToast(t('prom.updated', 'Promemoria aggiornato'), 'success');
       } else {
         const created = await remindersApiService.create(input);
         setItems(prev => [created, ...prev]);
-        showToast('Promemoria creato', 'success');
+        showToast(t('prom.created', 'Promemoria creato'), 'success');
       }
       setEditor(null);
     } catch (err: any) {
-      setSaveError(err?.message || 'Errore salvataggio');
+      setSaveError(err?.message || t('prom.errSave', 'Errore salvataggio'));
     } finally {
       setSaving(false);
     }
@@ -184,7 +213,7 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
       });
       setItems(prev => prev.map(x => x.id === saved.id ? saved : x));
     } catch (err: any) {
-      showToast(err?.message || 'Errore aggiornamento', 'error');
+      showToast(err?.message || t('prom.errUpdate', 'Errore aggiornamento'), 'error');
     }
   };
 
@@ -193,9 +222,9 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
       await remindersApiService.delete(id);
       setItems(prev => prev.filter(x => x.id !== id));
       setConfirmDeleteId(null);
-      showToast('Promemoria eliminato', 'info');
+      showToast(t('prom.deleted', 'Promemoria eliminato'), 'info');
     } catch (err: any) {
-      showToast(err?.message || 'Errore eliminazione', 'error');
+      showToast(err?.message || t('prom.errDelete', 'Errore eliminazione'), 'error');
     }
   };
 
@@ -227,9 +256,9 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
             <Bell className="h-5 w-5" />
           </span>
           <div className="min-w-0">
-            <h2 className="text-[15px] font-semibold text-[var(--ds-text-primary)]">Promemoria</h2>
+            <h2 className="text-[15px] font-semibold text-[var(--ds-text-primary)]">{t('prom.title', 'Promemoria')}</h2>
             <p className="text-[13px] leading-snug text-[var(--ds-text-muted)]">
-              Notifiche automatiche programmate — una volta o ricorrenti (giornaliere, settimanali, mensili).
+              {t('prom.subtitle', 'Notifiche automatiche programmate — una volta o ricorrenti (giornaliere, settimanali, mensili).')}
             </p>
           </div>
         </div>
@@ -239,7 +268,7 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
           className="inline-flex items-center gap-1.5 h-8 px-3 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[12px] font-semibold hover:bg-[var(--ds-action-bg-hover)] shrink-0"
         >
           <Plus className="h-3.5 w-3.5" />
-          Nuovo
+          {t('prom.new', 'Nuovo')}
         </button>
       </div>
 
@@ -251,16 +280,16 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
       )}
 
       {loading ? (
-        <div className="p-10 text-center text-[13px] text-[var(--ds-text-muted)]">Carico…</div>
+        <div className="p-10 text-center text-[13px] text-[var(--ds-text-muted)]">{t('prom.loading', 'Carico…')}</div>
       ) : sorted.length === 0 ? (
         <div className="p-10 text-center text-[13px] text-[var(--ds-text-muted)]">
-          Nessun promemoria configurato.
+          {t('prom.empty', 'Nessun promemoria configurato.')}
         </div>
       ) : (
         <ul className="divide-y divide-[var(--ds-border)]">
           {sorted.map(r => {
-            const badge = kindBadge(r);
-            const roles = r.target_roles.map(rc => ROLE_OPTIONS.find(o => o.code === rc)?.label || rc).join(', ');
+            const badge = kindBadge(r, t);
+            const roles = r.target_roles.map(rc => roleLabel(rc, t)).join(', ');
             return (
               <li key={r.id} className={`p-3 sm:p-4 ${r.active ? '' : 'opacity-60'}`}>
                 <div className="flex items-start justify-between gap-3">
@@ -272,14 +301,14 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
                       </span>
                       {!r.active && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded-[var(--ds-radius-control)] font-medium ring-1 ring-inset bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] ring-[var(--ds-border)] shrink-0">
-                          Disattivato
+                          {t('prom.off', 'Disattivato')}
                         </span>
                       )}
                     </div>
                     <div className="mt-1 flex items-center gap-3 text-[12px] text-[var(--ds-text-muted)] flex-wrap">
                       <span className="inline-flex items-center gap-1">
                         {r.kind === 'RECURRING' ? <Repeat className="h-3 w-3" /> : <Calendar className="h-3 w-3" />}
-                        {formatSchedule(r)}
+                        {formatSchedule(r, t)}
                       </span>
                       <span className="inline-flex items-center gap-1">→ {roles}</span>
                     </div>
@@ -291,7 +320,7 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
                     {r.last_run_at && (
                       <p className="mt-1 text-[11px] text-[var(--ds-text-subtle)] inline-flex items-center gap-1">
                         <Clock className="h-3 w-3" />
-                        Ultima esecuzione: {new Date(r.last_run_at).toLocaleString('it-IT', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                        {t('prom.lastRun', 'Ultima esecuzione: {{quando}}', { quando: new Date(r.last_run_at).toLocaleString(displayLocale(), { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) })}
                       </p>
                     )}
                   </div>
@@ -304,15 +333,15 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
                           ? 'border-[var(--ds-seated-solid)] bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] hover:bg-[var(--ds-seated-tint)]'
                           : 'border-[var(--ds-border)] bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)]'
                       }`}
-                      title={r.active ? 'Disattiva' : 'Attiva'}
+                      title={r.active ? t('prom.switchOff', 'Disattiva') : t('prom.switchOn', 'Attiva')}
                     >
-                      {r.active ? 'Attivo' : 'Off'}
+                      {r.active ? t('prom.on', 'Attivo') : t('prom.offShort', 'Off')}
                     </button>
                     <button
                       type="button"
                       onClick={() => openEdit(r)}
                       className="p-1.5 rounded-[var(--ds-radius)] text-[var(--ds-text-muted)] hover:text-[var(--ds-arriving-text)] hover:bg-[var(--ds-arriving-tint)]"
-                      title="Modifica"
+                      title={t('prom.edit', 'Modifica')}
                     >
                       <Pencil className="h-3.5 w-3.5" />
                     </button>
@@ -320,7 +349,7 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
                       type="button"
                       onClick={() => setConfirmDeleteId(r.id)}
                       className="p-1.5 rounded-[var(--ds-radius)] text-[var(--ds-text-muted)] hover:text-[var(--ds-critical-text)] hover:bg-[var(--ds-critical-tint)]"
-                      title="Elimina"
+                      title={t('prom.delete', 'Elimina')}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
@@ -338,7 +367,7 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
           <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-raised)] w-full max-w-lg overflow-hidden flex flex-col max-h-[92vh]" onClick={e => e.stopPropagation()}>
             <div className="p-4 sm:p-5 border-b border-[var(--ds-border)] flex items-center justify-between gap-2">
               <h3 className="text-[16px] font-semibold text-[var(--ds-text-primary)]">
-                {editor.id ? 'Modifica promemoria' : 'Nuovo promemoria'}
+                {editor.id ? t('prom.editTitle', 'Modifica promemoria') : t('prom.newTitle', 'Nuovo promemoria')}
               </h3>
               <button
                 type="button"
@@ -352,30 +381,30 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
             <div className="p-4 sm:p-5 space-y-4 overflow-y-auto">
               {/* Title */}
               <div>
-                <label className="block text-[11px] font-semibold text-[var(--ds-text-muted)] mb-1">Titolo *</label>
+                <label className="block text-[11px] font-semibold text-[var(--ds-text-muted)] mb-1">{t('prom.fieldTitle', 'Titolo *')}</label>
                 <input
                   type="text"
                   value={editor.title}
                   onChange={e => setEditor({ ...editor, title: e.target.value.slice(0, 200) })}
-                  placeholder="Es. Ordinare il pane per domani"
+                  placeholder={t('prom.titlePlaceholder', 'Es. Ordinare il pane per domani')}
                   className="w-full h-10 px-3 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface-row)] text-[14px] text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]"
                   autoFocus
                 />
               </div>
               {/* Description */}
               <div>
-                <label className="block text-[11px] font-semibold text-[var(--ds-text-muted)] mb-1">Descrizione (opzionale)</label>
+                <label className="block text-[11px] font-semibold text-[var(--ds-text-muted)] mb-1">{t('prom.description', 'Descrizione (opzionale)')}</label>
                 <textarea
                   value={editor.description}
                   onChange={e => setEditor({ ...editor, description: e.target.value.slice(0, 500) })}
                   rows={2}
-                  placeholder="Contenuto del messaggio inviato"
+                  placeholder={t('prom.descriptionPlaceholder', 'Contenuto del messaggio inviato')}
                   className="w-full px-3 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface-row)] text-[14px] text-[var(--ds-text-primary)] resize-y focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]"
                 />
               </div>
               {/* Kind */}
               <div>
-                <label className="block text-[11px] font-semibold text-[var(--ds-text-muted)] mb-1.5">Tipo</label>
+                <label className="block text-[11px] font-semibold text-[var(--ds-text-muted)] mb-1.5">{t('prom.kind', 'Tipo')}</label>
                 <div className="grid grid-cols-2 gap-2">
                   {(['RECURRING', 'ONE_OFF'] as const).map(k => (
                     <button
@@ -388,7 +417,7 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
                           : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] border-[var(--ds-border)] hover:text-[var(--ds-text-primary)]'
                       }`}
                     >
-                      {k === 'RECURRING' ? 'Ricorrente' : 'Temporaneo'}
+                      {k === 'RECURRING' ? t('prom.badgeRecurring', 'Ricorrente') : t('prom.badgeOneOff', 'Temporaneo')}
                     </button>
                   ))}
                 </div>
@@ -396,7 +425,7 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
               {/* Frequency (RECURRING) */}
               {editor.kind === 'RECURRING' && (
                 <div>
-                  <label className="block text-[11px] font-semibold text-[var(--ds-text-muted)] mb-1.5">Frequenza</label>
+                  <label className="block text-[11px] font-semibold text-[var(--ds-text-muted)] mb-1.5">{t('prom.frequency', 'Frequenza')}</label>
                   <div className="grid grid-cols-3 gap-2">
                     {(['DAILY', 'WEEKLY', 'MONTHLY'] as const).map(f => (
                       <button
@@ -409,7 +438,7 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
                             : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] border-[var(--ds-border)] hover:text-[var(--ds-text-primary)]'
                         }`}
                       >
-                        {f === 'DAILY' ? 'Giornaliero' : f === 'WEEKLY' ? 'Settimanale' : 'Mensile'}
+                        {f === 'DAILY' ? t('prom.daily', 'Giornaliero') : f === 'WEEKLY' ? t('prom.weekly', 'Settimanale') : t('prom.monthly', 'Mensile')}
                       </button>
                     ))}
                   </div>
@@ -418,9 +447,9 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
               {/* Weekdays (WEEKLY) */}
               {editor.kind === 'RECURRING' && editor.frequency === 'WEEKLY' && (
                 <div>
-                  <label className="block text-[11px] font-semibold text-[var(--ds-text-muted)] mb-1.5">Giorni</label>
+                  <label className="block text-[11px] font-semibold text-[var(--ds-text-muted)] mb-1.5">{t('prom.days', 'Giorni')}</label>
                   <div className="flex flex-wrap gap-1.5">
-                    {WEEKDAYS.map(w => {
+                    {giorni.map(w => {
                       const on = editor.weekdays.includes(w.code);
                       return (
                         <button
@@ -449,7 +478,7 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
               {/* Month day (MONTHLY) */}
               {editor.kind === 'RECURRING' && editor.frequency === 'MONTHLY' && (
                 <div>
-                  <label className="block text-[11px] font-semibold text-[var(--ds-text-muted)] mb-1">Giorno del mese (1-28)</label>
+                  <label className="block text-[11px] font-semibold text-[var(--ds-text-muted)] mb-1">{t('prom.monthDay', 'Giorno del mese (1-28)')}</label>
                   <input
                     type="number"
                     min={1} max={28}
@@ -458,14 +487,14 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
                     className="w-28 h-10 px-3 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface-row)] text-[14px] tabular text-[var(--ds-text-primary)]"
                   />
                   <p className="mt-1 text-[11px] text-[var(--ds-text-subtle)]">
-                    Limitato a 28 per garantire l'esecuzione in tutti i mesi (incluso febbraio).
+                    {t('prom.monthDayHint', "Limitato a 28 per garantire l'esecuzione in tutti i mesi (incluso febbraio).")}
                   </p>
                 </div>
               )}
               {/* Date (ONE_OFF) */}
               {editor.kind === 'ONE_OFF' && (
                 <div>
-                  <label className="block text-[11px] font-semibold text-[var(--ds-text-muted)] mb-1">Data</label>
+                  <label className="block text-[11px] font-semibold text-[var(--ds-text-muted)] mb-1">{t('prom.date', 'Data')}</label>
                   <input
                     type="date"
                     value={editor.schedule_date}
@@ -476,7 +505,7 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
               )}
               {/* Time */}
               <div>
-                <label className="block text-[11px] font-semibold text-[var(--ds-text-muted)] mb-1">Orario (HH:MM)</label>
+                <label className="block text-[11px] font-semibold text-[var(--ds-text-muted)] mb-1">{t('prom.time', 'Orario (HH:MM)')}</label>
                 <input
                   type="time"
                   value={editor.schedule_time}
@@ -486,19 +515,19 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
               </div>
               {/* Roles */}
               <div>
-                <label className="block text-[11px] font-semibold text-[var(--ds-text-muted)] mb-1.5">Destinatari</label>
+                <label className="block text-[11px] font-semibold text-[var(--ds-text-muted)] mb-1.5">{t('prom.recipients', 'Destinatari')}</label>
                 <div className="flex flex-wrap gap-1.5">
-                  {ROLE_OPTIONS.map(o => {
-                    const on = editor.target_roles.includes(o.code);
+                  {ROLE_CODES.map(codice => {
+                    const on = editor.target_roles.includes(codice);
                     return (
                       <button
-                        key={o.code}
+                        key={codice}
                         type="button"
                         onClick={() => setEditor({
                           ...editor,
                           target_roles: on
-                            ? editor.target_roles.filter(x => x !== o.code)
-                            : [...editor.target_roles, o.code],
+                            ? editor.target_roles.filter(x => x !== codice)
+                            : [...editor.target_roles, codice],
                         })}
                         className={`h-8 px-3 rounded-[var(--ds-radius-control)] text-[12px] font-medium border transition-colors ${
                           on
@@ -506,7 +535,7 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
                             : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] border-[var(--ds-border)] hover:text-[var(--ds-text-primary)]'
                         }`}
                       >
-                        {o.label}
+                        {roleLabel(codice, t)}
                       </button>
                     );
                   })}
@@ -520,7 +549,7 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
                   onChange={e => setEditor({ ...editor, active: e.target.checked })}
                   className="h-4 w-4 rounded border-[var(--ds-border-strong)] text-[var(--ds-arriving-text)] focus:ring-[var(--ds-border-focus)]"
                 />
-                <span className="text-[13px] text-[var(--ds-text-primary)]">Attivo</span>
+                <span className="text-[13px] text-[var(--ds-text-primary)]">{t('prom.active', 'Attivo')}</span>
               </label>
               {saveError && (
                 <div className="p-2 rounded-[var(--ds-radius)] bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] text-[12px] flex items-start gap-1.5">
@@ -536,7 +565,7 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
                 disabled={saving}
                 className="px-4 py-2 rounded-[var(--ds-radius-control)] text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-50"
               >
-                Annulla
+                {t('prom.cancel', 'Annulla')}
               </button>
               <button
                 type="button"
@@ -545,7 +574,7 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
                 className="inline-flex items-center gap-1.5 px-4 py-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[13px] font-medium hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-                {editor.id ? 'Salva' : 'Crea'}
+                {editor.id ? t('prom.save', 'Salva') : t('prom.create', 'Crea')}
               </button>
             </div>
           </div>
@@ -557,9 +586,9 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
       {confirmDeleteId !== null && createPortal(
         <div className="fixed inset-0 z-[85] bg-[var(--ds-backdrop)] flex items-center justify-center p-4" onClick={() => setConfirmDeleteId(null)}>
           <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-raised)] w-full max-w-sm p-5" onClick={e => e.stopPropagation()}>
-            <h4 className="font-semibold text-[15px] text-[var(--ds-text-primary)] mb-2">Eliminare il promemoria?</h4>
+            <h4 className="font-semibold text-[15px] text-[var(--ds-text-primary)] mb-2">{t('prom.confirmDelete', 'Eliminare il promemoria?')}</h4>
             <p className="text-[13px] text-[var(--ds-text-muted)] mb-4">
-              L'azione non è reversibile. Il promemoria non verrà più eseguito.
+              {t('prom.confirmDeleteHint', "L'azione non è reversibile. Il promemoria non verrà più eseguito.")}
             </p>
             <div className="flex gap-2 justify-end">
               <button
@@ -567,14 +596,14 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
                 onClick={() => setConfirmDeleteId(null)}
                 className="px-4 py-2 rounded-[var(--ds-radius-control)] text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)]"
               >
-                Annulla
+                {t('prom.cancel', 'Annulla')}
               </button>
               <button
                 type="button"
                 onClick={() => handleDelete(confirmDeleteId)}
                 className="px-4 py-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] text-[13px] font-medium hover:bg-[var(--ds-critical-solid)]"
               >
-                Elimina
+                {t('prom.delete', 'Elimina')}
               </button>
             </div>
           </div>
