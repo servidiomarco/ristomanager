@@ -405,5 +405,14 @@
     "notesPlaceholder": "e.g. Transfer reference, receipt no. …",
     "cancel": "Cancel",
     "submit": "Record"
+  },
+  "comp": {
+    "print": "Print",
+    "printKitchen": "Print for the kitchen",
+    "title": "Menu composition",
+    "notes": "Working notes"
+  },
+  "dish": {
+    "allergens": "Allergens"
   }
 }

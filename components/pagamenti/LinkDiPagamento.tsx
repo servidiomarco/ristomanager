@@ -1,4 +1,6 @@
 import React, { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
+import { displayLocale } from '../../utils/formatLocale';
 import { CreditCard, Receipt } from 'lucide-react';
 import type { PaymentRequest } from '../../services/paymentsApiService';
 import { toTitleCase } from '../../utils/text';
@@ -37,7 +39,10 @@ const STATUS_TILE: Record<PillTone, string> = {
   neutral: 'bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)]',
 };
 
-/** Day heading for the group a payment falls into — "Oggi", "Ieri", or the date. */
+/* `dayKey` è una CHIAVE di raggruppamento, non testo mostrato: resta su
+   'it-IT' perché serve solo a mettere due pagamenti nello stesso mucchio, e
+   confrontarla con today/yesterday calcolati alla stessa maniera. È
+   `dayLabel` qui sotto quella che si legge. */
 const dayKey = (iso: string): string => {
   try {
     return new Date(iso).toLocaleDateString('it-IT', { timeZone: sessionTimeZone() });
@@ -46,14 +51,16 @@ const dayKey = (iso: string): string => {
   }
 };
 
-const dayLabel = (iso: string): string => {
+type TFunc = (key: string, defaultValue: string) => string;
+
+const dayLabel = (iso: string, t?: TFunc): string => {
   const today = new Date().toLocaleDateString('it-IT', { timeZone: sessionTimeZone() });
   const yesterday = new Date(Date.now() - 86_400_000).toLocaleDateString('it-IT', { timeZone: sessionTimeZone() });
   const key = dayKey(iso);
-  if (key === today) return 'Oggi';
-  if (key === yesterday) return 'Ieri';
+  if (key === today) return t ? t('link.today', 'Oggi') : 'Oggi';
+  if (key === yesterday) return t ? t('link.yesterday', 'Ieri') : 'Ieri';
   try {
-    return new Date(iso).toLocaleDateString('it-IT', {
+    return new Date(iso).toLocaleDateString(displayLocale(), {
       timeZone: sessionTimeZone(), weekday: 'long', day: 'numeric', month: 'short',
     });
   } catch {
@@ -133,6 +140,7 @@ export const LinkDiPagamento: React.FC<{
 }> = ({
   items, total, statusFilter, onStatusFilter, period, span, onOpenPeriod, selectedId, onSelect,
 }) => {
+  const { t } = useTranslation('pagamenti', { useSuspense: false });
   // Counts come from the loaded page, like the totals in the header — the list
   // request is capped at 200 and there is no aggregate endpoint to ask.
   const counts = useMemo(() => {
@@ -156,7 +164,7 @@ export const LinkDiPagamento: React.FC<{
       const key = dayKey(p.created_at);
       let day = byDay.get(key);
       if (!day) {
-        day = { key, label: dayLabel(p.created_at), groups: [] };
+        day = { key, label: dayLabel(p.created_at, t), groups: [] };
         byDay.set(key, day);
         out.push(day);
       }
@@ -175,11 +183,11 @@ export const LinkDiPagamento: React.FC<{
   }, [items]);
 
   const chips: { v: StatusFilter; l: string; n: number }[] = [
-    { v: 'all', l: 'Tutti', n: counts.all },
-    { v: 'pending', l: 'In attesa', n: counts.pending },
-    { v: 'paid', l: 'Pagati', n: counts.paid },
-    { v: 'failed', l: 'Falliti', n: counts.failed },
-    { v: 'expired', l: 'Scaduti', n: counts.expired },
+    { v: 'all', l: t('link.all', 'Tutti'), n: counts.all },
+    { v: 'pending', l: t('link.pending', 'In attesa'), n: counts.pending },
+    { v: 'paid', l: t('link.paid', 'Pagati'), n: counts.paid },
+    { v: 'failed', l: t('link.failed', 'Falliti'), n: counts.failed },
+    { v: 'expired', l: t('link.expired', 'Scaduti'), n: counts.expired },
   ];
 
   return (

@@ -11,5 +11,39 @@
   },
   "printCopy": "Stampa copia",
   "printSent": "Copia in stampa",
-  "errPrint": "Stampa non riuscita"
+  "errPrint": "Stampa non riuscita",
+  "bill": {
+    "total": "Totale",
+    "taken": "Incassato",
+    "residual": "Residuo"
+  },
+  "link": {
+    "today": "Oggi",
+    "yesterday": "Ieri",
+    "all": "Tutti",
+    "pending": "In attesa",
+    "paid": "Pagati",
+    "failed": "Falliti",
+    "expired": "Scaduti"
+  },
+  "provider": {
+    "title": "Provider di pagamento",
+    "errLoad": "Errore nel caricamento del provider",
+    "errSave": "Errore aggiornamento provider"
+  },
+  "pat": {
+    "errLoad": "Errore nel caricamento delle impostazioni",
+    "errSave": "Errore aggiornamento impostazione",
+    "on": "Attivo",
+    "off": "Disattivato",
+    "toggleAria": "{{azione}} conto al tavolo",
+    "switchOff": "Disattiva",
+    "switchOn": "Attiva",
+    "techTitle": "Parametri tecnici (sola lettura)",
+    "ttl": "TTL prenotazione quota: <strong>5 minuti</strong>",
+    "ttlHint": "Un claim non pagato viene rilasciato automaticamente dal reconcile job (ogni 60s) così la capacità torna disponibile per altri ospiti.",
+    "rate": "Rate limit endpoint pubblico: <strong>60 richieste/min per IP</strong> · <strong>10 claim/min per conto</strong>",
+    "rateHint": "Limita spam e prevenzione lock-out del residuo: la protezione per token blocca chi cerca di monopolizzare le quote conoscendo un singolo QR.",
+    "adminsOnly": "Solo gli amministratori possono modificare queste impostazioni."
+  }
 }

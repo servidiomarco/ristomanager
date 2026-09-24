@@ -1,4 +1,6 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
+import { displayLocale } from '../utils/formatLocale';
 import { BanquetMenu, Dish, Shift } from '../types';
 import { X, Sun, Moon, Users, Calendar, Utensils, Printer, StickyNote, ImageIcon, ChefHat } from 'lucide-react';
 import { printBanquet } from '../utils/printBanquet';
@@ -15,13 +17,14 @@ const formatItalianDate = (iso?: string): string => {
   if (!iso) return '';
   try {
     const d = new Date(iso + 'T00:00:00');
-    return d.toLocaleDateString('it-IT', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
+    return d.toLocaleDateString(displayLocale(), { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
   } catch {
     return iso;
   }
 };
 
 export const BanquetCompositionModal: React.FC<Props> = ({ banquet, dishes, onClose }) => {
+  const { t } = useTranslation(['menu', 'common'], { useSuspense: false });
   const { hasPermission } = useAuth();
   const canViewBanquetPrice = hasPermission('banquet:view_price');
   const courses = Array.isArray(banquet.courses) && banquet.courses.length > 0
@@ -86,7 +89,7 @@ export const BanquetCompositionModal: React.FC<Props> = ({ banquet, dishes, onCl
               type="button"
               onClick={() => printBanquet(banquet, dishes, { showPrice: canViewBanquetPrice })}
               className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-              title="Stampa"
+              title={t('comp.print', 'Stampa')}
             >
               <Printer className="h-4 w-4" />
             </button>
@@ -94,7 +97,7 @@ export const BanquetCompositionModal: React.FC<Props> = ({ banquet, dishes, onCl
               type="button"
               onClick={() => printBanquet(banquet, dishes, { kitchenMode: true })}
               className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-              title="Stampa per cucina"
+              title={t('comp.printKitchen', 'Stampa per cucina')}
             >
               <ChefHat className="h-4 w-4" />
             </button>
@@ -102,7 +105,7 @@ export const BanquetCompositionModal: React.FC<Props> = ({ banquet, dishes, onCl
               type="button"
               onClick={onClose}
               className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-              title="Chiudi"
+              title={t('common:actions.close', 'Chiudi')}
             >
               <X className="h-4 w-4" />
             </button>
@@ -114,7 +117,7 @@ export const BanquetCompositionModal: React.FC<Props> = ({ banquet, dishes, onCl
           <div>
             <h3 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-2 flex items-center gap-1.5">
               <Utensils className="h-3.5 w-3.5" />
-              Composizione del menù
+              {t('comp.title', 'Composizione del menù')}
             </h3>
             {courses ? (
               <div className="space-y-3">
@@ -190,7 +193,7 @@ export const BanquetCompositionModal: React.FC<Props> = ({ banquet, dishes, onCl
             <div className="space-y-2 pt-2 border-t border-[var(--ds-border)]">
               <h3 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-2 flex items-center gap-1.5">
                 <StickyNote className="h-3.5 w-3.5" />
-                Note operative
+                {t('comp.notes', 'Note operative')}
               </h3>
               {banquet.notes_courses && (
                 <div className="border-l-3 border-l-[var(--ds-pending-solid)] bg-[var(--ds-pending-tint)] rounded-r-[var(--ds-radius)] p-2.5 border border-[var(--ds-pending-tint)] dark:border-l-[var(--ds-pending-solid)]">

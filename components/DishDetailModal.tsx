@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Dish } from '../types';
 import { X, ImageIcon, Tag, AlertCircle } from 'lucide-react';
 import { moneySymbol } from '../utils/displayMoney';
@@ -9,6 +10,7 @@ interface Props {
 }
 
 export const DishDetailModal: React.FC<Props> = ({ dish, onClose }) => {
+  const { t } = useTranslation(['menu', 'common'], { useSuspense: false });
   const [photoFullscreen, setPhotoFullscreen] = useState(false);
 
   useEffect(() => {
@@ -42,7 +44,7 @@ export const DishDetailModal: React.FC<Props> = ({ dish, onClose }) => {
             type="button"
             onClick={onClose}
             className="absolute top-3 right-3 inline-flex h-9 w-9 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-            title="Chiudi"
+            title={t('common:actions.close', 'Chiudi')}
           >
             <X className="h-4 w-4" />
           </button>
@@ -71,7 +73,7 @@ export const DishDetailModal: React.FC<Props> = ({ dish, onClose }) => {
             <div className="border-t border-[var(--ds-border)] pt-4">
               <h3 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-2 flex items-center gap-1.5">
                 <AlertCircle className="h-3.5 w-3.5 text-[var(--ds-critical-text)]" />
-                Allergeni
+                {t('dish.allergens', 'Allergeni')}
               </h3>
               <div className="flex flex-wrap gap-1.5">
                 {dish.allergens.map(a => (
@@ -103,7 +105,7 @@ export const DishDetailModal: React.FC<Props> = ({ dish, onClose }) => {
             type="button"
             onClick={() => setPhotoFullscreen(false)}
             className="absolute top-4 right-4 p-2 rounded-[var(--ds-radius-control)] bg-white/90 hover:bg-white text-[var(--ds-text-primary)] shadow-lg transition-colors"
-            title="Chiudi"
+            title={t('common:actions.close', 'Chiudi')}
           >
             <X className="h-6 w-6" />
           </button>

@@ -11,5 +11,39 @@
   },
   "printCopy": "Print a copy",
   "printSent": "Copy printing",
-  "errPrint": "Printing failed"
+  "errPrint": "Printing failed",
+  "bill": {
+    "total": "Total",
+    "taken": "Taken",
+    "residual": "Outstanding"
+  },
+  "link": {
+    "today": "Today",
+    "yesterday": "Yesterday",
+    "all": "All",
+    "pending": "Pending",
+    "paid": "Paid",
+    "failed": "Failed",
+    "expired": "Expired"
+  },
+  "provider": {
+    "title": "Payment provider",
+    "errLoad": "Could not load the provider",
+    "errSave": "Could not update the provider"
+  },
+  "pat": {
+    "errLoad": "Could not load the settings",
+    "errSave": "Could not update the setting",
+    "on": "On",
+    "off": "Off",
+    "toggleAria": "{{azione}} the table bill",
+    "switchOff": "Switch off",
+    "switchOn": "Switch on",
+    "techTitle": "Technical settings (read only)",
+    "ttl": "Share hold TTL: <strong>5 minutes</strong>",
+    "ttlHint": "An unpaid claim is released automatically by the reconcile job (every 60s), so the capacity goes back to the other guests.",
+    "rate": "Public endpoint rate limit: <strong>60 requests/min per IP</strong> · <strong>10 claims/min per bill</strong>",
+    "rateHint": "It limits spam and keeps the balance from being locked out: the per-token guard stops anyone trying to hog the shares knowing a single QR.",
+    "adminsOnly": "Only administrators can change these settings."
+  }
 }

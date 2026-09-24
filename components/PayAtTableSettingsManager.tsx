@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Receipt, Loader2, Clock, ShieldCheck, ChevronDown } from 'lucide-react';
 import { getFeatureFlags, updateFeatureFlags, FeatureFlags } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
@@ -9,6 +10,7 @@ interface Props {
 }
 
 export const PayAtTableSettingsManager: React.FC<Props> = ({ showToast }) => {
+  const { t } = useTranslation('pagamenti', { useSuspense: false });
     const { hasPermission } = useAuth();
     const canEdit = hasPermission('settings:full');
 
@@ -26,7 +28,7 @@ export const PayAtTableSettingsManager: React.FC<Props> = ({ showToast }) => {
                 const data = await getFeatureFlags();
                 if (!cancelled) setFlags(data);
             } catch (err: any) {
-                if (!cancelled) showToastRef.current(err?.message || 'Errore nel caricamento delle impostazioni', 'error');
+                if (!cancelled) showToastRef.current(err?.message || t('pat.errLoad', 'Errore nel caricamento delle impostazioni'), 'error');
             } finally {
                 if (!cancelled) setLoading(false);
             }
@@ -46,7 +48,7 @@ export const PayAtTableSettingsManager: React.FC<Props> = ({ showToast }) => {
             showToast(`Conto al tavolo: ${nextValue ? 'attivo' : 'disattivato'}`, 'success');
         } catch (err: any) {
             setFlags(previous);
-            showToast(err?.message || 'Errore aggiornamento impostazione', 'error');
+            showToast(err?.message || t('pat.errSave', 'Errore aggiornamento impostazione'), 'error');
         } finally {
             setSaving(false);
         }
@@ -76,14 +78,14 @@ export const PayAtTableSettingsManager: React.FC<Props> = ({ showToast }) => {
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
                     <span className={`text-[12px] font-medium ${enabled ? 'text-[var(--ds-seated-text)]' : 'text-[var(--ds-text-subtle)]'}`}>
-                        {enabled ? 'Attivo' : 'Disattivato'}
+                        {enabled ? t('pat.on', 'Attivo') : t('pat.off', 'Disattivato')}
                     </span>
                     {/* stopPropagation so clicking the switch doesn't toggle the accordion */}
                     <button
                         type="button"
                         role="switch"
                         aria-checked={enabled}
-                        aria-label={`${enabled ? 'Disattiva' : 'Attiva'} conto al tavolo`}
+                        aria-label={t('pat.toggleAria', '{{azione}} conto al tavolo', { azione: enabled ? t('pat.switchOff', 'Disattiva') : t('pat.switchOn', 'Attiva') })}
                         onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggle(); }}
                         disabled={!canEdit || saving}
                         className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
@@ -114,27 +116,27 @@ export const PayAtTableSettingsManager: React.FC<Props> = ({ showToast }) => {
                     claim scade, e perché un guest colpisce il rate limit). */}
                 <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] border border-[var(--ds-border)] p-3">
                     <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-3">
-                        Parametri tecnici (sola lettura)
+                        {t('pat.techTitle', 'Parametri tecnici (sola lettura)')}
                     </h5>
                     <ul className="space-y-2.5 text-[13px]">
                         <li className="flex items-start gap-2.5">
                             <Clock className="h-4 w-4 mt-0.5 text-[var(--ds-text-muted)] flex-shrink-0" />
                             <div className="flex-1 min-w-0">
-                                <div className="text-[var(--ds-text-primary)]">TTL prenotazione quota: <strong>5 minuti</strong></div>
-                                <div className="text-[12px] text-[var(--ds-text-muted)]">Un claim non pagato viene rilasciato automaticamente dal reconcile job (ogni 60s) così la capacità torna disponibile per altri ospiti.</div>
+                                <div className="text-[var(--ds-text-primary)]" dangerouslySetInnerHTML={{ __html: t('pat.ttl', 'TTL prenotazione quota: <strong>5 minuti</strong>') }} />
+                                <div className="text-[12px] text-[var(--ds-text-muted)]">{t('pat.ttlHint', 'Un claim non pagato viene rilasciato automaticamente dal reconcile job (ogni 60s) così la capacità torna disponibile per altri ospiti.')}</div>
                             </div>
                         </li>
                         <li className="flex items-start gap-2.5">
                             <ShieldCheck className="h-4 w-4 mt-0.5 text-[var(--ds-text-muted)] flex-shrink-0" />
                             <div className="flex-1 min-w-0">
-                                <div className="text-[var(--ds-text-primary)]">Rate limit endpoint pubblico: <strong>60 richieste/min per IP</strong> · <strong>10 claim/min per conto</strong></div>
-                                <div className="text-[12px] text-[var(--ds-text-muted)]">Limita spam e prevenzione lock-out del residuo: la protezione per token blocca chi cerca di monopolizzare le quote conoscendo un singolo QR.</div>
+                                <div className="text-[var(--ds-text-primary)]" dangerouslySetInnerHTML={{ __html: t('pat.rate', 'Rate limit endpoint pubblico: <strong>60 richieste/min per IP</strong> · <strong>10 claim/min per conto</strong>') }} />
+                                <div className="text-[12px] text-[var(--ds-text-muted)]">{t('pat.rateHint', 'Limita spam e prevenzione lock-out del residuo: la protezione per token blocca chi cerca di monopolizzare le quote conoscendo un singolo QR.')}</div>
                             </div>
                         </li>
                     </ul>
                     {!canEdit && (
                         <p className="text-[12px] text-[var(--ds-text-subtle)] mt-3 italic">
-                            Solo gli amministratori possono modificare queste impostazioni.
+                            {t('pat.adminsOnly', 'Solo gli amministratori possono modificare queste impostazioni.')}
                         </p>
                     )}
                 </div>
