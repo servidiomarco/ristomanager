@@ -11,6 +11,7 @@ import {
 } from '../services/staffChat';
 import { socketClient } from '../services/socketClient';
 import { displayLocale } from '../utils/formatLocale';
+import { relativeTime } from '../utils/relativeTime';
 import {
   SplitPane, PaneHeader, PanePlaceholder, SectionHeader, Avatar, EmptyState, AttachmentRow,
   Callout, CountBadge, dsIconButton,
@@ -49,19 +50,6 @@ const ROLE_LABELS_IT: Record<string, string> = {
 };
 const roleLabel = (r: string, tr?: TFunc): string =>
   tr ? tr(`common:role.${r}`, ROLE_LABELS_IT[r] ?? r) : (ROLE_LABELS_IT[r] ?? r);
-
-const formatRelative = (iso: string | null, tr?: TFunc): string => {
-  if (!iso) return '';
-  const d = new Date(iso);
-  const min = Math.floor((Date.now() - d.getTime()) / 60000);
-  if (min < 1) return tr ? tr('rel.now', 'ora') : 'ora';
-  if (min < 60) return tr ? tr('rel.min', '{{n}} min fa', { n: min }) : `${min} min fa`;
-  const h = Math.floor(min / 60);
-  if (h < 24) return tr ? tr('rel.hours', '{{n}} h fa', { n: h }) : `${h} h fa`;
-  const days = Math.floor(h / 24);
-  if (days < 7) return tr ? tr('rel.days', '{{n}} g fa', { n: days }) : `${days} g fa`;
-  return d.toLocaleDateString(displayLocale(), { day: '2-digit', month: 'short' });
-};
 
 const formatTime = (iso: string): string => {
   try {
@@ -466,7 +454,7 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
           </span>
           <span className="flex items-center gap-1.5">
             <span className="whitespace-nowrap text-[13px] text-[var(--ds-text-muted)]">
-              {formatRelative(t.lastMessage?.created_at ?? null, tr)}
+              {relativeTime(t.lastMessage?.created_at, tr)}
             </span>
             {t.unreadCount > 0 && <CountBadge tone="alert" count={t.unreadCount} />}
           </span>

@@ -5,12 +5,6 @@
     "cucina": "Kitchen",
     "reception": "Reception"
   },
-  "rel": {
-    "now": "now",
-    "min": "{{n}} min ago",
-    "hours": "{{n}} h ago",
-    "days": "{{n}} d ago"
-  },
   "today": "Today",
   "yesterday": "Yesterday",
   "removedUser": "Removed user",

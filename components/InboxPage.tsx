@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { relativeTime } from '../utils/relativeTime';
 import { useTranslation } from 'react-i18next';
 import { MessageCircle, Send, Loader2, RefreshCw, AlertTriangle, CheckCircle2, Clock, ArrowRight, Check, CalendarPlus, Paperclip, X as XIcon, Wand2, FolderOpen } from 'lucide-react';
 import { Loader } from './Loader';
@@ -31,20 +32,6 @@ import {
 } from './ds';
 import type { PillTone } from './ds';
 import { sessionTimeZone } from '../utils/displayTime';
-
-const formatRelative = (iso: string | null): string => {
-  if (!iso) return '';
-  const d = new Date(iso);
-  const diffMs = Date.now() - d.getTime();
-  const min = Math.floor(diffMs / 60000);
-  if (min < 1) return 'ora';
-  if (min < 60) return `${min} min fa`;
-  const h = Math.floor(min / 60);
-  if (h < 24) return `${h} h fa`;
-  const days = Math.floor(h / 24);
-  if (days < 7) return `${days} g fa`;
-  return d.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' });
-};
 
 const formatTime = (iso: string): string => {
   try {
@@ -710,7 +697,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                 {displayName(c)}
               </span>
               <span className="flex items-center gap-1.5">
-                <span className="whitespace-nowrap text-[13px] text-[var(--ds-text-muted)]">{formatRelative(c.last_sent_at)}</span>
+                <span className="whitespace-nowrap text-[13px] text-[var(--ds-text-muted)]">{relativeTime(c.last_sent_at, tv)}</span>
                 {unread > 0 && (
                   <CountBadge tone="alert" count={unread} />
                 )}

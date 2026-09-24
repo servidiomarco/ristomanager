@@ -1,0 +1,36 @@
+{
+  "errLoad": "Could not load the notifications",
+  "title": "Notifications",
+  "markAllRead": "Mark all as read",
+  "reload": "Refresh",
+  "allRead": "All read",
+  "filters": "Filters",
+  "all": "All",
+  "unread": "Unread",
+  "noneToRead": "No notification to read.",
+  "none": "No notification.",
+  "cat": {
+    "all": "All categories",
+    "reservation": "Bookings",
+    "voice": "Calls",
+    "message": "Messages",
+    "email": "Email",
+    "payment": "Payments",
+    "system": "System"
+  },
+  "bucket": {
+    "adesso": "Right now",
+    "oggi": "Today",
+    "ieri": "Yesterday",
+    "settimana": "This week",
+    "prima": "Earlier"
+  },
+  "moreActions": "More actions",
+  "markRead": "Mark as read",
+  "dismiss": "Dismiss",
+  "read": "Read",
+  "filterByState": "Filter by state",
+  "filterByCategory": "Filter by category",
+  "close": "Close",
+  "seeAll": "See all"
+}

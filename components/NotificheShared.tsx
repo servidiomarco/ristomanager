@@ -3,6 +3,12 @@ import { createPortal } from 'react-dom';
 import { Bell, X, Phone, CreditCard, Calendar, MessageCircle, Mail, AlertTriangle, Check, MoreHorizontal } from 'lucide-react';
 import { NotificationRow } from '../services/notificationsApiService';
 import { SwipeRow } from './ds';
+import { relativeTime } from '../utils/relativeTime';
+
+/* `t` a parametro: questo modulo è fatto di funzioni pure e di componenti
+   che la pagina e il pannello della campanella condividono. Senza `t` si
+   resta in italiano. */
+type TFunc = (key: string, defaultValue: string, options?: Record<string, unknown>) => string;
 
 /**
  * Everything the notifications list is made of, shared by the full page and
@@ -10,18 +16,11 @@ import { SwipeRow } from './ds';
  * row density, tone mapping or what the "…" menu offers.
  */
 
-export const formatRelative = (iso: string): string => {
-  const d = new Date(iso);
-  const diffMs = Date.now() - d.getTime();
-  const min = Math.floor(diffMs / 60000);
-  if (min < 1) return 'ora';
-  if (min < 60) return `${min} min fa`;
-  const h = Math.floor(min / 60);
-  if (h < 24) return `${h} h fa`;
-  const days = Math.floor(h / 24);
-  if (days < 7) return `${days} g fa`;
-  return d.toLocaleDateString('it-IT', { day: '2-digit', month: 'short', year: '2-digit' });
-};
+/* Le notifiche mostrano anche l'anno sulle righe vecchie: è l'unica
+   differenza che le cinque copie avevano fra loro, ed è diventata
+   un'opzione invece di una funzione a parte. */
+export const formatRelative = (iso: string, t?: TFunc): string =>
+  relativeTime(iso, t, { withYear: true });
 
 // Category → visual bucket. Anything not mapped falls back to "general".
 /**
@@ -71,13 +70,16 @@ export const categoryStyle = (cat: string | null): { Icon: React.ComponentType<{
 export type Bucket = 'adesso' | 'oggi' | 'ieri' | 'settimana' | 'prima';
 
 export const BUCKET_ORDER: Bucket[] = ['adesso', 'oggi', 'ieri', 'settimana', 'prima'];
-export const BUCKET_LABEL: Record<Bucket, string> = {
+const BUCKET_LABEL_IT: Record<Bucket, string> = {
   adesso: 'Adesso',
   oggi: 'Oggi',
   ieri: 'Ieri',
   settimana: 'Questa settimana',
   prima: 'Prima',
 };
+
+export const bucketLabel = (b: Bucket, t?: TFunc): string =>
+  t ? t(`bucket.${b}`, BUCKET_LABEL_IT[b]) : BUCKET_LABEL_IT[b];
 
 const sameDay = (a: Date, b: Date) =>
   a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
@@ -104,7 +106,8 @@ const MENU_WIDTH = 208;
 export const RowMenu: React.FC<{
   onMarkRead?: () => void;
   onDismiss: () => void;
-}> = ({ onMarkRead, onDismiss }) => {
+  t: TFunc;
+}> = ({ onMarkRead, onDismiss, t }) => {
   const [at, setAt] = useState<{ top: number; left: number } | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -158,7 +161,7 @@ export const RowMenu: React.FC<{
         onClick={() => (open ? setAt(null) : place())}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label="Altre azioni"
+        aria-label={t('moreActions', 'Altre azioni')}
         className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
       >
         <MoreHorizontal className="h-4 w-4" />
@@ -173,7 +176,7 @@ export const RowMenu: React.FC<{
           {onMarkRead && (
             <button type="button" role="menuitem" className={item} onClick={() => { setAt(null); onMarkRead(); }}>
               <Check className="h-4 w-4 text-[var(--ds-text-muted)]" aria-hidden />
-              Segna come letta
+              {t('markRead', 'Segna come letta')}
             </button>
           )}
           <button
@@ -183,7 +186,7 @@ export const RowMenu: React.FC<{
             onClick={() => { setAt(null); onDismiss(); }}
           >
             <X className="h-4 w-4" aria-hidden />
-            Rimuovi
+            {t('dismiss', 'Rimuovi')}
           </button>
         </div>,
         document.body
@@ -202,20 +205,21 @@ export const NotificationItem: React.FC<{
   onOpen: (n: NotificationRow) => void;
   onMarkRead: (n: NotificationRow) => void;
   onDismiss: (n: NotificationRow) => void;
-}> = ({ n, hint, onOpen, onMarkRead, onDismiss }) => {
+  t: TFunc;
+}> = ({ n, hint, onOpen, onMarkRead, onDismiss, t }) => {
   const isUnread = !n.read_at;
   const { Icon, tile } = categoryStyle(n.category);
   return (
     <SwipeRow
       hint={hint}
       left={isUnread ? {
-        label: 'Letta',
+        label: t('read', 'Letta'),
         tone: 'confirm',
         icon: <Check className="h-4 w-4" aria-hidden />,
         onAction: () => onMarkRead(n),
       } : undefined}
       right={{
-        label: 'Rimuovi',
+        label: t('dismiss', 'Rimuovi'),
         tone: 'danger',
         icon: <X className="h-4 w-4" aria-hidden />,
         onAction: () => onDismiss(n),
@@ -246,7 +250,7 @@ export const NotificationItem: React.FC<{
               <p className="truncate text-[14px] text-[var(--ds-text-muted)]">{n.body}</p>
             )}
             <span className="mt-0.5 block text-[13px] tabular-nums text-[var(--ds-text-muted)]">
-              {formatRelative(n.sent_at)}
+              {formatRelative(n.sent_at, t)}
             </span>
           </div>
         </button>
@@ -256,6 +260,7 @@ export const NotificationItem: React.FC<{
           <RowMenu
             onMarkRead={isUnread ? () => onMarkRead(n) : undefined}
             onDismiss={() => onDismiss(n)}
+            t={t}
           />
         </div>
       </div>

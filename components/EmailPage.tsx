@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import { displayLocale } from '../utils/formatLocale';
+import { relativeTime } from '../utils/relativeTime';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Mail, Send, Loader2, RefreshCw, CheckCircle2, Clock, AlertTriangle, ArrowRight, Check, ArrowDownLeft, ArrowUpRight, Reply, Paperclip, X as XIcon, FolderOpen, Wand2, CalendarPlus } from 'lucide-react';
 import { Loader } from './Loader';
@@ -22,20 +23,6 @@ import {
   Avatar, EmptyState, SwipeRow, useFirstRunHint, PanePlaceholder, PaneHeader, CountBadge,
   dsInput, dsTextarea, dsButton, dsIconButton, AttachmentRow, LinkifiedText,
 } from './ds';
-
-const formatRelative = (iso: string | null): string => {
-  if (!iso) return '';
-  const d = new Date(iso);
-  const diffMs = Date.now() - d.getTime();
-  const min = Math.floor(diffMs / 60000);
-  if (min < 1) return 'ora';
-  if (min < 60) return `${min} min fa`;
-  const h = Math.floor(min / 60);
-  if (h < 24) return `${h} h fa`;
-  const days = Math.floor(h / 24);
-  if (days < 7) return `${days} g fa`;
-  return d.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' });
-};
 
 const formatTime = (iso: string): string => {
   try {
@@ -618,7 +605,7 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
             <div className="flex items-baseline justify-between gap-2">
               <span className="truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">{displayName(th)}</span>
               <span className="flex items-center gap-1.5">
-                <span className="whitespace-nowrap text-[13px] text-[var(--ds-text-muted)]">{formatRelative(th.last_sent_at)}</span>
+                <span className="whitespace-nowrap text-[13px] text-[var(--ds-text-muted)]">{relativeTime(th.last_sent_at, t)}</span>
                 {th.unread_count > 0 && (
                   <CountBadge tone="alert" count={th.unread_count} />
                 )}

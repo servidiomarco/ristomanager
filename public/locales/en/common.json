@@ -243,5 +243,11 @@
     "viaChannel": "via {{canale}}",
     "sentOn": "sent on {{quando}}",
     "paidOn": "paid on {{quando}}"
+  },
+  "rel": {
+    "now": "now",
+    "min": "{{n}} min ago",
+    "hours": "{{n}} h ago",
+    "days": "{{n}} d ago"
   }
 }
