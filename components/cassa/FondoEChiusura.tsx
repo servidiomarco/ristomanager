@@ -236,6 +236,14 @@ export const FondoEChiusura: React.FC<FondoEChiusuraProps> = ({
                 <dt className="text-[var(--ds-text-secondary)]">{t('cashTakings')}</dt>
                 <dd className="tabular-nums text-[var(--ds-text-secondary)]">{euro(view?.cash_cents ?? 0)}</dd>
               </div>
+              {/* Nel cassetto ma non incassi del conto: senza questa riga la
+                  conta tornava con le mance in più, senza spiegazione. */}
+              {typeof view?.tips_cash_cents === 'number' && view.tips_cash_cents > 0 && (
+                <div className="flex justify-between gap-2">
+                  <dt className="text-[var(--ds-text-secondary)]">{t('cashTips')}</dt>
+                  <dd className="tabular-nums text-[var(--ds-text-secondary)]">{euro(view.tips_cash_cents)}</dd>
+                </div>
+              )}
               <div className="flex justify-between gap-2 border-t border-[var(--ds-border)] pt-2 text-[16px] font-semibold">
                 <dt className="text-[var(--ds-text-primary)]">{t('expected')}</dt>
                 <dd className="tabular-nums text-[var(--ds-text-primary)]">{euro(expected)}</dd>

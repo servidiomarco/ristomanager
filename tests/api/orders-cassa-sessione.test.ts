@@ -220,4 +220,42 @@ describe('cassa — sessione del cassetto', () => {
         const after = await view();
         expect(after.session.difference_cents).toBe(-500);
     });
+
+    it('la mancia in contanti entra nei contanti attesi, quella sul POS no', async () => {
+        // 24/09: conto saldato col QR, 5 € di mancia in contanti alla
+        // chiusura — finivano sul conto ma non nel cassetto.
+        const before = await view();
+        const cashTipBill = await openBill('SESS-MANCIA1', 2000);
+        const closed = await api().post(`/bills/${cashTipBill}/close`).set(bearer(token)).send({
+            payments: [{ method: 'POS_FISICO', amount_cents: 2000 }],
+            tip_cents: 500, tip_method: 'CONTANTI', documento: 'Proforma',
+        });
+        expect(closed.status).toBe(200);
+        expect(closed.body.tip_method).toBe('CONTANTI');
+
+        const mid = await view();
+        expect(mid.tips_cash_cents - before.tips_cash_cents).toBe(500);
+        expect(mid.expected_cents - before.expected_cents).toBe(500);
+        // Non è un incasso del conto: i contanti incassati restano fermi.
+        expect(mid.cash_cents).toBe(before.cash_cents);
+
+        const posTipBill = await openBill('SESS-MANCIA2', 2000);
+        const pos = await api().post(`/bills/${posTipBill}/close`).set(bearer(token)).send({
+            payments: [{ method: 'POS_FISICO', amount_cents: 2000 }],
+            tip_cents: 300, tip_method: 'POS_FISICO', documento: 'Proforma',
+        });
+        expect(pos.status).toBe(200);
+        const after = await view();
+        expect(after.tips_cash_cents).toBe(mid.tips_cash_cents);
+        expect(after.expected_cents).toBe(mid.expected_cents);
+    });
+
+    it('un metodo di mancia sconosciuto si rifiuta', async () => {
+        const bill = await openBill('SESS-MANCIA3', 1000);
+        const res = await api().post(`/bills/${bill}/close`).set(bearer(token)).send({
+            payments: [{ method: 'CONTANTI', amount_cents: 1000 }],
+            tip_cents: 100, tip_method: 'OMAGGIO', documento: 'Proforma',
+        });
+        expect(res.status).toBe(400);
+    });
 });

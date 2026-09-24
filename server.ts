@@ -5850,6 +5850,9 @@ app.post('/reservations/:id/bill/notify', authenticate, requirePermission('payme
 // Metodi registrabili a mano dallo staff. LINK_ONLINE è escluso: quelle
 // righe le scrive solo il webhook come specchio di una quota PAID.
 const STAFF_BILL_PAYMENT_METHODS = ['CONTANTI', 'POS_FISICO', 'SATISPAY', 'BUONO_PASTO', 'GIFT_CARD', 'SOSPESO', 'OMAGGIO'] as const;
+// Come si lascia una mancia: solo i mezzi che la portano davvero da qualche
+// parte (il cassetto, o l'estratto del POS/Satispay).
+const TIP_METHODS: readonly any[] = ['CONTANTI', 'POS_FISICO', 'SATISPAY'];
 
 function parseStaffBillPayment(raw: any): { method: string; amount_cents: number; meta: any } | { error: string } {
     const method = String(raw?.method || '');
@@ -5896,6 +5899,13 @@ app.post('/bills/:id/close', authenticate, requirePermission('payments:full'), a
         if (!Number.isFinite(tipCents) || tipCents < 0) {
             return res.status(400).json({ error: 'tip_cents must be >= 0' });
         }
+        // Come è stata data la mancia: CONTANTI entra nei contanti attesi del
+        // cassetto. Assente = sconosciuto (client vecchi), come prima.
+        const tipMethodRaw = req.body?.tip_method;
+        if (tipMethodRaw != null && !TIP_METHODS.includes(tipMethodRaw)) {
+            return res.status(400).json({ error: `tip_method must be one of ${TIP_METHODS.join(', ')}` });
+        }
+        const tipMethod: string | null = tipCents > 0 && tipMethodRaw != null ? String(tipMethodRaw) : null;
         const rawPayments = Array.isArray(req.body?.payments) ? req.body.payments : [];
         const parsedPayments: { method: string; amount_cents: number; meta: any }[] = [];
         for (const raw of rawPayments) {
@@ -6021,6 +6031,7 @@ app.post('/bills/:id/close', authenticate, requirePermission('payments:full'), a
                          WHERE table_bill_id = $1 AND method = 'CONTANTI' AND table_bill_split_id IS NULL AND voided_at IS NULL
                      ),
                      tip_cents = $4,
+                     tip_method = $8,
                      notes = COALESCE($5, notes),
                      lottery_code = COALESCE($7, lottery_code),
                      share_token = NULL
@@ -6028,8 +6039,8 @@ app.post('/bills/:id/close', authenticate, requirePermission('payments:full'), a
                  RETURNING id, reservation_id, table_id, total_cents, covers, currency,
                            items, status, share_token, opened_at, closed_at,
                            opened_by_user_id, closed_by_user_id, external_ref,
-                           cash_settled_cents, tip_cents, notes`,
-                [id, finalStatus, req.user?.userId ?? null, Math.round(tipCents), notesForDb, req.tenantId!, lotteryCode]
+                           cash_settled_cents, tip_cents, tip_method, notes`,
+                [id, finalStatus, req.user?.userId ?? null, Math.round(tipCents), notesForDb, req.tenantId!, lotteryCode, tipMethod]
             );
             updatedRow = upd.rows[0];
             await client.query('COMMIT');
@@ -6533,7 +6544,7 @@ app.get('/reports/cash-closure', authenticate, requirePermission('payments:view'
         // incassi, così la chiusura serale si riscontra tavolo per tavolo e
         // si filtra per tipo di chiusura (scontrino/fattura/proforma/senza).
         const billListRs = await queryWithRetry(
-            `SELECT b.id, b.total_cents, b.status, b.tip_cents, b.closed_at, b.covers,
+            `SELECT b.id, b.total_cents, b.status, b.tip_cents, b.tip_method, b.closed_at, b.covers,
                     t.name AS table_name,
                     -- Un conto d'asporto non ha tavolo: la riga dice «Asporto
                     -- #N» col cliente dell'ordine, e i covers (fissi a 1 in
@@ -34134,7 +34145,7 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
         const rows = await queryWithRetry(
             `SELECT b.id, b.reservation_id, b.table_id, b.total_cents, b.covers,
                     b.currency, b.items, b.status, b.share_token, b.opened_at, b.closed_at,
-                    b.cash_settled_cents, b.tip_cents, b.external_ref,
+                    b.cash_settled_cents, b.tip_cents, b.tip_method, b.external_ref,
                     b.discount_type, b.discount_value, b.discount_reason,
                     b.takeaway_order_id,
                     t.name AS table_name,
@@ -34417,6 +34428,18 @@ async function loadCashSession(tenantId: number, service: CurrentService) {
         [tenantId, service_date, shift]
     );
 
+    // Mance in contanti dei conti CHIUSI nel servizio: sono nel cassetto ma
+    // non sono un incasso del conto (niente scontrino), quindi stanno fuori
+    // da cash_cents e dentro i contanti attesi.
+    const tipsRs = await queryWithRetry(
+        `SELECT COALESCE(SUM(b.tip_cents), 0)::int AS amount_cents
+           FROM table_bills b
+          WHERE b.tenant_id = $1 AND b.tip_method = 'CONTANTI' AND b.tip_cents > 0
+            AND b.closed_at IS NOT NULL AND b.status <> 'VOIDED'
+            AND ${SERVICE_OF('b.closed_at', TZ)} = $2::date
+            AND ${SHIFT_OF('b.closed_at', TZ)} = $3`,
+        [tenantId, service_date, shift]
+    );
     // Conti ancora da incassare NEL SERVIZIO: la cassa si chiude comunque, ma
     // lo dice. Il servizio del conto arriva dalla comanda, o si deduce
     // dall'apertura per i conti aperti a mano — stessa derivazione di
@@ -34466,6 +34489,7 @@ async function loadCashSession(tenantId: number, service: CurrentService) {
 
     const cash_cents = sum(m => m === 'CONTANTI');
     const opening_float_cents = Number(session?.opening_float_cents ?? 0);
+    const tips_cash_cents = Number(tipsRs.rows[0]?.amount_cents ?? 0);
 
     return {
         service: { service_date, shift },
@@ -34476,7 +34500,8 @@ async function loadCashSession(tenantId: number, service: CurrentService) {
         cash_cents,
         // Quello che deve esserci nel cassetto. Sempre CALCOLATO, mai
         // memorizzato: uno storno alle 23:40 lo deve muovere.
-        expected_cents: opening_float_cents + cash_cents,
+        tips_cash_cents,
+        expected_cents: opening_float_cents + cash_cents + tips_cash_cents,
         out_of_totals: {
             deposits_cents: Number(depositsRs.rows[0]?.amount_cents ?? 0),
             deposits_count: Number(depositsRs.rows[0]?.movements ?? 0),

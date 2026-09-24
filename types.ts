@@ -444,6 +444,7 @@ export interface TableBill {
   external_ref: string | null;
   cash_settled_cents: number;
   tip_cents: number;
+  tip_method?: TipMethod | null;
   notes: string | null;
 }
 
@@ -454,6 +455,9 @@ export interface TableBill {
 // solo al report per metodo — il residuo le conta già tramite la quota.
 // Le righe senza specchio sono incassi registrati dallo staff e pesano sul
 // residuo. Storno = soft-void (voided_at), mai delete.
+/** Come è stata data la mancia: CONTANTI entra nei contanti attesi. */
+export type TipMethod = 'CONTANTI' | 'POS_FISICO' | 'SATISPAY';
+
 export type BillPaymentMethod =
   | 'CONTANTI'
   | 'POS_FISICO'
@@ -494,6 +498,8 @@ export interface CashClosureBillRow {
   total_cents: number;
   status: 'CLOSED' | 'SETTLED_PARTIAL';
   tip_cents: number;
+  /** Assente sul backend vecchio; null = mancia registrata senza metodo. */
+  tip_method?: TipMethod | null;
   closed_at: string;
   covers: number;
   /** Turno del conto: lo stesso tavolo serve pranzo e cena. */
@@ -604,7 +610,10 @@ export interface CashSessionView {
   movements: number;
   collected_cents: number;
   cash_cents: number;
-  /** Fondo + contanti del servizio. Sempre ricalcolato, mai memorizzato. */
+  /** Mance in contanti dei conti chiusi nel servizio: nel cassetto, ma non
+   *  incassi del conto. Assente sul backend vecchio. */
+  tips_cash_cents?: number;
+  /** Fondo + contanti + mance in contanti. Sempre ricalcolato, mai memorizzato. */
   expected_cents: number;
   /** Quello che il conto ha mosso senza portare denaro nel cassetto. */
   out_of_totals: {

@@ -4,6 +4,7 @@ import { ArrowLeft, Check, Loader2, QrCode, Send } from 'lucide-react';
 import { chime } from '../../utils/chime';
 import { billsApiService } from '../../services/billsApiService';
 import type { BillPaymentInput, OpenBillRow } from '../../services/billsApiService';
+import type { TipMethod } from '../../types';
 import { Callout, SegmentedControl, StatusPill } from '../ds';
 import { METHODS, methodLabel, nextAmountText, settleMath, settlePayments } from '../pagamenti/settleView';
 import type { SettleOpts } from '../pagamenti/BillSheet';
@@ -25,6 +26,8 @@ import { moneySymbol } from '../../utils/displayMoney';
    separati: caparra, incassato in cassa, pagato online. */
 
 type Doc = 'Scontrino' | 'Proforma' | 'Fattura';
+
+const TIP_METHODS: TipMethod[] = ['CONTANTI', 'POS_FISICO', 'SATISPAY'];
 
 interface PagamentoProps {
   bill: OpenBillRow;
@@ -97,6 +100,11 @@ export const Pagamento: React.FC<PagamentoProps> = ({
     setAmount(nextAmountText(Math.max(0, residual - recorded)));
   }, [residual, movements]);
   const [tip, setTip] = useState('');
+  // Come arriva la mancia: finché nessuno sceglie, segue il metodo del conto
+  // (una mancia sul POS la batte chi batte il conto), altrimenti contanti.
+  const [tipChoice, setTipChoice] = useState<TipMethod | null>(null);
+  const tipMethod: TipMethod = tipChoice
+    ?? (method === 'POS_FISICO' || method === 'SATISPAY' ? method : 'CONTANTI');
   const [doc, setDoc] = useState<Doc>('Scontrino');
   // Invio del link /pay al telefono dell'ordine d'asporto. Esito inline
   // sotto il bottone (niente toast: l'operatore sta guardando qui) e
@@ -166,6 +174,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
     onSettle({
       payments,
       tip_cents: tipCents,
+      ...(tipCents > 0 ? { tip_method: tipMethod } : {}),
       // «Fattura» chiude comunque senza scontrino: il documento si emette poi
       // dal conto, dove ci sono i dati del cessionario.
       documento: doc === 'Scontrino' ? 'Scontrino' : 'Proforma',
@@ -535,6 +544,21 @@ export const Pagamento: React.FC<PagamentoProps> = ({
               />
             </div>
           </label>
+          {/* Dove finisce la mancia: in contanti entra nel cassetto. Senza
+              questa scelta i contanti di una mancia a un conto saldato col QR
+              restavano fuori dai contanti attesi (24/09). */}
+          {tipCents > 0 && (
+            <div className="mt-2">
+              <SegmentedControl<TipMethod>
+                value={tipMethod}
+                onChange={setTipChoice}
+                options={TIP_METHODS.map(m => ({ value: m, label: methodLabel(m) }))}
+                ariaLabel={t('tipMethod')}
+                equalWidth={false}
+                size="sm"
+              />
+            </div>
+          )}
 
           {canaleEDocumento}
         </section>

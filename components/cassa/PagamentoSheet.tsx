@@ -169,7 +169,7 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
         row?.fiscal_doc_type ?? null,
       );
       const paidNowCents = (opts?.payments ?? []).reduce((s, p) => s + p.amount_cents, 0);
-      setEsito({ kind, bill: row ?? { ...bill, closed_at: result.closed_at }, paidNowCents });
+      setEsito({ kind, bill: row ?? { ...bill, closed_at: result.closed_at, tip_cents: result.tip_cents, tip_method: result.tip_method }, paidNowCents });
       setScreen('esito');
       // Intento «Fattura»: niente strada a metà — l'emissione si apre da
       // sola, precompilata col cliente della visita se c'è.
@@ -201,6 +201,8 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
           esito={esito.kind}
           totalCents={esito.bill.total_cents}
           paidNowCents={esito.paidNowCents ?? null}
+          tipCents={esito.bill.tip_cents ?? 0}
+          tipMethod={esito.bill.tip_method ?? null}
           residualCents={esito.bill.residual_cents ?? null}
           tableName={esito.bill.table_name}
           closedAt={esito.bill.closed_at ?? null}

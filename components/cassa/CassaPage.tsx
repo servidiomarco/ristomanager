@@ -429,7 +429,7 @@ export const CassaPage: React.FC<CassaPageProps> = ({
       // Quanto è entrato con QUESTO incasso: l'esito parziale mostra questo,
       // non il totale del tavolo.
       const paidNowCents = (opts?.payments ?? []).reduce((s, p) => s + p.amount_cents, 0);
-      setEsito({ kind, bill: row ?? { ...bill, closed_at: closed.closed_at }, paidNowCents });
+      setEsito({ kind, bill: row ?? { ...bill, closed_at: closed.closed_at, tip_cents: closed.tip_cents, tip_method: closed.tip_method }, paidNowCents });
       setScreen('esito');
     } catch (err: any) {
       setError(err?.data?.error ?? err?.message ?? t('err.close'));
@@ -820,6 +820,8 @@ export const CassaPage: React.FC<CassaPageProps> = ({
           esito={esito.kind}
           totalCents={esito.bill.total_cents}
           paidNowCents={esito.paidNowCents ?? null}
+          tipCents={esito.bill.tip_cents ?? 0}
+          tipMethod={esito.bill.tip_method ?? null}
           residualCents={esito.bill.residual_cents ?? null}
           tableName={esito.bill.table_name}
           closedAt={esito.bill.closed_at ?? null}

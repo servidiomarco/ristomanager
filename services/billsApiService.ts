@@ -1,6 +1,6 @@
 import { authApiService } from './authApiService';
 import { socketClient } from './socketClient';
-import type { BillPaymentMethod, CashClosureReport, CustomerBilling, FiscalDocument, FiscalProviderSetting, TableBill, TableBillWithSplits } from '../types';
+import type { BillPaymentMethod, CashClosureReport, CustomerBilling, FiscalDocument, FiscalProviderSetting, TableBill, TableBillWithSplits, TipMethod } from '../types';
 import { buildApiError } from './apiError';
 import { routedGetUrl, cloudFallbackUrl, noteRoutedResponse, fetchNodeAware } from './apiRouting';
 
@@ -29,6 +29,8 @@ export interface CloseBillPayload {
   /** Legacy: totale contanti cumulativo. Preferire payments. */
   cash_settled_cents?: number;
   tip_cents?: number;
+  /** Come è stata data la mancia; CONTANTI entra nel cassetto. */
+  tip_method?: TipMethod;
   notes?: string;
   /** Conti nativi: 'Proforma' = chiusura deliberata senza documento fiscale
    *  (registrata come segnaposto PROFORMA, sostituibile da scontrino o
@@ -356,6 +358,7 @@ export interface OpenBillRow {
   staff_paid_cents?: number;
   /** Mancia registrata alla chiusura. */
   tip_cents?: number;
+  tip_method?: TipMethod | null;
   /** Quando il conto è stato chiuso (solo per i conti chiusi). */
   closed_at?: string | null;
   residual_cents: number;

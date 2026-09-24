@@ -5,7 +5,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { Check, Copy, ExternalLink, FileText, Loader2, Printer, QrCode, Search, X, Banknote } from 'lucide-react';
 import { billsApiService, printBill, type BillPaymentInput, type OpenBillRow } from '../../services/billsApiService';
 import { getCustomers } from '../../services/apiService';
-import type { Customer } from '../../types';
+import type { Customer, TipMethod } from '../../types';
 import { FormCard, PaneHeader, Sheet, StatusPill } from '../ds';
 import { formatEuro } from './paymentsView';
 import { METHODS, methodLabel, eurToCents, settleMath, settlePayments, nextAmountText } from './settleView';
@@ -18,6 +18,7 @@ export type SettleOpts = {
   payments?: BillPaymentInput[];
   cash_settled_cents?: number;
   tip_cents?: number;
+  tip_method?: TipMethod;
   passepartout_documento?: 'Scontrino' | 'Proforma';
   /** Conti nativi: 'Proforma' = chiusura deliberata senza documento
    *  fiscale; 'Cassa' = scontrino battuto sull'RT esterno (periodo ponte),
