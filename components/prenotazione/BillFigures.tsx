@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { money } from '../../utils/displayMoney';
 
 /* ── Le tre cifre del conto ───────────────────────────────────────────────
@@ -33,15 +34,16 @@ export const BillFigures: React.FC<{
   paidCents: number;
   residualCents: number;
 }> = ({ totalCents, paidCents, residualCents }) => {
+  const { t } = useTranslation('pagamenti', { useSuspense: false });
   const pct = totalCents > 0 ? Math.min(100, Math.round((paidCents / totalCents) * 100)) : 0;
   const settled = residualCents <= 0;
   return (
     <>
       <div className="flex items-start gap-4">
-        <Figure label="Totale" value={euro(totalCents)} />
-        <Figure label="Incassato" value={euro(paidCents)} tone={paidCents > 0 ? 'positive' : undefined} />
+        <Figure label={t('bill.total', 'Totale')} value={euro(totalCents)} />
+        <Figure label={t('bill.taken', 'Incassato')} value={euro(paidCents)} tone={paidCents > 0 ? 'positive' : undefined} />
         <Figure
-          label="Residuo"
+          label={t('bill.residual', 'Residuo')}
           value={euro(Math.max(0, residualCents))}
           tone={settled ? 'positive' : 'critical'}
         />

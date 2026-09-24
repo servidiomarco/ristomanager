@@ -261,5 +261,21 @@
     "namePlaceholder": "What do you call it? (e.g. August menu)",
     "uploading": "Uploading…",
     "pickFile": "Pick a file"
+  },
+  "ai": {
+    "errLoadPrompt": "Could not load the table logic prompt",
+    "promptSaved": "Table logic prompt saved",
+    "errSavePrompt": "Saving failed",
+    "loading": "Loading…",
+    "promptPlaceholder": "e.g. prefer the tables by the window for parties over 6; do not assign table 12 after 21:00; for regulars always use their preferred table if free…",
+    "saving": "Saving…",
+    "save": "Save"
+  },
+  "preset": {
+    "errLoad": "Could not load the quick messages",
+    "saved": "Quick messages saved",
+    "restored": "Default quick messages restored",
+    "errSave": "Saving failed",
+    "needOne": "You need at least one message, or use \"Back to the defaults\""
   }
 }

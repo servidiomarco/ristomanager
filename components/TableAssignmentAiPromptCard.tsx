@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Wand2, Save, Loader2, ChevronDown } from 'lucide-react';
 import { Loader } from './Loader';
 import { getTableAssignmentAiPrompt, updateTableAssignmentAiPrompt } from '../services/apiService';
@@ -15,6 +16,7 @@ const PROMPT_MAX = 4000;
 // Sofia. Affianca la logica esistente, non la sostituisce — e con il campo
 // vuoto la proposta resta spenta.
 export const TableAssignmentAiPromptCard: React.FC<Props> = ({ showToast }) => {
+  const { t } = useTranslation('impostazioni', { useSuspense: false });
   const { hasPermission } = useAuth();
   const canEdit = hasPermission('settings:full');
 
@@ -33,7 +35,7 @@ export const TableAssignmentAiPromptCard: React.FC<Props> = ({ showToast }) => {
         const p = await getTableAssignmentAiPrompt();
         if (!cancelled) setPrompt(p);
       } catch {
-        if (!cancelled) showToastRef.current('Impossibile caricare il prompt logica tavoli', 'error');
+        if (!cancelled) showToastRef.current(t('ai.errLoadPrompt', 'Impossibile caricare il prompt logica tavoli'), 'error');
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -47,9 +49,9 @@ export const TableAssignmentAiPromptCard: React.FC<Props> = ({ showToast }) => {
     try {
       const saved = await updateTableAssignmentAiPrompt(prompt);
       setPrompt(saved);
-      showToast('Prompt logica tavoli salvato', 'success');
+      showToast(t('ai.promptSaved', 'Prompt logica tavoli salvato'), 'success');
     } catch (err: any) {
-      showToast(err?.message || 'Errore durante il salvataggio', 'error');
+      showToast(err?.message || t('ai.errSavePrompt', 'Errore durante il salvataggio'), 'error');
     } finally {
       setSaving(false);
     }
@@ -73,7 +75,7 @@ export const TableAssignmentAiPromptCard: React.FC<Props> = ({ showToast }) => {
 
       <div className="px-4 pb-4 pt-1 border-t border-[var(--ds-border)]">
         {loading ? (
-          <div className="py-10 flex justify-center"><Loader label="Carico…" size={40} /></div>
+          <div className="py-10 flex justify-center"><Loader label={t('ai.loading', 'Carico…')} size={40} /></div>
         ) : (
           <>
             {!canEdit && (
@@ -87,7 +89,7 @@ export const TableAssignmentAiPromptCard: React.FC<Props> = ({ showToast }) => {
               onChange={e => setPrompt(e.target.value.slice(0, PROMPT_MAX))}
               disabled={!canEdit}
               rows={8}
-              placeholder={'Es: privilegia i tavoli vicino alla vetrata per i gruppi oltre 6 persone; non assegnare il tavolo 12 dopo le 21:00; per gli habitué usa sempre il tavolo preferito se libero…'}
+              placeholder={t('ai.promptPlaceholder', 'Es: privilegia i tavoli vicino alla vetrata per i gruppi oltre 6 persone; non assegnare il tavolo 12 dopo le 21:00; per gli habitué usa sempre il tavolo preferito se libero…')}
               className="w-full text-[13px] rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-3 py-2 resize-y focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
             />
             <p className="text-[12px] text-[var(--ds-text-muted)] mt-1">{prompt.length}/{PROMPT_MAX}</p>
@@ -97,7 +99,7 @@ export const TableAssignmentAiPromptCard: React.FC<Props> = ({ showToast }) => {
                 <button onClick={handleSave} disabled={saving}
                   className="inline-flex items-center gap-2 px-4 py-2 rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[14px] font-medium hover:opacity-90 disabled:opacity-50">
                   {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                  {saving ? 'Salvataggio…' : 'Salva'}
+                  {saving ? t('ai.saving', 'Salvataggio…') : t('ai.save', 'Salva')}
                 </button>
               </div>
             )}

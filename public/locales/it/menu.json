@@ -405,5 +405,14 @@
     "notesPlaceholder": "Es. Riferimento bonifico, ricevuta n. ...",
     "cancel": "Annulla",
     "submit": "Registra"
+  },
+  "comp": {
+    "print": "Stampa",
+    "printKitchen": "Stampa per cucina",
+    "title": "Composizione del menù",
+    "notes": "Note operative"
+  },
+  "dish": {
+    "allergens": "Allergeni"
   }
 }
