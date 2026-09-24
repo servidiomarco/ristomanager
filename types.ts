@@ -625,6 +625,8 @@ export interface TableBillSplit {
   kind: SplitKind;
   amount_cents: number;
   item_ids: number[] | null;
+  /** Pezzi per riga della quota (dal 24/09); item_ids = riga intera, quote vecchie. */
+  item_units?: { order_item_id: number; units: number }[] | null;
   claimant_label: string | null;
   claimed_at: string;
   expires_at: string | null;

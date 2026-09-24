@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { publicPayApiService, PublicBillView, ClaimResponse } from '../services/publicPayApiService';
 import { PAY_NAMESPACE, SUPPORTED_LANGUAGES, SupportedLanguage } from '../i18n/config';
-import { Loader2, Users, CheckCircle2, AlertTriangle, ExternalLink, X, ChevronDown } from 'lucide-react';
+import { Loader2, Users, CheckCircle2, AlertTriangle, ExternalLink, X, ChevronDown, Minus, Plus } from 'lucide-react';
 import { currencySymbol } from '../utils/money';
 
 // Extract the share_token from the current URL. Kept as a plain function
@@ -56,9 +56,10 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [claim, setClaim] = useState<ClaimResponse | null>(null);
-  // Righe scelte per lo split per piatto: è così che la gente divide davvero
-  // il conto — «io ho preso solo l'antipasto».
-  const [pickedItems, setPickedItems] = useState<number[]>([]);
+  // Pezzi scelti per riga nello split per piatto: è così che la gente divide
+  // davvero il conto — «io ho preso solo l'antipasto». A pezzi, non a righe:
+  // al tavolo da quattro ognuno si prende il suo dei «4× Coperto» (24/09).
+  const [pickedUnits, setPickedUnits] = useState<Record<number, number>>({});
   // Dettaglio del conto sotto il totale: oltre la soglia parte ripiegato,
   // così su un conto lungo totale e bottoni restano a portata di pollice.
   const [itemsExpanded, setItemsExpanded] = useState(false);
@@ -73,6 +74,9 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
   // Letto in modo difensivo: il backend deployato può non mandarlo ancora.
   const isTakeaway = bill?.takeaway === true;
   const branding = bill?.branding ?? null;
+  // Il backend che divide le righe a pezzi manda `taken_units`; uno vecchio
+  // no, e allora il picker resta a righe intere come prima.
+  const unitsSupported = (bill?.items ?? []).some(i => typeof i.taken_units === 'number');
 
   const load = useCallback(async (background = false) => {
     if (!background) setLoading(true);
@@ -105,7 +109,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
   const handleEqualShare = () => { setMode('equal'); setErrorMsg(null); };
   const handleFullBill = () => { setMode('full'); setErrorMsg(null); };
   const handleFixedAmount = () => { setMode('fixed'); setErrorMsg(null); };
-  const handlePerItem = () => { setMode('items'); setErrorMsg(null); setPickedItems([]); };
+  const handlePerItem = () => { setMode('items'); setErrorMsg(null); setPickedUnits({}); };
   const handleBack = () => { setMode('menu'); setErrorMsg(null); };
 
   const submitClaim = async (kind: 'equal_share' | 'full_bill' | 'fixed_amount' | 'per_item') => {
@@ -114,12 +118,18 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
     try {
       const payload: any = { kind, claimant_label: claimantLabel.trim() || undefined };
       if (kind === 'per_item') {
-        if (pickedItems.length === 0) {
+        const picked = Object.entries(pickedUnits)
+          .map(([id, units]) => ({ order_item_id: Number(id), units }))
+          .filter(u => u.units > 0);
+        if (picked.length === 0) {
           setErrorMsg(t('errors.pickAtLeastOne'));
           setSubmitting(false);
           return;
         }
-        payload.item_ids = pickedItems;
+        // Un backend che non conosce ancora le unità (finestra fra i deploy)
+        // riceve le righe intere, com'era: lì la pagina non offre i pezzi.
+        if (unitsSupported) payload.item_units = picked;
+        else payload.item_ids = picked.map(u => u.order_item_id);
       }
       if (kind === 'fixed_amount') {
         const euros = Number(String(fixedAmountInput).replace(',', '.'));
@@ -236,6 +246,11 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
   // righe senza id (snapshot Passepartout) si mostrano ma non si scelgono.
   const allItems = bill.items ?? [];
   const pickableItems = allItems.filter((i): i is typeof i & { id: number } => i.id != null);
+  // Letti in modo difensivo: il backend deployato può non mandarli ancora.
+  const takenOf = (i: { qty: number; taken: boolean; taken_units?: number }) =>
+    typeof i.taken_units === 'number' ? i.taken_units : (i.taken ? i.qty : 0);
+  const unitCentsOf = (i: { qty: number; total_cents: number; unit_cents?: number }) =>
+    typeof i.unit_cents === 'number' ? i.unit_cents : Math.round(i.total_cents / Math.max(1, i.qty));
   const COLLAPSED_ITEM_ROWS = 5;
   const itemsCollapsible = allItems.length > COLLAPSED_ITEM_ROWS + 1;
   const visibleItems = itemsCollapsible && !itemsExpanded ? allItems.slice(0, COLLAPSED_ITEM_ROWS) : allItems;
@@ -409,28 +424,72 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
             <div className="text-sm font-semibold">{t('items.question')}</div>
             <ul className="divide-y divide-[var(--ds-border)] -mx-1">
               {pickableItems.map(it => {
-                const picked = pickedItems.includes(it.id);
+                const taken = takenOf(it);
+                const free = Math.max(0, it.qty - taken);
+                const units = pickedUnits[it.id] ?? 0;
+                const unitCents = unitCentsOf(it);
+                const multi = unitsSupported && free > 1;
+                const setUnits = (n: number) => setPickedUnits(prev => ({ ...prev, [it.id]: Math.max(0, Math.min(free, n)) }));
+                // Il tocco sulla riga prende UN pezzo (il proprio coperto), o
+                // lo toglie; lo stepper ne aggiunge altri. Senza le unità, o su
+                // un pezzo solo, resta la spunta della riga intera.
+                const toggle = () => setUnits(units > 0 ? 0 : (unitsSupported ? 1 : free));
                 return (
-                  <li key={it.id}>
+                  <li key={it.id} className={`flex items-center gap-2 px-1 ${units > 0 ? 'bg-[var(--ds-surface-row)]' : ''}`}>
                     <button
                       type="button"
-                      disabled={it.taken}
-                      onClick={() => setPickedItems(prev =>
-                        prev.includes(it.id) ? prev.filter(x => x !== it.id) : [...prev, it.id])}
-                      className={`w-full flex items-center gap-3 px-1 py-3 text-left transition
-                        ${it.taken ? 'opacity-40 cursor-not-allowed' : ''}
-                        ${picked ? 'bg-[var(--ds-surface-row)]' : ''}`}
+                      disabled={free === 0}
+                      onClick={toggle}
+                      className={`flex min-h-[48px] min-w-0 flex-1 items-center gap-3 py-2 text-left transition
+                        ${free === 0 ? 'opacity-40 cursor-not-allowed' : ''}`}
                     >
                       <span className={`h-5 w-5 shrink-0 rounded border flex items-center justify-center
-                        ${picked ? 'bg-[var(--ds-action-bg)] border-[var(--ds-action-bg)] text-[var(--ds-action-fg)]' : 'border-[var(--ds-border-strong)]'}`}>
-                        {picked ? '✓' : ''}
+                        ${units > 0 ? 'bg-[var(--ds-action-bg)] border-[var(--ds-action-bg)] text-[var(--ds-action-fg)]' : 'border-[var(--ds-border-strong)]'}`}>
+                        {units > 0 ? '✓' : ''}
                       </span>
-                      <span className="flex-1 text-sm">
-                        {it.qty}× {it.name}
-                        {it.taken && <span className="block text-[11px] text-[var(--ds-text-muted)]">{t('items.alreadyTaken')}</span>}
+                      <span className="min-w-0 flex-1 text-sm">
+                        {(free > 1 || (free === 0 && it.qty > 1)) ? `${free > 0 ? free : it.qty}× ` : ''}{it.name}
+                        {free === 0 ? (
+                          <span className="block text-[11px] text-[var(--ds-text-muted)]">{t('items.alreadyTaken')}</span>
+                        ) : (multi || taken > 0) && (
+                          <span className="block text-[11px] tabular-nums text-[var(--ds-text-muted)]">
+                            {multi ? t('items.each', { amount: eur(unitCents) }) : ''}
+                            {multi && taken > 0 ? ' · ' : ''}
+                            {taken > 0 ? t('items.takenUnits', { count: taken }) : ''}
+                          </span>
+                        )}
                       </span>
-                      <span className="text-sm tabular-nums">{eur(it.total_cents)}</span>
+                      {!multi && (
+                        <span className="text-sm tabular-nums">
+                          {eur(free === 0 ? it.total_cents : unitCents * (unitsSupported ? 1 : free))}
+                        </span>
+                      )}
                     </button>
+                    {multi && (
+                      <div className="flex shrink-0 items-center gap-0.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] p-0.5">
+                        <button
+                          type="button"
+                          onClick={() => setUnits(units - 1)}
+                          disabled={units <= 0}
+                          aria-label={t('items.oneLess', { name: it.name })}
+                          className="inline-flex h-11 w-11 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
+                        >
+                          <Minus className="h-4 w-4" />
+                        </button>
+                        <span className="min-w-[40px] text-center text-sm font-semibold tabular-nums">
+                          {units}/{free}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setUnits(units + 1)}
+                          disabled={units >= free}
+                          aria-label={t('items.oneMore', { name: it.name })}
+                          className="inline-flex h-11 w-11 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
+                        >
+                          <Plus className="h-4 w-4" />
+                        </button>
+                      </div>
+                    )}
                   </li>
                 );
               })}
@@ -438,8 +497,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
             <div className="flex items-baseline justify-between border-t border-[var(--ds-border)] pt-3">
               <span className="text-xs text-[var(--ds-text-muted)]">{t('items.yourShare')}</span>
               <span className="text-xl font-bold tabular-nums">
-                {eur(pickableItems.filter(i => pickedItems.includes(i.id))
-                       .reduce((n, i) => n + i.total_cents, 0))}
+                {eur(pickableItems.reduce((n, i) => n + (pickedUnits[i.id] ?? 0) * unitCentsOf(i), 0))}
               </span>
             </div>
             <div>
@@ -455,7 +513,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
             <button
               type="button"
               onClick={() => submitClaim('per_item')}
-              disabled={submitting || pickedItems.length === 0}
+              disabled={submitting || !Object.values(pickedUnits).some(u => u > 0)}
               className="w-full h-12 rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] font-semibold hover:bg-[var(--ds-action-bg-hover)] active:scale-[0.99] transition disabled:opacity-40 flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             >
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}

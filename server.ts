@@ -5533,7 +5533,7 @@ async function loadBillView(tenantId: number, billId: number): Promise<any | nul
     if (billResult.rows.length === 0) return null;
     const bill = billResult.rows[0];
     const splitsResult = await queryWithRetry(
-        `SELECT id, table_bill_id, kind, amount_cents, item_ids,
+        `SELECT id, table_bill_id, kind, amount_cents, item_ids, item_units,
                 claimant_label, claimed_at, expires_at,
                 payment_request_id, status, paid_at, released_at
          FROM table_bill_splits WHERE table_bill_id = $1
@@ -8223,6 +8223,52 @@ const publicSplitView = (s: any) => ({
     status: s.status,
 });
 
+/** Le unità di riga che una quota ospite impegna. item_units (dal 24/09) le
+ *  dice pezzo per pezzo; item_ids — quote vecchie, client vecchi — prende la
+ *  riga intera, cioè tutte le sue unità secondo lo snapshot del conto. */
+const splitItemUnits = (row: any, qtyOf: Map<number, number>): { order_item_id: number; units: number }[] => {
+    if (Array.isArray(row?.item_units)) {
+        return row.item_units
+            .map((u: any) => ({ order_item_id: Number(u?.order_item_id), units: Number(u?.units) }))
+            .filter((u: any) => Number.isFinite(u.order_item_id) && Number.isFinite(u.units) && u.units > 0);
+    }
+    if (Array.isArray(row?.item_ids)) {
+        return row.item_ids
+            .map((id: any) => Number(id))
+            .filter((id: number) => Number.isFinite(id))
+            .map((id: number) => ({ order_item_id: id, units: qtyOf.get(id) ?? 1 }));
+    }
+    return [];
+};
+
+/** Unità già impegnate per riga di un conto: quote ospite vive (CLAIMED o
+ *  PAID) e incassi staff non stornati con meta.item_units. Una sola fonte
+ *  per la pagina pubblica, la presa della quota e il dividi conto in cassa:
+ *  prima ognuno la ricostruiva a modo suo, e il QR prendeva solo righe
+ *  intere — «4× Coperto» tutto o niente. */
+async function billTakenUnits(billId: number, billItems: any[], client?: any): Promise<Map<number, number>> {
+    const q = (sql: string, params: any[]) => client ? client.query(sql, params) : queryWithRetry(sql, params);
+    const qtyOf = new Map<number, number>(billItems.map((i: any) => [Number(i.order_item_id), Number(i.qty) || 0]));
+    const taken = new Map<number, number>();
+    const add = (u: { order_item_id: number; units: number }) =>
+        taken.set(u.order_item_id, (taken.get(u.order_item_id) ?? 0) + u.units);
+    const splits = await q(
+        `SELECT item_ids, item_units FROM table_bill_splits
+         WHERE table_bill_id = $1 AND status IN ('CLAIMED','PAID')
+           AND (item_ids IS NOT NULL OR item_units IS NOT NULL)`,
+        [billId]
+    );
+    for (const r of splits.rows) splitItemUnits(r, qtyOf).forEach(add);
+    const staff = await q(
+        `SELECT meta->'item_units' AS item_units FROM table_bill_payments
+         WHERE table_bill_id = $1 AND voided_at IS NULL
+           AND jsonb_typeof(meta->'item_units') = 'array'`,
+        [billId]
+    );
+    for (const r of staff.rows) splitItemUnits({ item_units: r.item_units }, qtyOf).forEach(add);
+    return taken;
+}
+
 // Helper: fetches a bill by share_token limited to active states. Returns
 // null if not found / not active — callers respond with 404 in both cases
 // so we don't leak whether the token ever existed.
@@ -8295,28 +8341,11 @@ app.get('/pay/:token', publicPayLimiter, async (req, res) => runAsPlatform(async
         // dettaglio esiste (comanda dal gestionale) e la somma delle righe
         // coincide col totale: con uno sconto in mezzo, pagare "la propria
         // riga" addebiterebbe più del dovuto.
-        const claimedItemRows = await queryWithRetry(
-            `SELECT item_ids FROM table_bill_splits
-             WHERE table_bill_id = $1 AND status IN ('CLAIMED','PAID') AND item_ids IS NOT NULL`,
-            [bill.id]
-        );
-        const takenItemIds = new Set<number>();
-        for (const r of claimedItemRows.rows) {
-            for (const id of (Array.isArray(r.item_ids) ? r.item_ids : [])) takenItemIds.add(Number(id));
-        }
-        // Anche i piatti coperti da un incasso staff (quota «per piatti» in
-        // cassa) sono presi — pure a riga parziale: la quota dal QR prende la
-        // riga intera e farebbe ripagare la parte già incassata.
-        const staffItemRows = await queryWithRetry(
-            `SELECT meta->'item_units' AS item_units FROM table_bill_payments
-             WHERE table_bill_id = $1 AND voided_at IS NULL
-               AND jsonb_typeof(meta->'item_units') = 'array'`,
-            [bill.id]
-        );
-        for (const r of staffItemRows.rows) {
-            for (const u of (Array.isArray(r.item_units) ? r.item_units : [])) takenItemIds.add(Number(u?.order_item_id));
-        }
+        // Le unità già impegnate per riga — quote ospite e incassi staff, anche
+        // a riga parziale: «4× Coperto» con due coperti già pagati ne lascia
+        // due da prendere, non la riga intera.
         const billItems: any[] = Array.isArray(bill.items) ? bill.items : [];
+        const takenUnits = await billTakenUnits(bill.id, billItems);
         const itemsSum = billItems.reduce(
             (n: number, i: any) => n + Number(i.unit_price_cents || 0) * Number(i.qty || 0), 0
         );
@@ -8368,12 +8397,18 @@ app.get('/pay/:token', publicPayLimiter, async (req, res) => runAsPlatform(async
             items: billItems.map((i: any) => {
                 const itemId = Number(i.order_item_id);
                 const hasId = Number.isFinite(itemId);
+                const qty = Number(i.qty);
+                const takenQty = hasId ? Math.min(qty, takenUnits.get(itemId) ?? 0) : 0;
                 return {
                     id: hasId ? itemId : null,
                     name: i.name,
-                    qty: Number(i.qty),
-                    total_cents: Number(i.unit_price_cents) * Number(i.qty),
-                    taken: hasId && takenItemIds.has(itemId),
+                    qty,
+                    unit_cents: Number(i.unit_price_cents),
+                    total_cents: Number(i.unit_price_cents) * qty,
+                    // `taken` resta «riga esaurita» per i client vecchi;
+                    // `taken_units` dice quanti pezzi sono già di altri.
+                    taken: hasId && takenQty >= qty,
+                    taken_units: takenQty,
                 };
             }),
         });
@@ -8564,16 +8599,34 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
         }
 
         let amount: number;
-        let claimedItemIds: number[] | null = null;
+        let claimedItemUnits: { order_item_id: number; units: number }[] | null = null;
         if (kind === 'per_item') {
-            const requested = Array.isArray(req.body?.item_ids)
-                ? req.body.item_ids.map((n: any) => Number(n)).filter((n: number) => Number.isFinite(n))
-                : [];
-            if (requested.length === 0) {
-                await client.query('ROLLBACK');
-                return res.status(400).json({ error: 'item_ids must be a non-empty array' });
-            }
             const billItems: any[] = Array.isArray(bill.items) ? bill.items : [];
+            const byId = new Map(billItems.map((i: any) => [Number(i.order_item_id), i]));
+            // Due forme: item_units = pezzi per riga (dal 24/09, «1 dei 4
+            // coperti»); item_ids = righe intere, dal client della finestra fra
+            // i due deploy. Si normalizzano entrambe a unità.
+            const requested = new Map<number, number>();
+            if (Array.isArray(req.body?.item_units)) {
+                for (const u of req.body.item_units) {
+                    const id = Number(u?.order_item_id);
+                    const units = Number(u?.units);
+                    if (!Number.isFinite(id) || !Number.isInteger(units) || units <= 0) {
+                        await client.query('ROLLBACK');
+                        return res.status(400).json({ error: 'item_units must be [{order_item_id, units}] with positive integers' });
+                    }
+                    requested.set(id, (requested.get(id) ?? 0) + units);
+                }
+            } else if (Array.isArray(req.body?.item_ids)) {
+                for (const n of req.body.item_ids) {
+                    const id = Number(n);
+                    if (Number.isFinite(id)) requested.set(id, Number(byId.get(id)?.qty ?? 1));
+                }
+            }
+            if (requested.size === 0) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({ error: 'item_units must be a non-empty array' });
+            }
             const itemsSum = billItems.reduce(
                 (n: number, i: any) => n + Number(i.unit_price_cents || 0) * Number(i.qty || 0), 0
             );
@@ -8585,43 +8638,25 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
                 return res.status(409).json({ error: 'Per-item split not available for this bill' });
             }
 
-            // Righe già impegnate da altri: due ospiti non possono pagare lo
-            // stesso piatto.
-            const takenRs = await client.query(
-                `SELECT item_ids FROM table_bill_splits
-                 WHERE table_bill_id = $1 AND status IN ('CLAIMED','PAID') AND item_ids IS NOT NULL`,
-                [bill.id]
-            );
-            const taken = new Set<number>();
-            for (const r of takenRs.rows) {
-                for (const id of (Array.isArray(r.item_ids) ? r.item_ids : [])) taken.add(Number(id));
-            }
-            // …e nemmeno un piatto già coperto (anche in parte) da un incasso
-            // staff: la quota dal QR prende la riga intera.
-            const staffTakenRs = await client.query(
-                `SELECT meta->'item_units' AS item_units FROM table_bill_payments
-                 WHERE table_bill_id = $1 AND voided_at IS NULL
-                   AND jsonb_typeof(meta->'item_units') = 'array'`,
-                [bill.id]
-            );
-            for (const r of staffTakenRs.rows) {
-                for (const u of (Array.isArray(r.item_units) ? r.item_units : [])) taken.add(Number(u?.order_item_id));
-            }
-            const conflict = requested.filter((id: number) => taken.has(id));
-            if (conflict.length > 0) {
-                await client.query('ROLLBACK');
-                return res.status(409).json({ error: 'Some items are already claimed', conflicting_item_ids: conflict });
-            }
-
-            const byId = new Map(billItems.map((i: any) => [Number(i.order_item_id), i]));
+            // Pezzi già impegnati da altri — quote ospite e incassi staff:
+            // due ospiti non possono pagare lo stesso coperto. Il conto è
+            // sotto lock, quindi il conteggio non cambia fra qui e l'INSERT.
+            const taken = await billTakenUnits(bill.id, billItems, client);
             let sum = 0;
-            for (const id of requested) {
+            const conflict: number[] = [];
+            for (const [id, units] of requested) {
                 const it = byId.get(id);
                 if (!it) {
                     await client.query('ROLLBACK');
                     return res.status(400).json({ error: 'Unknown item', item_id: id });
                 }
-                sum += Number(it.unit_price_cents) * Number(it.qty);
+                const free = Number(it.qty) - (taken.get(id) ?? 0);
+                if (units > free) { conflict.push(id); continue; }
+                sum += Number(it.unit_price_cents) * units;
+            }
+            if (conflict.length > 0) {
+                await client.query('ROLLBACK');
+                return res.status(409).json({ error: 'Some items are already claimed', conflicting_item_ids: conflict });
             }
             if (sum <= 0) {
                 await client.query('ROLLBACK');
@@ -8632,7 +8667,7 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
                 return res.status(409).json({ error: 'Amount exceeds residual', max_allowed_cents: residual });
             }
             amount = sum;
-            claimedItemIds = requested;
+            claimedItemUnits = [...requested].map(([order_item_id, units]) => ({ order_item_id, units }));
         } else if (kind === 'equal_share') {
             const covers = Math.max(1, Number(bill.covers) || 1);
             amount = Math.min(residual, Math.ceil(bill.total_cents / covers));
@@ -8663,11 +8698,11 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
         try {
             const ins = await client.query(
                 `INSERT INTO table_bill_splits
-                    (tenant_id, table_bill_id, kind, amount_cents, claimant_label, expires_at, status, item_ids)
+                    (tenant_id, table_bill_id, kind, amount_cents, claimant_label, expires_at, status, item_units)
                  VALUES ($7, $1, $2, $3, $4, $5, 'CLAIMED', $6::jsonb)
                  RETURNING id`,
                 [bill.id, kind, amount, claimantLabel, expiresAt.toISOString(),
-                 claimedItemIds ? JSON.stringify(claimedItemIds) : null, bill.tenant_id]
+                 claimedItemUnits ? JSON.stringify(claimedItemUnits) : null, bill.tenant_id]
             );
             splitId = ins.rows[0].id;
         } catch (err: any) {
@@ -34224,9 +34259,9 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
             [staleDate, staleShift, req.tenantId!]
         );
 
-        // Piatti già coperti, per conto: dalle quote ospite con item_ids (la
-        // riga intera) e dagli incassi staff con meta.item_units (anche a
-        // unità). Il dividi conto «per piatti» li legge per non riproporre
+        // Piatti già coperti, per conto: dalle quote ospite (item_units a
+        // unità, o item_ids a riga intera per le vecchie) e dagli incassi
+        // staff con meta.item_units. Il dividi conto «per piatti» li legge per non riproporre
         // quello che è già stato pagato.
         const billIds = rows.rows.map((b: any) => b.id);
         const takenByBill = new Map<number, Map<number, number>>();
@@ -34250,17 +34285,20 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
                 }
             }
             const splitUnits = await queryWithRetry(
-                `SELECT table_bill_id, item_ids FROM table_bill_splits
+                `SELECT table_bill_id, item_ids, item_units FROM table_bill_splits
                  WHERE table_bill_id = ANY($1::int[]) AND tenant_id = $2
-                   AND status IN ('CLAIMED','PAID') AND item_ids IS NOT NULL`,
+                   AND status IN ('CLAIMED','PAID')
+                   AND (item_ids IS NOT NULL OR item_units IS NOT NULL)`,
                 [billIds, req.tenantId!]
             );
-            const itemsByBill = new Map<number, any[]>(rows.rows.map((b: any) => [b.id, Array.isArray(b.items) ? b.items : []]));
+            const qtyByBill = new Map<number, Map<number, number>>(rows.rows.map((b: any) => [
+                b.id,
+                new Map<number, number>((Array.isArray(b.items) ? b.items : [])
+                    .map((i: any) => [Number(i.order_item_id), Number(i.qty) || 0])),
+            ]));
             for (const r of splitUnits.rows) {
-                const snapshot = itemsByBill.get(r.table_bill_id) ?? [];
-                for (const id of (Array.isArray(r.item_ids) ? r.item_ids : [])) {
-                    const it = snapshot.find((i: any) => Number(i.order_item_id) === Number(id));
-                    addTaken(r.table_bill_id, Number(id), Number(it?.qty ?? 1));
+                for (const u of splitItemUnits(r, qtyByBill.get(r.table_bill_id) ?? new Map())) {
+                    addTaken(r.table_bill_id, u.order_item_id, u.units);
                 }
             }
         }

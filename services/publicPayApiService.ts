@@ -21,8 +21,13 @@ export interface PublicBillItem {
   name: string;
   qty: number;
   total_cents: number;
-  /** Già presa da un altro ospite: due persone non pagano lo stesso piatto. */
+  /** Prezzo di un pezzo. Assente da un backend vecchio: si ricava dal totale. */
+  unit_cents?: number;
+  /** Riga esaurita: tutti i suoi pezzi sono già di altri ospiti. */
   taken: boolean;
+  /** Pezzi già presi da altri (quote o cassa): «4× Coperto» con 2 pagati ne
+   *  lascia 2. Assente da un backend vecchio: vale `taken ? qty : 0`. */
+  taken_units?: number;
 }
 
 /** Identità pubblica del ristorante, stessa forma di /public/takeaway/info.
@@ -64,7 +69,10 @@ export interface PublicBillView {
 export interface ClaimPayload {
   kind: PublicSplitKind;
   amount_cents?: number;
+  /** Righe intere: la forma vecchia, ancora accettata dal server. */
   item_ids?: number[];
+  /** Pezzi per riga: «1 dei 4 coperti». */
+  item_units?: { order_item_id: number; units: number }[];
   claimant_label?: string;
 }
 
