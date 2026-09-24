@@ -30,6 +30,12 @@ const PROBE_TIMEOUT_MS = 2_000;
 // risponde stale solo DOPO il suo timeout verso il cloud — un limite client
 // più stretto aborterebbe proprio le risposte che l'ibrido esiste per dare.
 const NODE_FETCH_TIMEOUT_MS = 8_000;
+// Anche le LETTURE verso il cloud hanno un guinzaglio: a WAN staccata una
+// GET al cloud (config nodo non attiva su quel dispositivo, o circuito
+// aperto) restava appesa per il timeout TCP di sistema — minuti — e la
+// pagina KDS moriva su «Caricamento coda…» (scoperto al collaudo del
+// 24/09). Le SCRITTURE restano senza guinzaglio: possono durare
+// legittimamente, e la coda offline le protegge.
 
 interface NodeConfig {
     enabled: boolean;
@@ -184,7 +190,10 @@ export const noteNodeFailure = (): void => {
  *  fetch qualunque. L'abort arriva nel catch del chiamante come un errore di
  *  rete → cloudFallbackUrl apre il circuito e dà l'URL gemello per il retry. */
 export const fetchNodeAware = async (url: string, options: RequestInit = {}): Promise<Response> => {
-    if (!isNodeUrl(url)) return fetch(url, options);
+    const method = ((options.method as string) || 'GET').toUpperCase();
+    const isRead = method === 'GET' || method === 'HEAD';
+    // Guinzaglio: sempre verso il nodo; verso il cloud solo per le letture.
+    if (!isNodeUrl(url) && !isRead) return fetch(url, options);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), NODE_FETCH_TIMEOUT_MS);
     try {
@@ -236,10 +245,19 @@ export const refreshNodeConfig = async (): Promise<void> => {
     if (!token) return;
     let fresh: NodeConfig;
     try {
-        const res = await fetch(`${CLOUD_API_URL}/sala-node/client-config`, {
-            headers: { Authorization: `Bearer ${token}` },
-            cache: 'no-store',
-        });
+        // Timeout come il probe: a WAN staccata questa non deve appendere.
+        const cfgController = new AbortController();
+        const cfgTimer = setTimeout(() => cfgController.abort(), PROBE_TIMEOUT_MS);
+        let res: Response;
+        try {
+            res = await fetch(`${CLOUD_API_URL}/sala-node/client-config`, {
+                headers: { Authorization: `Bearer ${token}` },
+                cache: 'no-store',
+                signal: cfgController.signal,
+            });
+        } finally {
+            clearTimeout(cfgTimer);
+        }
         if (!res.ok) return; // il cloud ha risposto ma male: si tiene la config nota
         const body = await res.json();
         fresh = {

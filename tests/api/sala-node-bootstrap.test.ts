@@ -157,6 +157,12 @@ describe('bootstrap del nodo di sala', () => {
         expect(cfg.status).toBe(200);
         const sbagliato = await fetch(`${nodeBaseUrl}/print-agent/jobs`, { headers: { 'x-print-agent-token': 'token-sbagliato' } });
         expect(sbagliato.status).toBe(401);
+
+        // Fix 24/09: il nodo eredita ANCHE il token legacy (env del cloud,
+        // alias tenant 1) via /sala-node/credentials — senza copiarlo a mano
+        // nel .cmd. L'agente reale usa il legacy: il nodo deve accettarlo.
+        const legacy = await fetch(`${nodeBaseUrl}/print-agent/jobs`, { headers: { 'x-print-agent-token': 'test-print-agent-token' } });
+        expect(legacy.status).toBe(200);
     });
 
     it('le sequence locali sono oltre gli id del cloud: un INSERT nativo non collide', async () => {

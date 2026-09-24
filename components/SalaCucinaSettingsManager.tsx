@@ -77,7 +77,7 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
 
   const reload = useCallback(async () => {
     try {
-      const [f, c, p] = await Promise.all([getFeatureFlags(), getSalaConfig(), getSalaProfiles()]);
+      const [f, c, p] = await Promise.all([getFeatureFlags(), getSalaConfig({ fromCloud: true }), getSalaProfiles()]);
       setFlags(f);
       setConfig(c);
       setProfiles(p.profiles);
@@ -106,7 +106,7 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
   const [open, setOpen] = useState(false);
   useEffect(() => {
     if (!open) return;
-    const t = setInterval(() => { getSalaConfig().then(setConfig).catch(() => {}); }, 10_000);
+    const t = setInterval(() => { getSalaConfig({ fromCloud: true }).then(setConfig).catch(() => {}); }, 10_000);
     return () => clearInterval(t);
   }, [open]);
 

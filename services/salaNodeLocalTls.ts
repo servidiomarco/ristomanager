@@ -61,6 +61,15 @@ const fetchFromCloud = async (): Promise<NodeTlsMaterial | null> => {
         });
         if (!res.ok) return null;
         const body: any = await res.json();
+        // Il token legacy dell'agente di stampa arriva qui (fix del 24/09):
+        // il nodo lo mette nel PROPRIO env, così il suo printAgentAuth
+        // accetta l'agente che lo usa — senza copiarlo a mano nel .cmd.
+        // Anche a cert assente (HTTP locale): l'agente stampa comunque.
+        if (typeof body?.print_agent_legacy_token === 'string' && body.print_agent_legacy_token
+            && process.env.PRINT_AGENT_TOKEN !== body.print_agent_legacy_token) {
+            process.env.PRINT_AGENT_TOKEN = body.print_agent_legacy_token;
+            console.log('[node-tls] token legacy agente di stampa ereditato dal cloud');
+        }
         const cert = body?.cert;
         if (typeof cert?.cert_pem === 'string' && typeof cert?.key_pem === 'string') {
             return { cert_pem: cert.cert_pem, key_pem: cert.key_pem, expires_at: cert.expires_at ?? null };
