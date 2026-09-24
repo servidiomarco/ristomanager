@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { displayLocale } from '../utils/formatLocale';
 import { ChevronDown, Loader2, CreditCard, Save, Eye, EyeOff } from 'lucide-react';
 import { Loader } from './Loader';
 import {
@@ -17,10 +19,11 @@ interface Props {
 // Placeholder shown in the masked field when a secret is already stored.
 // Users type into the input only when they want to overwrite it — leaving it
 // empty means "keep current value" (the backend is partial-update aware).
-const maskPlaceholder = (last4: string | null): string =>
-    last4 ? `•••••••••••• ${last4}` : 'Non impostata';
+const maskPlaceholder = (last4: string | null, nonImpostata: string): string =>
+    last4 ? `•••••••••••• ${last4}` : nonImpostata;
 
 export const RevolutIntegrationCard: React.FC<Props> = ({ showToast }) => {
+    const { t } = useTranslation('canali', { useSuspense: false });
     const { hasPermission } = useAuth();
     const canEdit = hasPermission('settings:full');
 
@@ -53,7 +56,7 @@ export const RevolutIntegrationCard: React.FC<Props> = ({ showToast }) => {
                     setApiVersionInput(data.api_version);
                 }
             } catch (err: any) {
-                if (!cancelled) showToastRef.current(err?.message || 'Errore nel caricamento di Revolut', 'error');
+                if (!cancelled) showToastRef.current(err?.message || t('revolut.errLoad', 'Errore nel caricamento di Revolut'), 'error');
             } finally {
                 if (!cancelled) setLoading(false);
             }
@@ -70,11 +73,13 @@ export const RevolutIntegrationCard: React.FC<Props> = ({ showToast }) => {
             return (
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[var(--ds-radius-control)] text-[11px] font-medium bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] border border-[var(--ds-border)]">
                     <span className="w-1.5 h-1.5 rounded-full bg-[var(--ds-border-strong)]"></span>
-                    Non configurato
+                    {t('integr.notConfigured', 'Non configurato')}
                 </span>
             );
         }
-        const label = status.environment === 'production' ? 'Attivo (Produzione)' : 'Attivo (Sandbox)';
+        const label = status.environment === 'production'
+            ? t('integr.activeProd', 'Attivo (Produzione)')
+            : t('integr.activeSandbox', 'Attivo (Sandbox)');
         const color = status.environment === 'production'
             ? 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] border-[var(--ds-seated-solid)]'
             : 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] border-[var(--ds-pending-solid)]';
@@ -110,9 +115,9 @@ export const RevolutIntegrationCard: React.FC<Props> = ({ showToast }) => {
             setApiKeyInput('');
             setWebhookSecretInput('');
             setApiVersionInput(updated.api_version);
-            showToast('Configurazione Revolut aggiornata', 'success');
+            showToast(t('revolut.saved', 'Configurazione Revolut aggiornata'), 'success');
         } catch (err: any) {
-            showToast(err?.message || 'Errore aggiornamento Revolut', 'error');
+            showToast(err?.message || t('revolut.errSave', 'Errore aggiornamento Revolut'), 'error');
         } finally {
             setSaving(false);
         }
@@ -141,7 +146,7 @@ export const RevolutIntegrationCard: React.FC<Props> = ({ showToast }) => {
                     </div>
                     <div className="min-w-0">
                         <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">Revolut Merchant</h4>
-                        <p className="text-[13px] text-[var(--ds-text-muted)] truncate">Link di pagamento per caparre</p>
+                        <p className="text-[13px] text-[var(--ds-text-muted)] truncate">{t('revolut.subtitle', 'Link di pagamento per caparre')}</p>
                     </div>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
@@ -157,11 +162,11 @@ export const RevolutIntegrationCard: React.FC<Props> = ({ showToast }) => {
                     {/* Environment switch */}
                     <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0">
-                            <p className="text-[13px] font-medium text-[var(--ds-text-primary)]">Ambiente</p>
+                            <p className="text-[13px] font-medium text-[var(--ds-text-primary)]">{t('integr.environment', 'Ambiente')}</p>
                             <p className="text-[12px] text-[var(--ds-text-muted)]">
                                 {effectiveEnv === 'production'
-                                    ? 'Pagamenti reali sul merchant Revolut.'
-                                    : 'Test in sandbox. Nessun addebito reale.'}
+                                    ? t('revolut.envProd', 'Pagamenti reali sul merchant Revolut.')
+                                    : t('revolut.envSandbox', 'Test in sandbox. Nessun addebito reale.')}
                             </p>
                         </div>
                         <div className="inline-flex rounded-[var(--ds-radius)] border border-[var(--ds-border)] overflow-hidden text-[12px] font-medium">
@@ -175,7 +180,7 @@ export const RevolutIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                         : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)]'
                                 } disabled:opacity-60 disabled:cursor-not-allowed`}
                             >
-                                Sandbox
+                                {t('integr.sandbox', 'Sandbox')}
                             </button>
                             <button
                                 type="button"
@@ -187,7 +192,7 @@ export const RevolutIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                         : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)]'
                                 } disabled:opacity-60 disabled:cursor-not-allowed`}
                             >
-                                Produzione
+                                {t('integr.production', 'Produzione')}
                             </button>
                         </div>
                     </div>
@@ -203,14 +208,14 @@ export const RevolutIntegrationCard: React.FC<Props> = ({ showToast }) => {
                     {/* API key */}
                     <div>
                         <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">
-                            API Key
+                            {t('revolut.apiKey', 'API Key')}
                         </label>
                         <div className="relative">
                             <input
                                 type={showApiKey ? 'text' : 'password'}
                                 value={apiKeyInput}
                                 onChange={(e) => setApiKeyInput(e.target.value)}
-                                placeholder={maskPlaceholder(status.api_key_last4)}
+                                placeholder={maskPlaceholder(status.api_key_last4, t('integr.notSet', 'Non impostata'))}
                                 disabled={!canEdit || saving}
                                 autoComplete="off"
                                 spellCheck={false}
@@ -220,7 +225,7 @@ export const RevolutIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                 type="button"
                                 onClick={() => setShowApiKey((v) => !v)}
                                 className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[var(--ds-text-subtle)] hover:text-[var(--ds-text-primary)]"
-                                aria-label={showApiKey ? 'Nascondi' : 'Mostra'}
+                                aria-label={showApiKey ? t('integr.hide', 'Nascondi') : t('integr.show', 'Mostra')}
                                 tabIndex={-1}
                             >
                                 {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -234,14 +239,14 @@ export const RevolutIntegrationCard: React.FC<Props> = ({ showToast }) => {
                     {/* Webhook signing secret */}
                     <div>
                         <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">
-                            Webhook Signing Secret
+                            {t('revolut.webhookSecret', 'Webhook Signing Secret')}
                         </label>
                         <div className="relative">
                             <input
                                 type={showWebhookSecret ? 'text' : 'password'}
                                 value={webhookSecretInput}
                                 onChange={(e) => setWebhookSecretInput(e.target.value)}
-                                placeholder={maskPlaceholder(status.webhook_secret_last4)}
+                                placeholder={maskPlaceholder(status.webhook_secret_last4, t('integr.notSet', 'Non impostata'))}
                                 disabled={!canEdit || saving}
                                 autoComplete="off"
                                 spellCheck={false}
@@ -251,7 +256,7 @@ export const RevolutIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                 type="button"
                                 onClick={() => setShowWebhookSecret((v) => !v)}
                                 className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[var(--ds-text-subtle)] hover:text-[var(--ds-text-primary)]"
-                                aria-label={showWebhookSecret ? 'Nascondi' : 'Mostra'}
+                                aria-label={showWebhookSecret ? t('integr.hide', 'Nascondi') : t('integr.show', 'Mostra')}
                                 tabIndex={-1}
                             >
                                 {showWebhookSecret ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -265,7 +270,7 @@ export const RevolutIntegrationCard: React.FC<Props> = ({ showToast }) => {
                     {/* API version */}
                     <div>
                         <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">
-                            API Version
+                            {t('revolut.apiVersion', 'API Version')}
                         </label>
                         <input
                             type="text"
@@ -279,7 +284,7 @@ export const RevolutIntegrationCard: React.FC<Props> = ({ showToast }) => {
 
                     {status.updated_at && (
                         <p className="text-[11px] text-[var(--ds-text-subtle)]">
-                            Ultima modifica: {new Date(status.updated_at).toLocaleString('it-IT')}
+                            {t('integr.lastChange', 'Ultima modifica: {{quando}}', { quando: new Date(status.updated_at).toLocaleString(displayLocale()) })}
                             {status.updated_by ? ` · ${status.updated_by}` : ''}
                         </p>
                     )}
@@ -292,7 +297,7 @@ export const RevolutIntegrationCard: React.FC<Props> = ({ showToast }) => {
                             className="inline-flex items-center gap-2 px-3 py-1.5 rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[13px] font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                            Salva
+                            {t('integr.save', 'Salva')}
                         </button>
                     </div>
 

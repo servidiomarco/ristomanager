@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { displayLocale } from '../utils/formatLocale';
 import { ChevronDown, Loader2, Inbox, Save, Eye, EyeOff, Plug } from 'lucide-react';
 import { Loader } from './Loader';
 import {
@@ -14,10 +16,11 @@ interface Props {
     showToast: (msg: string, kind?: 'success' | 'error' | 'info') => void;
 }
 
-const maskPlaceholder = (last4: string | null): string =>
-    last4 ? `•••••••••••• ${last4}` : 'Non impostata';
+const maskPlaceholder = (last4: string | null, nonImpostata: string): string =>
+    last4 ? `•••••••••••• ${last4}` : nonImpostata;
 
 export const ImapIntegrationCard: React.FC<Props> = ({ showToast }) => {
+    const { t } = useTranslation('canali', { useSuspense: false });
     const { hasPermission } = useAuth();
     const canEdit = hasPermission('settings:full');
 
@@ -52,7 +55,7 @@ export const ImapIntegrationCard: React.FC<Props> = ({ showToast }) => {
                 }
             } catch (err: any) {
                 if (!cancelled) {
-                    const msg = err?.message || 'Errore nel caricamento IMAP';
+                    const msg = err?.message || t('imap.errLoad', 'Errore nel caricamento IMAP');
                     setLoadError(msg);
                     showToastRef.current(msg, 'error');
                 }
@@ -73,7 +76,7 @@ export const ImapIntegrationCard: React.FC<Props> = ({ showToast }) => {
             return (
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[var(--ds-radius-control)] text-[11px] font-medium bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] border border-[var(--ds-border)]">
                     <span className="w-1.5 h-1.5 rounded-full bg-[var(--ds-border-strong)]"></span>
-                    Non configurato
+                    {t('integr.notConfigured', 'Non configurato')}
                 </span>
             );
         }
@@ -81,14 +84,14 @@ export const ImapIntegrationCard: React.FC<Props> = ({ showToast }) => {
             return (
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[var(--ds-radius-control)] text-[11px] font-medium bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] border border-[var(--ds-border)]">
                     <span className="w-1.5 h-1.5 rounded-full bg-[var(--ds-pending-solid)]"></span>
-                    Disattivo
+                    {t('imap.off', 'Disattivo')}
                 </span>
             );
         }
         return (
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[var(--ds-radius-control)] text-[11px] font-medium border bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] border-[var(--ds-seated-solid)]">
                 <span className="w-1.5 h-1.5 rounded-full bg-[var(--ds-seated-solid)]"></span>
-                Attivo
+                {t('imap.on', 'Attivo')}
             </span>
         );
     }, [status]);
@@ -111,7 +114,7 @@ export const ImapIntegrationCard: React.FC<Props> = ({ showToast }) => {
         if (portInput.trim() !== (status.port ? String(status.port) : '')) {
             const n = Number(portInput);
             if (!Number.isInteger(n) || n < 1 || n > 65535) {
-                showToast('Porta non valida (1-65535)', 'error');
+                showToast(t('integr.badPort', 'Porta non valida (1-65535)'), 'error');
                 return;
             }
             payload.port = n;
@@ -128,9 +131,9 @@ export const ImapIntegrationCard: React.FC<Props> = ({ showToast }) => {
             setSecureInput(null);
             setEnabledInput(null);
             setPasswordInput('');
-            showToast('Configurazione IMAP aggiornata', 'success');
+            showToast(t('imap.saved', 'Configurazione IMAP aggiornata'), 'success');
         } catch (err: any) {
-            showToast(err?.message || 'Errore aggiornamento IMAP', 'error');
+            showToast(err?.message || t('imap.errSave', 'Errore aggiornamento IMAP'), 'error');
         } finally {
             setSaving(false);
         }
@@ -141,9 +144,9 @@ export const ImapIntegrationCard: React.FC<Props> = ({ showToast }) => {
         setTesting(true);
         try {
             await testImapConnection();
-            showToast('Connessione IMAP OK', 'success');
+            showToast(t('imap.testOk', 'Connessione IMAP OK'), 'success');
         } catch (err: any) {
-            showToast(err?.message || 'Test IMAP fallito', 'error');
+            showToast(err?.message || t('imap.testFail', 'Test IMAP fallito'), 'error');
         } finally {
             setTesting(false);
         }
@@ -166,9 +169,9 @@ export const ImapIntegrationCard: React.FC<Props> = ({ showToast }) => {
                         <Inbox className="w-5 h-5 text-[var(--ds-text-primary)]" />
                     </div>
                     <div className="min-w-0">
-                        <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">Ricezione Email (IMAP)</h4>
+                        <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">{t('imap.title', 'Ricezione Email (IMAP)')}</h4>
                         <p className="text-[12px] text-[var(--ds-critical-text)] truncate">
-                            {loadError || 'Impossibile contattare il server. Riavvia il backend e ricarica la pagina.'}
+                            {loadError || t('imap.noServer', 'Impossibile contattare il server. Riavvia il backend e ricarica la pagina.')}
                         </p>
                     </div>
                 </div>
@@ -189,9 +192,9 @@ export const ImapIntegrationCard: React.FC<Props> = ({ showToast }) => {
                         <Inbox className="w-5 h-5 text-[var(--ds-text-primary)]" />
                     </div>
                     <div className="min-w-0">
-                        <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">Ricezione Email (IMAP)</h4>
+                        <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">{t('imap.title', 'Ricezione Email (IMAP)')}</h4>
                         <p className="text-[13px] text-[var(--ds-text-muted)] truncate">
-                            Legge le risposte dei clienti dalla casella e le allega alla prenotazione
+                            {t('imap.subtitle', 'Legge le risposte dei clienti dalla casella e le allega alla prenotazione')}
                         </p>
                     </div>
                 </div>
@@ -217,7 +220,7 @@ export const ImapIntegrationCard: React.FC<Props> = ({ showToast }) => {
                             type="button"
                             role="switch"
                             aria-checked={effectiveEnabled}
-                            aria-label={effectiveEnabled ? 'Disattiva servizio IMAP' : 'Attiva servizio IMAP'}
+                            aria-label={effectiveEnabled ? t('imap.switchOff', 'Disattiva servizio IMAP') : t('imap.switchOn', 'Attiva servizio IMAP')}
                             onClick={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
@@ -240,12 +243,12 @@ export const ImapIntegrationCard: React.FC<Props> = ({ showToast }) => {
 
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div className="sm:col-span-2">
-                            <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">Host IMAP</label>
+                            <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">{t('imap.host', 'Host IMAP')}</label>
                             <input
                                 type="text"
                                 value={hostInput}
                                 onChange={(e) => setHostInput(e.target.value)}
-                                placeholder="imaps.aruba.it"
+                                placeholder={t('imap.hostPlaceholder', 'imaps.aruba.it')}
                                 disabled={!canEdit || saving}
                                 autoComplete="off"
                                 spellCheck={false}
@@ -253,7 +256,7 @@ export const ImapIntegrationCard: React.FC<Props> = ({ showToast }) => {
                             />
                         </div>
                         <div>
-                            <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">Porta</label>
+                            <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">{t('imap.port', 'Porta')}</label>
                             <input
                                 type="number"
                                 min={1}
@@ -305,12 +308,12 @@ export const ImapIntegrationCard: React.FC<Props> = ({ showToast }) => {
                     </div>
 
                     <div>
-                        <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">Utente</label>
+                        <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">{t('imap.user', 'Utente')}</label>
                         <input
                             type="text"
                             value={userInput}
                             onChange={(e) => setUserInput(e.target.value)}
-                            placeholder="prenotazioni@ristorante.it"
+                            placeholder={t('imap.userPlaceholder', 'prenotazioni@ristorante.it')}
                             disabled={!canEdit || saving}
                             autoComplete="off"
                             spellCheck={false}
@@ -319,13 +322,13 @@ export const ImapIntegrationCard: React.FC<Props> = ({ showToast }) => {
                     </div>
 
                     <div>
-                        <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">Password</label>
+                        <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">{t('imap.password', 'Password')}</label>
                         <div className="relative">
                             <input
                                 type={showPassword ? 'text' : 'password'}
                                 value={passwordInput}
                                 onChange={(e) => setPasswordInput(e.target.value)}
-                                placeholder={maskPlaceholder(status.password_last4)}
+                                placeholder={maskPlaceholder(status.password_last4, t('integr.notSet', 'Non impostata'))}
                                 disabled={!canEdit || saving}
                                 autoComplete="new-password"
                                 spellCheck={false}
@@ -335,7 +338,7 @@ export const ImapIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                 type="button"
                                 onClick={() => setShowPassword((v) => !v)}
                                 className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[var(--ds-text-subtle)] hover:text-[var(--ds-text-primary)]"
-                                aria-label={showPassword ? 'Nascondi' : 'Mostra'}
+                                aria-label={showPassword ? t('integr.hide', 'Nascondi') : t('integr.show', 'Mostra')}
                                 tabIndex={-1}
                             >
                                 {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -354,7 +357,7 @@ export const ImapIntegrationCard: React.FC<Props> = ({ showToast }) => {
 
                     {status.updated_at && (
                         <p className="text-[11px] text-[var(--ds-text-subtle)]">
-                            Ultima modifica: {new Date(status.updated_at).toLocaleString('it-IT')}
+                            {t('integr.lastChange', 'Ultima modifica: {{quando}}', { quando: new Date(status.updated_at).toLocaleString(displayLocale()) })}
                             {status.updated_by ? ` · ${status.updated_by}` : ''}
                         </p>
                     )}
@@ -367,7 +370,7 @@ export const ImapIntegrationCard: React.FC<Props> = ({ showToast }) => {
                             className="inline-flex items-center gap-2 px-3 py-1.5 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             {testing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plug className="w-4 h-4" />}
-                            Test connessione
+                            {t('integr.testConnection', 'Test connessione')}
                         </button>
                         <button
                             type="button"
@@ -376,13 +379,13 @@ export const ImapIntegrationCard: React.FC<Props> = ({ showToast }) => {
                             className="inline-flex items-center gap-2 px-3 py-1.5 rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[13px] font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                            Salva
+                            {t('integr.save', 'Salva')}
                         </button>
                     </div>
 
                     {!status.configured && (
                         <p className="text-[11px] text-[var(--ds-pending-text)]">
-                            Salva host, utente e password per poter testare o attivare il servizio.
+                            {t('imap.saveFirst', 'Salva host, utente e password per poter testare o attivare il servizio.')}
                         </p>
                     )}
 

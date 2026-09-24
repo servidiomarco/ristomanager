@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { displayLocale } from '../utils/formatLocale';
 import { ChevronDown, Loader2, CreditCard, Save, Eye, EyeOff, Info } from 'lucide-react';
 import { Loader } from './Loader';
 import {
@@ -17,10 +19,11 @@ interface Props {
 // Placeholder for a stored secret: the user types here only to overwrite it,
 // an empty field means "keep current value" (the backend is partial-update
 // aware). Same convention as the Revolut card.
-const maskPlaceholder = (last4: string | null): string =>
-    last4 ? `•••••••••••• ${last4}` : 'Non impostata';
+const maskPlaceholder = (last4: string | null, nonImpostata: string): string =>
+    last4 ? `•••••••••••• ${last4}` : nonImpostata;
 
 export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
+    const { t } = useTranslation('canali', { useSuspense: false });
     const { hasPermission } = useAuth();
     const canEdit = hasPermission('settings:full');
 
@@ -55,7 +58,7 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                     setSandboxMerchantCodeInput(data.sandbox_merchant_code || '');
                 }
             } catch (err: any) {
-                if (!cancelled) showToastRef.current(err?.message || 'Errore nel caricamento di SumUp', 'error');
+                if (!cancelled) showToastRef.current(err?.message || t('sumup.errLoad', 'Errore nel caricamento di SumUp'), 'error');
             } finally {
                 if (!cancelled) setLoading(false);
             }
@@ -73,7 +76,7 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
             return (
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[var(--ds-radius-control)] text-[11px] font-medium bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] border border-[var(--ds-border)]">
                     <span className="w-1.5 h-1.5 rounded-full bg-[var(--ds-border-strong)]"></span>
-                    Non configurato
+                    {t('integr.notConfigured', 'Non configurato')}
                 </span>
             );
         }
@@ -83,11 +86,13 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
             return (
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[var(--ds-radius-control)] text-[11px] font-medium bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] border border-[var(--ds-border)]">
                     <span className="w-1.5 h-1.5 rounded-full bg-[var(--ds-border-strong)]"></span>
-                    Pronto (non attivo)
+                    {t('sumup.ready', 'Pronto (non attivo)')}
                 </span>
             );
         }
-        const label = status.environment === 'production' ? 'Attivo (Produzione)' : 'Attivo (Sandbox)';
+        const label = status.environment === 'production'
+            ? t('integr.activeProd', 'Attivo (Produzione)')
+            : t('integr.activeSandbox', 'Attivo (Sandbox)');
         const color = status.environment === 'production'
             ? 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] border-[var(--ds-seated-solid)]'
             : 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] border-[var(--ds-pending-solid)]';
@@ -137,9 +142,9 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
             setSandboxApiKeyInput('');
             setMerchantCodeInput(updated.production_merchant_code || '');
             setSandboxMerchantCodeInput(updated.sandbox_merchant_code || '');
-            showToast('Configurazione SumUp aggiornata', 'success');
+            showToast(t('sumup.saved', 'Configurazione SumUp aggiornata'), 'success');
         } catch (err: any) {
-            showToast(err?.message || 'Errore aggiornamento SumUp', 'error');
+            showToast(err?.message || t('sumup.errSave', 'Errore aggiornamento SumUp'), 'error');
         } finally {
             setSaving(false);
         }
@@ -177,7 +182,7 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                     </div>
                     <div className="min-w-0">
                         <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">SumUp</h4>
-                        <p className="text-[13px] text-[var(--ds-text-muted)] truncate">Hosted Checkout per caparre e conto al tavolo</p>
+                        <p className="text-[13px] text-[var(--ds-text-muted)] truncate">{t('sumup.subtitle', 'Hosted Checkout per caparre e conto al tavolo')}</p>
                     </div>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
@@ -193,11 +198,11 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                     {/* Environment switch */}
                     <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0">
-                            <p className="text-[13px] font-medium text-[var(--ds-text-primary)]">Ambiente</p>
+                            <p className="text-[13px] font-medium text-[var(--ds-text-primary)]">{t('integr.environment', 'Ambiente')}</p>
                             <p className="text-[12px] text-[var(--ds-text-muted)]">
                                 {effectiveEnv === 'production'
-                                    ? 'Pagamenti reali sul merchant SumUp.'
-                                    : 'Test sul merchant sandbox. Nessun addebito reale.'}
+                                    ? t('sumup.envProd', 'Pagamenti reali sul merchant SumUp.')
+                                    : t('sumup.envSandbox', 'Test sul merchant sandbox. Nessun addebito reale.')}
                             </p>
                         </div>
                         <div className="inline-flex rounded-[var(--ds-radius)] border border-[var(--ds-border)] overflow-hidden text-[12px] font-medium">
@@ -211,7 +216,7 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                         : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)]'
                                 } disabled:opacity-60 disabled:cursor-not-allowed`}
                             >
-                                Sandbox
+                                {t('integr.sandbox', 'Sandbox')}
                             </button>
                             <button
                                 type="button"
@@ -223,7 +228,7 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                         : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)]'
                                 } disabled:opacity-60 disabled:cursor-not-allowed`}
                             >
-                                Produzione
+                                {t('integr.production', 'Produzione')}
                             </button>
                         </div>
                     </div>
@@ -241,19 +246,19 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                     {/* Production credentials */}
                     <div className="space-y-3">
                         <p className="text-[12px] font-semibold text-[var(--ds-text-primary)] flex items-center gap-2">
-                            Produzione
+                            {t('integr.production', 'Produzione')}
                             {status.production_configured && (
-                                <span className="text-[10px] font-medium text-[var(--ds-seated-text)]">completa</span>
+                                <span className="text-[10px] font-medium text-[var(--ds-seated-text)]">{t('integr.complete', 'completa')}</span>
                             )}
                         </p>
                         <div>
-                            <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">API Key</label>
+                            <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">{t('sumup.apiKey', 'API Key')}</label>
                             <div className="relative">
                                 <input
                                     type={showApiKey ? 'text' : 'password'}
                                     value={apiKeyInput}
                                     onChange={(e) => setApiKeyInput(e.target.value)}
-                                    placeholder={maskPlaceholder(status.production_api_key_last4)}
+                                    placeholder={maskPlaceholder(status.production_api_key_last4, t('integr.notSet', 'Non impostata'))}
                                     disabled={!canEdit || saving}
                                     autoComplete="off"
                                     spellCheck={false}
@@ -263,7 +268,7 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                     type="button"
                                     onClick={() => setShowApiKey((v) => !v)}
                                     className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[var(--ds-text-subtle)] hover:text-[var(--ds-text-primary)]"
-                                    aria-label={showApiKey ? 'Nascondi' : 'Mostra'}
+                                    aria-label={showApiKey ? t('integr.hide', 'Nascondi') : t('integr.show', 'Mostra')}
                                     tabIndex={-1}
                                 >
                                     {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -274,7 +279,7 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                             </p>
                         </div>
                         <div>
-                            <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">Merchant Code</label>
+                            <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">{t('sumup.merchantCode', 'Merchant Code')}</label>
                             <input
                                 type="text"
                                 value={merchantCodeInput}
@@ -291,19 +296,19 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                     {/* Sandbox credentials */}
                     <div className="space-y-3 pt-1">
                         <p className="text-[12px] font-semibold text-[var(--ds-text-primary)] flex items-center gap-2">
-                            Sandbox
+                            {t('integr.sandbox', 'Sandbox')}
                             {status.sandbox_configured && (
-                                <span className="text-[10px] font-medium text-[var(--ds-seated-text)]">completa</span>
+                                <span className="text-[10px] font-medium text-[var(--ds-seated-text)]">{t('integr.complete', 'completa')}</span>
                             )}
                         </p>
                         <div>
-                            <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">API Key sandbox</label>
+                            <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">{t('sumup.apiKeySandbox', 'API Key sandbox')}</label>
                             <div className="relative">
                                 <input
                                     type={showSandboxApiKey ? 'text' : 'password'}
                                     value={sandboxApiKeyInput}
                                     onChange={(e) => setSandboxApiKeyInput(e.target.value)}
-                                    placeholder={maskPlaceholder(status.sandbox_api_key_last4)}
+                                    placeholder={maskPlaceholder(status.sandbox_api_key_last4, t('integr.notSet', 'Non impostata'))}
                                     disabled={!canEdit || saving}
                                     autoComplete="off"
                                     spellCheck={false}
@@ -313,7 +318,7 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                     type="button"
                                     onClick={() => setShowSandboxApiKey((v) => !v)}
                                     className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[var(--ds-text-subtle)] hover:text-[var(--ds-text-primary)]"
-                                    aria-label={showSandboxApiKey ? 'Nascondi' : 'Mostra'}
+                                    aria-label={showSandboxApiKey ? t('integr.hide', 'Nascondi') : t('integr.show', 'Mostra')}
                                     tabIndex={-1}
                                 >
                                     {showSandboxApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -321,7 +326,7 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                             </div>
                         </div>
                         <div>
-                            <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">Merchant Code sandbox</label>
+                            <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">{t('sumup.merchantCodeSandbox', 'Merchant Code sandbox')}</label>
                             <input
                                 type="text"
                                 value={sandboxMerchantCodeInput}
@@ -340,19 +345,19 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                         {status.callback_url ? (
                             <>Callback SumUp: <code className="text-[var(--ds-text-muted)]">{status.callback_url}</code></>
                         ) : (
-                            'Il token per le notifiche di pagamento viene generato al primo salvataggio.'
+                            t('sumup.callbackHint', 'Il token per le notifiche di pagamento viene generato al primo salvataggio.')
                         )}
                     </div>
 
                     {/* Active provider */}
                     <div className="flex items-center justify-between gap-3 mt-1 pt-3 border-t border-[var(--ds-border)]">
                         <div className="min-w-0">
-                            <p className="text-[13px] font-medium text-[var(--ds-text-primary)]">Usa SumUp per i nuovi pagamenti</p>
+                            <p className="text-[13px] font-medium text-[var(--ds-text-primary)]">{t('sumup.useForNew', 'Usa SumUp per i nuovi pagamenti')}</p>
                             <p className="text-[12px] text-[var(--ds-text-muted)]">
                                 {effectiveActive
-                                    ? 'Caparre e conto al tavolo passano da SumUp.'
-                                    : 'I pagamenti continuano a passare da Revolut.'}
-                                {' '}I pagamenti già aperti restano sul provider che li ha creati.
+                                    ? t('sumup.activeHint', 'Caparre e conto al tavolo passano da SumUp.')
+                                    : t('sumup.inactiveHint', 'I pagamenti continuano a passare da Revolut.')}
+                                {' '}{t('sumup.openStay', 'I pagamenti già aperti restano sul provider che li ha creati.')}
                             </p>
                         </div>
                         <button
@@ -361,7 +366,7 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                             aria-checked={effectiveActive}
                             onClick={() => canEdit && setDraftActive(!effectiveActive)}
                             disabled={!canEdit || saving || (!effectiveActive && !targetEnvReady)}
-                            title={!effectiveActive && !targetEnvReady ? 'Completa le credenziali di questo ambiente' : undefined}
+                            title={!effectiveActive && !targetEnvReady ? t('sumup.completeFirst', 'Completa le credenziali di questo ambiente') : undefined}
                             className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                                 effectiveActive ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-surface-row)]'
                             }`}
@@ -376,7 +381,7 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
 
                     {status.updated_at && (
                         <p className="text-[11px] text-[var(--ds-text-subtle)]">
-                            Ultima modifica: {new Date(status.updated_at).toLocaleString('it-IT')}
+                            {t('integr.lastChange', 'Ultima modifica: {{quando}}', { quando: new Date(status.updated_at).toLocaleString(displayLocale()) })}
                             {status.updated_by ? ` · ${status.updated_by}` : ''}
                         </p>
                     )}
@@ -389,7 +394,7 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                             className="inline-flex items-center gap-2 px-3 py-1.5 rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[13px] font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                            Salva
+                            {t('integr.save', 'Salva')}
                         </button>
                     </div>
 
