@@ -1,18 +1,20 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { CalendarCheck, Users, UserX, Ban } from 'lucide-react';
 import { ReservationsReport } from '../../services/reportsApiService';
 import { downloadCsv } from '../../utils/downloadCsv';
 import {
   SectionCard, StatTile, EmptyChart, DeltaBadge, ShareRow, CsvButton,
-  chartTooltip, BAR_FILL, BAR_MAX, CAT_DOTS, DOW_LABELS,
+  chartTooltip, BAR_FILL, BAR_MAX, CAT_DOTS, dowLabels,
   formatInt, shortDay, compactTick, eachDayIso, channelLabel, nf,
 } from './shared';
 
 const rate = (parte: number, totale: number): number => (totale > 0 ? parte / totale : 0);
-const ratePct = (parte: number, totale: number): string => `${nf.format(Math.round(rate(parte, totale) * 100))}%`;
+const ratePct = (parte: number, totale: number): string => `${nf().format(Math.round(rate(parte, totale) * 100))}%`;
 
 export const BloccoPrenotazioni: React.FC<{ data: ReservationsReport }> = ({ data }) => {
+  const { t, i18n } = useTranslation('reportistica', { useSuspense: false });
   const { totali, precedente } = data;
 
   const perGiorno = React.useMemo(() => {
@@ -25,14 +27,16 @@ export const BloccoPrenotazioni: React.FC<{ data: ReservationsReport }> = ({ dat
     }));
   }, [data]);
 
+  const giorni = React.useMemo(() => dowLabels(), [i18n.language]);
+
   const perDow = React.useMemo(() => {
     const byDow = new Map(data.per_dow.map(d => [d.giorno, d]));
     // Settimana da lunedì: EXTRACT(DOW) ha la domenica a 0.
     return [1, 2, 3, 4, 5, 6, 0].map(dow => ({
-      label: DOW_LABELS[dow],
+      label: giorni[dow],
       coperti: byDow.get(dow)?.coperti ?? 0,
     }));
-  }, [data]);
+  }, [data, giorni]);
 
   const perOra = React.useMemo(
     () => data.per_ora.map(o => ({ label: `${o.ora}:00`, coperti: o.coperti })),
@@ -51,34 +55,34 @@ export const BloccoPrenotazioni: React.FC<{ data: ReservationsReport }> = ({ dat
   return (
     <SectionCard
       icon={<CalendarCheck className="h-5 w-5" />}
-      title="Prenotazioni e canali"
-      subtitle="Per giorno solare della prenotazione · cancellate e no-show contano nei tassi, non nei trend"
+      title={t('pren.title', 'Prenotazioni e canali')}
+      subtitle={t('pren.subtitle', 'Per giorno solare della prenotazione · cancellate e no-show contano nei tassi, non nei trend')}
       actions={<CsvButton onClick={esporta} />}
     >
       <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
         <StatTile
           icon={<CalendarCheck className="h-3.5 w-3.5" />}
-          label="Prenotazioni"
+          label={t('pren.bookings', 'Prenotazioni')}
           value={formatInt(totali.prenotazioni)}
           delta={<DeltaBadge current={totali.prenotazioni} previous={precedente.prenotazioni} />}
         />
         <StatTile
           icon={<Users className="h-3.5 w-3.5" />}
-          label="Coperti"
+          label={t('pren.covers', 'Coperti')}
           value={formatInt(totali.coperti)}
           hint={totali.bambini > 0 ? `di cui ${formatInt(totali.bambini)} bambini` : undefined}
           delta={<DeltaBadge current={totali.coperti} previous={precedente.coperti} />}
         />
         <StatTile
           icon={<UserX className="h-3.5 w-3.5" />}
-          label="No-show"
+          label={t('pren.noShow', 'No-show')}
           value={ratePct(totali.no_show, totali.prenotazioni)}
           hint={`${formatInt(totali.no_show)} su ${formatInt(totali.prenotazioni)}`}
           delta={<DeltaBadge current={rate(totali.no_show, totali.prenotazioni)} previous={rate(precedente.no_show, precedente.prenotazioni)} invert />}
         />
         <StatTile
           icon={<Ban className="h-3.5 w-3.5" />}
-          label="Cancellate"
+          label={t('pren.cancelled', 'Cancellate')}
           value={ratePct(totali.cancellate, totali.prenotazioni)}
           hint={`${formatInt(totali.cancellate)} su ${formatInt(totali.prenotazioni)}`}
           delta={<DeltaBadge current={rate(totali.cancellate, totali.prenotazioni)} previous={rate(precedente.cancellate, precedente.prenotazioni)} invert />}
@@ -92,7 +96,7 @@ export const BloccoPrenotazioni: React.FC<{ data: ReservationsReport }> = ({ dat
               <CartesianGrid strokeDasharray="3 3" horizontal vertical={false} stroke="var(--ds-border)" />
               <XAxis dataKey="label" axisLine={false} tickLine={false} stroke="var(--ds-border-strong)" tick={{ fill: 'var(--ds-text-muted)', fontSize: 11 }} interval="preserveStartEnd" />
               <YAxis domain={[0, 'auto']} allowDecimals={false} axisLine={false} tickLine={false} stroke="var(--ds-border-strong)" tick={{ fill: 'var(--ds-text-muted)', fontSize: 11 }} width={34} tickFormatter={compactTick} />
-              <Tooltip {...chartTooltip} formatter={(v: number, name: string) => [formatInt(v), name === 'coperti' ? 'Coperti' : 'Prenotazioni']} />
+              <Tooltip {...chartTooltip} formatter={(v: number, name: string) => [formatInt(v), name === 'coperti' ? t('pren.covers', 'Coperti') : t('pren.bookings', 'Prenotazioni')]} />
               <Bar dataKey="coperti" fill={BAR_FILL} radius={[4, 4, 0, 0]} maxBarSize={BAR_MAX} />
             </BarChart>
           </ResponsiveContainer>
@@ -109,7 +113,7 @@ export const BloccoPrenotazioni: React.FC<{ data: ReservationsReport }> = ({ dat
               <BarChart data={perDow} margin={{ top: 5, right: 5, left: -10, bottom: 0 }}>
                 <XAxis dataKey="label" axisLine={false} tickLine={false} stroke="var(--ds-border-strong)" tick={{ fill: 'var(--ds-text-muted)', fontSize: 11 }} />
                 <YAxis domain={[0, 'auto']} allowDecimals={false} axisLine={false} tickLine={false} stroke="var(--ds-border-strong)" tick={{ fill: 'var(--ds-text-muted)', fontSize: 11 }} width={34} tickFormatter={compactTick} />
-                <Tooltip {...chartTooltip} formatter={(v: number) => [formatInt(v), 'Coperti']} />
+                <Tooltip {...chartTooltip} formatter={(v: number) => [formatInt(v), t('pren.covers', 'Coperti')]} />
                 <Bar dataKey="coperti" fill={BAR_FILL} radius={[4, 4, 0, 0]} maxBarSize={BAR_MAX} />
               </BarChart>
             </ResponsiveContainer>
@@ -123,7 +127,7 @@ export const BloccoPrenotazioni: React.FC<{ data: ReservationsReport }> = ({ dat
                 <BarChart data={perOra} margin={{ top: 5, right: 5, left: -10, bottom: 0 }}>
                   <XAxis dataKey="label" axisLine={false} tickLine={false} stroke="var(--ds-border-strong)" tick={{ fill: 'var(--ds-text-muted)', fontSize: 11 }} />
                   <YAxis domain={[0, 'auto']} allowDecimals={false} axisLine={false} tickLine={false} stroke="var(--ds-border-strong)" tick={{ fill: 'var(--ds-text-muted)', fontSize: 11 }} width={34} tickFormatter={compactTick} />
-                  <Tooltip {...chartTooltip} formatter={(v: number) => [formatInt(v), 'Coperti']} />
+                  <Tooltip {...chartTooltip} formatter={(v: number) => [formatInt(v), t('pren.covers', 'Coperti')]} />
                   <Bar dataKey="coperti" fill={BAR_FILL} radius={[4, 4, 0, 0]} maxBarSize={BAR_MAX} />
                 </BarChart>
               </ResponsiveContainer>
@@ -141,7 +145,7 @@ export const BloccoPrenotazioni: React.FC<{ data: ReservationsReport }> = ({ dat
             <ShareRow
               key={c.canale}
               colorClass={CAT_DOTS[i % CAT_DOTS.length]}
-              label={channelLabel(c.canale)}
+              label={channelLabel(c.canale, t)}
               value={formatInt(c.prenotazioni)}
               hint={ratePct(c.prenotazioni, canaliTot)}
               share={rate(c.prenotazioni, canaliTot)}

@@ -1,13 +1,25 @@
 import React from 'react';
 import { ArrowDownRight, ArrowUpRight, Download } from 'lucide-react';
 import { moneyIntl } from '../../utils/displayMoney';
+import { displayLocale } from '../../utils/formatLocale';
 
 /* Elementi condivisi dei blocchi della Reportistica. Stesso linguaggio della
    pagina Consumi AI (MonitoringPage): card su --ds-surface, tile su
    --ds-surface-row, grafici recharts stilati coi token. */
 
-export const nf = new Intl.NumberFormat('it-IT');
-export const formatInt = (n: number | null | undefined): string => nf.format(Math.round(n ?? 0));
+/* `nf` era un Intl.NumberFormat su 'it-IT' costruito a livello di modulo —
+   esattamente quello che il commento qui sotto dice di non fare, due righe
+   più in basso e per formatEuroCents. Ora è una funzione, con la cache per
+   locale che serve perché costruire un formatter a ogni cella di un grafico
+   si sente (stesso motivo per cui utils/reservationTime.ts ne tiene una). */
+const formatters = new Map<string, Intl.NumberFormat>();
+export const nf = (): Intl.NumberFormat => {
+  const loc = displayLocale();
+  let f = formatters.get(loc);
+  if (!f) { f = new Intl.NumberFormat(loc); formatters.set(loc, f); }
+  return f;
+};
+export const formatInt = (n: number | null | undefined): string => nf().format(Math.round(n ?? 0));
 
 // Niente formatter a livello di modulo: si costruirebbe all'import, prima
 // che AuthContext sappia di quale ristorante è la sessione.
@@ -97,7 +109,7 @@ export const DeltaBadge: React.FC<{
       good ? 'text-[var(--ds-seated-text)]' : 'text-[var(--ds-critical-text)]'
     }`}>
       <Arrow className="h-3.5 w-3.5" aria-hidden />
-      {pct > 0 ? '+' : ''}{nf.format(pct)}%
+      {pct > 0 ? '+' : ''}{nf().format(pct)}%
     </span>
   );
 };
@@ -175,25 +187,31 @@ export const ShareRow: React.FC<{
   </div>
 );
 
-export const CsvButton: React.FC<{ onClick: () => void; label?: string }> = ({ onClick, label = 'Esporta csv' }) => (
+export const CsvButton: React.FC<{ onClick: () => void; label?: string }> = ({ onClick, label }) => (
   <button
     type="button"
     onClick={onClick}
     className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3 text-[13px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
   >
     <Download className="h-3.5 w-3.5" aria-hidden />
-    {label}
+    {label ?? 'Esporta csv'}
   </button>
 );
 
 // Nomi leggibili dei canali di prenotazione (reservations.source).
+type TFunc = (key: string, defaultValue: string, options?: Record<string, unknown>) => string;
+
 export const CHANNEL_LABELS: Record<string, string> = {
   MANUAL: 'Inserite dallo staff',
   WHATSAPP: 'WhatsApp',
   VOICE: 'Sofia (telefono)',
   GOOGLE: 'Pagina di prenotazione',
 };
-export const channelLabel = (key: string): string => CHANNEL_LABELS[key] || key;
+export const channelLabel = (key: string, t?: TFunc): string => {
+  const it = CHANNEL_LABELS[key];
+  if (!it) return key;
+  return t ? t(`src.${key}`, it) : it;
+};
 
 // Nomi leggibili dei metodi del libro cassa.
 export const METHOD_LABELS: Record<string, string> = {
@@ -206,7 +224,17 @@ export const METHOD_LABELS: Record<string, string> = {
   OMAGGIO: 'Omaggio',
   LINK_ONLINE: 'Link online',
 };
-export const methodLabel = (key: string): string => METHOD_LABELS[key] || key;
+export const methodLabel = (key: string, t?: TFunc): string => {
+  const it = METHOD_LABELS[key];
+  if (!it) return key;
+  return t ? t(`met.${key}`, it) : it;
+};
 
-// EXTRACT(DOW): 0 = domenica.
-export const DOW_LABELS = ['dom', 'lun', 'mar', 'mer', 'gio', 'ven', 'sab'] as const;
+/* EXTRACT(DOW): 0 = domenica. I nomi vengono dalla lingua e non da un
+   elenco italiano: il 7 gennaio 2024 era una domenica, così l'indice
+   combacia con quello che manda Postgres. */
+export const dowLabels = (): string[] => {
+  const fmt = new Intl.DateTimeFormat(displayLocale(), { weekday: 'short', timeZone: 'UTC' });
+  return Array.from({ length: 7 }, (_, i) =>
+    fmt.format(new Date(Date.UTC(2024, 0, 7 + i))).replace('.', '').toLowerCase());
+};

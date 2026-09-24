@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChefHat, Trash2 } from 'lucide-react';
 import { SegmentedControl } from '../ds';
 import { DishesReport } from '../../services/reportsApiService';
@@ -8,14 +9,15 @@ import { SectionCard, CsvButton, EmptyChart, formatInt, formatEuroCents } from '
 type Ordinamento = 'qty' | 'ricavo';
 
 export const BloccoCucina: React.FC<{ data: DishesReport }> = ({ data }) => {
+  const { t } = useTranslation('reportistica', { useSuspense: false });
   const [ordina, setOrdina] = React.useState<Ordinamento>('qty');
 
   if (!data.enabled) {
     return (
       <SectionCard
         icon={<ChefHat className="h-5 w-5" />}
-        title="Cucina e piatti"
-        subtitle="Piatti più venduti, tempi per partita e scarti"
+        title={t('cuc.title', 'Cucina e piatti')}
+        subtitle={t('cuc.subtitleEmpty', 'Piatti più venduti, tempi per partita e scarti')}
       >
         <EmptyChart message="Il modulo comande è disattivato: qui compariranno piatti, tempi e scarti." />
       </SectionCard>
@@ -38,8 +40,8 @@ export const BloccoCucina: React.FC<{ data: DishesReport }> = ({ data }) => {
   return (
     <SectionCard
       icon={<ChefHat className="h-5 w-5" />}
-      title="Cucina e piatti"
-      subtitle="Dalle comande lanciate nel periodo · righe stornate escluse dai venduti, contate negli scarti"
+      title={t('cuc.title', 'Cucina e piatti')}
+      subtitle={t('cuc.subtitle', 'Dalle comande lanciate nel periodo · righe stornate escluse dai venduti, contate negli scarti')}
       actions={<CsvButton onClick={esporta} />}
     >
       <div className="mb-4 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3">
@@ -51,8 +53,8 @@ export const BloccoCucina: React.FC<{ data: DishesReport }> = ({ data }) => {
             ariaLabel="Ordina i piatti per quantità o ricavo"
             size="sm"
             options={[
-              { value: 'qty', label: 'Quantità' },
-              { value: 'ricavo', label: 'Ricavo' },
+              { value: 'qty', label: t('cuc.qty', 'Quantità') },
+              { value: 'ricavo', label: t('cuc.revenue', 'Ricavo') },
             ]}
           />
         </div>
@@ -60,9 +62,9 @@ export const BloccoCucina: React.FC<{ data: DishesReport }> = ({ data }) => {
           <table className="w-full text-[13px]">
             <thead>
               <tr className="text-left text-[var(--ds-text-muted)]">
-                <th className="py-1.5 pr-2 font-medium">Piatto</th>
-                <th className="py-1.5 pr-2 text-right font-medium">Quantità</th>
-                <th className="py-1.5 text-right font-medium">Ricavo</th>
+                <th className="py-1.5 pr-2 font-medium">{t('cuc.dish', 'Piatto')}</th>
+                <th className="py-1.5 pr-2 text-right font-medium">{t('cuc.qty', 'Quantità')}</th>
+                <th className="py-1.5 text-right font-medium">{t('cuc.revenue', 'Ricavo')}</th>
               </tr>
             </thead>
             <tbody>
@@ -87,10 +89,10 @@ export const BloccoCucina: React.FC<{ data: DishesReport }> = ({ data }) => {
             <table className="w-full text-[13px]">
               <thead>
                 <tr className="text-left text-[var(--ds-text-muted)]">
-                  <th className="py-1.5 pr-2 font-medium">Partita</th>
-                  <th className="py-1.5 pr-2 text-right font-medium">Righe</th>
-                  <th className="py-1.5 pr-2 text-right font-medium">Media</th>
-                  <th className="py-1.5 text-right font-medium">Mediana</th>
+                  <th className="py-1.5 pr-2 font-medium">{t('cuc.station', 'Partita')}</th>
+                  <th className="py-1.5 pr-2 text-right font-medium">{t('cuc.lines', 'Righe')}</th>
+                  <th className="py-1.5 pr-2 text-right font-medium">{t('cuc.mean', 'Media')}</th>
+                  <th className="py-1.5 text-right font-medium">{t('cuc.median', 'Mediana')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -111,7 +113,7 @@ export const BloccoCucina: React.FC<{ data: DishesReport }> = ({ data }) => {
         <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3">
           <div className="mb-1 flex items-center gap-1.5 text-[13px] font-medium text-[var(--ds-text-secondary)]">
             <Trash2 className="h-3.5 w-3.5" aria-hidden />
-            Scarti per motivo
+            {t('cuc.wasteByReason', 'Scarti per motivo')}
             {scartiTot > 0 && <span className="ml-auto tabular font-semibold text-[var(--ds-text-primary)]">{formatEuroCents(scartiTot)}</span>}
           </div>
           {scarti.length > 0 ? (

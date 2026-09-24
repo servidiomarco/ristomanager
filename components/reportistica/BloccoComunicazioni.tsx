@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Phone, Clock, CalendarCheck, AlertTriangle } from 'lucide-react';
 import { CommunicationsReport } from '../../services/reportsApiService';
@@ -15,6 +16,7 @@ const CHANNEL_NAMES: Record<string, string> = {
 };
 
 export const BloccoComunicazioni: React.FC<{ data: CommunicationsReport }> = ({ data }) => {
+  const { t } = useTranslation('reportistica', { useSuspense: false });
   const { voce, voce_precedente } = data;
 
   const perGiorno = React.useMemo(() => {
@@ -32,32 +34,32 @@ export const BloccoComunicazioni: React.FC<{ data: CommunicationsReport }> = ({ 
   return (
     <SectionCard
       icon={<Phone className="h-5 w-5" />}
-      title="Sofia e comunicazioni"
-      subtitle="Chiamate dell'agente vocale e messaggi in uscita nel periodo"
+      title={t('com.title', 'Sofia e comunicazioni')}
+      subtitle={t('com.subtitle', "Chiamate dell'agente vocale e messaggi in uscita nel periodo")}
     >
       <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
         <StatTile
           icon={<Phone className="h-3.5 w-3.5" />}
-          label="Chiamate"
+          label={t('com.calls', 'Chiamate')}
           value={formatInt(voce.chiamate)}
           delta={<DeltaBadge current={voce.chiamate} previous={voce_precedente.chiamate} />}
         />
         <StatTile
           icon={<Clock className="h-3.5 w-3.5" />}
-          label="Minuti al telefono"
+          label={t('com.minutes', 'Minuti al telefono')}
           value={formatDuration(voce.secondi)}
           delta={<DeltaBadge current={voce.secondi} previous={voce_precedente.secondi} />}
         />
         <StatTile
           icon={<CalendarCheck className="h-3.5 w-3.5" />}
-          label="Convertite"
-          value={`${nf.format(conversione)}%`}
+          label={t('com.converted', 'Convertite')}
+          value={`${nf().format(conversione)}%`}
           hint={`${formatInt(voce.con_prenotazione)} prenotazioni da chiamata`}
           delta={<DeltaBadge current={voce.chiamate > 0 ? voce.con_prenotazione / voce.chiamate : 0} previous={conversionePrec} />}
         />
         <StatTile
           icon={<AlertTriangle className="h-3.5 w-3.5" />}
-          label="Da ricontrollare"
+          label={t('com.toReview', 'Da ricontrollare')}
           value={formatInt(voce.phantom + voce.gruppi_grandi)}
           hint={`${formatInt(voce.phantom)} phantom · ${formatInt(voce.gruppi_grandi)} gruppi grandi`}
           delta={<DeltaBadge current={voce.phantom + voce.gruppi_grandi} previous={voce_precedente.phantom + voce_precedente.gruppi_grandi} invert />}
@@ -71,7 +73,7 @@ export const BloccoComunicazioni: React.FC<{ data: CommunicationsReport }> = ({ 
               <CartesianGrid strokeDasharray="3 3" horizontal vertical={false} stroke="var(--ds-border)" />
               <XAxis dataKey="label" axisLine={false} tickLine={false} stroke="var(--ds-border-strong)" tick={{ fill: 'var(--ds-text-muted)', fontSize: 11 }} interval="preserveStartEnd" />
               <YAxis domain={[0, 'auto']} allowDecimals={false} axisLine={false} tickLine={false} stroke="var(--ds-border-strong)" tick={{ fill: 'var(--ds-text-muted)', fontSize: 11 }} width={30} />
-              <Tooltip {...chartTooltip} formatter={(v: number) => [formatInt(v), 'Chiamate']} />
+              <Tooltip {...chartTooltip} formatter={(v: number) => [formatInt(v), t('com.calls', 'Chiamate')]} />
               <Bar dataKey="chiamate" fill={BAR_FILL} radius={[4, 4, 0, 0]} maxBarSize={BAR_MAX} />
             </BarChart>
           </ResponsiveContainer>

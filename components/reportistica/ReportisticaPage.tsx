@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import ReactMarkdown from 'react-markdown';
 import { Loader2, RefreshCw, AlertTriangle, Printer, Wand2 } from 'lucide-react';
 import { asIsoDay, addDays } from '../ds';
@@ -22,10 +23,12 @@ import { BloccoComunicazioni } from './BloccoComunicazioni';
 type Slot<T> = { data: T | null; error: string | null };
 const emptySlot = <T,>(): Slot<T> => ({ data: null, error: null });
 
-const settleSlot = <T,>(r: PromiseSettledResult<T>): Slot<T> =>
+type TFunc = (key: string, defaultValue: string) => string;
+
+const settleSlot = <T,>(r: PromiseSettledResult<T>, t?: TFunc): Slot<T> =>
   r.status === 'fulfilled'
     ? { data: r.value, error: null }
-    : { data: null, error: r.reason?.message || 'Errore nel caricamento' };
+    : { data: null, error: r.reason?.message || (t ? t('errLoad', 'Errore nel caricamento') : 'Errore nel caricamento') };
 
 const BlockError: React.FC<{ title: string; message: string }> = ({ title, message }) => (
   <div className="flex items-center gap-2 rounded-[var(--ds-radius)] bg-[var(--ds-critical-tint)] px-4 py-3 text-[13px] text-[var(--ds-critical-text)]">
@@ -35,6 +38,7 @@ const BlockError: React.FC<{ title: string; message: string }> = ({ title, messa
 );
 
 export const ReportisticaPage: React.FC = () => {
+  const { t } = useTranslation('reportistica', { useSuspense: false });
   const [period, setPeriod] = useState<Period>(() => {
     const today = new Date();
     return { from: asIsoDay(addDays(today, -29)), to: asIsoDay(today) };
@@ -58,10 +62,10 @@ export const ReportisticaPage: React.FC = () => {
       getDishesReport(range),
       getCommunicationsReport(range),
     ]);
-    setPrenotazioni(settleSlot(r1));
-    setIncassi(settleSlot(r2));
-    setCucina(settleSlot(r3));
-    setComunicazioni(settleSlot(r4));
+    setPrenotazioni(settleSlot(r1, t));
+    setIncassi(settleSlot(r2, t));
+    setCucina(settleSlot(r3, t));
+    setComunicazioni(settleSlot(r4, t));
     setLoading(false);
   }, []);
 
@@ -91,7 +95,7 @@ export const ReportisticaPage: React.FC = () => {
       const { report } = await generateAiReport(aiDays);
       setAiReport(report);
     } catch (err: any) {
-      setAiError(err?.message || 'Errore nella generazione del report');
+      setAiError(err?.message || t('errAi', 'Errore nella generazione del report'));
     } finally {
       setAiLoading(false);
     }
@@ -106,7 +110,7 @@ export const ReportisticaPage: React.FC = () => {
             <div>
               <h1 className="text-[22px] font-bold text-[var(--ds-text-primary)]">Reportistica</h1>
               <p className="text-[13px] text-[var(--ds-text-muted)]">
-                Ogni numero è confrontato col periodo precedente di pari durata.
+                {t('compareHint', 'Ogni numero è confrontato col periodo precedente di pari durata.')}
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -115,7 +119,7 @@ export const ReportisticaPage: React.FC = () => {
                 onClick={stampa}
                 disabled={loading || nothingYet}
                 className="inline-flex h-9 w-9 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:text-[var(--ds-text-primary)] disabled:opacity-50"
-                aria-label="Stampa il report"
+                aria-label={t('printReport', 'Stampa il report')}
               >
                 <Printer className="h-4 w-4" />
               </button>
@@ -123,7 +127,7 @@ export const ReportisticaPage: React.FC = () => {
                 onClick={() => load(period)}
                 disabled={loading}
                 className="inline-flex h-9 w-9 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:text-[var(--ds-text-primary)] disabled:opacity-50"
-                aria-label="Aggiorna"
+                aria-label={t('reload', 'Aggiorna')}
               >
                 <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               </button>
@@ -137,16 +141,16 @@ export const ReportisticaPage: React.FC = () => {
           ) : (
             <div className="space-y-5">
               {prenotazioni.data && <BloccoPrenotazioni data={prenotazioni.data} />}
-              {prenotazioni.error && <BlockError title="Prenotazioni" message={prenotazioni.error} />}
+              {prenotazioni.error && <BlockError title={t('pren.title', 'Prenotazioni e canali')} message={prenotazioni.error} />}
 
               {incassi.data && <BloccoIncassi data={incassi.data} />}
-              {incassi.error && <BlockError title="Incassi" message={incassi.error} />}
+              {incassi.error && <BlockError title={t('inc.title', 'Incassi e cassa')} message={incassi.error} />}
 
               {cucina.data && <BloccoCucina data={cucina.data} />}
-              {cucina.error && <BlockError title="Cucina" message={cucina.error} />}
+              {cucina.error && <BlockError title={t('cuc.title', 'Cucina e piatti')} message={cucina.error} />}
 
               {comunicazioni.data && <BloccoComunicazioni data={comunicazioni.data} />}
-              {comunicazioni.error && <BlockError title="Comunicazioni" message={comunicazioni.error} />}
+              {comunicazioni.error && <BlockError title={t('com.title', 'Sofia e comunicazioni')} message={comunicazioni.error} />}
 
               {/* Report AI narrativo: stesso motore della Dashboard. Marcato
                   Wand2 + famiglia arriving come ogni cosa scritta dall'AI. */}
@@ -159,7 +163,7 @@ export const ReportisticaPage: React.FC = () => {
                     <div>
                       <h2 className="text-[17px] font-semibold text-[var(--ds-text-primary)]">Lettura AI</h2>
                       <p className="text-[13px] text-[var(--ds-text-muted)]">
-                        Copre sempre gli ultimi {aiDays} giorni da oggi, non il periodo scelto sopra.
+                        {t('aiDays', 'Copre sempre gli ultimi {{giorni}} giorni da oggi, non il periodo scelto sopra.', { giorni: aiDays })}
                       </p>
                     </div>
                   </div>
@@ -169,7 +173,7 @@ export const ReportisticaPage: React.FC = () => {
                     className="inline-flex h-10 flex-shrink-0 items-center gap-2 rounded-[var(--ds-radius)] bg-[var(--ds-text-primary)] px-4 text-[14px] font-semibold text-[var(--ds-surface)] transition-opacity hover:opacity-90 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
                     {aiLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
-                    {aiLoading ? 'Ci penso…' : aiReport ? 'Rigenera' : 'Genera'}
+                    {aiLoading ? t('aiThinking', 'Ci penso…') : aiReport ? t('aiRegen', 'Rigenera') : t('aiGen', 'Genera')}
                   </button>
                 </div>
                 {aiError && (

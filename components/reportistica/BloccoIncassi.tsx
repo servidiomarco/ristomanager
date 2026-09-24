@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Banknote, Receipt, Users, HandCoins } from 'lucide-react';
 import { RevenueReport } from '../../services/reportsApiService';
@@ -17,10 +18,11 @@ const DINNER_FILL = 'var(--ds-cat-1-solid)';
 const euroTick = (v: number): string => {
   const eur = v / 100;
   const s = moneySymbol();
-  return eur >= 1000 ? `${nf.format(Math.round(eur / 100) / 10)}k ${s}` : `${nf.format(Math.round(eur))} ${s}`;
+  return eur >= 1000 ? `${nf().format(Math.round(eur / 100) / 10)}k ${s}` : `${nf().format(Math.round(eur))} ${s}`;
 };
 
 export const BloccoIncassi: React.FC<{ data: RevenueReport }> = ({ data }) => {
+  const { t } = useTranslation('reportistica', { useSuspense: false });
   const { totali, precedente } = data;
 
   const perGiorno = React.useMemo(() => {
@@ -60,35 +62,35 @@ export const BloccoIncassi: React.FC<{ data: RevenueReport }> = ({ data }) => {
   return (
     <SectionCard
       icon={<Banknote className="h-5 w-5" />}
-      title="Incassi e cassa"
-      subtitle="Dal libro cassa, per giorno di servizio: un conto incassato dopo mezzanotte appartiene alla sera prima"
+      title={t('inc.title', 'Incassi e cassa')}
+      subtitle={t('inc.subtitle', 'Dal libro cassa, per giorno di servizio: un conto incassato dopo mezzanotte appartiene alla sera prima')}
       actions={<CsvButton onClick={esporta} />}
     >
       <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
         <StatTile
           icon={<Banknote className="h-3.5 w-3.5" />}
-          label="Incassato"
+          label={t('inc.taken', 'Incassato')}
           value={formatEuroCents(totali.incassato_cents)}
           hint={`${formatInt(totali.movimenti)} movimenti`}
           delta={<DeltaBadge current={totali.incassato_cents} previous={precedente.incassato_cents} />}
         />
         <StatTile
           icon={<Receipt className="h-3.5 w-3.5" />}
-          label="Scontrino medio"
+          label={t('inc.avgBill', 'Scontrino medio')}
           value={formatEuroCents(totali.scontrino_medio_cents)}
           hint={`${formatInt(totali.conti)} conti chiusi`}
           delta={<DeltaBadge current={totali.scontrino_medio_cents} previous={precedente.scontrino_medio_cents} />}
         />
         <StatTile
           icon={<Users className="h-3.5 w-3.5" />}
-          label="Coperto medio"
+          label={t('inc.avgCover', 'Coperto medio')}
           value={formatEuroCents(totali.coperto_medio_cents)}
           hint={`${formatInt(totali.coperti)} coperti al conto`}
           delta={<DeltaBadge current={totali.coperto_medio_cents} previous={precedente.coperto_medio_cents} />}
         />
         <StatTile
           icon={<HandCoins className="h-3.5 w-3.5" />}
-          label="Mance"
+          label={t('inc.tips', 'Mance')}
           value={formatEuroCents(totali.mance_cents)}
           delta={<DeltaBadge current={totali.mance_cents} previous={precedente.mance_cents} />}
         />
@@ -102,7 +104,7 @@ export const BloccoIncassi: React.FC<{ data: RevenueReport }> = ({ data }) => {
                 <CartesianGrid strokeDasharray="3 3" horizontal vertical={false} stroke="var(--ds-border)" />
                 <XAxis dataKey="label" axisLine={false} tickLine={false} stroke="var(--ds-border-strong)" tick={{ fill: 'var(--ds-text-muted)', fontSize: 11 }} interval="preserveStartEnd" />
                 <YAxis domain={[0, 'auto']} axisLine={false} tickLine={false} stroke="var(--ds-border-strong)" tick={{ fill: 'var(--ds-text-muted)', fontSize: 11 }} width={52} tickFormatter={euroTick} />
-                <Tooltip {...chartTooltip} formatter={(v: number, name: string) => [formatEuroCents(v), name === 'pranzo' ? 'Pranzo' : 'Cena']} />
+                <Tooltip {...chartTooltip} formatter={(v: number, name: string) => [formatEuroCents(v), name === 'pranzo' ? t('shift.lunch', 'Pranzo') : t('shift.dinner', 'Cena')]} />
                 <Bar dataKey="pranzo" stackId="giorno" fill={LUNCH_FILL} maxBarSize={BAR_MAX} />
                 <Bar dataKey="cena" stackId="giorno" fill={DINNER_FILL} radius={[4, 4, 0, 0]} maxBarSize={BAR_MAX} />
               </BarChart>
@@ -121,13 +123,13 @@ export const BloccoIncassi: React.FC<{ data: RevenueReport }> = ({ data }) => {
         <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3">
           <div className="mb-1 flex items-center justify-between gap-2">
             <span className="text-[13px] font-medium text-[var(--ds-text-secondary)]">Metodi di pagamento</span>
-            <CsvButton onClick={esportaMetodi} label="csv" />
+            <CsvButton onClick={esportaMetodi} label={t('csv', 'csv')} />
           </div>
           {data.per_metodo.length > 0 ? data.per_metodo.map((m, i) => (
             <ShareRow
               key={m.metodo}
               colorClass={CAT_DOTS[i % CAT_DOTS.length]}
-              label={methodLabel(m.metodo)}
+              label={methodLabel(m.metodo, t)}
               value={formatEuroCents(m.amount_cents)}
               hint={m.non_cash ? 'fuori incassato' : `${formatInt(m.movimenti)} mov.`}
               share={incassatoTot > 0 && !m.non_cash ? m.amount_cents / incassatoTot : 0}
