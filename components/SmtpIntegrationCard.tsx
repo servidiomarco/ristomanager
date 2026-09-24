@@ -82,7 +82,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
             return (
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[var(--ds-radius-control)] text-[11px] font-medium bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] border border-[var(--ds-border)]">
                     <span className="w-1.5 h-1.5 rounded-full bg-[var(--ds-border-strong)]"></span>
-                    {t('smtp.notConfigured', 'Non configurato')}
+                    {t('integr.notConfigured', 'Non configurato')}
                 </span>
             );
         }
@@ -127,7 +127,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
             if (portInput.trim() !== (status.port ? String(status.port) : '')) {
                 const n = Number(portInput);
                 if (!Number.isInteger(n) || n < 1 || n > 65535) {
-                    showToast(t('smtp.err.badPort', 'Porta non valida (1-65535)'), 'error');
+                    showToast(t('integr.badPort', 'Porta non valida (1-65535)'), 'error');
                     return;
                 }
                 payload.port = n;
@@ -336,7 +336,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                         type={showPassword ? 'text' : 'password'}
                                         value={passwordInput}
                                         onChange={(e) => setPasswordInput(e.target.value)}
-                                        placeholder={maskPlaceholder(status.password_last4, t('smtp.notSet', 'Non impostata'))}
+                                        placeholder={maskPlaceholder(status.password_last4, t('integr.notSet', 'Non impostata'))}
                                         disabled={!canEdit || saving}
                                         autoComplete="new-password"
                                         spellCheck={false}
@@ -346,7 +346,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                         type="button"
                                         onClick={() => setShowPassword((v) => !v)}
                                         className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[var(--ds-text-subtle)] hover:text-[var(--ds-text-primary)]"
-                                        aria-label={showPassword ? t('smtp.hide', 'Nascondi') : t('smtp.show', 'Mostra')}
+                                        aria-label={showPassword ? t('integr.hide', 'Nascondi') : t('integr.show', 'Mostra')}
                                         tabIndex={-1}
                                     >
                                         {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -367,7 +367,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                     type={showResendKey ? 'text' : 'password'}
                                     value={resendKeyInput}
                                     onChange={(e) => setResendKeyInput(e.target.value)}
-                                    placeholder={maskPlaceholder(status.resend_api_key_last4, t('smtp.notSet', 'Non impostata'))}
+                                    placeholder={maskPlaceholder(status.resend_api_key_last4, t('integr.notSet', 'Non impostata'))}
                                     disabled={!canEdit || saving}
                                     autoComplete="off"
                                     spellCheck={false}
@@ -377,7 +377,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                     type="button"
                                     onClick={() => setShowResendKey((v) => !v)}
                                     className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[var(--ds-text-subtle)] hover:text-[var(--ds-text-primary)]"
-                                    aria-label={showResendKey ? t('smtp.hide', 'Nascondi') : t('smtp.show', 'Mostra')}
+                                    aria-label={showResendKey ? t('integr.hide', 'Nascondi') : t('integr.show', 'Mostra')}
                                     tabIndex={-1}
                                 >
                                     {showResendKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -435,7 +435,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
 
                     {status.updated_at && (
                         <p className="text-[11px] text-[var(--ds-text-subtle)]">
-                            {t('smtp.lastChange', 'Ultima modifica: {{quando}}', { quando: new Date(status.updated_at).toLocaleString(displayLocale()) })}
+                            {t('integr.lastChange', 'Ultima modifica: {{quando}}', { quando: new Date(status.updated_at).toLocaleString(displayLocale()) })}
                             {status.updated_by ? ` · ${status.updated_by}` : ''}
                         </p>
                     )}
@@ -448,7 +448,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                             className="inline-flex items-center gap-2 px-3 py-1.5 rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[13px] font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                            {t('smtp.save', 'Salva')}
+                            {t('integr.save', 'Salva')}
                         </button>
                     </div>
 
