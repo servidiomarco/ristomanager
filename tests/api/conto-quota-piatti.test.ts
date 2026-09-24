@@ -3,8 +3,9 @@ import { api, bearer, ownerToken } from './helpers';
 
 // Quota «per piatti» della cassa: l'incasso porta in meta.item_units quali
 // piatti copre, /bills/open riespone le unità già coperte (con le quote
-// ospite a riga intera) e il QR le segna prese — così né la cassa né un
-// ospite ripropongono o ripagano un piatto già incassato.
+// ospite) e il QR le conta — così né la cassa né un ospite ripropongono o
+// ripagano un piatto già incassato. Dal 24/09 anche la quota dal QR va a
+// pezzi (item_units): al tavolo da quattro ognuno paga il suo coperto.
 describe('quota per piatti (meta.item_units)', () => {
     let token: string;
     let billId: number;
@@ -103,13 +104,19 @@ describe('quota per piatti (meta.item_units)', () => {
         expect(takenOf(open.body.bills, dolceId)).toBe(0);
     });
 
-    it('il QR segna presa la riga anche a copertura parziale, e il claim la rifiuta', async () => {
+    it('il QR conta i pezzi già incassati, e la riga intera non si prende più', async () => {
         const pub = await api().get(`/pay/${shareToken}`);
         expect(pub.status).toBe(200);
         const fritto = pub.body.items.find((i: any) => i.id === frittoId);
         const dolce = pub.body.items.find((i: any) => i.id === dolceId);
-        expect(fritto.taken).toBe(true);
+        // Un fritto su due è pagato: la riga non è esaurita, ma un pezzo è di altri.
+        expect(fritto.taken).toBe(false);
+        expect(fritto.taken_units).toBe(1);
+        expect(fritto.unit_cents).toBe(1000);
         expect(dolce.taken).toBe(false);
+        expect(dolce.taken_units).toBe(0);
+
+        // La forma vecchia (riga intera = 2 pezzi) non ci sta più.
 
         const claim = await api().post(`/pay/${shareToken}/claim`).send({
             kind: 'per_item', item_ids: [frittoId], claimant_label: 'Ospite Quota',
@@ -131,5 +138,53 @@ describe('quota per piatti (meta.item_units)', () => {
         const pub = await api().get(`/pay/${shareToken}`);
         expect(pub.status).toBe(200);
         expect(pub.body.items.find((i: any) => i.id === frittoId).taken).toBe(false);
+    });
+
+    it('la quota dal QR prende un pezzo alla volta, fino a esaurire la riga', async () => {
+        const bad = await api().post(`/pay/${shareToken}/claim`).send({
+            kind: 'per_item', item_units: [{ order_item_id: frittoId, units: 0 }],
+        });
+        expect(bad.status).toBe(400);
+
+        const primo = await api().post(`/pay/${shareToken}/claim`).send({
+            kind: 'per_item', item_units: [{ order_item_id: frittoId, units: 1 }], claimant_label: 'Primo',
+        });
+        expect(primo.status).toBe(201);
+        expect(primo.body.amount_cents).toBe(1000);
+
+        let pub = await api().get(`/pay/${shareToken}`);
+        let fritto = pub.body.items.find((i: any) => i.id === frittoId);
+        expect(fritto.taken_units).toBe(1);
+        expect(fritto.taken).toBe(false);
+
+        // Più pezzi di quanti ne restano → 409, senza impegnare niente.
+        const troppi = await api().post(`/pay/${shareToken}/claim`).send({
+            kind: 'per_item', item_units: [{ order_item_id: frittoId, units: 2 }],
+        });
+        expect(troppi.status).toBe(409);
+        expect(troppi.body.conflicting_item_ids).toContain(frittoId);
+
+        const secondo = await api().post(`/pay/${shareToken}/claim`).send({
+            kind: 'per_item',
+            item_units: [{ order_item_id: frittoId, units: 1 }, { order_item_id: dolceId, units: 1 }],
+            claimant_label: 'Secondo',
+        });
+        expect(secondo.status).toBe(201);
+        expect(secondo.body.amount_cents).toBe(1600);
+
+        pub = await api().get(`/pay/${shareToken}`);
+        fritto = pub.body.items.find((i: any) => i.id === frittoId);
+        expect(fritto.taken_units).toBe(2);
+        expect(fritto.taken).toBe(true);
+
+        const esaurito = await api().post(`/pay/${shareToken}/claim`).send({
+            kind: 'per_item', item_units: [{ order_item_id: frittoId, units: 1 }],
+        });
+        expect(esaurito.status).toBe(409);
+
+        // La cassa vede gli stessi pezzi presi dal QR.
+        const open = await api().get('/bills/open').set(bearer(token));
+        expect(takenOf(open.body.bills, frittoId)).toBe(2);
+        expect(takenOf(open.body.bills, dolceId)).toBe(1);
     });
 });
