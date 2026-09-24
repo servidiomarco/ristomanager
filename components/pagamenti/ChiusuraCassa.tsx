@@ -4,6 +4,7 @@ import { AlertCircle } from 'lucide-react';
 import type { CashClosureBillRow, CashClosureReport } from '../../types';
 import { Callout, FormCard, StatusPill } from '../ds';
 import { formatEuro } from './paymentsView';
+import { methodLabel } from './settleView';
 
 /* ── Chiusura di cassa ────────────────────────────────────────────────────
    I totali del giorno per metodo di incasso, dal libro cassa
@@ -289,7 +290,7 @@ export const ChiusuraCassa: React.FC<{
                             {b.payments.map((p, i) => (
                               <span key={i}>{(METHOD_LABELS[p.method] ?? p.method).toLowerCase()} {formatEuro(p.amount_cents)}</span>
                             ))}
-                            {b.tip_cents > 0 && <span className="text-[var(--ds-seated-text)]">mancia {formatEuro(b.tip_cents)}</span>}
+                            {b.tip_cents > 0 && <span className="text-[var(--ds-seated-text)]">mancia {formatEuro(b.tip_cents)}{b.tip_method ? ` · ${methodLabel(b.tip_method)}` : ''}</span>}
                           </div>
                         </>
                       );

@@ -2,10 +2,11 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
-import type { TableBill } from '../../types';
+import type { TableBill, TipMethod } from '../../types';
 import { StatusPill } from '../ds';
 import { StampaCopiaButton } from '../pagamenti/StampaCopiaButton';
 import { euro } from './cassaView';
+import { methodLabel } from '../pagamenti/settleView';
 import { timePart } from '../../utils/displayTime';
 
 /* ── Passo 5 · chiusura, i tre esiti ──────────────────────────────────────
@@ -37,6 +38,10 @@ interface EsitoChiusuraProps {
   /** Esito «parziale»: quanto è entrato con QUESTO incasso e quanto resta. */
   paidNowCents?: number | null;
   residualCents?: number | null;
+  /** Mancia registrata con la chiusura: fuori dal totale del conto, quindi
+   *  detta a parte — prima non compariva da nessuna parte in Cassa. */
+  tipCents?: number;
+  tipMethod?: TipMethod | null;
   tableName: string | null;
   closedAt: string | null;
   docNumber: string | null;
@@ -70,7 +75,7 @@ const HEAD: Record<Esito, { label: string; labelKey?: string; tone: 'positive' |
 };
 
 export const EsitoChiusura: React.FC<EsitoChiusuraProps> = ({
-  esito, totalCents, paidNowCents = null, residualCents = null, tableName, closedAt, docNumber, receiptToken, onPrintReceipt, onPrintProforma, busy,
+  esito, totalCents, paidNowCents = null, residualCents = null, tipCents = 0, tipMethod = null, tableName, closedAt, docNumber, receiptToken, onPrintReceipt, onPrintProforma, busy,
   onRetryDocument, onMarkProforma, onIssueReceipt, onIssueInvoice, onReopen, onBackToQueue,
 }) => {
   const { t } = useTranslation('cassa', { useSuspense: false });
@@ -117,6 +122,13 @@ export const EsitoChiusura: React.FC<EsitoChiusuraProps> = ({
         </div>
 
         <p className="mt-3 text-[14px] leading-relaxed text-[var(--ds-text-secondary)]">{body}</p>
+
+        {tipCents > 0 && (
+          <p className="mt-2 text-[14px] text-[var(--ds-text-secondary)]">
+            {t('tipLine', { importo: euro(tipCents) })}
+            {tipMethod && <span className="text-[var(--ds-text-muted)]"> · {methodLabel(tipMethod)}</span>}
+          </p>
+        )}
 
         {/* Lo scontrino si consegna adesso, col cliente ancora davanti: QR
             da inquadrare col telefono, o copia di cortesia dalla termica. */}
