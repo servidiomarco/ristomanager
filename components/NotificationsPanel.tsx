@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
 import { ArrowRight, Bell, CheckCheck, X } from 'lucide-react';
 import { notificationsApiService, NotificationRow } from '../services/notificationsApiService';
@@ -29,6 +30,7 @@ export const NotificationsPanel: React.FC<{
   /** Lets App refresh the bell badge after a read or a dismiss. */
   onCountsChanged: () => void;
 }> = ({ anchorRef, onClose, onSeeAll, onCountsChanged }) => {
+  const { t } = useTranslation('notifiche', { useSuspense: false });
   const [items, setItems] = useState<NotificationRow[]>([]);
   const [counts, setCounts] = useState({ total: 0, unread: 0 });
   const [loading, setLoading] = useState(true);
@@ -124,19 +126,19 @@ export const NotificationsPanel: React.FC<{
     <div
       ref={panelRef}
       role="dialog"
-      aria-label="Notifiche"
+      aria-label={t('title', 'Notifiche')}
       style={{ top: at.top, left: at.left, width: PANEL_WIDTH, maxHeight: 'min(70vh, 620px)' }}
       className="fixed z-[60] flex flex-col overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)]"
     >
       <div className="flex-shrink-0 space-y-3 p-4">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
-            Notifiche
+            {t('title', 'Notifiche')}
           </h2>
           <button
             type="button"
             onClick={onClose}
-            aria-label="Chiudi"
+            aria-label={t('close', 'Chiudi')}
             className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]"
           >
             <X className="h-4 w-4" />
@@ -145,12 +147,12 @@ export const NotificationsPanel: React.FC<{
         <SegmentedControl
           value={onlyUnread ? 'unread' : 'all'}
           onChange={next => { setLoading(true); setOnlyUnread(next === 'unread'); }}
-          ariaLabel="Filtra per stato"
+          ariaLabel={t('filterByState', 'Filtra per stato')}
           equalWidth={false}
           size="sm"
           options={[
-            { value: 'all', label: 'Tutte', badge: counts.total, badgeTone: 'neutral' },
-            { value: 'unread', label: 'Non lette', badge: counts.unread, badgeTone: 'alert' },
+            { value: 'all', label: t('all', 'Tutte'), badge: counts.total, badgeTone: 'neutral' },
+            { value: 'unread', label: t('unread', 'Non lette'), badge: counts.unread, badgeTone: 'alert' },
           ]}
         />
       </div>
@@ -162,7 +164,7 @@ export const NotificationsPanel: React.FC<{
           <SkeletonNotificationList count={4} />
         ) : items.length === 0 ? (
           <EmptyState icon={Bell}>
-            {onlyUnread ? 'Nessuna notifica da leggere.' : 'Nessuna notifica.'}
+            {onlyUnread ? t('noneToRead', 'Nessuna notifica da leggere.') : t('none', 'Nessuna notifica.')}
           </EmptyState>
         ) : (
           <div className="space-y-2">
@@ -173,6 +175,7 @@ export const NotificationsPanel: React.FC<{
                 onOpen={open}
                 onMarkRead={markRead}
                 onDismiss={dismiss}
+                t={t}
               />
             ))}
           </div>
@@ -187,14 +190,14 @@ export const NotificationsPanel: React.FC<{
           className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 text-[14px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
         >
           <CheckCheck className="h-4 w-4" aria-hidden />
-          Tutte lette
+          {t('allRead', 'Tutte lette')}
         </button>
         <button
           type="button"
           onClick={() => { onClose(); onSeeAll(); }}
           className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 text-[14px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]"
         >
-          Vedi tutte
+          {t('seeAll', 'Vedi tutte')}
           <ArrowRight className="h-4 w-4" aria-hidden />
         </button>
       </div>

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Bell, CheckCheck, RefreshCw, AlertTriangle, ListFilter } from 'lucide-react';
 import { SkeletonNotificationList } from './SkeletonCards';
 import { notificationsApiService, NotificationRow } from '../services/notificationsApiService';
@@ -8,7 +9,7 @@ import {
   useFirstRunHint, dsIconButton,
 } from './ds';
 import {
-  NotificationItem, BUCKET_ORDER, BUCKET_LABEL, bucketOf, type Bucket,
+  NotificationItem, BUCKET_ORDER, bucketLabel, bucketOf, type Bucket,
 } from './NotificheShared';
 
 // Read-state and category are one filter, not two: the endpoint takes either
@@ -35,6 +36,7 @@ const emptyCounts: CountsShape = {
 };
 
 const NotifichePage: React.FC = () => {
+  const { t } = useTranslation('notifiche', { useSuspense: false });
   const [items, setItems] = useState<NotificationRow[]>([]);
   const [counts, setCounts] = useState<CountsShape>(emptyCounts);
   const [loading, setLoading] = useState(true);
@@ -63,7 +65,7 @@ const NotifichePage: React.FC = () => {
       ]);
       setItems(notifications);
     } catch (err: any) {
-      setError(err?.message || 'Errore caricamento notifiche');
+      setError(err?.message || t('errLoad', 'Errore caricamento notifiche'));
     } finally {
       setLoading(false);
     }
@@ -127,13 +129,13 @@ const NotifichePage: React.FC = () => {
   // the endpoint takes either `unread` or `category`, never both, and that is
   // exactly how the page behaved before.
   const categoryFilters: { v: CategoryFilter; l: string; n: number }[] = [
-    { v: 'all', l: 'Tutte le categorie', n: 0 },
-    { v: 'reservation', l: 'Prenotazioni', n: counts.by_category.reservation },
-    { v: 'voice', l: 'Chiamate', n: counts.by_category.voice },
-    { v: 'message', l: 'Messaggi', n: counts.by_category.message },
-    { v: 'email', l: 'Email', n: counts.by_category.email },
-    { v: 'payment', l: 'Pagamenti', n: counts.by_category.payment },
-    { v: 'system', l: 'Sistema', n: counts.by_category.system },
+    { v: 'all', l: t('cat.all', 'Tutte le categorie'), n: 0 },
+    { v: 'reservation', l: t('cat.reservation', 'Prenotazioni'), n: counts.by_category.reservation },
+    { v: 'voice', l: t('cat.voice', 'Chiamate'), n: counts.by_category.voice },
+    { v: 'message', l: t('cat.message', 'Messaggi'), n: counts.by_category.message },
+    { v: 'email', l: t('cat.email', 'Email'), n: counts.by_category.email },
+    { v: 'payment', l: t('cat.payment', 'Pagamenti'), n: counts.by_category.payment },
+    { v: 'system', l: t('cat.system', 'Sistema'), n: counts.by_category.system },
   ];
   const categoryActive = filter !== 'all' && filter !== 'unread';
 
@@ -160,6 +162,7 @@ const NotifichePage: React.FC = () => {
       onOpen={handleOpen}
       onMarkRead={handleMarkRead}
       onDismiss={handleDismiss}
+      t={t}
     />
   );
 
@@ -168,7 +171,7 @@ const NotifichePage: React.FC = () => {
       <div className="space-y-3">
         <div className="flex items-center justify-between gap-3">
           <h1 className="min-w-0 text-[20px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)] lg:text-[24px]">
-            Notifiche
+            {t('title', 'Notifiche')}
           </h1>
           <div className="flex flex-shrink-0 items-center gap-2">
             {/* Below sm the labelled pill can't share a row with the filters,
@@ -179,8 +182,8 @@ const NotifichePage: React.FC = () => {
                 type="button"
                 onClick={handleMarkAllRead}
                 disabled={markingAll}
-                title="Segna tutte come lette"
-                aria-label="Segna tutte come lette"
+                title={t('markAllRead', 'Segna tutte come lette')}
+                aria-label={t('markAllRead', 'Segna tutte come lette')}
                 className={`${dsIconButton} sm:hidden`}
               >
                 <CheckCheck className="h-4 w-4" />
@@ -190,8 +193,8 @@ const NotifichePage: React.FC = () => {
               type="button"
               onClick={load}
               className={dsIconButton}
-              title="Aggiorna"
-              aria-label="Aggiorna"
+              title={t('reload', 'Aggiorna')}
+              aria-label={t('reload', 'Aggiorna')}
             >
               <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             </button>
@@ -208,11 +211,11 @@ const NotifichePage: React.FC = () => {
             <SegmentedControl
               value={filter === 'unread' ? 'unread' : 'all'}
               onChange={next => setFilter(next)}
-              ariaLabel="Filtra per stato"
+              ariaLabel={t('filterByState', 'Filtra per stato')}
               equalWidth={false}
               options={[
-                { value: 'all' as CategoryFilter, label: 'Tutte', badge: counts.total, badgeTone: 'neutral' },
-                { value: 'unread' as CategoryFilter, label: 'Non lette', badge: counts.unread, badgeTone: 'alert' },
+                { value: 'all' as CategoryFilter, label: t('all', 'Tutte'), badge: counts.total, badgeTone: 'neutral' },
+                { value: 'unread' as CategoryFilter, label: t('unread', 'Non lette'), badge: counts.unread, badgeTone: 'alert' },
               ]}
             />
           </div>
@@ -220,8 +223,8 @@ const NotifichePage: React.FC = () => {
             type="button"
             onClick={() => setFiltersOpen(v => !v)}
             aria-expanded={filtersOpen}
-            aria-label="Filtri"
-            title="Filtri"
+            aria-label={t('filters', 'Filtri')}
+            title={t('filters', 'Filtri')}
             className={filtersOpen
               ? 'relative inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] shadow-[var(--ds-shadow-card)] transition-colors'
               : `relative ${dsIconButton}`}
@@ -236,11 +239,11 @@ const NotifichePage: React.FC = () => {
               type="button"
               onClick={handleMarkAllRead}
               disabled={markingAll}
-              title="Segna tutte come lette"
+              title={t('markAllRead', 'Segna tutte come lette')}
               className="ml-auto hidden h-9 flex-shrink-0 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-50 sm:inline-flex"
             >
               <CheckCheck className="h-4 w-4" aria-hidden />
-              Tutte lette
+              {t('allRead', 'Tutte lette')}
             </button>
           )}
         </div>
@@ -250,7 +253,7 @@ const NotifichePage: React.FC = () => {
             <SegmentedControl
               value={categoryActive ? filter : 'all'}
               onChange={next => setFilter(next)}
-              ariaLabel="Filtra per categoria"
+              ariaLabel={t('filterByCategory', 'Filtra per categoria')}
               overflow="scroll"
               size="sm"
               options={categoryFilters.map(c => ({
@@ -269,7 +272,7 @@ const NotifichePage: React.FC = () => {
           <SkeletonNotificationList count={6} />
         ) : items.length === 0 ? (
           <EmptyState icon={Bell}>
-            {filter === 'unread' ? 'Nessuna notifica da leggere.' : 'Nessuna notifica.'}
+            {filter === 'unread' ? t('noneToRead', 'Nessuna notifica da leggere.') : t('none', 'Nessuna notifica.')}
           </EmptyState>
         ) : (
           <div className="space-y-1">
@@ -279,7 +282,7 @@ const NotifichePage: React.FC = () => {
                   tone={bucket === 'adesso' ? 'attention' : 'muted'}
                   action={<CountBadge count={rows.length} />}
                 >
-                  {BUCKET_LABEL[bucket]}
+                  {bucketLabel(bucket, t)}
                 </SectionHeader>
                 <div className="space-y-2 pb-2">
                   {rows.map((n, i) => renderRow(n, swipeHint && gi === 0 && i === 0))}

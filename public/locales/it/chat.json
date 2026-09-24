@@ -5,12 +5,6 @@
     "cucina": "Cucina",
     "reception": "Reception"
   },
-  "rel": {
-    "now": "ora",
-    "min": "{{n}} min fa",
-    "hours": "{{n}} h fa",
-    "days": "{{n}} g fa"
-  },
   "today": "Oggi",
   "yesterday": "Ieri",
   "removedUser": "Utente rimosso",

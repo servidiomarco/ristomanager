@@ -667,6 +667,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-24 | Notifiche, Email, Messaggi | Con la lingua inglese parlano inglese le Notifiche (pagina e pannello della campanella: filtri, categorie, raggruppamenti per momento, azioni di riga). I tempi relativi («2 h fa») diventano inglesi anche in Email e Messaggi, dove erano rimasti italiani pur essendo quelle pagine già tradotte. |
 | 2026-09-24 | Comande, Cucina e Passe | Nel selettore «Sposta la 2ª uscita» c'è «Elimina la 2ª uscita»: via tutte le righe non inviate di quell'uscita in un tocco, con Annulla (o conferma al secondo tocco se c'erano bozze già sulla comanda). Le righe già inviate restano. |
 | 2026-09-24 | Lista della spesa (Fornitori) | Con la lingua inglese parla inglese la gestione fornitori: creazione, modifica, categorie servite e conferma di eliminazione. |
 | 2026-09-24 | Utenti, Chat staff | Con la lingua inglese parlano inglese la gestione utenti (griglia, form, eliminazione) e la Chat staff (canali, messaggi diretti, composer, allegati, separatori di giornata). Nella chat i ruoli cambiano nome: «Titolare» diventa «Proprietario», «Direttore» «General Manager» e «Sala» «Cameriere», come già li chiamavano Utenti e la matrice dei permessi. |

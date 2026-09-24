@@ -1,0 +1,36 @@
+{
+  "errLoad": "Errore caricamento notifiche",
+  "title": "Notifiche",
+  "markAllRead": "Segna tutte come lette",
+  "reload": "Aggiorna",
+  "allRead": "Tutte lette",
+  "filters": "Filtri",
+  "all": "Tutte",
+  "unread": "Non lette",
+  "noneToRead": "Nessuna notifica da leggere.",
+  "none": "Nessuna notifica.",
+  "cat": {
+    "all": "Tutte le categorie",
+    "reservation": "Prenotazioni",
+    "voice": "Chiamate",
+    "message": "Messaggi",
+    "email": "Email",
+    "payment": "Pagamenti",
+    "system": "Sistema"
+  },
+  "bucket": {
+    "adesso": "Adesso",
+    "oggi": "Oggi",
+    "ieri": "Ieri",
+    "settimana": "Questa settimana",
+    "prima": "Prima"
+  },
+  "moreActions": "Altre azioni",
+  "markRead": "Segna come letta",
+  "dismiss": "Rimuovi",
+  "read": "Letta",
+  "filterByState": "Filtra per stato",
+  "filterByCategory": "Filtra per categoria",
+  "close": "Chiudi",
+  "seeAll": "Vedi tutte"
+}
