@@ -262,5 +262,12 @@
     "disconnected": "Not connected",
     "at": "Live {{ora}}",
     "offline": "Offline"
+  },
+  "palette": {
+    "aria": "Global search",
+    "placeholder": "Search bookings or customers…",
+    "reservations": "Bookings · {{count}}",
+    "guests": "{{count}} guests",
+    "guests_one": "{{count}} guest"
   }
 }
