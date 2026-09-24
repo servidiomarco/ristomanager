@@ -35568,6 +35568,10 @@ interface SnapshotTableSpec {
 }
 // L'ORDINE è quello di caricamento sul nodo (prima i genitori delle FK).
 const SNAPSHOT_TABLES: SnapshotTableSpec[] = [
+    // La riga del ristorante stesso: il nodo deve riconoscere i token degli
+    // agenti LAN (print agent in testa — fase stampe-dal-nodo). La tabella
+    // non ha tenant_id: la sua chiave è id (special-case qui e nel loader).
+    { name: 'tenants' },
     // Identità e permessi: servono al nodo per autorizzare i client LAN.
     { name: 'users', dropColumns: ['password_hash', 'refresh_token_hash', 'reset_token_hash', 'reset_token_expires_at'] },
     { name: 'role_permissions' },
@@ -35623,6 +35627,18 @@ const SNAPSHOT_TABLES: SnapshotTableSpec[] = [
     { name: 'takeaway_order_items', where: `takeaway_order_id IN (SELECT id FROM takeaway_orders WHERE tenant_id = $1 AND pickup_date >= $2::date)` },
 ];
 
+// La sola riga tenants, per i nodi GIÀ installati che non rifaranno il
+// bootstrap: serve a riconoscere i token degli agenti LAN (print agent).
+app.get('/sala-node/tenant', salaNodeAuth, async (req: any, res) => {
+    try {
+        const rs = await queryWithRetry(`SELECT * FROM tenants WHERE id = $1`, [req.salaNodeTenantId]);
+        res.json({ tenant: rs.rows[0] ?? null });
+    } catch (err: any) {
+        console.error('GET /sala-node/tenant error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 app.get('/sala-node/snapshot', salaNodeAuth, async (req: any, res) => {
     const client = await pool.connect();
     try {
@@ -35640,7 +35656,9 @@ app.get('/sala-node/snapshot', salaNodeAuth, async (req: any, res) => {
         const tablesOut: Record<string, any[]> = {};
         for (const spec of SNAPSHOT_TABLES) {
             const params: any[] = [tenantId];
-            let sql = `SELECT * FROM ${spec.name} WHERE tenant_id = $1`;
+            // tenants non ha tenant_id: la riga del tenant È la riga con id.
+            const tenantColumn = spec.name === 'tenants' ? 'id' : 'tenant_id';
+            let sql = `SELECT * FROM ${spec.name} WHERE ${tenantColumn} = $1`;
             if (spec.where) {
                 sql += ` AND (${spec.where})`;
                 if (spec.where.includes('$2')) params.push(cutoff);
