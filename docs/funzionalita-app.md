@@ -667,6 +667,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-24 | Tutte le schermate | Con la lingua inglese parlano inglese anche gli elementi condivisi: il bottone Indietro delle schede, i campi di ricerca, le chiusure di finestre e fogli, i toast, la pillola «Connesso/Offline» e i passi dei wizard. Erano italiani dentro le primitive, quindi comparivano in italiano anche nelle pagine già tradotte. |
 | 2026-09-24 | Impostazioni (Integrazioni) | Con la lingua inglese parlano inglese le card di ricezione email (IMAP), SumUp e Revolut: credenziali, ambiente sandbox/produzione, prova di connessione e scelta del provider attivo. |
 | 2026-09-24 | Notifiche, Email, Messaggi | Con la lingua inglese parlano inglese le Notifiche (pagina e pannello della campanella: filtri, categorie, raggruppamenti per momento, azioni di riga). I tempi relativi («2 h fa») diventano inglesi anche in Email e Messaggi, dove erano rimasti italiani pur essendo quelle pagine già tradotte. |
 | 2026-09-24 | Comande, Cucina e Passe | Nel selettore «Sposta la 2ª uscita» c'è «Elimina la 2ª uscita»: via tutte le righe non inviate di quell'uscita in un tocco, con Annulla (o conferma al secondo tocco se c'erano bozze già sulla comanda). Le righe già inviate restano. |

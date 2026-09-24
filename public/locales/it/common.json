@@ -149,7 +149,14 @@
     "mobileNav": "Navigazione mobile",
     "hideMenu": "Nascondi menu",
     "closeMenu": "Chiudi menu",
-    "notificationsUnread": "Notifiche, {{n}} non lette"
+    "notificationsUnread": "Notifiche, {{n}} non lette",
+    "back": "Indietro",
+    "searchField": "Cerca",
+    "clearSearch": "Svuota ricerca",
+    "closeActions": "Chiudi azioni",
+    "notifications": "Notifiche",
+    "closeToast": "Chiudi notifica",
+    "steps": "Passi"
   },
   "entity": {
     "voiceAgent": "Agente vocale",
@@ -249,5 +256,11 @@
     "min": "{{n}} min fa",
     "hours": "{{n}} h fa",
     "days": "{{n}} g fa"
+  },
+  "live": {
+    "connected": "Connesso",
+    "disconnected": "Non connesso",
+    "at": "Live {{ora}}",
+    "offline": "Offline"
   }
 }
