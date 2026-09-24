@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Paperclip, Loader2, Upload, Trash2, FileText, Image as ImageIcon, Film, Music } from 'lucide-react';
 import { listMedia, uploadMedia, deleteMedia, type MediaFile } from '../services/mediaApiService';
 import { useAuth } from '../contexts/AuthContext';
@@ -30,6 +31,7 @@ const iconaPer = (contentType: string) => {
 };
 
 export const MediaLibraryManager: React.FC<Props> = ({ showToast }) => {
+  const { t } = useTranslation('impostazioni', { useSuspense: false });
     const { hasPermission } = useAuth();
     const puoModificare = hasPermission('settings:full');
 
@@ -44,7 +46,7 @@ export const MediaLibraryManager: React.FC<Props> = ({ showToast }) => {
             const { files } = await listMedia();
             setFiles(files);
         } catch (err: any) {
-            showToast(err?.data?.error || 'Elenco dei file non caricato', 'error');
+            showToast(err?.data?.error || t('media.errList', 'Elenco dei file non caricato'), 'error');
         } finally {
             setLoading(false);
         }
@@ -57,7 +59,7 @@ export const MediaLibraryManager: React.FC<Props> = ({ showToast }) => {
         // Il controllo è anche sul server; qui serve a non far caricare 8 MB
         // per poi vederli rifiutati dopo l'attesa.
         if (file.size > MAX_BYTES) {
-            showToast('File troppo grande: massimo 5 MB', 'error');
+            showToast(t('media.tooBig', 'File troppo grande: massimo 5 MB'), 'error');
             return;
         }
         setCaricando(true);
@@ -66,9 +68,9 @@ export const MediaLibraryManager: React.FC<Props> = ({ showToast }) => {
             setTitolo('');
             if (inputRef.current) inputRef.current.value = '';
             await ricarica();
-            showToast('File caricato', 'success');
+            showToast(t('media.uploaded', 'File caricato'), 'success');
         } catch (err: any) {
-            showToast(err?.data?.error || 'Caricamento non riuscito', 'error');
+            showToast(err?.data?.error || t('media.errUpload', 'Caricamento non riuscito'), 'error');
         } finally {
             setCaricando(false);
         }
@@ -79,9 +81,9 @@ export const MediaLibraryManager: React.FC<Props> = ({ showToast }) => {
         try {
             await deleteMedia(f.id);
             setFiles(prev => prev.filter(x => x.id !== f.id));
-            showToast('File eliminato', 'success');
+            showToast(t('media.deleted', 'File eliminato'), 'success');
         } catch (err: any) {
-            showToast(err?.data?.error || 'Eliminazione non riuscita', 'error');
+            showToast(err?.data?.error || t('media.errDelete', 'Eliminazione non riuscita'), 'error');
         }
     };
 
@@ -95,8 +97,8 @@ export const MediaLibraryManager: React.FC<Props> = ({ showToast }) => {
                     <div className="min-w-0">
                         <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">Media</h4>
                         <p className="text-[13px] text-[var(--ds-text-muted)] truncate">
-                            {loading ? 'Caricamento…'
-                                : files.length === 0 ? 'Nessun file: carica il menù o la piantina'
+                            {loading ? t('media.loading', 'Caricamento…')
+                                : files.length === 0 ? t('media.empty', 'Nessun file: carica il menù o la piantina')
                                 : `${files.length} file pronti da allegare ai messaggi`}
                         </p>
                     </div>
@@ -116,7 +118,7 @@ export const MediaLibraryManager: React.FC<Props> = ({ showToast }) => {
                             type="text"
                             value={titolo}
                             onChange={e => setTitolo(e.target.value)}
-                            placeholder="Come lo chiami? (es. Menù di Ferragosto)"
+                            placeholder={t('media.namePlaceholder', 'Come lo chiami? (es. Menù di Ferragosto)')}
                             className="w-full h-10 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-3 text-[14px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                         />
                         <input
@@ -134,7 +136,7 @@ export const MediaLibraryManager: React.FC<Props> = ({ showToast }) => {
                             className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-[var(--ds-radius)] bg-[var(--ds-text-primary)] px-4 text-[14px] font-semibold text-[var(--ds-surface)] transition-opacity hover:opacity-90 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                         >
                             {caricando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                            {caricando ? 'Carico…' : 'Scegli un file'}
+                            {caricando ? t('media.uploading', 'Carico…') : t('media.pickFile', 'Scegli un file')}
                         </button>
                         <p className="text-[12px] text-[var(--ds-text-subtle)]">
                             Se lasci vuoto il nome, useremo quello del file.

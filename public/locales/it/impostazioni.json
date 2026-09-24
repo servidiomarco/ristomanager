@@ -248,5 +248,18 @@
     "remove": "Rimuovi",
     "add": "Aggiungi intolleranza (es. Fragole)",
     "adminsOnly": "Solo gli amministratori possono modificare la lista."
+  },
+  "media": {
+    "errList": "Elenco dei file non caricato",
+    "tooBig": "File troppo grande: massimo 5 MB",
+    "uploaded": "File caricato",
+    "errUpload": "Caricamento non riuscito",
+    "deleted": "File eliminato",
+    "errDelete": "Eliminazione non riuscita",
+    "loading": "Caricamento…",
+    "empty": "Nessun file: carica il menù o la piantina",
+    "namePlaceholder": "Come lo chiami? (es. Menù di Ferragosto)",
+    "uploading": "Carico…",
+    "pickFile": "Scegli un file"
   }
 }

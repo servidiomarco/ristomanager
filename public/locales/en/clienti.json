@@ -76,5 +76,16 @@
   "call": "Call",
   "avgCovers": "average covers",
   "consentUpdated": "Consent updated",
-  "mergeDuplicates": "Merge duplicates"
+  "mergeDuplicates": "Merge duplicates",
+  "picker": {
+    "errLoad": "Could not load the customers",
+    "errSave": "Could not save the customer",
+    "search": "Search by name, phone, email…",
+    "saving": "Saving…",
+    "saveSelect": "Save and select",
+    "empty": "No customer found.",
+    "name": "Name",
+    "phone": "Phone",
+    "email": "Email"
+  }
 }

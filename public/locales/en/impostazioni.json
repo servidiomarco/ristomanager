@@ -248,5 +248,18 @@
     "remove": "Remove",
     "add": "Add an intolerance (e.g. Strawberries)",
     "adminsOnly": "Only administrators can change this list."
+  },
+  "media": {
+    "errList": "The file list did not load",
+    "tooBig": "File too big: 5 MB maximum",
+    "uploaded": "File uploaded",
+    "errUpload": "The upload failed",
+    "deleted": "File deleted",
+    "errDelete": "The deletion failed",
+    "loading": "Loading…",
+    "empty": "No file yet: upload the menu or the floor plan",
+    "namePlaceholder": "What do you call it? (e.g. August menu)",
+    "uploading": "Uploading…",
+    "pickFile": "Pick a file"
   }
 }

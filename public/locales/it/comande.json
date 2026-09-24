@@ -305,5 +305,19 @@
     "dietary": "Allergie / diete",
     "coversCount_one": "{{count}} coperto",
     "coversCount_other": "{{count}} coperti"
-  }
+  },
+  "variant": {
+    "deleteRow": "Elimina riga",
+    "add": "Aggiungi",
+    "oneLess": "Uno in meno",
+    "oneMore": "Uno in più",
+    "minus10g": "Riduci di 10 grammi",
+    "plus10g": "Aggiungi 10 grammi",
+    "notePlaceholder": "Es. senza sale, metà porzione…"
+  },
+  "pad": {
+    "order": "Comanda"
+  },
+  "arrived": "Arrivato",
+  "releaseArrived": "Rilascia: Arrivato"
 }

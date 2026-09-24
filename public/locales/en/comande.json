@@ -305,5 +305,19 @@
     "dietary": "Allergies / diets",
     "coversCount_one": "{{count}} cover",
     "coversCount_other": "{{count}} covers"
-  }
+  },
+  "variant": {
+    "deleteRow": "Delete the line",
+    "add": "Add",
+    "oneLess": "One fewer",
+    "oneMore": "One more",
+    "minus10g": "Take off 10 grams",
+    "plus10g": "Add 10 grams",
+    "notePlaceholder": "e.g. no salt, half portion…"
+  },
+  "pad": {
+    "order": "Order"
+  },
+  "arrived": "Arrived",
+  "releaseArrived": "Release: arrived"
 }

@@ -475,5 +475,19 @@
     "channelState": "{{canale}} {{stato}}",
     "on": "attivo",
     "off": "spento"
+  },
+  "bar": {
+    "voiceResumed": "Agente vocale riattivato per questo turno",
+    "voicePaused": "Agente vocale sospeso per questo turno",
+    "errVoice": "Errore aggiornamento agente vocale",
+    "webResumed": "Prenotazioni web riattivate per questo turno",
+    "webPaused": "Prenotazioni web sospese per questo turno",
+    "errWeb": "Errore aggiornamento prenotazioni web",
+    "voiceOnTitle": "Agente vocale attivo per questo turno · click per sospendere",
+    "voiceOffTitle": "Agente vocale sospeso per questo turno · click per riattivare",
+    "voiceAria": "Stato agente vocale per questo turno",
+    "webOnTitle": "Prenotazioni web attive per questo turno · click per bloccare",
+    "webOffTitle": "Prenotazioni web bloccate per questo turno · click per sbloccare",
+    "webAria": "Stato prenotazioni web per questo turno"
   }
 }

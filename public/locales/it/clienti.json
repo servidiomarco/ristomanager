@@ -76,5 +76,16 @@
   "call": "Chiama",
   "avgCovers": "coperti medi",
   "consentUpdated": "Consenso aggiornato",
-  "mergeDuplicates": "Unisci duplicati"
+  "mergeDuplicates": "Unisci duplicati",
+  "picker": {
+    "errLoad": "Errore caricamento clienti",
+    "errSave": "Errore salvataggio cliente",
+    "search": "Cerca per nome, telefono, email...",
+    "saving": "Salvataggio...",
+    "saveSelect": "Salva e seleziona",
+    "empty": "Nessun cliente trovato.",
+    "name": "Nome",
+    "phone": "Telefono",
+    "email": "Email"
+  }
 }

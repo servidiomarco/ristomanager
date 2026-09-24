@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Customer } from '../types';
 import { createCustomer, getCustomers } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
@@ -25,6 +26,7 @@ interface NewCustomerDraft {
 }
 
 export const CustomerPickerModal: React.FC<Props> = ({ isOpen, initialQuery, onClose, onSelect, onCreated }) => {
+  const { t } = useTranslation('clienti', { useSuspense: false });
   const { hasPermission } = useAuth();
   const canCreate = hasPermission('customers:full');
 
@@ -56,7 +58,7 @@ export const CustomerPickerModal: React.FC<Props> = ({ isOpen, initialQuery, onC
         const data = await getCustomers(query);
         if (!cancelled) setCustomers(data);
       } catch (err: any) {
-        if (!cancelled) setError(err?.message || 'Errore caricamento clienti');
+        if (!cancelled) setError(err?.message || t('picker.errLoad', 'Errore caricamento clienti'));
       } finally {
         if (!cancelled) setIsLoading(false);
       }
@@ -85,7 +87,7 @@ export const CustomerPickerModal: React.FC<Props> = ({ isOpen, initialQuery, onC
       onSelect(created);
       onClose();
     } catch (err: any) {
-      setError(err?.message || 'Errore salvataggio cliente');
+      setError(err?.message || t('picker.errSave', 'Errore salvataggio cliente'));
     } finally {
       setIsSaving(false);
     }
@@ -123,7 +125,7 @@ export const CustomerPickerModal: React.FC<Props> = ({ isOpen, initialQuery, onC
             autoFocus
             value={query}
             onChange={e => setQuery(e.target.value)}
-            placeholder="Cerca per nome, telefono, email..."
+            placeholder={t('picker.search', 'Cerca per nome, telefono, email...')}
             className={`${dsInput} bg-[var(--ds-surface)] pl-11`}
           />
         </div>
@@ -157,7 +159,7 @@ export const CustomerPickerModal: React.FC<Props> = ({ isOpen, initialQuery, onC
               disabled={isSaving || !draft.name.trim() || !draft.phone.trim()}
               className={`${dsButton.primary} flex-1`}
             >
-              {isSaving ? 'Salvataggio...' : 'Salva e seleziona'}
+              {isSaving ? t('picker.saving', 'Salvataggio...') : t('picker.saveSelect', 'Salva e seleziona')}
             </button>
           </>
         )}
@@ -173,7 +175,7 @@ export const CustomerPickerModal: React.FC<Props> = ({ isOpen, initialQuery, onC
             <p className="p-6 text-center text-[14px] text-[var(--ds-text-muted)]">Caricamento...</p>
           )}
           {!isLoading && !error && sortedCustomers.length === 0 && (
-            <EmptyState icon={BookUser}>Nessun cliente trovato.</EmptyState>
+            <EmptyState icon={BookUser}>{t('picker.empty', 'Nessun cliente trovato.')}</EmptyState>
           )}
           {!isLoading && sortedCustomers.length > 0 && (
             <ul className="divide-y divide-[var(--ds-border)] overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
@@ -208,7 +210,7 @@ export const CustomerPickerModal: React.FC<Props> = ({ isOpen, initialQuery, onC
       {showCreate && (
         <form id={CREATE_FORM_ID} onSubmit={handleCreate}>
           <div className="space-y-4 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
-            <Field label="Nome" htmlFor="new-customer-name" required>
+            <Field label={t('picker.name', 'Nome')} htmlFor="new-customer-name" required>
               <input
                 id="new-customer-name"
                 type="text"
@@ -219,7 +221,7 @@ export const CustomerPickerModal: React.FC<Props> = ({ isOpen, initialQuery, onC
                 className={dsInput}
               />
             </Field>
-            <Field label="Telefono" htmlFor="new-customer-phone" required>
+            <Field label={t('picker.phone', 'Telefono')} htmlFor="new-customer-phone" required>
               <input
                 id="new-customer-phone"
                 type="tel"
@@ -229,7 +231,7 @@ export const CustomerPickerModal: React.FC<Props> = ({ isOpen, initialQuery, onC
                 className={dsInput}
               />
             </Field>
-            <Field label="Email" htmlFor="new-customer-email">
+            <Field label={t('picker.email', 'Email')} htmlFor="new-customer-email">
               <input
                 id="new-customer-email"
                 type="email"

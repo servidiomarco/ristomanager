@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Check, Loader2, Printer } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
@@ -25,7 +26,10 @@ interface StampaCopiaButtonProps {
 
 const SENT_MS = 4000;
 
-export const StampaCopiaButton: React.FC<StampaCopiaButtonProps> = ({ onPrint, variant = 'row', label = 'Stampa copia', sentLabel = 'Copia in stampa', className = '' }) => {
+export const StampaCopiaButton: React.FC<StampaCopiaButtonProps> = ({ onPrint, variant = 'row', label, sentLabel, className = '' }) => {
+  const { t } = useTranslation('pagamenti', { useSuspense: false });
+  const etichetta = label ?? t('printCopy', 'Stampa copia');
+  const etichettaInviata = sentLabel ?? t('printSent', 'Copia in stampa');
   const [state, setState] = useState<'idle' | 'sending' | 'sent'>('idle');
   const [error, setError] = useState<string | null>(null);
   const timer = useRef<number | null>(null);
@@ -42,7 +46,7 @@ export const StampaCopiaButton: React.FC<StampaCopiaButtonProps> = ({ onPrint, v
       timer.current = window.setTimeout(() => setState('idle'), SENT_MS);
     } catch (err: any) {
       setState('idle');
-      setError(err?.data?.message ?? err?.data?.error ?? err?.message ?? 'Stampa non riuscita');
+      setError(err?.data?.message ?? err?.data?.error ?? err?.message ?? t('errPrint', 'Stampa non riuscita'));
     }
   };
 

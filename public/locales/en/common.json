@@ -156,7 +156,10 @@
     "closeActions": "Close the actions",
     "notifications": "Notifications",
     "closeToast": "Dismiss the notification",
-    "steps": "Steps"
+    "steps": "Steps",
+    "pause": "Pause",
+    "play": "Play",
+    "recordingSeek": "Position in the recording"
   },
   "entity": {
     "voiceAgent": "Voice agent",
@@ -269,5 +272,23 @@
     "reservations": "Bookings · {{count}}",
     "guests": "{{count}} guests",
     "guests_one": "{{count}} guest"
+  },
+  "confirmDelete": {
+    "title": "Confirm the deletion",
+    "confirm": "Delete",
+    "cancel": "Cancel"
+  },
+  "version": {
+    "reloading": "Reloading…",
+    "reload": "Reload",
+    "close": "Dismiss the banner"
+  },
+  "retry": "Try again",
+  "period": {
+    "today": "Today",
+    "yesterday": "Yesterday",
+    "last7": "Last 7 days",
+    "allDates": "All dates",
+    "title": "Period"
   }
 }

@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Phone, Globe, Loader2 } from 'lucide-react';
 import {
     getFeatureFlags,
@@ -35,6 +36,7 @@ interface Props {
 // Agente vocale), and vice versa. Requires `settings:full` to be editable;
 // read-only for other roles.
 export const BookingChannelsBar: React.FC<Props> = ({ date, shift, showToast }) => {
+  const { t } = useTranslation('canali', { useSuspense: false });
     const { hasPermission } = useAuth();
     const canEdit = hasPermission('settings:full');
 
@@ -91,9 +93,9 @@ export const BookingChannelsBar: React.FC<Props> = ({ date, shift, showToast }) 
             }
             const res = await updateChannelSettings({ voice_bookings_suspension_schedule: updated });
             setChannels(res);
-            showToast(voiceShiftBlocked ? 'Agente vocale riattivato per questo turno' : 'Agente vocale sospeso per questo turno', 'success');
+            showToast(voiceShiftBlocked ? t('bar.voiceResumed', 'Agente vocale riattivato per questo turno') : t('bar.voicePaused', 'Agente vocale sospeso per questo turno'), 'success');
         } catch (err: any) {
-            showToast(err?.message || 'Errore aggiornamento agente vocale', 'error');
+            showToast(err?.message || t('bar.errVoice', 'Errore aggiornamento agente vocale'), 'error');
         } finally {
             setSavingKey(null);
         }
@@ -119,9 +121,9 @@ export const BookingChannelsBar: React.FC<Props> = ({ date, shift, showToast }) 
             }
             const res = await updateChannelSettings({ public_bookings_blocks: updated });
             setChannels(res);
-            showToast(webShiftBlocked ? 'Prenotazioni web riattivate per questo turno' : 'Prenotazioni web sospese per questo turno', 'success');
+            showToast(webShiftBlocked ? t('bar.webResumed', 'Prenotazioni web riattivate per questo turno') : t('bar.webPaused', 'Prenotazioni web sospese per questo turno'), 'success');
         } catch (err: any) {
-            showToast(err?.message || 'Errore aggiornamento prenotazioni web', 'error');
+            showToast(err?.message || t('bar.errWeb', 'Errore aggiornamento prenotazioni web'), 'error');
         } finally {
             setSavingKey(null);
         }
@@ -150,10 +152,10 @@ export const BookingChannelsBar: React.FC<Props> = ({ date, shift, showToast }) 
                     voiceGloballyOff
                         ? "Agente vocale disattivato globalmente — riattiva da Impostazioni → Canali di prenotazione"
                         : voiceOpen
-                            ? 'Agente vocale attivo per questo turno · click per sospendere'
-                            : 'Agente vocale sospeso per questo turno · click per riattivare'
+                            ? t('bar.voiceOnTitle', 'Agente vocale attivo per questo turno · click per sospendere')
+                            : t('bar.voiceOffTitle', 'Agente vocale sospeso per questo turno · click per riattivare')
                 }
-                aria-label="Stato agente vocale per questo turno"
+                aria-label={t('bar.voiceAria', 'Stato agente vocale per questo turno')}
             >
                 {savingKey === 'voice' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Phone className="h-4 w-4" />}
             </button>
@@ -168,10 +170,10 @@ export const BookingChannelsBar: React.FC<Props> = ({ date, shift, showToast }) 
                         : webDayBlockedAll
                             ? "Bloccato per intera giornata — modifica in Impostazioni"
                             : webOpen
-                                ? 'Prenotazioni web attive per questo turno · click per bloccare'
-                                : 'Prenotazioni web bloccate per questo turno · click per sbloccare'
+                                ? t('bar.webOnTitle', 'Prenotazioni web attive per questo turno · click per bloccare')
+                                : t('bar.webOffTitle', 'Prenotazioni web bloccate per questo turno · click per sbloccare')
                 }
-                aria-label="Stato prenotazioni web per questo turno"
+                aria-label={t('bar.webAria', 'Stato prenotazioni web per questo turno')}
             >
                 {savingKey === 'web' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Globe className="h-4 w-4" />}
             </button>
