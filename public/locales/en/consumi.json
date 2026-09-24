@@ -1,0 +1,47 @@
+{
+  "feature": {
+    "dashboard_report": "Dashboard report",
+    "banquet_menu": "Event menu proposal",
+    "suggest_reply": "Suggested message reply",
+    "whatsapp_agent": "WhatsApp agent"
+  },
+  "errLoad": "Could not load the usage figures",
+  "subtitle": "Sofia (ElevenLabs) and the AI analyses (Gemini) side by side.",
+  "reload": "Refresh",
+  "voice": {
+    "title": "Sofia · Voice agent (ElevenLabs)",
+    "subtitle": "Last {{giorni}} days · calls from our own history, live quota from the ElevenLabs plan",
+    "calls": "Calls ({{giorni}}d)",
+    "duration": "Duration ({{giorni}}d)",
+    "credits": "Credits used",
+    "quotaReset": "Quota reset",
+    "monthMinutes": "{{mese}} minutes",
+    "projected": "By month end ~{{minuti}} min · estimated revenue {{ricavo}}",
+    "soFar": "So far: cost {{costo}} · revenue {{ricavo}}",
+    "extraMin": "({{minuti}} min over)",
+    "margin": " · margin {{margine}}",
+    "pricedCalls": "Cost known for {{conosciute}} calls out of {{totali}}: the rest predate the history import.",
+    "plan": "Plan: {{prezzo}} a month, {{minuti}} minutes included, then {{extra}}/min. Calls under 10 seconds do not count.",
+    "quotaError": "ElevenLabs quota unavailable: {{errore}}. The call statistics are still good.",
+    "callsTooltip": "{{n}} calls",
+    "callsAxis": "Calls"
+  },
+  "ai": {
+    "title": "AI analyses (text models)",
+    "subtitle": "Last {{giorni}} days · costs estimated from the per-model price list, converted at {{cambio}} €/$ — the Anthropic invoice is in dollars",
+    "tokens": "Total tokens ({{giorni}}d)",
+    "cost": "Cost ({{giorni}}d)",
+    "avgCost": "Average cost",
+    "generations": "Generations",
+    "tokensTooltip": "{{n}} tokens",
+    "tokensAxis": "Tokens",
+    "colFeature": "Feature",
+    "colGen": "Generations",
+    "colTokens": "Tokens",
+    "colCost": "Cost",
+    "noPrice": "Model with no entry in the price table",
+    "nd": "n/a"
+  },
+  "note": "Note: ElevenLabs measures in plan credits/characters and the quota figures are live; Gemini is measured in tokens and the count starts when tracking was switched on, so it leaves out earlier generations.",
+  "total": "{{n}} in total"
+}

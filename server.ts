@@ -35544,6 +35544,13 @@ app.get('/sala-node/credentials', salaNodeAuth, async (req: any, res) => {
             port: settings.port,
             jwt_secret: AuthService.getAccessTokenSecret(),
             allowed_origins: origins,
+            // Il token legacy dell'agente di stampa (env del cloud, alias
+            // tenant 1 in printAgentAuth): il nodo lo eredita così, invece
+            // di doverlo copiare a mano nel .cmd (scoperto al collaudo del
+            // 24/09 — 401 dal nodo all'agente, che usa il legacy). Solo per
+            // il tenant pubblico: gli altri usano il token per-tenant a DB,
+            // che il nodo ha già dalla riga tenants dello snapshot.
+            print_agent_legacy_token: tenantId === PUBLIC_TENANT_ID ? (process.env.PRINT_AGENT_TOKEN || null) : null,
             cert: cert
                 ? { cert_pem: cert.cert_pem, key_pem: cert.key_pem, expires_at: cert.expires_at }
                 : null,

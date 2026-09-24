@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { displayLocale } from '../utils/formatLocale';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Loader2, RefreshCw, Phone, Clock, Wand2, Coins, AlertTriangle, Mic, Bot } from 'lucide-react';
 import {
@@ -24,9 +26,23 @@ const FEATURE_LABELS: Record<string, string> = {
   suggest_reply: 'Risposta suggerita messaggi',
   whatsapp_agent: 'Agente WhatsApp',
 };
-const featureLabel = (key: string): string => FEATURE_LABELS[key] || key;
+type TFunc = (key: string, defaultValue: string, options?: Record<string, unknown>) => string;
 
-const nf = new Intl.NumberFormat('it-IT');
+const featureLabel = (key: string, t?: TFunc): string => {
+  const it = FEATURE_LABELS[key];
+  if (!it) return key;
+  return t ? t(`feature.${key}`, it) : it;
+};
+
+/* Come in reportistica/shared.tsx: `nf` era su 'it-IT' a livello di modulo.
+   Cache per locale perché lo chiamano le celle dei grafici. */
+const formatters = new Map<string, Intl.NumberFormat>();
+const nf = (): Intl.NumberFormat => {
+  const loc = displayLocale();
+  let f = formatters.get(loc);
+  if (!f) { f = new Intl.NumberFormat(loc); formatters.set(loc, f); }
+  return f;
+};
 // Sotto il centesimo si scrivono tre decimali: "0,00 €" su una spesa vera
 // sembra un errore, e chi legge smette di fidarsi del numero.
 const formatEuro = (usd: number | null | undefined, tasso: number): string => {
@@ -35,7 +51,7 @@ const formatEuro = (usd: number | null | undefined, tasso: number): string => {
   if (eur < 0.01) return `${eur.toFixed(3).replace('.', ',')} €`;
   return `${eur.toFixed(2).replace('.', ',')} €`;
 };
-const formatInt = (n: number | null | undefined): string => nf.format(Math.round(n ?? 0));
+const formatInt = (n: number | null | undefined): string => nf().format(Math.round(n ?? 0));
 
 // Secondi → "1h 23m" / "12m 05s" / "42s", per i minuti di conversazione di Sofia.
 const formatDuration = (totalSeconds: number | null | undefined): string => {
@@ -52,21 +68,27 @@ const formatDateTime = (iso: string | null | undefined): string => {
   if (!iso) return '—';
   const d = new Date(iso);
   if (isNaN(d.getTime())) return '—';
-  return d.toLocaleString('it-IT', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleString(displayLocale(), { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 };
 
 const formatResetDate = (unix: number | null | undefined): string => {
   if (!unix) return '—';
   const d = new Date(unix * 1000);
   if (isNaN(d.getTime())) return '—';
-  return d.toLocaleDateString('it-IT', { day: '2-digit', month: 'long', year: 'numeric' });
+  return d.toLocaleDateString(displayLocale(), { day: '2-digit', month: 'long', year: 'numeric' });
 };
 
 // Etichetta d'asse compatta dal giorno ISO (YYYY-MM-DD → "12/08").
 // Centesimi di euro → "61 €" / "12,40 €".
 const formatCents = (cents: number): string => {
   const eur = cents / 100;
-  return Number.isInteger(eur) ? `${nf.format(eur)} €` : `${eur.toFixed(2).replace('.', ',')} €`;
+  /* L'euro resta: questi sono i conti della piattaforma, non di un
+     ristorante — Sympotia fattura in euro qualunque lingua legga chi guarda.
+     Il separatore decimale invece segue la lingua. */
+  return new Intl.NumberFormat(displayLocale(), {
+    minimumFractionDigits: Number.isInteger(eur) ? 0 : 2,
+    maximumFractionDigits: 2,
+  }).format(eur) + ' €';
 };
 
 const shortDay = (iso: string): string => {
@@ -145,6 +167,7 @@ const EmptyChart: React.FC<{ message: string }> = ({ message }) => (
 // ---- Pagina ------------------------------------------------------------------
 
 export const MonitoringPage: React.FC = () => {
+  const { t } = useTranslation('consumi', { useSuspense: false });
   const [days, setDays] = useState<WindowDays>(30);
   const [eleven, setEleven] = useState<ElevenLabsUsage | null>(null);
   const [gemini, setGemini] = useState<GeminiUsage | null>(null);
@@ -162,7 +185,7 @@ export const MonitoringPage: React.FC = () => {
       setEleven(e);
       setGemini(g);
     } catch (err: any) {
-      setError(err?.message || 'Errore nel caricamento dei consumi');
+      setError(err?.message || t('errLoad', 'Errore nel caricamento dei consumi'));
     } finally {
       setLoading(false);
     }
@@ -192,7 +215,7 @@ export const MonitoringPage: React.FC = () => {
             <div>
               <h1 className="text-[22px] font-bold text-[var(--ds-text-primary)]">Consumi AI</h1>
               <p className="text-[13px] text-[var(--ds-text-muted)]">
-                Sofia (ElevenLabs) e le analisi AI (Gemini) a confronto.
+                {t('subtitle', 'Sofia (ElevenLabs) e le analisi AI (Gemini) a confronto.')}
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -215,7 +238,7 @@ export const MonitoringPage: React.FC = () => {
                 onClick={() => load(days)}
                 disabled={loading}
                 className="inline-flex h-9 w-9 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:text-[var(--ds-text-primary)] disabled:opacity-50"
-                aria-label="Aggiorna"
+                aria-label={t('reload', 'Aggiorna')}
               >
                 <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               </button>
@@ -239,33 +262,33 @@ export const MonitoringPage: React.FC = () => {
               {/* ---- SOFIA / ELEVENLABS ---- */}
               <SectionCard
                 icon={<Mic className="h-5 w-5" />}
-                title="Sofia · Agente vocale (ElevenLabs)"
-                subtitle={`Ultimi ${days} giorni · chiamate dalla nostra cronologia, quota live dal piano ElevenLabs`}
+                title={t('voice.title', 'Sofia · Agente vocale (ElevenLabs)')}
+                subtitle={t('voice.subtitle', 'Ultimi {{giorni}} giorni · chiamate dalla nostra cronologia, quota live dal piano ElevenLabs', { giorni: days })}
               >
                 <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
                   <StatTile
                     icon={<Phone className="h-3.5 w-3.5" />}
-                    label={`Chiamate (${days}g)`}
+                    label={t('voice.calls', 'Chiamate ({{giorni}}g)', { giorni: days })}
                     value={formatInt(eleven?.calls.window.calls)}
-                    hint={`${formatInt(eleven?.calls.allTime.calls)} totali`}
+                    hint={t('total', '{{n}} totali', { n: formatInt(eleven?.calls.allTime.calls) })}
                   />
                   <StatTile
                     icon={<Clock className="h-3.5 w-3.5" />}
-                    label={`Durata (${days}g)`}
+                    label={t('voice.duration', 'Durata ({{giorni}}g)', { giorni: days })}
                     value={formatDuration(eleven?.calls.window.seconds)}
                     hint={typeof eleven?.calls.window.cost_usd === 'number'
                       ? `costo ${formatEuro(eleven.calls.window.cost_usd, eleven.usdEur ?? 0.92)}`
-                      : `${formatDuration(eleven?.calls.allTime.seconds)} totali`}
+                      : t('total', '{{n}} totali', { n: formatDuration(eleven?.calls.allTime.seconds) })}
                   />
                   <StatTile
                     icon={<Coins className="h-3.5 w-3.5" />}
-                    label="Crediti usati"
+                    label={t('voice.credits', 'Crediti usati')}
                     value={eleven?.subscription?.character_count != null ? formatInt(eleven.subscription.character_count) : '—'}
                     hint={eleven?.subscription?.character_limit != null ? `su ${formatInt(eleven.subscription.character_limit)}` : 'quota non disponibile'}
                   />
                   <StatTile
                     icon={<RefreshCw className="h-3.5 w-3.5" />}
-                    label="Reset quota"
+                    label={t('voice.quotaReset', 'Reset quota')}
                     value={eleven?.subscription?.tier ? String(eleven.subscription.tier) : '—'}
                     hint={formatResetDate(eleven?.subscription?.next_reset_unix)}
                   />
@@ -281,11 +304,11 @@ export const MonitoringPage: React.FC = () => {
                   const pct = Math.min(100, Math.round((month.billable_minutes / plan.includedMinutes) * 100));
                   const costCents = Math.round(month.cost_usd * tasso * 100);
                   const extraMinutes = Math.max(0, month.billable_minutes - plan.includedMinutes);
-                  const monthName = new Date().toLocaleDateString('it-IT', { month: 'long' });
+                  const monthName = new Date().toLocaleDateString(displayLocale(), { month: 'long' });
                   return (
                     <div className="mb-4 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3">
                       <div className="mb-1.5 flex items-center justify-between gap-2 text-[13px]">
-                        <span className="font-medium text-[var(--ds-text-secondary)]">Minuti di {monthName}</span>
+                        <span className="font-medium text-[var(--ds-text-secondary)]">{t('voice.monthMinutes', 'Minuti di {{mese}}', { mese: monthName })}</span>
                         <span className="tabular font-semibold text-[var(--ds-text-primary)]">
                           {formatInt(month.billable_minutes)} / {formatInt(plan.includedMinutes)} inclusi
                         </span>
@@ -298,21 +321,21 @@ export const MonitoringPage: React.FC = () => {
                       </div>
                       <div className="mt-2 grid grid-cols-1 gap-1 text-[12px] text-[var(--ds-text-muted)] sm:grid-cols-2">
                         <span>
-                          A fine mese ~{formatInt(month.projected_minutes)} min · ricavo stimato {formatCents(month.projected_revenue_cents)}
+                          {t('voice.projected', 'A fine mese ~{{minuti}} min · ricavo stimato {{ricavo}}', { minuti: formatInt(month.projected_minutes), ricavo: formatCents(month.projected_revenue_cents) })}
                         </span>
                         <span className="sm:text-right">
-                          Finora: costo {formatCents(costCents)} · ricavo {formatCents(month.estimated_revenue_cents)}
-                          {extraMinutes > 0 && ` (${formatInt(extraMinutes)} min extra)`}
-                          {` · margine ${formatCents(month.estimated_revenue_cents - costCents)}`}
+                          {t('voice.soFar', 'Finora: costo {{costo}} · ricavo {{ricavo}}', { costo: formatCents(costCents), ricavo: formatCents(month.estimated_revenue_cents) })}
+                          {extraMinutes > 0 && ` ${t('voice.extraMin', '({{minuti}} min extra)', { minuti: formatInt(extraMinutes) })}`}
+                          {t('voice.margin', ' · margine {{margine}}', { margine: formatCents(month.estimated_revenue_cents - costCents) })}
                         </span>
                       </div>
                       {month.priced_calls < month.calls && (
                         <p className="mt-1.5 text-[12px] text-[var(--ds-pending-text)]">
-                          Costo noto per {formatInt(month.priced_calls)} chiamate su {formatInt(month.calls)}: le altre sono precedenti al recupero dello storico.
+                          {t('voice.pricedCalls', 'Costo noto per {{conosciute}} chiamate su {{totali}}: le altre sono precedenti al recupero dello storico.', { conosciute: formatInt(month.priced_calls), totali: formatInt(month.calls) })}
                         </p>
                       )}
                       <p className="mt-1.5 text-[12px] text-[var(--ds-text-muted)]">
-                        Piano: {formatCents(plan.priceCents)} al mese, {formatInt(plan.includedMinutes)} minuti inclusi, poi {formatCents(plan.overageCentsPerMinute)}/min. Non contano le chiamate sotto i 10 secondi.
+                        {t('voice.plan', 'Piano: {{prezzo}} al mese, {{minuti}} minuti inclusi, poi {{extra}}/min. Non contano le chiamate sotto i 10 secondi.', { prezzo: formatCents(plan.priceCents), minuti: formatInt(plan.includedMinutes), extra: formatCents(plan.overageCentsPerMinute) })}
                       </p>
                     </div>
                   );
@@ -337,7 +360,7 @@ export const MonitoringPage: React.FC = () => {
                 {eleven?.subscriptionError && (
                   <div className="mb-4 flex items-center gap-2 rounded-[var(--ds-radius)] bg-[var(--ds-pending-tint)] px-4 py-2.5 text-[12px] text-[var(--ds-pending-text)]">
                     <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
-                    <span>Quota ElevenLabs non disponibile: {eleven.subscriptionError}. Le statistiche chiamate restano valide.</span>
+                    <span>{t('voice.quotaError', 'Quota ElevenLabs non disponibile: {{errore}}. Le statistiche chiamate restano valide.', { errore: eleven.subscriptionError })}</span>
                   </div>
                 )}
 
@@ -349,7 +372,7 @@ export const MonitoringPage: React.FC = () => {
                         <CartesianGrid strokeDasharray="3 3" horizontal vertical={false} stroke="var(--ds-border)" />
                         <XAxis dataKey="label" axisLine={false} tickLine={false} stroke="var(--ds-border-strong)" tick={{ fill: 'var(--ds-text-muted)', fontSize: 11 }} interval="preserveStartEnd" />
                         <YAxis domain={[0, 'auto']} allowDecimals={false} axisLine={false} tickLine={false} stroke="var(--ds-border-strong)" tick={{ fill: 'var(--ds-text-muted)', fontSize: 11 }} width={30} />
-                        <Tooltip {...chartTooltip} formatter={(v: number) => [`${v} chiamate`, 'Chiamate']} />
+                        <Tooltip {...chartTooltip} formatter={(v: number) => [t('voice.callsTooltip', '{{n}} chiamate', { n: v }), t('voice.callsAxis', 'Chiamate')]} />
                         <Bar dataKey="calls" fill={BAR_FILL} radius={[4, 4, 0, 0]} maxBarSize={BAR_MAX} />
                       </BarChart>
                     </ResponsiveContainer>
@@ -362,18 +385,18 @@ export const MonitoringPage: React.FC = () => {
               {/* ---- GEMINI ---- */}
               <SectionCard
                 icon={<Bot className="h-5 w-5" />}
-                title="Analisi AI (modelli di testo)"
-                subtitle={`Ultimi ${days} giorni · costi stimati dal listino per modello, convertiti a ${(gemini?.usdEur ?? 0.92).toString().replace('.', ',')} €/$ — la fattura Anthropic è in dollari`}
+                title={t('ai.title', 'Analisi AI (modelli di testo)')}
+                subtitle={t('ai.subtitle', 'Ultimi {{giorni}} giorni · costi stimati dal listino per modello, convertiti a {{cambio}} €/$ — la fattura Anthropic è in dollari', { giorni: days, cambio: nf().format(gemini?.usdEur ?? 0.92) })}
               >
                 <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
                   <StatTile
                     icon={<Coins className="h-3.5 w-3.5" />}
-                    label={`Token totali (${days}g)`}
+                    label={t('ai.tokens', 'Token totali ({{giorni}}g)', { giorni: days })}
                     value={formatInt(gemini?.totals.total_tokens)}
                   />
                   <StatTile
                     icon={<Coins className="h-3.5 w-3.5" />}
-                    label={`Costo (${days}g)`}
+                    label={t('ai.cost', 'Costo ({{giorni}}g)', { giorni: days })}
                     value={formatEuro(gemini?.totals.cost_usd, gemini?.usdEur ?? 0.92)}
                     hint={(gemini?.totals.unpriced_calls ?? 0) > 0
                       ? `${formatInt(gemini?.totals.unpriced_calls)} generazioni senza listino, escluse`
@@ -381,7 +404,7 @@ export const MonitoringPage: React.FC = () => {
                   />
                   <StatTile
                     icon={<Wand2 className="h-3.5 w-3.5" />}
-                    label="Costo medio"
+                    label={t('ai.avgCost', 'Costo medio')}
                     value={gemini && gemini.totals.calls > 0
                       ? formatEuro(gemini.totals.cost_usd / gemini.totals.calls, gemini.usdEur)
                       : '—'}
@@ -389,7 +412,7 @@ export const MonitoringPage: React.FC = () => {
                   />
                   <StatTile
                     icon={<Bot className="h-3.5 w-3.5" />}
-                    label="Generazioni"
+                    label={t('ai.generations', 'Generazioni')}
                     value={formatInt(gemini?.totals.calls)}
                     hint={`ultima: ${formatDateTime(gemini?.totals.last_at)}`}
                   />
@@ -402,7 +425,7 @@ export const MonitoringPage: React.FC = () => {
                         <CartesianGrid strokeDasharray="3 3" horizontal vertical={false} stroke="var(--ds-border)" />
                         <XAxis dataKey="label" axisLine={false} tickLine={false} stroke="var(--ds-border-strong)" tick={{ fill: 'var(--ds-text-muted)', fontSize: 11 }} interval="preserveStartEnd" />
                         <YAxis domain={[0, 'auto']} axisLine={false} tickLine={false} stroke="var(--ds-border-strong)" tick={{ fill: 'var(--ds-text-muted)', fontSize: 11 }} width={40} tickFormatter={compactTick} />
-                        <Tooltip {...chartTooltip} formatter={(v: number) => [`${formatInt(v)} token`, 'Token']} />
+                        <Tooltip {...chartTooltip} formatter={(v: number) => [t('ai.tokensTooltip', '{{n}} token', { n: formatInt(v) }), t('ai.tokensAxis', 'Token')]} />
                         <Bar dataKey="total_tokens" fill={BAR_FILL} radius={[4, 4, 0, 0]} maxBarSize={BAR_MAX} />
                       </BarChart>
                     </ResponsiveContainer>
@@ -417,24 +440,24 @@ export const MonitoringPage: React.FC = () => {
                     <table className="w-full text-[13px]">
                       <thead>
                         <tr className="text-left text-[var(--ds-text-muted)]">
-                          <th className="px-3 py-2 font-medium">Funzione</th>
-                          <th className="px-3 py-2 text-right font-medium">Generazioni</th>
-                          <th className="px-3 py-2 text-right font-medium">Token</th>
-                          <th className="px-3 py-2 text-right font-medium">Costo</th>
+                          <th className="px-3 py-2 font-medium">{t('ai.colFeature', 'Funzione')}</th>
+                          <th className="px-3 py-2 text-right font-medium">{t('ai.colGen', 'Generazioni')}</th>
+                          <th className="px-3 py-2 text-right font-medium">{t('ai.colTokens', 'Token')}</th>
+                          <th className="px-3 py-2 text-right font-medium">{t('ai.colCost', 'Costo')}</th>
                         </tr>
                       </thead>
                       <tbody>
                         {gemini.byFeature.map(f => (
                           <tr key={f.feature} className="border-t border-[var(--ds-border)]">
                             <td className="px-3 py-2 text-[var(--ds-text-primary)]">
-                              {featureLabel(f.feature)}
+                              {featureLabel(f.feature, t)}
                               {f.model && <span className="ml-1.5 text-[11px] text-[var(--ds-text-muted)]">{f.model}</span>}
                             </td>
                             <td className="tabular px-3 py-2 text-right text-[var(--ds-text-secondary)]">{formatInt(f.calls)}</td>
                             <td className="tabular px-3 py-2 text-right text-[var(--ds-text-secondary)]">{formatInt(f.total_tokens)}</td>
                             <td className="tabular px-3 py-2 text-right font-semibold text-[var(--ds-text-primary)]">
                               {f.unpriced_calls === f.calls
-                                ? <span className="font-normal text-[var(--ds-text-muted)]" title="Modello senza listino in tabella">n/d</span>
+                                ? <span className="font-normal text-[var(--ds-text-muted)]" title={t('ai.noPrice', 'Modello senza listino in tabella')}>{t('ai.nd', 'n/d')}</span>
                                 : formatEuro(f.cost_usd, gemini.usdEur)}
                             </td>
                           </tr>
@@ -446,9 +469,7 @@ export const MonitoringPage: React.FC = () => {
               </SectionCard>
 
               <p className="px-1 text-[12px] leading-relaxed text-[var(--ds-text-muted)]">
-                Nota: ElevenLabs misura in crediti/caratteri del piano e i valori quota sono in tempo reale;
-                Gemini è misurato in token e il conteggio parte da quando è stato attivato il tracciamento,
-                quindi non include le generazioni precedenti.
+                {t('note', 'Nota: ElevenLabs misura in crediti/caratteri del piano e i valori quota sono in tempo reale; Gemini è misurato in token e il conteggio parte da quando è stato attivato il tracciamento, quindi non include le generazioni precedenti.')}
               </p>
             </div>
           )}

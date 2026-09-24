@@ -118,8 +118,15 @@ const apiRequest = async <T>(url: string, options: RequestInit = {}): Promise<T>
   return response.json();
 };
 
-export const getSalaConfig = (): Promise<SalaConfig> =>
-  apiRequest(routedGetUrl('/sala/config'), { headers: getHeaders() });
+// fromCloud: la card Impostazioni deve vedere lo stato del nodo e
+// dell'agente COM'È SUL CLOUD (chi è agganciato al bridge, certificato,
+// dispositivi). Instradata al nodo, la stessa /sala/config risponderebbe di
+// sé — «nodo mai visto», «agente mai visto», «cert non emesso» — perché il
+// nodo non è agganciato al PROPRIO bridge (scoperto al collaudo del 24/09).
+// L'orderpad, che di /sala/config usa fire_mode/stazioni/stampanti, la
+// legge invece instradata: quei dati devono restare vivi a linea caduta.
+export const getSalaConfig = (opts?: { fromCloud?: boolean }): Promise<SalaConfig> =>
+  apiRequest(opts?.fromCloud ? `${API_URL}/sala/config` : routedGetUrl('/sala/config'), { headers: getHeaders() });
 
 /** Campo assente = non toccare; null/'' = azzera (dominio e IP), port null = 443. */
 export const updateSalaNodeSettings = (payload: SalaNodeSettingsPayload): Promise<{ domain: string | null; lan_ip: string | null; port: number; node_url: string | null }> =>
