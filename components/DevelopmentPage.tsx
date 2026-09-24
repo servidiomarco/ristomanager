@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { displayLocale } from '../utils/formatLocale';
 import { Plus, X, Trash2, Loader2, GripVertical, RefreshCw, Bot, RotateCcw, ExternalLink } from 'lucide-react';
 import {
   DevBoardCard, DevBoardColumnKey, DevBoardLabelKey, DevBoardClaudeStatus,
@@ -79,7 +81,7 @@ const CLAUDE_STATUS_META: Record<Exclude<DevBoardClaudeStatus, null>, { label: s
 const formatCardDate = (iso: string): string => {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return '';
-  return d.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' });
+  return d.toLocaleDateString(displayLocale(), { day: '2-digit', month: 'short' });
 };
 
 interface EditDraft {
@@ -91,6 +93,7 @@ interface EditDraft {
 }
 
 export const DevelopmentPage: React.FC = () => {
+  const { t } = useTranslation('dev', { useSuspense: false });
   const [cards, setCards] = useState<DevBoardCard[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -115,7 +118,7 @@ export const DevelopmentPage: React.FC = () => {
       const data = await getDevBoardCards();
       setCards(data);
     } catch (err: any) {
-      setError(err?.message || 'Errore caricamento board');
+      setError(err?.message || t('dev.errLoad', 'Errore caricamento board'));
     } finally {
       setIsLoading(false);
     }
@@ -164,7 +167,7 @@ export const DevelopmentPage: React.FC = () => {
       setComposerTitle('');
       composerInputRef.current?.focus();
     } catch (err: any) {
-      setError(err?.message || 'Errore salvataggio');
+      setError(err?.message || t('dev.errSave', 'Errore salvataggio'));
     } finally {
       setIsComposerSaving(false);
     }
@@ -197,7 +200,7 @@ export const DevelopmentPage: React.FC = () => {
       }
       setEditDraft(null);
     } catch (err: any) {
-      setError(err?.message || 'Errore salvataggio');
+      setError(err?.message || t('dev.errSave', 'Errore salvataggio'));
     } finally {
       setIsDraftSaving(false);
     }
@@ -212,7 +215,7 @@ export const DevelopmentPage: React.FC = () => {
     try {
       await deleteDevBoardCard(card.id);
     } catch (err: any) {
-      setError(err?.message || 'Errore eliminazione');
+      setError(err?.message || t('dev.errDelete', 'Errore eliminazione'));
       load();
     }
   };
@@ -230,7 +233,7 @@ export const DevelopmentPage: React.FC = () => {
       const updated = await approveDevBoardCardForClaude(card.id);
       setCards(prev => prev.map(c => c.id === updated.id ? updated : c));
     } catch (err: any) {
-      setError(err?.message || 'Errore avvio Claude');
+      setError(err?.message || t('dev.errStart', 'Errore avvio Claude'));
     } finally {
       setBusyClaudeId(null);
     }
@@ -243,7 +246,7 @@ export const DevelopmentPage: React.FC = () => {
       const updated = await resetDevBoardCardClaude(card.id);
       setCards(prev => prev.map(c => c.id === updated.id ? updated : c));
     } catch (err: any) {
-      setError(err?.message || 'Errore reset');
+      setError(err?.message || t('dev.errReset', 'Errore reset'));
     } finally {
       setBusyClaudeId(null);
     }
@@ -289,7 +292,7 @@ export const DevelopmentPage: React.FC = () => {
       <div className="flex flex-shrink-0 items-start justify-between gap-3 px-4 pb-3 pt-4 lg:px-6 lg:pt-6">
         <div className="min-w-0">
           <h2 className="text-[20px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)]">
-            Development
+            {t('dev.title', 'Development')}
           </h2>
           <p className="mt-0.5 text-[13px] text-[var(--ds-text-muted)]">
             Board di progetto · {totalCount} {totalCount === 1 ? 'card' : 'cards'} · visibile solo a questo account
@@ -298,8 +301,8 @@ export const DevelopmentPage: React.FC = () => {
         <button
           type="button"
           onClick={() => { setIsLoading(true); load(); }}
-          aria-label="Ricarica la board"
-          title="Ricarica"
+          aria-label={t('dev.reloadAria', 'Ricarica la board')}
+          title={t('dev.reload', 'Ricarica')}
           className={dsIconButton}
         >
           <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
@@ -314,7 +317,7 @@ export const DevelopmentPage: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setError(null)}
-                aria-label="Chiudi l'errore"
+                aria-label={t('dev.closeError', "Chiudi l'errore")}
                 className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-critical-text)] transition-[filter] hover:brightness-90"
               >
                 <X className="h-4 w-4" />
@@ -348,8 +351,8 @@ export const DevelopmentPage: React.FC = () => {
               <div className="flex items-center justify-between gap-2 px-3 pb-2 pt-3">
                 <div className="flex min-w-0 items-center gap-2">
                   <span className={`h-2 w-2 flex-none rounded-full ${tone.dot}`} aria-hidden />
-                  <span className={`truncate text-[14px] font-semibold ${tone.text}`} title={col.hint}>
-                    {col.label}
+                  <span className={`truncate text-[14px] font-semibold ${tone.text}`} title={t(`dev.col.${col.key}Hint`, col.hint)}>
+                    {t(`dev.col.${col.key}`, col.label)}
                   </span>
                   <span className="text-[13px] font-medium tabular-nums text-[var(--ds-text-muted)]">
                     {columnCards.length}
@@ -357,8 +360,8 @@ export const DevelopmentPage: React.FC = () => {
                 </div>
                 <button
                   type="button"
-                  title={`Aggiungi in ${col.label}`}
-                  aria-label={`Aggiungi in ${col.label}`}
+                  title={t('dev.addIn', 'Aggiungi in {{colonna}}', { colonna: t(`dev.col.${col.key}`, col.label) })}
+                  aria-label={t('dev.addIn', 'Aggiungi in {{colonna}}', { colonna: t(`dev.col.${col.key}`, col.label) })}
                   onClick={() => { setComposerColumn(col.key); setComposerTitle(''); }}
                   className="inline-flex h-9 w-9 flex-none items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 >
@@ -398,7 +401,7 @@ export const DevelopmentPage: React.FC = () => {
                                 const meta = labelMeta(key);
                                 return meta ? (
                                   <span key={key} className={`rounded-[var(--ds-radius-control)] px-2 py-0.5 text-[11px] font-semibold leading-none ${meta.chipClass}`}>
-                                    {meta.name}
+                                    {t(`dev.area.${meta.key}`, meta.name)}
                                   </span>
                                 ) : null;
                               })}
@@ -414,7 +417,7 @@ export const DevelopmentPage: React.FC = () => {
                           )}
                           {/* Non in maiuscolo: "05 ago" a 10px in capitali
                               perde la forma della parola e non guadagna nulla.
-                              L'id è il riferimento con cui si cita la card
+                              {t('dev.idHint', "L'id è il riferimento con cui si cita la card")}
                               (a Claude, nelle PR: "Card dev board #23"). */}
                           <p className="mt-1.5 text-[12px] tabular-nums text-[var(--ds-text-muted)]">
                             #{card.id} · {formatCardDate(card.updated_at || card.created_at)}
@@ -444,7 +447,7 @@ export const DevelopmentPage: React.FC = () => {
                                     <span className={`inline-flex items-center gap-1.5 rounded-[var(--ds-radius-control)] px-2 py-1 text-[11px] font-semibold leading-none ${meta.chipClass}`}>
                                       <span className={`h-1.5 w-1.5 rounded-full ${meta.dot} ${meta.pulse ? 'animate-pulse' : ''}`} aria-hidden />
                                       <Bot className="h-3 w-3" aria-hidden />
-                                      {meta.label}
+                                      {t(`dev.claude.${card.claude_status}`, meta.label)}
                                     </span>
                                   );
                                 })()}
@@ -474,14 +477,14 @@ export const DevelopmentPage: React.FC = () => {
                                   <button
                                     type="button"
                                     disabled={busyClaudeId === card.id}
-                                    title={card.claude_status === 'failed' ? 'Riprova' : 'Rilancia'}
+                                    title={card.claude_status === 'failed' ? t('dev.retry', 'Riprova') : t('dev.relaunch', 'Rilancia')}
                                     onClick={(e) => { e.stopPropagation(); approveForClaude(card); }}
                                     className="inline-flex h-8 items-center gap-1 rounded-[var(--ds-radius-control)] px-2 text-[12px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface)] disabled:opacity-40"
                                   >
                                     {busyClaudeId === card.id
                                       ? <Loader2 className="h-3 w-3 animate-spin" />
                                       : <RotateCcw className="h-3 w-3" aria-hidden />}
-                                    {card.claude_status === 'failed' ? 'Riprova' : 'Rilancia'}
+                                    {card.claude_status === 'failed' ? t('dev.retry', 'Riprova') : t('dev.relaunch', 'Rilancia')}
                                   </button>
                                 )}
                               </>
@@ -506,7 +509,7 @@ export const DevelopmentPage: React.FC = () => {
                     onClick={() => { setComposerColumn(col.key); setComposerTitle(''); }}
                     className="w-full rounded-[var(--ds-radius)] border border-dashed border-[var(--ds-border-strong)] px-3 py-4 text-[13px] text-[var(--ds-text-muted)] transition-colors hover:border-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]"
                   >
-                    {col.hint} — aggiungi la prima card
+                    {t('dev.emptyCol', '{{nota}} — aggiungi la prima card', { nota: t(`dev.col.${col.key}Hint`, col.hint) })}
                   </button>
                 )}
 
@@ -522,7 +525,7 @@ export const DevelopmentPage: React.FC = () => {
                         if (e.key === 'Escape') setComposerColumn(null);
                       }}
                       rows={2}
-                      placeholder="Titolo della card…"
+                      placeholder={t('dev.cardPlaceholder', 'Titolo della card…')}
                       className="w-full resize-none rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-3 py-2 text-[14px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     />
                     <div className="flex items-center gap-2">
@@ -537,7 +540,7 @@ export const DevelopmentPage: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => setComposerColumn(null)}
-                        aria-label="Chiudi il compositore"
+                        aria-label={t('dev.closeComposer', 'Chiudi il compositore')}
                         className="inline-flex h-10 w-10 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)]"
                       >
                         <X className="h-4 w-4" />
@@ -554,7 +557,7 @@ export const DevelopmentPage: React.FC = () => {
       <ModalShell
         open={!!editDraft}
         onClose={() => setEditDraft(null)}
-        title={editDraft?.id == null ? 'Nuova card' : `Card #${editDraft.id}`}
+        title={editDraft?.id == null ? t('dev.newCard', 'Nuova card') : t('dev.cardN', 'Card #{{n}}', { n: editDraft.id })}
         size="sm"
         closeOnEscape
         bodyClassName="space-y-4 p-5 sm:p-6"
@@ -598,7 +601,7 @@ export const DevelopmentPage: React.FC = () => {
       >
         {editDraft && (
           <>
-            <Field label="Titolo" htmlFor="devcard-title" required>
+            <Field label={t('dev.fieldTitle', 'Titolo')} htmlFor="devcard-title" required>
               <input
                 id="devcard-title"
                 type="text"
@@ -608,17 +611,17 @@ export const DevelopmentPage: React.FC = () => {
                 className={dsInput}
               />
             </Field>
-            <Field label="Descrizione" htmlFor="devcard-description" aside="opzionale">
+            <Field label={t('dev.description', 'Descrizione')} htmlFor="devcard-description" aside={t('dev.optional', 'opzionale')}>
               <textarea
                 id="devcard-description"
                 value={editDraft.description}
                 onChange={(e) => setEditDraft(d => d ? { ...d, description: e.target.value } : d)}
                 rows={4}
-                placeholder="Dettagli, note, link…"
+                placeholder={t('dev.descPlaceholder', 'Dettagli, note, link…')}
                 className={`${dsTextarea} resize-y leading-relaxed`}
               />
             </Field>
-            <Field label="Colonna">
+            <Field label={t('dev.column', 'Colonna')}>
               <div className="grid grid-cols-2 gap-2">
                 {COLUMNS.map(col => {
                   const active = editDraft.column_key === col.key;
@@ -635,13 +638,13 @@ export const DevelopmentPage: React.FC = () => {
                       }`}
                     >
                       <span className={`h-2 w-2 flex-none rounded-full ${COLUMN_TONE[col.tone].dot}`} aria-hidden />
-                      <span className="truncate">{col.label}</span>
+                      <span className="truncate">{t(`dev.col.${col.key}`, col.label)}</span>
                     </button>
                   );
                 })}
               </div>
             </Field>
-            <Field label="Etichette">
+            <Field label={t('dev.labels', 'Etichette')}>
               <div className="flex flex-wrap gap-2">
                 {LABELS.map(l => {
                   const active = editDraft.labels.includes(l.key);
@@ -661,7 +664,7 @@ export const DevelopmentPage: React.FC = () => {
                         active ? 'ring-2 ring-[var(--ds-text-primary)]' : ''
                       }`}
                     >
-                      {l.name}
+                      {t(`dev.area.${l.key}`, l.name)}
                     </button>
                   );
                 })}
@@ -674,7 +677,7 @@ export const DevelopmentPage: React.FC = () => {
       <ModalShell
         open={!!deleteCandidate}
         onClose={() => setDeleteCandidate(null)}
-        title="Elimina card"
+        title={t('dev.deleteTitle', 'Elimina card')}
         size="sm"
         closeOnEscape
         bodyClassName="p-5 sm:p-6"
@@ -689,7 +692,7 @@ export const DevelopmentPage: React.FC = () => {
         }
       >
         <p className="text-[15px] text-[var(--ds-text-primary)]">
-          Eliminare la card <strong className="font-semibold">{deleteCandidate?.title}</strong>?
+          <span dangerouslySetInnerHTML={{ __html: t('dev.deleteAsk', 'Eliminare la card <strong>{{titolo}}</strong>?', { titolo: deleteCandidate?.title ?? '' }) }} />
         </p>
       </ModalShell>
     </div>
