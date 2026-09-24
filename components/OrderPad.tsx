@@ -41,7 +41,7 @@ import { PadTabs } from './comande/PadTabs';
 import { CourseColumn, CourseList, SendFooter } from './comande/CourseColumn';
 import { ComandaSheet } from './comande/ComandaSheet';
 import { SendFlight, type SendFlightData, type SendKind } from './comande/SendFlight';
-import { isBarCourse, isDessertCourse, isOffSequenceCourse } from '../utils/courses';
+import { courseContext, isBarCourse, isDessertCourse, isOffSequenceCourse } from '../utils/courses';
 import { ReasonDialog } from './comande/ReasonDialog';
 import { DiscountDialog } from './comande/DiscountDialog';
 import { buildRows, buildMergeGroups, makeReservationForTable, type TableFilter } from './comande/tablesView';
@@ -774,7 +774,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
         setError(err?.data?.error ?? err?.message ?? t('err.move'));
       } finally { setBusy(false); }
     }
-    setFlash(t('toast.movedTo', { uscita: courseLabel(to, t) }));
+    setFlash(t('toast.movedTo', { uscita: courseLabel(to, t), context: courseContext(to) }));
   };
 
   /** Elimina un'uscita intera: tutte le sue righe NON inviate, locali e in
@@ -800,7 +800,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
         return;
       } finally { setBusy(false); }
     }
-    addToast(t('toast.courseDeleted', { uscita: courseLabel(courseNo, t) }), 'success', {
+    addToast(t('toast.courseDeleted', { uscita: courseLabel(courseNo, t), context: courseContext(courseNo) }), 'success', {
       icon: Trash2,
       ...(serverDrafts.length === 0 && removed.length > 0 ? {
         action: {
@@ -974,7 +974,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
   const repeatAll = (lines: RepeatLine[]) => {
     for (const l of lines) repeatLine(l, l.qty);
     setComandaOpen(false);
-    setFlash(t('toast.roundRepeated', { uscita: courseLabel(course, t) }));
+    setFlash(t('toast.roundRepeated', { uscita: courseLabel(course, t), context: courseContext(course) }));
   };
 
   const clearDrafts = () => {
@@ -1243,7 +1243,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
     try {
       await fireCourse(order.order.id, courseNo);
       setOrder(await ordersApiService.getOrder(order.order.id));
-      setFlash(t('toast.courseFired', { uscita: courseLabel(courseNo, t) }));
+      setFlash(t('toast.courseFired', { uscita: courseLabel(courseNo, t), context: courseContext(courseNo) }));
     } catch (err: any) {
       setError(err?.data?.error ?? err?.message ?? t('err.fire'));
     } finally {
@@ -1300,7 +1300,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
     setBusy(true); setError(null);
     try {
       setOrder(await ordersApiService.recallCourse(order.order.id, courseNo));
-      setFlash(t('toast.courseRecalled', { uscita: courseLabel(courseNo, t) }));
+      setFlash(t('toast.courseRecalled', { uscita: courseLabel(courseNo, t), context: courseContext(courseNo) }));
     } catch (err: any) {
       setError(err?.data?.error ?? err?.message ?? t('err.recall'));
     } finally {
@@ -2130,7 +2130,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
           open
           onClose={() => { setMoveFor(null); setDeleteCourseArmed(false); }}
           title={moveFor.kind === 'course'
-            ? t('move.courseTitle', { uscita: courseLabel(moveFor.from, t) })
+            ? t('move.courseTitle', { uscita: courseLabel(moveFor.from, t), context: courseContext(moveFor.from) })
             : t('move.lineTitle', { cosa: moveFor.kind === 'item' ? moveFor.item.name_snapshot : moveFor.label })}
           subtitle={t(moveFor.kind === 'course' ? 'move.courseHint' : 'move.lineHint')}
           size="sm"
@@ -2209,7 +2209,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
                   <Trash2 size={17} aria-hidden />
                   {armed
                     ? t('move.deleteCourseConfirm', { count: rows })
-                    : t('move.deleteCourse', { uscita: courseLabel(from, t) })}
+                    : t('move.deleteCourse', { uscita: courseLabel(from, t), context: courseContext(from) })}
                 </button>
                 {sentStay && (
                   <p className="text-center text-[13px] text-[var(--ds-text-muted)]">{t('move.deleteCourseSentStay')}</p>
