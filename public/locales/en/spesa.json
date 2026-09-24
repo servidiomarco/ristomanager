@@ -77,5 +77,28 @@
   "printSelection": "Print the selection",
   "shareSelection": "Share the selection",
   "deleteSelection": "Delete the selection",
-  "exitSelection": "Leave selection mode"
+  "exitSelection": "Leave selection mode",
+  "forn": {
+    "errCreate": "Could not create it",
+    "errSave": "Could not save",
+    "title": "Suppliers",
+    "subtitle": "A supplier can serve more than one category",
+    "add": "Add a supplier",
+    "name": "Name",
+    "namePlaceholder": "Supplier name",
+    "categories": "Categories served",
+    "phone": "Phone",
+    "note": "Note",
+    "notes": "Notes",
+    "optional": "Optional",
+    "optionalPlural": "Optional",
+    "addButton": "Add",
+    "empty": "No supplier yet. Add one above.",
+    "cancel": "Cancel",
+    "save": "Save",
+    "edit": "Edit {{nome}}",
+    "delete": "Delete {{nome}}",
+    "confirmDelete": "Delete it? The products linked to it will be left without a supplier.",
+    "deleteButton": "Delete"
+  }
 }

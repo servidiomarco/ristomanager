@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useShopping } from '../contexts/ShoppingContext';
 import { ShoppingCategory, Supplier } from '../services/shoppingApiService';
 import { Plus, Loader2, Edit2, Trash2, Check, Truck } from 'lucide-react';
@@ -6,6 +7,7 @@ import {
   Callout, EmptyState, Field, FormCard, ModalShell, StatusPill,
   dsButton, dsInput, dsTextarea,
 } from './ds';
+import { categoryLabel } from './spesa/shoppingView';
 
 /* ── Gestione fornitori ───────────────────────────────────────────────────
    Reached from the shopping list, where it is the only way to create the
@@ -25,28 +27,26 @@ interface SupplierManagementModalProps {
 
 const CATEGORIES: ShoppingCategory[] = ['CUCINA', 'BAR', 'ALTRO'];
 
-const CATEGORY_LABELS: Record<ShoppingCategory, string> = {
-  CUCINA: 'Cucina',
-  BAR: 'Bar',
-  ALTRO: 'Altro',
-};
-
 const sortedCategories = (cats: ShoppingCategory[]): ShoppingCategory[] =>
   CATEGORIES.filter(c => cats.includes(c));
 
-const CategoryChips: React.FC<{ categories: ShoppingCategory[] }> = ({ categories }) => (
-  <span className="flex flex-wrap items-center gap-1.5">
-    {sortedCategories(categories).map(c => (
-      <StatusPill key={c} tone="neutral">{CATEGORY_LABELS[c]}</StatusPill>
-    ))}
-  </span>
-);
+const CategoryChips: React.FC<{ categories: ShoppingCategory[] }> = ({ categories }) => {
+  const { t } = useTranslation('spesa', { useSuspense: false });
+  return (
+    <span className="flex flex-wrap items-center gap-1.5">
+      {sortedCategories(categories).map(c => (
+        <StatusPill key={c} tone="neutral">{categoryLabel(c, t)}</StatusPill>
+      ))}
+    </span>
+  );
+};
 
 const CategoryCheckboxes: React.FC<{
   value: ShoppingCategory[];
   onChange: (next: ShoppingCategory[]) => void;
   disabled?: boolean;
 }> = ({ value, onChange, disabled }) => {
+  const { t } = useTranslation('spesa', { useSuspense: false });
   const toggle = (c: ShoppingCategory) => {
     if (value.includes(c)) {
       const next = value.filter(x => x !== c);
@@ -73,7 +73,7 @@ const CategoryCheckboxes: React.FC<{
                 : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
             }`}
           >
-            {CATEGORY_LABELS[c]}
+            {categoryLabel(c, t)}
           </button>
         );
       })}
@@ -86,6 +86,7 @@ export const SupplierManagementModal: React.FC<SupplierManagementModalProps> = (
   onClose,
   initialCategory,
 }) => {
+  const { t } = useTranslation('spesa', { useSuspense: false });
   const { suppliers, addSupplier, updateSupplier, deleteSupplier } = useShopping();
 
   // Add form
@@ -144,7 +145,7 @@ export const SupplierManagementModal: React.FC<SupplierManagementModalProps> = (
       });
       resetAddForm();
     } catch (err: any) {
-      setAddError(err?.message || 'Errore durante la creazione');
+      setAddError(err?.message || t('forn.errCreate', 'Errore durante la creazione'));
     } finally {
       setIsAdding(false);
     }
@@ -183,7 +184,7 @@ export const SupplierManagementModal: React.FC<SupplierManagementModalProps> = (
       });
       cancelEdit();
     } catch (err: any) {
-      setEditError(err?.message || 'Errore durante il salvataggio');
+      setEditError(err?.message || t('forn.errSave', 'Errore durante il salvataggio'));
     } finally {
       setIsSaving(false);
     }
@@ -203,8 +204,8 @@ export const SupplierManagementModal: React.FC<SupplierManagementModalProps> = (
     <ModalShell
       open={open}
       onClose={onClose}
-      title="Gestione fornitori"
-      subtitle="Un fornitore può servire più categorie"
+      title={t('forn.title', 'Gestione fornitori')}
+      subtitle={t('forn.subtitle', 'Un fornitore può servire più categorie')}
       size="md"
       closeOnEscape
       bodyClassName="space-y-3 p-4 sm:p-5"
@@ -212,37 +213,37 @@ export const SupplierManagementModal: React.FC<SupplierManagementModalProps> = (
       {/* Adding comes first: this modal is opened to create a supplier far more
           often than to correct one, and on a phone a form pinned under a
           scrolling list is a form nobody reaches. */}
-      <FormCard title="Aggiungi fornitore">
+      <FormCard title={t('forn.add', 'Aggiungi fornitore')}>
         <div className="space-y-4">
-          <Field label="Nome">
+          <Field label={t('forn.name', 'Nome')}>
             <input
               type="text"
               value={newName}
               onChange={e => setNewName(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAdd(); } }}
-              placeholder="Nome fornitore"
+              placeholder={t('forn.namePlaceholder', 'Nome fornitore')}
               className={dsInput}
             />
           </Field>
-          <Field label="Categorie servite">
+          <Field label={t('forn.categories', 'Categorie servite')}>
             <CategoryCheckboxes value={newCategories} onChange={setNewCategories} disabled={isAdding} />
           </Field>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label="Telefono">
+            <Field label={t('forn.phone', 'Telefono')}>
               <input
                 type="tel"
                 value={newPhone}
                 onChange={e => setNewPhone(e.target.value)}
-                placeholder="Opzionale"
+                placeholder={t('forn.optional', 'Opzionale')}
                 className={dsInput}
               />
             </Field>
-            <Field label="Nota">
+            <Field label={t('forn.note', 'Nota')}>
               <input
                 type="text"
                 value={newNote}
                 onChange={e => setNewNote(e.target.value)}
-                placeholder="Opzionale"
+                placeholder={t('forn.optional', 'Opzionale')}
                 className={dsInput}
               />
             </Field>
@@ -256,14 +257,14 @@ export const SupplierManagementModal: React.FC<SupplierManagementModalProps> = (
               className={`w-full sm:w-auto ${dsButton.primary}`}
             >
               {isAdding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-              Aggiungi
+              {t('forn.addButton', 'Aggiungi')}
             </button>
           </div>
         </div>
       </FormCard>
 
       {sortedSuppliers.length === 0 ? (
-        <EmptyState icon={Truck}>Nessun fornitore. Aggiungine uno qui sopra.</EmptyState>
+        <EmptyState icon={Truck}>{t('forn.empty', 'Nessun fornitore. Aggiungine uno qui sopra.')}</EmptyState>
       ) : (
         sortedSuppliers.map(s => {
           const isEditing = editingId === s.id;
@@ -273,7 +274,7 @@ export const SupplierManagementModal: React.FC<SupplierManagementModalProps> = (
             return (
               <FormCard key={s.id}>
                 <div className="space-y-4">
-                  <Field label="Nome">
+                  <Field label={t('forn.name', 'Nome')}>
                     <input
                       type="text"
                       value={editName}
@@ -282,23 +283,23 @@ export const SupplierManagementModal: React.FC<SupplierManagementModalProps> = (
                       className={dsInput}
                     />
                   </Field>
-                  <Field label="Categorie servite">
+                  <Field label={t('forn.categories', 'Categorie servite')}>
                     <CategoryCheckboxes value={editCategories} onChange={setEditCategories} disabled={isSaving} />
                   </Field>
-                  <Field label="Telefono">
+                  <Field label={t('forn.phone', 'Telefono')}>
                     <input
                       type="tel"
                       value={editPhone}
                       onChange={e => setEditPhone(e.target.value)}
-                      placeholder="Opzionale"
+                      placeholder={t('forn.optional', 'Opzionale')}
                       className={dsInput}
                     />
                   </Field>
-                  <Field label="Note">
+                  <Field label={t('forn.notes', 'Note')}>
                     <textarea
                       value={editNote}
                       onChange={e => setEditNote(e.target.value)}
-                      placeholder="Opzionali"
+                      placeholder={t('forn.optionalPlural', 'Opzionali')}
                       rows={2}
                       className={`${dsTextarea} resize-none`}
                     />
@@ -306,7 +307,7 @@ export const SupplierManagementModal: React.FC<SupplierManagementModalProps> = (
                   {editError && <Callout tone="critical">{editError}</Callout>}
                   <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
                     <button type="button" onClick={cancelEdit} disabled={isSaving} className={dsButton.quiet}>
-                      Annulla
+                      {t('forn.cancel', 'Annulla')}
                     </button>
                     <button
                       type="button"
@@ -315,7 +316,7 @@ export const SupplierManagementModal: React.FC<SupplierManagementModalProps> = (
                       className={dsButton.primary}
                     >
                       {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                      Salva
+                      {t('forn.save', 'Salva')}
                     </button>
                   </div>
                 </div>
@@ -343,7 +344,7 @@ export const SupplierManagementModal: React.FC<SupplierManagementModalProps> = (
                   <button
                     type="button"
                     onClick={() => startEdit(s)}
-                    aria-label={`Modifica ${s.name}`}
+                    aria-label={t('forn.edit', 'Modifica {{nome}}', { nome: s.name })}
                     className="inline-flex h-10 w-10 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
                     <Edit2 className="h-4 w-4" />
@@ -351,7 +352,7 @@ export const SupplierManagementModal: React.FC<SupplierManagementModalProps> = (
                   <button
                     type="button"
                     onClick={() => setPendingDeleteId(s.id)}
-                    aria-label={`Elimina ${s.name}`}
+                    aria-label={t('forn.delete', 'Elimina {{nome}}', { nome: s.name })}
                     className="inline-flex h-10 w-10 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
                     <Trash2 className="h-4 w-4" />
@@ -362,7 +363,7 @@ export const SupplierManagementModal: React.FC<SupplierManagementModalProps> = (
               {isPendingDelete && (
                 <div className="mt-3 rounded-[var(--ds-radius)] bg-[var(--ds-critical-tint)] p-3">
                   <p className="text-[14px] text-[var(--ds-critical-text)]">
-                    Eliminare? I prodotti collegati resteranno senza fornitore.
+                    {t('forn.confirmDelete', 'Eliminare? I prodotti collegati resteranno senza fornitore.')}
                   </p>
                   <div className="mt-2.5 flex justify-end gap-2">
                     <button
@@ -371,7 +372,7 @@ export const SupplierManagementModal: React.FC<SupplierManagementModalProps> = (
                       disabled={isDeleting}
                       className="inline-flex h-10 items-center rounded-[var(--ds-radius-control)] px-4 text-[14px] font-medium text-[var(--ds-critical-text)] transition-opacity hover:opacity-80 disabled:opacity-50"
                     >
-                      Annulla
+                      {t('forn.cancel', 'Annulla')}
                     </button>
                     <button
                       type="button"
@@ -380,7 +381,7 @@ export const SupplierManagementModal: React.FC<SupplierManagementModalProps> = (
                       className="inline-flex h-10 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-solid)] px-4 text-[14px] font-semibold text-[var(--ds-critical-fg)] transition-opacity hover:opacity-90 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     >
                       {isDeleting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                      Elimina
+                      {t('forn.deleteButton', 'Elimina')}
                     </button>
                   </div>
                 </div>

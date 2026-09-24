@@ -667,6 +667,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-24 | Lista della spesa (Fornitori) | Con la lingua inglese parla inglese la gestione fornitori: creazione, modifica, categorie servite e conferma di eliminazione. |
 | 2026-09-24 | Utenti, Chat staff | Con la lingua inglese parlano inglese la gestione utenti (griglia, form, eliminazione) e la Chat staff (canali, messaggi diretti, composer, allegati, separatori di giornata). Nella chat i ruoli cambiano nome: «Titolare» diventa «Proprietario», «Direttore» «General Manager» e «Sala» «Cameriere», come già li chiamavano Utenti e la matrice dei permessi. |
 | 2026-09-24 | Impostazioni (Promemoria, Permessi) | Con la lingua inglese parlano inglese i Promemoria (elenco, editor con frequenze e giorni, destinatari) e la matrice dei permessi per ruolo. I nomi dei ruoli ora vengono da un posto solo: nei Promemoria «Direttore», «Responsabile» e «Camerieri» diventano «General Manager», «Manager» e «Cameriere», come già li chiamavano Utenti, Dashboard e la matrice dei permessi. |
 | 2026-09-24 | Personale (Compensi) | Con la lingua inglese parlano inglese i Compensi: schermata di sblocco, mese con i tre totali, righe per dipendente coi gruppi fissi/stagionali/extra, acconto e saldo, correzione del dovuto e tariffe. Il campo importo ora si presenta nel formato della lingua (1234.56 in inglese), e lo legge in entrambe. |
