@@ -18,7 +18,7 @@ export const MAX_COURSES = 6;
 import { isBarCourse } from '../../utils/courses';
 import { moneyIntl } from '../../utils/displayMoney';
 import { displayLocale } from '../../utils/formatLocale';
-export { BAR_COURSE_NO, DESSERT_COURSE_NO, isBarCourse, isDessertCourse, ordinal, courseLabel } from '../../utils/courses';
+export { BAR_COURSE_NO, DESSERT_COURSE_NO, isBarCourse, isDessertCourse, ordinal, courseLabel, courseContext } from '../../utils/courses';
 
 export interface CartLine {
   key: string;
