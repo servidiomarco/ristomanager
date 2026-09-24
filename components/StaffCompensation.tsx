@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   StaffMember, StaffType,
   StaffCompensationProfile, StaffCompensationPayment,
@@ -12,6 +13,7 @@ import {
 } from 'lucide-react';
 import { ModalShell, Field, EmptyState, dsButton, dsInput, dsSelect, dsIconButton } from './ds';
 import { moneyIntl, moneySymbol } from '../utils/displayMoney';
+import { displayLocale } from '../utils/formatLocale';
 
 // ── Compensi ─────────────────────────────────────────────────────────────
 // La sezione economica del Personale. Il token step-up vive SOLO nello
@@ -25,14 +27,25 @@ interface StaffCompensationProps {
   showToast: (message: string, type: 'success' | 'error' | 'info') => void;
 }
 
-const TYPE_LABELS: Record<StaffType, string> = {
+/* `t` a parametro: qui non ci sono hook. Senza `t` si resta in italiano —
+   un chiamante dimenticato deve leggersi, non sparire. */
+type TFunc = (key: string, defaultValue: string, options?: Record<string, unknown>) => string;
+
+const TYPE_LABELS_IT: Record<StaffType, string> = {
   [StaffType.FISSO]: 'Fissi',
   [StaffType.STAGIONALE]: 'Stagionali',
   [StaffType.EXTRA]: 'Extra'
 };
+const typeLabel = (ty: StaffType, t?: TFunc): string =>
+  t ? t(`comp.type.${ty}`, TYPE_LABELS_IT[ty]) : TYPE_LABELS_IT[ty];
+
 const TYPE_ORDER: StaffType[] = [StaffType.FISSO, StaffType.STAGIONALE, StaffType.EXTRA];
 
-const METHOD_LABELS = { CONTANTI: 'Contanti', BONIFICO: 'Bonifico', ALTRO: 'Altro' } as const;
+/* I valori CONTANTI/BONIFICO/ALTRO sono dell'API: si traduce l'etichetta,
+   mai il valore. */
+const METHOD_LABELS_IT = { CONTANTI: 'Contanti', BONIFICO: 'Bonifico', ALTRO: 'Altro' } as const;
+const methodLabel = (m: keyof typeof METHOD_LABELS_IT, t?: TFunc): string =>
+  t ? t(`comp.method.${m}`, METHOD_LABELS_IT[m]) : METHOD_LABELS_IT[m];
 
 const formatEuro = (cents: number): string => moneyIntl(cents / 100);
 
@@ -48,7 +61,7 @@ const parseEuroToCents = (raw: string): number | null => {
 };
 
 const centsToEuroInput = (cents: number | null | undefined): string =>
-  cents == null ? '' : (cents / 100).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: false });
+  cents == null ? '' : (cents / 100).toLocaleString(displayLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: false });
 
 const currentMonth = (): string => {
   const now = new Date();
@@ -62,7 +75,7 @@ const addMonths = (month: string, delta: number): string => {
 };
 
 const monthLabel = (month: string): string =>
-  new Date(`${month}-01T00:00:00`).toLocaleDateString('it-IT', { month: 'long', year: 'numeric' });
+  new Date(`${month}-01T00:00:00`).toLocaleDateString(displayLocale(), { month: 'long', year: 'numeric' });
 
 const todayIso = (): string => {
   const now = new Date();
@@ -72,6 +85,7 @@ const todayIso = (): string => {
 interface Grant { token: string; expiresAt: number }
 
 export const StaffCompensation: React.FC<StaffCompensationProps> = ({ staffMembers, showToast }) => {
+  const { t } = useTranslation('personale', { useSuspense: false });
   const [grant, setGrant] = useState<Grant | null>(null);
   const [password, setPassword] = useState('');
   const [unlocking, setUnlocking] = useState(false);
@@ -103,8 +117,8 @@ export const StaffCompensation: React.FC<StaffCompensationProps> = ({ staffMembe
     setPaymentModal(null);
     setOverrideModal(null);
     setRatesModal(null);
-    if (expired) setUnlockError('Lo sblocco è scaduto: ridigita la password.');
-  }, []);
+    if (expired) setUnlockError(t('comp.expired', 'Lo sblocco è scaduto: ridigita la password.'));
+  }, [t]);
 
   // Scadenza anticipata di qualche secondo rispetto al server: meglio un
   // prompt pulito che una richiesta partita e rimbalzata.
@@ -120,8 +134,8 @@ export const StaffCompensation: React.FC<StaffCompensationProps> = ({ staffMembe
       lock(true);
       return;
     }
-    showToast(err instanceof Error ? err.message : 'Operazione non riuscita', 'error');
-  }, [lock, showToast]);
+    showToast(err instanceof Error ? err.message : t('comp.failed', 'Operazione non riuscita'), 'error');
+  }, [lock, showToast, t]);
 
   const reload = useCallback(async (token: string, m: string) => {
     setLoading(true);
@@ -157,9 +171,9 @@ export const StaffCompensation: React.FC<StaffCompensationProps> = ({ staffMembe
     } catch (err: any) {
       const code = err?.data?.error;
       setUnlockError(
-        code === 'wrong_password' ? 'La password non è corretta.'
-        : code === 'rate_limited' ? 'Troppi tentativi: riprova tra qualche minuto.'
-        : 'Sblocco non riuscito, riprova.'
+        code === 'wrong_password' ? t('comp.wrongPassword', 'La password non è corretta.')
+        : code === 'rate_limited' ? t('comp.rateLimited', 'Troppi tentativi: riprova tra qualche minuto.')
+        : t('comp.unlockFailed', 'Sblocco non riuscito, riprova.')
       );
       passwordRef.current?.focus();
     } finally {
@@ -175,11 +189,11 @@ export const StaffCompensation: React.FC<StaffCompensationProps> = ({ staffMembe
           <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-full bg-[var(--ds-surface-row)]">
             <Lock className="h-5 w-5 text-[var(--ds-text-secondary)]" aria-hidden />
           </div>
-          <h2 className="text-[17px] font-semibold text-[var(--ds-text-primary)]">Sezione riservata</h2>
+          <h2 className="text-[17px] font-semibold text-[var(--ds-text-primary)]">{t('comp.reserved', 'Sezione riservata')}</h2>
           <p className="mt-1 text-[14px] text-[var(--ds-text-secondary)]">
-            Conferma la password del tuo account. Lo sblocco dura 15 minuti e scade uscendo dalla sezione.
+            {t('comp.reservedHint', 'Conferma la password del tuo account. Lo sblocco dura 15 minuti e scade uscendo dalla sezione.')}
           </p>
-          <Field className="mt-4" label="Password" htmlFor="compensation-password" error={unlockError}>
+          <Field className="mt-4" label={t('comp.password', 'Password')} htmlFor="compensation-password" error={unlockError}>
             <input
               ref={passwordRef}
               id="compensation-password"
@@ -193,7 +207,7 @@ export const StaffCompensation: React.FC<StaffCompensationProps> = ({ staffMembe
           </Field>
           <button type="submit" disabled={!password || unlocking} className={`${dsButton.primary} mt-4 w-full`}>
             {unlocking && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
-            Sblocca
+            {t('comp.unlock', 'Sblocca')}
           </button>
         </form>
       </div>
@@ -214,7 +228,7 @@ export const StaffCompensation: React.FC<StaffCompensationProps> = ({ staffMembe
       .sort((a, b) => {
         const ma = membersById.get(a.staffId)!;
         const mb = membersById.get(b.staffId)!;
-        return `${ma.surname} ${ma.name}`.localeCompare(`${mb.surname} ${mb.name}`, 'it');
+        return `${ma.surname} ${ma.name}`.localeCompare(`${mb.surname} ${mb.name}`, displayLocale());
       })
   })).filter(g => g.rows.length > 0);
 
@@ -225,19 +239,19 @@ export const StaffCompensation: React.FC<StaffCompensationProps> = ({ staffMembe
       {/* ── Mese e totali ── */}
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-1">
-          <button type="button" onClick={() => setMonth(addMonths(month, -1))} aria-label="Mese precedente" className={dsIconButton}>
+          <button type="button" onClick={() => setMonth(addMonths(month, -1))} aria-label={t('comp.prevMonth', 'Mese precedente')} className={dsIconButton}>
             <ChevronLeft className="h-4 w-4" />
           </button>
           <span className="min-w-[150px] text-center text-[16px] font-semibold capitalize text-[var(--ds-text-primary)]">
             {monthLabel(month)}
           </span>
-          <button type="button" onClick={() => setMonth(addMonths(month, 1))} aria-label="Mese successivo" className={dsIconButton}>
+          <button type="button" onClick={() => setMonth(addMonths(month, 1))} aria-label={t('comp.nextMonth', 'Mese successivo')} className={dsIconButton}>
             <ChevronRight className="h-4 w-4" />
           </button>
         </div>
         {!isCurrentMonth && (
           <button type="button" onClick={() => setMonth(currentMonth())} className={dsButton.secondary}>
-            Oggi
+            {t('comp.today', 'Oggi')}
           </button>
         )}
       </div>
@@ -245,9 +259,9 @@ export const StaffCompensation: React.FC<StaffCompensationProps> = ({ staffMembe
       {summary && (
         <div className="grid grid-cols-3 overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
           {([
-            ['Dovuto', summary.totals.dueCents, 'text-[var(--ds-text-primary)]'],
-            ['Pagato', summary.totals.paidCents, 'text-[var(--ds-text-primary)]'],
-            ['Residuo', summary.totals.residualCents,
+            [t('comp.due', 'Dovuto'), summary.totals.dueCents, 'text-[var(--ds-text-primary)]'],
+            [t('comp.paid', 'Pagato'), summary.totals.paidCents, 'text-[var(--ds-text-primary)]'],
+            [t('comp.residual', 'Residuo'), summary.totals.residualCents,
               summary.totals.residualCents > 0 ? 'text-[var(--ds-pending-text)]' : 'text-[var(--ds-seated-text)]'],
           ] as const).map(([label, cents, tone]) => (
             <div key={label} className="border-r border-[var(--ds-border)] px-4 py-3 last:border-r-0">
@@ -266,14 +280,14 @@ export const StaffCompensation: React.FC<StaffCompensationProps> = ({ staffMembe
 
       {summary && rowsByType.length === 0 && (
         <EmptyState icon={Wallet}>
-          Nessun compenso nel mese. Le tariffe si impostano dal dipendente, i turni fanno il resto.
+          {t('comp.empty', 'Nessun compenso nel mese. Le tariffe si impostano dal dipendente, i turni fanno il resto.')}
         </EmptyState>
       )}
 
       {/* ── Righe per dipendente ── */}
       {rowsByType.map(group => (
         <section key={group.type}>
-          <h3 className="mb-2 px-1 text-[13px] font-medium text-[var(--ds-text-muted)]">{TYPE_LABELS[group.type]}</h3>
+          <h3 className="mb-2 px-1 text-[13px] font-medium text-[var(--ds-text-muted)]">{typeLabel(group.type, t)}</h3>
           <div className="overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
             {group.rows.map(row => {
               const member = membersById.get(row.staffId)!;
@@ -290,36 +304,36 @@ export const StaffCompensation: React.FC<StaffCompensationProps> = ({ staffMembe
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-[15px] font-medium text-[var(--ds-text-primary)]">
                         {member.surname} {member.name}
-                        {!member.isActive && <span className="ml-2 text-[12px] text-[var(--ds-text-muted)]">non attivo</span>}
+                        {!member.isActive && <span className="ml-2 text-[12px] text-[var(--ds-text-muted)]">{t('comp.inactive', 'non attivo')}</span>}
                       </div>
                       <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[12px] text-[var(--ds-text-muted)]">
                         {member.staffType === StaffType.EXTRA && (
-                          <span>{row.singleDays} singoli · {row.doubleDays} doppi</span>
+                          <span>{t('comp.daysSplit', '{{singoli}} singoli · {{doppi}} doppi', { singoli: row.singleDays, doppi: row.doubleDays })}</span>
                         )}
                         {row.dueSource === 'OVERRIDE' && (
-                          <span className="text-[var(--ds-arriving-text)]">dovuto corretto a mano</span>
+                          <span className="text-[var(--ds-arriving-text)]">{t('comp.overridden', 'dovuto corretto a mano')}</span>
                         )}
                         {row.missingRate && (
                           <span className="inline-flex items-center gap-1 text-[var(--ds-pending-text)]">
                             <AlertTriangle className="h-3 w-3" aria-hidden />
-                            tariffa mancante
+                            {t('comp.missingRate', 'tariffa mancante')}
                           </span>
                         )}
                       </div>
                     </div>
                     <div className="grid grid-cols-3 gap-4 text-right tabular-nums">
                       <div>
-                        <div className="text-[11px] text-[var(--ds-text-muted)]">dovuto</div>
+                        <div className="text-[11px] text-[var(--ds-text-muted)]">{t('comp.dueLower', 'dovuto')}</div>
                         <div className="text-[14px] font-medium text-[var(--ds-text-primary)]">
                           {row.dueCents == null ? '—' : formatEuro(row.dueCents)}
                         </div>
                       </div>
                       <div>
-                        <div className="text-[11px] text-[var(--ds-text-muted)]">pagato</div>
+                        <div className="text-[11px] text-[var(--ds-text-muted)]">{t('comp.paidLower', 'pagato')}</div>
                         <div className="text-[14px] font-medium text-[var(--ds-text-primary)]">{formatEuro(row.paidCents)}</div>
                       </div>
                       <div>
-                        <div className="text-[11px] text-[var(--ds-text-muted)]">residuo</div>
+                        <div className="text-[11px] text-[var(--ds-text-muted)]">{t('comp.residualLower', 'residuo')}</div>
                         <div className={`text-[14px] font-semibold ${
                           row.residualCents == null ? 'text-[var(--ds-text-muted)]'
                           : row.residualCents > 0 ? 'text-[var(--ds-pending-text)]'
@@ -340,21 +354,21 @@ export const StaffCompensation: React.FC<StaffCompensationProps> = ({ staffMembe
                       <div className="flex flex-wrap gap-2">
                         {row.missingRate && (
                           <button type="button" onClick={() => setRatesModal(row.staffId)} className={dsButton.primary}>
-                            Tariffe
+                            {t('comp.rates', 'Tariffe')}
                           </button>
                         )}
                         <button type="button" onClick={() => setPaymentModal({ staffId: row.staffId, kind: 'ACCONTO' })} className={row.missingRate ? dsButton.secondary : dsButton.primary}>
-                          Acconto
+                          {t('comp.advance', 'Acconto')}
                         </button>
                         <button type="button" onClick={() => setPaymentModal({ staffId: row.staffId, kind: 'SALDO' })} className={dsButton.secondary}>
-                          Saldo
+                          {t('comp.balance', 'Saldo')}
                         </button>
                         <button type="button" onClick={() => setOverrideModal(row.staffId)} className={dsButton.secondary}>
-                          Correggi dovuto
+                          {t('comp.fixDue', 'Correggi dovuto')}
                         </button>
                         {!row.missingRate && (
                           <button type="button" onClick={() => setRatesModal(row.staffId)} className={dsButton.secondary}>
-                            Tariffe
+                            {t('comp.rates', 'Tariffe')}
                           </button>
                         )}
                       </div>
@@ -365,17 +379,17 @@ export const StaffCompensation: React.FC<StaffCompensationProps> = ({ staffMembe
                             <li key={p.id} className="flex items-center gap-3 border-b border-[var(--ds-border)] px-3 py-2 last:border-b-0">
                               <div className="min-w-0 flex-1 text-[13px]">
                                 <span className="font-medium text-[var(--ds-text-primary)]">
-                                  {p.kind === 'ACCONTO' ? 'Acconto' : 'Saldo'} · {formatEuro(p.amountCents)}
+                                  {p.kind === 'ACCONTO' ? t('comp.advance', 'Acconto') : t('comp.balance', 'Saldo')} · {formatEuro(p.amountCents)}
                                 </span>
                                 <span className="ml-2 text-[var(--ds-text-muted)]">
-                                  {new Date(`${p.paidOn}T00:00:00`).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}
-                                  {p.method ? ` · ${METHOD_LABELS[p.method]}` : ''}
+                                  {new Date(`${p.paidOn}T00:00:00`).toLocaleDateString(displayLocale(), { day: 'numeric', month: 'short' })}
+                                  {p.method ? ` · ${methodLabel(p.method, t)}` : ''}
                                   {p.note ? ` · ${p.note}` : ''}
                                 </span>
                               </div>
                               <button
                                 type="button"
-                                aria-label="Elimina movimento"
+                                aria-label={t('comp.deleteMovement', 'Elimina movimento')}
                                 onClick={async () => {
                                   try {
                                     await staffCompensationApiService.deletePayment(grant.token, p.id);
@@ -398,12 +412,12 @@ export const StaffCompensation: React.FC<StaffCompensationProps> = ({ staffMembe
                             try {
                               await staffCompensationApiService.deleteOverride(grant.token, row.staffId, month);
                               await reload(grant.token, month);
-                              showToast('Dovuto tornato al calcolo automatico', 'success');
+                              showToast(t('comp.backToAutoDone', 'Dovuto tornato al calcolo automatico'), 'success');
                             } catch (err) { handleApiError(err); }
                           }}
                           className="text-[13px] font-medium text-[var(--ds-text-muted)] transition-colors hover:text-[var(--ds-text-primary)]"
                         >
-                          Torna al calcolo automatico
+                          {t('comp.backToAuto', 'Torna al calcolo automatico')}
                         </button>
                       )}
                     </div>
@@ -427,7 +441,7 @@ export const StaffCompensation: React.FC<StaffCompensationProps> = ({ staffMembe
               await staffCompensationApiService.createPayment(grant.token, input);
               setPaymentModal(null);
               await reload(grant.token, month);
-              showToast('Movimento registrato', 'success');
+              showToast(t('comp.movementSaved', 'Movimento registrato'), 'success');
             } catch (err) { handleApiError(err); }
           }}
         />
@@ -445,7 +459,7 @@ export const StaffCompensation: React.FC<StaffCompensationProps> = ({ staffMembe
               await staffCompensationApiService.setOverride(grant.token, overrideModal, month, cents, note);
               setOverrideModal(null);
               await reload(grant.token, month);
-              showToast('Dovuto corretto', 'success');
+              showToast(t('comp.dueFixed', 'Dovuto corretto'), 'success');
             } catch (err) { handleApiError(err); }
           }}
         />
@@ -462,7 +476,7 @@ export const StaffCompensation: React.FC<StaffCompensationProps> = ({ staffMembe
               await staffCompensationApiService.updateProfile(grant.token, ratesModal, updates);
               setRatesModal(null);
               await reload(grant.token, month);
-              showToast('Tariffe salvate', 'success');
+              showToast(t('comp.ratesSaved', 'Tariffe salvate'), 'success');
             } catch (err) { handleApiError(err); }
           }}
         />
@@ -480,6 +494,7 @@ const PaymentSheet: React.FC<{
   onClose: () => void;
   onSubmit: (input: CreateCompensationPaymentInput) => Promise<void>;
 }> = ({ member, kind, month, onClose, onSubmit }) => {
+  const { t } = useTranslation('personale', { useSuspense: false });
   const [amount, setAmount] = useState('');
   const [paidOn, setPaidOn] = useState(todayIso());
   const [method, setMethod] = useState<'CONTANTI' | 'BONIFICO' | 'ALTRO' | ''>('');
@@ -492,7 +507,7 @@ const PaymentSheet: React.FC<{
     <ModalShell
       open
       onClose={onClose}
-      title={kind === 'ACCONTO' ? 'Acconto' : 'Saldo'}
+      title={kind === 'ACCONTO' ? t('comp.advance', 'Acconto') : t('comp.balance', 'Saldo')}
       subtitle={`${member.surname} ${member.name} · ${monthLabel(month)}`}
       bodyClassName="px-5 pb-5 pt-4 sm:px-6"
       footer={
@@ -508,29 +523,29 @@ const PaymentSheet: React.FC<{
           className={`${dsButton.primary} w-full`}
         >
           {saving && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
-          Registra
+          {t('comp.record', 'Registra')}
         </button>
       }
     >
       <div className="space-y-4">
-        <Field label="Importo" htmlFor="comp-amount" required>
+        <Field label={t('comp.amount', 'Importo')} htmlFor="comp-amount" required>
           <input id="comp-amount" inputMode="decimal" placeholder={`0,00 ${moneySymbol()}`} autoFocus value={amount}
             onChange={e => setAmount(e.target.value)} className={dsInput} />
         </Field>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Data" htmlFor="comp-paid-on">
+          <Field label={t('comp.date', 'Data')} htmlFor="comp-paid-on">
             <input id="comp-paid-on" type="date" value={paidOn} onChange={e => setPaidOn(e.target.value)} className={dsInput} />
           </Field>
-          <Field label="Metodo" htmlFor="comp-method">
+          <Field label={t('comp.methodLabel', 'Metodo')} htmlFor="comp-method">
             <select id="comp-method" value={method} onChange={e => setMethod(e.target.value as typeof method)} className={dsSelect}>
               <option value="">—</option>
-              <option value="CONTANTI">Contanti</option>
-              <option value="BONIFICO">Bonifico</option>
-              <option value="ALTRO">Altro</option>
+              <option value="CONTANTI">{methodLabel('CONTANTI', t)}</option>
+              <option value="BONIFICO">{methodLabel('BONIFICO', t)}</option>
+              <option value="ALTRO">{methodLabel('ALTRO', t)}</option>
             </select>
           </Field>
         </div>
-        <Field label="Nota" htmlFor="comp-note">
+        <Field label={t('comp.note', 'Nota')} htmlFor="comp-note">
           <input id="comp-note" value={note} onChange={e => setNote(e.target.value)} className={dsInput} />
         </Field>
       </div>
@@ -545,6 +560,7 @@ const OverrideSheet: React.FC<{
   onClose: () => void;
   onSubmit: (cents: number, note?: string) => Promise<void>;
 }> = ({ member, row, month, onClose, onSubmit }) => {
+  const { t } = useTranslation('personale', { useSuspense: false });
   const [amount, setAmount] = useState(centsToEuroInput(row?.dueSource === 'OVERRIDE' ? row.dueCents : null));
   const [note, setNote] = useState(row?.overrideNote ?? '');
   const [saving, setSaving] = useState(false);
@@ -554,7 +570,7 @@ const OverrideSheet: React.FC<{
     <ModalShell
       open
       onClose={onClose}
-      title="Correggi dovuto"
+      title={t('comp.fixDue', 'Correggi dovuto')}
       subtitle={`${member.surname} ${member.name} · ${monthLabel(month)}`}
       bodyClassName="px-5 pb-5 pt-4 sm:px-6"
       footer={
@@ -565,17 +581,17 @@ const OverrideSheet: React.FC<{
           className={`${dsButton.primary} w-full`}
         >
           {saving && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
-          Salva
+          {t('comp.save', 'Salva')}
         </button>
       }
     >
       <div className="space-y-4">
-        <Field label="Dovuto del mese" htmlFor="ovr-amount" required
-          hint="Sostituisce il calcolo automatico solo per questo mese.">
+        <Field label={t('comp.monthDue', 'Dovuto del mese')} htmlFor="ovr-amount" required
+          hint={t('comp.monthDueHint', 'Sostituisce il calcolo automatico solo per questo mese.')}>
           <input id="ovr-amount" inputMode="decimal" placeholder={`0,00 ${moneySymbol()}`} autoFocus value={amount}
             onChange={e => setAmount(e.target.value)} className={dsInput} />
         </Field>
-        <Field label="Nota" htmlFor="ovr-note">
+        <Field label={t('comp.note', 'Nota')} htmlFor="ovr-note">
           <input id="ovr-note" value={note} onChange={e => setNote(e.target.value)} className={dsInput} />
         </Field>
       </div>
@@ -589,6 +605,7 @@ const RatesSheet: React.FC<{
   onClose: () => void;
   onSubmit: (updates: { monthlyCents?: number | null; singleServiceCents?: number | null; doubleServiceCents?: number | null; notes?: string }) => Promise<void>;
 }> = ({ member, profile, onClose, onSubmit }) => {
+  const { t } = useTranslation('personale', { useSuspense: false });
   const isExtra = member.staffType === StaffType.EXTRA;
   const [monthly, setMonthly] = useState(centsToEuroInput(profile?.monthlyCents));
   const [single, setSingle] = useState(centsToEuroInput(profile?.singleServiceCents));
@@ -607,7 +624,7 @@ const RatesSheet: React.FC<{
     <ModalShell
       open
       onClose={onClose}
-      title="Tariffe"
+      title={t('comp.rates', 'Tariffe')}
       subtitle={`${member.surname} ${member.name}`}
       bodyClassName="px-5 pb-5 pt-4 sm:px-6"
       footer={
@@ -625,30 +642,30 @@ const RatesSheet: React.FC<{
           className={`${dsButton.primary} w-full`}
         >
           {saving && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
-          Salva
+          {t('comp.save', 'Salva')}
         </button>
       }
     >
       <div className="space-y-4">
         {isExtra ? (
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Servizio singolo" htmlFor="rate-single" hint="giorno con un servizio">
+            <Field label={t('comp.singleService', 'Servizio singolo')} htmlFor="rate-single" hint={t('comp.singleServiceHint', 'giorno con un servizio')}>
               <input id="rate-single" inputMode="decimal" placeholder={`0,00 ${moneySymbol()}`} value={single}
                 onChange={e => setSingle(e.target.value)} className={dsInput} />
             </Field>
-            <Field label="Servizio doppio" htmlFor="rate-double" hint="pranzo e cena, totale giorno">
+            <Field label={t('comp.doubleService', 'Servizio doppio')} htmlFor="rate-double" hint={t('comp.doubleServiceHint', 'pranzo e cena, totale giorno')}>
               <input id="rate-double" inputMode="decimal" placeholder={`0,00 ${moneySymbol()}`} value={double}
                 onChange={e => setDouble(e.target.value)} className={dsInput} />
             </Field>
           </div>
         ) : (
-          <Field label="Mensile" htmlFor="rate-monthly"
-            hint={member.staffType === StaffType.STAGIONALE ? 'pieno nei mesi di contratto' : undefined}>
+          <Field label={t('comp.monthly', 'Mensile')} htmlFor="rate-monthly"
+            hint={member.staffType === StaffType.STAGIONALE ? t('comp.monthlyHint', 'pieno nei mesi di contratto') : undefined}>
             <input id="rate-monthly" inputMode="decimal" placeholder={`0,00 ${moneySymbol()}`} value={monthly}
               onChange={e => setMonthly(e.target.value)} className={dsInput} />
           </Field>
         )}
-        <Field label="Nota" htmlFor="rate-notes">
+        <Field label={t('comp.note', 'Nota')} htmlFor="rate-notes">
           <input id="rate-notes" value={notes} onChange={e => setNotes(e.target.value)} className={dsInput} />
         </Field>
       </div>
