@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { AlertTriangle, CheckCircle, Info, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -32,22 +33,28 @@ const TONE_ICON: Record<ToastTone, LucideIcon> = {
 
 /** L'ancora fissa. Renderizzata sempre, così la regione aria-live esiste
  *  prima che arrivi il primo annuncio. */
-export const ToastViewport: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <div className="ds-toast-viewport" role="region" aria-label="Notifiche" aria-live="polite">
-    {children}
-  </div>
-);
+export const ToastViewport: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { t } = useTranslation(undefined, { useSuspense: false });
+  return (
+    <div className="ds-toast-viewport" role="region" aria-label={t('aria.notifications', 'Notifiche')} aria-live="polite">
+      {children}
+    </div>
+  );
+};
 
-const CloseButton: React.FC<{ onClick: () => void }> = ({ onClick }) => (
+const CloseButton: React.FC<{ onClick: () => void }> = ({ onClick }) => {
+  const { t } = useTranslation(undefined, { useSuspense: false });
+  return (
   <button
     type="button"
     onClick={onClick}
-    aria-label="Chiudi notifica"
+    aria-label={t('aria.closeToast', 'Chiudi notifica')}
     className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-action-fg)] transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
   >
     <X className="h-4 w-4" aria-hidden />
   </button>
-);
+  );
+};
 
 const ActionButton: React.FC<{
   label: string;

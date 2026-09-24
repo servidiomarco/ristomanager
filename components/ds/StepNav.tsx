@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { Check } from 'lucide-react';
 
 /* ── StepNav ──────────────────────────────────────────────────────────────
@@ -27,7 +28,8 @@ export const StepNav: React.FC<{
   current: number;
   onSelect: (index: number) => void;
   ariaLabel?: string;
-}> = ({ steps, current, onSelect, ariaLabel = 'Passi' }) => {
+}> = ({ steps, current, onSelect, ariaLabel }) => {
+  const { t } = useTranslation(undefined, { useSuspense: false });
   const navRef = React.useRef<HTMLElement>(null);
   // Su mobile la nav scorre e il passo attivo può stare fuori schermo: dopo
   // un «Avanti» sembra che il form non sia cambiato. Il passo attivo si
@@ -39,7 +41,7 @@ export const StepNav: React.FC<{
       ?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
   }, [current]);
   return (
-  <nav ref={navRef} className="flex gap-2 overflow-x-auto scrollbar-hide" aria-label={ariaLabel}>
+  <nav ref={navRef} className="flex gap-2 overflow-x-auto scrollbar-hide" aria-label={ariaLabel ?? t('aria.steps', 'Passi')}>
     {steps.map((step, i) => {
       const isCurrent = i === current;
       const isDone = i < current && !step.disabled;

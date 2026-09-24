@@ -1,5 +1,6 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
+import { displayLocale } from '../../utils/formatLocale';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 /* ── Calendario ───────────────────────────────────────────────────────────
@@ -23,12 +24,6 @@ export const startOfMonth = (d: Date): Date => new Date(d.getFullYear(), d.getMo
 /** Monday-first, the Italian week. `getDay()` is Sunday-first, hence the shift. */
 export const mondayIndex = (d: Date): number => (d.getDay() + 6) % 7;
 
-export const MONTHS = [
-  'Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
-  'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre',
-];
-export const WEEKDAYS = ['L', 'M', 'M', 'G', 'V', 'S', 'D'];
-
 const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 /* I nomi del calendario vengono da Intl nella lingua scelta, non dalle due
@@ -38,7 +33,9 @@ const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
    36px della cella e si leggono al volo. */
 export const useCalendarLabels = () => {
   const { i18n } = useTranslation();
-  const locale = (i18n.language || 'it').toLowerCase().startsWith('en') ? 'en-GB' : 'it-IT';
+  // displayLocale() è la stessa regola scritta una volta sola: qui era
+  // ricopiata, e una seconda copia è una seconda occasione di divergere.
+  const locale = displayLocale(i18n.language);
   return React.useMemo(() => {
     const month = new Intl.DateTimeFormat(locale, { month: 'long' });
     const weekday = new Intl.DateTimeFormat(locale, { weekday: 'short' });

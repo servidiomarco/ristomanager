@@ -149,7 +149,14 @@
     "mobileNav": "Mobile navigation",
     "hideMenu": "Hide menu",
     "closeMenu": "Close menu",
-    "notificationsUnread": "Notifications, {{n}} unread"
+    "notificationsUnread": "Notifications, {{n}} unread",
+    "back": "Back",
+    "searchField": "Search",
+    "clearSearch": "Clear the search",
+    "closeActions": "Close the actions",
+    "notifications": "Notifications",
+    "closeToast": "Dismiss the notification",
+    "steps": "Steps"
   },
   "entity": {
     "voiceAgent": "Voice agent",
@@ -249,5 +256,11 @@
     "min": "{{n}} min ago",
     "hours": "{{n}} h ago",
     "days": "{{n}} d ago"
+  },
+  "live": {
+    "connected": "Connected",
+    "disconnected": "Not connected",
+    "at": "Live {{ora}}",
+    "offline": "Offline"
   }
 }
