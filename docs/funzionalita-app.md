@@ -667,6 +667,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-24 | Banchetti, Recensioni, Pagamenti | Con la lingua inglese parlano inglese i pagamenti dei banchetti (acconti, saldi, metodi, residuo), la pagina Recensioni con gli esiti delle richieste, e le intestazioni della pagina Pagamenti. |
 | 2026-09-24 | Ricerca globale, Impostazioni | Con la lingua inglese parlano inglese la ricerca globale (⌘K), le note di prenotazione con le loro varianti e le chiusure programmate di sale e tavoli. Nella ricerca globale il chip di stato («Annullata», «No show», «Da confermare») ora prende nome e colore dalla stessa fonte di tutte le altre schermate, invece di riscriverseli. |
 | 2026-09-24 | Tutte le schermate | Con la lingua inglese parlano inglese anche gli elementi condivisi: il bottone Indietro delle schede, i campi di ricerca, le chiusure di finestre e fogli, i toast, la pillola «Connesso/Offline» e i passi dei wizard. Erano italiani dentro le primitive, quindi comparivano in italiano anche nelle pagine già tradotte. |
 | 2026-09-24 | Impostazioni (Integrazioni) | Con la lingua inglese parlano inglese le card di ricezione email (IMAP), SumUp e Revolut: credenziali, ambiente sandbox/produzione, prova di connessione e scelta del provider attivo. |

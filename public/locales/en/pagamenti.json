@@ -1,0 +1,12 @@
+{
+  "sectionAria": "Payments section",
+  "tabCassa": "Close",
+  "tabLinks": "Links",
+  "searchPlaceholder": "Search customer, phone, order…",
+  "searchAria": "Search",
+  "kpi": {
+    "incassato": "Taken",
+    "attesa": "Pending",
+    "residuo": "Outstanding bills"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "status": {
+    "sent": "Sent",
+    "failed": "Failed",
+    "sending": "Outcome not confirmed",
+    "skipped_consent": "Skipped: no consent",
+    "skipped_no_contact": "Skipped: no contact details",
+    "skipped_recent": "Skipped: asked recently already"
+  },
+  "errLoad": "Could not load",
+  "title": "Reviews",
+  "subtitle": "The requests sent to customers after their visit. Google profile reviews will appear here once the account is linked.",
+  "reload": "Refresh",
+  "offNotice": "The review request is off: switch it on from Settings → Reviews.",
+  "noPlaceId": "The Google profile Place ID is missing: without it the link does not exist and nothing goes out. Set it from Settings → Reviews.",
+  "retry": "Try again",
+  "empty": "No request yet: when a table closes its visit the customer gets the review link, and the request appears here.",
+  "sentRequests": "Requests sent",
+  "loading": "Loading…",
+  "showMore": "Show more",
+  "settingsHint": "Times, recipients and Place ID are set from Settings → Reviews."
+}

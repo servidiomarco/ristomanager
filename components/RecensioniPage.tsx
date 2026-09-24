@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { displayLocale } from '../utils/formatLocale';
 import { Star, Loader2, RefreshCw, Settings2 } from 'lucide-react';
 import { Callout, EmptyState, StatusPill, dsButton, dsIconButton, type PillTone } from './ds';
 import { SkeletonReviewList } from './SkeletonCards';
@@ -35,13 +37,14 @@ const formatWhen = (iso: string | null): string => {
     if (!iso) return '—';
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return '—';
-    return d.toLocaleString('it-IT', {
+    return d.toLocaleString(displayLocale(), {
         timeZone: sessionTimeZone(),
         day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
     });
 };
 
 export const RecensioniPage: React.FC = () => {
+    const { t } = useTranslation('recensioni', { useSuspense: false });
     const [requests, setRequests] = useState<ReviewRequestRow[]>([]);
     const [total, setTotal] = useState(0);
     const [requestsEnabled, setRequestsEnabled] = useState<boolean | null>(null);
@@ -64,7 +67,7 @@ export const RecensioniPage: React.FC = () => {
                 setGoogleReady(!!settings.google_place_id);
             }
         } catch (err: any) {
-            setError(err?.message || 'Errore nel caricamento');
+            setError(err?.message || t('errLoad', 'Errore nel caricamento'));
         } finally {
             setLoading(false);
         }
@@ -80,7 +83,7 @@ export const RecensioniPage: React.FC = () => {
             setRequests(prev => [...prev, ...more.requests]);
             setTotal(more.total);
         } catch (err: any) {
-            setError(err?.message || 'Errore nel caricamento');
+            setError(err?.message || t('errLoad', 'Errore nel caricamento'));
         } finally {
             setLoadingMore(false);
         }
@@ -90,17 +93,16 @@ export const RecensioniPage: React.FC = () => {
         <div className="space-y-4 p-4 sm:p-6 lg:p-8">
             <header className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                    <h1 className="text-[22px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)] sm:text-[26px]">Recensioni</h1>
+                    <h1 className="text-[22px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)] sm:text-[26px]">{t('title', 'Recensioni')}</h1>
                     <p className="mt-1 text-[15px] text-[var(--ds-text-muted)]">
-                        Le richieste inviate ai clienti dopo la visita. Le recensioni del profilo
-                        Google compariranno qui col collegamento dell'account.
+                        {t('subtitle', "Le richieste inviate ai clienti dopo la visita. Le recensioni del profilo Google compariranno qui col collegamento dell'account.")}
                     </p>
                 </div>
                 <button
                     type="button"
                     onClick={() => { setLoading(true); load(); }}
-                    aria-label="Aggiorna"
-                    title="Aggiorna"
+                    aria-label={t('reload', 'Aggiorna')}
+                    title={t('reload', 'Aggiorna')}
                     className={dsIconButton}
                 >
                     <RefreshCw className="h-4 w-4" aria-hidden />
@@ -109,13 +111,12 @@ export const RecensioniPage: React.FC = () => {
 
             {requestsEnabled === false && (
                 <Callout tone="pending" icon={Settings2}>
-                    La richiesta di recensione è spenta: si accende da Impostazioni → Recensioni.
+                    {t('offNotice', 'La richiesta di recensione è spenta: si accende da Impostazioni → Recensioni.')}
                 </Callout>
             )}
             {requestsEnabled === true && googleReady === false && (
                 <Callout tone="pending" icon={Settings2}>
-                    Manca il Place ID del profilo Google: senza, il link non esiste e non parte nulla.
-                    Si imposta da Impostazioni → Recensioni.
+                    {t('noPlaceId', 'Manca il Place ID del profilo Google: senza, il link non esiste e non parte nulla. Si imposta da Impostazioni → Recensioni.')}
                 </Callout>
             )}
 
@@ -127,7 +128,7 @@ export const RecensioniPage: React.FC = () => {
                     tone="critical"
                     action={
                         <button type="button" className={dsButton.quiet} onClick={() => { setLoading(true); load(); }}>
-                            Riprova
+                            {t('retry', 'Riprova')}
                         </button>
                     }
                 >
@@ -141,18 +142,19 @@ export const RecensioniPage: React.FC = () => {
                 </section>
             ) : requests.length === 0 ? (
                 <EmptyState icon={Star}>
-                    Nessuna richiesta ancora: quando un tavolo chiude la visita, il cliente
-                    riceve il link per recensire e la richiesta compare qui.
+                    {t('empty', 'Nessuna richiesta ancora: quando un tavolo chiude la visita, il cliente riceve il link per recensire e la richiesta compare qui.')}
                 </EmptyState>
             ) : (
                 <section className="overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
                     <div className="flex items-center justify-between border-b border-[var(--ds-border)] px-4 py-3">
-                        <h2 className="text-[13px] font-semibold text-[var(--ds-text-secondary)]">Richieste inviate</h2>
+                        <h2 className="text-[13px] font-semibold text-[var(--ds-text-secondary)]">{t('sentRequests', 'Richieste inviate')}</h2>
                         <span className="text-[13px] tabular-nums text-[var(--ds-text-muted)]">{total}</span>
                     </div>
                     <ul className="divide-y divide-[var(--ds-border)]">
                         {requests.map(r => {
-                            const meta = STATUS_META[r.status] ?? { label: r.status, tone: 'neutral' as PillTone };
+                            const meta = STATUS_META[r.status];
+                            const etichetta = meta ? t(`status.${r.status}`, meta.label) : r.status;
+                            const tono: PillTone = meta?.tone ?? 'neutral';
                             return (
                                 <li key={r.id} className="flex items-center gap-3 px-4 py-3">
                                     <div className="min-w-0 flex-1">
@@ -163,7 +165,7 @@ export const RecensioniPage: React.FC = () => {
                                             {r.status === 'failed' && r.error ? ` · ${r.error}` : ''}
                                         </p>
                                     </div>
-                                    <StatusPill tone={meta.tone}>{meta.label}</StatusPill>
+                                    <StatusPill tone={tono}>{etichetta}</StatusPill>
                                 </li>
                             );
                         })}
@@ -172,7 +174,7 @@ export const RecensioniPage: React.FC = () => {
                         <div className="flex justify-center border-t border-[var(--ds-border)] px-4 py-3">
                             <button type="button" disabled={loadingMore} onClick={loadMore} className={dsButton.secondary}>
                                 {loadingMore && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
-                                {loadingMore ? 'Caricamento…' : 'Mostra altre'}
+                                {loadingMore ? t('loading', 'Caricamento…') : t('showMore', 'Mostra altre')}
                             </button>
                         </div>
                     )}
@@ -181,7 +183,7 @@ export const RecensioniPage: React.FC = () => {
 
             <p className="flex items-center gap-1.5 text-[13px] text-[var(--ds-text-muted)]">
                 <Settings2 className="h-3.5 w-3.5" aria-hidden />
-                Orari, destinatari e Place ID si regolano da Impostazioni → Recensioni.
+                {t('settingsHint', 'Orari, destinatari e Place ID si regolano da Impostazioni → Recensioni.')}
             </p>
         </div>
     );

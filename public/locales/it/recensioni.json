@@ -1,0 +1,22 @@
+{
+  "status": {
+    "sent": "Inviata",
+    "failed": "Non riuscita",
+    "sending": "Esito non confermato",
+    "skipped_consent": "Saltata: senza consenso",
+    "skipped_no_contact": "Saltata: senza recapiti",
+    "skipped_recent": "Saltata: già chiesta di recente"
+  },
+  "errLoad": "Errore nel caricamento",
+  "title": "Recensioni",
+  "subtitle": "Le richieste inviate ai clienti dopo la visita. Le recensioni del profilo Google compariranno qui col collegamento dell'account.",
+  "reload": "Aggiorna",
+  "offNotice": "La richiesta di recensione è spenta: si accende da Impostazioni → Recensioni.",
+  "noPlaceId": "Manca il Place ID del profilo Google: senza, il link non esiste e non parte nulla. Si imposta da Impostazioni → Recensioni.",
+  "retry": "Riprova",
+  "empty": "Nessuna richiesta ancora: quando un tavolo chiude la visita, il cliente riceve il link per recensire e la richiesta compare qui.",
+  "sentRequests": "Richieste inviate",
+  "loading": "Caricamento…",
+  "showMore": "Mostra altre",
+  "settingsHint": "Orari, destinatari e Place ID si regolano da Impostazioni → Recensioni."
+}
