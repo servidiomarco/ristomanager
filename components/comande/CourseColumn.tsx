@@ -7,7 +7,7 @@ import { StatusPill } from '../ds';
 import {
   BAR_COURSE_NO,
   DESSERT_COURSE_NO,
-  courseBadge, MAX_COURSES, cartForCourse, cartSum, cartUnitCents, courseLabel,
+  courseBadge, MAX_COURSES, cartForCourse, cartSum, cartUnitCents, courseContext, courseLabel,
   courseStatus, euro, isSent, itemsForCourse, rowCount, rowCountLabel, weightLabel,
   type CartLine,
   isSystemLine,
@@ -210,7 +210,7 @@ export const CourseList: React.FC<CourseListProps> = ({
                 type="button"
                 onClick={() => onMoveCourse!(n)}
                 disabled={busy}
-                aria-label={t('moveCourseAria', { uscita: courseLabel(n, t) })}
+                aria-label={t('moveCourseAria', { uscita: courseLabel(n, t), context: courseContext(n) })}
                 title={t('pickCourseHint')}
                 {...grip({ kind: 'course', from: n, count: draftRows.length + serverRows.filter(i => i.status === 'DRAFT').length })}
                 className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] ring-1 ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
