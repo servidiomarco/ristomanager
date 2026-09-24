@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
+import { displayLocale } from '../utils/formatLocale';
 import { X, ChevronLeft, ChevronRight, RefreshCw, Filter, Search } from 'lucide-react';
 import { ModalShell, dsInput, dsSelect, dsIconButton, dsStepArrow } from './ds';
 import { ActivityLog, ActivityAction, ResourceType, LogFilters } from '../types';
@@ -9,6 +11,10 @@ interface ActivityLogsProps {
   isOpen: boolean;
   onClose: () => void;
 }
+
+/* I valori (CREATE, RESERVATION, …) sono dell'enum e finiscono nella query:
+   si traduce l'etichetta, mai il valore. */
+type TFunc = (key: string, defaultValue: string, options?: Record<string, unknown>) => string;
 
 const ACTION_LABELS: Record<ActivityAction, string> = {
   [ActivityAction.CREATE]: 'Creazione',
@@ -34,6 +40,12 @@ const RESOURCE_LABELS: Record<ResourceType, string> = {
   [ResourceType.SETTINGS]: 'Impostazioni'
 };
 
+const actionLabel = (a: ActivityAction, t?: TFunc): string =>
+  t ? t(`action.${a}`, ACTION_LABELS[a]) : ACTION_LABELS[a];
+
+const resourceLabel = (r: ResourceType, t?: TFunc): string =>
+  t ? t(`res.${r}`, RESOURCE_LABELS[r]) : RESOURCE_LABELS[r];
+
 const ACTION_COLORS: Record<ActivityAction, string> = {
   [ActivityAction.CREATE]: 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]',
   [ActivityAction.UPDATE]: 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]',
@@ -43,6 +55,7 @@ const ACTION_COLORS: Record<ActivityAction, string> = {
 };
 
 export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) => {
+  const { t } = useTranslation('log', { useSuspense: false });
   const [logs, setLogs] = useState<ActivityLog[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -91,7 +104,7 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
       setLogs(response.logs);
       setTotal(response.total);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch logs');
+      setError(err instanceof Error ? err.message : t('errLoad', 'Errore nel caricamento dei log'));
     } finally {
       setLoading(false);
     }
@@ -128,7 +141,7 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
-    return date.toLocaleString('it-IT', {
+    return date.toLocaleString(displayLocale(), {
       day: '2-digit',
       month: '2-digit',
       year: 'numeric',
@@ -155,8 +168,8 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
     <ModalShell
       open={isOpen}
       onClose={onClose}
-      title="Log Attività"
-      subtitle={`${total} ${total === 1 ? 'operazione registrata' : 'operazioni registrate'}`}
+      title={t('title', 'Log attività')}
+      subtitle={t('count', '{{count}} operazioni registrate', { count: total })}
       size="fluid"
       fixedHeight
       bodyClassName="px-5 pb-5 sm:px-6"
@@ -164,14 +177,14 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
         <div>
           <div className="mb-3 flex items-center gap-2">
             <Filter className="h-3.5 w-3.5 text-[var(--ds-text-muted)]" aria-hidden />
-            <span className="text-[13px] font-semibold text-[var(--ds-text-secondary)]">Filtri</span>
+            <span className="text-[13px] font-semibold text-[var(--ds-text-secondary)]">{t('filters', 'Filtri')}</span>
             {hasFilters && (
               <button
                 type="button"
                 onClick={resetFilters}
                 className="ml-2 rounded-[var(--ds-radius-control)] text-[13px] text-[var(--ds-text-primary)] underline underline-offset-2 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               >
-                Azzera filtri
+                {t('clearFilters', 'Azzera filtri')}
               </button>
             )}
             {/* L'aggiornamento sta con i filtri, non nella testata: è la
@@ -180,21 +193,21 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
               type="button"
               onClick={fetchLogs}
               className={`${dsIconButton} ml-auto`}
-              title="Aggiorna"
-              aria-label="Aggiorna"
+              title={t('reload', 'Aggiorna')}
+              aria-label={t('reload', 'Aggiorna')}
             >
               <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} aria-hidden />
             </button>
           </div>
           <div className="relative mb-3">
             <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ds-text-muted)]" aria-hidden />
-            <label htmlFor="log-search" className="sr-only">Cerca nei log</label>
+            <label htmlFor="log-search" className="sr-only">{t('searchAria', 'Cerca nei log')}</label>
             <input
               id="log-search"
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Cerca in tutte le prenotazioni (nome, email, dettagli)..."
+              placeholder={t('searchPlaceholder', 'Cerca in tutte le prenotazioni (nome, email, dettagli)...')}
               className={`${dsInput} bg-[var(--ds-surface)] pl-11 pr-11`}
             />
             {search && (
@@ -202,8 +215,8 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
                 type="button"
                 onClick={() => setSearch('')}
                 className="absolute right-3 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                title="Cancella ricerca"
-                aria-label="Cancella ricerca"
+                title={t('clearSearch', 'Cancella ricerca')}
+                aria-label={t('clearSearch', 'Cancella ricerca')}
               >
                 <X className="h-3.5 w-3.5" aria-hidden />
               </button>
@@ -216,10 +229,10 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
                 setSelectedUserId(e.target.value ? parseInt(e.target.value, 10) : undefined);
                 setPage(1);
               }}
-              aria-label="Filtra per utente"
+              aria-label={t('filterUser', 'Filtra per utente')}
               className={`${dsSelect} bg-[var(--ds-surface)]`}
             >
-              <option value="">Tutti gli utenti</option>
+              <option value="">{t('allUsers', 'Tutti gli utenti')}</option>
               {users.map(user => (
                 <option key={user.id} value={user.id}>{user.name || user.email}</option>
               ))}
@@ -231,12 +244,12 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
                 setSelectedResourceType(e.target.value as ResourceType || undefined);
                 setPage(1);
               }}
-              aria-label="Filtra per risorsa"
+              aria-label={t('filterResource', 'Filtra per risorsa')}
               className={`${dsSelect} bg-[var(--ds-surface)]`}
             >
-              <option value="">Tutte le risorse</option>
+              <option value="">{t('allResources', 'Tutte le risorse')}</option>
               {Object.values(ResourceType).map(type => (
-                <option key={type} value={type}>{RESOURCE_LABELS[type]}</option>
+                <option key={type} value={type}>{resourceLabel(type, t)}</option>
               ))}
             </select>
 
@@ -246,16 +259,16 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
                 setSelectedAction(e.target.value as ActivityAction || undefined);
                 setPage(1);
               }}
-              aria-label="Filtra per azione"
+              aria-label={t('filterAction', 'Filtra per azione')}
               className={`${dsSelect} bg-[var(--ds-surface)]`}
             >
-              <option value="">Tutte le azioni</option>
+              <option value="">{t('allActions', 'Tutte le azioni')}</option>
               {Object.values(ActivityAction).map(action => (
-                <option key={action} value={action}>{ACTION_LABELS[action]}</option>
+                <option key={action} value={action}>{actionLabel(action, t)}</option>
               ))}
             </select>
 
-            <label htmlFor="log-from" className="sr-only">Da</label>
+            <label htmlFor="log-from" className="sr-only">{t('from', 'Da')}</label>
             <input
               id="log-from"
               type="date"
@@ -264,11 +277,11 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
                 setFromDate(e.target.value);
                 setPage(1);
               }}
-              placeholder="Da"
+              placeholder={t('from', 'Da')}
               className={`${dsInput} bg-[var(--ds-surface)]`}
             />
 
-            <label htmlFor="log-to" className="sr-only">A</label>
+            <label htmlFor="log-to" className="sr-only">{t('to', 'A')}</label>
             <input
               id="log-to"
               type="date"
@@ -277,13 +290,13 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
                 setToDate(e.target.value);
                 setPage(1);
               }}
-              placeholder="A"
+              placeholder={t('to', 'A')}
               className={`${dsInput} bg-[var(--ds-surface)]`}
             />
           </div>
         </div>
       }
-      footerStart={totalPages > 1 ? `Pagina ${page} di ${totalPages}` : undefined}
+      footerStart={totalPages > 1 ? t('page', 'Pagina {{n}} di {{totale}}', { n: page, totale: totalPages }) : undefined}
       footer={totalPages > 1 ? (
         <>
           <button
@@ -291,7 +304,7 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
             onClick={() => setPage(p => Math.max(1, p - 1))}
             disabled={page === 1}
             className={dsStepArrow}
-            aria-label="Pagina precedente"
+            aria-label={t('prevPage', 'Pagina precedente')}
           >
             <ChevronLeft className="h-4 w-4" aria-hidden />
           </button>
@@ -300,7 +313,7 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
             onClick={() => setPage(p => Math.min(totalPages, p + 1))}
             disabled={page === totalPages}
             className={dsStepArrow}
-            aria-label="Pagina successiva"
+            aria-label={t('nextPage', 'Pagina successiva')}
           >
             <ChevronRight className="h-4 w-4" aria-hidden />
           </button>
@@ -318,20 +331,20 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
         </div>
       ) : logs.length === 0 ? (
         <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-6 py-12 text-center text-[14px] text-[var(--ds-text-muted)] shadow-[var(--ds-shadow-card)]">
-          Nessun log trovato
+          {t('empty', 'Nessun log trovato')}
         </div>
       ) : (
         <div className="overflow-x-auto rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
           <table className="w-full">
             <thead className="sticky top-0 bg-[var(--ds-surface-row)]">
               <tr>
-                <th className={th}>Data/Ora</th>
-                <th className={th}>Utente</th>
-                <th className={th}>Azione</th>
-                <th className={th}>Risorsa</th>
-                <th className={th}>Nome</th>
-                <th className={th}>Dettagli</th>
-                <th className={th}>Stato</th>
+                <th className={th}>{t('col.when', 'Data/Ora')}</th>
+                <th className={th}>{t('col.user', 'Utente')}</th>
+                <th className={th}>{t('col.action', 'Azione')}</th>
+                <th className={th}>{t('col.resource', 'Risorsa')}</th>
+                <th className={th}>{t('col.name', 'Nome')}</th>
+                <th className={th}>{t('col.details', 'Dettagli')}</th>
+                <th className={th}>{t('col.status', 'Stato')}</th>
               </tr>
             </thead>
             <tbody>
@@ -346,11 +359,11 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
                   <td className="px-4 py-3">
                     <span className={`inline-flex items-center gap-1 rounded-[var(--ds-radius-control)] px-2 py-0.5 text-[11px] font-medium ${ACTION_COLORS[log.action]}`}>
                       <span className="h-1.5 w-1.5 rounded-full bg-current opacity-60" />
-                      {ACTION_LABELS[log.action]}
+                      {actionLabel(log.action, t)}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-[14px] text-[var(--ds-text-muted)]">
-                    {RESOURCE_LABELS[log.resource_type]}
+                    {resourceLabel(log.resource_type, t)}
                   </td>
                   <td className="max-w-[150px] truncate px-4 py-3 text-[14px] text-[var(--ds-text-primary)]" title={log.resource_name || '-'}>
                     {log.resource_name || '-'}
@@ -365,7 +378,7 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
                         : 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)]'
                     }`}>
                       <span className="h-1.5 w-1.5 rounded-full bg-current opacity-60" />
-                      {log.status === 'SUCCESS' ? 'OK' : 'Errore'}
+                      {log.status === 'SUCCESS' ? t('ok', 'OK') : t('failed', 'Errore')}
                     </span>
                   </td>
                 </tr>

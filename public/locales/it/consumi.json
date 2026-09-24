@@ -1,0 +1,47 @@
+{
+  "feature": {
+    "dashboard_report": "Report Dashboard",
+    "banquet_menu": "Proposta menu banchetto",
+    "suggest_reply": "Risposta suggerita messaggi",
+    "whatsapp_agent": "Agente WhatsApp"
+  },
+  "errLoad": "Errore nel caricamento dei consumi",
+  "subtitle": "Sofia (ElevenLabs) e le analisi AI (Gemini) a confronto.",
+  "reload": "Aggiorna",
+  "voice": {
+    "title": "Sofia · Agente vocale (ElevenLabs)",
+    "subtitle": "Ultimi {{giorni}} giorni · chiamate dalla nostra cronologia, quota live dal piano ElevenLabs",
+    "calls": "Chiamate ({{giorni}}g)",
+    "duration": "Durata ({{giorni}}g)",
+    "credits": "Crediti usati",
+    "quotaReset": "Reset quota",
+    "monthMinutes": "Minuti di {{mese}}",
+    "projected": "A fine mese ~{{minuti}} min · ricavo stimato {{ricavo}}",
+    "soFar": "Finora: costo {{costo}} · ricavo {{ricavo}}",
+    "extraMin": "({{minuti}} min extra)",
+    "margin": " · margine {{margine}}",
+    "pricedCalls": "Costo noto per {{conosciute}} chiamate su {{totali}}: le altre sono precedenti al recupero dello storico.",
+    "plan": "Piano: {{prezzo}} al mese, {{minuti}} minuti inclusi, poi {{extra}}/min. Non contano le chiamate sotto i 10 secondi.",
+    "quotaError": "Quota ElevenLabs non disponibile: {{errore}}. Le statistiche chiamate restano valide.",
+    "callsTooltip": "{{n}} chiamate",
+    "callsAxis": "Chiamate"
+  },
+  "ai": {
+    "title": "Analisi AI (modelli di testo)",
+    "subtitle": "Ultimi {{giorni}} giorni · costi stimati dal listino per modello, convertiti a {{cambio}} €/$ — la fattura Anthropic è in dollari",
+    "tokens": "Token totali ({{giorni}}g)",
+    "cost": "Costo ({{giorni}}g)",
+    "avgCost": "Costo medio",
+    "generations": "Generazioni",
+    "tokensTooltip": "{{n}} token",
+    "tokensAxis": "Token",
+    "colFeature": "Funzione",
+    "colGen": "Generazioni",
+    "colTokens": "Token",
+    "colCost": "Costo",
+    "noPrice": "Modello senza listino in tabella",
+    "nd": "n/d"
+  },
+  "note": "Nota: ElevenLabs misura in crediti/caratteri del piano e i valori quota sono in tempo reale; Gemini è misurato in token e il conteggio parte da quando è stato attivato il tracciamento, quindi non include le generazioni precedenti.",
+  "total": "{{n}} totali"
+}
