@@ -53,6 +53,13 @@ export const ordinal = (n: number, t?: TFunc): string => {
     return t && n >= 1 && n <= 6 ? t(`courses.ord${n}`, it) : it;
 };
 
+/** Il context i18next dell'uscita, per le frasi che portano un articolo o
+ *  un accordo: «la 2ª uscita … eliminata», ma «il Bar … eliminato» e «i
+ *  Dolci … eliminati». Le chiavi con varianti `_bar` / `_dessert` le usano;
+ *  le altre (e le lingue che non ne hanno bisogno) ricadono sulla base. */
+export const courseContext = (n: number): 'bar' | 'dessert' | undefined =>
+    isBarCourse(n) ? 'bar' : isDessertCourse(n) ? 'dessert' : undefined;
+
 /** «1ª uscita» … «6ª uscita», «Bar», «Dolci». */
 export const courseLabel = (n: number, t?: TFunc): string => {
     if (isBarCourse(n) || isDessertCourse(n)) return ordinal(n, t);
