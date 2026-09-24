@@ -77,5 +77,28 @@
   "printSelection": "Stampa selezione",
   "shareSelection": "Condividi selezione",
   "deleteSelection": "Elimina selezione",
-  "exitSelection": "Esci dalla selezione"
+  "exitSelection": "Esci dalla selezione",
+  "forn": {
+    "errCreate": "Errore durante la creazione",
+    "errSave": "Errore durante il salvataggio",
+    "title": "Gestione fornitori",
+    "subtitle": "Un fornitore può servire più categorie",
+    "add": "Aggiungi fornitore",
+    "name": "Nome",
+    "namePlaceholder": "Nome fornitore",
+    "categories": "Categorie servite",
+    "phone": "Telefono",
+    "note": "Nota",
+    "notes": "Note",
+    "optional": "Opzionale",
+    "optionalPlural": "Opzionali",
+    "addButton": "Aggiungi",
+    "empty": "Nessun fornitore. Aggiungine uno qui sopra.",
+    "cancel": "Annulla",
+    "save": "Salva",
+    "edit": "Modifica {{nome}}",
+    "delete": "Elimina {{nome}}",
+    "confirmDelete": "Eliminare? I prodotti collegati resteranno senza fornitore.",
+    "deleteButton": "Elimina"
+  }
 }
