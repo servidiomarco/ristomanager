@@ -667,6 +667,9 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-24 | Prenotazioni, Inventario | Con la lingua inglese parlano inglese la stampa della lista prenotazioni e la stampa dell'inventario, dialogo e foglio: i due fogli sono il contenuto stesso della pagina, quindi escono nella lingua dell'operatore. L'ordine alfabetico di prodotti e tavoli segue le regole della lingua scelta. |
+| 2026-09-24 | Banchetti, Recensioni, Pagamenti | Con la lingua inglese parlano inglese i pagamenti dei banchetti (acconti, saldi, metodi, residuo), la pagina Recensioni con gli esiti delle richieste, e le intestazioni della pagina Pagamenti. |
+| 2026-09-24 | Banchetti, Recensioni, Pagamenti | Con la lingua inglese parlano inglese i pagamenti dei banchetti (acconti, saldi, metodi, residuo), la pagina Recensioni con gli esiti delle richieste, e le intestazioni della pagina Pagamenti. |
 | 2026-09-24 | Comande, Cucina e Passe | Le frasi sulle uscite Bar e Dolci si accordano: «Sposta il Bar», «Elimina i Dolci», «Bar eliminato», «Spostato nei Dolci», «Ripeti tutto nel Bar» — non più «la Bar» o «Dolci eliminata». |
 | 2026-09-24 | Ricerca globale, Impostazioni | Con la lingua inglese parlano inglese la ricerca globale (⌘K), le note di prenotazione con le loro varianti e le chiusure programmate di sale e tavoli. Nella ricerca globale il chip di stato («Annullata», «No show», «Da confermare») ora prende nome e colore dalla stessa fonte di tutte le altre schermate, invece di riscriverseli. |
 | 2026-09-24 | Tutte le schermate | Con la lingua inglese parlano inglese anche gli elementi condivisi: il bottone Indietro delle schede, i campi di ricerca, le chiusure di finestre e fogli, i toast, la pillola «Connesso/Offline» e i passi dei wizard. Erano italiani dentro le primitive, quindi comparivano in italiano anche nelle pagine già tradotte. |

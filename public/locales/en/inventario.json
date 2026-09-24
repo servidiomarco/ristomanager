@@ -93,5 +93,37 @@
   "close": "Close",
   "add": "Add",
   "cancel": "Cancel",
-  "saveProduct": "Save product"
+  "saveProduct": "Save product",
+  "stampa": {
+    "area": {
+      "CUCINA": "Kitchen",
+      "SALA": "Front of house"
+    },
+    "title": "Print the inventory",
+    "cancel": "Cancel",
+    "print": "Print",
+    "what": "What to print",
+    "wholeArea": "The whole area (total per product)",
+    "onlyOne": "{{posto}} only",
+    "category": "Category",
+    "allCategories": "All categories",
+    "uncategorized": "No category",
+    "totalAllAreas": "Total (all areas)",
+    "areaFallback": "Area",
+    "categoryFallback": "Category",
+    "wholeAreaShort": "The whole area",
+    "counts": "{{prodotti}} · {{sezioni}}",
+    "products": "{{count}} products",
+    "products_one": "{{count}} product",
+    "sections": "{{count}} sections",
+    "sections_one": "{{count}} section",
+    "sheetTitle": "Inventory — {{area}}",
+    "empty": "No product matches the filters.",
+    "colProduct": "Product",
+    "colUnit": "Unit",
+    "colQtyTotal": "Total qty",
+    "colQty": "Quantity",
+    "colSpread": "Spread",
+    "printedOn": "Printed on {{quando}}"
+  }
 }

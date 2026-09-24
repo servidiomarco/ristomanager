@@ -364,5 +364,46 @@
     "notePlaceholder": "Note (e.g. 48–52°C at the core)",
     "englishPlaceholder": "English (e.g. Rare)",
     "englishHint": "Translation for the waiter: it does not reach the kitchen"
+  },
+  "bpay": {
+    "type": {
+      "DEPOSIT": "Deposit",
+      "BALANCE": "Balance",
+      "OTHER": "Other"
+    },
+    "method": {
+      "CASH": "Cash",
+      "CARD": "Card",
+      "TRANSFER": "Bank transfer",
+      "OTHER": "Other"
+    },
+    "errLoad": "Could not load the payments",
+    "needDate": "Enter the payment date",
+    "errSave": "The payment was not recorded",
+    "confirmDelete": "Delete this payment?",
+    "errDelete": "The payment was not deleted",
+    "title": "Payments",
+    "confirmBanquet": "Confirm the event",
+    "stayQuote": "Keep it a quote",
+    "totalDue": "Total owed",
+    "discount": "Discount {{sconto}}: −{{importo}}",
+    "alreadyPaid": "Already paid",
+    "count": "{{count}} payments",
+    "count_one": "{{count}} payment",
+    "remaining": "Outstanding",
+    "settled": "Settled",
+    "record": "Record a payment",
+    "none": "No payment recorded.",
+    "recordedBy": "Recorded by {{chi}}",
+    "delete": "Delete",
+    "newPayment": "New payment",
+    "amount": "Amount ({{valuta}}) *",
+    "date": "Date *",
+    "type2": "Type",
+    "method2": "Method",
+    "notes": "Notes (optional)",
+    "notesPlaceholder": "e.g. Transfer reference, receipt no. …",
+    "cancel": "Cancel",
+    "submit": "Record"
   }
 }

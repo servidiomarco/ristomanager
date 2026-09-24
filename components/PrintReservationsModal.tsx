@@ -1,4 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
+import { displayLocale } from '../utils/formatLocale';
 import { createPortal } from 'react-dom';
 import { ModalShell, dsInput, dsSelect, dsButton, Field, SegmentedControl } from './ds';
 import { Reservation, Shift, Room, Table, ArrivalStatus, BanquetMenu } from '../types';
@@ -22,7 +24,7 @@ interface Props {
 
 const formatPrintDate = (dateStr: string): string => {
   const d = new Date(`${dateStr}T12:00:00`);
-  return d.toLocaleDateString('it-IT', {
+  return d.toLocaleDateString(displayLocale(), {
     weekday: 'long',
     day: 'numeric',
     month: 'long',
@@ -40,6 +42,7 @@ export const PrintReservationsModal: React.FC<Props> = ({
   initialDate,
   initialShift,
 }) => {
+  const { t } = useTranslation(['prenotazioni', 'common'], { useSuspense: false });
   const { hasPermission } = useAuth();
   const canViewBanquetPrice = hasPermission('banquet:view_price');
   const [printDate, setPrintDate] = useState(initialDate);
@@ -93,7 +96,7 @@ export const PrintReservationsModal: React.FC<Props> = ({
         const tb = b.table_id ? tableById.get(b.table_id)?.name ?? '' : '';
         if (!ta && tb) return 1;
         if (ta && !tb) return -1;
-        const byTable = ta.localeCompare(tb, 'it', { numeric: true, sensitivity: 'base' });
+        const byTable = ta.localeCompare(tb, displayLocale(), { numeric: true, sensitivity: 'base' });
         if (byTable !== 0) return byTable;
         return a.reservation_time.localeCompare(b.reservation_time);
       });
@@ -111,11 +114,11 @@ export const PrintReservationsModal: React.FC<Props> = ({
   const arrivedCount = filteredReservations.filter(r => isSeated(r)).length;
 
   const shiftLabel = printShift === 'ALL'
-    ? 'Tutti i turni'
-    : printShift === Shift.LUNCH ? 'Pranzo' : 'Cena';
+    ? t('stampa.allShifts', 'Tutti i turni')
+    : printShift === Shift.LUNCH ? t('common:shift.lunch', 'Pranzo') : t('common:shift.dinner', 'Cena');
   const roomLabel = printRoomId === 'ALL'
-    ? 'Tutte le sale'
-    : (rooms.find(r => r.id === printRoomId)?.name || 'Sala');
+    ? t('stampa.allRooms', 'Tutte le sale')
+    : (rooms.find(r => r.id === printRoomId)?.name || t('stampa.room', 'Sala'));
 
   if (!isOpen) return null;
 
@@ -132,7 +135,7 @@ export const PrintReservationsModal: React.FC<Props> = ({
         title={
           <span className="inline-flex items-center gap-2">
             <Printer className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-secondary)]" aria-hidden />
-            Stampa Prenotazioni
+            {t('stampa.title', 'Stampa prenotazioni')}
           </span>
         }
         size="md"
@@ -143,7 +146,7 @@ export const PrintReservationsModal: React.FC<Props> = ({
         footer={
           <>
             <button type="button" onClick={onClose} className={dsButton.secondary}>
-              Annulla
+              {t('stampa.cancel', 'Annulla')}
             </button>
             <button
               type="button"
@@ -152,14 +155,14 @@ export const PrintReservationsModal: React.FC<Props> = ({
               className={dsButton.primary}
             >
               <Printer className="h-4 w-4" aria-hidden />
-              Stampa
+              {t('stampa.print', 'Stampa')}
             </button>
           </>
         }
       >
         <div className="space-y-4 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)] sm:p-5">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label="Data" htmlFor="print-date">
+            <Field label={t('stampa.date', 'Data')} htmlFor="print-date">
               <input
                 id="print-date"
                 type="date"
@@ -168,19 +171,19 @@ export const PrintReservationsModal: React.FC<Props> = ({
                 className={dsInput}
               />
             </Field>
-            <Field label="Turno">
+            <Field label={t('stampa.shift', 'Turno')}>
               <SegmentedControl<Shift | 'ALL'>
                 ariaLabel="Turno"
                 value={printShift}
                 onChange={setPrintShift}
                 options={[
-                  { value: 'ALL' as const, label: 'Tutti' },
-                  { value: Shift.LUNCH, label: 'Pranzo' },
-                  { value: Shift.DINNER, label: 'Cena' },
+                  { value: 'ALL' as const, label: t('stampa.all', 'Tutti') },
+                  { value: Shift.LUNCH, label: t('common:shift.lunch', 'Pranzo') },
+                  { value: Shift.DINNER, label: t('common:shift.dinner', 'Cena') },
                 ]}
               />
             </Field>
-            <Field label="Sala" htmlFor="print-room">
+            <Field label={t('stampa.room', 'Sala')} htmlFor="print-room">
               <select
                 id="print-room"
                 value={printRoomId === 'ALL' ? 'ALL' : String(printRoomId)}
@@ -193,27 +196,27 @@ export const PrintReservationsModal: React.FC<Props> = ({
                 ))}
               </select>
             </Field>
-            <Field label="Stato arrivo" htmlFor="print-arrival">
+            <Field label={t('stampa.arrival', 'Stato arrivo')} htmlFor="print-arrival">
               <select
                 id="print-arrival"
                 value={printArrival}
                 onChange={(e) => setPrintArrival(e.target.value as ArrivalStatus | 'ALL')}
                 className={dsSelect}
               >
-                <option value="ALL">Tutti</option>
+                <option value="ALL">{t('stampa.all', 'Tutti')}</option>
                 <option value={ArrivalStatus.WAITING}>In attesa</option>
-                <option value={ArrivalStatus.ARRIVED}>Arrivati</option>
-                <option value={ArrivalStatus.DEPARTED}>Liberati</option>
+                <option value={ArrivalStatus.ARRIVED}>{t('stampa.arrived', 'Arrivati')}</option>
+                <option value={ArrivalStatus.DEPARTED}>{t('stampa.departed', 'Liberati')}</option>
               </select>
             </Field>
-            <Field label="Ordina per">
+            <Field label={t('stampa.sortBy', 'Ordina per')}>
               <SegmentedControl<'TIME' | 'TABLE'>
                 ariaLabel="Ordina per"
                 value={printSort}
                 onChange={setPrintSort}
                 options={[
-                  { value: 'TIME' as const, label: 'Orario' },
-                  { value: 'TABLE' as const, label: 'Tavolo' },
+                  { value: 'TIME' as const, label: t('stampa.byTime', 'Orario') },
+                  { value: 'TABLE' as const, label: t('stampa.byTable', 'Tavolo') },
                 ]}
               />
             </Field>
@@ -226,17 +229,17 @@ export const PrintReservationsModal: React.FC<Props> = ({
               onChange={(e) => setIncludeBanquets(e.target.checked)}
               className="h-5 w-5 rounded-[var(--ds-radius)] accent-[var(--ds-action-bg)]"
             />
-            <span className="text-[15px] text-[var(--ds-text-primary)]">Includi banchetti del giorno</span>
+            <span className="text-[15px] text-[var(--ds-text-primary)]">{t('stampa.withBanquets', 'Includi banchetti del giorno')}</span>
           </label>
         </div>
 
         <div className="mt-4">
-          <p className="mb-2 text-[13px] font-semibold text-[var(--ds-text-secondary)]">Anteprima</p>
+          <p className="mb-2 text-[13px] font-semibold text-[var(--ds-text-secondary)]">{t('stampa.preview', 'Anteprima')}</p>
           <div className="space-y-1 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-4 text-[14px]">
             <p className="font-semibold capitalize text-[var(--ds-text-primary)]">{formatPrintDate(printDate)}</p>
             <p className="text-[var(--ds-text-secondary)]">{shiftLabel} · {roomLabel}</p>
             <p className="text-[var(--ds-text-muted)]">
-              {filteredReservations.length} prenotazioni · {totalGuests} ospiti · {arrivedCount} arrivati
+              {t('stampa.summary', '{{prenotazioni}} prenotazioni · {{ospiti}} ospiti · {{arrivati}} arrivati', { prenotazioni: filteredReservations.length, ospiti: totalGuests, arrivati: arrivedCount })}
               {includeBanquets && banquetsForDate.length > 0 && ` · ${banquetsForDate.length} banchetti`}
             </p>
           </div>
@@ -249,26 +252,26 @@ export const PrintReservationsModal: React.FC<Props> = ({
         <div className="print-portal">
           <div id="print-area" className="print-only">
         <header style={{ marginBottom: '1.25rem', paddingBottom: '0.75rem', borderBottom: '2px solid var(--ds-print-ink)' }}>
-          <h1 style={{ fontSize: '1.5rem', fontWeight: 700, margin: 0 }}>Lista Prenotazioni</h1>
+          <h1 style={{ fontSize: '1.5rem', fontWeight: 700, margin: 0 }}>{t('stampa.sheetTitle', 'Lista prenotazioni')}</h1>
           <p style={{ margin: '0.25rem 0 0', fontSize: '0.95rem', color: 'var(--ds-print-ink-secondary)', textTransform: 'capitalize' }}>
             {formatPrintDate(printDate)} · {shiftLabel} · {roomLabel}
           </p>
         </header>
 
         {filteredReservations.length === 0 && banquetsForDate.length === 0 ? (
-          <p style={{ fontStyle: 'italic', color: 'var(--ds-print-ink-muted)' }}>Nessuna prenotazione corrispondente ai filtri.</p>
+          <p style={{ fontStyle: 'italic', color: 'var(--ds-print-ink-muted)' }}>{t('stampa.empty', 'Nessuna prenotazione corrispondente ai filtri.')}</p>
         ) : (
           <>
             {filteredReservations.length > 0 && (
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
                 <thead>
                   <tr style={{ background: 'var(--ds-print-fill)', borderBottom: '1px solid var(--ds-print-rule-strong)' }}>
-                    <th style={{ padding: '0.5rem', textAlign: 'left' }}>Orario</th>
-                    <th style={{ padding: '0.5rem', textAlign: 'left' }}>Cliente</th>
-                    <th style={{ padding: '0.5rem', textAlign: 'center' }}>Ospiti</th>
-                    <th style={{ padding: '0.5rem', textAlign: 'left' }}>Tavolo</th>
-                    <th style={{ padding: '0.5rem', textAlign: 'left' }}>Telefono</th>
-                    <th style={{ padding: '0.5rem', textAlign: 'left' }}>Note</th>
+                    <th style={{ padding: '0.5rem', textAlign: 'left' }}>{t('stampa.colTime', 'Orario')}</th>
+                    <th style={{ padding: '0.5rem', textAlign: 'left' }}>{t('stampa.colCustomer', 'Cliente')}</th>
+                    <th style={{ padding: '0.5rem', textAlign: 'center' }}>{t('stampa.colGuests', 'Ospiti')}</th>
+                    <th style={{ padding: '0.5rem', textAlign: 'left' }}>{t('stampa.colTable', 'Tavolo')}</th>
+                    <th style={{ padding: '0.5rem', textAlign: 'left' }}>{t('stampa.colPhone', 'Telefono')}</th>
+                    <th style={{ padding: '0.5rem', textAlign: 'left' }}>{t('stampa.colNotes', 'Note')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -299,7 +302,7 @@ export const PrintReservationsModal: React.FC<Props> = ({
                 <tfoot>
                   <tr style={{ borderTop: '2px solid var(--ds-print-ink)', fontWeight: 700 }}>
                     <td colSpan={2} style={{ padding: '0.5rem' }}>
-                      Totale: {filteredReservations.length} prenotazioni
+                      {t('stampa.total', 'Totale: {{count}} prenotazioni', { count: filteredReservations.length })}
                     </td>
                     <td style={{ padding: '0.5rem', textAlign: 'center' }}>
                       {totalGuests}
@@ -308,7 +311,7 @@ export const PrintReservationsModal: React.FC<Props> = ({
                       )}
                     </td>
                     <td colSpan={3} style={{ padding: '0.5rem' }}>
-                      {arrivedCount > 0 && `(${arrivedCount} arrivati)`}
+                      {arrivedCount > 0 && t('stampa.arrivedCount', '({{count}} arrivati)', { count: arrivedCount })}
                     </td>
                   </tr>
                 </tfoot>
@@ -317,7 +320,7 @@ export const PrintReservationsModal: React.FC<Props> = ({
 
             {includeBanquets && banquetsForDate.length > 0 && (
               <section style={{ marginTop: '1.5rem' }}>
-                <h2 style={{ fontSize: '1.05rem', fontWeight: 700, marginBottom: '0.5rem' }}>Banchetti del giorno</h2>
+                <h2 style={{ fontSize: '1.05rem', fontWeight: 700, marginBottom: '0.5rem' }}>{t('stampa.banquets', 'Banchetti del giorno')}</h2>
                 <ul style={{ listStyle: 'disc', paddingLeft: '1.25rem', margin: 0 }}>
                   {banquetsForDate.map(b => (
                     <li key={b.id} style={{ marginBottom: '0.25rem' }}>
@@ -333,7 +336,7 @@ export const PrintReservationsModal: React.FC<Props> = ({
         )}
 
         <footer style={{ marginTop: '2rem', paddingTop: '0.5rem', borderTop: '1px solid var(--ds-print-rule)', fontSize: '0.7rem', color: 'var(--ds-print-ink-subtle)', textAlign: 'right' }}>
-          Stampato il {new Date().toLocaleString('it-IT')}
+          {t('stampa.printedOn', 'Stampato il {{quando}}', { quando: new Date().toLocaleString(displayLocale()) })}
         </footer>
           </div>
         </div>,
