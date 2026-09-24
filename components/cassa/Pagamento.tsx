@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, Loader2, QrCode, Send } from 'lucide-react';
+import { ArrowLeft, Check, Loader2, QrCode, Send } from 'lucide-react';
 import { chime } from '../../utils/chime';
 import { billsApiService } from '../../services/billsApiService';
 import type { BillPaymentInput, OpenBillRow } from '../../services/billsApiService';
@@ -120,6 +120,18 @@ export const Pagamento: React.FC<PagamentoProps> = ({
   // Sconto complessivo (di comanda e di conto): la somma delle righe meno il
   // totale. Si mostra perché il totale, da solo, non spiega la differenza.
   const itemsSum = (bill.items ?? []).reduce((s, i) => s + i.unit_price_cents * i.qty, 0);
+
+  // Cosa è già pagato, riga per riga: le quote dal QR pagate e gli incassi
+  // «per piatti» della cassa. «In pagamento» = quota QR presa ma non ancora
+  // saldata. Letti in modo difensivo: il backend deployato può non mandarli.
+  const paidUnits = useMemo(
+    () => new Map((bill.item_paid_units ?? []).map(u => [u.order_item_id, u.units])),
+    [bill.item_paid_units]
+  );
+  const takenUnits = useMemo(
+    () => new Map((bill.item_taken_units ?? []).map(u => [u.order_item_id, u.units])),
+    [bill.item_taken_units]
+  );
   const discountShown = itemsSum > 0 ? Math.max(0, itemsSum - bill.total_cents) : 0;
 
   const addMovement = () => {
@@ -154,11 +166,11 @@ export const Pagamento: React.FC<PagamentoProps> = ({
   const canaleEDocumento = (
     <>
       {/* Il secondo gruppo: apre un canale, non registra denaro. */}
-      <h2 className="mt-5 text-[13px] font-semibold text-[var(--ds-text-muted)]">{t('askCustomer')}</h2>
+      <h2 className="mt-5 border-t border-[var(--ds-border)] pt-4 text-[13px] font-semibold text-[var(--ds-text-muted)]">{t('askCustomer')}</h2>
       <p className="mt-1 text-[12px] text-[var(--ds-text-muted)]">
         {t('billStaysOpen')}
       </p>
-      <div className="mt-2 flex flex-wrap items-center gap-2">
+      <div className="mt-3 flex flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={onShowQr}
@@ -188,8 +200,8 @@ export const Pagamento: React.FC<PagamentoProps> = ({
         <p className="mt-1 text-[12px] text-[var(--ds-critical-text)]">{linkSend.detail || t('sendFailedRetry')}</p>
       )}
 
-      <div className="mt-5">
-        <span className="mb-1.5 block text-[13px] font-medium text-[var(--ds-text-secondary)]">
+      <div className="mt-5 border-t border-[var(--ds-border)] pt-4">
+        <span className="mb-2 block text-[13px] font-semibold text-[var(--ds-text-muted)]">
           {t('docAtClose')}
         </span>
         <SegmentedControl<Doc>
@@ -223,48 +235,60 @@ export const Pagamento: React.FC<PagamentoProps> = ({
 
       {error && <Callout tone="critical" className="mt-3">{error}</Callout>}
 
-      <p className={`mt-3 text-[13px] ${math.willSettle ? 'text-[var(--ds-seated-text)]' : 'text-[var(--ds-critical-text)]'}`}>
-        {math.willSettle
-          ? (tipCents > 0 ? t('willSettleTip', { mancia: euro(tipCents) }) : t('willSettle'))
-          : t('shortfall', { importo: euro(math.shortfall) })}
-      </p>
+      {/* Il piede resta in vista: dentro il modal la colonna scorre, e la
+          conferma — il gesto per cui si è aperta la schermata — non deve mai
+          finire sotto la piega. Sticky dentro la sezione (p-4): i margini
+          negativi lo portano a filo dei bordi, il fondo copre ciò che scorre.
+          Nel modal il corpo che scorre ha il suo padding (p-4, sm:p-5): lo
+          sticky si fermerebbe lì sopra lasciando intravedere il contenuto
+          sotto, quindi scende fino al bordo e recupera lo spazio in basso. */}
+      <div className={`sticky -mx-4 -mb-4 mt-5 rounded-b-[var(--ds-radius)] border-t border-[var(--ds-border)] bg-[var(--ds-surface)] px-4 pt-3 ${
+        embedded ? '-bottom-4 pb-8 sm:-bottom-5 sm:pb-9' : 'bottom-0 pb-4'
+      }`}>
+        <p className={`text-[13px] ${math.willSettle ? 'text-[var(--ds-seated-text)]' : 'text-[var(--ds-critical-text)]'}`}>
+          {math.willSettle
+            ? (tipCents > 0 ? t('willSettleTip', { mancia: euro(tipCents) }) : t('willSettle'))
+            : t('shortfall', { importo: euro(math.shortfall) })}
+        </p>
 
-      {/* flex-wrap: con Correggi e Sconto insieme, su telefono la conferma
-          scende su una riga sua invece di comprimersi. */}
-      <div className="mt-2 flex flex-wrap gap-2">
-        {onEdit && (
+        {/* Due file: i verbi secondari a parti uguali, poi la conferma da sola
+            a tutta larghezza. In un'unica fila la conferma si comprimeva fino
+            ad andare a capo su tre righe («Registra e / 44,50 e / chiudi»). */}
+        <div className="mt-3 flex gap-2">
+          {onEdit && (
+            <button
+              type="button"
+              onClick={onEdit}
+              disabled={busy}
+              className="inline-flex h-11 min-w-0 flex-1 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-3 text-[15px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
+            >
+              <span className="truncate">{t('fix')}</span>
+            </button>
+          )}
+          {onDiscount && (
+            <button
+              type="button"
+              onClick={onDiscount}
+              disabled={busy}
+              className="inline-flex h-11 min-w-0 flex-1 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-3 text-[15px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
+            >
+              <span className="truncate">{t('discount')}</span>
+            </button>
+          )}
           <button
             type="button"
-            onClick={onEdit}
-            disabled={busy}
-            className="inline-flex h-12 flex-shrink-0 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-5 text-[15px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
+            onClick={onSplit}
+            disabled={busy || residual <= 0}
+            className="inline-flex h-11 min-w-0 flex-1 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-3 text-[15px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
           >
-            {t('fix')}
+            <span className="truncate">{t('splitBill')}</span>
           </button>
-        )}
-        {onDiscount && (
-          <button
-            type="button"
-            onClick={onDiscount}
-            disabled={busy}
-            className="inline-flex h-12 flex-shrink-0 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-5 text-[15px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
-          >
-            {t('discount')}
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={onSplit}
-          disabled={busy || residual <= 0}
-          className="inline-flex h-12 flex-shrink-0 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-5 text-[15px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
-        >
-          {t('splitBill')}
-        </button>
+        </div>
         <button
           type="button"
           onClick={confirm}
           disabled={busy}
-          className="inline-flex h-12 flex-1 items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
+          className="mt-2 inline-flex h-12 w-full items-center justify-center gap-2 whitespace-nowrap rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-4 text-[17px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
         >
           {busy && <Loader2 size={16} className="animate-spin" />}
           Registra {euro(math.applied + math.recorded)} e chiudi
@@ -301,8 +325,11 @@ export const Pagamento: React.FC<PagamentoProps> = ({
       </div>
       )}
 
+      {/* Nel modal a scorrere è il corpo del ModalShell, non questa griglia:
+          un overflow qui (senza altezza fissa non scorre mai) catturava lo
+          sticky del piede di conferma, che restava sotto la piega. */}
       <div className={embedded
-        ? 'grid w-full min-h-0 flex-1 gap-3 overflow-y-auto pb-1 lg:grid-cols-2'
+        ? 'grid w-full gap-3 pb-1 lg:grid-cols-2'
         : 'mx-auto grid w-full min-h-0 max-w-[1200px] flex-1 gap-4 overflow-y-auto px-4 pb-6 lg:grid-cols-2 lg:px-8'}>
         {/* Riepilogo */}
         <section className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
@@ -312,13 +339,33 @@ export const Pagamento: React.FC<PagamentoProps> = ({
               deve spingere il residuo fuori dallo schermo. */}
           {(bill.items?.length ?? 0) > 0 && (
             <ul className="mt-3 max-h-56 space-y-1 overflow-y-auto border-b border-[var(--ds-border)] pb-3 pr-1 text-[13px]">
-              {(bill.items ?? []).map((it, idx) => (
-                <li key={idx} className="flex items-baseline gap-2">
-                  <span className="shrink-0 tabular-nums text-[var(--ds-text-muted)]">{it.qty}×</span>
-                  <span className="min-w-0 flex-1 truncate text-[var(--ds-text-secondary)]">{it.name}</span>
-                  <span className="tabular-nums text-[var(--ds-text-secondary)]">{euro(it.unit_price_cents * it.qty)}</span>
-                </li>
-              ))}
+              {(bill.items ?? []).map((it, idx) => {
+                const oid = it.order_item_id;
+                const known = oid != null && bill.item_paid_units != null;
+                const paid = known ? Math.min(it.qty, paidUnits.get(oid!) ?? 0) : 0;
+                const paying = known ? Math.max(0, Math.min(it.qty - paid, (takenUnits.get(oid!) ?? 0) - paid)) : 0;
+                const allPaid = paid >= it.qty;
+                return (
+                  <li key={idx} className="flex items-baseline gap-2">
+                    <span className="shrink-0 tabular-nums text-[var(--ds-text-muted)]">{it.qty}×</span>
+                    <span className={`min-w-0 flex-1 truncate ${allPaid ? 'text-[var(--ds-text-muted)]' : 'text-[var(--ds-text-secondary)]'}`}>
+                      {it.name}
+                    </span>
+                    {allPaid ? (
+                      <span className="inline-flex shrink-0 items-center gap-0.5 text-[12px] font-medium text-[var(--ds-seated-text)]">
+                        <Check size={12} aria-hidden />{t('itemPaid')}
+                      </span>
+                    ) : (paid > 0 || paying > 0) && (
+                      <span className="shrink-0 text-[12px]">
+                        {paid > 0 && <span className="font-medium text-[var(--ds-seated-text)]">{t('itemPaidUnits', { count: paid })}</span>}
+                        {paid > 0 && paying > 0 && <span className="text-[var(--ds-text-muted)]"> · </span>}
+                        {paying > 0 && <span className="text-[var(--ds-pending-text)]">{t('itemPaying', { count: paying })}</span>}
+                      </span>
+                    )}
+                    <span className={`shrink-0 tabular-nums ${allPaid ? 'text-[var(--ds-text-muted)]' : 'text-[var(--ds-text-secondary)]'}`}>{euro(it.unit_price_cents * it.qty)}</span>
+                  </li>
+                );
+              })}
             </ul>
           )}
           <dl className="mt-3 space-y-1.5 text-[14px]">
@@ -378,7 +425,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
         {/* Come si paga */}
         <section className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
           <h2 className="text-[13px] font-semibold text-[var(--ds-text-muted)]">{t('collectHere')}</h2>
-          <div className="mt-2 flex flex-wrap gap-1.5">
+          <div className="mt-3 flex flex-wrap gap-2">
             {METHODS.map(m => {
               // Un sospeso su un tavolo senza cliente è un credito che nessuno
               // può riscuotere: si abilita solo quando c'è un nome.
@@ -425,7 +472,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
           )}
 
           {math.remaining > 0 && (
-            <div className="mt-3 flex items-end gap-2">
+            <div className="mt-4 flex items-end gap-2">
               <label className="block flex-1">
                 <span className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">
                   {t(method === 'CONTANTI' ? 'cashReceived' : 'amount')}
@@ -443,7 +490,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
                 type="button"
                 onClick={addMovement}
                 disabled={busy || math.applied <= 0 || math.applied >= math.remaining}
-                className="h-12 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)] disabled:opacity-40"
+                className="h-12 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)] disabled:opacity-40"
               >
                 {t('add')}
               </button>
@@ -456,7 +503,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
             </p>
           )}
 
-          <label className="mt-3 block">
+          <label className="mt-4 block">
             <span className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">
               Mancia <span className="font-normal text-[var(--ds-text-muted)]">(facoltativa)</span>
             </span>

@@ -34263,14 +34263,21 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
         // unità, o item_ids a riga intera per le vecchie) e dagli incassi
         // staff con meta.item_units. Il dividi conto «per piatti» li legge per non riproporre
         // quello che è già stato pagato.
+        //
+        // I PAGATI a parte (item_paid_units): i «presi» contano anche le quote
+        // dal QR prenotate e non ancora pagate, e l'incasso in cassa li mostra
+        // accanto alle righe — «pagato» deve voler dire pagato (24/09).
         const billIds = rows.rows.map((b: any) => b.id);
         const takenByBill = new Map<number, Map<number, number>>();
-        const addTaken = (billId: number, oid: number, units: number) => {
+        const paidByBill = new Map<number, Map<number, number>>();
+        const addTo = (byBill: Map<number, Map<number, number>>, billId: number, oid: number, units: number) => {
             if (!Number.isFinite(oid) || !Number.isFinite(units) || units <= 0) return;
-            const m = takenByBill.get(billId) ?? new Map<number, number>();
+            const m = byBill.get(billId) ?? new Map<number, number>();
             m.set(oid, (m.get(oid) ?? 0) + units);
-            takenByBill.set(billId, m);
+            byBill.set(billId, m);
         };
+        const addTaken = (billId: number, oid: number, units: number) => addTo(takenByBill, billId, oid, units);
+        const addPaid = (billId: number, oid: number, units: number) => addTo(paidByBill, billId, oid, units);
         if (billIds.length > 0) {
             const staffUnits = await queryWithRetry(
                 `SELECT table_bill_id, meta->'item_units' AS item_units
@@ -34282,10 +34289,11 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
             for (const r of staffUnits.rows) {
                 for (const u of (Array.isArray(r.item_units) ? r.item_units : [])) {
                     addTaken(r.table_bill_id, Number(u?.order_item_id), Number(u?.units));
+                    addPaid(r.table_bill_id, Number(u?.order_item_id), Number(u?.units));
                 }
             }
             const splitUnits = await queryWithRetry(
-                `SELECT table_bill_id, item_ids, item_units FROM table_bill_splits
+                `SELECT table_bill_id, status, item_ids, item_units FROM table_bill_splits
                  WHERE table_bill_id = ANY($1::int[]) AND tenant_id = $2
                    AND status IN ('CLAIMED','PAID')
                    AND (item_ids IS NOT NULL OR item_units IS NOT NULL)`,
@@ -34299,6 +34307,7 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
             for (const r of splitUnits.rows) {
                 for (const u of splitItemUnits(r, qtyByBill.get(r.table_bill_id) ?? new Map())) {
                     addTaken(r.table_bill_id, u.order_item_id, u.units);
+                    if (r.status === 'PAID') addPaid(r.table_bill_id, u.order_item_id, u.units);
                 }
             }
         }
@@ -34308,6 +34317,8 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
             bills: rows.rows.map((b: any) => ({
                 ...b,
                 item_taken_units: [...(takenByBill.get(b.id) ?? new Map())]
+                    .map(([order_item_id, units]) => ({ order_item_id, units })),
+                item_paid_units: [...(paidByBill.get(b.id) ?? new Map())]
                     .map(([order_item_id, units]) => ({ order_item_id, units })),
                 service_date: b.service_date instanceof Date
                     ? b.service_date.toISOString().slice(0, 10)

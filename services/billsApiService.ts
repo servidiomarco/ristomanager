@@ -336,6 +336,9 @@ export interface OpenBillRow {
   items: { name: string; qty: number; unit_price_cents: number; order_item_id?: number }[] | null;
   /** Unità di ogni riga già coperte da quote ospite o incassi «per piatti». */
   item_taken_units?: { order_item_id: number; units: number }[];
+  /** Pezzi davvero PAGATI per riga (quote QR pagate + incassi di cassa):
+   *  i «taken» contano anche le quote prenotate e non ancora pagate. */
+  item_paid_units?: { order_item_id: number; units: number }[];
   status: string;
   share_token: string | null;
   opened_at: string;

@@ -20,6 +20,13 @@ describe('quota per piatti (meta.item_units)', () => {
         expect(row).toBeTruthy();
         return row.item_taken_units.find((t: any) => t.order_item_id === oid)?.units ?? 0;
     };
+    // I pezzi davvero PAGATI (incasso in cassa, quota QR saldata): quello che
+    // l'incasso mostra accanto alle righe. Una quota QR solo prenotata non c'è.
+    const paidOf = (bills: any[], oid: number): number => {
+        const row = bills.find((b: any) => b.id === billId);
+        expect(row).toBeTruthy();
+        return row.item_paid_units.find((t: any) => t.order_item_id === oid)?.units ?? 0;
+    };
 
     beforeAll(async () => {
         token = await ownerToken();
@@ -102,6 +109,7 @@ describe('quota per piatti (meta.item_units)', () => {
         expect(open.status).toBe(200);
         expect(takenOf(open.body.bills, frittoId)).toBe(1);
         expect(takenOf(open.body.bills, dolceId)).toBe(0);
+        expect(paidOf(open.body.bills, frittoId)).toBe(1);
     });
 
     it('il QR conta i pezzi già incassati, e la riga intera non si prende più', async () => {
@@ -182,9 +190,12 @@ describe('quota per piatti (meta.item_units)', () => {
         });
         expect(esaurito.status).toBe(409);
 
-        // La cassa vede gli stessi pezzi presi dal QR.
+        // La cassa vede gli stessi pezzi presi dal QR — presi, non pagati:
+        // le quote sono solo prenotate finché il pagamento non arriva.
         const open = await api().get('/bills/open').set(bearer(token));
         expect(takenOf(open.body.bills, frittoId)).toBe(2);
         expect(takenOf(open.body.bills, dolceId)).toBe(1);
+        expect(paidOf(open.body.bills, frittoId)).toBe(0);
+        expect(paidOf(open.body.bills, dolceId)).toBe(0);
     });
 });
