@@ -224,4 +224,18 @@ describe('stream inverso nodo→cloud', () => {
         expect(suNodo.rows[0].n).toBe(1);
         expect(suNodo.rows[0].o).toBe('local');
     });
+
+    it('un evento già applicato non si riapplica: il cursore letto è quello scritto', async () => {
+        // In produzione (RLS rigida, 24/09) il cursore si scriveva ma non si
+        // rileggeva: il cloud ripartiva da zero a ogni giro e riscriveva le
+        // righe dalla copia del nodo, di continuo. Una modifica fatta sul
+        // cloud dopo la convergenza deve restare lì oltre qualche giro di
+        // poll. Il bug si vede con TEST_STRICT_RLS=1.
+        const cur = await cloudDb!.query(`SELECT applied_seq FROM replication_cursor WHERE tenant_id = 1 AND stream = 'node'`);
+        expect(Number(cur.rows[0]?.applied_seq ?? 0)).toBeGreaterThan(0);
+        await cloudDb!.query(`UPDATE tables SET status = 'AVAILABLE' WHERE id = $1`, [tableId]);
+        await sleep(7_000);
+        const r = await cloudDb!.query('SELECT status FROM tables WHERE id = $1', [tableId]);
+        expect(r.rows[0].status).toBe('AVAILABLE');
+    }, 20_000);
 });

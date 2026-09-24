@@ -12,7 +12,7 @@
 // recupero dopo un outage è lo stesso giro con più batch.
 
 import type { Socket } from 'socket.io';
-import pool, { runAsPlatform } from '../db.js';
+import { queryWithRetry, runAsPlatform } from '../db.js';
 import { applyReplicaBatch, type ReplicaEvent, type WantedRows, type FetchedRows } from './replicaApply.js';
 
 const PULL_LIMIT = 500;
@@ -33,7 +33,13 @@ export const startNodeUpstream = (tenantId: number, socket: Socket): (() => void
     let lastErrorLogged = 0;
 
     const pullOnce = async (): Promise<boolean> => runAsPlatform(async () => {
-        const cur = await pool.query(
+        // queryWithRetry, non pool.query: il pool nudo non porta il contesto
+        // di piattaforma, e con la RLS rigida di produzione la riga del
+        // cursore risultava invisibile. Il cloud chiedeva allora sempre
+        // «dopo 0» e riapplicava in loop, a ogni secondo, gli stessi eventi
+        // del nodo (24/09: i 22 del collaudo WAN, con la comanda 318 e il
+        // tavolo 87 riscritti dalla copia del nodo di continuo).
+        const cur = await queryWithRetry(
             `SELECT applied_seq FROM replication_cursor WHERE tenant_id = $1 AND stream = 'node'`,
             [tenantId]
         );
@@ -41,6 +47,13 @@ export const startNodeUpstream = (tenantId: number, socket: Socket): (() => void
         const body = await rpc(socket, 'node:pull', { after, limit: PULL_LIMIT });
         const events: ReplicaEvent[] = Array.isArray(body?.events) ? body.events : [];
         if (events.length === 0) return false;
+        // Cintura: un lotto che non porta il cursore oltre il punto chiesto
+        // non si applica — il drain girerebbe all'infinito sugli stessi
+        // eventi invece di aspettare il prossimo giro.
+        const lastSeq = Number(events[events.length - 1].seq);
+        if (!(lastSeq > after)) {
+            throw new Error(`il nodo ha risposto fino a ${lastSeq} a una richiesta dopo ${after}`);
+        }
         await applyReplicaBatch({
             tenantId,
             events,
