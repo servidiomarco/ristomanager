@@ -777,6 +777,49 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
     setFlash(t('toast.movedTo', { uscita: courseLabel(to, t) }));
   };
 
+  /** Elimina un'uscita intera: tutte le sue righe NON inviate, locali e in
+   *  bozza sul server. Le inviate restano — il server le rifiuta (409) e il
+   *  rimedio è lo storno con motivazione, dalla comanda. Le righe locali si
+   *  riprendono con Annulla, come nello svuotamento del carrello; le bozze
+   *  sul server no, e per quelle il modale chiede un secondo tocco prima. */
+  const deleteCourseDrafts = async (courseNo: number) => {
+    if (!order || busy) return;
+    const removed = cart.filter(l => l.course_no === courseNo);
+    const serverDrafts = order.items.filter(i =>
+      i.status === 'DRAFT' && !isSystemLine(i) && i.course_no === courseNo);
+    const orderIdAtDelete = openOrderIdRef.current;
+    setCart(prev => prev.filter(l => l.course_no !== courseNo));
+    if (serverDrafts.length > 0) {
+      setBusy(true); setError(null);
+      try {
+        let view: OrderWithItems | null = null;
+        for (const i of serverDrafts) view = await ordersApiService.deleteItem(i.id);
+        if (view) setOrder(view);
+      } catch (err: any) {
+        setError(err?.data?.error ?? err?.message ?? t('err.delete'));
+        return;
+      } finally { setBusy(false); }
+    }
+    addToast(t('toast.courseDeleted', { uscita: courseLabel(courseNo, t) }), 'success', {
+      icon: Trash2,
+      ...(serverDrafts.length === 0 && removed.length > 0 ? {
+        action: {
+          label: t('cancel'),
+          onClick: () => {
+            if (openOrderIdRef.current !== orderIdAtDelete) {
+              addToast(t('toast.orderChanged'), 'info');
+              return;
+            }
+            setCart(prev => [...removed, ...prev]);
+          },
+        },
+      } : {}),
+      replaceKey: 'orderpad-flash',
+    });
+  };
+  // Il secondo tocco su «Elimina» quando ci sono bozze sul server.
+  const [deleteCourseArmed, setDeleteCourseArmed] = useState(false);
+
   // Cosa si sta spostando: una riga locale, una riga server in bozza, o
   // un'uscita intera. Il selettore in fondo al file chiede solo «dove».
   const [moveFor, setMoveFor] = useState<
@@ -2085,7 +2128,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
       {moveFor && (
         <ModalShell
           open
-          onClose={() => setMoveFor(null)}
+          onClose={() => { setMoveFor(null); setDeleteCourseArmed(false); }}
           title={moveFor.kind === 'course'
             ? t('move.courseTitle', { uscita: courseLabel(moveFor.from, t) })
             : t('move.lineTitle', { cosa: moveFor.kind === 'item' ? moveFor.item.name_snapshot : moveFor.label })}
@@ -2121,6 +2164,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
                     }
                     else moveCourseTo(moveFor.from, n);
                     setMoveFor(null);
+                    setDeleteCourseArmed(false);
                   }}
                   className="flex h-16 flex-col items-center justify-center gap-0.5 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] text-[15px] font-semibold text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
                 >
@@ -2134,6 +2178,45 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
               );
             })}
           </div>
+          {moveFor.kind === 'course' && (() => {
+            const from = moveFor.from;
+            const localRows = cart.filter(l => l.course_no === from).length;
+            const serverRows = order.items.filter(i =>
+              i.status === 'DRAFT' && !isSystemLine(i) && i.course_no === from).length;
+            const rows = localRows + serverRows;
+            if (rows === 0) return null;
+            const sentStay = order.items.some(i =>
+              i.course_no === from && i.status !== 'DRAFT' && i.status !== 'VOIDED' && !isSystemLine(i));
+            // Le bozze sul server non tornano con Annulla: lì si chiede un
+            // secondo tocco, che dice anche quante righe se ne vanno.
+            const needsConfirm = serverRows > 0;
+            const armed = needsConfirm && deleteCourseArmed;
+            return (
+              <div className="mt-4 flex flex-col gap-2 border-t border-[var(--ds-border)] pt-4">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    if (needsConfirm && !armed) { setDeleteCourseArmed(true); return; }
+                    setMoveFor(null);
+                    setDeleteCourseArmed(false);
+                    deleteCourseDrafts(from);
+                  }}
+                  className={armed
+                    ? 'inline-flex h-12 w-full items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-solid)] text-[15px] font-semibold text-white transition-colors disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]'
+                    : 'inline-flex h-12 w-full items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[15px] font-medium text-[var(--ds-critical-text)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-critical-tint)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]'}
+                >
+                  <Trash2 size={17} aria-hidden />
+                  {armed
+                    ? t('move.deleteCourseConfirm', { count: rows })
+                    : t('move.deleteCourse', { uscita: courseLabel(from, t) })}
+                </button>
+                {sentStay && (
+                  <p className="text-center text-[13px] text-[var(--ds-text-muted)]">{t('move.deleteCourseSentStay')}</p>
+                )}
+              </div>
+            );
+          })()}
         </ModalShell>
       )}
 
