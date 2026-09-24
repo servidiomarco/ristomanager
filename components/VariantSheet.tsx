@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronDown, CornerDownRight, Info, Minus, Plus, Trash2, Wine } from 'lucide-react';
 import type { Dish } from '../types';
 import type { MenuCatalogue } from '../services/ordersApiService';
@@ -65,6 +66,7 @@ export const VariantSheet: React.FC<{
   wineQty?: (wineDishId: number) => number;
   onRemoveWine?: (wine: Dish) => void;
 }> = ({ dish, groups, components = [], initial, initialQty, onDelete, confirmLabel, onCancel, onConfirm, onAdd, courseName, onCourseTap, pairedWines, onAddWine, wineQty, onRemoveWine }) => {
+  const { t } = useTranslation('comande', { useSuspense: false });
   // Verso per variante, scala d'intensità a 4 gradini (utils/modifierScale):
   // +1 aggiunge a pagamento, +2 «Molta» allo stesso addebito, −1 «Senza» in
   // sconto, −2 «Poca» gratis, 0 = non applicata. Le scelte singole (cotture)
@@ -240,8 +242,8 @@ export const VariantSheet: React.FC<{
               <button
                 type="button"
                 onClick={onDelete}
-                aria-label="Elimina riga"
-                title="Elimina riga"
+                aria-label={t('variant.deleteRow', 'Elimina riga')}
+                title={t('variant.deleteRow', 'Elimina riga')}
                 className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               >
                 <Trash2 size={16} />
@@ -259,7 +261,7 @@ export const VariantSheet: React.FC<{
                   quantità, peso e varianti compresi, vivo mentre si tocca. */}
               {missing.length > 0
                 ? `Scegli: ${missing.map(g => g.name).join(', ')}`
-                : `${confirmLabel ?? 'Aggiungi'} · ${euro(previewCents)}`}
+                : `${confirmLabel ?? t('variant.add', 'Aggiungi')} · ${euro(previewCents)}`}
             </button>
           </div>
         </div>
@@ -290,7 +292,7 @@ export const VariantSheet: React.FC<{
               type="button"
               onClick={() => setQty(v => Math.max(1, v - 1))}
               disabled={qty <= 1}
-              aria-label="Uno in meno"
+              aria-label={t('variant.oneLess', 'Uno in meno')}
               className="inline-flex h-11 w-11 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
             >
               <Minus size={16} aria-hidden />
@@ -301,7 +303,7 @@ export const VariantSheet: React.FC<{
             <button
               type="button"
               onClick={() => setQty(v => Math.min(99, v + 1))}
-              aria-label="Uno in più"
+              aria-label={t('variant.oneMore', 'Uno in più')}
               className="inline-flex h-11 w-11 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)]"
             >
               <Plus size={16} aria-hidden />
@@ -336,7 +338,7 @@ export const VariantSheet: React.FC<{
             <button
               type="button"
               onClick={() => setGrams(v => Math.max(wMin, v - 10))}
-              aria-label="Riduci di 10 grammi"
+              aria-label={t('variant.minus10g', 'Riduci di 10 grammi')}
               className="inline-flex h-11 w-11 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)]"
             >
               <Minus size={16} aria-hidden />
@@ -347,7 +349,7 @@ export const VariantSheet: React.FC<{
             <button
               type="button"
               onClick={() => setGrams(v => Math.min(wMax, v + 10))}
-              aria-label="Aumenta di 10 grammi"
+              aria-label={t('variant.plus10g', 'Aggiungi 10 grammi')}
               className="inline-flex h-11 w-11 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)]"
             >
               <Plus size={16} aria-hidden />
@@ -686,7 +688,7 @@ export const VariantSheet: React.FC<{
           value={custom}
           onChange={e => setCustom(e.target.value)}
           maxLength={300}
-          placeholder="Es. senza sale, metà porzione…"
+          placeholder={t('variant.notePlaceholder', 'Es. senza sale, metà porzione…')}
           className={dsInput}
           // Aperta dal tocco lungo su un piatto senza varianti, la sheet ha
           // solo questo campo: il cameriere è qui per scrivere.

@@ -1,4 +1,6 @@
 import React, { useMemo, useState } from 'react';
+import { displayLocale } from '../../utils/formatLocale';
+import { useTranslation } from 'react-i18next';
 import { CalendarDays } from 'lucide-react';
 import { ModalShell, dsButton, MonthGrid, asIsoDay, addDays, startOfMonth } from '../ds';
 
@@ -19,7 +21,7 @@ export type Period = { from: string; to: string };
 const shortDay = (iso: string): string => {
   if (!iso) return '';
   const [y, m, d] = iso.split('-').map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' });
+  return new Date(y, m - 1, d).toLocaleDateString(displayLocale(), { day: 'numeric', month: 'short' });
 };
 
 /**
@@ -30,15 +32,17 @@ const shortDay = (iso: string): string => {
  * looking at. `span` is the range the loaded results actually cover, so the
  * unfiltered case still names real dates rather than a category.
  */
-export const periodLabel = (period: Period, today = new Date(), span?: Period | null): string => {
+type TFunc = (key: string, defaultValue: string) => string;
+
+export const periodLabel = (period: Period, today = new Date(), span?: Period | null, t?: TFunc): string => {
   if (!period.from && !period.to) {
-    if (!span?.from || !span?.to) return 'Tutte le date';
+    if (!span?.from || !span?.to) return t ? t('period.allDates', 'Tutte le date') : 'Tutte le date';
     return span.from === span.to ? shortDay(span.from) : `${shortDay(span.from)} – ${shortDay(span.to)}`;
   }
   const todayIso = asIsoDay(today);
   const yesterdayIso = asIsoDay(addDays(today, -1));
-  if (period.from === todayIso && period.to === todayIso) return 'Oggi';
-  if (period.from === yesterdayIso && period.to === yesterdayIso) return 'Ieri';
+  if (period.from === todayIso && period.to === todayIso) return t ? t('period.today', 'Oggi') : 'Oggi';
+  if (period.from === yesterdayIso && period.to === yesterdayIso) return t ? t('period.yesterday', 'Ieri') : 'Ieri';
   if (period.from && period.to && period.from === period.to) return shortDay(period.from);
   if (period.from && period.to) return `${shortDay(period.from)} – ${shortDay(period.to)}`;
   return period.from ? `dal ${shortDay(period.from)}` : `fino al ${shortDay(period.to)}`;
@@ -55,6 +59,7 @@ export const PeriodPicker: React.FC<{
   onApply: (next: Period) => void;
   onClose: () => void;
 }> = ({ open, period, span, summary, onApply, onClose }) => {
+  const { t } = useTranslation(undefined, { useSuspense: false });
   const [draft, setDraft] = useState<Period>(period);
   const [anchor, setAnchor] = useState<Date>(() => {
     const [y, m] = (period.from || asIsoDay(new Date())).split('-').map(Number);
@@ -83,9 +88,9 @@ export const PeriodPicker: React.FC<{
   };
 
   const shortcuts: { label: string; value: Period }[] = [
-    { label: 'Oggi', value: { from: todayIso, to: todayIso } },
-    { label: 'Ieri', value: { from: yesterdayIso, to: yesterdayIso } },
-    { label: 'Ultimi 7 giorni', value: { from: asIsoDay(addDays(today, -6)), to: todayIso } },
+    { label: t('period.today', 'Oggi'), value: { from: todayIso, to: todayIso } },
+    { label: t('period.yesterday', 'Ieri'), value: { from: yesterdayIso, to: yesterdayIso } },
+    { label: t('period.last7', 'Ultimi 7 giorni'), value: { from: asIsoDay(addDays(today, -6)), to: todayIso } },
   ];
 
   const isActive = (v: Period) => v.from === draft.from && v.to === draft.to;
@@ -105,14 +110,14 @@ export const PeriodPicker: React.FC<{
     <ModalShell
       open={open}
       onClose={onClose}
-      title="Periodo"
+      title={t('period.title', 'Periodo')}
       size="md"
       closeOnEscape
       bodyClassName="p-5 sm:p-6"
       footerStart={
         <span>
           <span className="font-semibold text-[var(--ds-text-primary)]">
-            {periodLabel(draft, today, span)}
+            {periodLabel(draft, today, span, t)}
           </span>
           {summary && <span className="block text-[13px]">{summary}</span>}
         </span>
@@ -188,7 +193,7 @@ export const PeriodPicker: React.FC<{
           <button
             type="button"
             onClick={() => setAnchor(a => new Date(a.getFullYear(), a.getMonth() - 1, 1))}
-            aria-label="Mese precedente"
+            aria-label={t('date.previousMonth', 'Mese precedente')}
             className="inline-flex h-9 w-9 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             ‹
@@ -199,7 +204,7 @@ export const PeriodPicker: React.FC<{
           <button
             type="button"
             onClick={() => setAnchor(a => new Date(a.getFullYear(), a.getMonth() + 1, 1))}
-            aria-label="Mese successivo"
+            aria-label={t('date.nextMonth', 'Mese successivo')}
             className="inline-flex h-9 w-9 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             ›
@@ -231,14 +236,17 @@ export const PeriodTrigger: React.FC<{
   span?: Period | null;
   count?: number;
   onClick: () => void;
-}> = ({ period, span, count, onClick }) => (
+}> = ({ period, span, count, onClick }) => {
+  const { t } = useTranslation(undefined, { useSuspense: false });
+  return (
   <button
     type="button"
     onClick={onClick}
     className="inline-flex h-9 flex-shrink-0 items-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
   >
     <CalendarDays className="h-4 w-4" aria-hidden />
-    {periodLabel(period, new Date(), span)}
+    {periodLabel(period, new Date(), span, t)}
     {count != null && <span className="tabular-nums opacity-70">{count}</span>}
   </button>
-);
+  );
+};

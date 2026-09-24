@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { RefreshCw, X } from 'lucide-react';
 import { useAppVersion } from '../hooks/useAppVersion';
 
@@ -11,6 +12,7 @@ import { useAppVersion } from '../hooks/useAppVersion';
 // urgent dialogs still win visually. Height stays small (~40px) to avoid
 // stealing screen real-estate from the working area.
 export const AppVersionBanner: React.FC = () => {
+  const { t } = useTranslation(undefined, { useSuspense: false });
     const { isOutdated, remoteVersion, dismiss, reload } = useAppVersion();
     // Feedback state for the "Ricarica" button: without it the click looks
     // unresponsive for the ~1s SW skipWaiting → location.reload() window.
@@ -56,13 +58,13 @@ export const AppVersionBanner: React.FC = () => {
                     className="inline-flex items-center gap-1.5 h-8 px-3 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-arriving-text)] text-[12px] font-semibold hover:bg-[var(--ds-arriving-tint)] disabled:opacity-80 disabled:cursor-progress transition-colors whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-surface)]"
                 >
                     <RefreshCw className={`h-3.5 w-3.5 ${isReloading ? 'animate-spin' : ''}`} />
-                    {isReloading ? 'Ricarico…' : 'Ricarica'}
+                    {isReloading ? t('version.reloading', 'Ricarico…') : t('version.reload', 'Ricarica')}
                 </button>
                 <button
                     type="button"
                     onClick={dismiss}
                     disabled={isReloading}
-                    aria-label="Chiudi banner"
+                    aria-label={t('version.close', 'Chiudi banner')}
                     className="p-1 rounded-[var(--ds-radius-control)] text-[var(--ds-arriving-fg)] opacity-80 hover:opacity-100 hover:bg-[var(--ds-arriving-fg)]/10 disabled:opacity-50 transition-opacity flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-surface)]"
                 >
                     <X className="h-4 w-4" />

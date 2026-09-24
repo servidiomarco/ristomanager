@@ -475,5 +475,19 @@
     "channelState": "{{canale}} {{stato}}",
     "on": "on",
     "off": "off"
+  },
+  "bar": {
+    "voiceResumed": "Voice agent switched back on for this shift",
+    "voicePaused": "Voice agent paused for this shift",
+    "errVoice": "Could not update the voice agent",
+    "webResumed": "Web bookings switched back on for this shift",
+    "webPaused": "Web bookings paused for this shift",
+    "errWeb": "Could not update the web bookings",
+    "voiceOnTitle": "Voice agent on for this shift · click to pause",
+    "voiceOffTitle": "Voice agent paused for this shift · click to switch back on",
+    "voiceAria": "Voice agent status for this shift",
+    "webOnTitle": "Web bookings on for this shift · click to block",
+    "webOffTitle": "Web bookings blocked for this shift · click to unblock",
+    "webAria": "Web bookings status for this shift"
   }
 }

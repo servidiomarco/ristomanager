@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Loader2, Pause, Play } from 'lucide-react';
 
 /**
@@ -33,6 +34,7 @@ export const CallRecordingPlayer: React.FC<{
   /** Fetches the recording. Playback starts as soon as src arrives. */
   onLoad: () => void;
 }> = ({ src, durationSeconds, loading, onLoad }) => {
+  const { t } = useTranslation(undefined, { useSuspense: false });
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [playing, setPlaying] = useState(false);
   const [elapsed, setElapsed] = useState(0);
@@ -74,7 +76,7 @@ export const CallRecordingPlayer: React.FC<{
         type="button"
         onClick={toggle}
         disabled={loading}
-        aria-label={playing ? 'Metti in pausa' : 'Riproduci'}
+        aria-label={playing ? t('aria.pause', 'Metti in pausa') : t('aria.play', 'Riproduci')}
         className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
       >
         {loading ? <Loader2 className="h-4 w-4 animate-spin" />
@@ -105,7 +107,7 @@ export const CallRecordingPlayer: React.FC<{
           value={Math.round(progress * 1000)}
           onChange={e => seekTo(Number(e.target.value) / 1000)}
           disabled={!src || !total}
-          aria-label="Posizione nella registrazione"
+          aria-label={t('aria.recordingSeek', 'Posizione nella registrazione')}
           className="absolute inset-0 h-full w-full cursor-pointer appearance-none bg-transparent opacity-0 disabled:cursor-default"
         />
       </div>

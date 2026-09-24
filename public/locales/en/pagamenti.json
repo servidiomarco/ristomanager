@@ -8,5 +8,8 @@
     "incassato": "Taken",
     "attesa": "Pending",
     "residuo": "Outstanding bills"
-  }
+  },
+  "printCopy": "Print a copy",
+  "printSent": "Copy printing",
+  "errPrint": "Printing failed"
 }

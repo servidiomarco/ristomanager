@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { Trash2 } from 'lucide-react';
 import { ModalShell, dsButton } from './ds';
 
@@ -21,11 +22,11 @@ interface ConfirmDeleteModalProps {
 
 export const ConfirmDeleteModal: React.FC<ConfirmDeleteModalProps> = ({
   isOpen,
-  title = 'Conferma Eliminazione',
+  title,
   message,
   itemName,
-  confirmLabel = 'Elimina',
-  cancelLabel = 'Annulla',
+  confirmLabel,
+  cancelLabel,
   onConfirm,
   onCancel,
   icon,
@@ -35,13 +36,20 @@ export const ConfirmDeleteModal: React.FC<ConfirmDeleteModalProps> = ({
   confirmClassName = dsButton.critical,
   showIrreversibleWarning = true,
 }) => {
+  /* I default stavano sulle prop: «Conferma Eliminazione», «Elimina»,
+     «Annulla» erano italiano cablato in ogni chiamante che non le passava —
+     e sono una dozzina. Ora si risolvono qui. */
+  const { t } = useTranslation(undefined, { useSuspense: false });
+  const titolo = title ?? t('confirmDelete.title', 'Conferma eliminazione');
+  const confermaLabel = confirmLabel ?? t('confirmDelete.confirm', 'Elimina');
+  const annullaLabel = cancelLabel ?? t('confirmDelete.cancel', 'Annulla');
   if (!isOpen) return null;
 
   return (
     <ModalShell
       open={isOpen}
       onClose={onCancel}
-      title={title}
+      title={titolo}
       size="sm"
       // Si apre spesso sopra un altro modal: teniamo lo z-index esplicito
       // invece di affidarci all'ordine di pittura.
@@ -50,10 +58,10 @@ export const ConfirmDeleteModal: React.FC<ConfirmDeleteModalProps> = ({
       footer={
         <>
           <button type="button" onClick={onCancel} className={dsButton.secondary}>
-            {cancelLabel}
+            {annullaLabel}
           </button>
           <button type="button" onClick={onConfirm} className={confirmClassName}>
-            {confirmLabel}
+            {confermaLabel}
           </button>
         </>
       }

@@ -8,5 +8,8 @@
     "incassato": "Incassato",
     "attesa": "In attesa",
     "residuo": "Residuo conti"
-  }
+  },
+  "printCopy": "Stampa copia",
+  "printSent": "Copia in stampa",
+  "errPrint": "Stampa non riuscita"
 }

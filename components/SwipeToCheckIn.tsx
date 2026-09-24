@@ -1,4 +1,5 @@
 import React, { useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { CheckCircle2 } from 'lucide-react';
 
 /**
@@ -23,6 +24,7 @@ const ENGAGE_PX = 14;        // horizontal intent before the gesture locks
 const MAX_PULL_PX = 220;     // hard cap on the visual pull
 
 export const SwipeToCheckIn: React.FC<SwipeToCheckInProps> = ({ enabled, onConfirm, children }) => {
+  const { t } = useTranslation('comande', { useSuspense: false });
   const [dx, setDx] = useState(0);
   const [springing, setSpringing] = useState(false);
   const startRef = useRef<{ x: number; y: number } | null>(null);
@@ -121,7 +123,7 @@ export const SwipeToCheckIn: React.FC<SwipeToCheckInProps> = ({ enabled, onConfi
             style={{ transform: `scale(${0.8 + progress * 0.4})` }}
           />
           <span className="text-white text-sm font-semibold">
-            {armed ? 'Rilascia: Arrivato' : 'Arrivato'}
+            {armed ? t('releaseArrived', 'Rilascia: Arrivato') : t('arrived', 'Arrivato')}
           </span>
         </div>
       )}

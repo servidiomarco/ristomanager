@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { BookOpen, ClipboardList, LayoutGrid } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
@@ -24,7 +25,9 @@ interface PadTabsProps {
 const tabClass =
   'flex flex-1 flex-col items-center gap-0.5 py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] rounded-[var(--ds-radius)]';
 
-export const PadTabs: React.FC<PadTabsProps> = ({ onTables, onComanda, onMenu, comandaMarked }) => (
+export const PadTabs: React.FC<PadTabsProps> = ({ onTables, onComanda, onMenu, comandaMarked }) => {
+  const { t } = useTranslation('comande', { useSuspense: false });
+  return (
   // La barra è a tutta larghezza dentro un contenitore col padding: i margini
   // negativi la portano ai bordi, il padding interno rimette i contenuti in
   // colonna col resto. Il safe-area sta qui: la barra possiede lo spazio
@@ -41,7 +44,7 @@ export const PadTabs: React.FC<PadTabsProps> = ({ onTables, onComanda, onMenu, c
         <ClipboardList size={21} aria-hidden />
       </span>
       <span className="flex items-center gap-1 text-[12px] font-semibold text-[var(--ds-text-muted)]">
-        Comanda
+        {t('pad.order', 'Comanda')}
         {comandaMarked && (
           <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--ds-text-muted)]" aria-hidden />
         )}
@@ -54,4 +57,5 @@ export const PadTabs: React.FC<PadTabsProps> = ({ onTables, onComanda, onMenu, c
       <span className="text-[12px] font-semibold text-[var(--ds-text-primary)]">Menu</span>
     </button>
   </div>
-);
+  );
+};

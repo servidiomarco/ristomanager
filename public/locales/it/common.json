@@ -156,7 +156,10 @@
     "closeActions": "Chiudi azioni",
     "notifications": "Notifiche",
     "closeToast": "Chiudi notifica",
-    "steps": "Passi"
+    "steps": "Passi",
+    "pause": "Metti in pausa",
+    "play": "Riproduci",
+    "recordingSeek": "Posizione nella registrazione"
   },
   "entity": {
     "voiceAgent": "Agente vocale",
@@ -269,5 +272,23 @@
     "reservations": "Prenotazioni · {{count}}",
     "guests": "{{count}} ospiti",
     "guests_one": "{{count}} ospite"
+  },
+  "confirmDelete": {
+    "title": "Conferma eliminazione",
+    "confirm": "Elimina",
+    "cancel": "Annulla"
+  },
+  "version": {
+    "reloading": "Ricarico…",
+    "reload": "Ricarica",
+    "close": "Chiudi banner"
+  },
+  "retry": "Riprova",
+  "period": {
+    "today": "Oggi",
+    "yesterday": "Ieri",
+    "last7": "Ultimi 7 giorni",
+    "allDates": "Tutte le date",
+    "title": "Periodo"
   }
 }
