@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Thermometer, Flame, Sparkles, Truck, Snowflake, Printer, CalendarDays,
   Check, X, Plus, Trash2, AlertTriangle, RefreshCw,
@@ -23,6 +24,29 @@ import {
 import { printHaccpReport } from '../utils/printHaccpReport';
 import { SkeletonHaccpSections } from './SkeletonCards';
 import { Callout, SegmentedControl, StatusPill, dsButton, dsIconButton, dsSelect } from './ds';
+import { displayLocale } from '../utils/formatLocale';
+
+/* `t` come parametro per le funzioni di modulo e le costanti: qui non ci sono
+   hook. Senza `t` si resta in italiano — un chiamante dimenticato deve
+   leggersi, non sparire. Lo stesso contratto di utils/courses.ts. */
+type TFunc = (key: string, defaultValue: string, options?: Record<string, unknown>) => string;
+
+/* ATTENZIONE — quello che NON si traduce, e non è una dimenticanza.
+ *
+ * Le liste in services/haccpApiService.ts (celle, frigo, friggitrici, punti di
+ * pulizia, prodotti suggeriti) sono l'impianto del Vecchio Frantoio: «Frigo
+ * antipasti», «Friggitrice 3», «Salsa silana». Non sono etichette da
+ * tradurre — sono inventario, e per un ristorante a Londra sarebbero
+ * sbagliate in qualunque lingua. Di più: finiscono a database come chiave
+ * della riga (`location`, `fryerLabel`, `point`), quindi tradurle
+ * spaccherebbe il legame con tutto lo storico al primo cambio di lingua.
+ *
+ * La strada vera è renderle configurabili per ristorante. Finché non lo sono,
+ * restano come stanno, e con loro i due placeholder d'esempio che nominano gli
+ * stessi prodotti.
+ *
+ * Fuori anche utils/printHaccpReport.ts: i fogli di stampa sono un cantiere a
+ * parte, e un foglio mezzo inglese è peggio di un foglio italiano. */
 
 const todayISO = (): string => {
   const d = new Date();
@@ -63,7 +87,7 @@ const fieldLabel = 'mb-1.5 block text-[13px] text-[var(--ds-text-muted)]';
 const stamp = 'col-span-12 -mt-0.5 text-[12px] tabular-nums text-[var(--ds-text-subtle)]';
 
 const recordedLabel = (recordedBy: string, recordedAt: string): string =>
-  `${recordedBy.split('@')[0]} · ${new Date(recordedAt).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`;
+  `${recordedBy.split('@')[0]} · ${new Date(recordedAt).toLocaleTimeString(displayLocale(), { hour: '2-digit', minute: '2-digit' })}`;
 
 // Intestazione in cima a ogni card: icona in pastiglia, titolo, e a destra il
 // contatore di completamento come pill invece che come testo sciolto.
@@ -104,6 +128,7 @@ const deleteButton =
 // =============================================================================
 
 export const HaccpPage: React.FC = () => {
+  const { t } = useTranslation('haccp', { useSuspense: false });
   const [date, setDate] = useState<string>(todayISO());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -132,7 +157,7 @@ export const HaccpPage: React.FC = () => {
       setReceipts(r);
       setProduction(p);
     } catch (e: any) {
-      setError(e?.message || 'Errore nel caricamento');
+      setError(e?.message || t('err.load', 'Errore nel caricamento'));
     } finally {
       setLoading(false);
     }
@@ -163,7 +188,7 @@ export const HaccpPage: React.FC = () => {
         return [...others, saved].sort((a, b) => a.location.localeCompare(b.location));
       });
     } catch (e: any) {
-      setError(e?.message || 'Errore nel salvataggio temperatura');
+      setError(e?.message || t('err.temperature', 'Errore nel salvataggio temperatura'));
     }
   };
 
@@ -186,7 +211,7 @@ export const HaccpPage: React.FC = () => {
         return [...others, saved].sort((a, b) => a.fryerLabel.localeCompare(b.fryerLabel));
       });
     } catch (e: any) {
-      setError(e?.message || 'Errore nel salvataggio friggitrice');
+      setError(e?.message || t('err.fryer', 'Errore nel salvataggio friggitrice'));
     }
   };
 
@@ -212,7 +237,7 @@ export const HaccpPage: React.FC = () => {
         return [...others, saved].sort((a, b) => a.point.localeCompare(b.point));
       });
     } catch (e: any) {
-      setError(e?.message || 'Errore nel salvataggio pulizia');
+      setError(e?.message || t('err.cleaning', 'Errore nel salvataggio pulizia'));
     }
   };
 
@@ -233,7 +258,7 @@ export const HaccpPage: React.FC = () => {
       });
       setReceipts(prev => [...prev, saved]);
     } catch (e: any) {
-      setError(e?.message || 'Errore nel salvataggio ricevimento');
+      setError(e?.message || t('err.receipt', 'Errore nel salvataggio ricevimento'));
     }
   };
 
@@ -242,7 +267,7 @@ export const HaccpPage: React.FC = () => {
       await haccpApiService.deleteReceipt(id);
       setReceipts(prev => prev.filter(r => r.id !== id));
     } catch (e: any) {
-      setError(e?.message || 'Errore eliminazione');
+      setError(e?.message || t('err.delete', 'Errore eliminazione'));
     }
   };
 
@@ -263,7 +288,7 @@ export const HaccpPage: React.FC = () => {
       });
       setProduction(prev => [...prev, saved]);
     } catch (e: any) {
-      setError(e?.message || 'Errore nel salvataggio produzione');
+      setError(e?.message || t('err.production', 'Errore nel salvataggio produzione'));
     }
   };
 
@@ -272,7 +297,7 @@ export const HaccpPage: React.FC = () => {
       await haccpApiService.deleteProductionLog(id);
       setProduction(prev => prev.filter(p => p.id !== id));
     } catch (e: any) {
-      setError(e?.message || 'Errore eliminazione');
+      setError(e?.message || t('err.delete', 'Errore eliminazione'));
     }
   };
 
@@ -317,7 +342,7 @@ export const HaccpPage: React.FC = () => {
             HACCP
           </h1>
           <p className="mt-1 text-[15px] text-[var(--ds-text-muted)]">
-            Controlli giornalieri di igiene e sicurezza alimentare.
+            {t('subtitle', 'Controlli giornalieri di igiene e sicurezza alimentare.')}
           </p>
         </div>
 
@@ -338,7 +363,7 @@ export const HaccpPage: React.FC = () => {
               value={date}
               onChange={e => setDate(e.target.value)}
               onClick={e => { try { e.currentTarget.showPicker(); } catch { /* niente picker: resta il campo nativo */ } }}
-              aria-label="Giorno"
+              aria-label={t('day', 'Giorno')}
               // Bianca e con l'ombra come il campo di ricerca delle altre
               // schermate, non incassata: qui sta sulla tela, non dentro una card.
               className="h-11 w-auto min-w-0 cursor-pointer rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] pl-10 pr-4 text-[15px] tabular-nums text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-date-and-time-value]:min-w-0 [&::-webkit-date-and-time-value]:text-left"
@@ -352,19 +377,19 @@ export const HaccpPage: React.FC = () => {
             type="button"
             onClick={onPrintReport}
             disabled={loading}
-            title="Stampa report"
-            aria-label="Stampa report"
+            title={t('printReport', 'Stampa report')}
+            aria-label={t('printReport', 'Stampa report')}
             className={`${dsButton.primary} w-11 flex-shrink-0 px-0 sm:w-auto sm:px-5`}
           >
             <Printer className="h-4 w-4" aria-hidden />
-            <span className="hidden sm:inline">Stampa report</span>
+            <span className="hidden sm:inline">{t('printReport', 'Stampa report')}</span>
           </button>
           <button
             type="button"
             onClick={() => reload(date)}
             className={`${dsIconButton} ml-auto`}
-            title="Ricarica"
-            aria-label="Ricarica"
+            title={t('reload', 'Ricarica')}
+            aria-label={t('reload', 'Ricarica')}
           >
             <RefreshCw className="h-4 w-4" />
           </button>
@@ -378,7 +403,7 @@ export const HaccpPage: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setError(null)}
-                aria-label="Chiudi avviso"
+                aria-label={t('closeAlert', 'Chiudi avviso')}
                 className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--ds-radius-control)] opacity-70 transition-opacity hover:opacity-100"
               >
                 <X className="h-4 w-4" />
@@ -395,9 +420,9 @@ export const HaccpPage: React.FC = () => {
           <>
             <Card>
               <CardHeader
-                title="Temperature frigoriferi e congelatori"
+                title={t('card.temperatures', 'Temperature frigoriferi e congelatori')}
                 icon={<Thermometer className="h-4 w-4" />}
-                status={`${tempCompleted}/${HACCP_TEMPERATURE_LOCATIONS.length} compilati`}
+                status={t('filledCount', '{{fatti}}/{{totale}} compilati', { fatti: tempCompleted, totale: HACCP_TEMPERATURE_LOCATIONS.length })}
               />
               <TemperatureSection
                 rows={HACCP_TEMPERATURE_LOCATIONS}
@@ -408,36 +433,36 @@ export const HaccpPage: React.FC = () => {
 
             <Card>
               <CardHeader
-                title="Friggitrici — controllo olio"
+                title={t('card.oil', 'Friggitrici — controllo olio')}
                 icon={<Flame className="h-4 w-4" />}
-                status={`${oilCompleted}/${HACCP_FRYERS.length} compilati`}
+                status={t('filledCount', '{{fatti}}/{{totale}} compilati', { fatti: oilCompleted, totale: HACCP_FRYERS.length })}
               />
               <OilSection rows={HACCP_FRYERS} byFryer={oilByFryer} onSave={saveOil} />
             </Card>
 
             <Card>
               <CardHeader
-                title="Pulizie attrezzature e superfici"
+                title={t('card.cleaning', 'Pulizie attrezzature e superfici')}
                 icon={<Sparkles className="h-4 w-4" />}
-                status={`${cleaningCompleted}/${HACCP_CLEANING_POINTS.length} eseguite`}
+                status={t('doneCount', '{{fatti}}/{{totale}} eseguite', { fatti: cleaningCompleted, totale: HACCP_CLEANING_POINTS.length })}
               />
               <CleaningSection rows={HACCP_CLEANING_POINTS} byPoint={cleaningByPoint} onSave={saveCleaning} />
             </Card>
 
             <Card>
               <CardHeader
-                title="Ricevimento merci"
+                title={t('card.receipts', 'Ricevimento merci')}
                 icon={<Truck className="h-4 w-4" />}
-                status={`${receipts.length} ${receipts.length === 1 ? 'registrazione' : 'registrazioni'}`}
+                status={t('records', '{{count}} registrazioni', { count: receipts.length })}
               />
               <ReceiptsSection rows={receipts} onAdd={addReceipt} onDelete={deleteReceipt} />
             </Card>
 
             <Card>
               <CardHeader
-                title="Abbattimento / produzione"
+                title={t('card.production', 'Abbattimento / produzione')}
                 icon={<Snowflake className="h-4 w-4" />}
-                status={`${production.length} ${production.length === 1 ? 'registrazione' : 'registrazioni'}`}
+                status={t('records', '{{count}} registrazioni', { count: production.length })}
               />
               <ProductionSection rows={production} onAdd={addProduction} onDelete={deleteProduction} />
             </Card>
@@ -494,6 +519,7 @@ interface TempRowProps {
 const TemperatureRow: React.FC<TempRowProps> = ({
   location, targetMax, initialTemperature, initialNote, recordedAt, recordedBy, onSave,
 }) => {
+  const { t } = useTranslation('haccp', { useSuspense: false });
   // Seed the field with the limit so the operator can either confirm it or
   // type over it. "touched" tracks whether the operator has actually focused
   // the field — without it, tabbing past 11 untouched rows would record 11
@@ -536,7 +562,7 @@ const TemperatureRow: React.FC<TempRowProps> = ({
       <div className="col-span-12 min-w-0 sm:col-span-4">
         <div className="text-[15px] font-medium text-[var(--ds-text-primary)]">{location}</div>
         <div className="text-[13px] tabular-nums text-[var(--ds-text-muted)]">
-          Limite ≤ {formatNumber(targetMax)}°C
+          {t('limit', 'Limite ≤ {{gradi}}°C', { gradi: formatNumber(targetMax) })}
         </div>
       </div>
       <div className="col-span-4 sm:col-span-2">
@@ -546,7 +572,7 @@ const TemperatureRow: React.FC<TempRowProps> = ({
             inputMode="decimal"
             value={temp}
             placeholder="—"
-            aria-label={`Temperatura ${location}`}
+            aria-label={t('tempAria', 'Temperatura {{punto}}', { punto: location })}
             onChange={e => { setTemp(e.target.value); setTouched(true); }}
             onFocus={e => { setTouched(true); e.target.select(); }}
             onBlur={commit}
@@ -559,8 +585,8 @@ const TemperatureRow: React.FC<TempRowProps> = ({
         <input
           type="text"
           value={note}
-          placeholder="Note (opzionale)"
-          aria-label={`Note ${location}`}
+          placeholder={t('notePlaceholder', 'Note (opzionale)')}
+          aria-label={t('noteAria', 'Note {{punto}}', { punto: location })}
           onChange={e => setNote(e.target.value)}
           onBlur={commit}
           className={field}
@@ -574,7 +600,7 @@ const TemperatureRow: React.FC<TempRowProps> = ({
         ) : parsed !== null ? (
           <span
             className="inline-block h-2 w-2 rounded-full bg-[var(--ds-pending-solid)]"
-            title="Suggerimento — non confermato"
+            title={t('unconfirmed', 'Suggerimento — non confermato')}
           />
         ) : null}
       </div>
@@ -595,11 +621,16 @@ interface OilSectionProps {
   onSave: (fryerLabel: string, action: HaccpOilAction, note: string) => void;
 }
 
-const OIL_ACTION_LABELS: Record<HaccpOilAction, string> = {
+/* I valori (SOSTITUITO, FILTRATO, UTILIZZABILE) sono quelli dell'API e del
+   database: si traduce l'etichetta, mai il valore. */
+const OIL_ACTION_LABELS_IT: Record<HaccpOilAction, string> = {
   SOSTITUITO: 'Sostituito',
   FILTRATO: 'Filtrato',
   UTILIZZABILE: 'Utilizzabile',
 };
+
+const oilActionLabel = (a: HaccpOilAction, t?: TFunc): string =>
+  t ? t(`oil.${a}`, OIL_ACTION_LABELS_IT[a]) : OIL_ACTION_LABELS_IT[a];
 
 const OilSection: React.FC<OilSectionProps> = ({ rows, byFryer, onSave }) => {
   return (
@@ -634,6 +665,7 @@ interface OilRowProps {
 const OilRow: React.FC<OilRowProps> = ({
   fryerLabel, initialAction, initialNote, recordedAt, recordedBy, onSave,
 }) => {
+  const { t } = useTranslation('haccp', { useSuspense: false });
   const [action, setAction] = useState<HaccpOilAction | null>(initialAction);
   const [note, setNote] = useState(initialNote);
   useEffect(() => { setAction(initialAction); }, [initialAction]);
@@ -660,18 +692,18 @@ const OilRow: React.FC<OilRowProps> = ({
         <SegmentedControl<HaccpOilAction>
           value={(action ?? '') as HaccpOilAction}
           onChange={pick}
-          ariaLabel={`Controllo olio ${fryerLabel}`}
+          ariaLabel={t('oilAria', 'Controllo olio {{friggitrice}}', { friggitrice: fryerLabel })}
           size="sm"
           equalWidth={false}
-          options={HACCP_OIL_ACTIONS.map(a => ({ value: a, label: OIL_ACTION_LABELS[a] }))}
+          options={HACCP_OIL_ACTIONS.map(a => ({ value: a, label: oilActionLabel(a, t) }))}
         />
       </div>
       <div className="col-span-12 sm:col-span-4">
         <input
           type="text"
           value={note}
-          placeholder="Note (opzionale)"
-          aria-label={`Note ${fryerLabel}`}
+          placeholder={t('notePlaceholder', 'Note (opzionale)')}
+          aria-label={t('noteAria', 'Note {{punto}}', { punto: fryerLabel })}
           onChange={e => setNote(e.target.value)}
           onBlur={commitNote}
           disabled={!action}
@@ -728,6 +760,7 @@ interface CleaningRowProps {
 const CleaningRow: React.FC<CleaningRowProps> = ({
   point, initialDone, initialNote, recordedAt, recordedBy, onSave,
 }) => {
+  const { t } = useTranslation('haccp', { useSuspense: false });
   const [done, setDone] = useState(initialDone);
   const [note, setNote] = useState(initialNote);
   useEffect(() => { setDone(initialDone); }, [initialDone]);
@@ -753,7 +786,7 @@ const CleaningRow: React.FC<CleaningRowProps> = ({
           onClick={toggle}
           className="-my-2 inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           aria-pressed={done}
-          aria-label={done ? 'Segna come non eseguito' : 'Segna come eseguito'}
+          aria-label={done ? t('markNotDone', 'Segna come non eseguito') : t('markDone', 'Segna come eseguito')}
         >
           <span
             className={`flex h-6 w-6 items-center justify-center rounded-[var(--ds-radius)] transition-colors ${
@@ -771,8 +804,8 @@ const CleaningRow: React.FC<CleaningRowProps> = ({
         <input
           type="text"
           value={note}
-          placeholder="Note (opzionale)"
-          aria-label={`Note ${point}`}
+          placeholder={t('notePlaceholder', 'Note (opzionale)')}
+          aria-label={t('noteAria', 'Note {{punto}}', { punto: point })}
           onChange={e => setNote(e.target.value)}
           onBlur={commitNote}
           className={field}
@@ -812,6 +845,7 @@ const outcomeChip = (active: boolean, tone: 'positive' | 'critical'): string => 
 };
 
 const ReceiptsSection: React.FC<ReceiptsSectionProps> = ({ rows, onAdd, onDelete }) => {
+  const { t } = useTranslation('haccp', { useSuspense: false });
   const [product, setProduct] = useState('');
   const [lotNumber, setLotNumber] = useState('');
   const [temperature, setTemperature] = useState('');
@@ -832,7 +866,7 @@ const ReceiptsSection: React.FC<ReceiptsSectionProps> = ({ rows, onAdd, onDelete
     <div className="space-y-2">
       <form onSubmit={submit} className="grid grid-cols-12 items-end gap-2 border-b border-[var(--ds-border)] pb-4">
         <div className="col-span-12 sm:col-span-4">
-          <label className={fieldLabel} htmlFor="haccp-receipt-product">Prodotto</label>
+          <label className={fieldLabel} htmlFor="haccp-receipt-product">{t('product', 'Prodotto')}</label>
           <input
             id="haccp-receipt-product"
             ref={productInputRef}
@@ -848,7 +882,7 @@ const ReceiptsSection: React.FC<ReceiptsSectionProps> = ({ rows, onAdd, onDelete
           </datalist>
         </div>
         <div className="col-span-6 sm:col-span-2">
-          <label className={fieldLabel} htmlFor="haccp-receipt-lot">Lotto</label>
+          <label className={fieldLabel} htmlFor="haccp-receipt-lot">{t('lot', 'Lotto')}</label>
           <input
             id="haccp-receipt-lot"
             type="text"
@@ -858,7 +892,7 @@ const ReceiptsSection: React.FC<ReceiptsSectionProps> = ({ rows, onAdd, onDelete
           />
         </div>
         <div className="col-span-6 sm:col-span-2">
-          <label className={fieldLabel} htmlFor="haccp-receipt-temp">Temp. (°C)</label>
+          <label className={fieldLabel} htmlFor="haccp-receipt-temp">{t('temp', 'Temp. (°C)')}</label>
           <input
             id="haccp-receipt-temp"
             type="text"
@@ -869,7 +903,7 @@ const ReceiptsSection: React.FC<ReceiptsSectionProps> = ({ rows, onAdd, onDelete
           />
         </div>
         <div className="col-span-6 sm:col-span-2">
-          <span className={fieldLabel}>Esito</span>
+          <span className={fieldLabel}>{t('outcome', 'Esito')}</span>
           <div className="flex gap-1.5">
             <button
               type="button"
@@ -877,7 +911,7 @@ const ReceiptsSection: React.FC<ReceiptsSectionProps> = ({ rows, onAdd, onDelete
               aria-pressed={accepted}
               className={outcomeChip(accepted, 'positive')}
             >
-              Accettato
+              {t('accepted', 'Accettato')}
             </button>
             <button
               type="button"
@@ -885,7 +919,7 @@ const ReceiptsSection: React.FC<ReceiptsSectionProps> = ({ rows, onAdd, onDelete
               aria-pressed={!accepted}
               className={outcomeChip(!accepted, 'critical')}
             >
-              Respinto
+              {t('rejected', 'Respinto')}
             </button>
           </div>
         </div>
@@ -896,7 +930,7 @@ const ReceiptsSection: React.FC<ReceiptsSectionProps> = ({ rows, onAdd, onDelete
             className={`w-full ${dsButton.primary}`}
           >
             <Plus className="h-4 w-4" aria-hidden />
-            Aggiungi
+            {t('add', 'Aggiungi')}
           </button>
         </div>
         <div className="col-span-12">
@@ -904,15 +938,15 @@ const ReceiptsSection: React.FC<ReceiptsSectionProps> = ({ rows, onAdd, onDelete
             type="text"
             value={note}
             onChange={e => setNote(e.target.value)}
-            placeholder="Note (opzionale)"
-            aria-label="Note ricevimento"
+            placeholder={t('notePlaceholder', 'Note (opzionale)')}
+            aria-label={t('receiptNoteAria', 'Note ricevimento')}
             className={field}
           />
         </div>
       </form>
 
       {rows.length === 0 ? (
-        <div className={emptyNote}>Nessuna registrazione per oggi.</div>
+        <div className={emptyNote}>{t('noRecords', 'Nessuna registrazione per oggi.')}</div>
       ) : (
         <ul className={rowList}>
           {rows.map(r => (
@@ -920,7 +954,7 @@ const ReceiptsSection: React.FC<ReceiptsSectionProps> = ({ rows, onAdd, onDelete
               <div className="col-span-12 min-w-0 truncate text-[15px] font-medium text-[var(--ds-text-primary)] sm:col-span-4">
                 {r.product}
                 {r.lotNumber && (
-                  <span className="ml-1.5 text-[13px] tabular-nums text-[var(--ds-text-muted)]">· lotto {r.lotNumber}</span>
+                  <span className="ml-1.5 text-[13px] tabular-nums text-[var(--ds-text-muted)]">{t('lotInline', '· lotto {{numero}}', { numero: r.lotNumber })}</span>
                 )}
               </div>
               <div className="col-span-4 text-right text-[15px] tabular-nums text-[var(--ds-text-secondary)] sm:col-span-2">
@@ -929,7 +963,7 @@ const ReceiptsSection: React.FC<ReceiptsSectionProps> = ({ rows, onAdd, onDelete
               <div className="col-span-4 sm:col-span-2">
                 <StatusPill tone={r.accepted ? 'positive' : 'critical'}>
                   {r.accepted ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
-                  {r.accepted ? 'Accettato' : 'Respinto'}
+                  {r.accepted ? t('accepted', 'Accettato') : t('rejected', 'Respinto')}
                 </StatusPill>
               </div>
               <div className="col-span-4 truncate text-[14px] text-[var(--ds-text-muted)] sm:col-span-3">
@@ -940,8 +974,8 @@ const ReceiptsSection: React.FC<ReceiptsSectionProps> = ({ rows, onAdd, onDelete
                   type="button"
                   onClick={() => onDelete(r.id)}
                   className={deleteButton}
-                  title="Elimina"
-                  aria-label={`Elimina ${r.product}`}
+                  title={t('delete', 'Elimina')}
+                  aria-label={t('deleteNamed', 'Elimina {{nome}}', { nome: r.product })}
                 >
                   <Trash2 className="h-4 w-4" />
                 </button>
@@ -965,6 +999,7 @@ interface ProductionSectionProps {
 }
 
 const ProductionSection: React.FC<ProductionSectionProps> = ({ rows, onAdd, onDelete }) => {
+  const { t } = useTranslation('haccp', { useSuspense: false });
   const [product, setProduct] = useState('');
   const [blastTempRange, setBlastTempRange] = useState<string>(HACCP_BLAST_TEMP_RANGES[0]);
   const [blastDuration, setBlastDuration] = useState<string>(HACCP_BLAST_DURATIONS[0]);
@@ -985,7 +1020,7 @@ const ProductionSection: React.FC<ProductionSectionProps> = ({ rows, onAdd, onDe
     <div className="space-y-2">
       <form onSubmit={submit} className="grid grid-cols-12 items-end gap-2 border-b border-[var(--ds-border)] pb-4">
         <div className="col-span-12 sm:col-span-4">
-          <label className={fieldLabel} htmlFor="haccp-production-product">Prodotto</label>
+          <label className={fieldLabel} htmlFor="haccp-production-product">{t('product', 'Prodotto')}</label>
           <input
             id="haccp-production-product"
             ref={productInputRef}
@@ -1001,7 +1036,7 @@ const ProductionSection: React.FC<ProductionSectionProps> = ({ rows, onAdd, onDe
           </datalist>
         </div>
         <div className="col-span-6 sm:col-span-2">
-          <label className={fieldLabel} htmlFor="haccp-production-range">Range temp.</label>
+          <label className={fieldLabel} htmlFor="haccp-production-range">{t('tempRange', 'Range temp.')}</label>
           <select
             id="haccp-production-range"
             value={blastTempRange}
@@ -1012,7 +1047,7 @@ const ProductionSection: React.FC<ProductionSectionProps> = ({ rows, onAdd, onDe
           </select>
         </div>
         <div className="col-span-6 sm:col-span-2">
-          <label className={fieldLabel} htmlFor="haccp-production-duration">Durata</label>
+          <label className={fieldLabel} htmlFor="haccp-production-duration">{t('duration', 'Durata')}</label>
           <select
             id="haccp-production-duration"
             value={blastDuration}
@@ -1023,7 +1058,7 @@ const ProductionSection: React.FC<ProductionSectionProps> = ({ rows, onAdd, onDe
           </select>
         </div>
         <div className="col-span-6 sm:col-span-2">
-          <label className={fieldLabel} htmlFor="haccp-production-lot">Lotto interno</label>
+          <label className={fieldLabel} htmlFor="haccp-production-lot">{t('internalLot', 'Lotto interno')}</label>
           <input
             id="haccp-production-lot"
             type="text"
@@ -1039,7 +1074,7 @@ const ProductionSection: React.FC<ProductionSectionProps> = ({ rows, onAdd, onDe
             className={`w-full ${dsButton.primary}`}
           >
             <Plus className="h-4 w-4" aria-hidden />
-            Aggiungi
+            {t('add', 'Aggiungi')}
           </button>
         </div>
         <div className="col-span-12">
@@ -1047,15 +1082,15 @@ const ProductionSection: React.FC<ProductionSectionProps> = ({ rows, onAdd, onDe
             type="text"
             value={note}
             onChange={e => setNote(e.target.value)}
-            placeholder="Note (opzionale)"
-            aria-label="Note produzione"
+            placeholder={t('notePlaceholder', 'Note (opzionale)')}
+            aria-label={t('productionNoteAria', 'Note produzione')}
             className={field}
           />
         </div>
       </form>
 
       {rows.length === 0 ? (
-        <div className={emptyNote}>Nessuna registrazione per oggi.</div>
+        <div className={emptyNote}>{t('noRecords', 'Nessuna registrazione per oggi.')}</div>
       ) : (
         <ul className={rowList}>
           {rows.map(r => (
@@ -1063,7 +1098,7 @@ const ProductionSection: React.FC<ProductionSectionProps> = ({ rows, onAdd, onDe
               <div className="col-span-12 min-w-0 truncate text-[15px] font-medium text-[var(--ds-text-primary)] sm:col-span-4">
                 {r.product}
                 {r.internalLot && (
-                  <span className="ml-1.5 text-[13px] tabular-nums text-[var(--ds-text-muted)]">· lotto {r.internalLot}</span>
+                  <span className="ml-1.5 text-[13px] tabular-nums text-[var(--ds-text-muted)]">{t('lotInline', '· lotto {{numero}}', { numero: r.internalLot })}</span>
                 )}
               </div>
               <div className="col-span-4 text-[15px] tabular-nums text-[var(--ds-text-secondary)] sm:col-span-2">
@@ -1080,8 +1115,8 @@ const ProductionSection: React.FC<ProductionSectionProps> = ({ rows, onAdd, onDe
                   type="button"
                   onClick={() => onDelete(r.id)}
                   className={deleteButton}
-                  title="Elimina"
-                  aria-label={`Elimina ${r.product}`}
+                  title={t('delete', 'Elimina')}
+                  aria-label={t('deleteNamed', 'Elimina {{nome}}', { nome: r.product })}
                 >
                   <Trash2 className="h-4 w-4" />
                 </button>
