@@ -85,6 +85,17 @@ export const Pagamento: React.FC<PagamentoProps> = ({
       ? (quotaCents / 100).toFixed(2)
       : residual > 0 ? (residual / 100).toFixed(2) : '0'
   );
+  // Il residuo scende da solo mentre la schermata è aperta (quote QR, link
+  // online): il campo segue quello che manca davvero. Fermo al residuo
+  // d'apertura, a conto saldato dal cliente mostrava «Resto 44,50» e
+  // «Registra 0,00 e chiudi».
+  const lastResidual = useRef(residual);
+  useEffect(() => {
+    if (lastResidual.current === residual) return;
+    lastResidual.current = residual;
+    const recorded = movements.reduce((n, m) => n + m.amount_cents, 0);
+    setAmount(nextAmountText(Math.max(0, residual - recorded)));
+  }, [residual, movements]);
   const [tip, setTip] = useState('');
   const [doc, setDoc] = useState<Doc>('Scontrino');
   // Invio del link /pay al telefono dell'ordine d'asporto. Esito inline
@@ -132,6 +143,9 @@ export const Pagamento: React.FC<PagamentoProps> = ({
     () => new Map((bill.item_taken_units ?? []).map(u => [u.order_item_id, u.units])),
     [bill.item_taken_units]
   );
+  // Conto saldato = ogni riga pagata, anche quelle coperte da una quota
+  // «tutto il conto», che non dice quali piatti paga.
+  const billSettled = bill.total_cents > 0 && residual <= 0;
   const discountShown = itemsSum > 0 ? Math.max(0, itemsSum - bill.total_cents) : 0;
 
   const addMovement = () => {
@@ -165,7 +179,9 @@ export const Pagamento: React.FC<PagamentoProps> = ({
   // posto dove correggerli.
   const canaleEDocumento = (
     <>
-      {/* Il secondo gruppo: apre un canale, non registra denaro. */}
+      {/* Il secondo gruppo: apre un canale, non registra denaro — a conto
+          saldato non c'è più niente da chiedere. */}
+      {residual > 0 && (<>
       <h2 className="mt-5 border-t border-[var(--ds-border)] pt-4 text-[13px] font-semibold text-[var(--ds-text-muted)]">{t('askCustomer')}</h2>
       <p className="mt-1 text-[12px] text-[var(--ds-text-muted)]">
         {t('billStaysOpen')}
@@ -199,6 +215,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
       {linkSend.state === 'error' && (
         <p className="mt-1 text-[12px] text-[var(--ds-critical-text)]">{linkSend.detail || t('sendFailedRetry')}</p>
       )}
+      </>)}
 
       <div className="mt-5 border-t border-[var(--ds-border)] pt-4">
         <span className="mb-2 block text-[13px] font-semibold text-[var(--ds-text-muted)]">
@@ -291,7 +308,9 @@ export const Pagamento: React.FC<PagamentoProps> = ({
           className="mt-2 inline-flex h-12 w-full items-center justify-center gap-2 whitespace-nowrap rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-4 text-[17px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
         >
           {busy && <Loader2 size={16} className="animate-spin" />}
-          Registra {euro(math.applied + math.recorded)} e chiudi
+          {math.applied + math.recorded > 0
+            ? `Registra ${euro(math.applied + math.recorded)} e chiudi`
+            : t('closeBill')}
         </button>
       </div>
     </>
@@ -342,7 +361,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
               {(bill.items ?? []).map((it, idx) => {
                 const oid = it.order_item_id;
                 const known = oid != null && bill.item_paid_units != null;
-                const paid = known ? Math.min(it.qty, paidUnits.get(oid!) ?? 0) : 0;
+                const paid = billSettled ? it.qty : known ? Math.min(it.qty, paidUnits.get(oid!) ?? 0) : 0;
                 const paying = known ? Math.max(0, Math.min(it.qty - paid, (takenUnits.get(oid!) ?? 0) - paid)) : 0;
                 const allPaid = paid >= it.qty;
                 return (
