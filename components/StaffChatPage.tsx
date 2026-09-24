@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { MessagesSquare, Hash, Send, Loader2, AlertTriangle, Plus, ChevronUp, X as XIcon, Paperclip } from 'lucide-react';
 import { Loader } from './Loader';
 import { staffChatApiService, staffChatCache, staffMediaUrl, type StaffThreadSummary, type StaffColleague, type StaffPreset, type StaffUploadedAttachment } from '../services/staffChatApiService';
@@ -9,59 +10,75 @@ import {
   type StaffChannel, type StaffMessage,
 } from '../services/staffChat';
 import { socketClient } from '../services/socketClient';
+import { displayLocale } from '../utils/formatLocale';
 import {
   SplitPane, PaneHeader, PanePlaceholder, SectionHeader, Avatar, EmptyState, AttachmentRow,
   Callout, CountBadge, dsIconButton,
 } from './ds';
 
+/* Le funzioni di modulo prendono la traduzione come parametro: qui non ci
+   sono hook. Si chiama `tr` e non `t` perché in questo file `t` è già il
+   nome del thread — si rinomina il parametro nuovo, non la variabile che
+   c'era. Senza `tr` si resta in italiano. */
+type TFunc = (key: string, defaultValue: string, options?: Record<string, unknown>) => string;
+
 // Stesse etichette usate dalla membership in services/staffChat.ts: il canale
-// si chiama come la sezione che serve.
-const CHANNEL_LABELS: Record<StaffChannel, string> = {
+// si chiama come la sezione che serve. Le chiavi (generale, sala, …) sono
+// persistite e non si toccano.
+const CHANNEL_LABELS_IT: Record<StaffChannel, string> = {
   generale: 'Generale',
   sala: 'Sala',
   cucina: 'Cucina',
   reception: 'Reception',
 };
+const channelLabel = (c: StaffChannel, tr?: TFunc): string =>
+  tr ? tr(`channel.${c}`, CHANNEL_LABELS_IT[c]) : CHANNEL_LABELS_IT[c];
 
-const ROLE_LABELS: Record<string, string> = {
-  OWNER: 'Titolare',
-  GENERAL_MANAGER: 'Direttore',
+/* I ruoli hanno un nome solo, e sta in common.role. Qui c'erano «Titolare»,
+   «Direttore» e «Sala» mentre Utenti e la matrice dei permessi dicevano
+   «Proprietario», «General Manager» e «Cameriere»: lo stesso ruolo con due
+   nomi su schermate che l'operatore apre di fila. */
+const ROLE_LABELS_IT: Record<string, string> = {
+  OWNER: 'Proprietario',
+  GENERAL_MANAGER: 'General Manager',
   MANAGER: 'Manager',
   RECEPTION: 'Reception',
-  WAITER: 'Sala',
+  WAITER: 'Cameriere',
   KITCHEN: 'Cucina',
   CASSA: 'Cassa',
 };
+const roleLabel = (r: string, tr?: TFunc): string =>
+  tr ? tr(`common:role.${r}`, ROLE_LABELS_IT[r] ?? r) : (ROLE_LABELS_IT[r] ?? r);
 
-const formatRelative = (iso: string | null): string => {
+const formatRelative = (iso: string | null, tr?: TFunc): string => {
   if (!iso) return '';
   const d = new Date(iso);
   const min = Math.floor((Date.now() - d.getTime()) / 60000);
-  if (min < 1) return 'ora';
-  if (min < 60) return `${min} min fa`;
+  if (min < 1) return tr ? tr('rel.now', 'ora') : 'ora';
+  if (min < 60) return tr ? tr('rel.min', '{{n}} min fa', { n: min }) : `${min} min fa`;
   const h = Math.floor(min / 60);
-  if (h < 24) return `${h} h fa`;
+  if (h < 24) return tr ? tr('rel.hours', '{{n}} h fa', { n: h }) : `${h} h fa`;
   const days = Math.floor(h / 24);
-  if (days < 7) return `${days} g fa`;
-  return d.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' });
+  if (days < 7) return tr ? tr('rel.days', '{{n}} g fa', { n: days }) : `${days} g fa`;
+  return d.toLocaleDateString(displayLocale(), { day: '2-digit', month: 'short' });
 };
 
 const formatTime = (iso: string): string => {
   try {
-    return new Date(iso).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+    return new Date(iso).toLocaleTimeString(displayLocale(), { hour: '2-digit', minute: '2-digit' });
   } catch { return ''; }
 };
 
-const formatDayHeader = (iso: string): string => {
+const formatDayHeader = (iso: string, tr?: TFunc): string => {
   const d = new Date(iso);
   const today = new Date();
   const yesterday = new Date(today);
   yesterday.setDate(today.getDate() - 1);
   const isSame = (a: Date, b: Date) =>
     a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-  if (isSame(d, today)) return 'Oggi';
-  if (isSame(d, yesterday)) return 'Ieri';
-  return d.toLocaleDateString('it-IT', { weekday: 'long', day: '2-digit', month: 'short' });
+  if (isSame(d, today)) return tr ? tr('today', 'Oggi') : 'Oggi';
+  if (isSame(d, yesterday)) return tr ? tr('yesterday', 'Ieri') : 'Ieri';
+  return d.toLocaleDateString(displayLocale(), { weekday: 'long', day: '2-digit', month: 'short' });
 };
 
 const PAGE_SIZE = 50;
@@ -85,10 +102,10 @@ const renderBodyWithMentions = (body: string, names: string[], mine: boolean): R
     : part);
 };
 
-const threadTitle = (t: StaffThreadSummary): string =>
-  t.kind === 'channel'
-    ? CHANNEL_LABELS[t.channel as StaffChannel] ?? t.channel ?? ''
-    : t.otherUser?.fullName || 'Utente rimosso';
+const threadTitle = (th: StaffThreadSummary, tr?: TFunc): string =>
+  th.kind === 'channel'
+    ? (th.channel ? channelLabel(th.channel as StaffChannel, tr) : '')
+    : th.otherUser?.fullName || (tr ? tr('removedUser', 'Utente rimosso') : 'Utente rimosso');
 
 interface StaffChatPageProps {
   currentUserId: number;
@@ -100,6 +117,8 @@ interface StaffChatPageProps {
 }
 
 const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUserName, initialThreadKey, onInitialThreadConsumed }) => {
+  // `tr` e non `t`: in questo file `t` è già il thread nelle callback.
+  const { t: tr } = useTranslation(['chat', 'common'], { useSuspense: false });
   // Riparte dall'ultimo stato noto (cache modulo-level, pre-riempita al
   // login): la pagina viene smontata a ogni cambio vista e senza questo ogni
   // rientro mostrava lo spinner. Il fetch parte comunque e rimpiazza in
@@ -156,7 +175,7 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
       });
       setColleagues(colleagues);
     } catch (err: any) {
-      setListError(err?.message || 'Errore caricamento chat');
+      setListError(err?.message || tr('errLoadThreads', 'Errore caricamento chat'));
     } finally {
       setListLoading(false);
     }
@@ -326,7 +345,7 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
       staffChatApiService.markRead(key, msg.id).catch(() => {});
       composerRef.current?.focus();
     } catch (err: any) {
-      setSendError(err?.message || 'Invio non riuscito');
+      setSendError(err?.message || tr('errSend', 'Invio non riuscito'));
     } finally {
       setSending(false);
     }
@@ -343,7 +362,7 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
       }
       setAttachments(prev => [...prev, ...uploaded].slice(0, STAFF_MAX_ATTACHMENTS));
     } catch (err: any) {
-      setSendError(err?.message || 'Caricamento foto non riuscito');
+      setSendError(err?.message || tr('errUpload', 'Caricamento foto non riuscito'));
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -443,11 +462,11 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-2">
           <span className={`truncate text-[15px] text-[var(--ds-text-primary)] ${t.unreadCount > 0 ? 'font-semibold' : 'font-medium'}`}>
-            {threadTitle(t)}
+            {threadTitle(t, tr)}
           </span>
           <span className="flex items-center gap-1.5">
             <span className="whitespace-nowrap text-[13px] text-[var(--ds-text-muted)]">
-              {formatRelative(t.lastMessage?.created_at ?? null)}
+              {formatRelative(t.lastMessage?.created_at ?? null, tr)}
             </span>
             {t.unreadCount > 0 && <CountBadge tone="alert" count={t.unreadCount} />}
           </span>
@@ -457,7 +476,7 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
             ? (t.kind === 'channel' && t.lastMessage.sender_user_id !== currentUserId
               ? `${t.lastMessage.sender_name}: ${staffMessagePreview(t.lastMessage)}`
               : staffMessagePreview(t.lastMessage))
-            : 'Nessun messaggio'}
+            : tr('noMessage', 'Nessun messaggio')}
         </p>
       </div>
     </button>
@@ -468,14 +487,14 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
       detailOpen={!!selectedKey}
       toolbar={
         <div className="flex items-center justify-between gap-2">
-          <h2 className="text-[17px] font-semibold text-[var(--ds-text-primary)]">Chat staff</h2>
+          <h2 className="text-[17px] font-semibold text-[var(--ds-text-primary)]">{tr('title', 'Chat staff')}</h2>
           <button
             type="button"
             onClick={() => setPickerOpen(o => !o)}
             aria-expanded={pickerOpen}
             className={dsIconButton}
-            title="Nuovo messaggio diretto"
-            aria-label="Nuovo messaggio diretto"
+            title={tr('newDm', 'Nuovo messaggio diretto')}
+            aria-label={tr('newDm', 'Nuovo messaggio diretto')}
           >
             {pickerOpen ? <XIcon className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
           </button>
@@ -490,9 +509,9 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
           <div className="space-y-1">
             {pickerOpen && (
               <div className="mb-2 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-1.5">
-                <SectionHeader>Scrivi a</SectionHeader>
+                <SectionHeader>{tr('writeTo', 'Scrivi a')}</SectionHeader>
                 {colleagues.length === 0 ? (
-                  <p className="px-3 py-2 text-[14px] text-[var(--ds-text-muted)]">Nessun altro utente attivo.</p>
+                  <p className="px-3 py-2 text-[14px] text-[var(--ds-text-muted)]">{tr('noColleagues', 'Nessun altro utente attivo.')}</p>
                 ) : colleagues.map(c => (
                   <button
                     key={c.id}
@@ -502,18 +521,18 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
                   >
                     <Avatar name={c.fullName} size="sm" />
                     <span className="min-w-0 flex-1 truncate text-[14px] text-[var(--ds-text-primary)]">{c.fullName}</span>
-                    <span className="flex-shrink-0 text-[12px] text-[var(--ds-text-muted)]">{ROLE_LABELS[c.role] ?? c.role}</span>
+                    <span className="flex-shrink-0 text-[12px] text-[var(--ds-text-muted)]">{roleLabel(c.role, tr)}</span>
                   </button>
                 ))}
               </div>
             )}
-            <SectionHeader>Canali</SectionHeader>
+            <SectionHeader>{tr('channels', 'Canali')}</SectionHeader>
             <div className="space-y-1 pb-2">
               {channelThreads.map(renderThread)}
             </div>
             {dmThreads.length > 0 && (
               <>
-                <SectionHeader>Messaggi diretti</SectionHeader>
+                <SectionHeader>{tr('directs', 'Messaggi diretti')}</SectionHeader>
                 <div className="space-y-1">
                   {dmThreads.map(renderThread)}
                 </div>
@@ -524,15 +543,15 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
       }
       detail={
         !selected ? (
-          <PanePlaceholder icon={MessagesSquare}>Seleziona un canale o un collega</PanePlaceholder>
+          <PanePlaceholder icon={MessagesSquare}>{tr('pickOne', 'Seleziona un canale o un collega')}</PanePlaceholder>
         ) : (
           <>
             <PaneHeader
               onBack={() => setSelectedKey(null)}
-              backLabel="Torna alle chat"
-              title={threadTitle(selected)}
-              subtitle={selected.kind === 'direct'
-                ? (ROLE_LABELS[selected.otherUser?.role ?? ''] ?? undefined)
+              backLabel={tr('backToChats', 'Torna alle chat')}
+              title={threadTitle(selected, tr)}
+              subtitle={selected.kind === 'direct' && selected.otherUser?.role
+                ? roleLabel(selected.otherUser.role, tr)
                 : undefined}
             />
 
@@ -544,7 +563,7 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
                   <Callout tone="critical" icon={AlertTriangle}>{msgError}</Callout>
                 ) : messages.length === 0 ? (
                   <p className="mt-8 text-center text-[14px] text-[var(--ds-text-muted)]">
-                    Nessun messaggio ancora.
+                    {tr('noMessagesYet', 'Nessun messaggio ancora.')}
                   </p>
                 ) : (
                   <div className="mx-auto max-w-3xl space-y-4">
@@ -557,7 +576,7 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
                           className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-3.5 text-[13px] font-medium text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                         >
                           {loadingMore ? <Loader2 className="h-4 w-4 animate-spin" /> : <ChevronUp className="h-4 w-4" />}
-                          Messaggi precedenti
+                          {tr('olderMessages', 'Messaggi precedenti')}
                         </button>
                       </div>
                     )}
@@ -565,7 +584,7 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
                       <div key={g.day} className="space-y-2">
                         <div className="flex justify-center">
                           <span className="rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-2.5 py-1 text-[12px] text-[var(--ds-text-muted)] shadow-[var(--ds-shadow-card)]">
-                            {formatDayHeader(g.day)}
+                            {formatDayHeader(g.day, tr)}
                           </span>
                         </div>
                         {g.items.map(m => {
@@ -655,7 +674,7 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
                       >
                         <Avatar name={c.fullName} size="sm" />
                         <span className="min-w-0 flex-1 truncate text-[14px] text-[var(--ds-text-primary)]">{c.fullName}</span>
-                        <span className="flex-shrink-0 text-[12px] text-[var(--ds-text-muted)]">{ROLE_LABELS[c.role] ?? c.role}</span>
+                        <span className="flex-shrink-0 text-[12px] text-[var(--ds-text-muted)]">{roleLabel(c.role, tr)}</span>
                       </button>
                     ))}
                   </div>
@@ -694,8 +713,8 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={uploading || sending || attachments.length >= STAFF_MAX_ATTACHMENTS}
-                    aria-label="Allega una foto"
-                    title="Allega una foto"
+                    aria-label={tr('attachPhoto', 'Allega una foto')}
+                    title={tr('attachPhoto', 'Allega una foto')}
                     className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
                     {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
@@ -705,14 +724,14 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
                     value={composerText}
                     onChange={e => setComposerText(e.target.value.slice(0, STAFF_MESSAGE_MAX_LENGTH))}
                     onKeyDown={handleComposerKeyDown}
-                    placeholder="Scrivi un messaggio…"
+                    placeholder={tr('composerPlaceholder', 'Scrivi un messaggio…')}
                     rows={1}
                     className="max-h-40 min-w-0 flex-1 resize-none border-0 bg-transparent px-3 py-2 text-[15px] leading-snug text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] focus:outline-none"
                   />
                   <button
                     onClick={() => doSend(composerText)}
                     disabled={(!composerText.trim() && attachments.length === 0) || sending || uploading}
-                    aria-label="Invia messaggio"
+                    aria-label={tr('send', 'Invia messaggio')}
                     className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] transition-all hover:bg-[var(--ds-action-bg-hover)] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:cursor-not-allowed disabled:bg-[var(--ds-surface-row)] disabled:text-[var(--ds-text-subtle)]"
                   >
                     {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}

@@ -1,0 +1,34 @@
+{
+  "channel": {
+    "generale": "Generale",
+    "sala": "Sala",
+    "cucina": "Cucina",
+    "reception": "Reception"
+  },
+  "rel": {
+    "now": "ora",
+    "min": "{{n}} min fa",
+    "hours": "{{n}} h fa",
+    "days": "{{n}} g fa"
+  },
+  "today": "Oggi",
+  "yesterday": "Ieri",
+  "removedUser": "Utente rimosso",
+  "errSend": "Invio non riuscito",
+  "errUpload": "Caricamento foto non riuscito",
+  "noMessage": "Nessun messaggio",
+  "title": "Chat staff",
+  "newDm": "Nuovo messaggio diretto",
+  "writeTo": "Scrivi a",
+  "noColleagues": "Nessun altro utente attivo.",
+  "channels": "Canali",
+  "directs": "Messaggi diretti",
+  "pickOne": "Seleziona un canale o un collega",
+  "backToChats": "Torna alle chat",
+  "noMessagesYet": "Nessun messaggio ancora.",
+  "olderMessages": "Messaggi precedenti",
+  "attachPhoto": "Allega una foto",
+  "composerPlaceholder": "Scrivi un messaggio…",
+  "send": "Invia messaggio",
+  "errLoadThreads": "Errore caricamento chat"
+}

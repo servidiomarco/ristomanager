@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { UserPlus, Edit2, Trash2, Check, AlertCircle, Loader2, User as UserIcon, Shield, ChefHat, Utensils, Headset, Calculator } from 'lucide-react';
 import { User, UserRole } from '../types';
 import { authApiService } from '../services/authApiService';
@@ -18,7 +19,9 @@ interface UserManagementProps {
   onAutoOpenNewHandled?: () => void;
 }
 
-const ROLE_NAMES: Record<UserRole, string> = {
+/* I nomi dei ruoli vivono in common.role e si traducono una volta sola.
+   Questa mappa resta come italiano di riserva e come ORDINE del select. */
+const ROLE_NAMES_IT: Record<UserRole, string> = {
   // Ruolo di piattaforma: mai assegnabile da questa UI (il server rifiuta
   // comunque), l'etichetta serve solo a mostrare un eventuale utente
   // esistente senza la costante grezza.
@@ -53,6 +56,8 @@ const isPrivileged = (role: UserRole): boolean =>
   role === UserRole.OWNER || role === UserRole.GENERAL_MANAGER;
 
 export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpenNew, onAutoOpenNewHandled }) => {
+  const { t } = useTranslation(['impostazioni', 'common'], { useSuspense: false });
+  const roleLabel = (r: UserRole): string => t(`common:role.${r}`, ROLE_NAMES_IT[r] ?? r);
   const isModal = typeof onClose === 'function';
   const { user: currentUser } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
@@ -94,7 +99,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpe
       setUsers(data);
       setError('');
     } catch (err: any) {
-      setError(err.message || 'Errore nel caricamento degli utenti');
+      setError(err.message || t('utenti.errLoad', 'Errore nel caricamento degli utenti'));
     } finally {
       setIsLoading(false);
     }
@@ -146,7 +151,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpe
       } else {
         // Create new user
         if (!formData.password) {
-          setFormError('La password è obbligatoria per i nuovi utenti');
+          setFormError(t('utenti.passwordRequired', 'La password è obbligatoria per i nuovi utenti'));
           setIsSubmitting(false);
           return;
         }
@@ -160,7 +165,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpe
       await fetchUsers();
       resetForm();
     } catch (err: any) {
-      setFormError(err.message || 'Errore nel salvataggio');
+      setFormError(err.message || t('utenti.errSave', 'Errore nel salvataggio'));
     } finally {
       setIsSubmitting(false);
     }
@@ -179,7 +184,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpe
       setDeleteConfirmUser(null);
     } catch (err: any) {
       setDeleteConfirmUser(null);
-      setDeleteError(err.message || 'Errore nell\'eliminazione');
+      setDeleteError(err.message || t('utenti.errDelete', "Errore nell'eliminazione"));
     }
   };
 
@@ -189,7 +194,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpe
   const newUserLabel = (
     <>
       <UserPlus className="h-4 w-4" aria-hidden />
-      Nuovo utente
+      {t('utenti.newUser', 'Nuovo utente')}
     </>
   );
   /** Per l'empty state e il piede del modal: si centra, quindi non a tutta larghezza. */
@@ -221,7 +226,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpe
       {isLoading ? (
         <SkeletonCustomerGrid count={6} />
       ) : users.length === 0 ? (
-        <EmptyState icon={UserIcon} action={addButton}>Nessun utente configurato.</EmptyState>
+        <EmptyState icon={UserIcon} action={addButton}>{t('utenti.empty', 'Nessun utente configurato.')}</EmptyState>
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {users.map((user) => {
@@ -253,8 +258,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpe
                         type="button"
                         onClick={() => handleEdit(user)}
                         className={cardAction}
-                        aria-label={`Modifica ${user.full_name}`}
-                        title="Modifica"
+                        aria-label={t('utenti.editNamed', 'Modifica {{nome}}', { nome: user.full_name })}
+                        title={t('utenti.edit', 'Modifica')}
                       >
                         <Edit2 className="h-4 w-4" />
                       </button>
@@ -262,22 +267,22 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpe
                         type="button"
                         onClick={() => handleDeleteClick(user)}
                         className={`${cardAction} hover:text-[var(--ds-critical-text)]`}
-                        aria-label={`Elimina ${user.full_name}`}
-                        title="Elimina"
+                        aria-label={t('utenti.deleteNamed', 'Elimina {{nome}}', { nome: user.full_name })}
+                        title={t('utenti.delete', 'Elimina')}
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
                     </div>
                   ) : (
-                    <StatusPill className="flex-shrink-0">Tu</StatusPill>
+                    <StatusPill className="flex-shrink-0">{t('utenti.you', 'Tu')}</StatusPill>
                   )}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <StatusPill tone={isPrivileged(user.role) ? 'info' : 'neutral'}>
                     <RoleIcon className="h-3 w-3 flex-shrink-0" />
-                    {ROLE_NAMES[user.role]}
+                    {roleLabel(user.role)}
                   </StatusPill>
-                  {!user.is_active && <StatusPill tone="pending">Disattivato</StatusPill>}
+                  {!user.is_active && <StatusPill tone="pending">{t('utenti.disabled', 'Disattivato')}</StatusPill>}
                 </div>
               </div>
             );
@@ -294,7 +299,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpe
         <ModalShell
           open
           onClose={onClose!}
-          title="Gestione utenti"
+          title={t('utenti.title', 'Gestione utenti')}
           size="lg"
           bodyClassName="space-y-4 p-4 sm:p-6"
           footer={addButton}
@@ -322,8 +327,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpe
       <ModalShell
         open={showAddForm}
         onClose={resetForm}
-        title={editingUser ? 'Modifica utente' : 'Nuovo utente'}
-        subtitle={editingUser ? editingUser.email : 'Nome, email, password e ruolo.'}
+        title={editingUser ? t('utenti.editUser', 'Modifica utente') : t('utenti.newUser', 'Nuovo utente')}
+        subtitle={editingUser ? editingUser.email : t('utenti.formHint', 'Nome, email, password e ruolo.')}
         size="md"
         className={isModal ? 'z-[60]' : undefined}
         bodyClassName="p-4 sm:p-6"
@@ -336,14 +341,14 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpe
             className={dsButton.primary}
           >
             {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-            {editingUser ? 'Salva modifiche' : 'Crea utente'}
+            {editingUser ? t('utenti.saveChanges', 'Salva modifiche') : t('utenti.createUser', 'Crea utente')}
           </button>
         }
       >
         <form id="user-form" onSubmit={handleSubmit}>
           <FormCard>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label="Nome completo" htmlFor="user-full-name" required>
+              <Field label={t('utenti.fullName', 'Nome completo')} htmlFor="user-full-name" required>
                 <input
                   id="user-full-name"
                   type="text"
@@ -354,7 +359,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpe
                   autoFocus
                 />
               </Field>
-              <Field label="Email" htmlFor="user-email" required>
+              <Field label={t('utenti.email', 'Email')} htmlFor="user-email" required>
                 <input
                   id="user-email"
                   type="email"
@@ -365,10 +370,10 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpe
                 />
               </Field>
               <Field
-                label="Password"
+                label={t('utenti.password', 'Password')}
                 htmlFor="user-password"
                 required={!editingUser}
-                aside={editingUser ? 'lascia vuoto per mantenere' : 'almeno 6 caratteri'}
+                aside={editingUser ? t('utenti.keepPassword', 'lascia vuoto per mantenere') : t('utenti.minChars', 'almeno 6 caratteri')}
               >
                 <input
                   id="user-password"
@@ -380,19 +385,19 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpe
                   minLength={6}
                 />
               </Field>
-              <Field label="Ruolo" htmlFor="user-role">
+              <Field label={t('utenti.role', 'Ruolo')} htmlFor="user-role">
                 <select
                   id="user-role"
                   value={formData.role}
                   onChange={(e) => setFormData({ ...formData, role: e.target.value as UserRole })}
                   className={dsSelect}
                 >
-                  {(Object.keys(ROLE_NAMES) as UserRole[])
+                  {(Object.keys(ROLE_NAMES_IT) as UserRole[])
                     // Il ruolo di piattaforma non si assegna da qui: si crea
                     // solo a mano via SQL, e il server rifiuta comunque.
                     .filter(role => role !== UserRole.PLATFORM_ADMIN)
                     .map(role => (
-                      <option key={role} value={role}>{ROLE_NAMES[role]}</option>
+                      <option key={role} value={role}>{roleLabel(role)}</option>
                     ))}
                 </select>
               </Field>
@@ -412,7 +417,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpe
                   onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
                   className="h-5 w-5 flex-shrink-0 rounded accent-[var(--ds-action-bg)]"
                 />
-                Utente attivo
+                {t('utenti.activeUser', 'Utente attivo')}
               </label>
             )}
           </FormCard>
@@ -422,8 +427,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpe
       {/* Delete Confirmation Modal */}
       <ConfirmDeleteModal
         isOpen={!!deleteConfirmUser}
-        title="Elimina utente"
-        message="Stai per eliminare l'utente:"
+        title={t('utenti.deleteTitle', 'Elimina utente')}
+        message={t('utenti.deleteMsg', "Stai per eliminare l'utente:")}
         itemName={deleteConfirmUser?.full_name}
         onCancel={() => setDeleteConfirmUser(null)}
         onConfirm={handleDeleteConfirm}
@@ -432,13 +437,13 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpe
       <ModalShell
         open={!!deleteError}
         onClose={() => setDeleteError('')}
-        title="Non è stato possibile eliminare"
+        title={t('utenti.cannotDelete', 'Non è stato possibile eliminare')}
         size="sm"
         closeOnEscape
         bodyClassName="p-5 sm:p-6"
         footer={
           <button type="button" onClick={() => setDeleteError('')} className={dsButton.primary}>
-            Ho capito
+            {t('utenti.gotIt', 'Ho capito')}
           </button>
         }
       >

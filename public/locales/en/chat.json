@@ -1,0 +1,34 @@
+{
+  "channel": {
+    "generale": "General",
+    "sala": "Front of house",
+    "cucina": "Kitchen",
+    "reception": "Reception"
+  },
+  "rel": {
+    "now": "now",
+    "min": "{{n}} min ago",
+    "hours": "{{n}} h ago",
+    "days": "{{n}} d ago"
+  },
+  "today": "Today",
+  "yesterday": "Yesterday",
+  "removedUser": "Removed user",
+  "errSend": "The message did not go through",
+  "errUpload": "The photo did not upload",
+  "noMessage": "No message",
+  "title": "Staff chat",
+  "newDm": "New direct message",
+  "writeTo": "Write to",
+  "noColleagues": "No other active user.",
+  "channels": "Channels",
+  "directs": "Direct messages",
+  "pickOne": "Pick a channel or a colleague",
+  "backToChats": "Back to the chats",
+  "noMessagesYet": "No messages yet.",
+  "olderMessages": "Older messages",
+  "attachPhoto": "Attach a photo",
+  "composerPlaceholder": "Write a message…",
+  "send": "Send the message",
+  "errLoadThreads": "Could not load the chats"
+}
