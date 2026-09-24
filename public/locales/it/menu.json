@@ -364,5 +364,46 @@
     "notePlaceholder": "Nota (es. 48–52°C al cuore)",
     "englishPlaceholder": "Inglese (es. Rare)",
     "englishHint": "Traduzione per il cameriere: in cucina non esce"
+  },
+  "bpay": {
+    "type": {
+      "DEPOSIT": "Acconto",
+      "BALANCE": "Saldo",
+      "OTHER": "Altro"
+    },
+    "method": {
+      "CASH": "Contanti",
+      "CARD": "Carta",
+      "TRANSFER": "Bonifico",
+      "OTHER": "Altro"
+    },
+    "errLoad": "Errore caricamento pagamenti",
+    "needDate": "Inserisci la data del pagamento",
+    "errSave": "Errore durante la registrazione",
+    "confirmDelete": "Eliminare questo pagamento?",
+    "errDelete": "Errore eliminazione pagamento",
+    "title": "Pagamenti",
+    "confirmBanquet": "Conferma banchetto",
+    "stayQuote": "Resta preventivo",
+    "totalDue": "Totale dovuto",
+    "discount": "Sconto {{sconto}}: −{{importo}}",
+    "alreadyPaid": "Già pagato",
+    "count": "{{count}} pagamenti",
+    "count_one": "{{count}} pagamento",
+    "remaining": "Residuo",
+    "settled": "Saldato",
+    "record": "Registra pagamento",
+    "none": "Nessun pagamento registrato.",
+    "recordedBy": "Registrato da {{chi}}",
+    "delete": "Elimina",
+    "newPayment": "Nuovo pagamento",
+    "amount": "Importo ({{valuta}}) *",
+    "date": "Data *",
+    "type2": "Tipo",
+    "method2": "Metodo",
+    "notes": "Note (opzionale)",
+    "notesPlaceholder": "Es. Riferimento bonifico, ricevuta n. ...",
+    "cancel": "Annulla",
+    "submit": "Registra"
   }
 }

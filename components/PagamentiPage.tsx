@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { AlertCircle, CreditCard, Receipt } from 'lucide-react';
 import { socketClient } from '../services/socketClient';
 import { SkeletonPaymentList } from './SkeletonCards';
@@ -70,6 +71,7 @@ const PagamentiPage: React.FC<{
    *  da incassare diventa un bottone, altrimenti resta una riga di stato. */
   onOpenCassa?: () => void;
 }> = ({ globalDate, globalShiftFilter, onOpenCassa }) => {
+  const { t } = useTranslation('pagamenti', { useSuspense: false });
   const [tab, setTab] = useState<'CASSA' | 'LINKS'>('CASSA');
 
   // La lista "Conti aperti" segue datepicker + toggle turno della topbar: mostra
@@ -300,10 +302,10 @@ const PagamentiPage: React.FC<{
             No wrapping either — a third figure dropping to its own line reads
             as a separate object. They compress instead. */}
         <div className="flex w-full flex-shrink-0 items-center divide-x divide-[var(--ds-border)] rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-1 py-1 shadow-[var(--ds-shadow-card)] lg:w-auto lg:px-4">
-          <Kpi label={KPI_LABELS.incassato} value={formatEuro(totals.paid)} tone="positive" />
-          <Kpi label={KPI_LABELS.attesa} value={formatEuro(totals.pending)} tone="pending" />
+          <Kpi label={t('kpi.incassato', KPI_LABELS.incassato)} value={formatEuro(totals.paid)} tone="positive" />
+          <Kpi label={t('kpi.attesa', KPI_LABELS.attesa)} value={formatEuro(totals.pending)} tone="pending" />
           {billsAvailable && (
-            <Kpi label={KPI_LABELS.residuo} value={formatEuro(serviceResidual)} tone="critical" />
+            <Kpi label={t('kpi.residuo', KPI_LABELS.residuo)} value={formatEuro(serviceResidual)} tone="critical" />
           )}
         </div>
       </div>
@@ -323,11 +325,11 @@ const PagamentiPage: React.FC<{
                 <SegmentedControl<'CASSA' | 'LINKS'>
                   value={tab}
                   onChange={setTab}
-                  ariaLabel="Sezione pagamenti"
+                  ariaLabel={t('sectionAria', 'Sezione pagamenti')}
                   equalWidth
                   options={[
-                    { value: 'CASSA', label: 'Chiusura' },
-                    { value: 'LINKS', label: 'Link', badge: total || undefined },
+                    { value: 'CASSA', label: t('tabCassa', 'Chiusura') },
+                    { value: 'LINKS', label: t('tabLinks', 'Link'), badge: total || undefined },
                   ]}
                 />
               )}
@@ -352,8 +354,8 @@ const PagamentiPage: React.FC<{
                 <SearchField
                   value={search}
                   onChange={setSearch}
-                  placeholder="Cerca cliente, telefono, ordine…"
-                  ariaLabel="Cerca"
+                  placeholder={t('searchPlaceholder', 'Cerca cliente, telefono, ordine…')}
+                  ariaLabel={t('searchAria', 'Cerca')}
                 />
               )}
             </div>

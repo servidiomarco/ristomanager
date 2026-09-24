@@ -1,0 +1,12 @@
+{
+  "sectionAria": "Sezione pagamenti",
+  "tabCassa": "Chiusura",
+  "tabLinks": "Link",
+  "searchPlaceholder": "Cerca cliente, telefono, ordine…",
+  "searchAria": "Cerca",
+  "kpi": {
+    "incassato": "Incassato",
+    "attesa": "In attesa",
+    "residuo": "Residuo conti"
+  }
+}
