@@ -222,7 +222,10 @@
     "OWNER": "Owner",
     "WAITER": "Waiter",
     "KITCHEN": "Kitchen",
-    "CASSA": "Till"
+    "CASSA": "Till",
+    "GENERAL_MANAGER": "General manager",
+    "MANAGER": "Manager",
+    "RECEPTION": "Reception"
   },
   "shift": {
     "lunch": "Lunch",
