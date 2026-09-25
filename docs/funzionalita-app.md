@@ -668,6 +668,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-25 | Comande, Cucina e Passe | Sul palmare, chi apre un tavolo su cui lavora già un collega lo vede per nome («ci sta lavorando anche Giulia»): in produzione compariva invece la prima parte della sua email. |
 | 2026-09-24 | Cassa | La mancia dice come è stata data — contanti, POS o Satispay, di default il metodo del conto. Quella in contanti entra nei contanti attesi del cassetto («Mance in contanti»), così la conta di fine turno torna; l'esito della chiusura e la chiusura del giorno in Pagamenti la riportano col metodo. |
 | 2026-09-24 | Pagamenti, conto al tavolo e cassa | Nell'incasso con la cassa il riepilogo mostra le righe già pagate («✓ pagato», «1 pagato», «in pagamento» per le quote dal QR in corso). La colonna Incassa ha spaziature più ordinate e la conferma «Registra … e chiudi» non va più a capo: sta su una riga sua, sempre in vista in fondo. |
 | 2026-09-24 | Pagamenti, conto al tavolo e cassa | Nel conto al tavolo «Pago quello che ho preso» divide anche le righe con più pezzi: dei «4× Coperto» ognuno prende il suo (stepper «1/4»), e chi arriva dopo trova solo quelli rimasti. Stesso conteggio in cassa. |
