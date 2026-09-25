@@ -22664,8 +22664,24 @@ app.delete('/haccp/production/:id', authenticate, async (req, res) => {
 // the server so the ElevenLabs API key never reaches the browser.
 
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY || '';
-const ELEVENLABS_AGENT_ID = process.env.ELEVENLABS_AGENT_ID || '';
+const ELEVENLABS_AGENT_ID = (process.env.ELEVENLABS_AGENT_ID || '').trim();
 const ELEVENLABS_API_BASE = 'https://api.elevenlabs.io/v1';
+
+// L'agente in env è Sofia, cioè il Frantoio: la sua chiave, il suo account,
+// le sue chiamate. Finché il sync lo usava per chiunque, un «Sincronizza»
+// premuto dal tenant Demo (voice acceso) copiava nel Demo telefoni,
+// trascrizioni e audio dei clienti del Frantoio, e il post-call successivo
+// del Frantoio andava a sbattere sulla conversation_id già presa (audit
+// isolamento tenant, H-02). Gli altri ristoranti non hanno un agente finché
+// non arriva il secondo cliente voce: il binding per tenant nascerà allora,
+// probabilmente come mappa env agente→tenant impostabile solo dalla piattaforma.
+const voiceAgentForTenant = (tenantId: number): string | null =>
+    (Number(tenantId) === PUBLIC_TENANT_ID && ELEVENLABS_AGENT_ID) ? ELEVENLABS_AGENT_ID : null;
+
+const VOICE_AGENT_NOT_CONFIGURED = {
+    error: 'voice_agent_not_configured',
+    message: 'Nessun agente vocale collegato a questo ristorante.',
+};
 
 const VOICE_CALLS_ROLES: UserRole[] = [UserRole.OWNER, UserRole.GENERAL_MANAGER, UserRole.MANAGER];
 
@@ -23299,6 +23315,11 @@ app.get('/voice-calls/:id', authenticate, requireFeature('voice'), voiceCallsAut
 // transcript so a leaked URL can't be hot-linked from outside the app.
 app.get('/voice-calls/:id/audio', authenticate, requireFeature('voice'), voiceCallsAuthorize, async (req, res) => {
     try {
+        // L'audio si scarica dall'account ElevenLabs del Frantoio: un tenant
+        // senza agente non ha registrazioni sue da ascoltare lì (H-02).
+        if (!voiceAgentForTenant(req.tenantId!)) {
+            return res.status(409).json(VOICE_AGENT_NOT_CONFIGURED);
+        }
         if (!ELEVENLABS_API_KEY) {
             return res.status(503).json({ error: 'ELEVENLABS_API_KEY not configured' });
         }
@@ -23385,10 +23406,13 @@ app.get('/voice-calls/:id/messages', authenticate, requireFeature('voice'), voic
 // left untouched so manual edits aren't clobbered.
 app.post('/voice-calls/sync', authenticate, requireFeature('voice'), voiceCallsAuthorize, async (req, res) => {
     try {
+        // L'agente PRIMA della chiave: la chiave c'è sempre (è del Frantoio),
+        // è l'agente a dire di chi sono le conversazioni da importare (H-02).
+        const agentId = voiceAgentForTenant(req.tenantId!);
+        if (!agentId) return res.status(409).json(VOICE_AGENT_NOT_CONFIGURED);
         if (!ELEVENLABS_API_KEY) return res.status(503).json({ error: 'ELEVENLABS_API_KEY not configured' });
-        if (!ELEVENLABS_AGENT_ID) return res.status(503).json({ error: 'ELEVENLABS_AGENT_ID not configured' });
 
-        const listUrl = `${ELEVENLABS_API_BASE}/convai/conversations?agent_id=${encodeURIComponent(ELEVENLABS_AGENT_ID)}&page_size=30`;
+        const listUrl = `${ELEVENLABS_API_BASE}/convai/conversations?agent_id=${encodeURIComponent(agentId)}&page_size=30`;
         const listRes = await fetch(listUrl, { headers: { 'xi-api-key': ELEVENLABS_API_KEY } });
         if (!listRes.ok) {
             const text = await listRes.text().catch(() => '');
@@ -23429,6 +23453,11 @@ app.post('/voice-calls/sync', authenticate, requireFeature('voice'), voiceCallsA
                 );
                 if (!detailRes.ok) { failed++; continue; }
                 const detail = await detailRes.json() as any;
+                // Difesa in profondità: la lista è già filtrata per agente,
+                // ma una conversazione di un altro agente dello stesso
+                // account non deve finire in questo tenant nemmeno per un
+                // filtro ignorato a monte.
+                if (detail?.agent_id && detail.agent_id !== agentId) { failed++; continue; }
 
                 const rawTranscript = detail?.transcript;
                 let transcript: string | undefined;
@@ -28958,7 +28987,11 @@ const handlePublicContact = async (tenantId: number, _req: express.Request, res:
     // (canale acceso): la pagina già rende il form disattivato quando è false.
     const bookingsEnabled = (await isFeatureEnabledForTenant(tenantId, 'web_booking'))
         && (await getFeatureFlag(tenantId, 'public_bookings_enabled', false));
-    const raw = (process.env.VONAGE_VOICE_NUMBER || '').replace(/[^\d+]/g, '');
+    // Numero e agente sono la linea di Sofia, cioè del Frantoio: sulla
+    // /prenota di un altro ristorante la pillola col numero mandava i clienti
+    // di quel locale a telefonare al Frantoio (audit isolamento tenant, L-11).
+    const isSofiaLine = Number(tenantId) === PUBLIC_TENANT_ID;
+    const raw = isSofiaLine ? (process.env.VONAGE_VOICE_NUMBER || '').replace(/[^\d+]/g, '') : '';
     let voice: { phone: string; display: string } | null = null;
     if (raw) {
         const e164 = raw.startsWith('+') ? raw : `+${raw}`;
@@ -29006,7 +29039,9 @@ const handlePublicContact = async (tenantId: number, _req: express.Request, res:
             logo_url: identity.logoUrl || null,
             logo_dark_url: identity.logoDarkUrl || null,
         },
-        voice_agent_id: (process.env.ELEVENLABS_AGENT_ID || '').trim(),
+        // Stringa vuota, non null, per chi non ha un agente: il widget e i
+        // client già in giro controllano typeof === 'string'.
+        voice_agent_id: voiceAgentForTenant(tenantId) ?? '',
     });
 };
 

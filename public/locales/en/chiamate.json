@@ -60,6 +60,7 @@
   "markedAll_other": "{{count}} conversations marked as contacted",
   "nothingToContact": "No conversation to contact",
   "errorPrefix": "Error: {{dettaglio}}",
+  "agentNotConnected": "No voice agent is connected to this restaurant.",
   "chip": {
     "all": "All",
     "phantom": "To recover",

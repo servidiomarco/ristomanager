@@ -97,6 +97,14 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
             // Coda di stampa: il legacy token fa da alias del tenant 1, così
             // i test possono ritirare i job (RT fiscale incluso) e ackarli.
             PRINT_AGENT_TOKEN: 'test-print-agent-token',
+            // Linea di Sofia finta, del solo tenant 1 come in produzione:
+            // agente e numero fanno passare il Frantoio dal gate per tenant
+            // di sync, audio e /public/contact. La chiave resta vuota apposta:
+            // il sync del tenant 1 si ferma al 503 e nessun test chiama
+            // davvero ElevenLabs, anche se la shell di chi li lancia la esporta.
+            ELEVENLABS_AGENT_ID: 'agent_test_frantoio',
+            ELEVENLABS_API_KEY: '',
+            VONAGE_VOICE_NUMBER: '+390550000000',
         },
         stdio: ['ignore', 'pipe', 'pipe'],
     });
