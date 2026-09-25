@@ -374,6 +374,10 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpe
                 htmlFor="user-password"
                 required={!editingUser}
                 aside={editingUser ? t('utenti.keepPassword', 'lascia vuoto per mantenere') : t('utenti.minChars', 'almeno 6 caratteri')}
+                // Una password nuova impostata da qui chiude tutte le sessioni
+                // dell'account (audit M-01): il titolare deve saperlo prima di
+                // salvare, specie su un account condiviso dai palmari.
+                hint={editingUser && formData.password ? t('utenti.passwordResetHint', "Ogni dispositivo con questo account dovrà rifare l'accesso.") : undefined}
               >
                 <input
                   id="user-password"

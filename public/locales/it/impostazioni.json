@@ -123,6 +123,7 @@
     "password": "Password",
     "keepPassword": "lascia vuoto per mantenere",
     "minChars": "almeno 6 caratteri",
+    "passwordResetHint": "Ogni dispositivo con questo account dovrà rifare l'accesso.",
     "role": "Ruolo",
     "activeUser": "Utente attivo",
     "deleteTitle": "Elimina utente",
