@@ -27,7 +27,15 @@ export interface ApiError extends Error {
  */
 export function buildApiError(status: number, body: any, fallback?: string): ApiError {
     const data = body && typeof body === 'object' ? body : {};
-    const base = data.error || fallback || `Request failed with status ${status}`;
+    // Molte route rispondono { error: 'codice_macchina', message: 'frase' }:
+    // il codice serve ai client che ramificano (resta in err.data.error), la
+    // frase all'operatore. Prendere sempre `error` mostrava il codice nudo —
+    // «messaging_not_available» nel toast del link del conto su un
+    // ristorante demo, invece di «Messaggi non ancora attivi…». Un `error`
+    // in forma di frase (spazi, maiuscole) resta il titolo come prima.
+    const errorIsCode = typeof data.error === 'string' && /^[a-z][a-z0-9_]*$/.test(data.error);
+    const readableMessage = typeof data.message === 'string' ? data.message.trim() : '';
+    const base = (errorIsCode && readableMessage) || data.error || fallback || `Request failed with status ${status}`;
     // `detail` is optional and often absent; only append when it adds something
     // and isn't just a repeat of the headline.
     const detail = typeof data.detail === 'string' ? data.detail.trim() : '';
