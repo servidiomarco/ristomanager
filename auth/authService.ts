@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { queryWithRetry } from '../db.js';
 import { User, UserRole } from '../types.js';
 import { getAssignableRoles } from './permissions.js';
+import { withBcryptSlot } from './bcryptGate.js';
 
 // In produzione i segreti DEVONO arrivare dall'ambiente: per mesi Railway è
 // andato in produzione senza JWT_SECRET e i token erano firmati col fallback
@@ -72,13 +73,17 @@ export class AuthService {
 
   // Hash password using bcrypt
   static async hashPassword(password: string): Promise<string> {
-    const salt = await bcrypt.genSalt(12);
-    return bcrypt.hash(password, salt);
+    // Dal cancello di bcryptGate (audit M-07): hash e compare a costo 12
+    // sono il lavoro più caro del backend, e chiunque lo può innescare.
+    return withBcryptSlot(async () => {
+      const salt = await bcrypt.genSalt(12);
+      return bcrypt.hash(password, salt);
+    });
   }
 
   // Verify password against hash
   static async verifyPassword(password: string, hash: string): Promise<boolean> {
-    return bcrypt.compare(password, hash);
+    return withBcryptSlot(() => bcrypt.compare(password, hash));
   }
 
   // Il digest SHA-256 base64 del refresh token è la chiave di lookup in
@@ -204,9 +209,19 @@ export class AuthService {
   }
 
   // Verify access token
+  // Audit L-01: lo stesso JWT_SECRET firma anche il token di step-up, che
+  // passava da qui come fosse una sessione (req.user senza ruolo, ma le
+  // route dietro il solo authenticate lo accettavano). Un payload con
+  // `purpose` non è mai un access token: si rifiuta per esclusione, così i
+  // token già emessi (e quelli che il nodo verifica con codice più vecchio)
+  // restano validi. L'algoritmo è inchiodato a HS256, l'unico che firmiamo.
   static verifyAccessToken(token: string): TokenPayload | null {
     try {
-      return jwt.verify(token, JWT_SECRET) as TokenPayload;
+      const payload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
+      if (typeof payload !== 'object' || payload === null || 'purpose' in payload) {
+        return null;
+      }
+      return payload as TokenPayload;
     } catch {
       return null;
     }
@@ -248,16 +263,18 @@ export class AuthService {
       return null;
     }
 
-    // Tenant sospeso: l'account è valido ma il ristorante è spento (mancato
-    // pagamento, dismissione). Distinto dalle credenziali errate: la UI deve
-    // poter spiegare, non dire "password sbagliata".
-    if (userRow.tenant_status !== 'active') {
-      return { tenantSuspended: true };
-    }
-
     const isValidPassword = await this.verifyPassword(password, userRow.password_hash);
     if (!isValidPassword) {
       return null;
+    }
+
+    // Tenant sospeso: l'account è valido ma il ristorante è spento (mancato
+    // pagamento, dismissione). Distinto dalle credenziali errate: la UI deve
+    // poter spiegare, non dire "password sbagliata". Solo DOPO la password
+    // giusta (audit M-07): prima, un 403 a chiunque provasse un'email
+    // diceva che l'account esiste e che il ristorante è sospeso.
+    if (userRow.tenant_status !== 'active') {
+      return { tenantSuspended: true };
     }
 
     // Update last login
@@ -675,6 +692,20 @@ export class AuthService {
       return this.getUserById(userId);
     }
 
+    // Password impostata dal titolare o utente disattivato: tutti i suoi
+    // dispositivi escono (audit M-01, igiene delle sessioni). Prima le righe
+    // di user_sessions restavano e il refresh non guarda la password: il
+    // palmare di un ex dipendente continuava a rinnovarsi all'infinito dopo
+    // il cambio password, e riattivare un utente riportava dentro i suoi
+    // vecchi dispositivi. L'access token residuo scade da solo (max 6h).
+    // is_active=false arriva anche a ogni modifica di un utente già
+    // disattivato (UserManagement manda tutti i campi): cancellare sessioni
+    // che il refresh rifiuta comunque non cambia niente.
+    const revokeSessions = updates.password !== undefined || updates.is_active === false;
+    if (revokeSessions) {
+      fields.push('refresh_token_hash = NULL');
+    }
+
     fields.push(`updated_at = CURRENT_TIMESTAMP`);
     values.push(userId);
     values.push(tenantId);
@@ -690,6 +721,11 @@ export class AuthService {
     }
 
     const row = result.rows[0];
+    // Solo dopo l'UPDATE riuscito, e sull'id che ha restituito: un id di un
+    // altro tenant non tocca niente, sessioni comprese.
+    if (revokeSessions) {
+      await queryWithRetry('DELETE FROM user_sessions WHERE user_id = $1', [row.id]);
+    }
     return {
       id: row.id,
       email: row.email,
@@ -871,6 +907,21 @@ export class AuthService {
     token: string,
     newPassword: string
   ): Promise<{ id: number; email: string; full_name: string; tenantId: number } | null> {
+    const digest = this.digestResetToken(token);
+    // Prima il token, poi bcrypt (audit M-07): la route è anonima, e con
+    // l'hash in testa una raffica di token a caso costava un bcrypt a costo
+    // 12 ciascuno — la stessa CPU del flood sul login, spostato qui. La
+    // SELECT è solo il filtro economico: a consumare il token resta l'UPDATE
+    // qui sotto, col digest e la scadenza nel WHERE, così due richieste
+    // simultanee con lo stesso token non passano comunque entrambe.
+    const match = await queryWithRetry(
+      `SELECT id FROM users
+        WHERE reset_token_hash = $1 AND reset_token_expires_at > NOW() AND is_active = TRUE`,
+      [digest]
+    );
+    if (match.rows.length === 0) {
+      return null;
+    }
     const newHash = await this.hashPassword(newPassword);
     const result = await queryWithRetry(
       `UPDATE users
@@ -885,7 +936,7 @@ export class AuthService {
          AND reset_token_expires_at > NOW()
          AND is_active = TRUE
        RETURNING id, email, full_name, tenant_id`,
-      [newHash, this.digestResetToken(token)]
+      [newHash, digest]
     );
     if (result.rows.length === 0) {
       return null;

@@ -107,6 +107,9 @@ class AuthApiService {
       if (response.status === 400) throw new Error('Email e password sono obbligatori');
       if (response.status === 401) throw new Error('Email o password non corretti');
       if (response.status === 403) throw new Error('Account disattivato. Contatta un amministratore.');
+      // Limite sui tentativi sbagliati (audit M-07): senza questa riga lo
+      // staff leggeva «Accesso non riuscito» e continuava a riprovare.
+      if (response.status === 429) throw new Error('Troppi tentativi, riprova tra qualche minuto.');
       if (response.status >= 500) throw new Error('Errore del server, riprova tra qualche istante');
       throw new Error('Accesso non riuscito');
     }

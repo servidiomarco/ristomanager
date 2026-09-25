@@ -1,8 +1,9 @@
 import { Router, Request, Response } from 'express';
 import { randomBytes } from 'node:crypto';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { AuthService, isPlatformScopedSession } from './authService.js';
 import { authenticate, authorize } from './authMiddleware.js';
+import { replyIfBcryptBusy } from './bcryptGate.js';
 import { UserRole, ViewState } from '../types.js';
 import { RolePermissionService, ALL_PERMISSIONS, ALL_PERMISSION_KEYS, Permission, isReportsAdmin } from './permissionService.js';
 import { LogService, ActivityAction, ResourceType } from '../activityLogs/logService.js';
@@ -28,6 +29,112 @@ const publicBaseUrl = (): string | null => {
   const raw = String(process.env.PUBLIC_BOOKING_BASE_URL || '').trim().replace(/\/+$/, '');
   return raw || null;
 };
+
+// ============================================
+// LIMITI SUI TENTATIVI DI PASSWORD (audit M-07)
+// ============================================
+// /auth/login non aveva nessun limite: tentativi illimitati sul
+// PLATFORM_ADMIN (l'unico account che attraversa i tenant) e sugli OWNER del
+// Frantoio. I limiti del login contano SOLO i 401 — password sbagliata o
+// email sconosciuta: il login riuscito, il 403 del ristorante sospeso e i 500
+// della sonda d'avvio dei test API non consumano niente. Vivono nella memoria
+// del processo (un deploy li azzera: accettabile con una replica sola), e le
+// soglie si regolano da env senza toccare il codice. Il costo CPU di bcrypt lo
+// governa bcryptGate.ts, qualunque sia il numero di IP.
+const PASSWORD_WINDOW_MS = 15 * 60 * 1000;
+const tooManyAttempts = { error: 'rate_limited', message: 'Troppi tentativi, riprova tra qualche minuto.' };
+const onlyWrongCredentialsCount = (_req: Request, res: Response) => res.statusCode !== 401;
+const loginEmailKey = (req: Request) => String(req.body?.email ?? '').toLowerCase().trim().slice(0, 254);
+// Nessun header RateLimit/Retry-After sui tre limiter del login (revisione
+// del PR M-07): il tetto del PLATFORM_ADMIN li scriveva solo per le email di
+// piattaforma, sopra quelli del tetto per IP — un solo 401 anonimo diceva
+// quale email è l'account che vede tutti i ristoranti, e il suo "remaining"
+// mostrava il contatore globale dei tentativi. Senza header ogni risposta del
+// login è uguale qualunque sia l'email; la SPA non li legge comunque.
+const loginLimiterHeaders = { standardHeaders: false, legacyHeaders: false } as const;
+
+// Chiave IP+email, non il solo IP: i palmari del ristorante (e magari il WiFi
+// degli ospiti) escono dallo stesso IP pubblico, e un ospite che sbaglia
+// password a ripetizione non deve chiudere fuori lo staff. Il conteggio
+// parte all'arrivo e si restituisce alla risposta: più di 10 login IN VOLO
+// insieme sulla stessa email dallo stesso IP vedono un 429 anche se giusti —
+// una raffica da script, non staff che digita.
+const loginLimiter = rateLimit({
+  windowMs: PASSWORD_WINDOW_MS,
+  limit: Number(process.env.LOGIN_RATE_LIMIT) || 10,
+  ...loginLimiterHeaders,
+  keyGenerator: (req) => `${ipKeyGenerator(req.ip ?? '')}|${loginEmailKey(req)}`,
+  skipSuccessfulRequests: true,
+  requestWasSuccessful: onlyWrongCredentialsCount,
+  message: tooManyAttempts,
+});
+
+// Tetto per IP a email qualsiasi: ferma chi prova la stessa password su cento
+// email dallo stesso indirizzo. Largo apposta per il NAT del ristorante.
+const loginIpLimiter = rateLimit({
+  windowMs: PASSWORD_WINDOW_MS,
+  limit: Number(process.env.LOGIN_RATE_LIMIT_PER_IP) || 50,
+  ...loginLimiterHeaders,
+  keyGenerator: (req) => ipKeyGenerator(req.ip ?? ''),
+  skipSuccessfulRequests: true,
+  requestWasSuccessful: onlyWrongCredentialsCount,
+  message: tooManyAttempts,
+});
+
+// Tetto per email da qualunque IP, solo per i PLATFORM_ADMIN: la chiave
+// IP+email concede 10 tentativi a ogni IP nuovo, e un attacco distribuito
+// sull'account che vede tutti i ristoranti non avrebbe fine. Per gli account
+// dei ristoranti no: chiunque, da abbastanza IP, chiuderebbe fuori il titolare
+// del Frantoio. Un PLATFORM_ADMIN bloccato ha comunque la via di scorta del
+// pannello (PLATFORM_ADMIN_TOKEN).
+const isPlatformAdminEmail = async (email: string): Promise<boolean> => {
+  if (!email) return false;
+  // rls-bypass: login pre-auth, solo il ruolo dell'utente per email (UNIQUE globale), nessun dato esce
+  const result = await runAsPlatform(() => queryWithRetry(
+    `SELECT 1 FROM users WHERE email = $1 AND role = 'PLATFORM_ADMIN'`,
+    [email]
+  ));
+  return result.rows.length > 0;
+};
+
+const platformAdminLoginLimiter = rateLimit({
+  windowMs: PASSWORD_WINDOW_MS,
+  limit: Number(process.env.LOGIN_RATE_LIMIT_PLATFORM_ADMIN) || 20,
+  ...loginLimiterHeaders,
+  keyGenerator: (req) => `platform-admin|${loginEmailKey(req)}`,
+  // Un guasto del DB salta il tetto invece di diventare un 500: il login
+  // subito dopo fallirebbe comunque sulla stessa query.
+  skip: async (req) => {
+    try {
+      return !(await isPlatformAdminEmail(loginEmailKey(req)));
+    } catch {
+      return true;
+    }
+  },
+  skipSuccessfulRequests: true,
+  requestWasSuccessful: onlyWrongCredentialsCount,
+  message: tooManyAttempts,
+});
+
+// Password corrente ridigitata da una sessione già aperta (step-up, cambio
+// password, cambio email): niente enumeration da nascondere, il limiter
+// serve contro il brute-force da una sessione lasciata aperta o da un token
+// rubato. Chiave per UTENTE, non per IP: il ladro di un token non la
+// azzera cambiando IP, e i palmari dietro il NAT del ristorante non si
+// consumano i tentativi a vicenda. Gira dopo authenticate, quindi req.user
+// c'è sempre; l'IP è solo la rete di sicurezza.
+const stepUpLimiter = rateLimit({
+  windowMs: PASSWORD_WINDOW_MS,
+  limit: 10,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  keyGenerator: (req) => (req.user ? `user:${req.user.userId}` : ipKeyGenerator(req.ip ?? '')),
+  message: tooManyAttempts,
+});
+
+// I limiter del login stanno su una registrazione a parte: la route vera è
+// subito sotto, e ci arriva solo chi li ha passati tutti.
+router.post('/login', loginLimiter, loginIpLimiter, platformAdminLoginLimiter);
 
 // POST /auth/login - User login
 // runAsPlatform (qui e su refresh/forgot/reset): le route PRE-auth risolvono
@@ -84,6 +191,7 @@ router.post('/login', (req: Request, res: Response) => runAsPlatform(async () =>
       refreshToken: result.tokens.refreshToken
     });
   } catch (error) {
+    if (replyIfBcryptBusy(res, error)) return;
     console.error('Login error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
@@ -314,7 +422,9 @@ router.put('/me/profile', authenticate, async (req: Request, res: Response) => {
 });
 
 // POST /auth/me/password - Change own password (requires the current one)
-router.post('/me/password', authenticate, async (req: Request, res: Response) => {
+// stepUpLimiter anche qui (audit M-07): la password corrente si verifica
+// come nello step-up, e senza tetto un token rubato era un oracolo illimitato.
+router.post('/me/password', authenticate, stepUpLimiter, async (req: Request, res: Response) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: 'Not authenticated' });
@@ -354,13 +464,15 @@ router.post('/me/password', authenticate, async (req: Request, res: Response) =>
 
     res.json({ ok: true });
   } catch (error) {
+    if (replyIfBcryptBusy(res, error)) return;
     console.error('Change password error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 // POST /auth/me/email - Change own email (requires the current password)
-router.post('/me/email', authenticate, async (req: Request, res: Response) => {
+// Stesso tetto del cambio password: anche qui si saggia la password corrente.
+router.post('/me/email', authenticate, stepUpLimiter, async (req: Request, res: Response) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: 'Not authenticated' });
@@ -415,6 +527,7 @@ router.post('/me/email', authenticate, async (req: Request, res: Response) => {
       refreshToken: result.tokens.refreshToken
     });
   } catch (error) {
+    if (replyIfBcryptBusy(res, error)) return;
     console.error('Change email error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
@@ -424,16 +537,8 @@ router.post('/me/email', authenticate, async (req: Request, res: Response) => {
 // STEP-UP (sblocco sezioni riservate)
 // ============================================
 
-// Cap sui tentativi di sblocco: l'utente è già autenticato (niente
-// enumeration da nascondere), il limiter serve solo contro il brute-force
-// della password da una sessione lasciata aperta.
-const stepUpLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 10,
-  standardHeaders: 'draft-7',
-  legacyHeaders: false,
-  message: { error: 'rate_limited', message: 'Troppi tentativi, riprova tra qualche minuto.' },
-});
+// Il cap sui tentativi di sblocco (stepUpLimiter) sta in testa al file:
+// serve anche a cambio password e cambio email, registrati prima di qui.
 
 // Gli scope sblocabili: uno per sezione riservata. Whitelist esplicita,
 // così un client non conia sblocchi per scope che non esistono ancora.
@@ -494,6 +599,7 @@ router.post('/step-up', authenticate, stepUpLimiter, async (req: Request, res: R
 
     res.json({ stepUpToken, expiresIn: AuthService.STEP_UP_TTL_SECONDS });
   } catch (error) {
+    if (replyIfBcryptBusy(res, error)) return;
     console.error('Step-up error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
@@ -509,6 +615,19 @@ router.post('/step-up', authenticate, stepUpLimiter, async (req: Request, res: R
 const forgotPasswordLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 5,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'rate_limited', message: 'Troppe richieste, riprova tra qualche minuto.' },
+});
+
+// Anche il consumo del token ha il suo cap per IP (audit M-07): la route è
+// anonima e, una volta limitato il login, era la prossima porta per chi
+// cerca di tenere occupata la CPU. Il token è a 256 bit, quindi il cap non
+// difende il token: difende il server. 10 bastano a chi sbaglia la password
+// nuova un paio di volte.
+const resetPasswordLimiter = rateLimit({
+  windowMs: PASSWORD_WINDOW_MS,
+  limit: Number(process.env.RESET_PASSWORD_RATE_LIMIT) || 10,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   message: { error: 'rate_limited', message: 'Troppe richieste, riprova tra qualche minuto.' },
@@ -612,6 +731,9 @@ router.post('/forgot-password', forgotPasswordLimiter, (req: Request, res: Respo
   }
 }));
 
+// Il cap del reset, su una registrazione a parte come quelli del login.
+router.post('/reset-password', resetPasswordLimiter);
+
 // POST /auth/reset-password - Consume a reset token and set a new password
 router.post('/reset-password', (req: Request, res: Response) => runAsPlatform(async () => {
   try {
@@ -645,6 +767,7 @@ router.post('/reset-password', (req: Request, res: Response) => runAsPlatform(as
 
     res.json({ ok: true });
   } catch (error) {
+    if (replyIfBcryptBusy(res, error)) return;
     console.error('Reset password error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
@@ -723,6 +846,7 @@ router.post('/users', authenticate, authorize(UserRole.OWNER), async (req: Reque
 
     res.status(201).json(user);
   } catch (error: any) {
+    if (replyIfBcryptBusy(res, error)) return;
     console.error('Create user error:', error);
     if (error.code === '23505') { // Unique violation
       return res.status(409).json({ error: 'Email already exists' });
@@ -776,6 +900,7 @@ router.put('/users/:id', authenticate, authorize(UserRole.OWNER), async (req: Re
 
     res.json(user);
   } catch (error: any) {
+    if (replyIfBcryptBusy(res, error)) return;
     console.error('Update user error:', error);
     if (error.code === '23505') {
       return res.status(409).json({ error: 'Email already exists' });

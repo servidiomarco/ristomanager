@@ -154,19 +154,3 @@ export const requireAnyPermission = (...permissions: Permission[]) => {
     }
   };
 };
-
-// Optional authentication - doesn't fail if no token, but adds user if present
-export const optionalAuth = (req: Request, res: Response, next: NextFunction) => {
-  const authHeader = req.headers.authorization;
-
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    const token = authHeader.substring(7);
-    const payload = AuthService.verifyAccessToken(token);
-    if (payload) {
-      req.user = { ...payload, tenantId: normalizeTenantId(payload) };
-      req.tenantId = req.user.tenantId;
-    }
-  }
-
-  next();
-};
