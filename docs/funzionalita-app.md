@@ -417,6 +417,7 @@ Per i ristoranti con cassa **Passepartout Menù** (modulo dedicato):
 - Anteprima della comanda attiva su un tavolo della cassa e **importazione del conto** nel CRM.
 - **Chiusura del conto in cassa dal CRM**: scontrino e saldo partono verso il gestionale; ritentabile se la cassa era irraggiungibile.
 - Collegamento sicuro cloud↔ristorante tramite un piccolo agente installato sulla LAN (nessuna porta aperta verso l'esterno), con stato di connessione visibile.
+- **La cassa è solo del suo ristorante**: l'agente è legato al locale in cui è installato. Da un altro ristorante della piattaforma non si legge una comanda, non si apre un conto e non si chiude un tavolo su quella cassa, nemmeno col modulo acceso.
 
 ---
 
@@ -668,6 +669,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-25 | Integrazione cassa Passepartout | L'integrazione risponde solo al ristorante collegato alla cassa: da qualunque altro ristorante anteprima e import della comanda, chiusura in cassa e import del menu rispondono «Integrazione cassa non disponibile per questo ristorante», anche col modulo acceso, e lo stato dell'agente non mostra il PC né la versione del gestionale. |
 | 2026-09-25 | Pagamenti · Comande | Anche la chiusura dalla scheda conto (Pagamenti, palmare, Prenotazioni) chiede come è stata data la mancia, con lo stesso default del pannello di Cassa: quella in contanti entra nei contanti attesi del cassetto. |
 | 2026-09-24 | Cassa | La mancia dice come è stata data — contanti, POS o Satispay, di default il metodo del conto. Quella in contanti entra nei contanti attesi del cassetto («Mance in contanti»), così la conta di fine turno torna; l'esito della chiusura e la chiusura del giorno in Pagamenti la riportano col metodo. |
 | 2026-09-24 | Pagamenti, conto al tavolo e cassa | Nell'incasso con la cassa il riepilogo mostra le righe già pagate («✓ pagato», «1 pagato», «in pagamento» per le quote dal QR in corso). La colonna Incassa ha spaziature più ordinate e la conferma «Registra … e chiudi» non va più a capo: sta su una riga sua, sempre in vista in fondo. |

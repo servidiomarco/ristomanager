@@ -6,7 +6,7 @@
 // in uscita verso questo server, sul namespace dedicato `/pp-agent`,
 // autenticandosi con il segreto condiviso PASSEPARTOUT_AGENT_TOKEN. Da quel
 // momento il backend può eseguire chiamate RPC verso il gestionale con
-// `callPassepartout(op, params)` — request/response via ack socket.io con
+// `callPassepartout(tenantId, op, params)` — request/response via ack socket.io con
 // timeout, nessuna coda e nessun polling (a differenza del print-agent, qui
 // il cameriere sta aspettando la risposta a schermo).
 //
@@ -39,13 +39,23 @@ export type PassepartoutOp =
 export class PassepartoutBridgeError extends Error {
     constructor(
         message: string,
-        /** 'agent_offline' | 'timeout' | 'gestionale' | 'agent' */
+        /** 'not_for_tenant' | 'agent_offline' | 'timeout' | 'gestionale' | 'agent' */
         public readonly kind: string,
     ) {
         super(message);
         this.name = 'PassepartoutBridgeError';
     }
 }
+
+// L'agente è UNO per tutto il backend e parla con la cassa e l'RT fiscale di
+// un solo ristorante: il token PASSEPARTOUT_AGENT_TOKEN da env è quello del
+// Vecchio Frantoio, come il legacy PRINT_AGENT_TOKEN è alias del tenant 1.
+// Senza questo legame qualunque tenant poteva leggere le comande vive del
+// Frantoio e chiuderne un tavolo con scontrino sul suo RT (audit isolamento
+// tenant H-01: bastava il tenant Demo col conto al tavolo acceso). Quando ci
+// sarà un secondo cliente Passepartout la costante diventa una risoluzione
+// token → tenant (come per l'agente di stampa) e agentSocket una mappa.
+export const PASSEPARTOUT_AGENT_TENANT_ID = 1;
 
 let agentSocket: Socket | null = null;
 let connectedAt: Date | null = null;
@@ -55,7 +65,18 @@ export function isPassepartoutAgentConfigured(): boolean {
     return Boolean((process.env.PASSEPARTOUT_AGENT_TOKEN || '').trim());
 }
 
-export function getPassepartoutAgentStatus() {
+export function getPassepartoutAgentStatus(tenantId: number) {
+    // Agli altri tenant l'integrazione semplicemente non c'è: né stato né
+    // hostname del PC o versione del gestionale del Frantoio.
+    if (Number(tenantId) !== PASSEPARTOUT_AGENT_TENANT_ID) {
+        return {
+            configured: false,
+            connected: false,
+            connected_at: null,
+            hostname: null,
+            versione_gestionale: null,
+        };
+    }
     return {
         configured: isPassepartoutAgentConfigured(),
         connected: agentSocket != null,
@@ -104,18 +125,32 @@ export function setupPassepartoutBridge(io: SocketIOServer) {
 }
 
 /**
- * Esegue un'operazione sul gestionale attraverso l'agente LAN.
- * Rilancia PassepartoutBridgeError con kind:
+ * Esegue un'operazione sul gestionale attraverso l'agente LAN, per conto del
+ * tenant `tenantId`. Rilancia PassepartoutBridgeError con kind:
+ *  - 'not_for_tenant' se il tenant non è quello collegato all'agente (→ 403)
  *  - 'agent_offline' se nessun agente è collegato (→ 503 lato API)
  *  - 'timeout' se l'agente non risponde in tempo
  *  - 'gestionale' se il gestionale ha risposto con un errore applicativo
  *  - 'agent' per errori interni dell'agente
  */
 export async function callPassepartout<T = unknown>(
+    tenantId: number,
     op: PassepartoutOp,
     params: Record<string, unknown> = {},
     timeoutMs = 20_000,
 ): Promise<T> {
+    // Controllo al punto di uscita, non sulle route: vale per ogni chiamante
+    // presente e futuro (anteprima, import conto, chiusura automatica al
+    // saldo, retry «Chiudi in cassa», import menu) e non dipende dagli
+    // entitlement, che un OWNER può accendersi da solo. Prima del controllo
+    // agent_offline, così un altro tenant riceve un 403 e non un 503 che
+    // sembra un guasto passeggero.
+    if (Number(tenantId) !== PASSEPARTOUT_AGENT_TENANT_ID) {
+        throw new PassepartoutBridgeError(
+            'Integrazione cassa non disponibile per questo ristorante',
+            'not_for_tenant',
+        );
+    }
     const socket = agentSocket;
     if (!socket) {
         throw new PassepartoutBridgeError(

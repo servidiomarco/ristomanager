@@ -3629,7 +3629,10 @@ app.get('/reservations/:id/bill', authenticate, requirePermission('payments:view
 
 function sendPassepartoutError(res: any, err: unknown): boolean {
     if (!(err instanceof PassepartoutBridgeError)) return false;
-    const status = err.kind === 'agent_offline' ? 503 : err.kind === 'timeout' ? 504 : 502;
+    // not_for_tenant: l'agente è del Frantoio, gli altri tenant ricevono un
+    // rifiuto netto (403), non un 503 da «ristorante offline, riprova».
+    const status = err.kind === 'not_for_tenant' ? 403
+        : err.kind === 'agent_offline' ? 503 : err.kind === 'timeout' ? 504 : 502;
     res.status(status).json({ error: `passepartout_${err.kind}`, message: err.message });
     return true;
 }
@@ -3637,7 +3640,7 @@ function sendPassepartoutError(res: any, err: unknown): boolean {
 // Il nome tavolo in Passepartout deve combaciare ESATTAMENTE, e in sala i
 // nomi hanno varianti tipografiche ("204.", "23 "): il CRM manda il proprio
 // nome tavolo, qui si prova anche con le varianti note prima di arrendersi.
-async function findComandaTavolo(tavolo: string): Promise<{ comanda: PassepartoutComanda; tavolo: string } | null> {
+async function findComandaTavolo(tenantId: number, tavolo: string): Promise<{ comanda: PassepartoutComanda; tavolo: string } | null> {
     const base = tavolo.trim();
     const variants = [...new Set([
         base,
@@ -3647,14 +3650,14 @@ async function findComandaTavolo(tavolo: string): Promise<{ comanda: Passepartou
         base.toLowerCase(),
     ])].filter(v => v.length > 0);
     for (const v of variants) {
-        const comanda = await callPassepartout<PassepartoutComanda | null>('comandaTavolo', { tavolo: v });
+        const comanda = await callPassepartout<PassepartoutComanda | null>(tenantId, 'comandaTavolo', { tavolo: v });
         if (comanda) return { comanda, tavolo: v };
     }
     return null;
 }
 
-app.get('/passepartout/status', authenticate, requirePermission('payments:full'), (_req, res) => {
-    res.json(getPassepartoutAgentStatus());
+app.get('/passepartout/status', authenticate, requirePermission('payments:full'), (req, res) => {
+    res.json(getPassepartoutAgentStatus(req.tenantId!));
 });
 
 // Anteprima della comanda attiva su un tavolo del gestionale, già mappata
@@ -3666,7 +3669,7 @@ app.get('/passepartout/status', authenticate, requirePermission('payments:full')
 // lo scontrino dall'RT. settings:full: è diagnostica di piattaforma.
 app.get('/passepartout/ws-operations', authenticate, requirePermission('settings:full'), async (req, res) => {
     try {
-        const result = await callPassepartout('wsdl', {}, 30_000);
+        const result = await callPassepartout(req.tenantId!, 'wsdl', {}, 30_000);
         res.json(result);
     } catch (err: any) {
         if (sendPassepartoutError(res, err)) return;
@@ -3678,7 +3681,7 @@ app.get('/passepartout/tavolo/:nome', authenticate, requirePermission('payments:
     try {
         const nome = String(req.params.nome || '').trim();
         if (!nome) return res.status(400).json({ error: 'Nome tavolo mancante' });
-        const found = await findComandaTavolo(nome);
+        const found = await findComandaTavolo(req.tenantId!, nome);
         if (!found) {
             return res.status(404).json({
                 error: 'no_comanda',
@@ -3732,7 +3735,7 @@ async function chiudiComandaPassepartoutPerBill(
     const proforma = documento === 'Proforma';
     // Timeout largo: la sequenza sull'agente può includere invio in
     // produzione, attesa e saldo del sospeso (vedi chiudiComandaCompleta).
-    const esito = await callPassepartout<EsitoChiusuraComanda>('chiudi', {
+    const esito = await callPassepartout<EsitoChiusuraComanda>(tenantId, 'chiudi', {
         idComanda,
         tipoPagamento: config.tipoPagamento,
         tipoDocumento: proforma ? 'Proforma' : config.tipoDocumento,
@@ -3822,7 +3825,7 @@ app.post('/menu/import/passepartout', authenticate, requirePermission('menu:full
     try {
         // Timeout largo: il gestionale serializza ~14MB di catalogo (immagini
         // incluse) prima che l'agente lo riduca agli ~85KB che viaggiano qui.
-        const articoli = await callPassepartout<PassepartoutArticolo[]>('articoli', {}, 150_000);
+        const articoli = await callPassepartout<PassepartoutArticolo[]>(req.tenantId!, 'articoli', {}, 150_000);
         // Solo le voci di menu vere: le varianti di battitura, il coperto e
         // gli acconti non sono piatti. E solo le voci ACCESE: in Passepartout
         // un articolo o una categoria con storico non si può eliminare, si
@@ -5632,7 +5635,7 @@ app.post('/reservations/:id/bill', authenticate, requirePermission('payments:ful
         if (fromPassepartout) {
             const tavolo = String(req.body?.pp_tavolo || '').trim();
             if (!tavolo) return res.status(400).json({ error: 'pp_tavolo mancante per source=passepartout' });
-            let found = await findComandaTavolo(tavolo);
+            let found = await findComandaTavolo(req.tenantId!, tavolo);
             // Tavoli uniti: in sala la comanda può essere stata aperta su uno
             // qualsiasi dei tavoli dell'unione (25/08: 45+47 uniti, comanda
             // battuta sul 47, prenotazione sul 45 → import a vuoto). Se il
@@ -5651,7 +5654,7 @@ app.post('/reservations/:id/bill', authenticate, requirePermission('payments:ful
                     [req.tenantId!, mergeDate, resRow.rows[0].shift, resRow.rows[0].table_id]
                 );
                 for (const s of siblings.rows) {
-                    found = await findComandaTavolo(String(s.name));
+                    found = await findComandaTavolo(req.tenantId!, String(s.name));
                     if (found) break;
                 }
             }
@@ -33278,7 +33281,7 @@ app.post('/tables/:id/bill', authenticate, requirePermission('payments:full'), a
         if (fromPassepartout) {
             const tavolo = String(req.body?.pp_tavolo || tbl.rows[0].name || '').trim();
             if (!tavolo) return res.status(400).json({ error: 'pp_tavolo mancante per source=passepartout' });
-            const found = await findComandaTavolo(tavolo);
+            const found = await findComandaTavolo(req.tenantId!, tavolo);
             if (!found) {
                 return res.status(404).json({ error: 'no_comanda', message: `Nessuna comanda attiva sul tavolo "${tavolo}" nel gestionale. Il nome deve combaciare con quello di Passepartout (punto e spazi compresi).` });
             }
