@@ -39,6 +39,7 @@ import { VOICE_CHANNEL, WHATSAPP_CHANNEL, type ToolOutcome } from './services/bo
 import { TENANT_FEATURES, getTenantFeatures, isFeatureEnabledForTenant, invalidateTenantFeaturesCache, clearTenantFeaturesCache, type TenantFeature } from './services/entitlements.js';
 import { clearTenantLocaleCache, getTenantLocale, sqlTimeZone } from './services/tenantLocale.js';
 import { normalizePhoneE164 } from './utils/phone.js';
+import { createMessagingSender, MessagingUnavailableError, MESSAGING_NOT_AVAILABLE, type EnvMessagingConfig } from './services/messagingSender.js';
 import { provisionTenant, ProvisioningError } from './services/tenantProvisioning.js';
 import {
     createCheckoutSession,
@@ -338,6 +339,44 @@ const isKnownShift = (v: unknown): boolean => typeof v === 'string' && KNOWN_SHI
 const PUBLIC_TENANT_ID = 1;
 
 // ============================================
+// MITTENTE WHATSAPP/SMS — QUELLO IN ENV È DEL FRANTOIO
+// ============================================
+// Le credenziali Twilio/Meta in env sono del Vecchio Frantoio: fino al
+// 25/09/2026 ogni tenant spediva da lì, anche in forma anonima dalla pagina
+// /prenota/<slug> (audit isolamento tenant, H-08). Le regole — tenant 1
+// cablato, ENV_MESSAGING_TENANT_IDS solo additiva, sandbox delle demo in
+// ENV_MESSAGING_SANDBOX_RECIPIENTS — stanno in services/messagingSender.ts,
+// modulo puro provato senza avviare il server. Qui solo il cablaggio.
+const messagingSender = createMessagingSender(process.env, {
+    ownerTenantId: PUBLIC_TENANT_ID,
+    warn: (msg) => console.warn(msg),
+});
+
+// `toE164` è il numero che partirebbe davvero, col prefisso del ristorante:
+// quello di messagingDestination, o quello che le primitive d'invio
+// calcolano da sé. Una forma locale non combacia mai con la sandbox.
+function messagingConfigFor(tenantId: number | string, toE164?: string | null): EnvMessagingConfig | null {
+    return messagingSender.configFor(tenantId, toE164);
+}
+
+// Il destinatario in E.164 col prefisso di casa del ristorante, come lo
+// normalizzano sendTwilioWhatsApp/sendTwilioSms: controllo e invio guardano
+// lo stesso numero (su un tenant britannico «07700 900000» è +44…, non +39…).
+async function messagingDestination(tenantId: number, phone: string | null | undefined): Promise<string> {
+    if (!phone) return '';
+    return normalizePhoneE164(String(phone), (await getTenantLocale(tenantId)).dialCode);
+}
+
+// Per le route che spediscono su azione esplicita dell'operatore: 409 prima
+// di comporre il messaggio (e, per i link di pagamento, prima di creare
+// l'ordine sul gateway). true = risposta già inviata.
+function respondIfMessagingUnavailable(res: express.Response, tenantId: number, toE164: string | null | undefined): boolean {
+    if (messagingConfigFor(tenantId, toE164)) return false;
+    res.status(409).json(MESSAGING_NOT_AVAILABLE);
+    return true;
+}
+
+// ============================================
 // RISOLUZIONE TENANT DA TOKEN (webhook e print agent, Fase C2)
 // ============================================
 // I token vivono su tenants (webhook_token nel path, print_agent_token in
@@ -626,89 +665,13 @@ app.use('/auth', authRoutes);
 // ============================================
 app.use('/activity-logs', logRoutes);
 
-// ============================================
-// WHATSAPP WEBHOOK ENDPOINTS (Vonage)
-// ============================================
-
-// Vonage WhatsApp inbound messages webhook.
-// Corpo condiviso fra il path storico (alias del tenant 1) e il gemello
-// /webhook/t/:tenantToken/vonage-inbound che risolve il tenant dal token.
-async function handleVonageInbound(tenantId: number, req: express.Request, res: express.Response): Promise<void> {
-    console.log('[Vonage] Incoming message:', JSON.stringify(req.body, null, 2));
-
-    try {
-        // Acknowledge immediately to Vonage
-        res.status(200).send();
-
-        // Entitlement WhatsApp spento: si risponde comunque 200 (un 4xx/5xx
-        // farebbe solo accumulare retry al provider verso un canale non
-        // venduto) ma il messaggio non viene processato né salvato.
-        if (!(await isFeatureEnabledForTenant(tenantId, 'whatsapp'))) {
-            console.warn('[Vonage] inbound ignorato: entitlement whatsapp disattivo');
-            return;
-        }
-
-        // Vonage sends two different formats:
-        // Format 1 (actual): { from, message_type: "text", text: "..." }
-        // Format 2 (sandbox): { from, message: { content: { type: "text", text: "..." } } }
-
-        const from = req.body.from;
-        let messageText = null;
-
-        // Check actual Vonage format first
-        if (req.body.message_type === 'text' && req.body.text) {
-            messageText = req.body.text;
-        }
-        // Check sandbox/alternative format
-        else if (req.body.message?.content?.type === 'text') {
-            messageText = req.body.message.content.text;
-        }
-
-        if (messageText && from) {
-            // Vonage sandbox is deprecated but any inbound still lands here.
-            // Persist for the inbox — no auto-reply (see Twilio webhook note).
-            const row = await logInboundMessage({
-                tenantId,
-                provider: 'vonage', channel: 'whatsapp',
-                from: String(from), to: '', body: String(messageText),
-            });
-            if (row && socketService) {
-                socketService.broadcastToAll(tenantId, 'message:inbound', row);
-            }
-        } else {
-            console.log('[Vonage] Non-text message received, ignoring');
-        }
-
-    } catch (error) {
-        console.error('[Vonage] Error processing message:', error);
-        // Still respond 200 to Vonage to avoid retries
-        res.status(200).send();
-    }
-}
-
-// Alias tenant 1 finché i provider non sono riconfigurati sui path con token.
-app.post('/webhook/vonage-inbound', (req, res) => { void runWithTenantContext(PUBLIC_TENANT_ID, () => handleVonageInbound(PUBLIC_TENANT_ID, req, res)); });
-app.post('/webhook/t/:tenantToken/vonage-inbound', async (req, res) => {
-    const tenantId = await resolveWebhookTenantOr404(req, res);
-    if (tenantId == null) return;
-    await runWithTenantContext(tenantId, () => handleVonageInbound(tenantId, req, res));
-});
-
-// Vonage WhatsApp status updates webhook. Solo log: il tenant serve appena
-// il giorno in cui lo stato verrà persistito, ma il gemello col token nasce
-// ora così Vonage si configura una volta sola.
-function handleVonageStatus(_tenantId: number, req: express.Request, res: express.Response): void {
-    console.log('[Vonage] Message status:', JSON.stringify(req.body, null, 2));
-    res.status(200).send();
-}
-
-// Alias tenant 1 finché i provider non sono riconfigurati sui path con token.
-app.post('/webhook/vonage-status', (req, res) => handleVonageStatus(PUBLIC_TENANT_ID, req, res));
-app.post('/webhook/t/:tenantToken/vonage-status', async (req, res) => {
-    const tenantId = await resolveWebhookTenantOr404(req, res);
-    if (tenantId == null) return;
-    handleVonageStatus(tenantId, req, res);
-});
+// Webhook Vonage (inbound e stato, path storici e gemelli col token):
+// RIMOSSI il 25/09/2026. La sandbox WhatsApp Vonage era dismessa, e quelle
+// route non verificavano nessuna firma: una POST anonima creava
+// messaggi finti di clienti nella posta del Frantoio, con push allo staff
+// (audit isolamento tenant, M-05). Ora rispondono 404 come ogni path ignoto.
+// Il numero voce Vonage (VONAGE_VOICE_NUMBER, trunk SIP di ElevenLabs) non
+// passa di qui e resta com'è.
 
 // ============================================
 // WHATSAPP WEBHOOK ENDPOINTS (Twilio)
@@ -947,7 +910,9 @@ async function maybeFallbackWhatsAppToSms(tenantId: number, originalSid: string,
     if (!row || row.direction !== 'outbound' || row.channel !== 'whatsapp') return;
     if (!row.reservation_id) return;
     if (!row.body || !String(row.body).trim()) return;
-    if (!isTwilioSmsConfigured()) return;
+    // Il ripiego automatico è dei soli tenant col mittente (vedi
+    // messagingConfigFor): la sandbox delle demo copre gli invii a mano.
+    if (!isTwilioSmsConfigured(Number(row.tenant_id))) return;
 
     // Idempotency: skip if we (auto or manual) already sent an SMS for this
     // reservation after the failed WA. Twilio can deliver the terminal state
@@ -2997,6 +2962,7 @@ app.post('/reservations/:id/send-reminder', authenticate, requirePermission('res
         if (['CANCELLED', 'DECLINED', 'NO_SHOW'].includes(resv.reservation_status)) {
             return res.status(409).json({ error: 'invalid_status', message: `La prenotazione è ${resv.reservation_status}: niente reminder.` });
         }
+        if (respondIfMessagingUnavailable(res, req.tenantId!, await messagingDestination(req.tenantId!, resv.phone))) return;
 
         const sendResult = await sendBookingConfirmation(
             req.tenantId!,
@@ -3018,6 +2984,7 @@ app.post('/reservations/:id/send-reminder', authenticate, requirePermission('res
         }
         res.json({ ok: true, channel: sendResult.channel });
     } catch (err: any) {
+        if (err instanceof MessagingUnavailableError) return res.status(409).json(MESSAGING_NOT_AVAILABLE);
         console.error('POST /reservations/:id/send-reminder error:', err);
         res.status(502).json({ error: 'send_failed', message: err?.message || 'Invio non riuscito' });
     }
@@ -3276,6 +3243,8 @@ app.post('/reservations/:id/confirm-whatsapp', authenticate, requireFeature('wha
         if (!reservation.phone) {
             return res.status(400).json({ error: 'No phone number for this reservation' });
         }
+        const destinationE164 = await messagingDestination(req.tenantId!, reservation.phone);
+        if (respondIfMessagingUnavailable(res, req.tenantId!, destinationE164)) return;
 
         const roomName = await resolveReservationRoomName(reservation);
         const message = buildConfirmationMessage(
@@ -3287,7 +3256,7 @@ app.post('/reservations/:id/confirm-whatsapp', authenticate, requireFeature('wha
 
         let outcome: OutboundConfirmationResult;
         if (channelChoice === 'sms') {
-            if (!isTwilioSmsConfigured()) {
+            if (!isTwilioSmsConfigured(req.tenantId!, destinationE164)) {
                 return res.status(400).json({ error: 'SMS non configurato' });
             }
             outcome = await sendTwilioSms(req.tenantId!, reservation.phone, message, reservation.id);
@@ -3295,7 +3264,7 @@ app.post('/reservations/:id/confirm-whatsapp', authenticate, requireFeature('wha
                 console.warn('[confirmation] recordConfirmationSent failed:', err?.message || err)
             );
         } else if (channelChoice === 'whatsapp') {
-            if (!isTwilioWhatsAppConfigured() && !isMetaWhatsAppConfigured()) {
+            if (!isTwilioWhatsAppConfigured(req.tenantId!, destinationE164) && !isMetaWhatsAppConfigured(req.tenantId!)) {
                 return res.status(400).json({ error: 'WhatsApp non configurato' });
             }
             // Manual "Invia WhatsApp" from the CRM: freeform sends fail
@@ -3337,6 +3306,7 @@ app.post('/reservations/:id/confirm-whatsapp', authenticate, requireFeature('wha
             reservation: promoted || undefined,
         });
     } catch (err: any) {
+        if (err instanceof MessagingUnavailableError) return res.status(409).json(MESSAGING_NOT_AVAILABLE);
         console.error('Error sending confirmation:', err);
         res.status(500).json({ error: err?.message || 'Failed to send confirmation' });
     }
@@ -5766,6 +5736,7 @@ app.post('/reservations/:id/bill/notify', authenticate, requirePermission('payme
         if (!reservation.phone) {
             return res.status(400).json({ error: 'La prenotazione non ha un numero di telefono' });
         }
+        if (respondIfMessagingUnavailable(res, req.tenantId!, await messagingDestination(req.tenantId!, reservation.phone))) return;
         const guestLanguage = resolveGuestLanguage(reservation);
         const tenantCurrency = (await getTenantLocale(req.tenantId!)).currency;
 
@@ -5828,6 +5799,7 @@ app.post('/reservations/:id/bill/notify', authenticate, requirePermission('payme
                 public_url: publicUrl,
             });
         } catch (err: any) {
+            if (err instanceof MessagingUnavailableError) return res.status(409).json(MESSAGING_NOT_AVAILABLE);
             console.error('[bill:notify] delivery failed:', err?.message || err);
             res.status(502).json({
                 error: 'delivery_failed',
@@ -9072,8 +9044,12 @@ app.get('/messages/:id/media/:index', authenticate, requirePermission('reservati
             return res.status(400).json({ error: 'Host non consentito' });
         }
 
-        const sid = process.env.TWILIO_ACCOUNT_SID;
-        const token = process.env.TWILIO_AUTH_TOKEN;
+        // Le credenziali del media Twilio sono quelle del Frantoio: un altro
+        // tenant non le usa nemmeno per scaricare (vedi messagingConfigFor).
+        const cfg = messagingConfigFor(req.tenantId!);
+        if (!cfg) return res.status(404).json({ error: 'Allegato non disponibile' });
+        const sid = cfg.twilioAccountSid;
+        const token = cfg.twilioAuthToken;
         if (!sid || !token) return res.status(503).json({ error: 'Twilio non configurato' });
 
         const upstream = await fetch(String(item.url), {
@@ -10147,6 +10123,7 @@ app.post('/messages/send', authenticate, requireFeature('whatsapp'), requirePerm
         const desiredChannel: 'whatsapp' | 'sms' = channel === 'sms' ? 'sms' : 'whatsapp';
         const key = phoneMatchKey(String(phone));
         if (!key) return res.status(400).json({ error: 'invalid phone' });
+        if (respondIfMessagingUnavailable(res, req.tenantId!, await messagingDestination(req.tenantId!, String(phone)))) return;
 
         if (desiredChannel === 'whatsapp') {
             const win = await queryWithRetry(
@@ -10227,6 +10204,7 @@ app.post('/messages/send', authenticate, requireFeature('whatsapp'), requirePerm
         }
         res.json({ ok: true, message: row, channel: result.channel, sid: result.sid ?? null });
     } catch (err: any) {
+        if (err instanceof MessagingUnavailableError) return res.status(409).json(MESSAGING_NOT_AVAILABLE);
         console.error('POST /messages/send error:', err);
         res.status(500).json({ error: err?.message || 'Internal server error' });
     }
@@ -10710,7 +10688,11 @@ app.post('/payments/requests', authenticate, requirePermission('reservations:ful
             if (!(await isSmtpConfigured(req.tenantId!))) return res.status(400).json({ error: 'Email non configurata (server SMTP mancante)' });
         } else {
             if (!reservation.phone) return res.status(400).json({ error: 'La prenotazione non ha un numero di telefono' });
-            if (channel === 'sms' && !isTwilioSmsConfigured()) return res.status(400).json({ error: 'SMS non configurato' });
+            // Prima dell'ordine sul gateway: un 409 dopo lascerebbe un ordine
+            // di pagamento orfano, che nessuno riceverà mai.
+            const destinationE164 = await messagingDestination(req.tenantId!, reservation.phone);
+            if (respondIfMessagingUnavailable(res, req.tenantId!, destinationE164)) return;
+            if (channel === 'sms' && !isTwilioSmsConfigured(req.tenantId!, destinationE164)) return res.status(400).json({ error: 'SMS non configurato' });
         }
 
         // Create the gateway order first — if the API call fails we don't
@@ -16033,8 +16015,16 @@ const banquetQuoteUrl = (token: string): string => `${payAtTableBaseUrl()}/preve
 // dall'operatore). Finché il template non è approvato e cablato in env, il
 // foglio Condividi mostra il canale come «in attivazione» — l'interruttore
 // è questa funzione, nessun deploy applicativo per accenderlo.
-const banquetQuoteWhatsAppReady = (): boolean =>
-    isTwilioWhatsAppConfigured() && !!process.env.TWILIO_WA_CONTENT_SID_BANQUET_QUOTE;
+// Per tenant (e destinatario in E.164, per la sandbox delle demo): il
+// numero business è quello del Frantoio, vedi services/messagingSender.ts.
+const banquetQuoteWhatsAppReady = (tenantId: number, toE164?: string | null): boolean =>
+    isTwilioWhatsAppConfigured(tenantId, toE164) && !!process.env.TWILIO_WA_CONTENT_SID_BANQUET_QUOTE;
+// Il foglio Condividi non conosce ancora il numero: il canale si offre a chi
+// ha il mittente proprio e, nei ristoranti demo, se la sandbox ha dei numeri
+// — l'invio poi risponde 409 fuori da quelli. Senza, le prove della demo
+// verso il telefono di Marco non avrebbero nemmeno il campo per il numero.
+const banquetQuoteWhatsAppOffered = (tenantId: number): boolean =>
+    messagingSender.twilioWhatsAppOffered(tenantId) && !!process.env.TWILIO_WA_CONTENT_SID_BANQUET_QUOTE;
 
 // Card call-to-action: corpo {{1}} nome, {{2}} evento, {{3}} data; il
 // bottone «Apri il preventivo» ha l'host cablato nel template e {{4}} porta
@@ -16072,7 +16062,7 @@ app.post('/banquet-menus/:id/share', authenticate, requirePermission('menu:full'
         if (!Number.isInteger(id)) return res.status(400).json({ error: 'id non valido' });
         const token = await ensureBanquetShareToken(req.tenantId!, id);
         if (!token) return res.status(404).json({ error: 'Banquet not found' });
-        res.json({ token, url: banquetQuoteUrl(token), whatsapp_ready: banquetQuoteWhatsAppReady() });
+        res.json({ token, url: banquetQuoteUrl(token), whatsapp_ready: banquetQuoteWhatsAppOffered(req.tenantId!) });
     } catch (err) {
         console.error('POST /banquet-menus/:id/share error:', err);
         res.status(500).json({ error: 'Internal server error' });
@@ -16083,7 +16073,10 @@ app.post('/banquet-menus/:id/send-quote-whatsapp', authenticate, requirePermissi
     try {
         const id = Number(req.params.id);
         if (!Number.isInteger(id)) return res.status(400).json({ error: 'id non valido' });
-        if (!banquetQuoteWhatsAppReady()) {
+        // Il 503 «in attivazione» è di chi il mittente ce l'ha; un tenant
+        // senza riceve il 409 più sotto, quando il numero è noto (la sandbox
+        // delle demo guarda il destinatario).
+        if (messagingSender.hasOwnSender(req.tenantId!) && !banquetQuoteWhatsAppReady(req.tenantId!)) {
             return res.status(503).json({ error: 'whatsapp_non_configurato', message: "L'invio WhatsApp dal numero del ristorante non è ancora attivo." });
         }
         const rs = await queryWithRetry(
@@ -16099,6 +16092,13 @@ app.post('/banquet-menus/:id/send-quote-whatsapp', authenticate, requirePermissi
         const phone = String(req.body?.phone ?? row.customer_phone ?? '').trim();
         if (!phone || phone.replace(/\D/g, '').length < 8) {
             return res.status(400).json({ error: 'Serve un numero di telefono valido' });
+        }
+        // Il numero col prefisso del ristorante: lo stesso per il controllo e
+        // per l'invio (prima partiva sempre come italiano, normalizeItalianPhone).
+        const destinationE164 = await messagingDestination(req.tenantId!, phone);
+        if (respondIfMessagingUnavailable(res, req.tenantId!, destinationE164)) return;
+        if (!banquetQuoteWhatsAppReady(req.tenantId!, destinationE164)) {
+            return res.status(503).json({ error: 'whatsapp_non_configurato', message: "L'invio WhatsApp dal numero del ristorante non è ancora attivo." });
         }
         const token = await ensureBanquetShareToken(req.tenantId!, id);
         if (!token) return res.status(404).json({ error: 'Banquet not found' });
@@ -16120,7 +16120,7 @@ app.post('/banquet-menus/:id/send-quote-whatsapp', authenticate, requirePermissi
         const text = english
             ? `Quote "${row.name}" (${dateLabel}): ${url}`
             : `Preventivo «${row.name}» (${dateLabel}): ${url}`;
-        const result = await sendWhatsAppText(req.tenantId!, normalizeItalianPhone(phone), text, null, template);
+        const result = await sendWhatsAppText(req.tenantId!, destinationE164, text, null, template);
         if (req.user) {
             LogService.logActivity(
                 req.tenantId!, req.user.userId, req.user.email, req.user.email,
@@ -16130,6 +16130,7 @@ app.post('/banquet-menus/:id/send-quote-whatsapp', authenticate, requirePermissi
         }
         res.json({ ok: true, phone, channel: result.channel, url });
     } catch (err: any) {
+        if (err instanceof MessagingUnavailableError) return res.status(409).json(MESSAGING_NOT_AVAILABLE);
         console.error('POST /banquet-menus/:id/send-quote-whatsapp error:', err);
         res.status(500).json({ error: err?.message || 'Internal server error' });
     }
@@ -19727,149 +19728,6 @@ app.post('/staff-chat/attachments', authenticate, requirePermission('staffchat:u
     }
 });
 
-// ============================================
-// WHATSAPP HELPER FUNCTIONS
-// ============================================
-
-// Process WhatsApp booking message
-async function processWhatsAppBooking(phoneNumber: string, messageText: string) {
-    console.log(`[WhatsApp] Processing booking from ${phoneNumber}: ${messageText}`);
-
-    // Parse the message
-    const bookingData = parseBookingMessage(messageText);
-
-    // Fire-and-forget WhatsApp replies. The booking itself must never be lost
-    // because Twilio/Vonage rate-limited us or the network blipped — we save
-    // first and reply on a best-effort basis.
-    const replyAsync = (text: string) => {
-        sendWhatsAppText(PUBLIC_TENANT_ID, phoneNumber, text).catch(err =>
-            console.error('[WhatsApp] reply send failed:', err)
-        );
-    };
-
-    if (!bookingData) {
-        replyAsync(
-            "❌ Non ho capito il messaggio. Per favore usa questo formato:\n\n" +
-            "DATA ORA OSPITI NOME\n\n" +
-            "Esempio: 15/12 20:00 4 Marco Rossi"
-        );
-        return;
-    }
-
-    // Check if we have all required info
-    const missingFields = [];
-    if (!bookingData.date) missingFields.push("data");
-    if (!bookingData.time) missingFields.push("ora");
-    if (!bookingData.guests) missingFields.push("numero ospiti");
-    if (!bookingData.name) missingFields.push("nome");
-
-    if (missingFields.length > 0) {
-        replyAsync(
-            `⚠️ Mancano alcune informazioni: ${missingFields.join(", ")}\n\n` +
-            "Per favore invia: DATA ORA OSPITI NOME\n\n" +
-            "Esempio: 15/12 20:00 4 Marco Rossi"
-        );
-        return;
-    }
-
-    try {
-        // TypeScript assertions - we've already validated these fields exist
-        const date = bookingData.date!;
-        const time = bookingData.time!;
-        const name = bookingData.name!;
-        const guests = bookingData.guests!;
-
-        // Determine shift based on time
-        const shift = determineShift(time);
-
-        // Create reservation in database. WhatsApp bookings land as PENDING ("Da
-        // confermare") — staff reviews them in the list and the confirmation
-        // message is fired automatically when they flip the status to CONFIRMED.
-        const result = await runWithOutboxTx(async (txClient) => {
-            const insRes = await txClient.query(
-            // Canale WhatsApp inbound: niente JWT, la prenotazione nasce sul
-            // tenant pubblico come il resto del flusso webhook.
-            `INSERT INTO reservations (customer_name, reservation_time, shift, guests, phone, payment_status, arrival_status, reservation_status, tenant_id)
-                 VALUES ($1, ($2::timestamp AT TIME ZONE ${sqlTimeZone((await getTenantLocale(PUBLIC_TENANT_ID)).timezone)}), $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-            [
-                name,
-                `${date}T${time}`,
-                shift,
-                guests,
-                phoneNumber,
-                PaymentStatus.PENDING,
-                'WAITING',
-                'PENDING',
-                PUBLIC_TENANT_ID
-            ]
-            );
-            if (insRes.rows[0]) {
-                await outboxEnqueueInTx(txClient, PUBLIC_TENANT_ID, 'reservation:created', `reservation:${insRes.rows[0].id}`,
-                    { reservation_id: insRes.rows[0].id }, { actor: { channel: 'whatsapp' } });
-            }
-            return insRes;
-        });
-
-        const newReservation = result.rows[0];
-
-        // Broadcast via Socket.IO
-        if (socketService) {
-            socketService.broadcastReservationCreated(PUBLIC_TENANT_ID, newReservation);
-        }
-
-        // Auto-save WhatsApp contact to the rubrica.
-        await upsertCustomerFromReservation(PUBLIC_TENANT_ID, name, phoneNumber, null, null);
-
-        console.log(`[WhatsApp] ✅ Reservation created successfully for ${name}. Waiting for manual confirmation.`);
-
-        // Ack the guest only after the booking is safely saved. Fire-and-forget
-        // so a Twilio rate-limit or transient error can't roll back the work.
-        replyAsync(
-            "Grazie per la richiesta di prenotazione, a breve ricevera la conferma della disponibilita del tavolo per la data e ora richiesta."
-        );
-
-    } catch (error) {
-        console.error('[WhatsApp] Error creating reservation:', error);
-        replyAsync(
-            "❌ Si è verificato un errore durante la creazione della prenotazione.\n\n" +
-            "Per favore riprova o contattaci telefonicamente."
-        );
-    }
-}
-
-// Parse booking message (supports both structured and natural language)
-function parseBookingMessage(text: string): { date: string | null, time: string | null, guests: number | null, name: string | null } | null {
-    if (!text || text.trim().length === 0) return null;
-
-    // Try structured format first: "15/12 20:00 4 Marco Rossi"
-    const structuredMatch = text.match(/(\d{1,2}\/\d{1,2}(?:\/\d{4})?)\s+(\d{1,2}:\d{2})\s+(\d+)\s+(.+)/i);
-    if (structuredMatch) {
-        return {
-            date: normalizeDate(structuredMatch[1]),
-            time: structuredMatch[2],
-            guests: parseInt(structuredMatch[3]),
-            name: structuredMatch[4].trim()
-        };
-    }
-
-    // Try natural language patterns
-    const dateMatch = text.match(/(\d{1,2}\/\d{1,2}(?:\/\d{4})?)/);
-    const timeMatch = text.match(/(\d{1,2}:\d{2})/);
-    const guestsMatch = text.match(/(\d+)\s*(?:persone?|ospiti?|pax)/i);
-    const nameMatch = text.match(/(?:nome[:\s]+|per\s+)([A-Za-zÀ-ÿ\s]+?)(?:\s+tel|\s+\d|$)/i);
-
-    if (dateMatch || timeMatch || guestsMatch || nameMatch) {
-        return {
-            date: dateMatch ? normalizeDate(dateMatch[1]) : null,
-            time: timeMatch ? timeMatch[1] : null,
-            guests: guestsMatch ? parseInt(guestsMatch[1]) : null,
-            name: nameMatch ? nameMatch[1].trim() : null
-        };
-    }
-
-    return null;
-}
-
 // Build the booking-confirmation message. Includes full name, date, time,
 // party size and (when known) the room — the data points the guest needs to
 // verify the booking. Shared by the manual /confirm-whatsapp endpoint, the
@@ -21047,77 +20905,14 @@ function buildCustomEmail(params: {
     return { subject, text, html };
 }
 
-// Normalize date to YYYY-MM-DD format
-function normalizeDate(dateStr: string): string {
-    const parts = dateStr.split('/');
-    const day = parts[0].padStart(2, '0');
-    const month = parts[1].padStart(2, '0');
-    const year = parts[2] || new Date().getFullYear().toString();
-    return `${year}-${month}-${day}`;
-}
-
-// Determine shift (LUNCH or DINNER) based on time
-function determineShift(time: string): Shift {
-    const hour = parseInt(time.split(':')[0]);
-    return (hour >= 11 && hour < 17) ? Shift.LUNCH : Shift.DINNER;
-}
-
-// Send WhatsApp message via Vonage API
-async function sendVonageWhatsApp(to: string, text: string): Promise<void> {
-    const VONAGE_API_KEY = process.env.VONAGE_API_KEY;
-    const VONAGE_API_SECRET = process.env.VONAGE_API_SECRET;
-    const VONAGE_WHATSAPP_NUMBER = process.env.VONAGE_WHATSAPP_NUMBER;
-
-    if (!VONAGE_API_KEY || !VONAGE_API_SECRET || !VONAGE_WHATSAPP_NUMBER) {
-        console.error('[Vonage] Missing configuration. Set VONAGE_API_KEY, VONAGE_API_SECRET, and VONAGE_WHATSAPP_NUMBER');
-        return;
-    }
-
-    // Ensure phone number is in E.164 format (with + prefix)
-    const formattedTo = to.startsWith('+') ? to : `+${to}`;
-    const formattedFrom = VONAGE_WHATSAPP_NUMBER.startsWith('+') ? VONAGE_WHATSAPP_NUMBER : `+${VONAGE_WHATSAPP_NUMBER}`;
-
-    console.log(`[Vonage] Sending message to ${formattedTo} from ${formattedFrom}`);
-
-    try {
-        const auth = Buffer.from(`${VONAGE_API_KEY}:${VONAGE_API_SECRET}`).toString('base64');
-
-        const response = await fetch('https://messages-sandbox.nexmo.com/v1/messages', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Basic ${auth}`
-            },
-            body: JSON.stringify({
-                from: formattedFrom,
-                to: formattedTo,
-                message_type: 'text',
-                text: text,
-                channel: 'whatsapp'
-            })
-        });
-
-        if (!response.ok) {
-            const errorBody = await response.text();
-            throw new Error(`Vonage API error: ${response.status} - ${errorBody}`);
-        }
-
-        const result = await response.json();
-        console.log(`[Vonage] ✅ Message sent to ${to}`, result);
-
-    } catch (error) {
-        console.error('[Vonage] ❌ Error sending message:', error);
-        throw error;
-    }
-}
-
 // Twilio WhatsApp — sandbox during testing, business number after porting.
 // Recipients must "join <code>" via WhatsApp once before they can receive
 // messages from the sandbox sender.
-function isTwilioWhatsAppConfigured(): boolean {
-    return !!(process.env.TWILIO_ACCOUNT_SID
-        && process.env.TWILIO_AUTH_TOKEN
-        && process.env.TWILIO_WHATSAPP_FROM);
+// Per tenant: le credenziali arrivano solo da messagingSender. `toE164`
+// (vedi messagingDestination) serve alla sandbox delle demo; senza, un
+// tenant non ammesso è «spento».
+function isTwilioWhatsAppConfigured(tenantId: number, toE164?: string | null): boolean {
+    return messagingSender.twilioWhatsAppReady(tenantId, toE164);
 }
 
 // Result of an outbound Twilio send. `sid` is undefined for providers that
@@ -21409,21 +21204,30 @@ async function sendTwilioWhatsApp(
     mediaUrls?: string[],
     kind?: string | null
 ): Promise<OutboundConfirmationResult> {
-    const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
-    const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
-    const FROM = process.env.TWILIO_WHATSAPP_FROM;
+    // Twilio expects "whatsapp:+E164" on both ends. Normalize Italian numbers
+    // that arrive without the country prefix (10 digits starting with 3/0),
+    // Un numero locale senza prefisso è del paese del ristorante, non per
+    // forza italiano: il prefisso di casa arriva da tenantLocale.
+    // otherwise Twilio rejects "+3289630012" as an invalid Belgian number.
+    const e164To = normalizePhoneE164(String(to), (await getTenantLocale(tenantId)).dialCode);
+
+    // Mittente del Frantoio: il controllo guarda il numero che partirebbe
+    // davvero (E.164 col prefisso del ristorante), non quello scritto.
+    const cfg = messagingConfigFor(tenantId, e164To);
+    if (!cfg) {
+        console.warn(`[Twilio] WhatsApp non inviato: il tenant ${tenantId} non ha un mittente proprio`);
+        throw new MessagingUnavailableError();
+    }
+    const ACCOUNT_SID = cfg.twilioAccountSid;
+    const AUTH_TOKEN = cfg.twilioAuthToken;
+    const FROM = cfg.twilioWhatsAppFrom;
 
     if (!ACCOUNT_SID || !AUTH_TOKEN || !FROM) {
         console.error('[Twilio] Missing TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, or TWILIO_WHATSAPP_FROM');
         throw new Error('Twilio not configured');
     }
 
-    // Twilio expects "whatsapp:+E164" on both ends. Normalize Italian numbers
-    // that arrive without the country prefix (10 digits starting with 3/0),
-    // Un numero locale senza prefisso è del paese del ristorante, non per
-    // forza italiano: il prefisso di casa arriva da tenantLocale.
-    // otherwise Twilio rejects "+3289630012" as an invalid Belgian number.
-    const formattedTo = `whatsapp:${normalizePhoneE164(String(to), (await getTenantLocale(tenantId)).dialCode)}`;
+    const formattedTo = `whatsapp:${e164To}`;
     const formattedFrom = FROM.startsWith('whatsapp:') ? FROM : `whatsapp:${FROM.startsWith('+') ? FROM : `+${FROM}`}`;
 
     console.log(`[Twilio] Sending message to ${formattedTo} from ${formattedFrom}${template ? ` (template ${template.contentSid})` : ''}`);
@@ -21483,11 +21287,13 @@ async function sendTwilioWhatsApp(
     }
 }
 
-// Plain-text WhatsApp dispatcher. Prefers Twilio when configured, falls back
-// to Vonage. Meta is template-only (separate path) so it isn't in this chain.
+// Plain-text WhatsApp dispatcher: Twilio only.
 // When `template` is provided, uses Twilio's ContentSid/ContentVariables API
-// (required for business-initiated messages outside the 24h window); Vonage
-// doesn't support templates so it's skipped in that case.
+// (required for business-initiated messages outside the 24h window).
+// Il ripiego Vonage non c'è più (25/09/2026, audit M-05): con Twilio spento
+// ripiegava sulla sandbox dismessa e, senza nemmeno quella, fingeva l'invio
+// (riga 'vonage' nel log, nessun messaggio partito). Ora l'errore arriva al
+// chiamante, che è la verità.
 async function sendWhatsAppText(
     tenantId: number,
     to: string,
@@ -21502,22 +21308,7 @@ async function sendWhatsAppText(
     // Si lancia (non si finge il successo): i chiamanti fire-and-forget
     // loggano, quelli interattivi mostrano l'errore — che è la verità.
     if (isServiceNode) throw new Error('profilo service-node: gli invii esterni partono solo dal cloud');
-    if (isTwilioWhatsAppConfigured()) {
-        return sendTwilioWhatsApp(tenantId, to, text, reservationId, template, mediaUrls, kind);
-    }
-    if (template) throw new Error('WhatsApp template requires Twilio (Vonage unsupported)');
-    if (mediaUrls?.length) throw new Error('Gli allegati richiedono Twilio (Vonage non supportato)');
-    try {
-        await sendVonageWhatsApp(to, text);
-        await logOutboundMessage({ tenantId, provider: 'vonage', channel: 'whatsapp', to, body: text, reservationId, kind });
-        return { channel: 'whatsapp' };
-    } catch (err: any) {
-        await logOutboundMessage({
-            tenantId, provider: 'vonage', channel: 'whatsapp', to, body: text, reservationId, kind,
-            errorMessage: err?.message || String(err),
-        });
-        throw err;
-    }
+    return sendTwilioWhatsApp(tenantId, to, text, reservationId, template, mediaUrls, kind);
 }
 
 // Twilio SMS — temporary stand-in for booking confirmations while Meta
@@ -21527,27 +21318,38 @@ async function sendWhatsAppText(
 //      sender like "V Frantoio", since alpha senders live inside a service)
 //   2) TWILIO_SMS_FROM as literal alphanumeric sender ID (contains letters)
 //   3) TWILIO_SMS_FROM as E.164 phone number
-function isTwilioSmsConfigured(): boolean {
-    return !!(process.env.TWILIO_ACCOUNT_SID
-        && process.env.TWILIO_AUTH_TOKEN
-        && (process.env.TWILIO_MESSAGING_SERVICE_SID || process.env.TWILIO_SMS_FROM));
+// Per tenant, come isTwilioWhatsAppConfigured: vedi messagingSender.
+function isTwilioSmsConfigured(tenantId: number, toE164?: string | null): boolean {
+    return messagingSender.twilioSmsReady(tenantId, toE164);
 }
 
 async function sendTwilioSms(tenantId: number, to: string, text: string, reservationId?: number | null, kind?: string | null): Promise<OutboundConfirmationResult> {
-    const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
-    const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
-    const MESSAGING_SERVICE_SID = process.env.TWILIO_MESSAGING_SERVICE_SID;
-    const FROM = process.env.TWILIO_SMS_FROM;
+    // Stessa guardia di sendWhatsAppText: sul nodo di sala non si spedisce.
+    // Prima gli SMS non partivano solo perché lì mancano le env TWILIO_*.
+    if (isServiceNode) throw new Error('profilo service-node: gli invii esterni partono solo dal cloud');
+
+    // Normalize to E.164 assuming Italian numbers when the country code is
+    // missing — a phone like "3289630012" would otherwise be sent as
+    // "+3289630012" and Twilio rejects it as an invalid Belgian number.
+    const formattedTo = normalizePhoneE164(String(to), (await getTenantLocale(tenantId)).dialCode);
+
+    // Mittente del Frantoio (vedi messagingConfigFor), sul numero E.164 che
+    // partirebbe davvero. Prima di qualunque fetch e di qualunque log.
+    const cfg = messagingConfigFor(tenantId, formattedTo);
+    if (!cfg) {
+        console.warn(`[Twilio SMS] SMS non inviato: il tenant ${tenantId} non ha un mittente proprio`);
+        throw new MessagingUnavailableError();
+    }
+    const ACCOUNT_SID = cfg.twilioAccountSid;
+    const AUTH_TOKEN = cfg.twilioAuthToken;
+    const MESSAGING_SERVICE_SID = cfg.twilioMessagingServiceSid;
+    const FROM = cfg.twilioSmsFrom;
 
     if (!ACCOUNT_SID || !AUTH_TOKEN || (!MESSAGING_SERVICE_SID && !FROM)) {
         console.error('[Twilio SMS] Missing TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, or a sender (TWILIO_MESSAGING_SERVICE_SID / TWILIO_SMS_FROM)');
         throw new Error('Twilio SMS not configured');
     }
 
-    // Normalize to E.164 assuming Italian numbers when the country code is
-    // missing — a phone like "3289630012" would otherwise be sent as
-    // "+3289630012" and Twilio rejects it as an invalid Belgian number.
-    const formattedTo = normalizePhoneE164(String(to), (await getTenantLocale(tenantId)).dialCode);
     const body = new URLSearchParams({ To: formattedTo, Body: text });
 
     let senderDescription: string;
@@ -21634,7 +21436,9 @@ async function sendBookingConfirmation(
     const template = opts?.whatsappTemplate;
     const force = opts?.forceChannel;
     const kind = opts?.kind ?? null;
-    const tryWhatsApp = force === 'sms' ? false : (!!template && isTwilioWhatsAppConfigured());
+    // I predicati guardano lo stesso E.164 che le primitive spediranno.
+    const toE164 = await messagingDestination(tenantId, to);
+    const tryWhatsApp = force === 'sms' ? false : (!!template && isTwilioWhatsAppConfigured(tenantId, toE164));
     if (force === 'whatsapp' && !tryWhatsApp) {
         throw new Error('WhatsApp non configurato o template mancante');
     }
@@ -21644,7 +21448,7 @@ async function sendBookingConfirmation(
             ? await sendWhatsAppText(tenantId, to, text, reservationId, template, undefined, kind)
             : await sendTwilioSms(tenantId, to, text, reservationId, kind);
     } catch (err: any) {
-        if (tryWhatsApp && !force && isTwilioSmsConfigured()) {
+        if (tryWhatsApp && !force && isTwilioSmsConfigured(tenantId, toE164)) {
             console.warn('[confirmation] WA send failed, falling back to SMS:', err?.message || err);
             result = await sendTwilioSms(tenantId, to, text, reservationId, kind);
         } else {
@@ -21760,12 +21564,26 @@ async function dispatchBookingNotification(params: {
             : 'MANUAL';
         const smtpReady = !!params.buildEmail && !!email
             && await isSmtpConfigured(tenantId).catch(() => false);
+        // Un tenant senza mittente proprio salta WhatsApp e SMS con un log
+        // e basta (resta l'email, se c'è): la prenotazione non deve fallire
+        // per questo, e il mittente del Frantoio non parte per conto d'altri
+        // — nemmeno dalla pagina pubblica anonima (audit H-08). Il cancello
+        // è notificationReadiness, provato in messaggistica-mittente-tenant:
+        // i test API non hanno Twilio, quindi da fuori il server non si vede.
+        const readiness = messagingSender.notificationReadiness(
+            tenantId,
+            await messagingDestination(tenantId, phone),
+            { whatsappTemplate: !!params.whatsappTemplate }
+        );
+        if (phone && !readiness.allowed) {
+            console.warn(`[booking-notify:${kind}] WhatsApp/SMS saltati: il tenant ${tenantId} non ha un mittente proprio`);
+        }
         const { attempts, emailCopy } = resolveBookingChannels(policyMap[src], {
             hasPhone: !!phone,
             hasEmail: !!email,
             smtpReady,
-            whatsappReady: !!params.whatsappTemplate && isTwilioWhatsAppConfigured(),
-            smsReady: isTwilioSmsConfigured(),
+            whatsappReady: readiness.whatsappReady,
+            smsReady: readiness.smsReady,
         });
 
         if (attempts.length === 0) {
@@ -21811,67 +21629,12 @@ async function dispatchBookingNotification(params: {
     }
 }
 
-// Meta WhatsApp Business Cloud API — uses approved templates, so customers
-// don't need to opt-in like in the Vonage sandbox. Active when the three
-// META_WHATSAPP_* env vars are set; otherwise we fall back to Vonage.
-function isMetaWhatsAppConfigured(): boolean {
-    return !!(process.env.META_WHATSAPP_ACCESS_TOKEN
-        && process.env.META_WHATSAPP_PHONE_NUMBER_ID);
-}
-
-interface MetaTemplateMessage {
-    templateName: string;
-    languageCode: string;
-    bodyParams: string[];
-}
-
-async function sendMetaWhatsAppTemplate(to: string, template: MetaTemplateMessage): Promise<void> {
-    const ACCESS_TOKEN = process.env.META_WHATSAPP_ACCESS_TOKEN;
-    const PHONE_NUMBER_ID = process.env.META_WHATSAPP_PHONE_NUMBER_ID;
-    const GRAPH_VERSION = process.env.META_GRAPH_VERSION || 'v22.0';
-
-    if (!ACCESS_TOKEN || !PHONE_NUMBER_ID) {
-        console.error('[Meta] Missing META_WHATSAPP_ACCESS_TOKEN or META_WHATSAPP_PHONE_NUMBER_ID');
-        return;
-    }
-
-    // Meta wants digits only, no leading +.
-    const digitsTo = to.replace(/^\+/, '').replace(/\D/g, '');
-
-    const url = `https://graph.facebook.com/${GRAPH_VERSION}/${PHONE_NUMBER_ID}/messages`;
-    const body = {
-        messaging_product: 'whatsapp',
-        to: digitsTo,
-        type: 'template',
-        template: {
-            name: template.templateName,
-            language: { code: template.languageCode },
-            components: template.bodyParams.length > 0
-                ? [{
-                    type: 'body',
-                    parameters: template.bodyParams.map(text => ({ type: 'text', text })),
-                }]
-                : [],
-        },
-    };
-
-    console.log(`[Meta] Sending template "${template.templateName}" to ${digitsTo}`);
-
-    const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${ACCESS_TOKEN}`,
-        },
-        body: JSON.stringify(body),
-    });
-
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok) {
-        console.error('[Meta] ❌ Send failed', response.status, result);
-        throw new Error(`Meta API error: ${response.status} - ${JSON.stringify(result)}`);
-    }
-    console.log(`[Meta] ✅ Template sent to ${digitsTo}`, result);
+// Meta WhatsApp Business Cloud API. L'unico mittente Meta (la funzione
+// d'invio a template) serviva solo a /debug/whatsapp-test e se n'è andato
+// con lui il 25/09/2026: resta il predicato, che la conferma manuale guarda
+// ancora. Per tenant, come i gemelli Twilio: vedi messagingSender.
+function isMetaWhatsAppConfigured(tenantId: number): boolean {
+    return messagingSender.metaWhatsAppReady(tenantId);
 }
 
 
@@ -25504,6 +25267,7 @@ app.post('/takeaway/orders/:id/bill/notify', authenticate, requireFeature('takea
         if (!tw.customer_phone) {
             return res.status(400).json({ error: 'no_phone', message: "L'ordine non ha un numero di telefono" });
         }
+        if (respondIfMessagingUnavailable(res, req.tenantId!, await messagingDestination(req.tenantId!, tw.customer_phone))) return;
 
         const billRow = await queryWithRetry(
             `SELECT id, total_cents, share_token, status
@@ -25563,6 +25327,7 @@ app.post('/takeaway/orders/:id/bill/notify', authenticate, requireFeature('takea
                 public_url: publicUrl,
             });
         } catch (err: any) {
+            if (err instanceof MessagingUnavailableError) return res.status(409).json(MESSAGING_NOT_AVAILABLE);
             console.error('[takeaway bill:notify] delivery failed:', err?.message || err);
             res.status(502).json({
                 error: 'delivery_failed',
@@ -26683,7 +26448,6 @@ app.get('/settings/webhook-info', authenticate, requirePermission('settings:full
                 elevenlabs_post_call: `${webhookBase}/elevenlabs/post-call`,
                 twilio_whatsapp: `${webhookBase}/twilio-whatsapp`,
                 twilio_whatsapp_status: `${webhookBase}/twilio-whatsapp-status`,
-                vonage_inbound: `${webhookBase}/vonage-inbound`,
                 resend_inbound: `${webhookBase}/resend-inbound`,
                 openapi_fiscale: `${webhookBase}/openapi-fiscale`,
             } : null,
@@ -29363,7 +29127,21 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
         const depositPolicy = depositRequired ? await getAutoDepositPolicy(tenantId) : null;
         // Serve sia all'ordine sia al messaggio che lo annuncia: una lettura sola.
         const depositCurrency = (await getTenantLocale(tenantId)).currency;
-        if (depositRequired) {
+        // Il link deve poter arrivare: WhatsApp/SMS dal mittente del
+        // ristorante verso questo numero, oppure l'email. Senza nessuno dei
+        // due l'ordine sul gateway resterebbe orfano e, con la scadenza dei
+        // link accesa, la prenotazione verrebbe poi RIFIUTATA per un link mai
+        // ricevuto. Si scende nella «richiesta ricevuta», come quando il
+        // gateway fallisce (gemello di bookingTools, audit H-08). Per il
+        // Frantoio il mittente c'è sempre: nulla cambia.
+        const depositLinkReachable = depositRequired && (
+            !!messagingConfigFor(tenantId, await messagingDestination(tenantId, phoneE164))
+            || (!!emailNormalized && await isSmtpConfigured(tenantId).catch(() => false))
+        );
+        if (depositRequired && !depositLinkReachable) {
+            console.warn(`[public-booking] caparra senza link: il tenant ${tenantId} non ha un canale per mandarlo (prenotazione ${created.id})`);
+        }
+        if (depositLinkReachable) {
             depositAmountCents = guestsNum * (depositPolicy?.perPersonCents ?? DEPOSIT_DEFAULTS.perPersonCents);
             const orderDescription = `Caparra prenotazione #${created.id} - ${guestsLabel} ${dateLabel} ${time}`;
             try {
@@ -29775,161 +29553,10 @@ app.get('/locales/:lang/:file', (req, res) => {
 // i loghi. Slug ignoto o tenant sospeso → 404, mai il fallback.
 
 
-// WhatsApp diagnostic — sends a real message via the active provider and
-// returns the raw response so we can see exactly what's happening.
-// "auto" prefers Twilio → Meta → Vonage (same priority as the dispatcher).
-// Owner-only.
-app.post('/debug/whatsapp-test', authenticate, requireFeature('whatsapp'), requirePermission('settings:full'), async (req, res) => {
-    const to = typeof req.body?.to === 'string' ? req.body.to.trim() : '';
-    const text = typeof req.body?.text === 'string' && req.body.text.trim()
-        ? req.body.text.trim()
-        : 'Test diagnostico WhatsApp.';
-    const provider = typeof req.body?.provider === 'string' ? req.body.provider : 'auto';
-
-    if (!to) return res.status(400).json({ error: 'missing_to', message: 'Body must include "to"' });
-
-    const useTwilio = provider === 'twilio' || (provider === 'auto' && isTwilioWhatsAppConfigured());
-    const useMeta = !useTwilio && (provider === 'meta' || (provider === 'auto' && isMetaWhatsAppConfigured()));
-
-    if (useTwilio) {
-        const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
-        const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
-        const FROM = process.env.TWILIO_WHATSAPP_FROM;
-
-        if (!ACCOUNT_SID || !AUTH_TOKEN || !FROM) {
-            return res.status(500).json({
-                error: 'missing_twilio_config',
-                present: {
-                    TWILIO_ACCOUNT_SID: !!ACCOUNT_SID,
-                    TWILIO_AUTH_TOKEN: !!AUTH_TOKEN,
-                    TWILIO_WHATSAPP_FROM: !!FROM,
-                },
-            });
-        }
-
-        const formattedTo = `whatsapp:${normalizePhoneE164(String(to), (await getTenantLocale(req.tenantId!)).dialCode)}`;
-        const formattedFrom = FROM.startsWith('whatsapp:') ? FROM : `whatsapp:${FROM.startsWith('+') ? FROM : `+${FROM}`}`;
-        const auth = Buffer.from(`${ACCOUNT_SID}:${AUTH_TOKEN}`).toString('base64');
-        const body = new URLSearchParams({ From: formattedFrom, To: formattedTo, Body: text });
-
-        try {
-            const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${ACCOUNT_SID}/Messages.json`, {
-                method: 'POST',
-                headers: { 'Authorization': `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: body.toString(),
-            });
-            const rawBody = await response.text();
-            let parsedBody: any;
-            try { parsedBody = JSON.parse(rawBody); } catch { parsedBody = rawBody; }
-            return res.json({
-                ok: response.ok,
-                provider: 'twilio',
-                request: { from: formattedFrom, to: formattedTo, text, accountSid: ACCOUNT_SID },
-                twilio: { status: response.status, body: parsedBody },
-            });
-        } catch (err: any) {
-            return res.status(500).json({ error: 'fetch_failed', message: err?.message ?? String(err) });
-        }
-    }
-
-    if (useMeta) {
-        const ACCESS_TOKEN = process.env.META_WHATSAPP_ACCESS_TOKEN;
-        const PHONE_NUMBER_ID = process.env.META_WHATSAPP_PHONE_NUMBER_ID;
-        const GRAPH_VERSION = process.env.META_GRAPH_VERSION || 'v22.0';
-        const templateName = req.body?.templateName || process.env.META_WHATSAPP_TEMPLATE_NAME || 'booking_received';
-        const templateLang = req.body?.templateLang || process.env.META_WHATSAPP_TEMPLATE_LANG || 'it';
-        const bodyParams: string[] = Array.isArray(req.body?.bodyParams) ? req.body.bodyParams : [];
-
-        if (!ACCESS_TOKEN || !PHONE_NUMBER_ID) {
-            return res.status(500).json({
-                error: 'missing_meta_config',
-                present: {
-                    META_WHATSAPP_ACCESS_TOKEN: !!ACCESS_TOKEN,
-                    META_WHATSAPP_PHONE_NUMBER_ID: !!PHONE_NUMBER_ID,
-                },
-            });
-        }
-
-        const digitsTo = to.replace(/^\+/, '').replace(/\D/g, '');
-        const url = `https://graph.facebook.com/${GRAPH_VERSION}/${PHONE_NUMBER_ID}/messages`;
-        const reqBody = {
-            messaging_product: 'whatsapp',
-            to: digitsTo,
-            type: 'template',
-            template: {
-                name: templateName,
-                language: { code: templateLang },
-                components: bodyParams.length > 0
-                    ? [{ type: 'body', parameters: bodyParams.map(t => ({ type: 'text', text: String(t) })) }]
-                    : [],
-            },
-        };
-
-        try {
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ACCESS_TOKEN}` },
-                body: JSON.stringify(reqBody),
-            });
-            const rawBody = await response.text();
-            let parsedBody: any;
-            try { parsedBody = JSON.parse(rawBody); } catch { parsedBody = rawBody; }
-            return res.json({
-                ok: response.ok,
-                provider: 'meta',
-                request: { to: digitsTo, phoneNumberId: PHONE_NUMBER_ID, template: templateName, language: templateLang, bodyParams },
-                meta: { status: response.status, body: parsedBody },
-            });
-        } catch (err: any) {
-            return res.status(500).json({ error: 'fetch_failed', message: err?.message ?? String(err) });
-        }
-    }
-
-    // Vonage path
-    const VONAGE_API_KEY = process.env.VONAGE_API_KEY;
-    const VONAGE_API_SECRET = process.env.VONAGE_API_SECRET;
-    const VONAGE_WHATSAPP_NUMBER = process.env.VONAGE_WHATSAPP_NUMBER;
-
-    if (!VONAGE_API_KEY || !VONAGE_API_SECRET || !VONAGE_WHATSAPP_NUMBER) {
-        return res.status(500).json({
-            error: 'missing_vonage_config',
-            present: {
-                VONAGE_API_KEY: !!VONAGE_API_KEY,
-                VONAGE_API_SECRET: !!VONAGE_API_SECRET,
-                VONAGE_WHATSAPP_NUMBER: !!VONAGE_WHATSAPP_NUMBER,
-            },
-        });
-    }
-
-    const formattedTo = to.startsWith('+') ? to : `+${to}`;
-    const formattedFrom = VONAGE_WHATSAPP_NUMBER.startsWith('+') ? VONAGE_WHATSAPP_NUMBER : `+${VONAGE_WHATSAPP_NUMBER}`;
-    const auth = Buffer.from(`${VONAGE_API_KEY}:${VONAGE_API_SECRET}`).toString('base64');
-
-    try {
-        const response = await fetch('https://messages-sandbox.nexmo.com/v1/messages', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Basic ${auth}` },
-            body: JSON.stringify({
-                from: formattedFrom,
-                to: formattedTo,
-                message_type: 'text',
-                text,
-                channel: 'whatsapp',
-            }),
-        });
-        const rawBody = await response.text();
-        let parsedBody: any;
-        try { parsedBody = JSON.parse(rawBody); } catch { parsedBody = rawBody; }
-        res.json({
-            ok: response.ok,
-            provider: 'vonage',
-            request: { from: formattedFrom, to: formattedTo, text, apiKey: VONAGE_API_KEY },
-            vonage: { status: response.status, body: parsedBody },
-        });
-    } catch (err: any) {
-        res.status(500).json({ error: 'fetch_failed', message: err?.message ?? String(err) });
-    }
-});
+// /debug/whatsapp-test RIMOSSO il 25/09/2026: spediva testo libero dal
+// mittente del Frantoio (Twilio, Meta o Vonage) per qualunque tenant con
+// l'entitlement whatsapp, con fetch proprie che scavalcavano ogni controllo
+// (audit isolamento tenant, H-08). Il frontend non lo chiamava.
 
 // ============================================
 // GESTIONALE DI SALA — COMANDE (PR 2)
@@ -36596,6 +36223,8 @@ bookingTools.configureBookingTools({
     buildDepositRequestMessage,
     buildBookingDepositRequestTemplate,
     sendBookingConfirmation,
+    canSendMessagesTo: async (tenantId: number, phone: string) =>
+        !!messagingConfigFor(tenantId, await messagingDestination(tenantId, phone)),
 
     // logActivity esige il tenant come primo parametro: bookingTools lo passa.
     logActivity: (tenantId: number, ...a: any[]) => (LogService.logActivity as any)(tenantId, ...a),

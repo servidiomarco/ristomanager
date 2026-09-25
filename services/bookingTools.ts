@@ -141,6 +141,9 @@ export interface BookingToolsDeps {
     buildDepositRequestMessage: (...a: any[]) => string;
     buildBookingDepositRequestTemplate: (...a: any[]) => any;
     sendBookingConfirmation: (tenantId: number, phone: string, text: string, resId: number, opts?: any) => Promise<any>;
+    /** false = il tenant non ha un mittente WhatsApp/SMS proprio verso quel
+     *  numero (quello in env è del Frantoio: services/messagingSender.ts). */
+    canSendMessagesTo: (tenantId: number, phone: string) => Promise<boolean>;
 
     logActivity: (tenantId: number, ...a: any[]) => void;
     activityAction: { CREATE: any; UPDATE: any; DELETE: any };
@@ -639,7 +642,14 @@ export async function createReservation(
         let depositCheckoutUrl: string | null = null;
         let depositAmountCents = 0;
         const depositPolicy = depositRequired ? await d.getAutoDepositPolicy(tenantId) : null;
-        if (depositRequired) {
+        // Il link della caparra viaggia solo su WhatsApp/SMS: senza un
+        // mittente proprio l'ordine sul gateway resterebbe orfano. Si scende
+        // subito nel flusso «da rivedere», come quando il gateway fallisce.
+        const canSendDepositLink = depositRequired && await d.canSendMessagesTo(tenantId, created.phone);
+        if (depositRequired && !canSendDepositLink) {
+            console.warn(`${channel.logPrefix} caparra senza link: il tenant ${tenantId} non ha un mittente WhatsApp/SMS proprio`);
+        }
+        if (depositRequired && canSendDepositLink) {
             depositAmountCents = Math.trunc(guests) * (depositPolicy?.perPersonCents ?? d.depositDefaultPerPersonCents);
             const [yyyy, mm, dd] = normalizedDate.split('-');
             const depositDateLabel = `${dd}/${mm}/${yyyy}`;

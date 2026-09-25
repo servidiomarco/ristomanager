@@ -137,7 +137,7 @@ This is the differentiator, and the exact shape of the claim matters.
 
 Everything a guest sends arrives in the same building.
 
-- **WhatsApp** — two providers wired (Vonage and Twilio), inbound webhooks, delivery and read receipts, and Meta's 24-hour customer-service window enforced server-side so the interface can show a "window closed" banner rather than silently failing.
+- **WhatsApp** — via Twilio (the old Vonage sandbox was removed in September 2026), inbound webhooks, delivery and read receipts, and Meta's 24-hour customer-service window enforced server-side so the interface can show a "window closed" banner rather than silently failing.
 - **SMS** — inbound and outbound.
 - **Email** — inbound via Resend webhooks with signature verification, and via IMAP for a normal mailbox; outbound over the restaurant's own SMTP. Threaded by address.
 - Conversations grouped by phone number, unread counts, per-thread read state.
@@ -274,8 +274,8 @@ Taking orders, working a station queue, and firing a course are three separate p
 |---|---|
 | Till / POS | **Passepartout Menù** (SOAP over the restaurant's LAN — reads the open order on a table, closes it when the guest pays) |
 | Voice | **ElevenLabs** conversational agent with five server-side tools |
-| WhatsApp | **Vonage** and **Twilio** |
-| SMS | via the same providers |
+| WhatsApp | **Twilio** |
+| SMS | via the same provider |
 | Email in | **Resend** inbound webhooks, and **IMAP** for a standard mailbox |
 | Email out | the restaurant's own **SMTP** |
 | Card payments | **Revolut** and **SumUp** |

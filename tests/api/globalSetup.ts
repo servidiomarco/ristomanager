@@ -97,6 +97,13 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
             // Coda di stampa: il legacy token fa da alias del tenant 1, così
             // i test possono ritirare i job (RT fiscale incluso) e ackarli.
             PRINT_AGENT_TOKEN: 'test-print-agent-token',
+            // Mittente WhatsApp/SMS del Frantoio (services/messagingSender.ts):
+            // un numero di sandbox per le demo, e un'allowlist volutamente
+            // malformata («1;3» al posto di «1,3») che deve solo produrre un
+            // warning, mai spegnere il tenant 1. Vedi
+            // messaggistica-mittente-tenant.test.ts.
+            ENV_MESSAGING_SANDBOX_RECIPIENTS: '+39 333 000 9990',
+            ENV_MESSAGING_TENANT_IDS: '1;3',
         },
         stdio: ['ignore', 'pipe', 'pipe'],
     });
