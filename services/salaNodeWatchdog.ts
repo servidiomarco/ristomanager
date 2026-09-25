@@ -25,6 +25,7 @@ const SILENCE_MS = Math.max(60_000, Number(process.env.SALA_NODE_ALARM_AFTER_MS)
 const silenceSince = new Map<number, number>();
 const alarmed = new Set<number>();
 
+// rls-bypass: sweep dei tenant con l'ibrido acceso; le push partono in runWithTenantContext
 const tick = async (): Promise<void> => runAsPlatform(async () => {
     // I tenant con l'ibrido acceso: flag operativo E add-on venduto.
     const rows = await queryWithRetry(

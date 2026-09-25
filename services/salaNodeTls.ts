@@ -191,6 +191,7 @@ export function startSalaNodeCertRenewal(): void {
     const sweep = async () => {
         let rows: Array<{ tenant_id: number; domain: string }> = [];
         try {
+            // rls-bypass: scan dei cert in scadenza su tutti i tenant; il rinnovo gira in runWithTenantContext
             const rs = await runAsPlatform(() => queryWithRetry(
                 `SELECT tenant_id, domain FROM sala_node_certs
                  WHERE expires_at < CURRENT_TIMESTAMP + ($1 || ' days')::interval`,

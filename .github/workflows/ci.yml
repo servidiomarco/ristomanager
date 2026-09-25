@@ -29,6 +29,12 @@ jobs:
       # dizionari di public/locales restino allineati fra le lingue.
       - name: Dizionari allineati
         run: npm run check:locales
+      # Ogni runAsPlatform e ogni pool.query nudo lato server porta il suo
+      # «// rls-bypass: <motivo>»: un bypass nuovo senza motivazione ferma la
+      # PR. È la classe dei guasti visti solo in produzione (print agent
+      # 21/08, gate del nodo 16/09, cursore upstream 24/09).
+      - name: Bypass RLS motivati
+        run: npm run check:rls-bypass
       - name: Build frontend
         run: npm run build
       - name: Build server
@@ -60,4 +66,36 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Test API (build server + vitest)
+        run: npm test
+
+  # La stessa suite col server su un ruolo NON superuser e app.rls_strict
+  # acceso, cioè come gira Railway: una query senza contesto vede zero righe
+  # invece di tutte. Job separato e non matrice: il check «Test API» è fra
+  # quelli obbligatori di main, e una matrice ne cambierebbe il nome.
+  api-tests-strict:
+    name: Test API (RLS rigida)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:ci@localhost:5432/ristotest_api
+      TEST_STRICT_RLS: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Test API con RLS rigida (build server + vitest)
         run: npm test

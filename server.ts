@@ -454,6 +454,7 @@ async function resolveTenantByDomain(hostname: string): Promise<TenantDomainHit 
         // si decide PRIMA che esista un tenant — con la RLS rigida, senza
         // questa dichiarazione la lookup tornerebbe vuota e i domini custom
         // smetterebbero di instradare.
+        // rls-bypass: dominio→tenant si risolve prima del contesto; lookup sulla PK globale domain
         const result = await runAsPlatform(() => queryWithRetry(
             `SELECT t.id, t.slug FROM tenant_domains d
              JOIN tenants t ON t.id = d.tenant_id
@@ -596,6 +597,7 @@ app.get('/ready', async (_req, res) => {
     return res.status(503).json({ ready: false, reason: 'migrations_pending' });
   }
   try {
+    // rls-bypass: sonda di readiness, SELECT 1 senza tabelle: nessun dato tenant da scopare
     await pool.query('SELECT 1');
     res.json({ ready: true });
   } catch {
@@ -8304,6 +8306,7 @@ async function loadBillByToken(token: string) {
 // GET /pay/:token — the mobile page fetches this on load and after any
 // action. Response mirrors the authenticated GET, minus internal ids on
 // the splits.
+// rls-bypass: pagina ospite senza JWT, conto per share_token unico; ogni query filtra per bill.id/tenant_id
 app.get('/pay/:token', publicPayLimiter, async (req, res) => runAsPlatform(async () => {
     try {
         const token = String(req.params.token || '');
@@ -8436,6 +8439,7 @@ app.get('/pay/:token', publicPayLimiter, async (req, res) => runAsPlatform(async
 // data leak), and Meta's template approval / cache warm-up hits this
 // endpoint with the sample token, which won't correspond to any real
 // bill. Gated on the feature flag and on a minimum token shape.
+// rls-bypass: QR senza JWT, tenant dal dominio; i flag si leggono con tenant_id esplicito
 app.get('/pay/:token/qr.png', publicPayLimiter, async (req, res) => runAsPlatform(async () => {
     try {
         const token = String(req.params.token || '');
@@ -8485,6 +8489,7 @@ app.get('/pay/:token/qr.png', publicPayLimiter, async (req, res) => runAsPlatfor
 // schema dello share_token del conto, ma sopravvive alla chiusura perché lo
 // scontrino si mostra anche il giorno dopo. Lookup globale e runAsPlatform
 // come le altre route per token: è la riga trovata a dire il tenant.
+// rls-bypass: scontrino senza JWT, documento per public_token unico; join scopate su fd.tenant_id
 app.get('/scontrino/:token', publicPayLimiter, async (req, res) => runAsPlatform(async () => {
     try {
         const token = String(req.params.token || '');
@@ -8550,6 +8555,7 @@ app.get('/scontrino/:token', publicPayLimiter, async (req, res) => runAsPlatform
     }
 }));
 
+// rls-bypass: quota ospite senza JWT, conto per share_token unico; ogni scrittura porta bill.tenant_id
 app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (req, res) => runAsPlatform(async () => {
     const client = await pool.connect();
     try {
@@ -8821,6 +8827,7 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
 // the split_id and the token must match — this prevents someone with the
 // token from cancelling a split they didn't create (still not
 // authenticated, but at least you need to know the id you're releasing).
+// rls-bypass: rilascio quota senza JWT, conto per share_token unico; UPDATE per split_id + bill.id
 app.post('/pay/:token/release', publicPayLimiter, async (req, res) => runAsPlatform(async () => {
     try {
         const token = String(req.params.token || '');
@@ -9755,6 +9762,7 @@ app.post('/messages/attachments', authenticate, requirePermission('reservations:
 // credenziali. La protezione e' il token da 32 byte nel path — e' anche il
 // motivo per cui qui NON c'e' filtro tenant: il token e' unico globale e
 // non indovinabile, il tenant e' implicito nella riga trovata.
+// rls-bypass: media per Twilio senza JWT, riga per token casuale unico da 32 byte
 app.get('/public/media/:token', async (req, res) => runAsPlatform(async () => {
     try {
         const token = String(req.params.token || '');
@@ -11229,6 +11237,7 @@ async function applyPaymentOrderTransition(
 // side-effects because we key on `provider_order_id` and gate the
 // "first-completion" side-effects on the old `completed_at` being NULL under
 // a row-level lock.
+// rls-bypass: webhook senza JWT, tenant dalla riga per provider_order_id (unico globale), firma del tenant
 app.post('/webhook/revolut', async (req, res) => runAsPlatform(async () => {
     try {
         const body = req.body || {};
@@ -11282,6 +11291,7 @@ app.post('/webhook/revolut', async (req, res) => runAsPlatform(async () => {
 //
 // Idempotent for the same reason the Revolut receiver is: we key on
 // provider_order_id and gate first-completion side-effects on completed_at.
+// rls-bypass: callback SumUp senza JWT, tenant dalla riga per provider_order_id (unico globale)
 app.post('/webhook/sumup/:token', async (req, res) => runAsPlatform(async () => {
     try {
         // SumUp has shipped a few payload shapes over the years (and wraps
@@ -13443,6 +13453,7 @@ const runSchedulerTickWithLock = async (
         }
         // Lavoro di piattaforma dichiarato: i tick attraversano i tenant per
         // mestiere (promemoria e riconcili di tutti i ristoranti insieme).
+        // rls-bypass: tick di scheduler cross-tenant per mestiere, ogni riga porta il suo tenant_id a valle
         await runAsPlatform(() => tick());
     } finally {
         if (acquired) {
@@ -16138,6 +16149,7 @@ app.post('/banquet-menus/:id/send-quote-whatsapp', authenticate, requirePermissi
 // La pagina pubblica del preventivo: composizione per uscite, tariffe e
 // totali. Niente note operative (cucina/sala/mise en place) né riferimenti
 // interni — è il documento che il cliente inoltra alla famiglia.
+// rls-bypass: pagina a token senza JWT, tenant da share_token (unico globale), piatti per tenant_id
 app.get('/preventivo/:token', publicPayLimiter, async (req, res) => runAsPlatform(async () => {
     try {
         const token = String(req.params.token || '');
@@ -17193,6 +17205,7 @@ app.post('/dev-board/claude-callback', async (req, res) => {
         // nessuna riga ("Card non trovata" sul collaudo del 21/08). Il
         // segreto condiviso è già il gate; il bypass è il contratto delle
         // operazioni di sistema cross-tenant.
+        // rls-bypass: callback del workflow senza JWT, gate a segreto condiviso, card per id globale
         const result = await runAsPlatform(() => queryWithRetry(
             `UPDATE dev_board_cards
              SET claude_status = $2,
@@ -26826,6 +26839,7 @@ const platformAdminAuth = (req: express.Request, res: express.Response, next: ex
             // L'identità finisce in req.user per l'audit (impersonation):
             // niente req.tenantId, questi endpoint non hanno un tenant.
             req.user = payload;
+            // rls-bypass: pannello /admin cross-tenant per mestiere (JWT PLATFORM_ADMIN, oggi anche se scopato)
             return runAsPlatform(() => next());
         }
         // Bearer presente ma non da platform admin: si prova comunque la via
@@ -26847,6 +26861,7 @@ const platformAdminAuth = (req: express.Request, res: express.Response, next: ex
     if (!crypto.timingSafeEqual(a, b)) {
         return res.status(401).json({ error: 'invalid_platform_admin_token' });
     }
+    // rls-bypass: pannello /admin cross-tenant via PLATFORM_ADMIN_TOKEN env, confronto timing-safe
     runAsPlatform(() => next());
 };
 
@@ -27472,6 +27487,7 @@ app.get('/admin/billing/return', (_req, res) => {
 // DB. Stripe firma i byte esatti del payload: la verifica usa req.rawBody
 // (catturato dal verify hook di express.json in testa al file), MAI il body
 // già parsato — una ri-serializzazione riordina le chiavi e rompe la firma.
+// rls-bypass: webhook Stripe firmato: tenant da stripe_customer_id (UNIQUE), feature scritte su quel tenant
 app.post('/webhook/stripe', async (req, res) => runAsPlatform(async () => {
     if (!process.env.STRIPE_WEBHOOK_SECRET || !isBillingEnabled()) {
         // Env assente = funzionalità spenta, stessa semantica del pannello
@@ -29563,6 +29579,7 @@ app.get('/sitemap.xml', async (req, res) => {
         const base = `${req.protocol}://${req.get('host')}`;
         // Attraversa i tenant per mestiere: e' lavoro di piattaforma, va
         // dichiarato o con la policy rigida la query non vede nulla.
+        // rls-bypass: sitemap pubblica, elenca gli slug di tutti i tenant attivi (cross-tenant per mestiere)
         const r = await runAsPlatform(() => queryWithRetry(
             `SELECT slug FROM tenants
               WHERE slug IS NOT NULL AND slug <> ''
@@ -35507,6 +35524,7 @@ const salaNodeTenantAuthorized = async (tenantId: number): Promise<boolean> => {
     // lettura a vuoto avvelena la cache degli entitlement per 60s.
     if (!(await runWithTenantContext(tenantId, () => isFeatureEnabledForTenant(tenantId, 'sala_node')))) return false;
     try {
+        // rls-bypass: stato del tenant già risolto dal token del nodo, filtro esplicito su id (fuori contesto)
         const rs = await runAsPlatform(() => queryWithRetry('SELECT status FROM tenants WHERE id = $1', [tenantId]));
         return rs.rows[0]?.status === 'active';
     } catch (err: any) {
@@ -36675,7 +36693,13 @@ const startServer = async () => {
             // Initialize database schema in background, then backfill banquet reminders
             // Tutta la catena di boot è lavoro di piattaforma dichiarato:
             // schema, migration, seed e warm-up attraversano i tenant.
+            // rls-bypass: boot senza richiesta, createSchema fa DDL e seed/backfill su tutti i tenant
             runAsPlatform(() => createSchema())
+                // Timer e listener avviati qui dentro EREDITANO il contesto di
+                // piattaforma (AsyncLocalStorage): chi deve lavorare su un
+                // tenant apre runWithTenantContext, chi se ne dimentica vede
+                // tutti i tenant — non zero righe, e nessun test se ne accorge.
+                // rls-bypass: boot cross-tenant: migration, policy, warm-up e avvio dei job di piattaforma
                 .then(async () => await runAsPlatform(async () => {
                     console.log('✅ Database schema initialized');
                     // Le migration girano DOPO createSchema: la baseline

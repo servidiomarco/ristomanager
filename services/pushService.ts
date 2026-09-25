@@ -317,6 +317,7 @@ export const sendToPlatformAdmins = async (payload: PushPayload) => {
     try {
         // Lettura di piattaforma dichiarata: i destinatari stanno sopra i
         // tenant, e il chiamante (webhook Stripe) può avere ogni contesto.
+        // rls-bypass: gli admin stanno sopra i tenant; badge e notifica sul tenant di ciascun destinatario
         await runAsPlatform(async () => {
             const r = await queryWithRetry(
                 `SELECT id FROM users WHERE role = 'PLATFORM_ADMIN' AND is_active = TRUE`

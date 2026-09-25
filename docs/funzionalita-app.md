@@ -668,6 +668,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-25 | Comande, Cucina e Passe | Sul palmare, chi apre un tavolo su cui lavora già un collega lo vede per nome («Ci sta lavorando anche Giulia»): in produzione compariva invece la prima parte della sua email. |
 | 2026-09-25 | Impostazioni · Legale e privacy | L'informativa privacy pubblica (/privacy, /informativa-privacy, /privacy/<slug>) mostra di nuovo i dati inseriti in Impostazioni → Legale: in produzione usciva coi segnaposto («[Ragione sociale]»…) perché la pagina anonima leggeva le impostazioni senza il contesto del ristorante. |
 | 2026-09-25 | Pagamenti · Comande | Anche la chiusura dalla scheda conto (Pagamenti, palmare, Prenotazioni) chiede come è stata data la mancia, con lo stesso default del pannello di Cassa: quella in contanti entra nei contanti attesi del cassetto. |
 | 2026-09-24 | Cassa | La mancia dice come è stata data — contanti, POS o Satispay, di default il metodo del conto. Quella in contanti entra nei contanti attesi del cassetto («Mance in contanti»), così la conta di fine turno torna; l'esito della chiusura e la chiusura del giorno in Pagamenti la riportano col metodo. |
