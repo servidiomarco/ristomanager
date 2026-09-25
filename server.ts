@@ -9549,6 +9549,12 @@ app.post('/reports/ai-summary', authenticate, requireReportsAccess, async (req, 
         // accorto il modello al primo collaudo, elencando l'incoerenza fra
         // totali e dettaglio per giorno. "Ultimi 30 giorni" e' cio' che e'
         // successo, non cio' che e' prenotato.
+        //
+        // Ogni query porta anche il suo tenant_id esplicito (audit
+        // isolamento M-03): la sessione di pannello girava in runAsPlatform
+        // e questo report mescolava le prenotazioni e le sale di tutti i
+        // tenant. Ora il contesto basterebbe, ma il filtro regge anche senza.
+        const tenantId = req.tenantId!;
         const totali = async (da: string, a: string) => {
             const r = await queryWithRetry(
                 `SELECT COUNT(*)::int AS prenotazioni,
@@ -9557,9 +9563,10 @@ app.post('/reports/ai-summary', authenticate, requireReportsAccess, async (req, 
                         COUNT(*) FILTER (WHERE reservation_status = 'CANCELLED')::int AS cancellate,
                         COUNT(*) FILTER (WHERE reservation_status = 'NO_SHOW')::int AS no_show
                    FROM reservations
-                  WHERE reservation_time >= NOW() - $1::interval
+                  WHERE tenant_id = $3
+                    AND reservation_time >= NOW() - $1::interval
                     AND reservation_time <  NOW() - $2::interval`,
-                [da, a]);
+                [da, a, tenantId]);
             return r.rows[0];
         };
 
@@ -9570,35 +9577,49 @@ app.post('/reports/ai-summary', authenticate, requireReportsAccess, async (req, 
                 `SELECT EXTRACT(DOW FROM reservation_time AT TIME ZONE ${TZ})::int AS giorno,
                         COUNT(*)::int AS prenotazioni, COALESCE(SUM(guests),0)::int AS coperti
                    FROM reservations
-                  WHERE reservation_time >= NOW() - $1::interval
+                  WHERE tenant_id = $2
+                    AND reservation_time >= NOW() - $1::interval
                     AND reservation_time < NOW()
                     AND reservation_status NOT IN ('CANCELLED','DECLINED')
-                  GROUP BY 1 ORDER BY 1`, [`${giorni} days`]),
+                  GROUP BY 1 ORDER BY 1`, [`${giorni} days`, tenantId]),
             queryWithRetry(
                 `SELECT EXTRACT(HOUR FROM reservation_time AT TIME ZONE ${TZ})::int AS ora,
                         COUNT(*)::int AS prenotazioni, COALESCE(SUM(guests),0)::int AS coperti
                    FROM reservations
-                  WHERE reservation_time >= NOW() - $1::interval
+                  WHERE tenant_id = $2
+                    AND reservation_time >= NOW() - $1::interval
                     AND reservation_time < NOW()
                     AND reservation_status NOT IN ('CANCELLED','DECLINED')
-                  GROUP BY 1 HAVING COUNT(*) > 2 ORDER BY 1`, [`${giorni} days`]),
+                  GROUP BY 1 HAVING COUNT(*) > 2 ORDER BY 1`, [`${giorni} days`, tenantId]),
             queryWithRetry(
                 `SELECT COALESCE(source, 'MANUAL') AS canale, COUNT(*)::int AS prenotazioni
                    FROM reservations
-                  WHERE reservation_time >= NOW() - $1::interval AND reservation_time < NOW()
-                  GROUP BY 1 ORDER BY 2 DESC`, [`${giorni} days`]),
+                  WHERE tenant_id = $2
+                    AND reservation_time >= NOW() - $1::interval AND reservation_time < NOW()
+                  GROUP BY 1 ORDER BY 2 DESC`, [`${giorni} days`, tenantId]),
             queryWithRetry(
                 `SELECT COALESCE(ro.name, '(nessuna sala)') AS sala,
                         COUNT(*)::int AS prenotazioni, COALESCE(SUM(r.guests),0)::int AS coperti
                    FROM reservations r
-                   LEFT JOIN tables t ON t.id = r.table_id
-                   LEFT JOIN rooms ro ON ro.id = t.room_id
-                  WHERE r.reservation_time >= NOW() - $1::interval
+                   LEFT JOIN tables t ON t.id = r.table_id AND t.tenant_id = r.tenant_id
+                   LEFT JOIN rooms ro ON ro.id = t.room_id AND ro.tenant_id = t.tenant_id
+                  WHERE r.tenant_id = $2
+                    AND r.reservation_time >= NOW() - $1::interval
                     AND r.reservation_time < NOW()
                     AND r.reservation_status NOT IN ('CANCELLED','DECLINED')
-                  GROUP BY 1 ORDER BY 3 DESC`, [`${giorni} days`]),
-            queryWithRetry(`SELECT COALESCE(SUM(seats), 0)::int AS posti FROM tables`),
+                  GROUP BY 1 ORDER BY 3 DESC`, [`${giorni} days`, tenantId]),
+            queryWithRetry(`SELECT COALESCE(SUM(seats), 0)::int AS posti FROM tables WHERE tenant_id = $1`, [tenantId]),
         ]);
+
+        // Il nome del locale è quello del tenant della richiesta, non del
+        // Frantoio. businessIdentity() senza argomento etichettava come
+        // Frantoio anche i report dei tenant demo, e a cache fredda lanciava
+        // il refresh del tenant 1 nel contesto sbagliato (audit isolamento
+        // M-03). Serve il getter asincrono: quello sincrono a cache fredda
+        // restituisce il fallback, cioè di nuovo il Frantoio. Quello delle
+        // pagine pubbliche attende la cache e, fuori dal tenant 1, ripiega
+        // su tenants.name invece che sui letterali del Frantoio.
+        const restaurantName = (await publicBusinessIdentity(tenantId)).name;
 
         let usage: aiReport.ReportUsage | null = null;
         const markdown = await aiReport.generateDashboardReport({
@@ -9609,7 +9630,7 @@ app.post('/reports/ai-summary', authenticate, requireReportsAccess, async (req, 
             per_canale: perCanale.rows,
             per_sala: perSala.rows,
             posti_totali: posti.rows[0]?.posti ?? 0,
-            restaurantName: businessIdentity().name,
+            restaurantName,
         }, u => { usage = u; });
 
         // Telemetria per la pagina Consumi AI. Best-effort: un errore qui non
@@ -26812,7 +26833,7 @@ const ensureRoleChecks = async (): Promise<void> => {
     `);
 };
 
-const platformAdminAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+const platformAdminCredentials = (req: express.Request, res: express.Response, next: express.NextFunction) => {
     const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith('Bearer ')) {
         const payload = AuthService.verifyAccessToken(authHeader.substring(7));
@@ -26843,6 +26864,33 @@ const platformAdminAuth = (req: express.Request, res: express.Response, next: ex
     }
     runAsPlatform(() => next());
 };
+
+// Ricontrollo a DB del JWT di piattaforma (audit isolamento M-03: dalla
+// proposta E la contro-valutazione tiene solo questo). Ruolo e identità nel
+// token sono fermi all'emissione e l'access token vale ore (M-01): senza
+// ricontrollo un admin retrocesso o disattivato apriva ancora /admin/*.
+// Vale anche per la sessione «Entra», che qui resta accettata: rifiutarla
+// non salverebbe il tablet dimenticato, perché la sessione di pannello resta
+// comunque in localStorage accanto a quella scopata. La query gira già
+// dentro il runAsPlatform aperto da platformAdminCredentials, dove si
+// legge anche la riga dell'admin nel suo tenant di casa. La via env
+// PLATFORM_ADMIN_TOKEN non ha una riga utente da ricontrollare.
+const platformAdminAuth = (req: express.Request, res: express.Response, next: express.NextFunction) =>
+    platformAdminCredentials(req, res, () => {
+        if (req.user?.role !== UserRole.PLATFORM_ADMIN) return next();
+        queryWithRetry('SELECT role, is_active FROM users WHERE id = $1', [req.user.userId])
+            .then(r => {
+                const row = r.rows[0];
+                if (!row || row.is_active !== true || row.role !== UserRole.PLATFORM_ADMIN) {
+                    return res.status(403).json({ error: 'platform_admin_revoked', message: 'Account di piattaforma non più attivo.' });
+                }
+                next();
+            })
+            .catch(err => {
+                console.error('platformAdminAuth: ricontrollo utente fallito:', err);
+                res.status(500).json({ error: 'Internal server error' });
+            });
+    });
 
 app.post('/admin/tenants', platformAdminAuth, async (req, res) => {
     const body = req.body ?? {};
@@ -28509,11 +28557,14 @@ app.delete('/settings/ai-knowledge/:id', authenticate, requirePermission('settin
 // see the reservation modal needs to render the chip list. PUT is admin-only
 // (settings:full) and replaces the full list in one shot so we don't have to
 // track per-item CRUD/ordering.
-app.get('/settings/reservation-notes', authenticate, async (_req, res) => {
+app.get('/settings/reservation-notes', authenticate, async (req, res) => {
     try {
         // LEFT JOIN + json_agg pulls variants (ordered) alongside the preset
         // in a single round-trip. FILTER excludes the phantom NULL variant
         // for presets that have none, so we get `[]` not `[null]`.
+        // Il WHERE tenant_id è esplicito (audit isolamento M-03): senza,
+        // la sessione di pannello in runAsPlatform leggeva i preset di tutti
+        // i tenant, e la lettura restava affidata al solo contesto RLS.
         const result = await queryWithRetry(
             `SELECT p.id, p.label, p.icon, p.has_quantity,
                     COALESCE(
@@ -28524,9 +28575,11 @@ app.get('/settings/reservation-notes', authenticate, async (_req, res) => {
                         '[]'::json
                     ) AS variants
              FROM reservation_note_presets p
-             LEFT JOIN reservation_note_preset_variants v ON v.preset_id = p.id
+             LEFT JOIN reservation_note_preset_variants v ON v.preset_id = p.id AND v.tenant_id = p.tenant_id
+             WHERE p.tenant_id = $1
              GROUP BY p.id
-             ORDER BY p.sort_order ASC, p.id ASC`
+             ORDER BY p.sort_order ASC, p.id ASC`,
+            [req.tenantId!]
         );
         res.json(result.rows.map((r: any) => ({
             id: r.id,
@@ -28546,10 +28599,13 @@ app.get('/settings/reservation-notes', authenticate, async (_req, res) => {
 // permission surface and payload shape stay explicit — allergens have their
 // own semantics (uniform amber pill on the card) and shouldn't accidentally
 // grow icon support just because the notes endpoint does.
-app.get('/settings/reservation-allergens', authenticate, async (_req, res) => {
+app.get('/settings/reservation-allergens', authenticate, async (req, res) => {
     try {
+        // Filtro tenant esplicito per la stessa ragione dei preset note
+        // (audit isolamento M-03).
         const result = await queryWithRetry(
-            `SELECT id, label FROM reservation_allergen_presets ORDER BY sort_order ASC, id ASC`
+            `SELECT id, label FROM reservation_allergen_presets WHERE tenant_id = $1 ORDER BY sort_order ASC, id ASC`,
+            [req.tenantId!]
         );
         res.json(result.rows.map((r: any) => ({ id: r.id, label: r.label })));
     } catch (err) {
@@ -28593,7 +28649,8 @@ app.put('/settings/reservation-allergens', authenticate, requirePermission('sett
         }
         await client.query('COMMIT');
         const result = await queryWithRetry(
-            `SELECT id, label FROM reservation_allergen_presets ORDER BY sort_order ASC, id ASC`
+            `SELECT id, label FROM reservation_allergen_presets WHERE tenant_id = $1 ORDER BY sort_order ASC, id ASC`,
+            [req.tenantId!]
         );
         res.json(result.rows.map((r: any) => ({ id: r.id, label: r.label })));
     } catch (err) {
@@ -28698,9 +28755,11 @@ app.put('/settings/reservation-notes', authenticate, requirePermission('settings
                         '[]'::json
                     ) AS variants
              FROM reservation_note_presets p
-             LEFT JOIN reservation_note_preset_variants v ON v.preset_id = p.id
+             LEFT JOIN reservation_note_preset_variants v ON v.preset_id = p.id AND v.tenant_id = p.tenant_id
+             WHERE p.tenant_id = $1
              GROUP BY p.id
-             ORDER BY p.sort_order ASC, p.id ASC`
+             ORDER BY p.sort_order ASC, p.id ASC`,
+            [req.tenantId!]
         );
         res.json(result.rows.map((r: any) => ({
             id: r.id,

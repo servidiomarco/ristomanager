@@ -3,7 +3,7 @@ import { AuthService, TokenPayload, isPlatformScopedSession } from './authServic
 import { Permission } from './permissions.js';
 import { RolePermissionService } from './permissionService.js';
 import { UserRole } from '../types.js';
-import { runWithTenantContext, runAsPlatform } from '../db.js';
+import { runWithTenantContext } from '../db.js';
 
 // Extend Express Request to include user info
 declare global {
@@ -43,13 +43,16 @@ export const authenticate = (req: Request, res: Response, next: NextFunction) =>
   req.tenantId = req.user.tenantId;
   // Il resto della richiesta gira nel contesto del tenant: da qui in giù
   // ogni query del pool si scopa da sola (RLS rigida compresa, quando
-  // accesa). PLATFORM_ADMIN è piattaforma per definizione: le sue letture
-  // (pannello, impersonation) attraversano i tenant di mestiere — MA una
-  // sessione scopata su un tenant (claim scopedTenantId) è operativa e gira
-  // nel contesto di QUEL tenant, così non attraversa gli altri per sbaglio.
-  if (req.user.role === UserRole.PLATFORM_ADMIN && !isPlatformScopedSession(req.user)) {
-    return runAsPlatform(() => next());
-  }
+  // accesa). Vale anche per PLATFORM_ADMIN. Scopato («Entra») il suo
+  // tenantId è quello bersaglio; senza scope (la sessione del pannello) è
+  // il tenant di casa della riga utente. Il pannello non passa da qui:
+  // /admin/* ha platformAdminAuth con il suo runAsPlatform. Fino
+  // all'audit isolamento M-03 il token di pannello girava in runAsPlatform
+  // su OGNI route: quelle che si affidavano alla RLS invece che al WHERE
+  // tenant_id mescolavano i tenant. Il report AI, per esempio, leggeva le
+  // sale dei tenant demo, e con quelle le prompt injection di chi ha le
+  // credenziali demo. Fuori da /admin quel token è un utente del tenant di
+  // casa senza permessi, niente di più.
   return runWithTenantContext(req.tenantId, () => next());
 };
 

@@ -34,6 +34,45 @@ jobs:
       - name: Build server
         run: npm run build:server
 
+  # Il report AI (POST /reports/ai-summary) nella suite ordinaria risponde
+  # 503 prima di leggere il DB, perché non c'è la chiave. Qui gira il solo
+  # file che lo copre, con uno stub locale di Anthropic avviato dal test
+  # stesso: nessuna chiamata esterna. Da superuser la RLS tace, quindi a
+  # tenere fuori le sale di un altro tenant restano solo i filtri tenant_id
+  # espliciti del report, ed è proprio ciò che il job prova (audit
+  # isolamento M-03). Job a parte perché l'ambiente dello stub non deve
+  # arrivare agli altri file: ai-report.test.ts si aspetta il 503.
+  api-tests-ai-stub:
+    name: Test API (report AI, stub locale)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:ci@localhost:5432/ristotest_api
+      TEST_AI_STUB: '1'
+      ANTHROPIC_API_KEY: stub
+      ANTHROPIC_BASE_URL: http://127.0.0.1:47649
+      REPORTS_ADMIN_EMAILS: admin@ristomanager.com,platform.admin.contesto@example.com
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Report AI nel tenant (build server + vitest su un file)
+        run: npm run build:server && npx vitest run tests/api/pannello-contesto.test.ts
+
   api-tests:
     name: Test API
     runs-on: ubuntu-latest
