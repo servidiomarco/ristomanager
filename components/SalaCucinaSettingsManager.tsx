@@ -9,11 +9,12 @@ import {
   setCategoryStation,
   getSalaProfiles, createSalaProfile, updateSalaProfile,
   activateSalaProfile, detachSalaProfile, deleteSalaProfile,
-  updatePrintRoutes, updateSalaNodeSettings, provisionSalaNodeCert,
+  updatePrintRoutes, updateSalaNodeSettings, provisionSalaNodeCert, syncSalaNodeDns,
   getSalaNodeAuthority, setSalaNodeAuthority,
   type SalaConfig, type FireMode, type SalaProfile, type SalaNodeAuthority,
 } from '../services/salaApiService';
 import { useAuth } from '../contexts/AuthContext';
+import { UserRole } from '../types';
 
 interface Props {
   showToast: (msg: string, kind?: 'success' | 'error' | 'info') => void;
@@ -30,8 +31,11 @@ const FIRE_MODE_LABELS: { value: FireMode; key: string; title: string; hint: str
 
 export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
   const { t } = useTranslation('salacucina', { useSuspense: false });
-  const { hasPermission, hasFeature } = useAuth();
+  const { hasPermission, hasFeature, user } = useAuth();
   const canEdit = hasPermission('settings:full');
+  // Dominio e certificato del nodo li gestisce la piattaforma (audit H-05):
+  // dentro un tenant il ruolo PLATFORM_ADMIN c'è solo con la sessione «Entra».
+  const isPlatform = user?.role === UserRole.PLATFORM_ADMIN;
 
   const [flags, setFlags] = useState<FeatureFlags | null>(null);
   const [config, setConfig] = useState<SalaConfig | null>(null);
@@ -49,6 +53,7 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
   const [nodeDraft, setNodeDraft] = useState({ domain: '', lan_ip: '', port: '443' });
   const nodeDraftSeeded = useRef(false);
   const [certBusy, setCertBusy] = useState(false);
+  const [dnsBusy, setDnsBusy] = useState(false);
   // L'interruttore «Servizio completo sul nodo» (tappa 4): lo stato arriva
   // dalla sua route coi cancelli — la card lo mostra, non lo decide.
   const [authority, setAuthority] = useState<SalaNodeAuthority | null>(null);
@@ -110,6 +115,33 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
     return () => clearInterval(t);
   }, [open]);
 
+  // I rifiuti del nodo di sala (audit H-05) hanno un codice: si mostra la
+  // frase italiana del dizionario, non il codice grezzo.
+  const nodeError = (err: any, fallback: string): string => {
+    const key = ({
+      domain_platform_managed: 'nodeErrDomainManaged',
+      cert_platform_managed: 'nodeErrCertManaged',
+      lan_ip_not_private: 'nodeErrLanIpNotPrivate',
+      invalid_lan_ip: 'nodeErrLanIpNotPrivate',
+      domain_not_allowed: 'nodeErrDomainNotAllowed',
+      domain_reserved: 'nodeErrDomainNotAllowed',
+      invalid_domain: 'nodeErrDomainNotAllowed',
+      domain_taken: 'nodeErrDomainTaken',
+      cert_still_valid: 'nodeErrCertStillValid',
+      no_lan_ip: 'nodeErrNoLanIp',
+      tls_not_configured: 'nodeErrTlsNotConfigured',
+      rate_limited: 'nodeErrRateLimited',
+      // Il token Cloudflare resta senza DNS:Edit per settimane nel piano di
+      // deploy dell'audit H-05: senza questa voce il toast diceva «cloudflare».
+      cloudflare: 'nodeErrDnsProvider',
+      zone_not_found: 'nodeErrDnsProvider',
+    } as Record<string, string>)[err?.data?.error];
+    if (!key) return err?.message || fallback;
+    // Alla piattaforma serve anche il dettaglio del provider per capire cosa rifiuta.
+    if (key === 'nodeErrDnsProvider' && isPlatform && err?.data?.message) return `${t(key)} (${err.data.message})`;
+    return t(key);
+  };
+
   const act = async (fn: () => Promise<unknown>, okMsg?: string) => {
     if (saving) return;
     setSaving(true);
@@ -118,7 +150,7 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
       if (okMsg) showToast(okMsg, 'success');
       await reload();
     } catch (err: any) {
-      showToast(err?.message || t('actionFailed'), 'error');
+      showToast(nodeError(err, t('actionFailed')), 'error');
     } finally {
       setSaving(false);
     }
@@ -675,7 +707,7 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
                       : t('certNotIssued')}
                   </span>
                 </div>
-                {canEdit && (
+                {canEdit && isPlatform && (
                   <button type="button" disabled={saving || certBusy || !config.sala_node.domain}
                     title={!config.sala_node.domain ? t('configureDomainFirst') : undefined}
                     onClick={async () => {
@@ -685,7 +717,7 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
                         showToast(t('certIssuedToast', { dominio: r.domain }), 'success');
                         await reload();
                       } catch (err: any) {
-                        showToast(err?.message || t('certIssueFailed'), 'error');
+                        showToast(nodeError(err, t('certIssueFailed')), 'error');
                       } finally { setCertBusy(false); }
                     }}
                     className="text-[12px] px-2 py-1 rounded-md border border-[var(--ds-border)] disabled:opacity-50">
@@ -696,7 +728,9 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
               {canEdit && (
                 <div className="flex flex-wrap items-center gap-2 px-3 py-2">
                   <input value={nodeDraft.domain} onChange={e => setNodeDraft(v => ({ ...v, domain: e.target.value }))}
-                    placeholder={t('nodeDomainPlaceholder')} className="w-72 text-[13px] rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5" />
+                    readOnly={!isPlatform} title={!isPlatform ? t('nodeDomainManaged') : undefined}
+                    placeholder={isPlatform ? t('nodeDomainPlaceholder') : t('nodeDomainManaged')}
+                    className={`w-72 text-[13px] rounded-md border border-[var(--ds-border)] px-2 py-1.5 ${isPlatform ? 'bg-[var(--ds-surface)]' : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)]'}`} />
                   <input value={nodeDraft.lan_ip} onChange={e => setNodeDraft(v => ({ ...v, lan_ip: e.target.value }))}
                     placeholder={t('nodeLanIpPlaceholder')} className="w-40 text-[13px] rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5" />
                   <input value={nodeDraft.port} onChange={e => setNodeDraft(v => ({ ...v, port: e.target.value }))}
@@ -704,7 +738,8 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
                   <button type="button" disabled={saving}
                     onClick={() => act(
                       () => updateSalaNodeSettings({
-                        domain: nodeDraft.domain.trim() || null,
+                        // Il gestore non manda il dominio: lo assegna la piattaforma.
+                        ...(isPlatform ? { domain: nodeDraft.domain.trim() || null } : {}),
                         lan_ip: nodeDraft.lan_ip.trim() || null,
                         port: Number(nodeDraft.port) || 443,
                       }),
@@ -713,6 +748,25 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
                     className="text-[13px] px-2.5 py-1.5 rounded-md border border-[var(--ds-border)] disabled:opacity-50">
                     {t('save')}
                   </button>
+                  <button type="button" disabled={saving || dnsBusy || !config.sala_node.domain || !config.sala_node.lan_ip}
+                    title={t('nodeDnsSyncHint')}
+                    onClick={async () => {
+                      setDnsBusy(true);
+                      try {
+                        const r = await syncSalaNodeDns();
+                        showToast(t('nodeDnsSyncedToast', { dominio: r.domain, ip: r.lan_ip }), 'success');
+                      } catch (err: any) {
+                        showToast(nodeError(err, t('actionFailed')), 'error');
+                      } finally { setDnsBusy(false); }
+                    }}
+                    className="text-[13px] px-2.5 py-1.5 rounded-md border border-[var(--ds-border)] disabled:opacity-50">
+                    {t('nodeDnsSync')}
+                  </button>
+                  {/* Visibile anche su tablet, dove il title non si vede: il
+                      campo grigio da solo non spiega perché non si modifica. */}
+                  {!isPlatform && (
+                    <p className="w-full text-[12px] text-[var(--ds-text-muted)]">{t('nodeDomainManagedHint')}</p>
+                  )}
                 </div>
               )}
             </div>
