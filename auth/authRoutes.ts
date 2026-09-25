@@ -555,10 +555,18 @@ router.post('/forgot-password', forgotPasswordLimiter, (req: Request, res: Respo
     // riga utente è appoggiata. Senza, si ripiega sul transport del tenant
     // con la sola identità visibile di piattaforma: meglio un'email
     // consegnata col mittente sbagliato che nessuna email.
+    //
+    // Lo stesso mittente di piattaforma copre anche il ristorante che una
+    // casella sua non ce l'ha: fino all'audit H-03 ogni tenant senza email
+    // configurata ereditava quella del Frantoio (env), e il reset dei tenant
+    // demo partiva dalla casella del Frantoio. Ora quel ripiego non c'è più:
+    // o il ristorante ha la sua email, o parte il mittente di piattaforma,
+    // o (nessuno dei due) il reset resta muto come prima — risposta uniforme.
     const isPlatformAccount = userRow.role === UserRole.PLATFORM_ADMIN;
-    const viaPlatformSender = isPlatformAccount && isPlatformMailConfigured();
+    const tenantMailReady = await isSmtpConfigured(tenantId);
+    const viaPlatformSender = isPlatformMailConfigured() && (isPlatformAccount || !tenantMailReady);
 
-    if (!viaPlatformSender && !(await isSmtpConfigured(tenantId))) {
+    if (!viaPlatformSender && !tenantMailReady) {
       // Il warn è l'unico posto dove la differenza è visibile — nei log del
       // server, mai nella risposta.
       console.warn(`[forgot-password] SMTP non configurato per il tenant ${tenantId}: reset non inviabile per l'utente ${userRow.id}`);

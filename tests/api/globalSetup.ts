@@ -97,6 +97,22 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
             // Coda di stampa: il legacy token fa da alias del tenant 1, così
             // i test possono ritirare i job (RT fiscale incluso) e ackarli.
             PRINT_AGENT_TOKEN: 'test-print-agent-token',
+            // Casella email «del Frantoio» finta, in env come in produzione
+            // (audit H-03): vale solo per il tenant 1, ed email-e-nomi.test.ts
+            // verifica che un altro tenant non ne erediti nulla. Manca apposta
+            // il mittente (SMTP_FROM_EMAIL): il tenant 1 resta «email non
+            // configurata» per tutta la suite, come prima. L'host è la
+            // loopback su una porta chiusa: un invio forzato fallisce subito,
+            // senza rete.
+            SMTP_HOST: '127.0.0.1',
+            SMTP_PORT: '1',
+            SMTP_USER: 'frantoio-env@test.local',
+            SMTP_PASSWORD: 'env-segreto-8421',
+            RESEND_API_KEY: 're_env_finta_5190',
+            RESEND_INBOUND_SECRET: 'whsec_env_finto_7733',
+            EMAIL_PROVIDER: '',
+            SMTP_FROM_EMAIL: '',
+            EMAIL_FROM: '',
         },
         stdio: ['ignore', 'pipe', 'pipe'],
     });

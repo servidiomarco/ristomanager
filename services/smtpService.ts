@@ -2,8 +2,10 @@
 // Which one is used is decided by `email_provider` on the integration_settings
 // row (defaults to 'smtp' for backward compat). Resend is preferred on
 // Railway US-West because outbound port 465/587 to Aruba times out at the
-// egress. Config is layered exactly like services/revolutService.ts: DB row
-// wins, per-field fallback to env vars.
+// egress. Config is layered like services/revolutService.ts: DB row wins,
+// per-field fallback to env vars — but the env fallback belongs to the
+// Frantoio alone (tenant 1, see services/legacyEnv.ts); every other tenant
+// falls back to empty values, i.e. «non configurato».
 //
 // File is still called smtpService.ts for git-diff clarity; contents cover
 // both transports.
@@ -11,6 +13,7 @@
 import nodemailer, { type Transporter } from 'nodemailer';
 import { queryWithRetry } from '../db.js';
 import { PLATFORM_NAME } from '../platform.js';
+import { legacyEnvAllowed } from './legacyEnv.js';
 
 export type EmailProvider = 'smtp' | 'resend';
 
@@ -42,6 +45,24 @@ export interface EmailConfig {
 const CACHE_TTL_MS = 30_000;
 const cache = new Map<number, { config: EmailConfig; loadedAt: number }>();
 
+// Default neutri per i tenant che non sono il Frantoio: senza riga (o con
+// un campo vuoto) non c'è mittente — mai l'env, che è la casella del tenant 1.
+function baseDefaults(): EmailConfig {
+    return {
+        provider: 'smtp',
+        host: '',
+        port: 587,
+        secure: false,
+        user: '',
+        password: '',
+        resendApiKey: '',
+        fromEmail: '',
+        fromName: '',
+        replyTo: '',
+        resendInboundSecret: '',
+    };
+}
+
 function envDefaults(): EmailConfig {
     const providerEnv = (process.env.EMAIL_PROVIDER || '').toLowerCase();
     return {
@@ -60,7 +81,9 @@ function envDefaults(): EmailConfig {
 }
 
 async function loadFromDb(tenantId: number): Promise<EmailConfig> {
-    const defaults = envDefaults();
+    // Fallback env solo per il tenant storico (H-03, vedi legacyEnv.ts): vale
+    // anche per il ramo catch qui sotto, che ricade su questi stessi default.
+    const defaults = legacyEnvAllowed(tenantId) ? envDefaults() : baseDefaults();
     try {
         const result = await queryWithRetry(
             `SELECT email_provider, resend_api_key, resend_inbound_secret,
@@ -87,7 +110,7 @@ async function loadFromDb(tenantId: number): Promise<EmailConfig> {
         const resendInboundSecret = (row.resend_inbound_secret && String(row.resend_inbound_secret).trim()) || defaults.resendInboundSecret;
         return { provider, host, port, secure, user, password, resendApiKey, fromEmail, fromName, replyTo, resendInboundSecret };
     } catch (err) {
-        console.warn('[Email] loadFromDb failed, using env fallbacks:', (err as any)?.message || err);
+        console.warn(`[Email][t${tenantId}] loadFromDb failed, using defaults:`, (err as any)?.message || err);
         return defaults;
     }
 }
