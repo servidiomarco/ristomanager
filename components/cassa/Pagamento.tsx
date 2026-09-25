@@ -6,7 +6,7 @@ import { billsApiService } from '../../services/billsApiService';
 import type { BillPaymentInput, OpenBillRow } from '../../services/billsApiService';
 import type { TipMethod } from '../../types';
 import { Callout, SegmentedControl, StatusPill } from '../ds';
-import { METHODS, methodLabel, nextAmountText, settleMath, settlePayments } from '../pagamenti/settleView';
+import { METHODS, TIP_METHODS, defaultTipMethod, methodLabel, nextAmountText, settleMath, settlePayments } from '../pagamenti/settleView';
 import type { SettleOpts } from '../pagamenti/BillSheet';
 import { euro } from './cassaView';
 import { moneySymbol } from '../../utils/displayMoney';
@@ -26,8 +26,6 @@ import { moneySymbol } from '../../utils/displayMoney';
    separati: caparra, incassato in cassa, pagato online. */
 
 type Doc = 'Scontrino' | 'Proforma' | 'Fattura';
-
-const TIP_METHODS: TipMethod[] = ['CONTANTI', 'POS_FISICO', 'SATISPAY'];
 
 interface PagamentoProps {
   bill: OpenBillRow;
@@ -100,11 +98,9 @@ export const Pagamento: React.FC<PagamentoProps> = ({
     setAmount(nextAmountText(Math.max(0, residual - recorded)));
   }, [residual, movements]);
   const [tip, setTip] = useState('');
-  // Come arriva la mancia: finché nessuno sceglie, segue il metodo del conto
-  // (una mancia sul POS la batte chi batte il conto), altrimenti contanti.
+  // Come arriva la mancia: finché nessuno sceglie, segue il metodo del conto.
   const [tipChoice, setTipChoice] = useState<TipMethod | null>(null);
-  const tipMethod: TipMethod = tipChoice
-    ?? (method === 'POS_FISICO' || method === 'SATISPAY' ? method : 'CONTANTI');
+  const tipMethod: TipMethod = tipChoice ?? defaultTipMethod(method);
   const [doc, setDoc] = useState<Doc>('Scontrino');
   // Invio del link /pay al telefono dell'ordine d'asporto. Esito inline
   // sotto il bottone (niente toast: l'operatore sta guardando qui) e

@@ -1,4 +1,5 @@
 import type { BillPaymentInput } from '../../services/billsApiService';
+import type { TipMethod } from '../../types';
 
 /* ── L'aritmetica della chiusura conto ────────────────────────────────────
    Estratta da BillSheet perché Cassa la usa su una pagina intera invece che
@@ -20,6 +21,15 @@ export const METHODS: { value: BillPaymentInput['method']; label: string }[] = [
   { value: 'SOSPESO', label: 'Sospeso' },
   { value: 'OMAGGIO', label: 'Omaggio' },
 ];
+
+/** Come si lascia una mancia: solo i mezzi che la portano davvero da qualche
+ *  parte. Quella in CONTANTI entra nei contanti attesi del cassetto. */
+export const TIP_METHODS: TipMethod[] = ['CONTANTI', 'POS_FISICO', 'SATISPAY'];
+
+/** Finché nessuno sceglie, la mancia segue il metodo del conto (una mancia
+ *  sul POS la batte chi batte il conto); altrimenti contanti. */
+export const defaultTipMethod = (method: BillPaymentInput['method']): TipMethod =>
+  method === 'POS_FISICO' || method === 'SATISPAY' ? method : 'CONTANTI';
 
 export const methodLabel = (m: string): string =>
   m === 'LINK_ONLINE' ? 'Online' : METHODS.find(x => x.value === m)?.label ?? m;
