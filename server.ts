@@ -196,7 +196,7 @@ import {
     type BlacklistPolicyMap,
     type BlacklistSource,
 } from './services/blacklistPolicy.js';
-import { toTitleCase, toMenuTitleCase, phoneMatchKey, phoneDigitsVariants, phoneLast10Variants, PHONE_MATCH_KEY_SQL } from './utils/text.js';
+import { toTitleCase, toMenuTitleCase, guestNameForMessage, phoneMatchKey, phoneDigitsVariants, phoneLast10Variants, PHONE_MATCH_KEY_SQL } from './utils/text.js';
 import {
     claimReviewRequest,
     finishReviewRequest,
@@ -10254,24 +10254,26 @@ function payAtTableBaseUrl(): string {
 // messaggi di prenotazione. Senza language si resta sull'italiano storico.
 function buildTableBillLinkMessage(customerName: string, amountCents: number, covers: number, url: string, language?: string | null, currency?: string): string {
     const amount = formatMoneyMinor(amountCents, currency);
+    const name = guestNameForMessage(customerName);
     if (isEnglishGuest(language)) {
         const coversLabel = covers === 1 ? '1 guest' : `${covers} guests`;
-        return `Hi ${toTitleCase(customerName)}, here is the link to pay your table bill (${coversLabel} · total ${amount}): ${url}\nThank you!`;
+        return `${name ? `Hi ${name},` : 'Hi,'} here is the link to pay your table bill (${coversLabel} · total ${amount}): ${url}\nThank you!`;
     }
     const coversLabel = covers === 1 ? '1 coperto' : `${covers} coperti`;
-    return `Ciao ${toTitleCase(customerName)}, ecco il link per pagare al tavolo (${coversLabel} · totale ${amount}): ${url}\nGrazie!`;
+    return `${name ? `Ciao ${name},` : 'Ciao,'} ecco il link per pagare al tavolo (${coversLabel} · totale ${amount}): ${url}\nGrazie!`;
 }
 
 // La variante asporto: niente coperti (sull'asporto sarebbero un dato
 // falso), al loro posto l'ora di ritiro. Corto: un segmento SMS.
 function buildTakeawayBillLinkMessage(customerName: string, amountCents: number, pickupTime: string | null, url: string, language?: string | null, currency?: string): string {
     const amount = formatMoneyMinor(amountCents, currency);
+    const name = guestNameForMessage(customerName);
     if (isEnglishGuest(language)) {
         const when = pickupTime ? ` at ${pickupTime}` : '';
-        return `Hi ${toTitleCase(customerName)}, here is the link to pay for your takeaway order${when} (total ${amount}): ${url}\nThank you!`;
+        return `${name ? `Hi ${name},` : 'Hi,'} here is the link to pay for your takeaway order${when} (total ${amount}): ${url}\nThank you!`;
     }
     const when = pickupTime ? ` delle ${pickupTime}` : '';
-    return `Ciao ${toTitleCase(customerName)}, ecco il link per pagare il tuo asporto${when} (totale ${amount}): ${url}\nGrazie!`;
+    return `${name ? `Ciao ${name},` : 'Ciao,'} ecco il link per pagare il tuo asporto${when} (totale ${amount}): ${url}\nGrazie!`;
 }
 
 // Compose the message we send to the customer with the Revolut checkout link.
@@ -10282,12 +10284,13 @@ function buildTakeawayBillLinkMessage(customerName: string, amountCents: number,
 function buildPaymentMessage(customerName: string, amountCents: number, url: string, description?: string | null, language?: string | null, currency?: string): string {
     const amount = formatMoneyMinor(amountCents, currency);
     const desc = (description || '').trim();
+    const name = guestNameForMessage(customerName);
     if (isEnglishGuest(language)) {
-        const intro = `Hi ${toTitleCase(customerName)}, to complete your reservation at ${businessIdentity().name} we need a deposit of ${amount}.`;
+        const intro = `${name ? `Hi ${name},` : 'Hi,'} to complete your reservation at ${businessIdentity().name} we need a deposit of ${amount}.`;
         const line = desc ? `${intro}\n${desc}` : intro;
         return `${line}\nYou can pay securely here: ${url}\n\nThank you!`;
     }
-    const intro = `Ciao ${toTitleCase(customerName)}, per completare la prenotazione presso ${businessIdentity().name} serve un anticipo di ${amount}.`;
+    const intro = `${name ? `Ciao ${name},` : 'Ciao,'} per completare la prenotazione presso ${businessIdentity().name} serve un anticipo di ${amount}.`;
     const line = desc ? `${intro}\n${desc}` : intro;
     return `${line}\nPuoi pagare in sicurezza qui: ${url}\n\nGrazie!`;
 }
@@ -10357,10 +10360,11 @@ function buildDepositRequestMessage(
     // Niente link alle condizioni qui: l'SMS resta su due segmenti e il
     // cliente le trova sulla pagina di prenotazione (l'email invece lo porta,
     // dove non costa nulla).
+    const name = guestNameForMessage(customerName);
     if (isEnglishGuest(language)) {
-        return `Hi ${toTitleCase(customerName)}, to confirm your reservation for ${guestsLabel} on ${dateLabel} at ${time} we need a deposit of ${amount} (${perPerson} per person).\nPay securely here: ${checkoutUrl}\n\nWe will confirm your table as soon as we receive the payment. Thank you!`;
+        return `${name ? `Hi ${name},` : 'Hi,'} to confirm your reservation for ${guestsLabel} on ${dateLabel} at ${time} we need a deposit of ${amount} (${perPerson} per person).\nPay securely here: ${checkoutUrl}\n\nWe will confirm your table as soon as we receive the payment. Thank you!`;
     }
-    return `Ciao ${toTitleCase(customerName)}, per confermare la prenotazione per ${guestsLabel} il ${dateLabel} alle ${time} serve una caparra di ${amount} (${perPerson} a persona).\nPaga in sicurezza qui: ${checkoutUrl}\n\nAppena riceviamo il pagamento ti confermeremo il tavolo. Grazie!`;
+    return `${name ? `Ciao ${name},` : 'Ciao,'} per confermare la prenotazione per ${guestsLabel} il ${dateLabel} alle ${time} serve una caparra di ${amount} (${perPerson} a persona).\nPaga in sicurezza qui: ${checkoutUrl}\n\nAppena riceviamo il pagamento ti confermeremo il tavolo. Grazie!`;
 }
 
 // Message sent to the customer as soon as the Revolut ORDER_COMPLETED webhook
@@ -10377,7 +10381,7 @@ function buildDepositConfirmationMessage(
     opts?: MsgOpts
 ): string {
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime), msgTz(opts));
-    const fullName = toTitleCase(customerName);
+    const fullName = guestNameForMessage(customerName);
     const guestsNum = Math.max(1, Math.trunc(Number(guests) || 1));
     const room = (roomName ?? '').trim();
     const amount = formatMoneyMinor(amountCents, currency);
@@ -10411,7 +10415,7 @@ function buildRefundNotificationMessage(
     currency?: string,
     opts?: MsgOpts
 ): string {
-    const fullName = toTitleCase(customerName);
+    const fullName = guestNameForMessage(customerName);
     const amount = formatMoneyMinor(amountCents, currency);
     if (isEnglishGuest(language)) {
         const greeting = fullName ? `Hi ${fullName}` : 'Hi';
@@ -16261,7 +16265,7 @@ app.post('/banquet-menus/:id/send-quote-email', authenticate, requirePermission(
         const url = banquetQuoteUrl(token);
 
         const identity = businessIdentity(req.tenantId!);
-        const name = toTitleCase(row.customer_name);
+        const name = guestNameForMessage(row.customer_name);
         // Lingua dalla rubrica, col prefisso del telefono come ripiego —
         // il banchetto non passa da una prenotazione.
         const guestLanguage = normalizeLanguageCode(row.customer_language) ?? detectLanguageFromPhonePrefix(row.customer_phone);
@@ -20043,7 +20047,7 @@ function buildConfirmationMessage(
     // branch assumes wall-clock, which is correct only for the web-form input
     // used by the request email, not for DB-sourced confirmation times.)
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime), msgTz(opts));
-    const fullName = toTitleCase(customerName);
+    const fullName = guestNameForMessage(customerName);
     const guestsNum = Math.max(1, Math.trunc(Number(guests) || 1));
     const room = (roomName ?? '').trim();
     // Niente link Maps qui: questo testo finisce negli SMS e il link — anche
@@ -20096,7 +20100,7 @@ function buildDeclineMessage(
     opts?: MsgOpts
 ): string {
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime), msgTz(opts));
-    const fullName = toTitleCase(customerName);
+    const fullName = guestNameForMessage(customerName);
     const guestsNum = Math.max(1, Math.trunc(Number(guests) || 1));
     if (isEnglishGuest(language)) {
         const greeting = fullName ? `Hi ${fullName}, unfortunately` : 'Unfortunately';
@@ -20121,7 +20125,7 @@ function buildReminderMessage(
     opts?: MsgOpts
 ): string {
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime), msgTz(opts));
-    const fullName = toTitleCase(customerName);
+    const fullName = guestNameForMessage(customerName);
     const guestsNum = Math.max(1, Math.trunc(Number(guests) || 1));
     if (isEnglishGuest(language)) {
         const greeting = fullName ? `Hi ${fullName}!` : 'Hi!';
@@ -20146,7 +20150,7 @@ function buildUpdateMessage(
     opts?: MsgOpts
 ): string {
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime), msgTz(opts));
-    const fullName = toTitleCase(customerName);
+    const fullName = guestNameForMessage(customerName);
     const guestsNum = Math.max(1, Math.trunc(Number(guests) || 1));
     if (isEnglishGuest(language)) {
         const greeting = fullName ? `Hi ${fullName},` : 'Hi,';
@@ -20163,13 +20167,15 @@ function buildUpdateMessage(
 // sendBookingConfirmation then falls back to SMS. Room name is intentionally
 // excluded from all templates (Meta rejects empty variables); the SMS body still
 // includes it when known. Empty-name guard sends '—' so a missing customer_name
-// can't blow up the template with an empty var.
+// can't blow up the template with an empty var. Il nome passa da
+// guestNameForMessage (utils/text.ts) qui come in tutti i testi verso
+// l'ospite: niente link né numeri in una variabile firmata dal ristorante.
 function templateGuestsLabel(guests: number | null | undefined, english: boolean = false): string {
     const n = Math.max(1, Math.trunc(Number(guests) || 1));
     return english ? `${n} ${n === 1 ? 'guest' : 'guests'}` : `${n} ${n === 1 ? 'persona' : 'persone'}`;
 }
 function templateName(customerName: string | null | undefined): string {
-    const t = toTitleCase(customerName);
+    const t = guestNameForMessage(customerName);
     return t || '—';
 }
 // Card #34 — sceglie fra la SID italiana (storica) e quella inglese di uno
@@ -20304,7 +20310,7 @@ function buildReviewRequestMessage(
     identity: BusinessIdentity,
     language?: string | null
 ): string {
-    const fullName = toTitleCase(customerName);
+    const fullName = guestNameForMessage(customerName);
     if (isEnglishGuest(language)) {
         const greeting = fullName ? `Hi ${fullName}!` : 'Hi!';
         return `${greeting} Thank you for dining at ${identity.name}. If you enjoyed it, would you leave us a review on Google? ${reviewUrl} — one minute for you, it means a lot to us. See you soon!`;
@@ -20333,7 +20339,7 @@ function buildReviewRequestEmail(params: {
     identity: BusinessIdentity;
     language?: string | null;
 }): { subject: string; text: string; html: string } {
-    const name = toTitleCase(params.customerName);
+    const name = guestNameForMessage(params.customerName);
     const text = buildReviewRequestMessage(params.customerName, params.reviewUrl, params.identity, params.language);
     if (isEnglishGuest(params.language)) {
         const subject = `How was it? — ${params.identity.name}`;
@@ -20728,7 +20734,7 @@ function buildBookingRequestEmail(params: {
     const identity = businessIdentity();
     const valuta = params.currency || 'EUR';
     const { dateLabel, timeLabel } = formatBookingDateTime(params.reservationTime, params.timezone || 'Europe/Rome');
-    const name = toTitleCase(params.customerName);
+    const name = guestNameForMessage(params.customerName);
     const guestsNum = Math.max(1, Math.trunc(Number(params.guests) || 1));
     const room = (params.roomName || '').trim();
     const english = isEnglishGuest(params.language);
@@ -20775,7 +20781,7 @@ ${identity.name}`;
       <p class="muted" style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#57534e;">We'll get back to you shortly to confirm it by email, phone or WhatsApp.</p>
     `;
         const detailsHtml = `
-      <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${greetingText}<br>we've received your reservation request.</p>
+      <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${escapeHtml(greetingText)}<br>we've received your reservation request.</p>
       <table role="presentation" cellpadding="0" cellspacing="0" class="detail-box" style="width:100%;background:#fbf9f4;border-radius:12px;padding:16px;margin:0 0 16px;">
         <tr><td style="padding:6px 0;font-size:14px;"><strong>Date:</strong> ${escapeHtml(dateLabel)}</td></tr>
         <tr><td style="padding:6px 0;font-size:14px;"><strong>Time:</strong> ${escapeHtml(timeLabel)}</td></tr>
@@ -20792,6 +20798,9 @@ ${identity.name}`;
     const persone = guestsNum === 1 ? 'persona' : 'persone';
     const roomPart = room ? ` (${room})` : '';
     const subject = `Abbiamo ricevuto la tua richiesta — ${dateLabel} ${timeLabel}`;
+    // Nell'HTML il saluto passa da escapeHtml come in ogni altra email: prima
+    // entrava crudo, e il nome del form pubblico poteva iniettare markup
+    // nella mail spedita dal ristorante.
     const greetingText = name ? `Ciao ${name},` : 'Ciao,';
     const perPersonPart = hasDeposit && perPersonCents > 0 ? ` (${formatMoneyMinor(perPersonCents, valuta)} a persona)` : '';
 
@@ -20828,7 +20837,7 @@ ${identity.name}`;
     `;
 
     const detailsHtml = `
-      <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${greetingText}<br>abbiamo ricevuto la tua richiesta di prenotazione.</p>
+      <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${escapeHtml(greetingText)}<br>abbiamo ricevuto la tua richiesta di prenotazione.</p>
       <table role="presentation" cellpadding="0" cellspacing="0" class="detail-box" style="width:100%;background:#fbf9f4;border-radius:12px;padding:16px;margin:0 0 16px;">
         <tr><td style="padding:6px 0;font-size:14px;"><strong>Data:</strong> ${escapeHtml(dateLabel)}</td></tr>
         <tr><td style="padding:6px 0;font-size:14px;"><strong>Ora:</strong> ${escapeHtml(timeLabel)}</td></tr>
@@ -20859,7 +20868,7 @@ function buildBookingConfirmationEmail(params: {
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(params.reservationTime), params.timezone || 'Europe/Rome');
     const guestsNum = Math.max(1, Math.trunc(Number(params.guests) || 1));
     const room = (params.roomName || '').trim();
-    const name = toTitleCase(params.customerName);
+    const name = guestNameForMessage(params.customerName);
     const shortConfirm = buildConfirmationMessage(params.customerName, params.reservationTime, params.guests, params.roomName ?? null, params.language, { timezone: params.timezone });
 
     if (isEnglishGuest(params.language)) {
@@ -20916,7 +20925,7 @@ function buildBookingDeclineEmail(params: {
     // Orario dal DB → stringa naive letta come UTC (asUtcInstant, vedi #85).
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(params.reservationTime), params.timezone || 'Europe/Rome');
     const guestsNum = Math.max(1, Math.trunc(Number(params.guests) || 1));
-    const name = toTitleCase(params.customerName);
+    const name = guestNameForMessage(params.customerName);
     const text = buildDeclineMessage(params.customerName, params.reservationTime, params.guests, params.language, { timezone: params.timezone });
 
     if (isEnglishGuest(params.language)) {
@@ -20969,7 +20978,7 @@ function buildDepositRequestEmail(params: {
 }): { subject: string; text: string; html: string } {
     const identity = businessIdentity();
     const amount = formatMoneyMinor(params.amountCents, params.currency || 'EUR');
-    const name = toTitleCase(params.customerName);
+    const name = guestNameForMessage(params.customerName);
     const desc = (params.description || '').trim();
     const text = buildPaymentMessage(params.customerName, params.amountCents, params.checkoutUrl, desc || null, params.language);
 
@@ -21020,7 +21029,7 @@ function buildCustomEmail(params: {
     language?: string | null;
 }): { subject: string; text: string; html: string } {
     const identity = businessIdentity();
-    const name = toTitleCase(params.customerName);
+    const name = guestNameForMessage(params.customerName);
     const subject = params.subject.trim();
     const rawBody = params.body.trim();
     // Il corpo è scritto dallo staff e resta com'è: si localizzano solo
@@ -27958,7 +27967,9 @@ app.put('/settings/payments/provider', authenticate, requirePermission('settings
 // INTEGRATION SETTINGS (SMTP / email)
 // ============================================
 // Same shape as the Revolut endpoints above: GET returns a masked snapshot,
-// PUT accepts partial updates (empty string = clear back to env fallback).
+// PUT accepts partial updates (empty string = clear back to env fallback —
+// solo per il tenant 1; per gli altri tenant «vuoto» è «non configurato»,
+// vedi services/legacyEnv.ts).
 app.get('/settings/integrations/smtp', authenticate, requirePermission('settings:full'), async (req, res) => {
     try {
         const status = await getSmtpConfigStatus(req.tenantId!);
@@ -29406,6 +29417,9 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
             }
         }
 
+        // Il nome nei testi verso l'ospite passa da guestNameForMessage (nei
+        // builder e qui sotto): è il campo libero del form pubblico.
+        const ackName = guestNameForMessage(customer_name);
         const ackText = depositCheckoutUrl
             ? buildDepositRequestMessage(
                 toTitleCase(customer_name),
@@ -29421,8 +29435,8 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
             : confirmedNow
                 ? buildConfirmationMessage(customer_name, created.reservation_time, guestsNum, ackRoomName, language, { timezone: fusoMsg })
                 : isEnglishGuest(language)
-                    ? `Hi ${toTitleCase(customer_name)}, we've received your reservation request for ${guestGuestsLabel} on ${dateLabel} at ${time}. We'll get back to you shortly to confirm it. Thank you!`
-                    : `Ciao ${toTitleCase(customer_name)}, abbiamo ricevuto la tua richiesta di prenotazione per ${guestsLabel} il ${dateLabel} alle ${time}. Ti ricontatteremo a breve per confermarla. Grazie!`;
+                    ? `${ackName ? `Hi ${ackName},` : 'Hi,'} we've received your reservation request for ${guestGuestsLabel} on ${dateLabel} at ${time}. We'll get back to you shortly to confirm it. Thank you!`
+                    : `${ackName ? `Ciao ${ackName},` : 'Ciao,'} abbiamo ricevuto la tua richiesta di prenotazione per ${guestsLabel} il ${dateLabel} alle ${time}. Ti ricontatteremo a breve per confermarla. Grazie!`;
 
         // Pick the right WA template for the branch. When either env var is
         // unset, or the deposit token can't be parsed, waTemplate stays
@@ -29448,7 +29462,7 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
                 waTemplate = {
                     contentSid: pickedReceived.contentSid,
                     contentVariables: {
-                        '1': toTitleCase(customer_name),
+                        '1': templateName(customer_name),
                         '2': pickedReceived.english ? `${guestsNum} ${guestsNum === 1 ? 'guest' : 'guests'}` : guestsLabel,
                         '3': dateLabel,
                         '4': time,

@@ -5,6 +5,99 @@ export const toTitleCase = (input: string | null | undefined): string => {
     .replace(/(^|[\s'’\-])(\p{L})/gu, (_, sep, ch) => sep + ch.toUpperCase());
 };
 
+// Il nome dell'ospite come entra in un messaggio che parte dal mittente del
+// ristorante: SMS, WhatsApp, email, variabili dei template. Il nome arriva
+// da superfici pubbliche (/prenota, Sofia, rubrica che ne discende) come
+// testo libero fino a 80 caratteri, e «Mario https://… chiama il 333…»
+// diventava un messaggio di phishing firmato dal ristorante, con il suo
+// numero e il suo dominio (audit isolamento, anche sul /prenota del
+// Frantoio). Qui restano solo lettere, spazi e la punteggiatura che vive
+// dentro i nomi veri — apostrofo e trattino fra due lettere, l'apostrofo
+// dell'elisione («de' Medici»), il punto dopo una lettera: «D'Amico»,
+// «Anne-Marie», «J. R. R.». Cifre, @, due punti, barre e i pezzi che
+// somigliano a un link spariscono; poi si taglia a una parola intera entro
+// 40 caratteri. Il nome salvato e mostrato nel CRM resta com'è: si pulisce
+// solo la copia che esce. Vuoto → '', e il chiamante usa il saluto senza
+// nome che già aveva («Ciao,» / «Hi,», «—» nei template).
+//
+// Niente lookbehind nelle regex: il file lo importa anche la SPA, e i
+// Safari dei palmari più vecchi non li conoscono (errore di parsing
+// dell'intero bundle, non della sola funzione).
+const GUEST_NAME_MAX = 40;
+// Una nota fra parentesi è dello staff, non del nome: togliendone solo cifre
+// e simboli, «Rossi (2 persone)» usciva «Ciao Rossi Persone,». Via tutta,
+// anche quando la parentesi non si chiude.
+const BRACKETED_NOTE = /\([^)]*(?:\)|$)|\[[^\]]*(?:\]|$)|\{[^}]*(?:\}|$)/gu;
+// Un pezzo che è un link o un recapito sparisce intero: togliendo solo i
+// caratteri vietati, «evil.example» resterebbe cliccabile.
+const LINK_TOKEN = /:\/\/|www\.|@/iu;
+// Una parola con una cifra non è un nome («x2», «tav5», un telefono): via
+// intera, invece di lasciarne le lettere attaccate al nome («Rossi X»).
+const DIGIT_TOKEN = /\p{N}/u;
+// Lettera, punto, due lettere: un dominio («evil.example», «t.me») oppure
+// un'iniziale o un titolo attaccati al cognome («A.Rossi», «Mr.Smith»).
+// Quando è un nome il punto prende uno spazio («A. Rossi»), e lo spazio
+// basta a spezzare qualunque link; altrimenti il pezzo sparisce intero.
+const DOTTED_TOKEN = /[\p{L}\p{M}]\.[\p{L}\p{M}]{2,}/u;
+// È un nome se prima di ogni punto c'è una lettera sola (un'iniziale) o se
+// dopo c'è una maiuscola. L'iniziale conta da sola perché i chiamanti
+// passano spesso il nome da toTitleCase, che dopo il punto abbassa:
+// «A.Rossi» arriva come «A.rossi». «Dott.ssa», «Sig.ra» ed «evil.example»
+// non passano e spariscono (resta il cognome che segue); «x.com» diventa
+// «X. Com», innocuo.
+const dottedTokenIsName = (token: string): boolean => {
+  if (/[\/\\]/.test(token)) return false;
+  const parts = token.split('.');
+  for (let i = 0; i < parts.length - 1; i++) {
+    const after = parts[i + 1];
+    if (!/^[\p{L}\p{M}]/u.test(after)) continue;
+    const before = parts[i].match(/[\p{L}\p{M}]+$/u)?.[0] ?? '';
+    if (Array.from(before).length > 1 && !/^\p{Lu}/u.test(after)) return false;
+  }
+  return true;
+};
+const isNameLetter = (c: string | undefined): boolean => !!c && /[\p{L}\p{M}]/u.test(c);
+
+export const guestNameForMessage = (input: string | null | undefined): string => {
+  if (!input) return '';
+  const tokens = String(input)
+    .normalize('NFC')
+    .replace(BRACKETED_NOTE, ' ')
+    .split(/\s+/)
+    .filter(token => token && !LINK_TOKEN.test(token) && !DIGIT_TOKEN.test(token))
+    .map(token => {
+      if (!DOTTED_TOKEN.test(token)) return token;
+      return dottedTokenIsName(token) ? token.replace(/\.(?=[\p{L}\p{M}])/gu, '. ') : '';
+    })
+    .filter(Boolean);
+  const chars = Array.from(tokens.join(' '));
+  let kept = '';
+  chars.forEach((c, i) => {
+    const prev = chars[i - 1];
+    const next = chars[i + 1];
+    if (c === ' ' || isNameLetter(c)) kept += c;
+    else if ((c === "'" || c === '’' || c === '-') && isNameLetter(prev) && isNameLetter(next)) kept += c;
+    else if ((c === "'" || c === '’') && isNameLetter(prev) && next === ' ') kept += c;
+    else if (c === '.' && isNameLetter(prev)) kept += c;
+    else kept += ' ';
+  });
+  let name = '';
+  for (const word of kept.split(' ').filter(Boolean)) {
+    const candidate = name ? `${name} ${word}` : word;
+    if (Array.from(candidate).length > GUEST_NAME_MAX) {
+      // Una parola sola più lunga del tetto: si taglia lei, senza lasciare
+      // un apostrofo o un trattino appeso in fondo.
+      if (!name) name = Array.from(word).slice(0, GUEST_NAME_MAX).join('').replace(/['’\-]+$/u, '');
+      break;
+    }
+    name = candidate;
+  }
+  // toTitleCase non conosce il punto come separatore: «J.R.R.» diventerebbe
+  // «J.r.r.». Le iniziali tornano maiuscole qui, senza toccare la funzione
+  // condivisa.
+  return toTitleCase(name).replace(/\.(\p{Ll})/gu, (_, ch: string) => '.' + ch.toUpperCase());
+};
+
 // Denominazioni che sui titoli del menu restano sigle: «Barolo DOCG», non
 // «Barolo Docg» — vale per i vini e per le DOP/IGP alimentari. La lista è
 // chiusa apposta: parole corte vere (Do, Salame al Doc?) non devono

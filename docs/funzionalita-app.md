@@ -452,6 +452,7 @@ Per i ristoranti con cassa **Passepartout Menù** (modulo dedicato):
 **Messaggi automatici al cliente**
 - Conferma, promemoria, avviso di modifica, disdetta, richiesta e conferma caparra, link del conto: partono da **template WhatsApp approvati** (anche in inglese per gli ospiti stranieri — mai messaggi ibridi) con **fallback automatico a SMS** se il destinatario non è raggiungibile su WhatsApp.
 - **Ordine dei canali configurabile per fonte** di prenotazione (es. web: WhatsApp → SMS + copia email; telefono: solo SMS), con scalata automatica al canale successivo in caso di errore.
+- **Il nome dell'ospite viaggia pulito**: in SMS, WhatsApp ed email il nome entra con sole lettere, spazi, apostrofi, trattini e punti delle iniziali («D'Amico», «Anne-Marie», «J. R. R.»), al massimo 40 caratteri — link, numeri, note fra parentesi e simboli scritti nel campo nome non partono mai col mittente del ristorante («Rossi (2 persone)» esce «Rossi»). Nel gestionale il nome resta quello scritto dall'ospite; se della pulizia non resta nulla, il messaggio saluta senza nome («Ciao,»).
 
 **Prenotazioni via WhatsApp**
 - Un messaggio come "15/12 20:00 4 Marco Rossi" (o in linguaggio naturale, interpretato dall'agente AI) diventa una **proposta di prenotazione** che lo staff conferma con un tocco.
@@ -461,6 +462,7 @@ Per i ristoranti con cassa **Passepartout Menù** (modulo dedicato):
 ## Email
 
 - **Invio**: conferme, disdette, richieste caparra ed email libere (oggetto + corpo) con template HTML brandizzato del ristorante, via SMTP proprio o Resend.
+- **Ogni ristorante spedisce dalla sua casella**: finché non la configura in Impostazioni → Comunicazioni l'email risulta «non configurata» — nessun ristorante eredita mittente, chiavi o password di un altro, e anche il webhook di ricezione verifica solo col segreto del proprio ristorante.
 - **Ricezione**: le risposte dei clienti entrano nell'app (via webhook Resend o direttamente dalla casella IMAP del ristorante, es. Aruba/Gmail) e vengono **agganciate al thread giusto**.
 - Inbox email a due pannelli con schede Tutte / Risposte dei clienti, allegati, ricerca, composizione e risposta in thread.
 - **Le email HTML si vedono come il mittente le ha impaginate** (immagini, bottoni, colori), isolate in modo sicuro senza esecuzione di script; nelle email solo testo link e indirizzi diventano cliccabili e i link lunghi si spezzano invece di uscire dalla card.
@@ -602,7 +604,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 - **6 ruoli operativi**: Proprietario, General Manager, Manager, Reception, Cameriere, Cucina (più l'Admin di piattaforma, esterno ai ristoranti).
 - **~35 permessi granulari** (vista/modifica per ogni area; per le comande: prendere, stornare, monitor di partita, lancio uscite) applicati **sia sull'interfaccia sia sulle API**: senza permesso la voce di menu sparisce e l'endpoint rifiuta.
 - **Matrice permessi personalizzabile** per ristorante dalla UI (checkbox per ruolo), effettiva immediatamente.
-- Account: creazione/disattivazione utenti (solo Proprietario), cambio profilo, email e password self-service, **recupero password** via link monouso; il cambio password disconnette tutte le altre sessioni. L'email di recupero si presenta col nome del ristorante — per un account di piattaforma, col nome del prodotto.
+- Account: creazione/disattivazione utenti (solo Proprietario), cambio profilo, email e password self-service, **recupero password** via link monouso; il cambio password disconnette tutte le altre sessioni. L'email di recupero si presenta col nome del ristorante — per un account di piattaforma, col nome del prodotto. Se il ristorante non ha ancora una casella email sua, il link parte dal mittente di piattaforma (quando è configurato).
 - **Sessioni per dispositivo**: più palmari o postazioni sullo stesso account convivono senza sbattersi fuori a vicenda; il rinnovo dei token è trasparente e anticipato (la sessione resta viva finché il dispositivo la usa almeno una volta a settimana, e un blip di rete o un riavvio del server non disconnettono mai); il logout spegne solo il dispositivo da cui è fatto.
 - **Log attività** completo: chi ha fatto cosa, quando, su quale risorsa, con esito — filtrabile per utente, azione, risorsa e periodo.
 
@@ -668,6 +670,8 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-25 | Messaggi: WhatsApp e SMS, Email | Il nome dell'ospite nei messaggi in uscita (SMS, WhatsApp, email, template) passa pulito: restano lettere, spazi, apostrofi, trattini e i punti delle iniziali, al massimo 40 caratteri; link, numeri, note fra parentesi e simboli scritti nel campo nome non partono più col mittente del ristorante. Nel gestionale il nome non cambia; senza nome utile il saluto è «Ciao,». |
+| 2026-09-25 | Email, Utenti, ruoli e permessi | Ogni ristorante spedisce e riceve email solo dalla propria casella: finché non la configura in Impostazioni → Comunicazioni l'email risulta «non configurata» (invii, «Test», webhook di ricezione). Il recupero password di un ristorante senza casella parte dal mittente di piattaforma, se configurato. |
 | 2026-09-25 | Pagamenti · Comande | Anche la chiusura dalla scheda conto (Pagamenti, palmare, Prenotazioni) chiede come è stata data la mancia, con lo stesso default del pannello di Cassa: quella in contanti entra nei contanti attesi del cassetto. |
 | 2026-09-24 | Cassa | La mancia dice come è stata data — contanti, POS o Satispay, di default il metodo del conto. Quella in contanti entra nei contanti attesi del cassetto («Mance in contanti»), così la conta di fine turno torna; l'esito della chiusura e la chiusura del giorno in Pagamenti la riportano col metodo. |
 | 2026-09-24 | Pagamenti, conto al tavolo e cassa | Nell'incasso con la cassa il riepilogo mostra le righe già pagate («✓ pagato», «1 pagato», «in pagamento» per le quote dal QR in corso). La colonna Incassa ha spaziature più ordinate e la conferma «Registra … e chiudi» non va più a capo: sta su una riga sua, sempre in vista in fondo. |

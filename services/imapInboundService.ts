@@ -32,7 +32,8 @@ import {
 // Le variabili IMAP_* valgono SOLO per il tenant 1: compat con le
 // installazioni pre-SaaS che configuravano la mailbox via env invece che
 // dalle Impostazioni. I tenant nuovi esistono solo in integration_settings.
-const LEGACY_ENV_TENANT_ID = 1;
+// La regola è condivisa con l'invio email (smtpService) in legacyEnv.ts.
+import { LEGACY_ENV_TENANT_ID, legacyEnvAllowed } from './legacyEnv.js';
 
 export interface ImapConfig {
     host: string;
@@ -89,7 +90,7 @@ function envDefaults(): ImapConfig {
 
 async function loadFromDb(tenantId: number): Promise<ImapConfig> {
     // Fallback env solo per il tenant storico (vedi LEGACY_ENV_TENANT_ID).
-    const defaults = tenantId === LEGACY_ENV_TENANT_ID ? envDefaults() : baseDefaults();
+    const defaults = legacyEnvAllowed(tenantId) ? envDefaults() : baseDefaults();
     try {
         const result = await queryWithRetry(
             `SELECT imap_host, imap_port, imap_secure, imap_user, imap_password,
