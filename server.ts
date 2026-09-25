@@ -24255,10 +24255,16 @@ function normalizeLegalMode(v: unknown): LegalMode {
 async function getLegalConfig(tenantId: number): Promise<Record<string, string | boolean>> {
     const base = emptyLegalConfig();
     try {
-        const result = await queryWithRetry(
+        // Sempre nel contesto del tenant richiesto: i chiamanti pubblici
+        // (l'informativa /privacy, il refresh dell'identità partito da una
+        // pagina anonima) non ne hanno uno. In produzione, ruolo non
+        // superuser con RLS rigida, la lettura senza contesto vedeva 0 righe
+        // e l'informativa del Frantoio usciva coi segnaposto «[Ragione
+        // sociale]» (scoperto il 25/09/2026, audit isolamento tenant).
+        const result = await runWithTenantContext(tenantId, () => queryWithRetry(
             'SELECT text_value FROM app_settings WHERE tenant_id = $1 AND key = $2',
             [tenantId, LEGAL_CONFIG_KEY]
-        );
+        ));
         const raw = result.rows[0]?.text_value;
         if (typeof raw === 'string' && raw.trim()) {
             const parsed = JSON.parse(raw);

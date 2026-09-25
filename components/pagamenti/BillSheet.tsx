@@ -6,9 +6,9 @@ import { Check, Copy, ExternalLink, FileText, Loader2, Printer, QrCode, Search, 
 import { billsApiService, printBill, type BillPaymentInput, type OpenBillRow } from '../../services/billsApiService';
 import { getCustomers } from '../../services/apiService';
 import type { Customer, TipMethod } from '../../types';
-import { FormCard, PaneHeader, Sheet, StatusPill } from '../ds';
+import { FormCard, PaneHeader, SegmentedControl, Sheet, StatusPill } from '../ds';
 import { formatEuro } from './paymentsView';
-import { METHODS, methodLabel, eurToCents, settleMath, settlePayments, nextAmountText } from './settleView';
+import { METHODS, TIP_METHODS, defaultTipMethod, methodLabel, eurToCents, settleMath, settlePayments, nextAmountText } from './settleView';
 import { timePart } from '../../utils/displayTime';
 import { moneySymbol } from '../../utils/displayMoney';
 
@@ -149,6 +149,10 @@ export const SettleDialog: React.FC<{
   const [amount, setAmount] = useState(residual > 0 ? (residual / 100).toFixed(2) : '0');
   const [tip, setTip] = useState('');
   const tipCents = eurToCents(tip);
+  // Come in Incasso: senza metodo la mancia in contanti restava fuori dai
+  // contanti attesi del cassetto.
+  const [tipChoice, setTipChoice] = useState<TipMethod | null>(null);
+  const tipMethod: TipMethod = tipChoice ?? defaultTipMethod(method);
   const { remaining, applied, change, shortfall, willSettle } = settleMath(residual, movements, method, amount);
 
   const addMovement = () => {
@@ -162,6 +166,7 @@ export const SettleDialog: React.FC<{
       // L'importo ancora nel campo è un movimento non ancora aggiunto: vale.
       payments: settlePayments(movements, method, applied),
       tip_cents: tipCents,
+      ...(tipCents > 0 ? { tip_method: tipMethod } : {}),
       // «Fattura» chiude comunque con proforma: il documento si emette poi
       // dal conto, dove ci sono i dati del cessionario (come nel pannello
       // cassa). «Cassa» registra lo scontrino battuto sull'RT, col numero se
@@ -346,6 +351,16 @@ export const SettleDialog: React.FC<{
               <input type="text" inputMode="decimal" placeholder="0,00" value={tip} onChange={e => setTip(e.target.value)} disabled={busy} className={`${field} pl-7`} />
             </div>
           </label>
+          {tipCents > 0 && (
+            <SegmentedControl<TipMethod>
+              value={tipMethod}
+              onChange={setTipChoice}
+              options={TIP_METHODS.map(m => ({ value: m, label: methodLabel(m) }))}
+              ariaLabel={t('tipMethod')}
+              equalWidth={false}
+              size="sm"
+            />
+          )}
 
           <p className={`text-[14px] ${willSettle ? 'text-[var(--ds-seated-text)]' : 'text-[var(--ds-critical-text)]'}`}>
             {willSettle

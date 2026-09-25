@@ -363,7 +363,7 @@ Modulo completo per presa comanda, produzione e coordinamento delle uscite. Si a
 > **Una regola sola**: la **Cassa è il banco** (si incassa lì, durante il servizio), **Pagamenti è il libro** (si rilegge lì, anche a distanza di giorni). Il vecchio tab "Conti aperti" di Pagamenti è stato ritirato: incassare e chiudere i conti si fa solo dalla pagina Cassa, e le due pagine si rimandano a vicenda — il report di chiusura segnala i conti ancora da incassare con un collegamento alla Cassa, il cassetto chiuso rimanda alla chiusura del giorno in Pagamenti.
 
 **Conto del tavolo (dalla Cassa)**
-- **Scheda conto**: righe, sconti, coperto (importo di coperto e servizio regolabili in Impostazioni → Pagamenti); Da pagare / Già pagato / Incassato dai clienti / Da rimborsare; mancia; incassi dello staff (contanti/POS) registrati anche a conto aperto; chiusura in cassa; annullo con storno morbido (tutto resta a registro).
+- **Scheda conto**: righe, sconti, coperto (importo di coperto e servizio regolabili in Impostazioni → Pagamenti); Da pagare / Già pagato / Incassato dai clienti / Da rimborsare; mancia col suo metodo (contanti, POS o Satispay: in contanti entra nel cassetto); incassi dello staff (contanti/POS) registrati anche a conto aperto; chiusura in cassa; annullo con storno morbido (tutto resta a registro).
 - Gli **acconti/caparre già pagati si scalano da soli** dal conto del tavolo.
 
 **Conto al tavolo per l'ospite (pay-at-table)**
@@ -669,6 +669,8 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 | Data | Sezione | Modifica |
 |---|---|---|
 | 2026-09-25 | Comande, Cucina e Passe | Sul palmare, chi apre un tavolo su cui lavora già un collega lo vede per nome («Ci sta lavorando anche Giulia»): in produzione compariva invece la prima parte della sua email. |
+| 2026-09-25 | Impostazioni · Legale e privacy | L'informativa privacy pubblica (/privacy, /informativa-privacy, /privacy/<slug>) mostra di nuovo i dati inseriti in Impostazioni → Legale: in produzione usciva coi segnaposto («[Ragione sociale]»…) perché la pagina anonima leggeva le impostazioni senza il contesto del ristorante. |
+| 2026-09-25 | Pagamenti · Comande | Anche la chiusura dalla scheda conto (Pagamenti, palmare, Prenotazioni) chiede come è stata data la mancia, con lo stesso default del pannello di Cassa: quella in contanti entra nei contanti attesi del cassetto. |
 | 2026-09-24 | Cassa | La mancia dice come è stata data — contanti, POS o Satispay, di default il metodo del conto. Quella in contanti entra nei contanti attesi del cassetto («Mance in contanti»), così la conta di fine turno torna; l'esito della chiusura e la chiusura del giorno in Pagamenti la riportano col metodo. |
 | 2026-09-24 | Pagamenti, conto al tavolo e cassa | Nell'incasso con la cassa il riepilogo mostra le righe già pagate («✓ pagato», «1 pagato», «in pagamento» per le quote dal QR in corso). La colonna Incassa ha spaziature più ordinate e la conferma «Registra … e chiudi» non va più a capo: sta su una riga sua, sempre in vista in fondo. |
 | 2026-09-24 | Pagamenti, conto al tavolo e cassa | Nel conto al tavolo «Pago quello che ho preso» divide anche le righe con più pezzi: dei «4× Coperto» ognuno prende il suo (stepper «1/4»), e chi arriva dopo trova solo quelli rimasti. Stesso conteggio in cassa. |
