@@ -3,7 +3,7 @@ import { Server as HTTPServer } from 'http';
 import type { Reservation, Table, Room, Dish, BanquetMenu, UserRole, TableMerge, TableHiddenOverride, RoomClosedOverride } from '../types.js';
 import { AuthService, TokenPayload } from '../auth/authService.js';
 import { isAllowedOrigin } from './corsAllowlist.js';
-import pool from '../db.js';
+import { queryWithRetry, runWithTenantContext } from '../db.js';
 import { mirrorToSalaNode } from './salaNodeBridge.js';
 
 // Extended socket type with user data
@@ -210,11 +210,19 @@ export class SocketService {
     const cached = this.padNames.get(user.userId);
     if (cached) return cached;
     let name = user.email.split('@')[0];
+    // Gli handler socket girano fuori da authenticate, quindi senza contesto
+    // tenant: col pool nudo, sotto la RLS rigida di produzione, users dava
+    // zero righe e il palmare mostrava il prefisso dell'email invece del
+    // nome. In cache va solo l'esito di una lettura riuscita: un errore
+    // transitorio non deve fissare il ripiego fino al riavvio.
     try {
-      const r = await pool.query(`SELECT full_name FROM users WHERE id = $1`, [user.userId]);
+      const r = await runWithTenantContext(user.tenantId, () => queryWithRetry(
+        `SELECT full_name FROM users WHERE id = $1 AND tenant_id = $2`,
+        [user.userId, user.tenantId]
+      ));
       if (r.rows[0]?.full_name) name = String(r.rows[0].full_name);
+      this.padNames.set(user.userId, name);
     } catch { /* fallback: parte locale dell'email */ }
-    this.padNames.set(user.userId, name);
     return name;
   }
 

@@ -48,6 +48,7 @@ export const authenticate = (req: Request, res: Response, next: NextFunction) =>
   // sessione scopata su un tenant (claim scopedTenantId) è operativa e gira
   // nel contesto di QUEL tenant, così non attraversa gli altri per sbaglio.
   if (req.user.role === UserRole.PLATFORM_ADMIN && !isPlatformScopedSession(req.user)) {
+    // rls-bypass: token di pannello senza scope: tutta la richiesta vede ogni tenant, isola solo il WHERE tenant_id
     return runAsPlatform(() => next());
   }
   return runWithTenantContext(req.tenantId, () => next());

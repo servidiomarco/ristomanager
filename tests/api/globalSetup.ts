@@ -47,7 +47,8 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     // acceso a livello di ruolo — l'intera suite diventa la prova che ogni
     // percorso dell'app dichiara il proprio contesto. I client diretti dei
     // singoli file restano superuser (seed e cleanup non c'entrano con la
-    // policy). In CI resta spenta: è una prova da lanciare deliberatamente.
+    // policy). In CI gira in un job suo, «Test API (RLS rigida)», accanto a
+    // quello normale.
     let serverDbUrl = dbUrl;
     if (process.env.TEST_STRICT_RLS === '1') {
         const ROLE = 'app_test_rls';

@@ -14,6 +14,7 @@
     "start:prod": "node dist/server.js",
     "test": "npm run build:server && vitest run",
     "check:locales": "node scripts/check-locales.mjs",
+    "check:rls-bypass": "node scripts/check-rls-bypass.mjs",
     "migrate": "node-pg-migrate up",
     "migrate:down": "node-pg-migrate down",
     "migrate:create": "node-pg-migrate create -j js"
