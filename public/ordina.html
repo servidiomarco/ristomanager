@@ -515,12 +515,46 @@ button:disabled { cursor: not-allowed; }
     $('barTotal').textContent = euro(0);
     const branding = info?.branding || {};
     const restaurantName = branding.name || '';
+    // Solo link http(s) (audit M-08): maps_url arriva dal ristoratore
+    // (Impostazioni → Legale) e un «javascript:» o un «data:» qui girava nel
+    // browser dell'ospite al primo tocco. La base è la pagina stessa: un
+    // valore relativo o un dominio senza schema resta il link di sempre.
+    const safeHttpUrl = v => {
+        const s = String(v || '').trim();
+        if (!s) return null;
+        try {
+            const u = new URL(s, location.href);
+            return (u.protocol === 'https:' || u.protocol === 'http:') ? u.href : null;
+        } catch { return null; }
+    };
+    const PHONE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>';
+    const PIN_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>';
     // Rigenerati a ogni cambio lingua: la pill «Indicazioni» è testo tradotto.
+    // Costruiti col DOM e mai con innerHTML sui dati del tenant (audit M-08):
+    // prima telefono e mappa entravano grezzi nel markup, e un
+    // '"><img onerror=…>' salvato in Impostazioni girava su ogni visita di
+    // /ordina, senza un clic e anche con l'asporto spento. L'icona è l'unico
+    // innerHTML ed è una costante.
     function renderHeaderLinks() {
-        const links = [];
-        if (branding.phone) links.push('<a class="header__pill" href="tel:' + branding.phone.replace(/\s/g, '') + '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>' + branding.phone + '</a>');
-        if (branding.maps_url) links.push('<a class="header__pill" href="' + branding.maps_url + '" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>' + t('header.directions') + '</a>');
-        $('headerLinks').innerHTML = links.join('');
+        const host = $('headerLinks');
+        host.textContent = '';
+        const addPill = (href, icon, label, external) => {
+            const a = document.createElement('a');
+            a.className = 'header__pill';
+            a.setAttribute('href', href);
+            if (external) { a.setAttribute('target', '_blank'); a.setAttribute('rel', 'noopener'); }
+            a.innerHTML = icon;
+            a.appendChild(document.createTextNode(label));
+            host.appendChild(a);
+        };
+        // tel: solo da cifre, col «+» davanti se il numero ne ha uno: per un
+        // numero normale è il link di prima (che toglieva solo gli spazi), e
+        // il testo scritto per le persone resta l'etichetta.
+        const phone = String(branding.phone || '');
+        const digits = phone.replace(/\D/g, '');
+        if (digits) addPill('tel:' + (phone.includes('+') ? '+' : '') + digits, PHONE_ICON, phone, false);
+        const mapsUrl = safeHttpUrl(branding.maps_url);
+        if (mapsUrl) addPill(mapsUrl, PIN_ICON, t('header.directions'), true);
     }
     if (restaurantName) {
         document.title = t('meta.titleWithName', { name: restaurantName });

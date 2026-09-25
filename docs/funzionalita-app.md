@@ -618,7 +618,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 ## Piattaforma SaaS: multi-tenant, moduli e abbonamenti
 
-- **Ogni ristorante è un tenant isolato a livello di database** (Row Level Security): dati, branding, impostazioni, permessi e integrazioni separati. Pagine pubbliche per **slug** (`/prenota/nome-ristorante`) o **dominio personalizzato**.
+- **Ogni ristorante è un tenant isolato a livello di database** (Row Level Security): dati, branding, impostazioni, permessi e integrazioni separati. Pagine pubbliche per **slug** (`/prenota/nome-ristorante`) o **dominio personalizzato**. Il dominio personalizzato serve solo le pagine del suo ristorante: lo slug di un altro lì risponde 404, e la sitemap elenca solo le sue. L'indirizzo condiviso della piattaforma serve tutti gli slug.
 - **Moduli vendibili (add-on)**: Agente vocale (`voice`), WhatsApp (`whatsapp`), Prenotazioni web (`web_booking`), Conto al tavolo (`pay_at_table`), integrazione Passepartout (`passepartout`), Recensioni Google (`reviews`). L'email è canale base. Un modulo non incluso nel piano non compare nemmeno al Proprietario.
 - **Doppio livello di controllo**: il modulo va *venduto* (entitlement) e poi *acceso* dal ristoratore (interruttore operativo). Tutti i default sono prudenti (spento).
 - **Billing con Stripe**: abbonamento per tenant con add-on, checkout e portale clienti; lo stato dell'abbonamento accende/spegne i moduli da solo (webhook). Quadro MRR e stato clienti per l'amministrazione.
@@ -668,6 +668,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-25 | Piattaforma SaaS · Pagine pubbliche | Su un dominio personalizzato le pagine con lo slug di un altro ristorante (`/prenota`, `/ordina`, `/m`, `/privacy`, `/public/*`) rispondono 404, anche quando il ristorante del dominio è sospeso, e la sitemap elenca solo le sue; l'indirizzo condiviso resta valido per tutti. Nella testata di /prenota e /ordina sito e mappa diventano link solo se sono indirizzi http(s), e il telefono si chiama dalle sole cifre; nelle email il link alla mappa esce solo se è un indirizzo http(s). |
 | 2026-09-25 | Pagamenti · Comande | Anche la chiusura dalla scheda conto (Pagamenti, palmare, Prenotazioni) chiede come è stata data la mancia, con lo stesso default del pannello di Cassa: quella in contanti entra nei contanti attesi del cassetto. |
 | 2026-09-24 | Cassa | La mancia dice come è stata data — contanti, POS o Satispay, di default il metodo del conto. Quella in contanti entra nei contanti attesi del cassetto («Mance in contanti»), così la conta di fine turno torna; l'esito della chiusura e la chiusura del giorno in Pagamenti la riportano col metodo. |
 | 2026-09-24 | Pagamenti, conto al tavolo e cassa | Nell'incasso con la cassa il riepilogo mostra le righe già pagate («✓ pagato», «1 pagato», «in pagamento» per le quote dal QR in corso). La colonna Incassa ha spaziature più ordinate e la conferma «Registra … e chiudi» non va più a capo: sta su una riga sua, sempre in vista in fondo. |

@@ -21,6 +21,7 @@ import * as whatsappAgent from './services/whatsappAgent.js';
 import * as tableAssignmentAgent from './services/tableAssignmentAgent.js';
 import * as aiReport from './services/aiReportService.js';
 import { renderPrenota } from './services/prenotaSeo.js';
+import { renderContactBlockHtml } from './services/emailContactBlock.js';
 import { COST_USD_SQL, UNPRICED_SQL, USD_EUR } from './services/aiPricing.js';
 import { BILLABLE_SECONDS_SQL, billableMinutes, estimatedRevenueCents } from './services/voicePlan.js';
 import { getVoicePlan, getVoiceMonthUsage, mergeVoicePlan, claimNewVoiceUsageAlerts } from './services/voiceUsage.js';
@@ -440,10 +441,18 @@ async function resolveTenantBySlug(slug: string): Promise<number | null> {
     }
 }
 
+// Chiave unica per le lookup per hostname (instradamento e D-lite):
+// minuscolo e senza il punto finale dell'FQDN. «prenotazioni.vecchiofrantoio.com.»
+// è lo stesso host per DNS e TLS, ma come stringa letterale mancava cache e
+// tenant_domains: per D-lite era un host «di nessuno» e serviva lo slug di
+// qualunque tenant (review del PR M-08).
+const normalizePublicHostname = (hostname: string): string =>
+    String(hostname || '').trim().toLowerCase().replace(/\.$/, '');
+
 // Ritorna anche lo slug (non solo l'id): il redirect della root deve
 // costruire /prenota/<slug> a partire dal solo hostname.
 async function resolveTenantByDomain(hostname: string): Promise<TenantDomainHit | null> {
-    const domain = String(hostname || '').trim().toLowerCase();
+    const domain = normalizePublicHostname(hostname);
     if (!domain || domain.length > 255) return null;
     const cached = tenantDomainCache.get(domain);
     if (cached && Date.now() - cached.refreshedAt <= TENANT_TOKEN_TTL_MS) {
@@ -473,14 +482,94 @@ async function resolveTenantByDomain(hostname: string): Promise<TenantDomainHit 
     }
 }
 
+// «D-lite» (audit M-08, contesta:N-public-xss punto 3): di quale tenant è
+// l'hostname su cui arriva una richiesta pubblica CON slug. Lo slug vince sul
+// dominio, quindi /prenota/demo-pizzeria e /ordina/demo-pizzeria giravano
+// anche su prenotazioni.vecchiofrantoio.com: chi ha le credenziali OWNER del
+// Demo (girano fra i prospect) poteva rinominarlo «Vecchio Frantoio»,
+// caricarne il logo e raccogliere prenotazioni vere sul dominio del Frantoio.
+// Su un dominio di tenant si servono solo le pagine di quel tenant.
+//
+// L'host condiviso della piattaforma (PUBLIC_BOOKING_BASE_URL) è escluso per
+// costruzione: è lì che la SPA compone i link /ordina/<slug> e /m/<slug> di
+// TUTTI i tenant (publicBaseUrl in auth/authRoutes.ts), anche nel caso in cui
+// l'env punti a un host che è pure in tenant_domains.
+//
+// Proprietà, NON instradamento: la lookup è sua e non passa da
+// resolveTenantByDomain, che filtra status='active' perché decide chi SERVIRE.
+// Un dominio registrato resta di quel ristorante anche a tenant sospeso
+// (morosità, DNS ancora puntato su Railway): col filtro sullo stato tornava
+// «di nessuno» e apriva il dominio agli slug di tutti (review M-08, il Demo
+// servito sul dominio di un tenant sospeso).
+//
+// Cache: i proprietari per il TTL solito, con stale-if-error (un dominio già
+// visto resta suo anche se il DB inciampa: si chiude, non si apre); gli altri
+// host (il condiviso, il dominio Railway) si ricordano come «di nessuno» per
+// lo stesso TTL, o ogni chiamata /public/<slug>/* costerebbe una query in
+// più. Tetto alla mappa dei «di nessuno»: l'Host lo sceglie il client. Un
+// errore del DB su un host mai visto lascia passare la richiesta senza
+// memorizzare nulla: meglio servire la pagina che spegnere le prenotazioni
+// per un intoppo, e alla richiesta dopo si riprova.
+const publicHostOwnerCache = new Map<string, { owner: TenantDomainHit; refreshedAt: number }>();
+const publicHostMissCache = new Map<string, number>();
+const PUBLIC_HOST_MISS_CACHE_MAX = 500;
+
+const sharedPublicHostname = (): string => {
+    try {
+        return normalizePublicHostname(new URL(String(process.env.PUBLIC_BOOKING_BASE_URL || '').trim()).hostname);
+    } catch {
+        return '';
+    }
+};
+
+async function tenantOwningPublicHost(hostname: string): Promise<TenantDomainHit | null> {
+    const host = normalizePublicHostname(hostname);
+    if (!host || host.length > 255 || host === sharedPublicHostname()) return null;
+    const cached = publicHostOwnerCache.get(host);
+    if (cached && Date.now() - cached.refreshedAt <= TENANT_TOKEN_TTL_MS) return cached.owner;
+    const missAt = publicHostMissCache.get(host);
+    if (missAt != null && Date.now() - missAt <= TENANT_TOKEN_TTL_MS) return null;
+    try {
+        // rls-bypass: proprietà di un hostname, si decide prima del contesto tenant; lookup sulla PK globale domain
+        const result = await runAsPlatform(() => queryWithRetry(
+            `SELECT t.id, t.slug FROM tenant_domains d
+             JOIN tenants t ON t.id = d.tenant_id
+             WHERE d.domain = $1 LIMIT 1`,
+            [host]
+        ));
+        const row = result.rows[0];
+        if (row?.id != null) {
+            const owner: TenantDomainHit = { tenantId: Number(row.id), slug: String(row.slug) };
+            publicHostOwnerCache.set(host, { owner, refreshedAt: Date.now() });
+            publicHostMissCache.delete(host);
+            return owner;
+        }
+        // Dominio tolto da tenant_domains: da qui in poi è «di nessuno».
+        publicHostOwnerCache.delete(host);
+        if (publicHostMissCache.size >= PUBLIC_HOST_MISS_CACHE_MAX) publicHostMissCache.clear();
+        publicHostMissCache.set(host, Date.now());
+        return null;
+    } catch (err) {
+        console.error('[public-tenant] lookup proprietario host fallito:', (err as any)?.message || err);
+        return cached ? cached.owner : null;
+    }
+}
+
 // Precedenza: (a) :slug esplicito nel path — se c'è ed è ignoto si risponde
 // 404, MAI il fallback (come per i webhook token: una pagina mal linkata non
-// deve cadere in silenzio sul tenant 1); (b) hostname in tenant_domains;
-// (c) fallback tenant 1 — le installazioni single-tenant e i path storici
-// (/prenota, /public/*) continuano a funzionare senza slug né dominio.
+// deve cadere in silenzio sul tenant 1); e 404 anche quando l'hostname è il
+// dominio di un ALTRO tenant (D-lite, vedi tenantOwningPublicHost);
+// (b) hostname in tenant_domains; (c) fallback tenant 1 — le installazioni
+// single-tenant e i path storici (/prenota, /public/*) continuano a
+// funzionare senza slug né dominio.
 async function resolveTenantForPublicRequest(req: express.Request): Promise<number | null> {
     const slug = typeof req.params?.slug === 'string' ? req.params.slug : '';
-    if (slug) return resolveTenantBySlug(slug);
+    if (slug) {
+        const bySlug = await resolveTenantBySlug(slug);
+        if (bySlug == null) return null;
+        const hostOwner = await tenantOwningPublicHost(req.hostname);
+        return hostOwner && hostOwner.tenantId !== bySlug ? null : bySlug;
+    }
     const byDomain = await resolveTenantByDomain(req.hostname);
     if (byDomain) return byDomain.tenantId;
     return PUBLIC_TENANT_ID;
@@ -20004,17 +20093,8 @@ async function publicBusinessIdentity(tenantId: number): Promise<BusinessIdentit
     };
 }
 
-// tel:/wa.me a partire dal numero scritto per umani. Regola: se c'è un "+"
-// il prefisso internazionale è già nel numero, altrimenti si assume Italia —
-// coerente col resto del codebase (normalizeItalianPhone).
-function phoneHref(display: string): string {
-    const digits = display.replace(/\D/g, '');
-    return `tel:+${display.includes('+') ? digits : `39${digits}`}`;
-}
-function whatsappHref(display: string): string {
-    const digits = display.replace(/\D/g, '');
-    return `https://wa.me/${display.includes('+') ? digits : `39${digits}`}`;
-}
+// phoneHref/whatsappHref (tel:/wa.me dal numero scritto per umani) vivono in
+// services/emailContactBlock.ts, col blocco contatti delle email che li usa.
 
 /* Il contesto del ristorante per i messaggi al cliente.
  *
@@ -20602,27 +20682,12 @@ function escapeHtml(s: string): string {
         .replace(/'/g, '&#39;');
 }
 
-// Rendered block with call/WhatsApp CTAs for the customer emails. Kept in one
-// place so any future number change lives in a single spot. The WhatsApp link
-// uses wa.me (works in Gmail, iOS Mail, most clients); the phone link uses
-// tel: so a tap on mobile opens the dialer.
+// Il blocco con telefono, WhatsApp e mappa in fondo alle email al cliente.
+// Il markup vive in services/emailContactBlock.ts (audit M-08): lì ogni
+// valore del tenant passa da escapeHtml e il link alla mappa esce solo se è
+// un URL http(s) — prima maps_url entrava nell'href così com'era salvato.
 function contactBlockHtml(language?: string | null): string {
-    const identity = businessIdentity();
-    const english = isEnglishGuest(language);
-    return `
-      <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;margin:0 0 16px;">
-        <tr>
-          <td style="font-size:13px;line-height:1.6;color:#57534e;padding:8px 12px;border:1px solid #e7e5e4;border-radius:10px;background:#fbf9f4;">
-            <strong style="color:#292524;">${english ? 'Contact us directly:' : 'Contattaci direttamente:'}</strong><br>
-            📞 <a href="${phoneHref(identity.phone)}" style="color:#065f46;text-decoration:none;">${escapeHtml(identity.phone)}</a>
-            &nbsp;·&nbsp;
-            💬 <a href="${whatsappHref(identity.whatsapp)}" style="color:#065f46;text-decoration:none;">WhatsApp ${escapeHtml(identity.whatsapp)}</a>
-            &nbsp;·&nbsp;
-            📍 <a href="${identity.mapsUrl}" style="color:#065f46;text-decoration:none;">${english ? 'Get directions' : 'Come raggiungerci'}</a>
-          </td>
-        </tr>
-      </table>
-    `;
+    return renderContactBlockHtml(businessIdentity(), isEnglishGuest(language));
 }
 
 // Small helper that formats reservation date/time in Italian for the customer
@@ -29562,7 +29627,12 @@ app.get('/sitemap.xml', async (req, res) => {
               WHERE slug IS NOT NULL AND slug <> ''
                 AND status = 'active' 
               ORDER BY slug`));
-        const urls = [`${base}/prenota`, ...r.rows.map((t: any) => `${base}/prenota/${t.slug}`)];
+        // Sul dominio di un tenant solo le SUE pagine: quelle degli altri lì
+        // rispondono 404 (D-lite, tenantOwningPublicHost), e una sitemap che le
+        // elenca manderebbe il motore su pagine morte.
+        const hostOwner = await tenantOwningPublicHost(req.hostname);
+        const slugs = r.rows.map((t: any) => String(t.slug)).filter((s: string) => !hostOwner || s === hostOwner.slug);
+        const urls = [`${base}/prenota`, ...slugs.map((s: string) => `${base}/prenota/${s}`)];
         const oggi = new Date().toISOString().slice(0, 10);
         res.type('application/xml').send(
             '<?xml version="1.0" encoding="UTF-8"?>\n' +
