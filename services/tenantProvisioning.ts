@@ -124,9 +124,13 @@ export async function provisionTenant(input: ProvisionTenantInput): Promise<Prov
         // (il pannello ruoli la aggiorna lì), mentre l'elenco hardcoded in
         // db.ts è solo il seed del primo boot e invecchia. Quando nascerà una
         // matrice "template" di piattaforma (D2), si copierà quella.
+        // Le righe PLATFORM_ADMIN restano fuori (audit isolamento M-03):
+        // quel ruolo non sta nella matrice di nessun tenant, e una riga
+        // rimasta nel tenant 1 verrebbe copiata in ogni tenant nuovo.
         await client.query(
             `INSERT INTO role_permissions (tenant_id, role, permission)
-             SELECT $1, role, permission FROM role_permissions WHERE tenant_id = 1`,
+             SELECT $1, role, permission FROM role_permissions
+              WHERE tenant_id = 1 AND role <> 'PLATFORM_ADMIN'`,
             [tenantId]
         );
 

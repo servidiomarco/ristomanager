@@ -864,7 +864,9 @@ router.get('/permissions/roles/:role', authenticate, authorize(UserRole.OWNER), 
   try {
     const role = req.params.role.toUpperCase() as UserRole;
 
-    if (!Object.values(UserRole).includes(role)) {
+    // PLATFORM_ADMIN non sta nella matrice di nessun tenant: stessa guardia
+    // del PUT qui sotto, per simmetria.
+    if (!Object.values(UserRole).includes(role) || role === UserRole.PLATFORM_ADMIN) {
       return res.status(400).json({ error: 'Invalid role' });
     }
 
@@ -883,6 +885,19 @@ router.put('/permissions/roles/:role', authenticate, authorize(UserRole.OWNER), 
     const { permissions } = req.body;
 
     if (!Object.values(UserRole).includes(role)) {
+      return res.status(400).json({ error: 'Invalid role' });
+    }
+
+    // Era l'unica via, a runtime, per riscrivere le righe PLATFORM_ADMIN
+    // che la migration piattaforma-fuori-dalla-matrice cancella (audit
+    // isolamento M-03, correzione (b) della contro-valutazione). Un OWNER
+    // del tenant 1 le avrebbe rimesse davanti al token di pannello, che
+    // opera nel tenant di casa: menu con voci che rispondono 403 e, il
+    // giorno che emptyRoleMap avesse la chiave PLATFORM_ADMIN, cassa e
+    // fiscalità aperte. In ogni altro tenant le avrebbe scritte chiunque
+    // abbia le credenziali OWNER, per esempio i prospect della demo. La UI
+    // non manda mai questo ruolo: GET /auth/permissions lo esclude già.
+    if (role === UserRole.PLATFORM_ADMIN) {
       return res.status(400).json({ error: 'Invalid role' });
     }
 
