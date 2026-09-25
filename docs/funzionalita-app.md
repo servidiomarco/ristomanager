@@ -127,7 +127,7 @@ La sezione centrale del CRM: elenco, mappa tavoli e scheda prenotazione in un'un
 
 ## Prenotazione online (pagina pubblica /prenota)
 
-Pagina di prenotazione self-service, leggerissima (un solo file statico, si apre all'istante anche su reti lente), personalizzata col **branding del ristorante** (nome, tagline, logo, colore, indirizzo con link Google Maps, telefono cliccabile). Bilingue **italiano/inglese** con cambio lingua istantaneo. Ottimizzata SEO (titolo col nome del locale, Open Graph, dati strutturati Restaurant).
+Pagina di prenotazione self-service, leggerissima (un solo file statico, si apre all'istante anche su reti lente), personalizzata col **branding del ristorante** (nome, tagline, logo, colore, indirizzo con link Google Maps; telefono cliccabile solo per il ristorante collegato alla linea di Sofia). Bilingue **italiano/inglese** con cambio lingua istantaneo. Ottimizzata SEO (titolo col nome del locale, Open Graph, dati strutturati Restaurant).
 
 **Percorso del cliente (2 passi)**
 1. **Tavolo** — coperti (con "di cui bambini": prepariamo seggiolone e mezze porzioni), data da striscia settimanale o calendario mensile con **semaforo di disponibilità** (libero / quasi pieno / chiuso, col motivo di chiusura), scelta della **sala preferita**, turno Pranzo/Cena e slot orario.
@@ -179,6 +179,7 @@ Agente conversazionale AI (ElevenLabs) che **risponde al telefono del ristorante
 - Per ogni chiamata: **riassunto AI, trascrizione completa, registrazione audio** riascoltabile, durata, esito.
 - Azioni: richiama, segna ricontattato, **crea prenotazione dalla chiamata** (dati precompilati), apri scheda cliente, storico messaggi verso quel numero.
 - Badge "da ricontattare" sempre visibile nel menu.
+- **Sincronizza** recupera dall'agente le chiamate che il salvataggio automatico ha perso. Vale solo per il ristorante collegato alla linea di Sofia: per gli altri si ferma con «Nessun agente vocale collegato a questo ristorante.»
 
 ---
 
@@ -668,6 +669,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-25 | Agente vocale "Sofia"; Prenotazione online | Chiamate e numero di Sofia restano del solo ristorante collegato alla sua linea. Da un altro ristorante col modulo voce acceso, «Sincronizza» in Chiamate e la registrazione audio si fermano con «Nessun agente vocale collegato a questo ristorante.» invece di importare le chiamate di Sofia. La pagina /prenota degli altri ristoranti non mostra più la pillola col numero di Sofia. |
 | 2026-09-25 | Pagamenti · Comande | Anche la chiusura dalla scheda conto (Pagamenti, palmare, Prenotazioni) chiede come è stata data la mancia, con lo stesso default del pannello di Cassa: quella in contanti entra nei contanti attesi del cassetto. |
 | 2026-09-24 | Cassa | La mancia dice come è stata data — contanti, POS o Satispay, di default il metodo del conto. Quella in contanti entra nei contanti attesi del cassetto («Mance in contanti»), così la conta di fine turno torna; l'esito della chiusura e la chiusura del giorno in Pagamenti la riportano col metodo. |
 | 2026-09-24 | Pagamenti, conto al tavolo e cassa | Nell'incasso con la cassa il riepilogo mostra le righe già pagate («✓ pagato», «1 pagato», «in pagamento» per le quote dal QR in corso). La colonna Incassa ha spaziature più ordinate e la conferma «Registra … e chiudi» non va più a capo: sta su una riga sua, sempre in vista in fondo. |

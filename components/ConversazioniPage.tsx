@@ -17,6 +17,7 @@ import {
   FollowUpStatus,
   OutboundMessage,
 } from '../services/voiceCallsApiService';
+import type { ApiError } from '../services/apiError';
 import { Reservation } from '../types';
 import { useToast } from '../contexts/ToastContext';
 import { toTitleCase, phoneMatchKey } from '../utils/text';
@@ -56,6 +57,13 @@ const formatPhone = (phone: string | null | undefined, t: TFunc): string => {
   if (!phone) return t('unknownNumber');
   return phone;
 };
+
+// Sincronizza e registrazione rispondono 409 voice_agent_not_configured ai
+// ristoranti senza la linea di Sofia (audit isolamento tenant, H-02).
+// buildApiError mette il codice nel messaggio: senza questo ramo il Demo
+// leggeva «voice_agent_not_configured» nel toast e sopra il player.
+const isVoiceAgentMissing = (err: unknown): boolean =>
+  (err as ApiError | undefined)?.data?.error === 'voice_agent_not_configured';
 
 const messageStatusBadge = (status: string | null | undefined, t: TFunc): { label: string; tone: PillTone } => {
   const s = (status || '').toLowerCase();
@@ -279,11 +287,11 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
       audioObjectUrlRef.current = url;
       setAudioUrl(url);
     } catch (err) {
-      setAudioError((err as Error).message);
+      setAudioError(isVoiceAgentMissing(err) ? t('agentNotConnected') : (err as Error).message);
     } finally {
       setAudioLoading(false);
     }
-  }, [audioUrl, audioLoading, callId]);
+  }, [audioUrl, audioLoading, callId, t]);
 
   const turns = useMemo(() => parseTranscript(detail?.transcript ?? null), [detail]);
   const resBadge = reservationStatusBadge(detail?.reservation_status, t);
@@ -826,11 +834,13 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
       addToast(`Importate ${result.imported} · numeri recuperati ${result.backfilled} · saltate ${result.skipped}${result.failed ? ` · errori ${result.failed}` : ''}`, 'success');
       await fetchItems();
     } catch (err) {
-      addToast(t('errorPrefix', { dettaglio: (err as Error).message }), 'error');
+      addToast(isVoiceAgentMissing(err)
+        ? t('agentNotConnected')
+        : t('errorPrefix', { dettaglio: (err as Error).message }), 'error');
     } finally {
       setSyncing(false);
     }
-  }, [fetchItems, addToast]);
+  }, [fetchItems, addToast, t]);
 
   // Bulk "segna tutte come ricontattate": two-step confirm (first click arms
   // the button, second within 4s executes) so a stray tap can't flip the

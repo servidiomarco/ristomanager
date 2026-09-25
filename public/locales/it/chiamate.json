@@ -60,6 +60,7 @@
   "markedAll_other": "{{count}} conversazioni segnate come ricontattate",
   "nothingToContact": "Nessuna conversazione da ricontattare",
   "errorPrefix": "Errore: {{dettaglio}}",
+  "agentNotConnected": "Nessun agente vocale collegato a questo ristorante.",
   "chip": {
     "all": "Tutte",
     "phantom": "Da recuperare",
