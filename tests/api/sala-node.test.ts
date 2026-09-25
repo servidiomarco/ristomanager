@@ -1,4 +1,5 @@
 import { describe, it, expect, afterAll } from 'vitest';
+import { Client } from 'pg';
 import { api, ownerToken, bearer } from './helpers';
 
 // Nodo di sala, fondazioni cloud (tappa 3 del piano ibrido): token per-tenant
@@ -7,10 +8,17 @@ import { api, ownerToken, bearer } from './helpers';
 // la SPA /sala-node/client-config e interruttore sala_node_enabled mascherato
 // dall'entitlement 'sala_node' come pay_at_table.
 
-const salaNodeToken = async (owner: string): Promise<string> => {
-    const res = await api().get('/settings/webhook-info').set(bearer(owner));
-    expect(res.status).toBe(200);
-    return res.body.sala_node_token;
+// Il token del nodo si legge dal DB, come fa chi installa il nodo: il CRM
+// non lo espone più (audit isolamento, 25/09).
+const salaNodeToken = async (): Promise<string> => {
+    const db = new Client({ connectionString: process.env.DATABASE_URL || 'postgresql://localhost/ristotest_api' });
+    await db.connect();
+    try {
+        const t = await db.query('SELECT sala_node_token FROM tenants WHERE id = 1');
+        return t.rows[0].sala_node_token;
+    } finally {
+        await db.end();
+    }
 };
 
 describe('nodo di sala — fondazioni cloud', () => {
@@ -24,9 +32,17 @@ describe('nodo di sala — fondazioni cloud', () => {
     });
 
     it('il token per tenant esiste (backfill migration) nella forma pgcrypto', async () => {
-        const owner = await ownerToken();
-        const token = await salaNodeToken(owner);
+        const token = await salaNodeToken();
         expect(token).toMatch(/^[0-9a-f]{48}$/);
+    });
+
+    it('webhook-info non espone il token del nodo', async () => {
+        const owner = await ownerToken();
+        const res = await api().get('/settings/webhook-info').set(bearer(owner));
+        expect(res.status).toBe(200);
+        expect(res.body).not.toHaveProperty('sala_node_token');
+        // Gli altri token di instradamento restano dove li cerca chi configura.
+        expect(typeof res.body.webhook_token).toBe('string');
     });
 
     it('/sala-node/credentials: 401 senza token o con token inventato', async () => {
@@ -36,17 +52,14 @@ describe('nodo di sala — fondazioni cloud', () => {
         expect(finto.status).toBe(401);
     });
 
-    it('/sala-node/credentials: col token vero consegna segreto e allowlist', async () => {
-        const owner = await ownerToken();
-        const token = await salaNodeToken(owner);
+    it('/sala-node/credentials: col token vero consegna allowlist, MAI il segreto JWT', async () => {
+        const token = await salaNodeToken();
         const res = await api().get('/sala-node/credentials').set('x-sala-node-token', token);
         expect(res.status).toBe(200);
         expect(res.body.tenant_id).toBe(1);
-        // In test JWT_SECRET non è impostato: vale il fallback dev di
-        // authService — quel che conta è che sia LO STESSO con cui il server
-        // firma, così il nodo verifica i client in locale.
-        expect(typeof res.body.jwt_secret).toBe('string');
-        expect(res.body.jwt_secret.length).toBeGreaterThan(0);
+        // Il segreto firma i token di ogni tenant e della piattaforma: chi
+        // aveva il token del nodo poteva firmarsi un PLATFORM_ADMIN.
+        expect(res.body).not.toHaveProperty('jwt_secret');
         expect(Array.isArray(res.body.allowed_origins)).toBe(true);
         // Senza dominio configurato: niente certificato, dominio null.
         expect(res.body.domain).toBeNull();
@@ -113,7 +126,7 @@ describe('nodo di sala — fondazioni cloud', () => {
         // E il NODO stesso resta fuori: senza add-on le credenziali sono 403
         // (idem per l'handshake del bridge) — un cliente sospeso o cessato
         // non tiene il nodo agganciato al flusso eventi.
-        const token = await salaNodeToken(owner);
+        const token = await salaNodeToken();
         const creds = await api().get('/sala-node/credentials').set('x-sala-node-token', token);
         expect(creds.status).toBe(403);
         expect(creds.body.error).toBe('tenant_suspended_or_module_off');

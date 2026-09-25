@@ -27540,15 +27540,17 @@ app.put('/settings/entitlements', authenticate, requirePermission('settings:full
 // print_agent_token nella config dell'agente di stampa. Endpoint separato da
 // /settings/entitlements, che risponde i soli tre boolean e ha chi ci fa
 // asserzioni sopra. settings:full: i token equivalgono a credenziali.
+// Il sala_node_token NON passa di qui (audit isolamento, 25/09): apre lo
+// snapshot del tenant e l'upstream verso il cloud, quindi è un segreto di
+// macchina, non del gestore: chi installa il nodo lo legge dal DB.
 app.get('/settings/webhook-info', authenticate, requirePermission('settings:full'), async (req, res) => {
     try {
         const r = await queryWithRetry(
-            'SELECT webhook_token, print_agent_token, sala_node_token, slug FROM tenants WHERE id = $1',
+            'SELECT webhook_token, print_agent_token, slug FROM tenants WHERE id = $1',
             [req.tenantId!]
         );
         const webhookToken: string | null = r.rows[0]?.webhook_token ?? null;
         const printAgentToken: string | null = r.rows[0]?.print_agent_token ?? null;
-        const salaNodeToken: string | null = r.rows[0]?.sala_node_token ?? null;
         const tenantSlug: string | null = r.rows[0]?.slug ?? null;
         // Domini custom del tenant (Fase C3): mostrati accanto all'URL di
         // prenotazione così chi configura il DNS vede cosa punta già qui.
@@ -27564,7 +27566,6 @@ app.get('/settings/webhook-info', authenticate, requirePermission('settings:full
         res.json({
             webhook_token: webhookToken,
             print_agent_token: printAgentToken,
-            sala_node_token: salaNodeToken,
             webhook_base_url: webhookBase,
             booking_url: tenantSlug ? `${base}/prenota/${tenantSlug}` : null,
             domains: domainsRes.rows,
@@ -36451,10 +36452,14 @@ function salaNodeUrl(settings: { domain: string | null; port: number }): string 
     return settings.port === 443 ? `https://${settings.domain}` : `https://${settings.domain}:${settings.port}`;
 }
 
-// Bootstrap del nodo: segreto JWT (per verificare i client in locale, anche
-// a linea caduta), allowlist CORS del tenant e certificato TLS. Il nodo la
+// Bootstrap del nodo: allowlist CORS del tenant e certificato TLS. Il nodo la
 // chiama all'avvio e ogni 12h; l'ultima copia la tiene su disco, così un
 // riavvio durante un outage riparte comunque.
+// Il segreto JWT NON viaggia più qui (audit isolamento, 25/09): è la chiave
+// che firma i token di OGNI tenant e della piattaforma, e chi aveva il token
+// del nodo poteva farsi un PLATFORM_ADMIN. Il nodo lo riceve dal .cmd come
+// JWT_SECRET finché la firma non passa a una chiave asimmetrica (tappa ES256,
+// sul nodo la sola chiave pubblica).
 app.get('/sala-node/credentials', salaNodeAuth, async (req: any, res) => {
     try {
         const tenantId = req.salaNodeTenantId as number;
@@ -36473,7 +36478,6 @@ app.get('/sala-node/credentials', salaNodeAuth, async (req: any, res) => {
             tenant_id: tenantId,
             domain: settings.domain,
             port: settings.port,
-            jwt_secret: AuthService.getAccessTokenSecret(),
             allowed_origins: origins,
             // Il token legacy dell'agente di stampa (env del cloud, alias
             // tenant 1 in printAgentAuth): il nodo lo eredita così, invece

@@ -20,8 +20,12 @@ repo marketing (sez. 3–7).
 - Checkout del repo in `C:\ristomanager-agents\app` (già presente per gli
   altri agenti; update = `git pull` + riavvio dell'attività).
 - Node.js ≥ 20 (lo stesso usato dagli altri agenti).
-- Token del nodo: `tenants.sala_node_token` — si legge dal CRM (endpoint
-  `/settings/webhook-info`, permesso `settings:full`).
+- Token del nodo: `tenants.sala_node_token` — si legge dal DB (psql sul
+  database di produzione). Dal 25/09 il CRM non lo mostra più: apre snapshot
+  e upstream del tenant, è un segreto di macchina come le env di Railway.
+- Segreto JWT: `JWT_SECRET` di Railway (variables). Dal 25/09 il cloud non
+  lo consegna più al nodo: va scritto nel `.cmd`, e riscritto a ogni
+  rotazione del segreto sul cloud.
 - Rete: **prenotazione DHCP** per il PC (l'IP del record A non deve cambiare
   dopo un blackout — stessa raccomandazione mai attuata per le stampanti).
 
@@ -44,7 +48,8 @@ repo marketing (sez. 3–7).
 ```bat
 @echo off
 cd /d C:\ristomanager-agents\app
-set SALA_NODE_TOKEN=<token dal CRM>
+set SALA_NODE_TOKEN=<token dal DB>
+set JWT_SECRET=<lo stesso del cloud - Railway, variables>
 set CLOUD_URL=https://ristomanager-production.up.railway.app
 node --loader ts-node/esm sala-node\index.ts
 ```
@@ -122,17 +127,18 @@ cd /d C:\ristomanager-agents\app
 set SERVER_PROFILE=service-node
 set DATABASE_URL=postgresql://postgres:<password>@localhost:5432/ristonodo
 set SALA_NODE_CLOUD_URL=https://ristomanager-production.up.railway.app
-set SALA_NODE_TOKEN=<token dal CRM>
+set SALA_NODE_TOKEN=<token dal DB>
 set SALA_NODE_STATE_DIR=C:\ristomanager-agents\sala-node-state
 set PORT=8443
-set JWT_SECRET=<lo stesso del cloud - gia' nelle credenziali del relay>
-set JWT_REFRESH_SECRET=<idem>
+set JWT_SECRET=<lo stesso del cloud - Railway, variables>
 node dist\server.js
 ```
 
-Nota JWT: il nodo verifica i token dei client col segreto condiviso — gli
-stessi due valori del cloud (Railway → variables). Senza, i palmari
-riceverebbero 401 sul nodo.
+Nota JWT: il nodo verifica i token dei client col segreto condiviso — lo
+stesso `JWT_SECRET` del cloud (Railway → variables). Senza, i palmari
+riceverebbero 401 sul nodo. `JWT_REFRESH_SECRET` NON serve: login e refresh
+vanno sempre al cloud. A ogni rotazione di `JWT_SECRET` sul cloud va
+aggiornato anche questo `.cmd`, a modalità ibrida spenta.
 
 Lo scambio (fuori servizio):
 
