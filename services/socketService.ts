@@ -1,9 +1,9 @@
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import { Server as HTTPServer } from 'http';
 import type { Reservation, Table, Room, Dish, BanquetMenu, UserRole, TableMerge, TableHiddenOverride, RoomClosedOverride } from '../types.js';
-import { AuthService, TokenPayload } from '../auth/authService.js';
+import { AuthService, TokenPayload, isPlatformScopedSession } from '../auth/authService.js';
 import { isAllowedOrigin } from './corsAllowlist.js';
-import { queryWithRetry, runWithTenantContext } from '../db.js';
+import { queryWithRetry, runWithTenantContext, runAsPlatform } from '../db.js';
 import { mirrorToSalaNode } from './salaNodeBridge.js';
 
 // Extended socket type with user data
@@ -213,15 +213,20 @@ export class SocketService {
     // Gli handler socket girano fuori da authenticate, quindi senza contesto
     // tenant: col pool nudo, sotto la RLS rigida di produzione, users dava
     // zero righe e il palmare mostrava il prefisso dell'email invece del
-    // nome. In cache va solo l'esito di una lettura riuscita: un errore
-    // transitorio non deve fissare il ripiego fino al riavvio.
+    // nome. In cache va solo un nome letto davvero: un errore o una riga non
+    // vista non devono fissare il ripiego fino al riavvio.
     try {
-      const r = await runWithTenantContext(user.tenantId, () => queryWithRetry(
-        `SELECT full_name FROM users WHERE id = $1 AND tenant_id = $2`,
-        [user.userId, user.tenantId]
-      ));
-      if (r.rows[0]?.full_name) name = String(r.rows[0].full_name);
-      this.padNames.set(user.userId, name);
+      const r = isPlatformScopedSession(user)
+        // rls-bypass: sessione «Entra», la riga dell'admin sta nel tenant di casa; lettura per id dal JWT
+        ? await runAsPlatform(() => queryWithRetry(`SELECT full_name FROM users WHERE id = $1`, [user.userId]))
+        : await runWithTenantContext(user.tenantId, () => queryWithRetry(
+            `SELECT full_name FROM users WHERE id = $1 AND tenant_id = $2`,
+            [user.userId, user.tenantId]
+          ));
+      if (r.rows[0]?.full_name) {
+        name = String(r.rows[0].full_name);
+        this.padNames.set(user.userId, name);
+      }
     } catch { /* fallback: parte locale dell'email */ }
     return name;
   }

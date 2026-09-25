@@ -18,9 +18,10 @@ const connetti = (token: string): Promise<Socket> => new Promise((resolve, rejec
         auth: { token },
         timeout: 10_000,
     });
-    const t = setTimeout(() => reject(new Error('socket non connesso')), 10_000);
+    const fallisci = (e: Error) => { clearTimeout(t); socket.close(); reject(e); };
+    const t = setTimeout(() => fallisci(new Error('socket non connesso')), 10_000);
     socket.on('connect', () => { clearTimeout(t); resolve(socket); });
-    socket.on('connect_error', (e) => { clearTimeout(t); reject(e); });
+    socket.on('connect_error', fallisci);
 });
 
 const entra = (socket: Socket, tableId: number): Promise<Array<{ name: string }>> =>
@@ -48,7 +49,8 @@ describe('presenza sul palmare comande', () => {
         const login = await api().post('/auth/login').send({ email, password: PASSWORD });
         expect(login.status).toBe(200);
         const token = login.body.accessToken as string;
-        sockets.push(await connetti(token), await connetti(token));
+        sockets.push(await connetti(token));
+        sockets.push(await connetti(token));
     });
 
     afterAll(async () => {

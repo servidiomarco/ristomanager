@@ -27481,7 +27481,7 @@ app.get('/admin/billing/return', (_req, res) => {
 // DB. Stripe firma i byte esatti del payload: la verifica usa req.rawBody
 // (catturato dal verify hook di express.json in testa al file), MAI il body
 // già parsato — una ri-serializzazione riordina le chiavi e rompe la firma.
-// rls-bypass: webhook Stripe firmato, tenant da stripe_customer_id (unico), tenant_features e admin globali
+// rls-bypass: webhook Stripe firmato: tenant da stripe_customer_id (UNIQUE), feature scritte su quel tenant
 app.post('/webhook/stripe', async (req, res) => runAsPlatform(async () => {
     if (!process.env.STRIPE_WEBHOOK_SECRET || !isBillingEnabled()) {
         // Env assente = funzionalità spenta, stessa semantica del pannello
@@ -36689,7 +36689,11 @@ const startServer = async () => {
             // schema, migration, seed e warm-up attraversano i tenant.
             // rls-bypass: boot senza richiesta, createSchema fa DDL e seed/backfill su tutti i tenant
             runAsPlatform(() => createSchema())
-                // rls-bypass: boot cross-tenant (migration, policy, warm-up); ogni timer avviato qui dichiari il suo contesto
+                // Timer e listener avviati qui dentro EREDITANO il contesto di
+                // piattaforma (AsyncLocalStorage): chi deve lavorare su un
+                // tenant apre runWithTenantContext, chi se ne dimentica vede
+                // tutti i tenant — non zero righe, e nessun test se ne accorge.
+                // rls-bypass: boot cross-tenant: migration, policy, warm-up e avvio dei job di piattaforma
                 .then(async () => await runAsPlatform(async () => {
                     console.log('✅ Database schema initialized');
                     // Le migration girano DOPO createSchema: la baseline
