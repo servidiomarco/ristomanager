@@ -146,9 +146,12 @@ export interface BookingToolsDeps {
     activityAction: { CREATE: any; UPDATE: any; DELETE: any };
     resourceType: { RESERVATION: any };
     pushSendToRoles: (tenantId: number, roles: string[], payload: any, opts?: any) => Promise<any>;
-    broadcastReservationCreated: (r: any) => void;
-    broadcastReservationUpdated: (r: any) => void;
-    broadcastPaymentRequestCreated: (r: any) => void;
+    // Il tenant esplicito, mai letto dalla riga (audit isolamento tenant,
+    // H-07): la riga di annullamento e modifica non portava tenant_id, e il
+    // broadcast ripiegava sul tenant 1.
+    broadcastReservationCreated: (tenantId: number, r: any) => void;
+    broadcastReservationUpdated: (tenantId: number, r: any) => void;
+    broadcastPaymentRequestCreated: (tenantId: number, r: any) => void;
     broadcastReservationsUpdatedByIds: (ids: number[]) => Promise<any>;
 
     /** Card #26: se la prenotazione è nata senza tavolo, prova a proporne uno
@@ -675,7 +678,7 @@ export async function createReservation(
                     ]
                 );
                 depositCheckoutUrl = order.checkoutUrl;
-                try { d.broadcastPaymentRequestCreated(insertedPayment.rows[0]); }
+                try { d.broadcastPaymentRequestCreated(tenantId, insertedPayment.rows[0]); }
                 catch (err) { console.warn(`${channel.logPrefix} payment socket broadcast failed:`, err); }
 
                 const smsText = d.buildDepositRequestMessage(
@@ -744,7 +747,7 @@ export async function createReservation(
         }
 
         try {
-            d.broadcastReservationCreated(created);
+            d.broadcastReservationCreated(tenantId, created);
             // La riga appena trasmessa non ha i campi latest_payment_*: se la
             // caparra è partita si rimanda la versione arricchita, così
             // l'icona dell'acconto compare subito in dashboard.
@@ -950,7 +953,7 @@ export async function cancelReservation(
         );
 
         try {
-            d.broadcastReservationUpdated({ ...cancelled, reservation_status: 'CANCELLED' });
+            d.broadcastReservationUpdated(tenantId, { ...cancelled, reservation_status: 'CANCELLED' });
         } catch (err) {
             console.warn(`${channel.logPrefix} broadcastReservationUpdated failed:`, err);
         }
@@ -1187,7 +1190,7 @@ export async function modifyReservation(
         );
 
         try {
-            d.broadcastReservationUpdated(after);
+            d.broadcastReservationUpdated(tenantId, after);
         } catch (err) {
             console.warn(`${channel.logPrefix} broadcastReservationUpdated (modify) failed:`, err);
         }

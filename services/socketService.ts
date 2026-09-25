@@ -5,6 +5,7 @@ import { AuthService, TokenPayload } from '../auth/authService.js';
 import { isAllowedOrigin } from './corsAllowlist.js';
 import pool from '../db.js';
 import { mirrorToSalaNode } from './salaNodeBridge.js';
+import { currentTenantContext } from '../db.js';
 
 // Extended socket type with user data
 interface AuthenticatedSocket extends Socket {
@@ -231,6 +232,20 @@ export class SocketService {
   // ibrida non arriva mai in cucina: non aggiungerne.
   private emitTo(tenantId: number, rooms: string[], event: string, data: any, excludeSocketId?: string) {
     if (rooms.length === 0) return;
+    // Invariante dell'audit isolamento tenant (H-07): un evento parte solo
+    // verso il tenant per cui la richiesta sta lavorando. Con H-07 il
+    // broadcast delle modifiche di Sofia ripiegava sul tenant 1, e una
+    // modifica del Demo finiva sugli schermi (e sul nodo) del Frantoio. Sotto
+    // runAsPlatform o senza contesto (webhook, scheduler, outbox) non c'è
+    // niente con cui confrontare. In produzione solo il log: un evento
+    // perso in silenzio a metà servizio costa più del difetto che segnala;
+    // lo scarto si accende con SOCKET_TENANT_INVARIANT_ENFORCE=1 (i test API
+    // lo passano), dopo una settimana di log puliti su Railway.
+    const ctx = currentTenantContext();
+    if (typeof ctx === 'number' && ctx !== Number(tenantId)) {
+      console.error(`[tenant-invariant] evento ${event} per il tenant ${tenantId} emesso nel contesto del tenant ${ctx}`);
+      if (process.env.SOCKET_TENANT_INVARIANT_ENFORCE === '1') return;
+    }
     if (excludeSocketId) {
       this.io.to(rooms).except(excludeSocketId).emit(event, data);
     } else {
