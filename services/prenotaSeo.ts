@@ -118,8 +118,12 @@ export const renderPrenota = async (id: PrenotaIdentity, canonical: string): Pro
             `<script type="application/ld+json">${buildJsonLd(id, canonical)}</script>`,
         ].join('\n    ');
 
+        // Funzione e non stringa come secondo argomento (audit M-08, nota
+        // del critico): in una stringa di sostituzione «$&», «$`» e «$'»
+        // vengono espansi, e un nome o una tagline che li contiene
+        // ricopiava pezzi della pagina dentro <head>. esc() non li tocca.
         return html
-            .replace('<title>Prenota un tavolo</title>', `<title>${titolo}</title>\n    ${testa}`);
+            .replace('<title>Prenota un tavolo</title>', () => `<title>${titolo}</title>\n    ${testa}`);
     } catch {
         return html;
     }

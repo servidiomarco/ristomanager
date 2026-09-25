@@ -1108,9 +1108,23 @@ a { color: var(--ds-pending-text); }
         // il testo esce (ma resta leggibile agli screen reader via alt).
         $('brandText').hidden = true;
     }
+    // Solo link http(s) (audit M-08), stessa funzione di ordina.html: sito e
+    // mappa arrivano dal ristoratore (Impostazioni → Legale) e un
+    // «javascript:» o un «data:» finiva dritto nell'href della testata. La
+    // base è la pagina stessa: un valore relativo o un dominio senza schema
+    // resta il link di sempre.
+    const safeHttpUrl = v => {
+        const s = String(v || '').trim();
+        if (!s) return null;
+        try {
+            const u = new URL(s, location.href);
+            return (u.protocol === 'https:' || u.protocol === 'http:') ? u.href : null;
+        } catch { return null; }
+    };
     const brandLink = $('brandLink');
-    if (branding.website_url) {
-        brandLink.href = branding.website_url;
+    const websiteUrl = safeHttpUrl(branding.website_url);
+    if (websiteUrl) {
+        brandLink.href = websiteUrl;
         brandLink.setAttribute('aria-label', t('header.brandAria', { name: restaurantName || t('header.brandAriaFallback') }));
     } else {
         brandLink.removeAttribute('href');
@@ -1159,8 +1173,10 @@ a { color: var(--ds-pending-text); }
     }
     // "Dove siamo" quando l'indirizzo non è ancora scritto in Impostazioni:
     // il link alla mappa è la cosa che serve davvero, l'etichetta può aspettare.
-    if (branding.maps_url) {
-        addPill(branding.maps_url, branding.address || t('rooms.whereFallback'),
+    // Passa dallo stesso safeHttpUrl del sito (audit M-08).
+    const mapsUrl = safeHttpUrl(branding.maps_url);
+    if (mapsUrl) {
+        addPill(mapsUrl, branding.address || t('rooms.whereFallback'),
             '<path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 1116 0z"/><circle cx="12" cy="10" r="3"/>', true);
     }
 
