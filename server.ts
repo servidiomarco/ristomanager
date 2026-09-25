@@ -2117,7 +2117,10 @@ async function broadcastReservationsUpdatedByIds(ids: number[]): Promise<void> {
             WHERE r.id = ANY($1::int[])
         `, [ids]);
         for (const row of result.rows) {
-            socketService.broadcastReservationSynced(Number(row.tenant_id) || PUBLIC_TENANT_ID, row);
+            // Il tenant dalla riga (r.* lo porta sempre, NOT NULL), senza il
+            // ripiego sul tenant 1: una riga che lo perdesse non deve finire
+            // sugli schermi del Frantoio (audit isolamento tenant, H-07).
+            socketService.broadcastReservationSynced(Number(row.tenant_id), row);
         }
     } catch (err) {
         console.warn('[sync] broadcastReservationsUpdatedByIds failed:', err);
@@ -19929,7 +19932,10 @@ const IDENTITY_FALLBACK: BusinessIdentity = {
 
 // Cache per tenant: ogni ristorante ha la propria identità pubblica.
 const identityCache = new Map<number, { identity: BusinessIdentity; refreshedAt: number }>();
-const IDENTITY_TTL_MS = 60_000;
+// IDENTITY_CACHE_TTL_MS la imposta solo globalSetup dei test API: provare il
+// refresh a cache scaduta (tenant-fallback.test.ts) non deve costare un
+// minuto d'attesa. Railway e il nodo di sala non la impostano.
+const IDENTITY_TTL_MS = Number(process.env.IDENTITY_CACHE_TTL_MS) > 0 ? Number(process.env.IDENTITY_CACHE_TTL_MS) : 60_000;
 
 // I template di messaggi/email chiamano businessIdentity() senza argomento e
 // restano quindi sul tenant 1 (PUBLIC_TENANT_ID): il threading del tenant nel
@@ -19950,7 +19956,18 @@ function businessIdentity(tenantId: number = PUBLIC_TENANT_ID): BusinessIdentity
 }
 
 async function refreshBusinessIdentity(tenantId: number): Promise<void> {
-    const legal = await getLegalConfig(tenantId);
+    // Contesto del tenant da leggere, non del chiamante. businessIdentity()
+    // senza argomento rinfresca il tenant 1 anche da una richiesta del Demo:
+    // sotto la RLS rigida di produzione quella lettura vedeva zero righe e
+    // la cache del Frantoio restava senza logo né indirizzo per 60 s
+    // (/prenota, email). Audit isolamento tenant, M-06.
+    const esito = { letta: false };
+    const legal = await runWithTenantContext(tenantId, () => getLegalConfig(tenantId, esito));
+    // Riga assente o lettura fallita: si tiene l'identità già in cache
+    // invece di sovrascriverla coi fallback. Senza una cache precedente si
+    // prosegue come sempre (i fallback storici). Stessa lezione di
+    // salaNodeTenantAuthorized: la lettura a vuoto avvelena la cache.
+    if (!esito.letta && identityCache.has(tenantId)) return;
     const s = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
     identityCache.set(tenantId, {
         identity: {
@@ -24239,7 +24256,10 @@ function normalizeLegalMode(v: unknown): LegalMode {
     return (typeof v === 'string' && (LEGAL_MODES as readonly string[]).includes(v)) ? (v as LegalMode) : LEGAL_MODE_DEFAULT;
 }
 
-async function getLegalConfig(tenantId: number): Promise<Record<string, string | boolean>> {
+// `esito.letta` diventa true solo se la riga c'era e si è letta: serve a
+// refreshBusinessIdentity per distinguere un legal_config vuoto da una
+// lettura mancata (qui l'errore resta inghiottito, come sempre).
+async function getLegalConfig(tenantId: number, esito?: { letta: boolean }): Promise<Record<string, string | boolean>> {
     const base = emptyLegalConfig();
     try {
         const result = await queryWithRetry(
@@ -24256,6 +24276,7 @@ async function getLegalConfig(tenantId: number): Promise<Record<string, string |
                 for (const k of LEGAL_BOOL_FIELDS) {
                     if (typeof parsed[k] === 'boolean') base[k] = parsed[k];
                 }
+                if (esito) esito.letta = true;
             }
         }
     } catch (err) {
@@ -36604,9 +36625,13 @@ bookingTools.configureBookingTools({
     pushSendToRoles,
     // socketService è inizializzato dopo il listen: le lambda lo leggono al
     // momento della chiamata, non alla configurazione.
-    broadcastReservationCreated: (r: any) => socketService?.broadcastReservationCreated(Number(r.tenant_id) || PUBLIC_TENANT_ID, r),
-    broadcastReservationUpdated: (r: any) => socketService?.broadcastReservationUpdated(Number(r.tenant_id) || PUBLIC_TENANT_ID, r),
-    broadcastPaymentRequestCreated: (r: any) => socketService?.broadcastToAll(Number(r.tenant_id) || PUBLIC_TENANT_ID, 'paymentRequest:created', r),
+    // Il tenant arriva da bookingTools, che lo ha risolto dal canale: mai
+    // più `Number(r.tenant_id) || PUBLIC_TENANT_ID`. Le righe di annullamento
+    // e modifica di Sofia non portavano tenant_id, e ogni loro broadcast
+    // finiva sugli schermi del Frantoio (audit isolamento tenant, H-07).
+    broadcastReservationCreated: (tenantId: number, r: any) => socketService?.broadcastReservationCreated(tenantId, r),
+    broadcastReservationUpdated: (tenantId: number, r: any) => socketService?.broadcastReservationUpdated(tenantId, r),
+    broadcastPaymentRequestCreated: (tenantId: number, r: any) => socketService?.broadcastToAll(tenantId, 'paymentRequest:created', r),
     broadcastReservationsUpdatedByIds,
     suggestTableAssignment: (tenantId: number, reservationId: number) => {
         maybeSuggestTableAssignment(tenantId, reservationId).catch(err =>

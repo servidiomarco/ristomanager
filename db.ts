@@ -135,6 +135,18 @@ export const runWithTenantContext = <T>(tenantId: number, fn: () => T): T =>
 export const runAsPlatform = <T>(fn: () => T): T =>
     tenantContext.run({ platform: true }, fn);
 
+// Il contesto in cui gira il codice chiamante, in sola lettura: serve
+// all'invariante di SocketService.emitTo (audit isolamento tenant, H-07),
+// che confronta il tenant dell'evento con quello per cui la richiesta sta
+// lavorando. Numero = scopato su quel tenant, 'platform' = lavoro di
+// piattaforma dichiarato, undefined = nessun contesto.
+export const currentTenantContext = (): number | 'platform' | undefined => {
+    const ctx = tenantContext.getStore();
+    if (!ctx) return undefined;
+    if (ctx.tenantId) return ctx.tenantId;
+    return ctx.platform ? 'platform' : undefined;
+};
+
 // SET di sessione sul client appena preso dal pool, RESET alla release: il
 // client torna in pool pulito qualunque cosa sia successa nel mezzo. I
 // valori sono sanificati (Number / letterale fisso), niente input utente.

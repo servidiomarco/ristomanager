@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import type { Request } from 'express';
 import { queryWithRetry } from '../db.js';
-import { outboxEnqueueInTx, withOutboxTx } from './outboxService.js';
+import { outboxEnqueueInTx, outboxKick, withOutboxTx } from './outboxService.js';
 import { Shift, ReservationSource } from '../types.js';
 import { getDatePartInTz, getTimePartInTz } from '../utils/reservationTime.js';
 import { getTenantLocale } from './tenantLocale.js';
@@ -1163,12 +1163,28 @@ export async function cancelVoiceReservation(
     if (active.length > 1) return { status: 'ambiguous', candidates: active };
 
     const target = active[0];
-    const updated = await queryWithRetry(`
-        UPDATE reservations
-        SET reservation_status = 'CANCELLED'
-        WHERE id = $1 AND tenant_id = $2
-        RETURNING id, customer_name, reservation_time, shift, guests
-    `, [target.id, tenantId]);
+    // Audit isolamento tenant, H-07. RETURNING * e non cinque colonne: la
+    // riga senza tenant_id faceva ripiegare il broadcast sul tenant 1 (un
+    // annullamento del Demo arrivava sugli schermi del Frantoio), e sui
+    // client la riga parziale sostituiva la scheda per intero (App.tsx),
+    // che perdeva note, telefono e tavolo fino al ricaricamento. L'evento
+    // nel log di replica, nella stessa transazione come in PUT
+    // /reservations: senza, il nodo di sala non vedeva gli annullamenti
+    // di Sofia.
+    const updated = await withOutboxTx(async (client) => {
+        const upd = await client.query(`
+            UPDATE reservations
+            SET reservation_status = 'CANCELLED'
+            WHERE id = $1 AND tenant_id = $2
+            RETURNING *
+        `, [target.id, tenantId]);
+        if (upd.rows[0]) {
+            await outboxEnqueueInTx(client, tenantId, 'reservation:updated', `reservation:${target.id}`,
+                { reservation_id: Number(target.id) });
+        }
+        return upd;
+    });
+    outboxKick();
 
     return { status: 'cancelled', reservation: updated.rows[0] };
 }
@@ -1361,24 +1377,35 @@ export async function modifyVoiceReservation(
     // The two branches use different SQL parameter counts. Postgres refuses
     // to bind excess parameters ("could not determine data type of parameter
     // $1"), so we split into two calls with their own params array.
-    const returning = 'id, customer_name, reservation_time, shift, guests, table_id, phone';
-    const updated = scheduleChanged
-        ? await queryWithRetry(
-            `UPDATE reservations
-             SET reservation_time = $1, shift = $2, guests = $3, table_id = $4,
-                 notes = $5, reservation_status = 'CONFIRMED'
-             WHERE id = $6 AND tenant_id = $7
-             RETURNING ${returning}`,
-            [newReservationTime, newShift, newGuests, assigned?.id ?? current.table_id,
-             notesToStore, current.id, tenantId]
-          )
-        : await queryWithRetry(
-            `UPDATE reservations
-             SET notes = $1, reservation_status = 'CONFIRMED'
-             WHERE id = $2 AND tenant_id = $3
-             RETURNING ${returning}`,
-            [notesToStore, current.id, tenantId]
-          );
+    // RETURNING * ed evento nel log di replica: stesso motivo e stesso schema
+    // dell'annullamento qui sopra (audit isolamento tenant, H-07). La riga
+    // parziale toglieva dalla scheda del Frantoio note, stato d'arrivo e
+    // dati del cliente a ogni modifica di Sofia.
+    const updated = await withOutboxTx(async (client) => {
+        const upd = scheduleChanged
+            ? await client.query(
+                `UPDATE reservations
+                 SET reservation_time = $1, shift = $2, guests = $3, table_id = $4,
+                     notes = $5, reservation_status = 'CONFIRMED'
+                 WHERE id = $6 AND tenant_id = $7
+                 RETURNING *`,
+                [newReservationTime, newShift, newGuests, assigned?.id ?? current.table_id,
+                 notesToStore, current.id, tenantId]
+              )
+            : await client.query(
+                `UPDATE reservations
+                 SET notes = $1, reservation_status = 'CONFIRMED'
+                 WHERE id = $2 AND tenant_id = $3
+                 RETURNING *`,
+                [notesToStore, current.id, tenantId]
+              );
+        if (upd.rows[0]) {
+            await outboxEnqueueInTx(client, tenantId, 'reservation:updated', `reservation:${current.id}`,
+                { reservation_id: Number(current.id) });
+        }
+        return upd;
+    });
+    outboxKick();
 
     const after: ModifiedReservation = {
         ...updated.rows[0],
