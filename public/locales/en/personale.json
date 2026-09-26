@@ -192,5 +192,19 @@
     "doubleServiceHint": "lunch and dinner, whole day",
     "monthly": "Monthly",
     "monthlyHint": "in full during the contract months"
-  }
+  },
+  "leavePlan": "Leave",
+  "userAlreadyLinked": "This account is already linked to another card",
+  "leaveCard": "Leave",
+  "leaveCardAside": "allowance and requests from the app",
+  "annualLeaveDays": "Leave days per year",
+  "annualLeaveDaysHint": "Empty: the default from the leave plan rules applies",
+  "annualLeaveDaysPlaceholder": "Restaurant default",
+  "linkedAccount": "App account",
+  "linkedAccountHint": "With a linked account the employee requests leave from their profile",
+  "noLinkedAccount": "None",
+  "openLeavePlan": "Open Leave",
+  "pendingLeaveHere_one": "One leave request pending",
+  "pendingLeaveHere_other": "{{count}} leave requests pending",
+  "leaveRequest": "Leave request"
 }

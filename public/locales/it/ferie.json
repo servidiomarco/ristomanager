@@ -1,0 +1,140 @@
+{
+  "loadError": "Errore nel caricamento del piano ferie",
+  "prevYear": "Anno precedente",
+  "nextYear": "Anno successivo",
+  "prevMonth": "Mese precedente",
+  "nextMonth": "Mese successivo",
+  "rules": "Regole",
+  "newRequest": "Richiesta",
+  "stat": {
+    "pending": "in attesa",
+    "approvedDays": "giorni approvati",
+    "shortDays": "giorni scoperti"
+  },
+  "pendingTitle": "In attesa",
+  "generate": "Genera proposta",
+  "noMinimumsHint": "Senza una copertura minima la proposta approva tutto ciò che sta nel monte.",
+  "proposalTitle": "Proposta",
+  "proposalSummary": "Da approvare {{approve}} · da rifiutare {{reject}}",
+  "cancel": "Annulla",
+  "apply": "Applica",
+  "noPending": "Nessuna richiesta in attesa.",
+  "unknownStaff": "Dipendente eliminato",
+  "category": {
+    "SALA": "Sala",
+    "CUCINA": "Cucina"
+  },
+  "categoryLower": {
+    "SALA": "sala",
+    "CUCINA": "cucina"
+  },
+  "service": {
+    "LUNCH": "Pranzo",
+    "DINNER": "Cena"
+  },
+  "serviceLower": {
+    "LUNCH": "pranzo",
+    "DINNER": "cena"
+  },
+  "remainingAfter": "restano {{days}}",
+  "enteredByManager": "Inserita dal responsabile",
+  "moreReasons": "(+{{count}})",
+  "decisionFor": "Decisione per {{name}}",
+  "approve": "Approva",
+  "reject": "Rifiuta",
+  "approvedToast": "Ferie approvate",
+  "rejectedToast": "Richiesta rifiutata",
+  "revokedToast": "Ferie annullate",
+  "someFailed_one": "Una richiesta era già stata decisa",
+  "someFailed_other": "{{count}} richieste erano già state decise",
+  "proposalError": "Proposta non riuscita",
+  "proposalApplied_one": "Una richiesta decisa",
+  "proposalApplied_other": "{{count}} richieste decise",
+  "closedDay": "Chiuso",
+  "restDay": "Riposo settimanale",
+  "bar": {
+    "approved": "Ferie approvate",
+    "pending": "In attesa",
+    "other": "Altre assenze"
+  },
+  "legend": {
+    "short": "Sotto il minimo",
+    "risky": "Sotto il minimo se approvi"
+  },
+  "coverageRow": "In servizio",
+  "planAria": "Piano ferie di {{month}}",
+  "noStaff": "Nessun dipendente attivo.",
+  "balanceTitle": "Spettanti {{entitled}} · approvate {{approved}} · in attesa {{pending}}",
+  "remainingShort": "{{days}} residui",
+  "balanceTitleSection": "Monte ferie {{year}}",
+  "defaultDaysMeta": "di norma {{days}}",
+  "col": {
+    "entitled": "Spettanti",
+    "approved": "Approvate",
+    "pending": "In attesa",
+    "remaining": "Residue"
+  },
+  "decidedTitle": "Decise",
+  "revoke": "Revoca",
+  "rejectTitle": "Rifiuta richiesta",
+  "rejectNote": "Motivo",
+  "rejectNoteHint": "Lo legge il dipendente.",
+  "revokeTitle": "Annulla ferie approvate",
+  "revokeBody": "L'assenza esce dal calendario e il dipendente torna in turno.",
+  "rulesTitle": "Regole del piano ferie",
+  "save": "Salva",
+  "invalidDays": "Numero di giorni non valido",
+  "rulesSaved": "Regole salvate",
+  "minimumsTitle": "Copertura minima",
+  "minimumsAside": "persone in servizio",
+  "defaultDaysTitle": "Giorni di ferie l'anno",
+  "defaultDaysHint": "Per fissi e stagionali senza un valore sulla scheda. Vuoto: monte non tenuto.",
+  "notTracked": "Non tenuto",
+  "priorityTitle": "Chi ha la precedenza",
+  "priority": {
+    "FIRST_COME": "Chi chiede prima",
+    "FEWEST_DAYS": "Chi ne ha fatte meno"
+  },
+  "priorityHint": {
+    "FIRST_COME": "Sulle stesse date vince la richiesta più vecchia.",
+    "FEWEST_DAYS": "Passa avanti chi quest'anno ha meno giorni approvati."
+  },
+  "requestCreated": "Richiesta inserita · {{days}}",
+  "newRequestTitle": "Richiesta di ferie",
+  "createRequest": "Inserisci",
+  "staffMember": "Dipendente",
+  "pickStaff": "Scegli…",
+  "from": "Dal",
+  "to": "Al",
+  "note": "Nota",
+  "days_one": "{{value}} giorno",
+  "days_other": "{{value}} giorni",
+  "status": {
+    "PENDING": "In attesa",
+    "APPROVED": "Approvata",
+    "REJECTED": "Non approvata",
+    "CANCELLED": "Annullata"
+  },
+  "reason": {
+    "coverage": "{{date}}: {{where}} a {{service}} scende a {{left}} (minimo {{min}})",
+    "balance": "Supera il monte {{year}} di {{days}}"
+  },
+  "error": {
+    "overlap": "Ci sono già ferie in quelle date.",
+    "invalid_dates": "Controlla le date.",
+    "too_long": "Al massimo 62 giorni per richiesta.",
+    "in_the_past": "Le date sono già passate.",
+    "no_working_days": "Solo giorni di riposo o di chiusura.",
+    "staff_inactive": "Il dipendente non è attivo.",
+    "not_linked": "Il tuo account non è collegato a una scheda del personale.",
+    "not_pending": "La richiesta è già stata decisa.",
+    "generic": "Operazione non riuscita."
+  },
+  "myLeaveTitle": "Le mie ferie",
+  "askLeave": "Chiedi ferie",
+  "send": "Invia",
+  "requestSent": "Richiesta inviata.",
+  "willCost": "Costa {{days}}",
+  "overBalance": "oltre il residuo",
+  "withdraw": "Ritira richiesta"
+}

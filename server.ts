@@ -207,6 +207,25 @@ import {
 import { clampModifierN, signedModifierLabel, signedModifierDelta } from './utils/modifierScale.js';
 import { BAR_COURSE_NO, DESSERT_COURSE_NO, isOffSequenceCourse } from './utils/courses.js';
 import { getRomeDatePart, getRomeTimePart, getDatePartInTz, getTimePartInTz } from './utils/reservationTime.js';
+import {
+    addIsoDays,
+    countLeaveDays,
+    coverageTimeline,
+    isIsoDay,
+    leaveDaysByYear,
+    makeServiceOpen,
+    MAX_LEAVE_SPAN_DAYS,
+    proposeLeavePlan,
+    spanDays,
+    type CoverageMinimums,
+    type LeaveAbsence,
+    type LeavePriority,
+    type LeaveRequestLike,
+    type LeaveShiftRow,
+    type LeaveStaff,
+    type OpeningCalendar,
+    type ServiceOpen,
+} from './utils/leavePlan.js';
 import { formatMoneyMinor } from './utils/money.js';
 import { buildEReceiptPayload, buildFatturaPaXml, getFiscalDriver, type FiscalSeller, type InvoiceBuyer } from './services/fiscalService.js';
 import {
@@ -17854,6 +17873,60 @@ app.delete('/suppliers/:id', authenticate, async (req, res) => {
 // STAFF MANAGEMENT ROUTES
 // ============================================
 
+// La forma JSON di una scheda, unica per lista, dettaglio, creazione e
+// modifica. annual_leave_days è NUMERIC: pg lo restituisce come stringa.
+const staffRowJson = (row: any) => ({
+    id: row.id,
+    name: row.name,
+    surname: row.surname,
+    category: row.category,
+    staffType: row.staff_type,
+    phone: row.phone,
+    email: row.email,
+    role: row.role,
+    hireDate: row.hire_date,
+    contractEndDate: row.contract_end_date,
+    weeklyRestDay: row.weekly_rest_day,
+    notes: row.notes,
+    isActive: row.is_active,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    userId: row.user_id ?? null,
+    annualLeaveDays: row.annual_leave_days != null ? Number(row.annual_leave_days) : null
+});
+
+// Il collegamento scheda ↔ account è ciò che apre «Le mie ferie» al
+// dipendente: l'account deve essere di questo ristorante e non già legato a
+// un'altra scheda (l'indice unico lo impedirebbe comunque, ma con un 500).
+async function checkLinkableUser(
+    tenantId: number,
+    userId: unknown,
+    staffId: string | null
+): Promise<{ ok: true; value: number | null } | { ok: false; status: number; error: string }> {
+    if (userId === null || userId === '') return { ok: true, value: null };
+    const id = Number(userId);
+    if (!Number.isInteger(id) || id <= 0) return { ok: false, status: 400, error: 'invalid_user_id' };
+    const r = await queryWithRetry(
+        `SELECT u.id, sm.id AS staff_id
+           FROM users u
+           LEFT JOIN staff_members sm ON sm.user_id = u.id
+          WHERE u.id = $1 AND u.tenant_id = $2 AND u.role <> 'PLATFORM_ADMIN'`,
+        [id, tenantId]
+    );
+    if (r.rows.length === 0) return { ok: false, status: 404, error: 'user_not_found' };
+    if (r.rows[0].staff_id && r.rows[0].staff_id !== staffId) return { ok: false, status: 409, error: 'user_already_linked' };
+    return { ok: true, value: id };
+}
+
+// Giorni di ferie l'anno: mezze giornate ammesse (un'assenza su un solo
+// servizio vale 0,5), vuoto = si eredita il default del ristorante.
+const parseAnnualLeaveDays = (v: unknown): { ok: true; value: number | null } | { ok: false } => {
+    if (v === null || v === '') return { ok: true, value: null };
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < 0 || n > 365) return { ok: false };
+    return { ok: true, value: Math.round(n * 2) / 2 };
+};
+
 // Get all staff members
 app.get('/staff', authenticate, async (req, res) => {
     try {
@@ -17870,23 +17943,7 @@ app.get('/staff', authenticate, async (req, res) => {
 
         const result = await queryWithRetry(query, params);
 
-        const staff = result.rows.map(row => ({
-            id: row.id,
-            name: row.name,
-            surname: row.surname,
-            category: row.category,
-            staffType: row.staff_type,
-            phone: row.phone,
-            email: row.email,
-            role: row.role,
-            hireDate: row.hire_date,
-            contractEndDate: row.contract_end_date,
-            weeklyRestDay: row.weekly_rest_day,
-            notes: row.notes,
-            isActive: row.is_active,
-            createdAt: row.created_at,
-            updatedAt: row.updated_at
-        }));
+        const staff = result.rows.map(staffRowJson);
 
         res.json(staff);
     } catch (err) {
@@ -17898,11 +17955,16 @@ app.get('/staff', authenticate, async (req, res) => {
 // Create staff member
 app.post('/staff', authenticate, requirePermission('staff:full'), async (req, res) => {
     try {
-        const { name, surname, category, staffType, phone, email, role, hireDate, contractEndDate, weeklyRestDay, notes } = req.body;
+        const { name, surname, category, staffType, phone, email, role, hireDate, contractEndDate, weeklyRestDay, notes, userId, annualLeaveDays } = req.body;
 
         if (!name || !surname || !category || !staffType) {
             return res.status(400).json({ error: 'Name, surname, category, and staffType are required' });
         }
+
+        const leaveDays = annualLeaveDays === undefined ? { ok: true as const, value: null } : parseAnnualLeaveDays(annualLeaveDays);
+        if (!leaveDays.ok) return res.status(400).json({ error: 'invalid_annual_leave_days' });
+        const link = userId === undefined ? { ok: true as const, value: null } : await checkLinkableUser(req.tenantId!, userId, null);
+        if (link.ok === false) return res.status(link.status).json({ error: link.error });
 
         // Nome, cognome e ruolo nascono già in Title Case (stessa forma
         // della migration nomi-personale-title-case): le superfici che
@@ -17913,30 +17975,14 @@ app.post('/staff', authenticate, requirePermission('staff:full'), async (req, re
         const cleanRole = typeof role === 'string' && role.trim() ? toTitleCase(role.trim()) : null;
 
         const result = await queryWithRetry(
-            `INSERT INTO staff_members (tenant_id, name, surname, category, staff_type, phone, email, role, hire_date, contract_end_date, weekly_rest_day, notes)
-             VALUES ($12, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            `INSERT INTO staff_members (tenant_id, name, surname, category, staff_type, phone, email, role, hire_date, contract_end_date, weekly_rest_day, notes, user_id, annual_leave_days)
+             VALUES ($12, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $13, $14)
              RETURNING *`,
-            [cleanName, cleanSurname, category, staffType, phone || null, email || null, cleanRole, hireDate || null, contractEndDate || null, weeklyRestDay ?? null, notes || null, req.tenantId!]
+            [cleanName, cleanSurname, category, staffType, phone || null, email || null, cleanRole, hireDate || null, contractEndDate || null, weeklyRestDay ?? null, notes || null, req.tenantId!, link.value, leaveDays.value]
         );
 
         const row = result.rows[0];
-        const staffMember = {
-            id: row.id,
-            name: row.name,
-            surname: row.surname,
-            category: row.category,
-            staffType: row.staff_type,
-            phone: row.phone,
-            email: row.email,
-            role: row.role,
-            hireDate: row.hire_date,
-            contractEndDate: row.contract_end_date,
-            weeklyRestDay: row.weekly_rest_day,
-            notes: row.notes,
-            isActive: row.is_active,
-            createdAt: row.created_at,
-            updatedAt: row.updated_at
-        };
+        const staffMember = staffRowJson(row);
 
         // Broadcast to all connected clients
         const socketId = req.headers['x-socket-id'] as string;
@@ -18348,6 +18394,19 @@ app.put('/staff/time-off/:id', authenticate, requirePermission('staff:full'), as
 app.delete('/staff/time-off/:id', authenticate, requirePermission('staff:full'), async (req, res) => {
     try {
         const { id } = req.params;
+        if (!STAFF_UUID_RE.test(String(id))) {
+            return res.status(404).json({ error: 'Time off record not found' });
+        }
+        // Ferie approvate cancellate dal calendario: la richiesta da cui
+        // nascevano passa ad annullata PRIMA della DELETE — dopo, la FK
+        // (ON DELETE SET NULL) l'avrebbe lasciata «approvata» senza assenza,
+        // e il dipendente la vedrebbe ancora confermata.
+        const cancelled = await queryWithRetry(
+            `UPDATE staff_leave_requests SET status = 'CANCELLED', decided_by_user_id = $3, decided_at = now()
+              WHERE time_off_id = $1 AND tenant_id = $2 AND status = 'APPROVED'
+              RETURNING id`,
+            [id, req.tenantId!, req.user?.userId ?? null]
+        );
         const result = await queryWithRetry('DELETE FROM staff_time_off WHERE id = $1 AND tenant_id = $2 RETURNING id', [id, req.tenantId!]);
 
         if (result.rows.length === 0) {
@@ -18357,6 +18416,9 @@ app.delete('/staff/time-off/:id', authenticate, requirePermission('staff:full'),
         // Broadcast
         const socketId = req.headers['x-socket-id'] as string;
         if (socketService) socketService.broadcastToAll(req.tenantId!, 'timeoff:deleted', { id }, socketId);
+        if (socketService && cancelled.rows.length > 0) {
+            socketService.broadcastToAll(req.tenantId!, 'leave:changed', { ids: cancelled.rows.map(r => r.id) });
+        }
 
         res.status(204).send();
     } catch (err) {
@@ -18448,6 +18510,783 @@ app.get('/staff/presence', authenticate, async (req, res) => {
         res.json(staffByShift);
     } catch (err) {
         console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ============================================
+// PIANO FERIE (richieste, monte ferie, proposta automatica)
+// IMPORTANT: specific paths BEFORE /staff/:id, come per shifts/time-off.
+//
+// Due porte. Il responsabile: staff:view per leggere il piano, staff:full
+// per decidere, inserire per conto di un dipendente e cambiare le regole.
+// Il dipendente: /staff/my-leave, SENZA permessi di matrice — lo autorizza
+// il collegamento fra il suo account e la scheda (staff_members.user_id),
+// che solo chi ha staff:full può creare. Vede e tocca solo le proprie.
+//
+// La logica (quanti giorni costa una richiesta, chi è in servizio, la
+// proposta) sta in utils/leavePlan.ts, condivisa col client che conta i
+// giorni mentre il dipendente sceglie le date.
+// ============================================
+
+interface LeaveSettingsJson {
+    defaultAnnualDays: number | null;
+    minimums: CoverageMinimums;
+    priority: LeavePriority;
+}
+
+async function loadLeaveSettings(tenantId: number): Promise<LeaveSettingsJson> {
+    const r = await queryWithRetry('SELECT * FROM staff_leave_settings WHERE tenant_id = $1', [tenantId]);
+    const row = r.rows[0];
+    return {
+        defaultAnnualDays: row?.default_annual_days != null ? Number(row.default_annual_days) : null,
+        minimums: {
+            SALA: { LUNCH: Number(row?.min_sala_lunch ?? 0), DINNER: Number(row?.min_sala_dinner ?? 0) },
+            CUCINA: { LUNCH: Number(row?.min_cucina_lunch ?? 0), DINNER: Number(row?.min_cucina_dinner ?? 0) },
+        },
+        priority: row?.priority === 'FEWEST_DAYS' ? 'FEWEST_DAYS' : 'FIRST_COME',
+    };
+}
+
+// Quando il ristorante lavora, sulla finestra: orari per giorno della
+// settimana più chiusure straordinarie. Serve a non far pagare sul monte i
+// giorni di chiusura e a non segnare scoperto un servizio che non c'è.
+async function loadOpeningCalendar(tenantId: number, from: string, to: string): Promise<OpeningCalendar> {
+    const [hours, closures] = await Promise.all([
+        getAllOpeningHours(tenantId),
+        queryWithRetry(
+            `SELECT to_char(date, 'YYYY-MM-DD') AS date, shift FROM special_closures
+              WHERE tenant_id = $1 AND date BETWEEN $2::date AND $3::date`,
+            [tenantId, from, to]
+        ),
+    ]);
+    const weekly: OpeningCalendar['weekly'] = {};
+    for (const h of hours) {
+        weekly[h.weekday] = { LUNCH: !!(h.lunch_open && h.lunch_close), DINNER: !!(h.dinner_open && h.dinner_close) };
+    }
+    return {
+        weekly,
+        closures: closures.rows.map((c: any) => ({
+            date: c.date,
+            shift: c.shift === 'LUNCH' || c.shift === 'DINNER' ? c.shift : null,
+        })),
+    };
+}
+
+const leaveIsoDay = (v: any): string => String(v).slice(0, 10);
+
+const parseLeaveYear = (v: unknown): number | null => {
+    const n = Number(v);
+    return Number.isInteger(n) && n >= 2000 && n <= 2100 ? n : null;
+};
+
+const toLeaveStaff = (row: any): LeaveStaff => ({
+    id: row.id,
+    category: row.category === 'CUCINA' ? 'CUCINA' : 'SALA',
+    staffType: row.staff_type,
+    weeklyRestDay: row.weekly_rest_day ?? null,
+    hireDate: row.hire_date ? leaveIsoDay(row.hire_date) : null,
+    contractEndDate: row.contract_end_date ? leaveIsoDay(row.contract_end_date) : null,
+    isActive: row.is_active !== false,
+});
+
+const toLeaveShift = (row: any): LeaveShiftRow => ({
+    staffId: row.staff_id,
+    date: leaveIsoDay(row.date),
+    shift: row.shift,
+    present: row.present !== false,
+});
+
+const toLeaveAbsence = (row: any): LeaveAbsence => ({
+    staffId: row.staff_id,
+    startDate: leaveIsoDay(row.start_date),
+    endDate: leaveIsoDay(row.end_date),
+    shift: row.shift === 'LUNCH' || row.shift === 'DINNER' ? row.shift : null,
+});
+
+const toLeaveRequestLike = (row: any): LeaveRequestLike => ({
+    id: row.id,
+    staffId: row.staff_id,
+    startDate: leaveIsoDay(row.start_date),
+    endDate: leaveIsoDay(row.end_date),
+    createdAt: new Date(row.created_at).toISOString(),
+});
+
+// Il monte di una persona: il suo, o il default del ristorante per chi ha
+// un contratto — gli EXTRA a chiamata non hanno ferie da pianificare.
+const leaveEntitlement = (row: any, settings: LeaveSettingsJson): number | null =>
+    row.annual_leave_days != null
+        ? Number(row.annual_leave_days)
+        : row.staff_type !== 'EXTRA' ? settings.defaultAnnualDays : null;
+
+// Giorni per persona e anno di un insieme di assenze o richieste. Il monte
+// si legge dalle VACANZA in staff_time_off, non dalle richieste: le ferie
+// registrate a mano dal responsabile pesano quanto quelle chieste dall'app.
+const leaveDaysByStaffYear = (rows: any[], restDayOf: (staffId: string) => number | null, isOpen: ServiceOpen): Map<string, number> => {
+    const out = new Map<string, number>();
+    for (const r of rows) {
+        const shift = r.shift === 'LUNCH' || r.shift === 'DINNER' ? r.shift : null;
+        const byYear = leaveDaysByYear(restDayOf(r.staff_id), leaveIsoDay(r.start_date), leaveIsoDay(r.end_date), isOpen, shift);
+        for (const [year, n] of Object.entries(byYear)) {
+            const key = `${r.staff_id}|${year}`;
+            out.set(key, (out.get(key) ?? 0) + n);
+        }
+    }
+    return out;
+};
+
+function computeLeaveBalances(
+    year: number,
+    staffRows: any[],
+    vacations: any[],
+    pendingRows: any[],
+    settings: LeaveSettingsJson,
+    isOpen: ServiceOpen
+) {
+    const restDay = new Map<string, number | null>(staffRows.map(r => [r.id, r.weekly_rest_day ?? null]));
+    const restDayOf = (id: string) => restDay.get(id) ?? null;
+    const approved = leaveDaysByStaffYear(vacations, restDayOf, isOpen);
+    const pending = leaveDaysByStaffYear(pendingRows, restDayOf, isOpen);
+    return staffRows.map(row => {
+        const entitled = leaveEntitlement(row, settings);
+        const used = approved.get(`${row.id}|${year}`) ?? 0;
+        return {
+            staffId: row.id,
+            entitled,
+            approved: used,
+            pending: pending.get(`${row.id}|${year}`) ?? 0,
+            remaining: entitled === null ? null : entitled - used,
+        };
+    });
+}
+
+const LEAVE_REQUEST_SELECT = `
+    SELECT r.id, r.staff_id, r.start_date, r.end_date, r.note, r.status, r.decided_at,
+           r.decision_note, r.created_at, r.time_off_id,
+           (r.requested_by_user_id IS NOT NULL AND r.requested_by_user_id = sm.user_id) AS by_staff,
+           du.full_name AS decided_by_name,
+           sm.weekly_rest_day
+      FROM staff_leave_requests r
+      JOIN staff_members sm ON sm.id = r.staff_id
+      LEFT JOIN users du ON du.id = r.decided_by_user_id
+`;
+
+const leaveRequestJson = (row: any, isOpen: ServiceOpen) => ({
+    id: row.id,
+    staffId: row.staff_id,
+    startDate: leaveIsoDay(row.start_date),
+    endDate: leaveIsoDay(row.end_date),
+    note: row.note ?? null,
+    status: row.status,
+    days: countLeaveDays(row.weekly_rest_day ?? null, leaveIsoDay(row.start_date), leaveIsoDay(row.end_date), isOpen),
+    requestedByStaff: row.by_staff === true,
+    decidedByName: row.decided_by_name ?? null,
+    decidedAt: row.decided_at ?? null,
+    decisionNote: row.decision_note ?? null,
+    createdAt: row.created_at,
+});
+
+const timeOffRowJson = (row: any) => ({
+    id: row.id,
+    staffId: row.staff_id,
+    startDate: row.start_date,
+    endDate: row.end_date,
+    type: row.type,
+    shift: row.shift,
+    notes: row.notes,
+    approved: row.approved,
+    createdAt: row.created_at,
+});
+
+const LEAVE_DAY_FMT = new Intl.DateTimeFormat('it-IT', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+const formatLeaveRange = (start: string, end: string): string => {
+    const f = (d: string) => LEAVE_DAY_FMT.format(new Date(`${d}T00:00:00Z`));
+    if (start === end) return f(start);
+    // Stesso mese: «23–29 nov», come lo scrive il piano.
+    if (start.slice(0, 7) === end.slice(0, 7)) return `${Number(start.slice(8, 10))}–${f(end)}`;
+    return `${f(start)} – ${f(end)}`;
+};
+const formatLeaveDays = (n: number): string => `${String(n).replace('.', ',')} ${n === 1 ? 'giorno' : 'giorni'}`;
+
+type LeaveCheck =
+    | { ok: true; days: number; isOpen: ServiceOpen }
+    | { ok: false; status: number; error: string };
+
+// Le regole di una richiesta nuova, uguali per il dipendente e per il
+// responsabile che la inserisce al suo posto (al quale però il passato è
+// concesso: registrare a posteriori ferie già fatte è normale).
+async function checkNewLeaveRequest(
+    tenantId: number,
+    staffRow: any,
+    startDate: unknown,
+    endDate: unknown,
+    notBefore: string | null
+): Promise<LeaveCheck> {
+    if (!isIsoDay(startDate) || !isIsoDay(endDate) || endDate < startDate) {
+        return { ok: false, status: 400, error: 'invalid_dates' };
+    }
+    if (spanDays(startDate, endDate) > MAX_LEAVE_SPAN_DAYS) return { ok: false, status: 400, error: 'too_long' };
+    if (notBefore && startDate < notBefore) return { ok: false, status: 400, error: 'in_the_past' };
+    if (staffRow.is_active === false) return { ok: false, status: 409, error: 'staff_inactive' };
+
+    const [overlap, calendar] = await Promise.all([
+        queryWithRetry(
+            `SELECT 1 FROM staff_leave_requests
+              WHERE tenant_id = $1 AND staff_id = $2 AND status IN ('PENDING', 'APPROVED')
+                AND start_date <= $4::date AND end_date >= $3::date
+             UNION ALL
+             SELECT 1 FROM staff_time_off
+              WHERE tenant_id = $1 AND staff_id = $2 AND type = 'VACANZA'
+                AND start_date <= $4::date AND end_date >= $3::date
+             LIMIT 1`,
+            [tenantId, staffRow.id, startDate, endDate]
+        ),
+        loadOpeningCalendar(tenantId, startDate, endDate),
+    ]);
+    if (overlap.rows.length > 0) return { ok: false, status: 409, error: 'overlap' };
+
+    const isOpen = makeServiceOpen(calendar);
+    const days = countLeaveDays(staffRow.weekly_rest_day ?? null, startDate, endDate, isOpen);
+    // Solo riposi e chiusure: non costerebbe niente e non toglierebbe
+    // nessuno dal turno — quasi sempre date sbagliate.
+    if (days <= 0) return { ok: false, status: 400, error: 'no_working_days' };
+    return { ok: true, days, isOpen };
+}
+
+async function insertLeaveRequest(
+    tenantId: number,
+    staffId: string,
+    startDate: string,
+    endDate: string,
+    note: unknown,
+    requestedBy: number | null
+): Promise<any> {
+    const cleanNote = typeof note === 'string' && note.trim() ? note.trim().slice(0, 500) : null;
+    const ins = await queryWithRetry(
+        `INSERT INTO staff_leave_requests (tenant_id, staff_id, start_date, end_date, note, requested_by_user_id)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+        [tenantId, staffId, startDate, endDate, cleanNote, requestedBy]
+    );
+    const r = await queryWithRetry(`${LEAVE_REQUEST_SELECT} WHERE r.id = $1 AND r.tenant_id = $2`, [ins.rows[0].id, tenantId]);
+    return r.rows[0];
+}
+
+// Chi decide sulle ferie è chi ha staff:full nella matrice di QUESTO
+// ristorante: i ruoli si leggono da role_permissions, non da una lista
+// fissa, così un titolare che apre la gestione al MANAGER lo trova avvisato.
+async function notifyLeaveManagers(tenantId: number, excludeUserId: number | null, title: string, body: string, tag: string): Promise<void> {
+    try {
+        const r = await queryWithRetry(
+            `SELECT DISTINCT role FROM role_permissions WHERE tenant_id = $1 AND permission = 'staff:full'`,
+            [tenantId]
+        );
+        const roles = r.rows.map((x: any) => String(x.role));
+        if (roles.length === 0) return;
+        await pushSendToRoles(tenantId, roles, { title, body, url: '/?view=STAFF', tag, category: 'staff' }, { excludeUserId });
+    } catch (err) {
+        console.warn('[ferie] notifica ai responsabili fallita:', (err as any)?.message || err);
+    }
+}
+
+async function loadMyStaffRow(tenantId: number, userId: number | undefined): Promise<any | null> {
+    if (!userId) return null;
+    const r = await queryWithRetry('SELECT * FROM staff_members WHERE tenant_id = $1 AND user_id = $2', [tenantId, userId]);
+    return r.rows[0] ?? null;
+}
+
+// Il piano di un anno: richieste, monte per persona, assenze in calendario
+// e copertura giorno per giorno. Le richieste in attesa arrivano anche se
+// cadono in un altro anno: sono la coda da smaltire, non un dato del piano.
+app.get('/staff/leave-plan', authenticate, requirePermission('staff:view'), async (req, res) => {
+    try {
+        const tenantId = req.tenantId!;
+        const today = getRomeDatePart(new Date());
+        const year = parseLeaveYear(req.query.year) ?? Number(today.slice(0, 4));
+        const from = `${year}-01-01`;
+        const to = `${year}-12-31`;
+
+        const [settings, staffRs, shiftsRs, absRs, reqRs, calendar] = await Promise.all([
+            loadLeaveSettings(tenantId),
+            queryWithRetry('SELECT * FROM staff_members WHERE tenant_id = $1 ORDER BY surname, name', [tenantId]),
+            queryWithRetry(
+                `SELECT staff_id, date, shift, present FROM staff_shifts
+                  WHERE tenant_id = $1 AND date BETWEEN $2::date AND $3::date`,
+                [tenantId, from, to]
+            ),
+            queryWithRetry(
+                `SELECT id, staff_id, start_date, end_date, type, shift FROM staff_time_off
+                  WHERE tenant_id = $1 AND start_date <= $3::date AND end_date >= $2::date
+                  ORDER BY start_date`,
+                [tenantId, from, to]
+            ),
+            queryWithRetry(
+                `${LEAVE_REQUEST_SELECT}
+                  WHERE r.tenant_id = $1
+                    AND ((r.start_date <= $3::date AND r.end_date >= $2::date) OR r.status = 'PENDING')
+                  ORDER BY r.start_date, r.created_at`,
+                [tenantId, from, to]
+            ),
+            loadOpeningCalendar(tenantId, addIsoDays(from, -MAX_LEAVE_SPAN_DAYS), addIsoDays(to, MAX_LEAVE_SPAN_DAYS)),
+        ]);
+
+        const isOpen = makeServiceOpen(calendar);
+        const pendingRows = reqRs.rows.filter((r: any) => r.status === 'PENDING');
+        const coverage = coverageTimeline({
+            staff: staffRs.rows.map(toLeaveStaff),
+            shifts: shiftsRs.rows.map(toLeaveShift),
+            absences: absRs.rows.map(toLeaveAbsence),
+            pending: pendingRows.map(toLeaveRequestLike),
+            isOpen,
+            from,
+            to,
+        });
+        const balances = computeLeaveBalances(
+            year,
+            staffRs.rows,
+            absRs.rows.filter((a: any) => a.type === 'VACANZA'),
+            pendingRows,
+            settings,
+            isOpen
+        );
+
+        res.json({
+            year,
+            today,
+            settings,
+            requests: reqRs.rows.map((r: any) => leaveRequestJson(r, isOpen)),
+            balances,
+            absences: absRs.rows.map((a: any) => ({
+                id: a.id,
+                staffId: a.staff_id,
+                startDate: leaveIsoDay(a.start_date),
+                endDate: leaveIsoDay(a.end_date),
+                type: a.type,
+                shift: a.shift ?? null,
+            })),
+            coverage,
+        });
+    } catch (err) {
+        console.error('GET /staff/leave-plan error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Il numero sul segmento «Ferie» di Personale e, per persona, sulla sua
+// scheda: leggero apposta, lo si chiede a ogni apertura della pagina.
+app.get('/staff/leave-requests/pending-count', authenticate, requirePermission('staff:view'), async (req, res) => {
+    try {
+        const r = await queryWithRetry(
+            `SELECT staff_id, COUNT(*)::int AS n FROM staff_leave_requests
+              WHERE tenant_id = $1 AND status = 'PENDING'
+              GROUP BY staff_id`,
+            [req.tenantId!]
+        );
+        const byStaff: Record<string, number> = {};
+        let count = 0;
+        for (const row of r.rows) { byStaff[row.staff_id] = row.n; count += row.n; }
+        res.json({ count, byStaff });
+    } catch (err) {
+        console.error('GET /staff/leave-requests/pending-count error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/staff/leave-settings', authenticate, requirePermission('staff:full'), async (req, res) => {
+    try {
+        const b = req.body ?? {};
+        const days = parseAnnualLeaveDays(b.defaultAnnualDays ?? null);
+        if (!days.ok) return res.status(400).json({ error: 'invalid_annual_leave_days' });
+        const m = b.minimums ?? {};
+        const mins: number[] = [m?.SALA?.LUNCH, m?.SALA?.DINNER, m?.CUCINA?.LUNCH, m?.CUCINA?.DINNER].map((v: unknown) => Number(v ?? 0));
+        if (mins.some(n => !Number.isInteger(n) || n < 0 || n > 50)) {
+            return res.status(400).json({ error: 'invalid_minimums' });
+        }
+        const priority = b.priority === 'FEWEST_DAYS' ? 'FEWEST_DAYS' : b.priority === 'FIRST_COME' || b.priority === undefined ? 'FIRST_COME' : null;
+        if (!priority) return res.status(400).json({ error: 'invalid_priority' });
+
+        await queryWithRetry(
+            `INSERT INTO staff_leave_settings
+                (tenant_id, default_annual_days, min_sala_lunch, min_sala_dinner, min_cucina_lunch, min_cucina_dinner, priority, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+             ON CONFLICT (tenant_id) DO UPDATE SET
+                default_annual_days = EXCLUDED.default_annual_days,
+                min_sala_lunch = EXCLUDED.min_sala_lunch,
+                min_sala_dinner = EXCLUDED.min_sala_dinner,
+                min_cucina_lunch = EXCLUDED.min_cucina_lunch,
+                min_cucina_dinner = EXCLUDED.min_cucina_dinner,
+                priority = EXCLUDED.priority,
+                updated_at = now()`,
+            [req.tenantId!, days.value, ...mins, priority]
+        );
+        const settings = await loadLeaveSettings(req.tenantId!);
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll(req.tenantId!, 'leave:changed', { settings: true }, socketId);
+        res.json(settings);
+    } catch (err) {
+        console.error('PUT /staff/leave-settings error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Il responsabile inserisce una richiesta per conto di un dipendente (chi
+// la chiede a voce, chi non ha l'app). Nasce in attesa come le altre: la
+// decisione resta un passo distinto e passa dalla stessa proposta.
+app.post('/staff/leave-requests', authenticate, requirePermission('staff:full'), async (req, res) => {
+    try {
+        const tenantId = req.tenantId!;
+        const { staffId, startDate, endDate, note } = req.body ?? {};
+        if (!STAFF_UUID_RE.test(String(staffId))) return res.status(404).json({ error: 'Staff member not found' });
+        const staffRs = await queryWithRetry('SELECT * FROM staff_members WHERE id = $1 AND tenant_id = $2', [staffId, tenantId]);
+        const staffRow = staffRs.rows[0];
+        if (!staffRow) return res.status(404).json({ error: 'Staff member not found' });
+
+        const check = await checkNewLeaveRequest(tenantId, staffRow, startDate, endDate, null);
+        if (check.ok === false) return res.status(check.status).json({ error: check.error });
+
+        const row = await insertLeaveRequest(tenantId, staffRow.id, startDate, endDate, note, req.user?.userId ?? null);
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll(tenantId, 'leave:changed', { ids: [row.id] }, socketId);
+        res.status(201).json(leaveRequestJson(row, check.isOpen));
+    } catch (err) {
+        console.error('POST /staff/leave-requests error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Approva, rifiuta o revoca, una o molte insieme (la proposta si applica
+// in blocco). Una transazione sola: se una riga fallisce a metà non resta
+// un piano applicato per tre quarti. Approvare crea l'assenza VACANZA —
+// è da lì che presenze e calendario turni vedono le ferie.
+app.post('/staff/leave-requests/decide', authenticate, requirePermission('staff:full'), async (req, res) => {
+    try {
+        const tenantId = req.tenantId!;
+        const userId = req.user?.userId ?? null;
+        const raw = Array.isArray(req.body?.decisions) ? req.body.decisions : null;
+        if (!raw || raw.length === 0 || raw.length > 200) return res.status(400).json({ error: 'invalid_decisions' });
+
+        const seen = new Set<string>();
+        const decisions: Array<{ id: string; decision: 'APPROVE' | 'REJECT' | 'REVOKE'; note: string | null }> = [];
+        for (const d of raw) {
+            const id = String(d?.id ?? '');
+            if (!STAFF_UUID_RE.test(id) || !['APPROVE', 'REJECT', 'REVOKE'].includes(d?.decision)) {
+                return res.status(400).json({ error: 'invalid_decisions' });
+            }
+            if (seen.has(id)) continue;
+            seen.add(id);
+            const note = typeof d.note === 'string' && d.note.trim() ? d.note.trim().slice(0, 500) : null;
+            decisions.push({ id, decision: d.decision, note });
+        }
+
+        const outcome = await withTenant(tenantId, async client => {
+            const results: Array<{ id: string; ok: boolean; error?: string; decision?: string; staffUserId?: number | null; startDate?: string; endDate?: string; note?: string | null }> = [];
+            const createdTimeOffs: any[] = [];
+            const deletedTimeOffIds: string[] = [];
+            for (const d of decisions) {
+                const cur = await client.query(
+                    `SELECT r.*, sm.user_id AS staff_user_id
+                       FROM staff_leave_requests r
+                       JOIN staff_members sm ON sm.id = r.staff_id
+                      WHERE r.id = $1 AND r.tenant_id = $2
+                      FOR UPDATE OF r`,
+                    [d.id, tenantId]
+                );
+                const row = cur.rows[0];
+                if (!row) { results.push({ id: d.id, ok: false, error: 'not_found' }); continue; }
+
+                if (d.decision === 'REVOKE') {
+                    if (row.status !== 'APPROVED') { results.push({ id: d.id, ok: false, error: 'not_approved' }); continue; }
+                    if (row.time_off_id) {
+                        await client.query('DELETE FROM staff_time_off WHERE id = $1 AND tenant_id = $2', [row.time_off_id, tenantId]);
+                        deletedTimeOffIds.push(row.time_off_id);
+                    }
+                    await client.query(
+                        `UPDATE staff_leave_requests
+                            SET status = 'CANCELLED', time_off_id = NULL, decided_by_user_id = $3, decided_at = now(), decision_note = $4
+                          WHERE id = $1 AND tenant_id = $2`,
+                        [d.id, tenantId, userId, d.note]
+                    );
+                } else {
+                    if (row.status !== 'PENDING') { results.push({ id: d.id, ok: false, error: 'not_pending' }); continue; }
+                    if (d.decision === 'APPROVE') {
+                        const t = await client.query(
+                            `INSERT INTO staff_time_off (tenant_id, staff_id, start_date, end_date, type, shift, notes, approved)
+                             VALUES ($1, $2, $3, $4, 'VACANZA', NULL, $5, true)
+                             RETURNING *`,
+                            [tenantId, row.staff_id, row.start_date, row.end_date, row.note ?? null]
+                        );
+                        createdTimeOffs.push(t.rows[0]);
+                        await client.query(
+                            `UPDATE staff_leave_requests
+                                SET status = 'APPROVED', time_off_id = $3, decided_by_user_id = $4, decided_at = now(), decision_note = $5
+                              WHERE id = $1 AND tenant_id = $2`,
+                            [d.id, tenantId, t.rows[0].id, userId, d.note]
+                        );
+                    } else {
+                        await client.query(
+                            `UPDATE staff_leave_requests
+                                SET status = 'REJECTED', decided_by_user_id = $3, decided_at = now(), decision_note = $4
+                              WHERE id = $1 AND tenant_id = $2`,
+                            [d.id, tenantId, userId, d.note]
+                        );
+                    }
+                }
+                results.push({
+                    id: d.id,
+                    ok: true,
+                    decision: d.decision,
+                    staffUserId: row.staff_user_id ?? null,
+                    startDate: leaveIsoDay(row.start_date),
+                    endDate: leaveIsoDay(row.end_date),
+                    note: d.note,
+                });
+            }
+            return { results, createdTimeOffs, deletedTimeOffIds };
+        });
+
+        const done = outcome.results.filter(r => r.ok);
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) {
+            for (const t of outcome.createdTimeOffs) socketService.broadcastToAll(tenantId, 'timeoff:created', timeOffRowJson(t), socketId);
+            for (const id of outcome.deletedTimeOffIds) socketService.broadcastToAll(tenantId, 'timeoff:deleted', { id }, socketId);
+            if (done.length > 0) socketService.broadcastToAll(tenantId, 'leave:changed', { ids: done.map(r => r.id) }, socketId);
+        }
+
+        // Il dipendente lo sa senza dover riaprire il profilo.
+        const TITLES: Record<string, string> = {
+            APPROVE: 'Ferie approvate',
+            REJECT: 'Ferie non approvate',
+            REVOKE: 'Ferie annullate',
+        };
+        for (const r of done) {
+            if (!r.staffUserId || r.staffUserId === userId) continue;
+            const body = formatLeaveRange(r.startDate!, r.endDate!) + (r.note ? ` · ${r.note}` : '');
+            void pushSendToUser(r.staffUserId, { title: TITLES[r.decision!], body, url: '/', tag: `leave-${r.id}`, category: 'staff' })
+                ?.catch(err => console.warn('[ferie] notifica al dipendente fallita:', err?.message || err));
+        }
+
+        res.json({
+            results: outcome.results.map(r => ({ id: r.id, ok: r.ok, ...(r.error ? { error: r.error } : {}) })),
+        });
+    } catch (err) {
+        console.error('POST /staff/leave-requests/decide error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// La proposta: su TUTTE le richieste in attesa, con la copertura minima e
+// il monte di ciascuno. Non scrive niente — il responsabile la rilegge,
+// la ritocca e la applica da /decide.
+app.post('/staff/leave-plan/proposal', authenticate, requirePermission('staff:full'), async (req, res) => {
+    try {
+        const tenantId = req.tenantId!;
+        const pendingRs = await queryWithRetry(
+            `SELECT id, staff_id, start_date, end_date, created_at FROM staff_leave_requests
+              WHERE tenant_id = $1 AND status = 'PENDING'`,
+            [tenantId]
+        );
+        if (pendingRs.rows.length === 0) return res.json({ items: [] });
+        const pending = pendingRs.rows.map(toLeaveRequestLike);
+
+        const minStart = pending.reduce((m, r) => (r.startDate < m ? r.startDate : m), pending[0].startDate);
+        const maxEnd = pending.reduce((m, r) => (r.endDate > m ? r.endDate : m), pending[0].endDate);
+        // Il monte è annuale: servono le ferie già in calendario sugli anni
+        // interi toccati dalle richieste, non solo sui giorni richiesti.
+        const winFrom = `${minStart.slice(0, 4)}-01-01`;
+        const winTo = `${maxEnd.slice(0, 4)}-12-31`;
+
+        const [settings, staffRs, shiftsRs, absRs, calendar] = await Promise.all([
+            loadLeaveSettings(tenantId),
+            queryWithRetry('SELECT * FROM staff_members WHERE tenant_id = $1', [tenantId]),
+            queryWithRetry(
+                `SELECT staff_id, date, shift, present FROM staff_shifts
+                  WHERE tenant_id = $1 AND date BETWEEN $2::date AND $3::date`,
+                [tenantId, minStart, maxEnd]
+            ),
+            queryWithRetry(
+                `SELECT staff_id, start_date, end_date, type, shift FROM staff_time_off
+                  WHERE tenant_id = $1 AND start_date <= $3::date AND end_date >= $2::date`,
+                [tenantId, winFrom, winTo]
+            ),
+            loadOpeningCalendar(tenantId, winFrom, winTo),
+        ]);
+
+        const isOpen = makeServiceOpen(calendar);
+        const byId = new Map<string, any>(staffRs.rows.map((r: any) => [r.id, r]));
+        const used = leaveDaysByStaffYear(
+            absRs.rows.filter((a: any) => a.type === 'VACANZA'),
+            id => byId.get(id)?.weekly_rest_day ?? null,
+            isOpen
+        );
+        const items = proposeLeavePlan({
+            staff: staffRs.rows.map(toLeaveStaff),
+            shifts: shiftsRs.rows.map(toLeaveShift),
+            absences: absRs.rows.map(toLeaveAbsence),
+            pending,
+            minimums: settings.minimums,
+            isOpen,
+            priority: settings.priority,
+            entitlement: id => {
+                const row = byId.get(id);
+                return row ? leaveEntitlement(row, settings) : null;
+            },
+            usedDays: (id, year) => used.get(`${id}|${year}`) ?? 0,
+        });
+        res.json({ items });
+    } catch (err) {
+        console.error('POST /staff/leave-plan/proposal error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Gli account a cui collegare una scheda, per il selettore nel modulo del
+// dipendente. Con la scheda a cui ognuno è già legato, così il selettore
+// può dire «già collegato a …» invece di fallire al salvataggio.
+app.get('/staff/linkable-users', authenticate, requirePermission('staff:full'), async (req, res) => {
+    try {
+        const r = await queryWithRetry(
+            `SELECT u.id, u.full_name, u.email, u.role, sm.id AS staff_id
+               FROM users u
+               LEFT JOIN staff_members sm ON sm.user_id = u.id
+              WHERE u.tenant_id = $1 AND u.is_active = true AND u.role <> 'PLATFORM_ADMIN'
+              ORDER BY u.full_name`,
+            [req.tenantId!]
+        );
+        res.json(r.rows.map((u: any) => ({
+            id: u.id,
+            fullName: u.full_name,
+            email: u.email,
+            role: u.role,
+            staffId: u.staff_id ?? null,
+        })));
+    } catch (err) {
+        console.error('GET /staff/linkable-users error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ── Self-service: «Le mie ferie» nel profilo ─────────────────────────────
+
+app.get('/staff/my-leave', authenticate, async (req, res) => {
+    try {
+        const tenantId = req.tenantId!;
+        const me = await loadMyStaffRow(tenantId, req.user?.userId);
+        if (!me) return res.json({ linked: false });
+
+        const today = getRomeDatePart(new Date());
+        const year = parseLeaveYear(req.query.year) ?? Number(today.slice(0, 4));
+        const from = `${year}-01-01`;
+        const to = `${year}-12-31`;
+        // Il calendario copre l'anno e i prossimi diciotto mesi: è quello con
+        // cui il client conta i giorni mentre il dipendente sceglie le date.
+        const horizon = addIsoDays(today, 548);
+        const calTo = horizon > to ? horizon : addIsoDays(to, MAX_LEAVE_SPAN_DAYS);
+
+        const [settings, vacRs, reqRs, calendar] = await Promise.all([
+            loadLeaveSettings(tenantId),
+            queryWithRetry(
+                `SELECT staff_id, start_date, end_date, shift FROM staff_time_off
+                  WHERE tenant_id = $1 AND staff_id = $2 AND type = 'VACANZA'
+                    AND start_date <= $4::date AND end_date >= $3::date`,
+                [tenantId, me.id, from, to]
+            ),
+            queryWithRetry(
+                `${LEAVE_REQUEST_SELECT}
+                  WHERE r.tenant_id = $1 AND r.staff_id = $2 AND (r.end_date >= $3::date OR r.status = 'PENDING')
+                  ORDER BY r.start_date DESC
+                  LIMIT 50`,
+                [tenantId, me.id, from]
+            ),
+            loadOpeningCalendar(tenantId, addIsoDays(from, -MAX_LEAVE_SPAN_DAYS), calTo),
+        ]);
+
+        const isOpen = makeServiceOpen(calendar);
+        const [balance] = computeLeaveBalances(
+            year,
+            [me],
+            vacRs.rows,
+            reqRs.rows.filter((r: any) => r.status === 'PENDING'),
+            settings,
+            isOpen
+        );
+        res.json({
+            linked: true,
+            staffId: me.id,
+            weeklyRestDay: me.weekly_rest_day ?? null,
+            year,
+            today,
+            balance,
+            requests: reqRs.rows.map((r: any) => leaveRequestJson(r, isOpen)),
+            calendar,
+        });
+    } catch (err) {
+        console.error('GET /staff/my-leave error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/staff/my-leave', authenticate, async (req, res) => {
+    try {
+        const tenantId = req.tenantId!;
+        const userId = req.user?.userId ?? null;
+        const me = await loadMyStaffRow(tenantId, req.user?.userId);
+        if (!me) return res.status(403).json({ error: 'not_linked' });
+
+        const { startDate, endDate, note } = req.body ?? {};
+        const check = await checkNewLeaveRequest(tenantId, me, startDate, endDate, getRomeDatePart(new Date()));
+        if (check.ok === false) return res.status(check.status).json({ error: check.error });
+
+        const row = await insertLeaveRequest(tenantId, me.id, startDate, endDate, note, userId);
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll(tenantId, 'leave:changed', { ids: [row.id] }, socketId);
+
+        const who = `${toTitleCase(me.name)} ${toTitleCase(me.surname)}`;
+        void notifyLeaveManagers(
+            tenantId,
+            userId,
+            'Richiesta ferie',
+            `${who} · ${formatLeaveRange(startDate, endDate)} (${formatLeaveDays(check.days)})`,
+            `leave-${row.id}`
+        );
+
+        res.status(201).json(leaveRequestJson(row, check.isOpen));
+    } catch (err) {
+        console.error('POST /staff/my-leave error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Il dipendente ritira una richiesta finché è in attesa. Una volta decisa
+// passa dal responsabile: annullare ferie approvate libera un turno che
+// qualcuno potrebbe aver già riorganizzato.
+app.delete('/staff/my-leave/:id', authenticate, async (req, res) => {
+    try {
+        const tenantId = req.tenantId!;
+        const { id } = req.params;
+        const me = await loadMyStaffRow(tenantId, req.user?.userId);
+        if (!me) return res.status(403).json({ error: 'not_linked' });
+        if (!STAFF_UUID_RE.test(String(id))) return res.status(404).json({ error: 'not_found' });
+
+        const r = await queryWithRetry(
+            `UPDATE staff_leave_requests
+                SET status = 'CANCELLED', decided_by_user_id = $4, decided_at = now()
+              WHERE id = $1 AND tenant_id = $2 AND staff_id = $3 AND status = 'PENDING'
+              RETURNING id`,
+            [id, tenantId, me.id, req.user?.userId ?? null]
+        );
+        if (r.rows.length === 0) {
+            const exists = await queryWithRetry(
+                'SELECT 1 FROM staff_leave_requests WHERE id = $1 AND tenant_id = $2 AND staff_id = $3',
+                [id, tenantId, me.id]
+            );
+            return exists.rows.length > 0
+                ? res.status(409).json({ error: 'not_pending' })
+                : res.status(404).json({ error: 'not_found' });
+        }
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll(tenantId, 'leave:changed', { ids: [id] }, socketId);
+        res.status(204).send();
+    } catch (err) {
+        console.error('DELETE /staff/my-leave/:id error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -18860,23 +19699,7 @@ app.get('/staff/:id', authenticate, async (req, res) => {
         }
 
         const row = result.rows[0];
-        res.json({
-            id: row.id,
-            name: row.name,
-            surname: row.surname,
-            category: row.category,
-            staffType: row.staff_type,
-            phone: row.phone,
-            email: row.email,
-            role: row.role,
-            hireDate: row.hire_date,
-            contractEndDate: row.contract_end_date,
-            weeklyRestDay: row.weekly_rest_day,
-            notes: row.notes,
-            isActive: row.is_active,
-            createdAt: row.created_at,
-            updatedAt: row.updated_at
-        });
+        res.json(staffRowJson(row));
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Internal server error' });
@@ -18887,7 +19710,17 @@ app.get('/staff/:id', authenticate, async (req, res) => {
 app.put('/staff/:id', authenticate, requirePermission('staff:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, surname, category, staffType, phone, email, role, hireDate, contractEndDate, weeklyRestDay, notes, isActive } = req.body;
+        const { name, surname, category, staffType, phone, email, role, hireDate, contractEndDate, weeklyRestDay, notes, isActive, userId, annualLeaveDays } = req.body;
+
+        // Account collegato e giorni di ferie: stessa regola del riposo
+        // settimanale — undefined lascia com'è, null svuota.
+        if (!STAFF_UUID_RE.test(String(id))) {
+            return res.status(404).json({ error: 'Staff member not found' });
+        }
+        const leaveDays = annualLeaveDays === undefined ? null : parseAnnualLeaveDays(annualLeaveDays);
+        if (leaveDays && !leaveDays.ok) return res.status(400).json({ error: 'invalid_annual_leave_days' });
+        const link = userId === undefined ? null : await checkLinkableUser(req.tenantId!, userId, String(id));
+        if (link && link.ok === false) return res.status(link.status).json({ error: link.error });
 
         // Stessa forma del POST: quello che arriva scritto si titola, quello
         // che non arriva (undefined/null) passa alla COALESCE com'è.
@@ -18910,6 +19743,8 @@ app.put('/staff/:id', authenticate, requirePermission('staff:full'), async (req,
                 weekly_rest_day = CASE WHEN $10::text = 'KEEP' THEN weekly_rest_day ELSE $11::smallint END,
                 notes = COALESCE($12, notes),
                 is_active = COALESCE($13, is_active),
+                user_id = CASE WHEN $16::boolean THEN $17::integer ELSE user_id END,
+                annual_leave_days = CASE WHEN $18::boolean THEN $19::numeric ELSE annual_leave_days END,
                 updated_at = CURRENT_TIMESTAMP
              WHERE id = $14 AND tenant_id = $15
              RETURNING *`,
@@ -18917,7 +19752,9 @@ app.put('/staff/:id', authenticate, requirePermission('staff:full'), async (req,
                 cleanName, cleanSurname, category, staffType, phone, email, cleanRole, hireDate, contractEndDate,
                 weeklyRestDay === undefined ? 'KEEP' : 'SET',
                 weeklyRestDay === undefined ? null : weeklyRestDay,
-                notes, isActive, id, req.tenantId!
+                notes, isActive, id, req.tenantId!,
+                link !== null, link && link.ok ? link.value : null,
+                leaveDays !== null, leaveDays && leaveDays.ok ? leaveDays.value : null
             ]
         );
 
@@ -18926,23 +19763,7 @@ app.put('/staff/:id', authenticate, requirePermission('staff:full'), async (req,
         }
 
         const row = result.rows[0];
-        const staffMember = {
-            id: row.id,
-            name: row.name,
-            surname: row.surname,
-            category: row.category,
-            staffType: row.staff_type,
-            phone: row.phone,
-            email: row.email,
-            role: row.role,
-            hireDate: row.hire_date,
-            contractEndDate: row.contract_end_date,
-            weeklyRestDay: row.weekly_rest_day,
-            notes: row.notes,
-            isActive: row.is_active,
-            createdAt: row.created_at,
-            updatedAt: row.updated_at
-        };
+        const staffMember = staffRowJson(row);
 
         // Broadcast to all connected clients
         const socketId = req.headers['x-socket-id'] as string;

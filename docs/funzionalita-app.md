@@ -528,6 +528,14 @@ Modulo a parte (si attiva con l'abbonamento «recensioni»).
 - **Griglia turni settimanale** Lun–Dom: Pranzo, Cena, Pranzo e cena, Tutto il giorno, Riposo; inserimento massivo della settimana.
 - **Assenze**: malattia, permesso, riposo, per giornata intera o singolo turno.
 - **Chi è presente oggi** per turno (incrocio automatico di turni e assenze), mostrato anche in Dashboard.
+- **Piano ferie** (area «Ferie» dentro Personale, accanto a Personale e Compensi):
+  - **Richieste dei dipendenti**: chi ha l'account collegato alla propria scheda (lo collega il responsabile dal modulo del dipendente) chiede le ferie da **«Le mie ferie»** nel proprio profilo — date, nota, e subito quanti giorni costano. Vede il proprio monte (spettanti, approvate, in attesa, residue) e lo stato di ogni richiesta, può ritirarla finché è in attesa e riceve una notifica quando viene approvata o rifiutata (con il motivo).
+  - Il responsabile può inserire una richiesta **per conto di un dipendente**, dal piano o dalla tab Assenze della sua scheda; chi decide sulle ferie riceve una notifica a ogni richiesta nuova, e il segmento «Ferie» mostra quante sono in attesa.
+  - **Giorni conteggiati**: solo quelli in cui il dipendente avrebbe lavorato — il riposo settimanale e i giorni di chiusura del ristorante (orari e chiusure straordinarie) non si scalano dal monte.
+  - **Monte ferie annuo**: giorni spettanti per dipendente, oppure un valore di default del ristorante per fissi e stagionali; le richieste a cavallo d'anno pesano sui due anni. Anche le ferie registrate direttamente in calendario contano.
+  - **Piano del mese** a barre per reparto: ferie approvate, richieste in attesa, altre assenze, riposi e giorni di chiusura, con la riga **«In servizio»** che segna in rosso i giorni sotto la copertura minima e in giallo quelli che ci finirebbero approvando ciò che è in attesa.
+  - **Proposta automatica** («Genera proposta»): con le regole impostate — copertura minima per reparto e servizio (pranzo/cena) e precedenza a chi chiede prima o a chi ha fatto meno ferie — propone quali richieste approvare e quali rifiutare, con il motivo (il giorno che scenderebbe sotto il minimo, o i giorni oltre il monte). Ogni scelta si può cambiare prima di applicarla in blocco.
+  - Approvare una richiesta la trasforma in un'assenza «Vacanza» nel calendario turni e nelle presenze; revocarla (o cancellare l'assenza dal calendario) la annulla.
 - **Compensi** (area riservata dentro Personale): tariffe per dipendente — mensile per fissi e stagionali, a servizio per gli extra con prezzo distinto per il giorno singolo e il doppio (pranzo+cena) — acconti e saldi con residuo del mese. Per gli extra il dovuto si calcola da solo dai turni con presenza, correggibile a mano mese per mese. Visibile solo a chi ha il permesso «Compensi e acconti» (di default il titolare) e protetta da un secondo sblocco: si ridigita la password dell'account, lo sblocco dura 15 minuti e scade uscendo dalla sezione. Come tutto il gestionale, la sezione segue il tema chiaro/scuro: importi, avvisi «tariffa mancante» e fogli restano leggibili anche in modalità scura.
 
 ---
@@ -670,6 +678,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-26 | Personale; Utenti (profilo) | Piano ferie: i dipendenti chiedono le ferie da «Le mie ferie» nel profilo (con l'account collegato alla scheda), il responsabile le vede nell'area Ferie di Personale con monte annuo, piano del mese e copertura per reparto, e una proposta automatica che rispetta copertura minima e monte ferie; approvate, diventano assenze in calendario. |
 | 2026-09-26 | Agente vocale "Sofia" | Chi riaggancia e poco dopo richiama e prenota non resta più fra le «Da ricontattare»: la chiamata servita chiude i tentativi a vuoto dello stesso numero delle 24 ore prima. |
 | 2026-09-26 | Agente vocale "Sofia" | A chi non è in rubrica Sofia chiede nome e cognome in una sola domanda e, se ne arriva uno solo, chiede l'altro: niente più ripetizioni sommate in un nome («Cesareo Cesareo», «Bimbinuto Benvenuto»). |
 | 2026-09-25 | Agente vocale "Sofia"; Impostazioni | Minuti di Sofia: nuovo avviso al 90% dei minuti inclusi, e nella card in Impostazioni → AI il ristoratore sceglie a quali soglie riceverli (50, 80, 90, 100%). |

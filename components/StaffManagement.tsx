@@ -3,10 +3,12 @@ import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
 import {
   StaffMember, StaffShift, StaffTimeOff, StaffCategory, StaffType,
-  Shift, TimeOffType
+  Shift, TimeOffType, LinkableUser
 } from '../types';
 import { staffApiService, CreateStaffInput, CreateTimeOffInput } from '../services/staffApiService';
 import { StaffCompensation } from './StaffCompensation';
+import { PianoFerie, LeaveRequestModal } from './PianoFerie';
+import { socketClient } from '../services/socketClient';
 import { useAuth } from '../contexts/AuthContext';
 import { toTitleCase } from '../utils/text';
 import { displayLocale } from '../utils/formatLocale';
@@ -182,7 +184,35 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
   // password; tornare a PERSONALE lo smonta e butta via lo sblocco.
   const { hasPermission } = useAuth();
   const canSeeCompensation = hasPermission('staff:payments');
-  const [area, setArea] = useState<'PERSONALE' | 'COMPENSI'>('PERSONALE');
+  const canManage = hasPermission('staff:full');
+  const [area, setArea] = useState<'PERSONALE' | 'FERIE' | 'COMPENSI'>('PERSONALE');
+
+  // Richieste di ferie in attesa: il numero sul segmento «Ferie» e, per
+  // persona, l'avviso sulla scheda. Si rilegge quando qualcuno ne manda una.
+  const [leavePending, setLeavePending] = useState<{ count: number; byStaff: Record<string, number> }>({ count: 0, byStaff: {} });
+  const refreshLeavePending = useCallback(async () => {
+    try {
+      setLeavePending(await staffApiService.getPendingLeaveCount());
+    } catch {
+      // Backend precedente o permesso mancante: niente badge, niente errore.
+    }
+  }, []);
+  useEffect(() => {
+    refreshLeavePending();
+    const attach = (socket: ReturnType<typeof socketClient.getSocket>) => {
+      if (!socket) return () => {};
+      socket.on('leave:changed', refreshLeavePending);
+      return () => { socket.off('leave:changed', refreshLeavePending); };
+    };
+    let detach = attach(socketClient.getSocket());
+    const unsubscribe = socketClient.onSocketChange(s => { detach(); detach = attach(s); });
+    return () => { detach(); unsubscribe(); };
+  }, [refreshLeavePending]);
+
+  // Gli account a cui collegare la scheda (self-service ferie), letti
+  // all'apertura del modulo: servono solo lì e solo a chi può salvare.
+  const [linkableUsers, setLinkableUsers] = useState<LinkableUser[] | null>(null);
+  const [leaveRequestFor, setLeaveRequestFor] = useState<string | null>(null);
 
   // Filters
   const [categoryFilter, setCategoryFilter] = useState<StaffCategory | 'ALL'>('ALL');
@@ -263,7 +293,9 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
     hireDate: '',
     contractEndDate: '',
     weeklyRestDay: null,
-    notes: ''
+    notes: '',
+    userId: null,
+    annualLeaveDays: null
   });
 
   const [shiftForm, setShiftForm] = useState({
@@ -610,14 +642,24 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
       hireDate: '',
       contractEndDate: '',
       weeklyRestDay: null,
-      notes: ''
+      notes: '',
+      userId: null,
+      annualLeaveDays: null
     });
     setEditingStaff(null);
     setStaffStep(0);
   };
 
+  const loadLinkableUsers = () => {
+    if (!canManage) return;
+    staffApiService.getLinkableUsers()
+      .then(setLinkableUsers)
+      .catch(() => setLinkableUsers(null));
+  };
+
   const handleOpenAddStaff = () => {
     resetStaffForm();
+    loadLinkableUsers();
     setShowStaffModal(true);
   };
 
@@ -635,8 +677,11 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
       hireDate: staff.hireDate || '',
       contractEndDate: staff.contractEndDate || '',
       weeklyRestDay: staff.weeklyRestDay ?? null,
-      notes: staff.notes || ''
+      notes: staff.notes || '',
+      userId: typeof staff.userId === 'number' ? staff.userId : null,
+      annualLeaveDays: typeof staff.annualLeaveDays === 'number' ? staff.annualLeaveDays : null
     });
+    loadLinkableUsers();
     setShowStaffModal(true);
   };
 
@@ -650,19 +695,30 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
 
     try {
       setIsSavingStaff(true);
+      // Account e giorni di ferie viaggiano solo se cambiati: una scheda letta
+      // da un backend che non li conosceva non deve scollegare nessuno.
+      const { userId, annualLeaveDays, ...base } = staffForm;
+      const prevUserId = editingStaff && typeof editingStaff.userId === 'number' ? editingStaff.userId : null;
+      const prevDays = editingStaff && typeof editingStaff.annualLeaveDays === 'number' ? editingStaff.annualLeaveDays : null;
+      const payload = {
+        ...base,
+        ...((userId ?? null) !== prevUserId ? { userId: userId ?? null } : {}),
+        ...((annualLeaveDays ?? null) !== prevDays ? { annualLeaveDays: annualLeaveDays ?? null } : {}),
+      };
       if (editingStaff) {
-        const updated = await staffApiService.updateStaffMember(editingStaff.id, staffForm);
+        const updated = await staffApiService.updateStaffMember(editingStaff.id, payload);
         setStaffMembers(prev => prev.map(s => s.id === editingStaff.id ? updated : s));
         showToast(t('staffUpdated'), 'success');
       } else {
-        const created = await staffApiService.createStaffMember(staffForm);
+        const created = await staffApiService.createStaffMember(payload);
         setStaffMembers(prev => [...prev, created]);
         showToast(t('staffAdded'), 'success');
       }
       setShowStaffModal(false);
       resetStaffForm();
     } catch (error) {
-      showToast(t('saveError'), 'error');
+      const code = (error as { data?: { error?: string } })?.data?.error;
+      showToast(code === 'user_already_linked' ? t('userAlreadyLinked') : t('saveError'), 'error');
     } finally {
       setIsSavingStaff(false);
     }
@@ -1058,17 +1114,18 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
 
   /* ── Toolbar ─────────────────────────────────────────────────────────── */
   // Il toggle Personale | Compensi, condiviso dalle due aree.
-  const areaToggle = canSeeCompensation ? (
-    <SegmentedControl<'PERSONALE' | 'COMPENSI'>
+  const areaToggle = (
+    <SegmentedControl<'PERSONALE' | 'FERIE' | 'COMPENSI'>
       value={area}
       onChange={setArea}
       ariaLabel={t('staffArea')}
       options={[
         { value: 'PERSONALE', label: t('staff') },
-        { value: 'COMPENSI', label: 'Compensi' },
+        { value: 'FERIE', label: t('leavePlan'), badge: leavePending.count || undefined, badgeTone: 'alert' },
+        ...(canSeeCompensation ? [{ value: 'COMPENSI' as const, label: 'Compensi' }] : []),
       ]}
     />
-  ) : null;
+  );
 
   const toolbar = (
     <div ref={toolbarRef} className="space-y-3">
@@ -1585,6 +1642,31 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
           </div>
         ) : (
           <div className="space-y-3">
+            {/* Le ferie passano dalla richiesta: così entrano nel monte e
+                nella proposta del piano, invece di un'assenza scritta a mano
+                che il piano scopre solo dopo. */}
+            {(leavePending.byStaff[selectedStaff.id] ?? 0) > 0 && (
+              <Callout
+                tone="pending"
+                action={
+                  <button
+                    type="button"
+                    onClick={() => setArea('FERIE')}
+                    className="inline-flex h-11 items-center text-[14px] font-semibold underline-offset-2 hover:underline"
+                  >
+                    {t('openLeavePlan')}
+                  </button>
+                }
+              >
+                {t('pendingLeaveHere', { count: leavePending.byStaff[selectedStaff.id] })}
+              </Callout>
+            )}
+            {canManage && selectedStaff.isActive && (
+              <button type="button" onClick={() => setLeaveRequestFor(selectedStaff.id)} className={`${dsButton.secondary} w-full`}>
+                <CalendarDays className="h-4 w-4" aria-hidden />
+                {t('leaveRequest')}
+              </button>
+            )}
             {timeOffsByMonth.length === 0 ? (
               <EmptyState
                 icon={CalendarDays}
@@ -1735,6 +1817,27 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
     setDayMenu(null);
     run(d);
   };
+
+  if (area === 'FERIE') {
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        <div className="bg-[var(--ds-canvas)] pb-2">
+          <div className="mx-auto w-full max-w-5xl px-4 pt-3 sm:px-6">{areaToggle}</div>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <PianoFerie
+            staffMembers={staffMembers}
+            canManage={canManage}
+            showToast={showToast}
+            onChanged={() => {
+              refreshLeavePending();
+              staffApiService.getTimeOff().then(setTimeOffs).catch(() => {});
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
 
   if (area === 'COMPENSI' && canSeeCompensation) {
     return (
@@ -2080,6 +2183,53 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
                 />
               </Field>
             </FormCard>
+
+            {/* Monte ferie e account: il collegamento è ciò che apre al
+                dipendente «Le mie ferie» nel suo profilo. */}
+            <FormCard title={t('leaveCard')} aside={t('leaveCardAside')} className="space-y-4">
+              <Field label={t('annualLeaveDays')} htmlFor="staff-leave-days" hint={t('annualLeaveDaysHint')}>
+                <input
+                  id="staff-leave-days"
+                  type="number"
+                  inputMode="decimal"
+                  min={0}
+                  max={365}
+                  step={0.5}
+                  value={staffForm.annualLeaveDays ?? ''}
+                  onChange={(e) => setStaffForm({
+                    ...staffForm,
+                    annualLeaveDays: e.target.value === '' ? null : Number(e.target.value)
+                  })}
+                  placeholder={t('annualLeaveDaysPlaceholder')}
+                  className={dsInput}
+                />
+              </Field>
+              {linkableUsers && (
+                <Field label={t('linkedAccount')} htmlFor="staff-user" hint={t('linkedAccountHint')}>
+                  <select
+                    id="staff-user"
+                    value={staffForm.userId ?? ''}
+                    onChange={(e) => setStaffForm({
+                      ...staffForm,
+                      userId: e.target.value === '' ? null : Number(e.target.value)
+                    })}
+                    className={dsSelect}
+                  >
+                    <option value="">{t('noLinkedAccount')}</option>
+                    {linkableUsers.map(u => {
+                      const takenBy = u.staffId && u.staffId !== editingStaff?.id
+                        ? staffMembers.find(s => s.id === u.staffId)
+                        : null;
+                      return (
+                        <option key={u.id} value={u.id} disabled={!!takenBy}>
+                          {u.fullName} · {u.email}{takenBy ? ` — ${fullName(takenBy)}` : ''}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </Field>
+              )}
+            </FormCard>
           </div>
         )}
       </ModalShell>
@@ -2177,6 +2327,16 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ showToast, aut
           </Field>
         </FormCard>
       </ModalShell>
+
+      {/* ----- Richiesta di ferie per conto del dipendente ----- */}
+      <LeaveRequestModal
+        open={!!leaveRequestFor}
+        onClose={() => setLeaveRequestFor(null)}
+        staffMembers={staffMembers}
+        initialStaffId={leaveRequestFor ?? undefined}
+        onCreated={() => { setLeaveRequestFor(null); refreshLeavePending(); }}
+        showToast={showToast}
+      />
 
       {/* ----- Time off modal ----- */}
       <ModalShell
