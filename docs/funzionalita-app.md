@@ -179,6 +179,7 @@ Agente conversazionale AI (ElevenLabs) che **risponde al telefono del ristorante
 - Per ogni chiamata: **riassunto AI, trascrizione completa, registrazione audio** riascoltabile, durata, esito.
 - Azioni: richiama, segna ricontattato, **crea prenotazione dalla chiamata** (dati precompilati), apri scheda cliente, storico messaggi verso quel numero.
 - Badge "da ricontattare" sempre visibile nel menu.
+- Se lo stesso numero richiama e Sofia lo serve (prenota, sposta o disdice), i suoi tentativi a vuoto delle 24 ore prima si chiudono da soli; restano aperti quelli con una richiesta propria (richiamata chiesta, gruppo grande, conferma senza prenotazione).
 
 ---
 
@@ -668,6 +669,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-26 | Agente vocale "Sofia" | Chi riaggancia e poco dopo richiama e prenota non resta più fra le «Da ricontattare»: la chiamata servita chiude i tentativi a vuoto dello stesso numero delle 24 ore prima. |
 | 2026-09-25 | Comande, Cucina e Passe | Sul palmare, chi apre un tavolo su cui lavora già un collega lo vede per nome («Ci sta lavorando anche Giulia»): in produzione compariva invece la prima parte della sua email. |
 | 2026-09-25 | Impostazioni · Legale e privacy | L'informativa privacy pubblica (/privacy, /informativa-privacy, /privacy/<slug>) mostra di nuovo i dati inseriti in Impostazioni → Legale: in produzione usciva coi segnaposto («[Ragione sociale]»…) perché la pagina anonima leggeva le impostazioni senza il contesto del ristorante. |
 | 2026-09-25 | Pagamenti · Comande | Anche la chiusura dalla scheda conto (Pagamenti, palmare, Prenotazioni) chiede come è stata data la mancia, con lo stesso default del pannello di Cassa: quella in contanti entra nei contanti attesi del cassetto. |
