@@ -69,7 +69,11 @@ import {
     PassepartoutBridgeError,
 } from './services/passepartoutBridge.js';
 import { setupSalaNodeBridge, getSalaNodeStatus, disconnectSalaNode, askNodeStatus } from './services/salaNodeBridge.js';
-import { provisionSalaNodeCert, startSalaNodeCertRenewal, isSalaNodeTlsConfigured, SalaNodeTlsError } from './services/salaNodeTls.js';
+import {
+    provisionSalaNodeCert, startSalaNodeCertRenewal, SalaNodeTlsError,
+    syncSalaNodeDnsRecord, validateNewNodeDomain, isNodeDomainTakenByOtherTenant, isPrivateLanIp,
+} from './services/salaNodeTls.js';
+import { isPlatformScopedSession } from './auth/authService.js';
 import type { PassepartoutComanda, EsitoChiusuraComanda, PassepartoutArticolo } from './services/passepartoutService.js';
 import { MENU_LANGS, isMenuTranslationConfigured, translateMenuEntries } from './services/menuTranslationService.js';
 import { isWinePairingConfigured, suggestWinePairings } from './services/aiWinePairingService.js';
@@ -36883,21 +36887,47 @@ app.post('/sala-node/authority', authenticate, requirePermission('settings:full'
 // Dominio, IP LAN e porta del nodo, dalla card Impostazioni → Nodo di sala.
 // Sentinella "campo presente nel body": assente = non toccare, null/'' =
 // azzera (come /sala/print-routes).
-app.put('/sala-node/settings', authenticate, requirePermission('settings:full'), async (req, res) => {
+//
+// Audit isolamento tenant H-05 (25/09): il dominio lo decide la piattaforma.
+// Prima qualunque utente con settings:full di QUALUNQUE tenant (il login demo
+// della Pizzeria è in mano ai prospect) sceglieva un host qualsiasi della
+// zona, apex e www compresi, e poi puntava il record A dove voleva. Ora
+// cambiarlo (o azzerarlo) vuole la sessione di piattaforma («Entra»); lo
+// stesso valore già salvato è un no-op, perché la card lo rimanda a ogni
+// salvataggio e il gestore deve poter ancora cambiare IP e porta.
+// requireFeature in più come cintura: la card è già nascosta senza add-on.
+app.put('/sala-node/settings', authenticate, requirePermission('settings:full'), requireFeature('sala_node'), async (req, res) => {
     try {
         const body = req.body ?? {};
         const upserts: Array<{ key: string; text: string | null; int: number | null }> = [];
         if ('domain' in body) {
             const raw = body.domain == null ? '' : String(body.domain).trim().toLowerCase();
-            if (raw && !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(raw)) {
-                return res.status(400).json({ error: 'invalid_domain' });
+            const current = ((await getSalaNodeSettings(req.tenantId!)).domain ?? '').toLowerCase();
+            if (raw !== current) {
+                if (!isPlatformScopedSession(req.user!)) {
+                    return res.status(403).json({ error: 'domain_platform_managed', message: 'Il dominio del nodo lo gestisce la piattaforma' });
+                }
+                if (raw) {
+                    const invalid = validateNewNodeDomain(raw);
+                    if (invalid) {
+                        return res.status(400).json({ error: invalid, message: 'Il dominio del nodo deve essere sala.<nome> sotto la zona dei nodi, non un nome riservato' });
+                    }
+                    if (await isNodeDomainTakenByOtherTenant(req.tenantId!, raw)) {
+                        return res.status(409).json({ error: 'domain_taken', message: 'Il dominio è già di un altro ristorante' });
+                    }
+                }
+                upserts.push({ key: SALA_NODE_DOMAIN_KEY, text: raw || null, int: null });
             }
-            upserts.push({ key: SALA_NODE_DOMAIN_KEY, text: raw || null, int: null });
         }
         if ('lan_ip' in body) {
             const raw = body.lan_ip == null ? '' : String(body.lan_ip).trim();
             if (raw && !/^\d{1,3}(\.\d{1,3}){3}$/.test(raw)) {
                 return res.status(400).json({ error: 'invalid_lan_ip' });
+            }
+            // Solo LAN privata o CGNAT (Tailscale): il record A sotto il brand
+            // verso un IP pubblico è il dirottamento dell'audit H-05.
+            if (raw && !isPrivateLanIp(raw)) {
+                return res.status(400).json({ error: 'lan_ip_not_private', message: "L'IP del nodo deve essere della rete locale (10.x, 172.16-31.x, 192.168.x o 100.64-127.x)" });
             }
             upserts.push({ key: SALA_NODE_LAN_IP_KEY, text: raw || null, int: null });
         }
@@ -36908,7 +36938,7 @@ app.put('/sala-node/settings', authenticate, requirePermission('settings:full'),
             }
             upserts.push({ key: SALA_NODE_PORT_KEY, text: null, int: raw });
         }
-        if (upserts.length === 0) {
+        if (!['domain', 'lan_ip', 'port'].some(k => k in body)) {
             return res.status(400).json({ error: 'no_updates' });
         }
         for (const u of upserts) {
@@ -36928,22 +36958,48 @@ app.put('/sala-node/settings', authenticate, requirePermission('settings:full'),
     }
 });
 
+// Codici di SalaNodeTlsError → HTTP. Tutti i controlli su dominio, IP e
+// collisioni girano PRIMA di Cloudflare: anche senza token si vede l'esito.
+const SALA_NODE_TLS_STATUS: Record<string, number> = {
+    no_domain: 400, no_lan_ip: 400, domain_not_allowed: 400, lan_ip_not_private: 400,
+    domain_platform_managed: 403, domain_taken: 409, cert_still_valid: 409, rate_limited: 429,
+    tls_not_configured: 503,
+};
+const salaNodeTlsErrorResponse = (res: express.Response, err: SalaNodeTlsError) =>
+    res.status(SALA_NODE_TLS_STATUS[err.code] ?? 502).json({ error: err.code, message: err.message });
+
 // Emissione/rinnovo manuale del certificato TLS del nodo (primo giro dal
 // bottone in card; poi ci pensa il rinnovo giornaliero). Sincrona e lenta:
 // la validazione DNS-01 prende decine di secondi.
-app.post('/sala-node/provision-cert', authenticate, requirePermission('settings:full'), async (req, res) => {
-    if (!isSalaNodeTlsConfigured()) {
-        return res.status(503).json({ error: 'tls_not_configured' });
+// Solo piattaforma (audit H-05): l'emissione è un TXT scritto nella zona del
+// brand e un certificato a nome della piattaforma, non un'azione del
+// gestore. force=true scavalca il rifiuto «certificato ancora valido».
+app.post('/sala-node/provision-cert', authenticate, requirePermission('settings:full'), requireFeature('sala_node'), async (req, res) => {
+    if (!isPlatformScopedSession(req.user!)) {
+        return res.status(403).json({ error: 'cert_platform_managed', message: 'Il certificato del nodo lo emette la piattaforma' });
     }
     try {
-        const result = await provisionSalaNodeCert(req.tenantId!);
+        const result = await provisionSalaNodeCert(req.tenantId!, { manual: true, force: req.body?.force === true });
         res.json(result);
     } catch (err: any) {
-        if (err instanceof SalaNodeTlsError) {
-            const status = err.code === 'no_domain' ? 400 : 502;
-            return res.status(status).json({ error: err.code, message: err.message });
-        }
+        if (err instanceof SalaNodeTlsError) return salaNodeTlsErrorResponse(res, err);
         console.error('POST /sala-node/provision-cert error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Solo il record A verso l'IP LAN salvato, senza certificato: il gestore
+// deve poter ripuntare il nodo dopo un cambio di IP (DHCP) anche ora che
+// l'emissione è della piattaforma. Il dominio resta quello assegnato e l'IP
+// dev'essere privato — il servizio lo ricontrolla prima di Cloudflare,
+// insieme alla regola sul nome che vale per il gestore e non per la
+// piattaforma, e al freno per tenant (429 rate_limited).
+app.post('/sala-node/sync-dns', authenticate, requirePermission('settings:full'), requireFeature('sala_node'), async (req, res) => {
+    try {
+        res.json(await syncSalaNodeDnsRecord(req.tenantId!, { platform: isPlatformScopedSession(req.user!) }));
+    } catch (err: any) {
+        if (err instanceof SalaNodeTlsError) return salaNodeTlsErrorResponse(res, err);
+        console.error('POST /sala-node/sync-dns error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });

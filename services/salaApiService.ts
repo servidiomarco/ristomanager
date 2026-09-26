@@ -141,6 +141,11 @@ export const updateSalaNodeSettings = (payload: SalaNodeSettingsPayload): Promis
 export const provisionSalaNodeCert = (): Promise<{ domain: string; expires_at: string }> =>
   apiRequest(`${API_URL}/sala-node/provision-cert`, { method: 'POST', headers: getHeaders() });
 
+/** Solo il record A del nodo verso l'IP LAN salvato (niente certificato):
+ *  il gestore lo rilancia dopo un cambio di IP del PC di sala. */
+export const syncSalaNodeDns = (): Promise<{ domain: string; lan_ip: string }> =>
+  apiRequest(`${API_URL}/sala-node/sync-dns`, { method: 'POST', headers: getHeaders() });
+
 /** Lo stato dell'interruttore «Servizio completo sul nodo» (tappa 4):
  *  autorità, allineamento delle due repliche e teste dei log. */
 export interface SalaNodeAuthority {
