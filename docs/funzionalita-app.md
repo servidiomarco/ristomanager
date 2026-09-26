@@ -678,6 +678,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-26 | Personale | La scheda di un dipendente senza date d'assunzione o di fine contratto si salva di nuovo: il salvataggio rispondeva «Errore nel salvataggio» (emerso collegando gli account per il piano ferie). Svuotare una data dal modulo ora la cancella davvero. |
 | 2026-09-26 | Personale; Utenti (profilo) | Piano ferie: i dipendenti chiedono le ferie da «Le mie ferie» nel profilo (con l'account collegato alla scheda), il responsabile le vede nell'area Ferie di Personale con monte annuo, piano del mese e copertura per reparto, e una proposta automatica che rispetta copertura minima e monte ferie; approvate, diventano assenze in calendario. |
 | 2026-09-26 | Agente vocale "Sofia" | Chi riaggancia e poco dopo richiama e prenota non resta più fra le «Da ricontattare»: la chiamata servita chiude i tentativi a vuoto dello stesso numero delle 24 ore prima. |
 | 2026-09-26 | Agente vocale "Sofia" | A chi non è in rubrica Sofia chiede nome e cognome in una sola domanda e, se ne arriva uno solo, chiede l'altro: niente più ripetizioni sommate in un nome («Cesareo Cesareo», «Bimbinuto Benvenuto»). |

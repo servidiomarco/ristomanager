@@ -17918,6 +17918,16 @@ async function checkLinkableUser(
     return { ok: true, value: id };
 }
 
+// Una data della scheda in modifica: undefined/null = lascia com'è, "" =
+// svuota (è ciò che manda il modulo per un campo vuoto), YYYY-MM-DD valida =
+// sostituisce. null come ritorno = valore non accettabile.
+const staffDateField = (v: unknown): { mode: 'KEEP' | 'SET'; value: string | null } | null => {
+    if (v === undefined || v === null) return { mode: 'KEEP', value: null };
+    if (v === '') return { mode: 'SET', value: null };
+    if (typeof v === 'string' && isIsoDay(v.slice(0, 10))) return { mode: 'SET', value: v.slice(0, 10) };
+    return null;
+};
+
 // Giorni di ferie l'anno: mezze giornate ammesse (un'assenza su un solo
 // servizio vale 0,5), vuoto = si eredita il default del ristorante.
 const parseAnnualLeaveDays = (v: unknown): { ok: true; value: number | null } | { ok: false } => {
@@ -19722,6 +19732,15 @@ app.put('/staff/:id', authenticate, requirePermission('staff:full'), async (req,
         const link = userId === undefined ? null : await checkLinkableUser(req.tenantId!, userId, String(id));
         if (link && link.ok === false) return res.status(link.status).json({ error: link.error });
 
+        // Date del contratto: il modulo manda "" per un campo vuoto, e finiva
+        // dritto nel cast a DATE — 500 «invalid input syntax for type date»,
+        // e una scheda senza date non si salvava più (visto in produzione
+        // collegando l'account di un cuoco). Ora "" svuota, undefined/null
+        // lasciano com'è, una data valida sostituisce, il resto è un 400.
+        const hire = staffDateField(hireDate);
+        const contractEnd = staffDateField(contractEndDate);
+        if (!hire || !contractEnd) return res.status(400).json({ error: 'invalid_date' });
+
         // Stessa forma del POST: quello che arriva scritto si titola, quello
         // che non arriva (undefined/null) passa alla COALESCE com'è.
         const cleanName = typeof name === 'string' && name.trim() ? toTitleCase(name.trim()) : name;
@@ -19738,8 +19757,8 @@ app.put('/staff/:id', authenticate, requirePermission('staff:full'), async (req,
                 phone = COALESCE($5, phone),
                 email = COALESCE($6, email),
                 role = COALESCE($7, role),
-                hire_date = COALESCE($8, hire_date),
-                contract_end_date = COALESCE($9, contract_end_date),
+                hire_date = CASE WHEN $20::text = 'KEEP' THEN hire_date ELSE $8::date END,
+                contract_end_date = CASE WHEN $21::text = 'KEEP' THEN contract_end_date ELSE $9::date END,
                 weekly_rest_day = CASE WHEN $10::text = 'KEEP' THEN weekly_rest_day ELSE $11::smallint END,
                 notes = COALESCE($12, notes),
                 is_active = COALESCE($13, is_active),
@@ -19749,12 +19768,13 @@ app.put('/staff/:id', authenticate, requirePermission('staff:full'), async (req,
              WHERE id = $14 AND tenant_id = $15
              RETURNING *`,
             [
-                cleanName, cleanSurname, category, staffType, phone, email, cleanRole, hireDate, contractEndDate,
+                cleanName, cleanSurname, category, staffType, phone, email, cleanRole, hire.value, contractEnd.value,
                 weeklyRestDay === undefined ? 'KEEP' : 'SET',
                 weeklyRestDay === undefined ? null : weeklyRestDay,
                 notes, isActive, id, req.tenantId!,
                 link !== null, link && link.ok ? link.value : null,
-                leaveDays !== null, leaveDays && leaveDays.ok ? leaveDays.value : null
+                leaveDays !== null, leaveDays && leaveDays.ok ? leaveDays.value : null,
+                hire.mode, contractEnd.mode
             ]
         );
 
