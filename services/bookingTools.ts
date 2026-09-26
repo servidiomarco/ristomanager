@@ -367,6 +367,7 @@ export async function checkAvailability(
         // tool arriva proprio nel turno in cui il nome va chiesto.
         const nameFields: Record<string, any> = {};
         const callerId = String(p.caller_id ?? '').trim();
+        let lookupFailed = false;
         if (result.available && callerId) {
             try {
                 const known = await d.findCustomerByPhone(tenantId, callerId);
@@ -379,8 +380,19 @@ export async function checkAvailability(
                 }
             } catch (err) {
                 // Come in create_reservation: la rubrica non blocca mai.
+                lookupFailed = true;
                 console.warn(`${channel.logPrefix} check-availability rubrica lookup failed (non-blocking):`, (err as Error)?.message || err);
             }
+        }
+        // Chiamante sconosciuto, solo al telefono. A "A che nome registro?"
+        // quasi tutti rispondono col solo cognome; la domanda di rincalzo
+        // ("mi conferma il cognome?") faceva ripetere la stessa parola e il
+        // modello sommava le due risposte: "Cesareo Cesareo" e "Bimbinuto
+        // Benvenuto" (cognome storpiato, poi dettato lettera per lettera) il
+        // 26/09/2026. Con la rubrica irraggiungibile non si dice niente:
+        // meglio il prompt che un'istruzione sbagliata.
+        if (result.available && channel.id === 'voice' && !nameFields.customer_known && !lookupFailed) {
+            nameFields.name_instruction = `Chiedi nome e cognome in una sola domanda: "Mi dice nome e cognome?". Se risponde con una parola sola chiedi una volta la parte che manca ("E il nome?" o "E il cognome?"), mai "mi conferma". Unisci solo due parole diverse: se ripete la stessa parola o una simile, o ne fa lo spelling, è la stessa parte e tieni l'ultima versione. Una parola comune (Benvenuto) è un cognome valido.`;
         }
 
         console.log(`${channel.logPrefix} check-availability`, { date: normalizedDate, raw_date: p.date, shift: rawShift, guests, location_preference: locationPreference, result });
