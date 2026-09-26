@@ -88,7 +88,7 @@
   "minimumsTitle": "Copertura minima",
   "minimumsAside": "persone in servizio",
   "defaultDaysTitle": "Giorni di ferie l'anno",
-  "defaultDaysHint": "Per fissi e stagionali senza un valore sulla scheda. Vuoto: monte non tenuto.",
+  "defaultDaysHint": "Per fissi e stagionali senza un valore sulla scheda, in proporzione ai mesi di contratto nell'anno. Vuoto: monte non tenuto.",
   "notTracked": "Non tenuto",
   "priorityTitle": "Chi ha la precedenza",
   "priority": {
@@ -136,5 +136,7 @@
   "requestSent": "Richiesta inviata.",
   "willCost": "Costa {{days}}",
   "overBalance": "oltre il residuo",
-  "withdraw": "Ritira richiesta"
+  "withdraw": "Ritira richiesta",
+  "trackingStart": "Avvio del registro ferie",
+  "trackingStartHint": "Chi risulta assunto fino a questo giorno matura le ferie da inizio anno: le date inserite all'avvio dell'app non sono assunzioni vere."
 }

@@ -1382,6 +1382,9 @@ export interface LeaveSettings {
   defaultAnnualDays: number | null; // null = monte non tenuto
   minimums: Record<'SALA' | 'CUCINA', Record<'LUNCH' | 'DINNER', number>>;
   priority: 'FIRST_COME' | 'FEWEST_DAYS';
+  // Avvio del registro ferie: chi risulta assunto fino a questo giorno
+  // matura da inizio anno. Opzionale: il backend precedente non lo manda.
+  trackingStart?: string | null;
 }
 
 export interface LeaveBalance {

@@ -88,7 +88,7 @@
   "minimumsTitle": "Minimum staffing",
   "minimumsAside": "people on duty",
   "defaultDaysTitle": "Leave days per year",
-  "defaultDaysHint": "For permanent and seasonal staff with no value on their card. Empty: allowance not tracked.",
+  "defaultDaysHint": "For permanent and seasonal staff with no value on their card, prorated to the months of contract in the year. Empty: allowance not tracked.",
   "notTracked": "Not tracked",
   "priorityTitle": "Who goes first",
   "priority": {
@@ -136,5 +136,7 @@
   "requestSent": "Request sent.",
   "willCost": "Uses {{days}}",
   "overBalance": "more than you have left",
-  "withdraw": "Withdraw request"
+  "withdraw": "Withdraw request",
+  "trackingStart": "Leave records start",
+  "trackingStartHint": "Anyone shown as hired up to this day accrues leave from the start of the year: dates entered when the app went live aren't real hiring dates."
 }
