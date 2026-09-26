@@ -150,6 +150,7 @@ import {
     cancelVoiceReservation,
     modifyVoiceReservation,
     recordVoiceCall,
+    closeEarlierMissedCalls,
     extractVoiceCallCost,
     recordCallbackRequest,
     formatItalianConfirmation,
@@ -36668,10 +36669,14 @@ bookingTools.configureBookingTools({
 });
 
 // La voce aggancia ogni azione alla riga di voice_calls per l'audit della
-// telefonata; gli altri canali avranno il proprio aggancio.
+// telefonata; gli altri canali avranno il proprio aggancio. Una chiamata
+// servita chiude anche i tentativi a vuoto dello stesso numero appena prima.
 VOICE_CHANNEL.linkConversation = ({ tenantId, conversationId, phone, reservationId }) => {
     recordVoiceCall(tenantId, { conversation_id: conversationId, phone, reservation_id: reservationId })
         .catch(err => console.warn('[ElevenLabs] recordVoiceCall failed:', err?.message || err));
+    closeEarlierMissedCalls(tenantId, conversationId, phone)
+        .then(n => { if (n > 0) console.log(`[ElevenLabs] ${conversationId}: ${n} chiamate precedenti dello stesso numero chiuse`); })
+        .catch(err => console.warn('[ElevenLabs] closeEarlierMissedCalls failed:', err?.message || err));
 };
 
 const startServer = async () => {

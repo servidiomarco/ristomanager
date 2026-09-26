@@ -180,6 +180,7 @@ Agente conversazionale AI (ElevenLabs) che **risponde al telefono del ristorante
 - Per ogni chiamata: **riassunto AI, trascrizione completa, registrazione audio** riascoltabile, durata, esito.
 - Azioni: richiama, segna ricontattato, **crea prenotazione dalla chiamata** (dati precompilati), apri scheda cliente, storico messaggi verso quel numero.
 - Badge "da ricontattare" sempre visibile nel menu.
+- Se lo stesso numero richiama e Sofia lo serve (prenota, sposta o disdice), i suoi tentativi a vuoto delle 24 ore prima si chiudono da soli; restano aperti quelli con una richiesta propria (richiamata chiesta, gruppo grande, conferma senza prenotazione).
 
 ---
 
@@ -669,6 +670,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-26 | Agente vocale "Sofia" | Chi riaggancia e poco dopo richiama e prenota non resta più fra le «Da ricontattare»: la chiamata servita chiude i tentativi a vuoto dello stesso numero delle 24 ore prima. |
 | 2026-09-26 | Agente vocale "Sofia" | A chi non è in rubrica Sofia chiede nome e cognome in una sola domanda e, se ne arriva uno solo, chiede l'altro: niente più ripetizioni sommate in un nome («Cesareo Cesareo», «Bimbinuto Benvenuto»). |
 | 2026-09-25 | Agente vocale "Sofia"; Impostazioni | Minuti di Sofia: nuovo avviso al 90% dei minuti inclusi, e nella card in Impostazioni → AI il ristoratore sceglie a quali soglie riceverli (50, 80, 90, 100%). |
 | 2026-09-25 | Comande, Cucina e Passe | Sul palmare, chi apre un tavolo su cui lavora già un collega lo vede per nome («Ci sta lavorando anche Giulia»): in produzione compariva invece la prima parte della sua email. |

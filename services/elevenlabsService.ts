@@ -1492,6 +1492,34 @@ export async function recordVoiceCall(tenantId: number, record: VoiceCallRecord)
     ]);
 }
 
+// Chi richiama e viene servito (prenota, sposta o disdice) chiude da sé i
+// tentativi precedenti dallo stesso numero rimasti «Da ricontattare»: caso
+// Sarubbi 26/09/2026, 7 secondi di saluto e riaggancio, poi un minuto dopo
+// la prenotazione — la prima chiamata restava aperta. Stessa chiave della
+// lista e del badge (ultime 10 cifre), solo le ultime 24 ore e solo le
+// chiamate senza una richiesta propria: richiamata chiesta, gruppo grande e
+// conferma fantasma restano da guardare a mano. follow_up_updated_by NULL:
+// l'ha chiusa il sistema, non un operatore.
+export async function closeEarlierMissedCalls(tenantId: number, conversationId: string, phone: string): Promise<number> {
+    const result = await queryWithRetry(`
+        UPDATE voice_calls
+        SET follow_up_status = 'CONTACTED',
+            follow_up_updated_by = NULL,
+            follow_up_updated_at = NOW()
+        WHERE tenant_id = $1
+          AND conversation_id <> $2
+          AND length(regexp_replace($3::text, '\\D', '', 'g')) >= 8
+          AND right(regexp_replace(phone, '\\D', '', 'g'), 10) = right(regexp_replace($3::text, '\\D', '', 'g'), 10)
+          AND reservation_id IS NULL
+          AND (follow_up_status IS NULL OR follow_up_status = 'PENDING')
+          AND callback_requested = FALSE
+          AND large_group_handoff = FALSE
+          AND phantom_confirmation = FALSE
+          AND created_at >= NOW() - INTERVAL '24 hours'
+    `, [tenantId, conversationId, phone]);
+    return result.rowCount ?? 0;
+}
+
 export interface CallbackRequestRecord {
     conversation_id: string;
     phone?: string;
