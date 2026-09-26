@@ -1,14 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Clock, Loader2 } from 'lucide-react';
-import { getVoiceUsage, updateVoiceExtraCap, type VoiceUsageResponse } from '../services/apiService';
+import { getVoiceUsage, updateVoiceExtraCap, updateVoiceAlertPercents, type VoiceUsageResponse } from '../services/apiService';
+import { VOICE_ALERT_PERCENT_OPTIONS } from '../services/voicePlan';
 import { useAuth } from '../contexts/AuthContext';
 import { dsButton } from './ds';
 
 /* ── Minuti di Sofia ──────────────────────────────────────────────────────
    Il ristoratore vede i minuti del mese contro quelli inclusi nell'add-on,
    dove arriverà a fine mese a questo ritmo, quante prenotazioni ha preso
-   Sofia, e sceglie il tetto di spesa per i minuti extra. Costo e margine
+   Sofia, e sceglie il tetto di spesa per i minuti extra e a quale
+   percentuale dei minuti inclusi ricevere l'avviso. Costo e margine
    restano nella pagina Consumi AI: sono numeri della piattaforma, non suoi. */
 
 interface Props {
@@ -28,6 +30,7 @@ export const VoiceUsageCard: React.FC<Props> = ({ showToast }) => {
     const [data, setData] = useState<VoiceUsageResponse | null>(null);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    const [alertsSaving, setAlertsSaving] = useState(false);
     const [capDraft, setCapDraft] = useState('');
 
     const showToastRef = useRef(showToast);
@@ -84,6 +87,28 @@ export const VoiceUsageCard: React.FC<Props> = ({ showToast }) => {
             showToast(err?.message || t('vu.err.save', 'Salvataggio non riuscito'), 'error');
         } finally {
             setSaving(false);
+        }
+    };
+
+    // Un backend precedente non manda le soglie e non saprebbe salvarle: la
+    // sezione resta nascosta finché il server nuovo non è in produzione.
+    const alertPercents = Array.isArray(plan.alertPercents) ? plan.alertPercents : null;
+
+    const toggleAlert = async (percent: number) => {
+        if (!alertPercents || alertsSaving) return;
+        const next = alertPercents.includes(percent)
+            ? alertPercents.filter(p => p !== percent)
+            : [...alertPercents, percent].sort((a, b) => a - b);
+        const previous = data;
+        setData({ ...data, plan: { ...plan, alertPercents: next } });
+        setAlertsSaving(true);
+        try {
+            setData(await updateVoiceAlertPercents(next));
+        } catch (err: any) {
+            setData(previous);
+            showToast(err?.message || t('vu.err.save', 'Salvataggio non riuscito'), 'error');
+        } finally {
+            setAlertsSaving(false);
         }
     };
 
@@ -194,6 +219,43 @@ export const VoiceUsageCard: React.FC<Props> = ({ showToast }) => {
                     <p className="mt-1 text-[12px] text-[var(--ds-critical-text)]">{t('vu.capInvalid', 'Inserisci un importo da 0 a 1.000 €.')}</p>
                 )}
             </div>
+
+            {alertPercents && (
+                <div className="mt-4 border-t border-[var(--ds-border)] pt-3">
+                    <div id="voice-alerts-label" className="text-[13px] font-medium text-[var(--ds-text-primary)]">
+                        {t('vu.alertsLabel', 'Avvisi sui minuti inclusi')}
+                    </div>
+                    <p className="text-[12px] text-[var(--ds-text-muted)]">
+                        {t('vu.alertsHint', 'Notifica a titolare e direzione quando Sofia arriva a:')}
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-2" role="group" aria-labelledby="voice-alerts-label">
+                        {VOICE_ALERT_PERCENT_OPTIONS.map(p => {
+                            const on = alertPercents.includes(p);
+                            return (
+                                <button
+                                    key={p}
+                                    type="button"
+                                    onClick={() => toggleAlert(p)}
+                                    disabled={!canEdit || alertsSaving}
+                                    aria-pressed={on}
+                                    className={`inline-flex h-11 items-center rounded-[var(--ds-radius-control)] px-4 text-[14px] font-semibold tabular-nums transition-colors disabled:opacity-50 ${
+                                        on
+                                            ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                                            : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
+                                    }`}
+                                >
+                                    {p}%
+                                </button>
+                            );
+                        })}
+                    </div>
+                    {alertPercents.length === 0 && (
+                        <p className="mt-1.5 text-[12px] text-[var(--ds-text-muted)]">
+                            {t('vu.alertsNone', "Arriverà solo l'avviso sul tetto degli extra.")}
+                        </p>
+                    )}
+                </div>
+            )}
         </div>
     );
 };

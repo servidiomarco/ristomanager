@@ -1363,6 +1363,9 @@ export interface VoicePlanInfo {
   extraCapCents: number;
   /** true se il ristorante ha un piano diverso dal listino. */
   custom: boolean;
+  /** Percentuali dei minuti inclusi a cui arriva l'avviso. Assente da un
+   *  backend precedente. */
+  alertPercents?: number[];
 }
 
 export interface VoiceMonthUsageInfo {
@@ -1393,6 +1396,14 @@ export const updateVoiceExtraCap = async (extraCapCents: number): Promise<VoiceU
     method: 'PUT',
     headers: getHeaders(),
     body: JSON.stringify({ extra_cap_cents: extraCapCents }),
+  });
+};
+
+export const updateVoiceAlertPercents = async (alertPercents: number[]): Promise<VoiceUsageResponse> => {
+  return apiRequest<VoiceUsageResponse>(`${API_URL}/voice-usage/alerts`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify({ alert_percents: alertPercents }),
   });
 };
 

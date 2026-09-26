@@ -380,6 +380,9 @@
     "capInvalid": "Inserisci un importo da 0 a 1.000 €.",
     "capSaved": "Tetto aggiornato",
     "save": "Salva",
+    "alertsLabel": "Avvisi sui minuti inclusi",
+    "alertsHint": "Notifica a titolare e direzione quando Sofia arriva a:",
+    "alertsNone": "Arriverà solo l'avviso sul tetto degli extra.",
     "loading": "Caricamento…",
     "err": {
       "load": "Errore nel caricamento dei minuti",
