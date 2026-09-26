@@ -22,7 +22,7 @@ import * as tableAssignmentAgent from './services/tableAssignmentAgent.js';
 import * as aiReport from './services/aiReportService.js';
 import { renderPrenota } from './services/prenotaSeo.js';
 import { COST_USD_SQL, UNPRICED_SQL, USD_EUR } from './services/aiPricing.js';
-import { BILLABLE_SECONDS_SQL, billableMinutes, estimatedRevenueCents } from './services/voicePlan.js';
+import { BILLABLE_SECONDS_SQL, billableMinutes, estimatedRevenueCents, VOICE_ALERT_PERCENT_OPTIONS } from './services/voicePlan.js';
 import { getVoicePlan, getVoiceMonthUsage, mergeVoicePlan, claimNewVoiceUsageAlerts } from './services/voiceUsage.js';
 import { outboxEnqueueInTx, outboxKick, outboxRegister, startOutboxDispatcher } from './services/outboxService.js';
 import { SERVER_PROFILE, isServiceNode } from './services/topology.js';
@@ -1869,8 +1869,9 @@ async function handleElevenLabsPostCall(tenantId: number, req: express.Request, 
         console.warn('[ElevenLabs] post-call recordVoiceCall failed:', err?.message || err);
     }
 
-    // Minuti di Sofia: avvisi all'80%/100% dei minuti inclusi e del tetto
-    // extra, una volta per soglia per mese. Dopo la risposta, mai bloccante.
+    // Minuti di Sofia: avvisi alle soglie dei minuti inclusi scelte dal
+    // ristoratore e all'80%/100% del tetto extra, una volta per soglia per
+    // mese. Dopo la risposta, mai bloccante.
     notifyVoiceUsageThresholds(tenantId).catch(err =>
         console.warn('[ElevenLabs] post-call usage alerts failed:', err?.message || err));
 
@@ -22950,6 +22951,34 @@ app.put('/voice-usage/cap', authenticate, requireFeature('voice'), requirePermis
     }
 });
 
+// A quali percentuali dei minuti inclusi avvisare il ristoratore, fra quelle
+// offerte. [] = nessun avviso sui minuti inclusi; quelli sul tetto partono
+// comunque. Gli avvisi già mandati nel mese restano: claimNewVoiceUsageAlerts
+// avvisa solo sopra l'ultimo.
+app.put('/voice-usage/alerts', authenticate, requireFeature('voice'), requirePermission('settings:full'), async (req, res) => {
+    try {
+        const raw = req.body?.alert_percents;
+        const options: readonly number[] = VOICE_ALERT_PERCENT_OPTIONS;
+        if (!Array.isArray(raw) || raw.some(p => !options.includes(p))) {
+            return res.status(400).json({ error: 'invalid_value', message: `Soglie ammesse: ${options.join(', ')}.` });
+        }
+        const percents = [...new Set<number>(raw)].sort((a, b) => a - b);
+        await queryWithRetry(
+            `INSERT INTO voice_plans (tenant_id, alert_percents, updated_at, updated_by)
+             VALUES ($1, $2::smallint[], NOW(), $3)
+             ON CONFLICT (tenant_id) DO UPDATE
+                SET alert_percents = EXCLUDED.alert_percents, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
+            [req.tenantId!, percents, req.user?.userId ?? null]
+        );
+        const plan = await getVoicePlan(req.tenantId!);
+        const month = await getVoiceMonthUsage(req.tenantId!, plan);
+        res.json({ plan, month });
+    } catch (err) {
+        console.error('PUT /voice-usage/alerts error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 // List with optional filters. Default newest-first, capped to 200 rows.
 app.get('/voice-calls', authenticate, requireFeature('voice'), voiceCallsAuthorize, async (req, res) => {
     try {
@@ -26952,7 +26981,7 @@ app.get('/admin/tenants', platformAdminAuth, async (_req, res) => {
         );
         const voiceByTenant = new Map<number, any>(voiceMonth.rows.map((r: any) => [Number(r.tenant_id), r]));
         const plans = await queryWithRetry(
-            `SELECT tenant_id, price_cents, included_minutes, overage_cents_per_minute, extra_cap_cents FROM voice_plans`
+            `SELECT tenant_id, price_cents, included_minutes, overage_cents_per_minute, extra_cap_cents, alert_percents FROM voice_plans`
         );
         const planRowByTenant = new Map<number, any>(plans.rows.map((p: any) => [Number(p.tenant_id), p]));
         res.json(result.rows.map((r: any) => ({
@@ -27411,7 +27440,7 @@ app.patch('/admin/tenants/:id/voice-plan', platformAdminAuth, async (req, res) =
                     included_minutes = EXCLUDED.included_minutes,
                     overage_cents_per_minute = EXCLUDED.overage_cents_per_minute,
                     updated_at = NOW()
-             RETURNING price_cents, included_minutes, overage_cents_per_minute, extra_cap_cents`,
+             RETURNING price_cents, included_minutes, overage_cents_per_minute, extra_cap_cents, alert_percents`,
             [tenantId, ...values]
         );
         res.json(mergeVoicePlan(r.rows[0]));

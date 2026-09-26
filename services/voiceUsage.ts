@@ -7,14 +7,18 @@
 import { queryWithRetry } from '../db.js';
 import { getTenantLocale, sqlTimeZone } from './tenantLocale.js';
 import {
-    VOICE_PLAN_DEFAULTS, BILLABLE_SECONDS_SQL, billableMinutes, extraCharge, estimatedRevenueCents,
+    VOICE_PLAN_DEFAULTS, VOICE_ALERT_PERCENTS_DEFAULT, VOICE_ALERT_PERCENT_OPTIONS,
+    BILLABLE_SECONDS_SQL, billableMinutes, extraCharge, estimatedRevenueCents,
     type VoicePlan,
 } from './voicePlan.js';
 import { USD_EUR } from './aiPricing.js';
 
 export interface EffectiveVoicePlan extends VoicePlan {
-    /** true se almeno un valore viene dalla riga voice_plans del tenant. */
+    /** true se almeno un valore del listino viene dalla riga voice_plans
+     *  del tenant (le soglie degli avvisi non contano: non sono prezzo). */
     custom: boolean;
+    /** Percentuali dei minuti inclusi a cui avvisare, crescenti. */
+    alertPercents: number[];
 }
 
 /** Piano effettivo da una riga voice_plans (o nessuna): NULL = default. */
@@ -27,12 +31,15 @@ export function mergeVoicePlan(row: any): EffectiveVoicePlan {
         extraCapCents: pick(row?.extra_cap_cents, VOICE_PLAN_DEFAULTS.extraCapCents),
         custom: Boolean(row) && [row.price_cents, row.included_minutes, row.overage_cents_per_minute, row.extra_cap_cents]
             .some(v => v !== null && v !== undefined),
+        alertPercents: Array.isArray(row?.alert_percents)
+            ? row.alert_percents.map(Number).sort((a: number, b: number) => a - b)
+            : [...VOICE_ALERT_PERCENTS_DEFAULT],
     };
 }
 
 export async function getVoicePlan(tenantId: number): Promise<EffectiveVoicePlan> {
     const r = await queryWithRetry(
-        `SELECT price_cents, included_minutes, overage_cents_per_minute, extra_cap_cents
+        `SELECT price_cents, included_minutes, overage_cents_per_minute, extra_cap_cents, alert_percents
            FROM voice_plans WHERE tenant_id = $1`,
         [tenantId]
     );
@@ -128,7 +135,9 @@ export async function getVoiceMonthUsage(tenantId: number, plan?: VoicePlan): Pr
 // Avvisi di consumo
 // ---------------------------------------------------------------------------
 
-export type VoiceUsageThreshold = 'included_80' | 'included_100' | 'cap_80' | 'cap_100';
+export type VoiceUsageThreshold =
+    | `included_${(typeof VOICE_ALERT_PERCENT_OPTIONS)[number]}`
+    | 'cap_80' | 'cap_100';
 
 export interface VoiceUsageAlert {
     threshold: VoiceUsageThreshold;
@@ -138,9 +147,22 @@ export interface VoiceUsageAlert {
 
 const eur = (cents: number) => `${(cents / 100).toFixed(2).replace('.', ',').replace(/,00$/, '')} €`;
 
+/** Percentuale di una soglia sui minuti inclusi ('included_90' → 90);
+ *  null per quelle sul tetto. */
+const includedPercentOf = (threshold: string): number | null => {
+    const m = /^included_(\d+)$/.exec(threshold);
+    return m ? Number(m[1]) : null;
+};
+
 /** Le soglie superate dal mese, dalla più grave: il testo è quello della
- *  notifica al ristoratore. */
-export function crossedVoiceThresholds(usage: VoiceMonthUsage, plan: VoicePlan): VoiceUsageAlert[] {
+ *  notifica al ristoratore. Sui minuti inclusi conta solo la più alta fra
+ *  quelle scelte dal ristoratore: una chiamata che porta dal 75% al 95% non
+ *  manda due avvisi. */
+export function crossedVoiceThresholds(
+    usage: VoiceMonthUsage,
+    plan: VoicePlan,
+    alertPercents: number[] = VOICE_ALERT_PERCENTS_DEFAULT,
+): VoiceUsageAlert[] {
     const out: VoiceUsageAlert[] = [];
     const used = usage.billable_minutes;
     const incl = plan.includedMinutes;
@@ -149,26 +171,29 @@ export function crossedVoiceThresholds(usage: VoiceMonthUsage, plan: VoicePlan):
         out.push({
             threshold: 'cap_100',
             title: 'Sofia: tetto dei minuti extra raggiunto',
-            body: `Gli extra di questo mese sono arrivati a ${eur(plan.extraCapCents)}, il tetto impostato. Alzalo in Impostazioni → Sofia per continuare a ricevere prenotazioni al telefono.`,
+            body: `Gli extra di questo mese sono arrivati a ${eur(plan.extraCapCents)}, il tetto impostato. Alzalo in Impostazioni → AI → Minuti di Sofia per continuare a ricevere prenotazioni al telefono.`,
         });
     } else if (plan.extraCapCents > 0 && rawExtraCents >= plan.extraCapCents * 0.8) {
         out.push({
             threshold: 'cap_80',
             title: 'Sofia: extra all\'80% del tetto',
-            body: `Minuti extra per ${eur(rawExtraCents)} su un tetto di ${eur(plan.extraCapCents)}. Se serve, alzalo in Impostazioni → Sofia.`,
+            body: `Minuti extra per ${eur(rawExtraCents)} su un tetto di ${eur(plan.extraCapCents)}. Se serve, alzalo in Impostazioni → AI → Minuti di Sofia.`,
         });
     }
-    if (incl > 0 && used >= incl) {
+    const reached = incl > 0
+        ? [...alertPercents].sort((a, b) => b - a).find(p => used * 100 >= incl * p)
+        : undefined;
+    if (reached === 100) {
         out.push({
             threshold: 'included_100',
             title: 'Sofia: minuti inclusi esauriti',
             body: `Usati ${used} minuti su ${incl} inclusi. Da ora ogni minuto costa ${eur(plan.overageCentsPerMinute)}, fino al tetto di ${eur(plan.extraCapCents)}.`,
         });
-    } else if (incl > 0 && used >= incl * 0.8) {
+    } else if (reached !== undefined) {
         out.push({
-            threshold: 'included_80',
-            title: 'Sofia: 80% dei minuti inclusi',
-            body: `Usati ${used} minuti su ${incl} inclusi questo mese${usage.projected_minutes > incl ? ` — a questo ritmo arrivi a circa ${usage.projected_minutes}` : ''}.`,
+            threshold: `included_${reached}` as VoiceUsageThreshold,
+            title: `Sofia: ${reached}% dei minuti inclusi`,
+            body: `Usati ${used} minuti su ${incl} inclusi questo mese, ne restano ${incl - used}${usage.projected_minutes > incl ? ` — a questo ritmo arrivi a circa ${usage.projected_minutes}` : ''}.`,
         });
     }
     return out;
@@ -182,10 +207,20 @@ export function crossedVoiceThresholds(usage: VoiceMonthUsage, plan: VoicePlan):
 export async function claimNewVoiceUsageAlerts(tenantId: number): Promise<{ alerts: VoiceUsageAlert[]; usage: VoiceMonthUsage } | null> {
     const plan = await getVoicePlan(tenantId);
     const usage = await getVoiceMonthUsage(tenantId, plan);
-    const crossed = crossedVoiceThresholds(usage, plan);
+    const crossed = crossedVoiceThresholds(usage, plan, plan.alertPercents);
     if (crossed.length === 0) return null;
+    // Se a metà mese il ristoratore toglie la soglia già scattata (es. il
+    // 90%), la più alta rimasta sotto (l'80%) non deve arrivare dopo: sui
+    // minuti inclusi si avvisa solo sopra l'ultimo avviso mandato.
+    const sent = await queryWithRetry(
+        `SELECT threshold FROM voice_usage_alerts WHERE tenant_id = $1 AND month = $2::date`,
+        [tenantId, usage.month]
+    );
+    const lastIncludedSent = Math.max(0, ...sent.rows.map((r: any) => includedPercentOf(r.threshold) ?? 0));
     const claimed: VoiceUsageAlert[] = [];
     for (const alert of crossed) {
+        const pct = includedPercentOf(alert.threshold);
+        if (pct !== null && pct <= lastIncludedSent) continue;
         const r = await queryWithRetry(
             `INSERT INTO voice_usage_alerts (tenant_id, month, threshold)
              VALUES ($1, $2::date, $3)
