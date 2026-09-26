@@ -380,6 +380,9 @@
     "capInvalid": "Enter an amount from 0 to 1,000 €.",
     "capSaved": "Cap updated",
     "save": "Save",
+    "alertsLabel": "Included-minutes alerts",
+    "alertsHint": "Notify owner and management when Sofia reaches:",
+    "alertsNone": "Only the extra-cap alert will be sent.",
     "loading": "Loading…",
     "err": {
       "load": "Could not load minutes",

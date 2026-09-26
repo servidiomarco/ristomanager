@@ -172,7 +172,7 @@ Agente conversazionale AI (ElevenLabs) che **risponde al telefono del ristorante
 - L'add-on include un pacchetto di **minuti di conversazione al mese** (listino: 49 €/mese, 250 minuti, poi 0,20 € al minuto; le chiamate sotto i 10 secondi non contano). La piattaforma può fare un piano su misura per singolo ristorante.
 - In **Impostazioni → AI** la card «Minuti di Sofia» mostra i minuti del mese contro quelli inclusi, la stima a fine mese al ritmo attuale, chiamate e prenotazioni prese da Sofia, gli extra maturati e un grafico dei minuti al giorno.
 - Il ristoratore sceglie il **tetto di spesa per i minuti extra** del mese (default 50 €, 0 = nessun extra).
-- **Avvisi** push al titolare e alla direzione (ed email al titolare) all'80% e al 100% dei minuti inclusi e all'80% e al 100% del tetto, una volta per soglia al mese.
+- **Avvisi** push al titolare e alla direzione (ed email al titolare), una volta per soglia al mese. Sui minuti inclusi il ristoratore sceglie a quali soglie riceverli fra 50%, 80%, 90% e 100% (default 80, 90 e 100; nessuna = niente avvisi sui minuti); se una chiamata ne supera più d'una arriva solo l'avviso della più alta. Gli avvisi all'80% e al 100% del tetto degli extra arrivano sempre.
 
 **Sezione Chiamate nel CRM**
 - Elenco chiamate con schede Tutte / Da ricontattare / Ricontattati / Con prenotazione.
@@ -670,6 +670,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 | Data | Sezione | Modifica |
 |---|---|---|
 | 2026-09-26 | Agente vocale "Sofia" | Chi riaggancia e poco dopo richiama e prenota non resta più fra le «Da ricontattare»: la chiamata servita chiude i tentativi a vuoto dello stesso numero delle 24 ore prima. |
+| 2026-09-25 | Agente vocale "Sofia"; Impostazioni | Minuti di Sofia: nuovo avviso al 90% dei minuti inclusi, e nella card in Impostazioni → AI il ristoratore sceglie a quali soglie riceverli (50, 80, 90, 100%). |
 | 2026-09-25 | Comande, Cucina e Passe | Sul palmare, chi apre un tavolo su cui lavora già un collega lo vede per nome («Ci sta lavorando anche Giulia»): in produzione compariva invece la prima parte della sua email. |
 | 2026-09-25 | Impostazioni · Legale e privacy | L'informativa privacy pubblica (/privacy, /informativa-privacy, /privacy/<slug>) mostra di nuovo i dati inseriti in Impostazioni → Legale: in produzione usciva coi segnaposto («[Ragione sociale]»…) perché la pagina anonima leggeva le impostazioni senza il contesto del ristorante. |
 | 2026-09-25 | Pagamenti · Comande | Anche la chiusura dalla scheda conto (Pagamenti, palmare, Prenotazioni) chiede come è stata data la mancia, con lo stesso default del pannello di Cassa: quella in contanti entra nei contanti attesi del cassetto. |

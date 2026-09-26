@@ -23,6 +23,13 @@ export const VOICE_PLAN_DEFAULTS = {
 
 export type VoicePlan = typeof VOICE_PLAN_DEFAULTS;
 
+/** Percentuali dei minuti inclusi a cui il ristoratore può chiedere
+ *  l'avviso. Il CHECK su voice_plans.alert_percents ripete questa lista. */
+export const VOICE_ALERT_PERCENT_OPTIONS = [50, 80, 90, 100] as const;
+
+/** Avvisi di chi non ha mai scelto. */
+export const VOICE_ALERT_PERCENTS_DEFAULT: number[] = [80, 90, 100];
+
 /** Le chiamate più corte non si contano: riagganci e chiamate per errore
  *  costano pochi centesimi e contarle farebbe solo discutere. */
 export const VOICE_MIN_BILLABLE_SECONDS = 10;
