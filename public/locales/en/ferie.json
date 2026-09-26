@@ -1,0 +1,140 @@
+{
+  "loadError": "Couldn't load the leave plan",
+  "prevYear": "Previous year",
+  "nextYear": "Next year",
+  "prevMonth": "Previous month",
+  "nextMonth": "Next month",
+  "rules": "Rules",
+  "newRequest": "Request",
+  "stat": {
+    "pending": "pending",
+    "approvedDays": "days approved",
+    "shortDays": "days short-staffed"
+  },
+  "pendingTitle": "Pending",
+  "generate": "Generate proposal",
+  "noMinimumsHint": "Without a minimum staffing level the proposal approves everything within the allowance.",
+  "proposalTitle": "Proposal",
+  "proposalSummary": "To approve {{approve}} · to reject {{reject}}",
+  "cancel": "Cancel",
+  "apply": "Apply",
+  "noPending": "No pending requests.",
+  "unknownStaff": "Deleted staff member",
+  "category": {
+    "SALA": "Dining room",
+    "CUCINA": "Kitchen"
+  },
+  "categoryLower": {
+    "SALA": "dining room",
+    "CUCINA": "kitchen"
+  },
+  "service": {
+    "LUNCH": "Lunch",
+    "DINNER": "Dinner"
+  },
+  "serviceLower": {
+    "LUNCH": "lunch",
+    "DINNER": "dinner"
+  },
+  "remainingAfter": "{{days}} left",
+  "enteredByManager": "Entered by a manager",
+  "moreReasons": "(+{{count}})",
+  "decisionFor": "Decision for {{name}}",
+  "approve": "Approve",
+  "reject": "Reject",
+  "approvedToast": "Leave approved",
+  "rejectedToast": "Request rejected",
+  "revokedToast": "Leave cancelled",
+  "someFailed_one": "One request had already been decided",
+  "someFailed_other": "{{count}} requests had already been decided",
+  "proposalError": "Couldn't generate the proposal",
+  "proposalApplied_one": "One request decided",
+  "proposalApplied_other": "{{count}} requests decided",
+  "closedDay": "Closed",
+  "restDay": "Weekly rest day",
+  "bar": {
+    "approved": "Approved leave",
+    "pending": "Pending",
+    "other": "Other absences"
+  },
+  "legend": {
+    "short": "Below minimum",
+    "risky": "Below minimum if approved"
+  },
+  "coverageRow": "On duty",
+  "planAria": "Leave plan for {{month}}",
+  "noStaff": "No active staff.",
+  "balanceTitle": "Entitled {{entitled}} · approved {{approved}} · pending {{pending}}",
+  "remainingShort": "{{days}} left",
+  "balanceTitleSection": "Leave allowance {{year}}",
+  "defaultDaysMeta": "default {{days}}",
+  "col": {
+    "entitled": "Entitled",
+    "approved": "Approved",
+    "pending": "Pending",
+    "remaining": "Left"
+  },
+  "decidedTitle": "Decided",
+  "revoke": "Revoke",
+  "rejectTitle": "Reject request",
+  "rejectNote": "Reason",
+  "rejectNoteHint": "The employee will read it.",
+  "revokeTitle": "Cancel approved leave",
+  "revokeBody": "The absence leaves the calendar and the employee is back on shift.",
+  "rulesTitle": "Leave plan rules",
+  "save": "Save",
+  "invalidDays": "Invalid number of days",
+  "rulesSaved": "Rules saved",
+  "minimumsTitle": "Minimum staffing",
+  "minimumsAside": "people on duty",
+  "defaultDaysTitle": "Leave days per year",
+  "defaultDaysHint": "For permanent and seasonal staff with no value on their card. Empty: allowance not tracked.",
+  "notTracked": "Not tracked",
+  "priorityTitle": "Who goes first",
+  "priority": {
+    "FIRST_COME": "First to ask",
+    "FEWEST_DAYS": "Fewest days taken"
+  },
+  "priorityHint": {
+    "FIRST_COME": "On the same dates the oldest request wins.",
+    "FEWEST_DAYS": "Whoever has the fewest approved days this year goes first."
+  },
+  "requestCreated": "Request added · {{days}}",
+  "newRequestTitle": "Leave request",
+  "createRequest": "Add",
+  "staffMember": "Staff member",
+  "pickStaff": "Choose…",
+  "from": "From",
+  "to": "To",
+  "note": "Note",
+  "days_one": "{{value}} day",
+  "days_other": "{{value}} days",
+  "status": {
+    "PENDING": "Pending",
+    "APPROVED": "Approved",
+    "REJECTED": "Not approved",
+    "CANCELLED": "Cancelled"
+  },
+  "reason": {
+    "coverage": "{{date}}: {{where}} at {{service}} drops to {{left}} (minimum {{min}})",
+    "balance": "Exceeds the {{year}} allowance by {{days}}"
+  },
+  "error": {
+    "overlap": "There is already leave on those dates.",
+    "invalid_dates": "Check the dates.",
+    "too_long": "At most 62 days per request.",
+    "in_the_past": "Those dates have already passed.",
+    "no_working_days": "Only rest or closing days.",
+    "staff_inactive": "This staff member is not active.",
+    "not_linked": "Your account isn't linked to a staff card.",
+    "not_pending": "The request has already been decided.",
+    "generic": "Something went wrong."
+  },
+  "myLeaveTitle": "My leave",
+  "askLeave": "Request leave",
+  "send": "Send",
+  "requestSent": "Request sent.",
+  "willCost": "Uses {{days}}",
+  "overBalance": "more than you have left",
+  "withdraw": "Withdraw request"
+}

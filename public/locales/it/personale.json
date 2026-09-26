@@ -192,5 +192,19 @@
     "doubleServiceHint": "pranzo e cena, totale giorno",
     "monthly": "Mensile",
     "monthlyHint": "pieno nei mesi di contratto"
-  }
+  },
+  "leavePlan": "Ferie",
+  "userAlreadyLinked": "Questo account è già collegato a un'altra scheda",
+  "leaveCard": "Ferie",
+  "leaveCardAside": "monte e richieste dall'app",
+  "annualLeaveDays": "Giorni di ferie l'anno",
+  "annualLeaveDaysHint": "Vuoto: vale il default delle regole del piano ferie",
+  "annualLeaveDaysPlaceholder": "Default del ristorante",
+  "linkedAccount": "Account nell'app",
+  "linkedAccountHint": "Con un account collegato il dipendente chiede ferie dal suo profilo",
+  "noLinkedAccount": "Nessuno",
+  "openLeavePlan": "Apri Ferie",
+  "pendingLeaveHere_one": "Una richiesta di ferie in attesa",
+  "pendingLeaveHere_other": "{{count}} richieste di ferie in attesa",
+  "leaveRequest": "Richiesta di ferie"
 }
