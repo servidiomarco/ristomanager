@@ -271,3 +271,113 @@ describe('piano ferie — richieste, proposta, decisioni', () => {
         expect(twice.status).toBe(409);
     });
 });
+
+// Il conteggio del monte per chi non ha un riposo fisso e il rateo per chi
+// ha un contratto che non copre l'anno. Nato da un fisso di produzione che
+// risultava a 28,5 giorni su 26: senza riposo sulla scheda, ogni giorno di
+// calendario si pagava, anche quelli che sarebbero stati di riposo.
+describe('piano ferie — 6 giorni su 7 e monte in proporzione', () => {
+    const Y = 2032;
+    let owner = '';
+    const ids: Record<string, string> = {};
+
+    const balanceOf = async (staffId: string) => {
+        const plan = await api().get(`/staff/leave-plan?year=${Y}`).set(bearer(owner));
+        expect(plan.status).toBe(200);
+        return plan.body.balances.find((b: any) => b.staffId === staffId);
+    };
+
+    beforeAll(async () => {
+        owner = await ownerToken();
+        const put = await api().put('/staff/leave-settings').set(bearer(owner)).send({
+            defaultAnnualDays: 26,
+            minimums: { SALA: { LUNCH: 0, DINNER: 0 }, CUCINA: { LUNCH: 0, DINNER: 0 } },
+            priority: 'FIRST_COME',
+            trackingStart: null,
+        });
+        expect(put.status).toBe(200);
+
+        const db = new Client({ connectionString: dbUrl() });
+        await db.connect();
+        try {
+            await db.query(
+                `INSERT INTO special_closures (tenant_id, date, shift, reason) VALUES (1, '2032-10-07', NULL, 'test ferie 6su7')
+                 ON CONFLICT DO NOTHING`
+            );
+        } finally {
+            await db.end();
+        }
+
+        const make = async (key: string, extra: Record<string, unknown>) => {
+            const res = await api().post('/staff').set(bearer(owner)).send({
+                name: key, surname: 'Rateo', category: 'SALA', staffType: 'FISSO', ...extra,
+            });
+            expect(res.status).toBe(201);
+            ids[key] = res.body.id;
+        };
+        await make('Senzariposo', {});
+        await make('Stagionale', { staffType: 'STAGIONALE', hireDate: `${Y}-07-04`, contractEndDate: `${Y}-09-06` });
+        await make('Avvio', { hireDate: `${Y}-04-01` });
+    });
+
+    afterAll(async () => {
+        const db = new Client({ connectionString: dbUrl() });
+        await db.connect();
+        try {
+            await db.query('DELETE FROM staff_members WHERE id = ANY($1::uuid[])', [Object.values(ids)]);
+            await db.query(`DELETE FROM special_closures WHERE tenant_id = 1 AND reason = 'test ferie 6su7'`);
+            await db.query('DELETE FROM staff_leave_settings WHERE tenant_id = 1');
+        } finally {
+            await db.end();
+        }
+    });
+
+    it('senza riposo fisso ogni 7 giorni consecutivi ne contano 6', async () => {
+        // 14 giorni pieni: due settimane, due riposi → 12.
+        const two = await api().post('/staff/time-off').set(bearer(owner)).send({
+            staffId: ids.Senzariposo, startDate: `${Y}-09-01`, endDate: `${Y}-09-14`, type: 'VACANZA',
+        });
+        expect(two.status).toBe(201);
+        // 3 giorni: sotto la settimana, contano tutti.
+        await api().post('/staff/time-off').set(bearer(owner)).send({
+            staffId: ids.Senzariposo, startDate: `${Y}-05-11`, endDate: `${Y}-05-13`, type: 'VACANZA',
+        });
+        expect((await balanceOf(ids.Senzariposo)).approved).toBe(15);
+    });
+
+    it('una settimana con una chiusura non scala un riposo in più', async () => {
+        // 5–11 ottobre, il 7 chiuso: 6 giorni pagati, la chiusura fa da riposo.
+        await api().post('/staff/time-off').set(bearer(owner)).send({
+            staffId: ids.Senzariposo, startDate: `${Y}-10-05`, endDate: `${Y}-10-11`, type: 'VACANZA',
+        });
+        expect((await balanceOf(ids.Senzariposo)).approved).toBe(21);
+    });
+
+    it('il monte segue i mesi di contratto', async () => {
+        // Luglio e agosto pieni, settembre con 6 giorni: 2 mesi → 26 × 2/12 = 4,33 → 4,5.
+        expect((await balanceOf(ids.Stagionale)).entitled).toBe(4.5);
+        // Assunto il 1° aprile: 9 mesi → 19,5.
+        expect((await balanceOf(ids.Avvio)).entitled).toBe(19.5);
+    });
+
+    it("chi risulta assunto fino all'avvio del registro matura da inizio anno", async () => {
+        const put = await api().put('/staff/leave-settings').set(bearer(owner)).send({
+            defaultAnnualDays: 26,
+            minimums: { SALA: { LUNCH: 0, DINNER: 0 }, CUCINA: { LUNCH: 0, DINNER: 0 } },
+            priority: 'FIRST_COME',
+            trackingStart: `${Y}-04-01`,
+        });
+        expect(put.body.trackingStart).toBe(`${Y}-04-01`);
+        expect((await balanceOf(ids.Avvio)).entitled).toBe(26);
+        // L'assunzione vera, dopo l'avvio, resta in proporzione.
+        expect((await balanceOf(ids.Stagionale)).entitled).toBe(4.5);
+
+        // Il client di prima non manda trackingStart: non deve azzerarlo.
+        const old = await api().put('/staff/leave-settings').set(bearer(owner)).send({
+            defaultAnnualDays: 26,
+            minimums: { SALA: { LUNCH: 0, DINNER: 0 }, CUCINA: { LUNCH: 0, DINNER: 0 } },
+            priority: 'FIRST_COME',
+        });
+        expect(old.body.trackingStart).toBe(`${Y}-04-01`);
+    });
+});

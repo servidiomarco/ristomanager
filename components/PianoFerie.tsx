@@ -903,6 +903,7 @@ const LeaveRulesModal: React.FC<{
 }> = ({ open, settings, onClose, onSaved, showToast }) => {
   const { t } = useTranslation('ferie', { useSuspense: false });
   const [days, setDays] = useState('');
+  const [trackingStart, setTrackingStart] = useState('');
   const [mins, setMins] = useState(settings.minimums);
   const [priority, setPriority] = useState(settings.priority);
   const [saving, setSaving] = useState(false);
@@ -910,6 +911,7 @@ const LeaveRulesModal: React.FC<{
   useEffect(() => {
     if (!open) return;
     setDays(settings.defaultAnnualDays === null ? '' : String(settings.defaultAnnualDays));
+    setTrackingStart(typeof settings.trackingStart === 'string' ? settings.trackingStart : '');
     setMins(settings.minimums);
     setPriority(settings.priority);
   }, [open, settings]);
@@ -927,7 +929,12 @@ const LeaveRulesModal: React.FC<{
         showToast(t('invalidDays'), 'error');
         return;
       }
-      await staffApiService.updateLeaveSettings({ defaultAnnualDays: parsed, minimums: mins, priority });
+      await staffApiService.updateLeaveSettings({
+        defaultAnnualDays: parsed,
+        minimums: mins,
+        priority,
+        trackingStart: trackingStart || null,
+      });
       showToast(t('rulesSaved'), 'success');
       onSaved();
     } catch (err) {
@@ -982,7 +989,7 @@ const LeaveRulesModal: React.FC<{
         </div>
       </FormCard>
 
-      <FormCard title={t('defaultDaysTitle')}>
+      <FormCard title={t('defaultDaysTitle')} className="space-y-4">
         <Field htmlFor="ferie-default-days" hint={t('defaultDaysHint')}>
           <input
             id="ferie-default-days"
@@ -994,6 +1001,15 @@ const LeaveRulesModal: React.FC<{
             value={days}
             onChange={e => setDays(e.target.value)}
             placeholder={t('notTracked')}
+            className={dsInput}
+          />
+        </Field>
+        <Field label={t('trackingStart')} htmlFor="ferie-tracking-start" hint={t('trackingStartHint')}>
+          <input
+            id="ferie-tracking-start"
+            type="date"
+            value={trackingStart}
+            onChange={e => setTrackingStart(e.target.value)}
             className={dsInput}
           />
         </Field>

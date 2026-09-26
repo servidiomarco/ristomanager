@@ -198,7 +198,7 @@
   "leaveCard": "Ferie",
   "leaveCardAside": "monte e richieste dall'app",
   "annualLeaveDays": "Giorni di ferie l'anno",
-  "annualLeaveDaysHint": "Vuoto: vale il default delle regole del piano ferie",
+  "annualLeaveDaysHint": "Per un anno intero, poi in proporzione ai mesi di contratto. Vuoto: vale il default del piano ferie",
   "annualLeaveDaysPlaceholder": "Default del ristorante",
   "linkedAccount": "Account nell'app",
   "linkedAccountHint": "Con un account collegato il dipendente chiede ferie dal suo profilo",

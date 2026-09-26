@@ -198,7 +198,7 @@
   "leaveCard": "Leave",
   "leaveCardAside": "allowance and requests from the app",
   "annualLeaveDays": "Leave days per year",
-  "annualLeaveDaysHint": "Empty: the default from the leave plan rules applies",
+  "annualLeaveDaysHint": "For a full year, then prorated to the months of contract. Empty: the leave plan default applies",
   "annualLeaveDaysPlaceholder": "Restaurant default",
   "linkedAccount": "App account",
   "linkedAccountHint": "With a linked account the employee requests leave from their profile",

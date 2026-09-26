@@ -112,7 +112,15 @@ export const makeServiceOpen = (cal: OpeningCalendar): ServiceOpen => {
 /** Quanto costa ogni giorno di un'assenza sul monte ferie: i giorni in cui
  *  la persona avrebbe lavorato. Il riposo settimanale e i giorni in cui il
  *  ristorante è chiuso a pranzo E a cena non si pagano; un'assenza su un
- *  solo servizio vale mezza giornata, se quel servizio è aperto. */
+ *  solo servizio vale mezza giornata, se quel servizio è aperto.
+ *
+ *  Chi non ha un riposo fisso (lo segna di volta in volta come assenza
+ *  RIPOSO) paga 6 giorni ogni 7 consecutivi: il monte del CCNL è in giorni
+ *  lavorativi su settimana di 6, e contare i 7 di calendario faceva
+ *  sforare il monte a chi aveva fatto meno di 26 giorni veri (in produzione
+ *  28,5 su 26 a un fisso senza riposo sulla scheda). Nei blocchi di 7 in
+ *  cui il ristorante chiude almeno un giorno, quella chiusura è già il
+ *  riposo; un periodo sotto la settimana conta per intero. */
 export const leaveDayWeights = (
     restDay: number | null,
     start: string,
@@ -120,16 +128,58 @@ export const leaveDayWeights = (
     isOpen: ServiceOpen,
     shift: LeaveService | null = null,
 ): Array<{ date: string; weight: number }> => {
+    const hasRestDay = restDay !== null && restDay !== undefined;
+    const days = eachIsoDay(start, end);
     const out: Array<{ date: string; weight: number }> = [];
-    for (const date of eachIsoDay(start, end)) {
-        if (restDay !== null && restDay !== undefined && weekdayOf(date) === restDay) continue;
+    for (let i = 0; i < days.length; i++) {
+        const date = days[i];
+        if (hasRestDay && weekdayOf(date) === restDay) continue;
         if (shift) {
             if (isOpen(date, shift)) out.push({ date, weight: 0.5 });
-        } else if (isOpen(date, 'LUNCH') || isOpen(date, 'DINNER')) {
-            out.push({ date, weight: 1 });
+            continue;
         }
+        if (!isOpen(date, 'LUNCH') && !isOpen(date, 'DINNER')) continue;
+        // Settimo giorno di un blocco pieno di 7, senza chiusure: è il riposo.
+        if (!hasRestDay && i % 7 === 6) {
+            const block = days.slice(i - 6, i + 1);
+            if (block.every(d => isOpen(d, 'LUNCH') || isOpen(d, 'DINNER'))) continue;
+        }
+        out.push({ date, weight: 1 });
     }
     return out;
+};
+
+/** Il monte di un anno per chi ha un contratto che non lo copre tutto:
+ *  un dodicesimo per ogni mese con almeno 15 giorni di contratto (il rateo
+ *  mensile delle buste paga), arrotondato alla mezza giornata.
+ *
+ *  `trackingStart` è l'avvio del registro ferie del ristorante: le date
+ *  d'assunzione fino a quel giorno sono quasi sempre il giorno in cui la
+ *  scheda è entrata nell'app, non l'assunzione vera, e non tolgono mesi
+ *  (al Vecchio Frantoio tre schede risultano «assunte» il 1° aprile 2026,
+ *  il giorno dell'avvio). La fine contratto conta sempre. */
+export const prorateEntitlement = (
+    annual: number,
+    year: number,
+    hireDate: string | null,
+    contractEndDate: string | null,
+    trackingStart: string | null,
+): number => {
+    const yearStart = `${year}-01-01`;
+    const yearEnd = `${year}-12-31`;
+    const hire = hireDate && !(trackingStart && hireDate <= trackingStart) ? hireDate : null;
+    const from = hire && hire > yearStart ? hire : yearStart;
+    const to = contractEndDate && contractEndDate < yearEnd ? contractEndDate : yearEnd;
+    if (to < from) return 0;
+    let months = 0;
+    for (let m = 0; m < 12; m++) {
+        const monthStart = `${year}-${String(m + 1).padStart(2, '0')}-01`;
+        const monthEnd = addIsoDays(m === 11 ? `${year + 1}-01-01` : `${year}-${String(m + 2).padStart(2, '0')}-01`, -1);
+        const a = from > monthStart ? from : monthStart;
+        const b = to < monthEnd ? to : monthEnd;
+        if (b >= a && spanDays(a, b) >= 15) months++;
+    }
+    return Math.round((annual * months) / 12 * 2) / 2;
 };
 
 export const countLeaveDays = (
@@ -280,7 +330,7 @@ export const proposeLeavePlan = (input: {
     minimums: CoverageMinimums;
     isOpen: ServiceOpen;
     priority: LeavePriority;
-    entitlement: (staffId: string) => number | null;
+    entitlement: (staffId: string, year: string) => number | null;
     usedDays: (staffId: string, year: string) => number;
 }): ProposalItem[] => {
     const isOnDuty = makeDutyIndex(input.shifts, input.absences);
@@ -337,15 +387,14 @@ export const proposeLeavePlan = (input: {
             }
         }
 
-        const ent = input.entitlement(s.id);
         const byYear: Record<string, number> = {};
         for (const d of weights) byYear[d.date.slice(0, 4)] = (byYear[d.date.slice(0, 4)] ?? 0) + d.weight;
-        if (ent !== null) {
-            for (const [year, need] of Object.entries(byYear)) {
-                const used = input.usedDays(s.id, year) + (acceptedDays.get(`${s.id}|${year}`) ?? 0);
-                const over = used + need - ent;
-                if (over > 1e-9) reasons.push({ kind: 'BALANCE', year, over: Math.round(over * 2) / 2 });
-            }
+        for (const [year, need] of Object.entries(byYear)) {
+            const ent = input.entitlement(s.id, year);
+            if (ent === null) continue;
+            const used = input.usedDays(s.id, year) + (acceptedDays.get(`${s.id}|${year}`) ?? 0);
+            const over = used + need - ent;
+            if (over > 1e-9) reasons.push({ kind: 'BALANCE', year, over: Math.round(over * 2) / 2 });
         }
 
         const verdict = reasons.length === 0 ? 'APPROVE' : 'REJECT';

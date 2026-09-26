@@ -215,6 +215,7 @@ import {
     leaveDaysByYear,
     makeServiceOpen,
     MAX_LEAVE_SPAN_DAYS,
+    prorateEntitlement,
     proposeLeavePlan,
     spanDays,
     type CoverageMinimums,
@@ -18543,6 +18544,7 @@ interface LeaveSettingsJson {
     defaultAnnualDays: number | null;
     minimums: CoverageMinimums;
     priority: LeavePriority;
+    trackingStart: string | null; // avvio del registro ferie, vedi prorateEntitlement
 }
 
 async function loadLeaveSettings(tenantId: number): Promise<LeaveSettingsJson> {
@@ -18555,6 +18557,7 @@ async function loadLeaveSettings(tenantId: number): Promise<LeaveSettingsJson> {
             CUCINA: { LUNCH: Number(row?.min_cucina_lunch ?? 0), DINNER: Number(row?.min_cucina_dinner ?? 0) },
         },
         priority: row?.priority === 'FEWEST_DAYS' ? 'FEWEST_DAYS' : 'FIRST_COME',
+        trackingStart: row?.leave_start_date ? leaveIsoDay(row.leave_start_date) : null,
     };
 }
 
@@ -18622,12 +18625,22 @@ const toLeaveRequestLike = (row: any): LeaveRequestLike => ({
     createdAt: new Date(row.created_at).toISOString(),
 });
 
-// Il monte di una persona: il suo, o il default del ristorante per chi ha
-// un contratto — gli EXTRA a chiamata non hanno ferie da pianificare.
-const leaveEntitlement = (row: any, settings: LeaveSettingsJson): number | null =>
-    row.annual_leave_days != null
+// Il monte di una persona in un anno: il suo, o il default del ristorante
+// per chi ha un contratto — gli EXTRA a chiamata non hanno ferie da
+// pianificare — in proporzione ai mesi di contratto dentro l'anno.
+const leaveEntitlement = (row: any, settings: LeaveSettingsJson, year: number | string): number | null => {
+    const annual = row.annual_leave_days != null
         ? Number(row.annual_leave_days)
         : row.staff_type !== 'EXTRA' ? settings.defaultAnnualDays : null;
+    if (annual === null) return null;
+    return prorateEntitlement(
+        annual,
+        Number(year),
+        row.hire_date ? leaveIsoDay(row.hire_date) : null,
+        row.contract_end_date ? leaveIsoDay(row.contract_end_date) : null,
+        settings.trackingStart
+    );
+};
 
 // Giorni per persona e anno di un insieme di assenze o richieste. Il monte
 // si legge dalle VACANZA in staff_time_off, non dalle richieste: le ferie
@@ -18658,7 +18671,7 @@ function computeLeaveBalances(
     const approved = leaveDaysByStaffYear(vacations, restDayOf, isOpen);
     const pending = leaveDaysByStaffYear(pendingRows, restDayOf, isOpen);
     return staffRows.map(row => {
-        const entitled = leaveEntitlement(row, settings);
+        const entitled = leaveEntitlement(row, settings, year);
         const used = approved.get(`${row.id}|${year}`) ?? 0;
         return {
             staffId: row.id,
@@ -18913,11 +18926,16 @@ app.put('/staff/leave-settings', authenticate, requirePermission('staff:full'), 
         }
         const priority = b.priority === 'FEWEST_DAYS' ? 'FEWEST_DAYS' : b.priority === 'FIRST_COME' || b.priority === undefined ? 'FIRST_COME' : null;
         if (!priority) return res.status(400).json({ error: 'invalid_priority' });
+        // Avvio del registro: assente = lascia com'è (il client di prima non
+        // lo manda e non deve azzerarlo), null o "" = nessun avvio.
+        const startProvided = b.trackingStart !== undefined;
+        const trackingStart = b.trackingStart === null || b.trackingStart === '' || b.trackingStart === undefined ? null : b.trackingStart;
+        if (trackingStart !== null && !isIsoDay(trackingStart)) return res.status(400).json({ error: 'invalid_date' });
 
         await queryWithRetry(
             `INSERT INTO staff_leave_settings
-                (tenant_id, default_annual_days, min_sala_lunch, min_sala_dinner, min_cucina_lunch, min_cucina_dinner, priority, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+                (tenant_id, default_annual_days, min_sala_lunch, min_sala_dinner, min_cucina_lunch, min_cucina_dinner, priority, leave_start_date, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $9::date, now())
              ON CONFLICT (tenant_id) DO UPDATE SET
                 default_annual_days = EXCLUDED.default_annual_days,
                 min_sala_lunch = EXCLUDED.min_sala_lunch,
@@ -18925,8 +18943,9 @@ app.put('/staff/leave-settings', authenticate, requirePermission('staff:full'), 
                 min_cucina_lunch = EXCLUDED.min_cucina_lunch,
                 min_cucina_dinner = EXCLUDED.min_cucina_dinner,
                 priority = EXCLUDED.priority,
+                leave_start_date = CASE WHEN $8::boolean THEN EXCLUDED.leave_start_date ELSE staff_leave_settings.leave_start_date END,
                 updated_at = now()`,
-            [req.tenantId!, days.value, ...mins, priority]
+            [req.tenantId!, days.value, ...mins, priority, startProvided, trackingStart]
         );
         const settings = await loadLeaveSettings(req.tenantId!);
         const socketId = req.headers['x-socket-id'] as string;
@@ -19135,9 +19154,9 @@ app.post('/staff/leave-plan/proposal', authenticate, requirePermission('staff:fu
             minimums: settings.minimums,
             isOpen,
             priority: settings.priority,
-            entitlement: id => {
+            entitlement: (id, year) => {
                 const row = byId.get(id);
-                return row ? leaveEntitlement(row, settings) : null;
+                return row ? leaveEntitlement(row, settings, year) : null;
             },
             usedDays: (id, year) => used.get(`${id}|${year}`) ?? 0,
         });
