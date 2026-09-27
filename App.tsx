@@ -245,6 +245,68 @@ const COMMS_VIEWS: ViewState[] = [ViewState.CONVERSAZIONI, ViewState.MESSAGGI, V
 // Stato aperto/chiuso della sidebar desktop. Scritto solo dalla linguetta.
 const SIDEBAR_COLLAPSED_KEY = 'ristocrm_sidebar_collapsed';
 
+// Soglie di compattazione del gruppo date/turni della testata (container
+// query: vedi il commento sul gruppo in testata). Quattro serie: con tre turni
+// (Dashboard, c'è «Tutti») o due, e per oggi o per un altro giorno — su un
+// altro giorno il gruppo porta il chip «Torna a oggi» e una data più lunga di
+// «Oggi». Con una serie sola, tarata sul caso peggiore, a 1024px Prenotazioni
+// rinunciava alle frecce con 157px liberi. Le serie a due turni sono quelle a
+// tre spostate della larghezza di «Tutti» (67px, 59 compatto). Misurate con
+// la barra laterale aperta, dal minimo di 768px a 1440, nodo acceso e spento:
+// margine minimo 10px. Stringhe intere: Tailwind non vede le classi composte.
+const HEADER_FIT = {
+  3: {
+    today: {
+      channels: '@min-[662px]:flex',
+      backChip: '', backLabel: '',
+      shiftIcon: '@max-[574px]:w-10 @max-[574px]:px-0 @max-[574px]:justify-center',
+      shiftText: '@max-[574px]:px-3',
+      shiftLabel: '@max-[574px]:sr-only',
+      dateWidth: 'w-[200px] @max-[452px]:w-auto',
+      dateSecondary: '@max-[452px]:hidden',
+      arrows: '@max-[366px]:hidden',
+      icon: '@max-[366px]:hidden',
+    },
+    other: {
+      channels: '@min-[700px]:flex',
+      backChip: '@max-[790px]:w-8 @max-[790px]:px-0 @max-[790px]:justify-center',
+      backLabel: '@max-[790px]:sr-only',
+      shiftIcon: '@max-[612px]:w-10 @max-[612px]:px-0 @max-[612px]:justify-center',
+      shiftText: '@max-[612px]:px-3',
+      shiftLabel: '@max-[612px]:sr-only',
+      dateWidth: 'w-[200px] @max-[490px]:w-auto',
+      dateSecondary: '@max-[490px]:hidden',
+      arrows: '@max-[440px]:hidden',
+      icon: '@max-[440px]:hidden',
+    },
+  },
+  2: {
+    today: {
+      channels: '@min-[595px]:flex',
+      backChip: '', backLabel: '',
+      shiftIcon: '@max-[507px]:w-10 @max-[507px]:px-0 @max-[507px]:justify-center',
+      shiftText: '',
+      shiftLabel: '@max-[507px]:sr-only',
+      dateWidth: 'w-[200px] @max-[393px]:w-auto',
+      dateSecondary: '@max-[393px]:hidden',
+      arrows: '@max-[307px]:hidden',
+      icon: '@max-[307px]:hidden',
+    },
+    other: {
+      channels: '@min-[633px]:flex',
+      backChip: '@max-[723px]:w-8 @max-[723px]:px-0 @max-[723px]:justify-center',
+      backLabel: '@max-[723px]:sr-only',
+      shiftIcon: '@max-[545px]:w-10 @max-[545px]:px-0 @max-[545px]:justify-center',
+      shiftText: '',
+      shiftLabel: '@max-[545px]:sr-only',
+      dateWidth: 'w-[200px] @max-[431px]:w-auto',
+      dateSecondary: '@max-[431px]:hidden',
+      arrows: '@max-[381px]:hidden',
+      icon: '@max-[381px]:hidden',
+    },
+  },
+} as const;
+
 // La lingua dell'ultimo operatore: chiave SUA, separata da quella del
 // detector i18n — che sulle pagine pubbliche la scrive l'ospite.
 const OPERATOR_LANG_KEY = 'ristocrm_operator_lang';
@@ -918,6 +980,9 @@ const App: React.FC = () => {
     return `${y}-${m}-${day}`;
   };
   const globalDateStr = formatLocalDateGlobal(globalDate);
+  // Serie di soglie della testata (HEADER_FIT): «Tutti» c'è solo in Dashboard.
+  const headerDayIsToday = globalDateStr === formatLocalDateGlobal(currentTime);
+  const headerFit = HEADER_FIT[view === ViewState.DASHBOARD ? 3 : 2][headerDayIsToday ? 'today' : 'other'];
   // Il bollo vive solo dove la sidebar si ritira: Comande sullo schermo largo.
   // Sotto lg la sidebar non c'è comunque (c'è la barra in basso), quindi la
   // bandiera non deve spegnere niente lì.
@@ -2598,16 +2663,40 @@ const App: React.FC = () => {
            {/* Desktop date/time/shift control group. Uses flex-1 (not a fixed
                w-1/2) so it takes exactly the free space between the mobile logo
                and the right actions — with the sidebar open at lg the content
-               area shrinks and a fixed half would overflow into the "+" button. */}
-           <div className={`hidden md:flex items-center gap-2.5 flex-1 min-w-0 ${[ViewState.SETTINGS, ViewState.USERS, ViewState.CLIENTI, ViewState.STAFF, ViewState.PLATFORM, ViewState.ASPORTO].includes(view) ? '!hidden' : ''}`}>
+               area shrinks and a fixed half would overflow into the "+" button.
+               flex-1 da solo non bastava: i figli non si restringono, e fra 768
+               e ~1180px uscivano dal gruppo finendo SOTTO il blocco di destra
+               (la pastiglia Live copriva «Cena», fino a 206px di sovrapposizione
+               in Dashboard a 768). Il gruppo è un @container e si compatta sullo
+               spazio che ha davvero — barra laterale aperta o chiusa, icone del
+               nodo o no — rinunciando prima al meno importante. Soglie misurate
+               in Dashboard (tre turni), per un giorno diverso da oggi / per oggi:
+                 < 790        «Torna a oggi» solo icona   (419 → 330 la data)
+                 < 700 / 662  via la barra dei canali
+                 < 612 / 574  Pranzo/Cena solo icona       (271 → 149 i turni)
+                 < 490 / 452  data stretta, senza «· dom 27 set»
+                 < 440 / 366  via frecce e icona del calendario: resta la data ▾
+               md:pl-3 stacca il gruppo dal marchio (sotto lg); le container
+               query misurano il contenuto al netto del padding, quindi i
+               gradini ne tengono conto da soli. Il minimo sta nei 347px che
+               il gruppo ha a 768, con 24px di margine anche su una data lunga. Le quattro serie, due turni compresi, sono in
+               HEADER_FIT in cima al file. */}
+           <div className={`hidden md:flex @container items-center gap-2.5 flex-1 min-w-0 md:pl-3 lg:pl-0 ${[ViewState.SETTINGS, ViewState.USERS, ViewState.CLIENTI, ViewState.STAFF, ViewState.PLATFORM, ViewState.ASPORTO].includes(view) ? '!hidden' : ''}`}>
              <DateNavigator
                value={globalDateStr}
                onChange={(dateOnly) => {
                  const [y, m, d] = dateOnly.split('-').map(Number);
                  if (y && m && d) setGlobalDate(new Date(y, m - 1, d));
                }}
-               widthClass="w-[200px]"
+               widthClass={headerFit.dateWidth}
                backToToday="inline"
+               fit={{
+                 arrows: headerFit.arrows,
+                 icon: headerFit.icon,
+                 secondary: headerFit.dateSecondary,
+                 backChip: headerFit.backChip,
+                 backLabel: headerFit.backLabel,
+               }}
              />
 
              {/* The standalone clock chip is gone — the time now lives inside
@@ -2624,7 +2713,10 @@ const App: React.FC = () => {
                  <button
                    key={opt.key}
                    onClick={() => setGlobalShiftFilter(opt.key)}
+                   title={opt.label}
                    className={`inline-flex items-center gap-1.5 px-4 h-9 rounded-[var(--ds-radius-control)] text-[15px] font-medium transition-colors ${
+                     opt.icon ? headerFit.shiftIcon : headerFit.shiftText
+                   } ${
                      globalShiftFilter === opt.key
                        ? 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]'
                        : 'text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
@@ -2632,7 +2724,10 @@ const App: React.FC = () => {
                    aria-pressed={globalShiftFilter === opt.key}
                  >
                    {opt.icon}
-                   {opt.label}
+                   {/* Stretti, Pranzo e Cena restano sole e tramonto: il nome
+                       va in sr-only (resta il nome del bottone) e nel title.
+                       «Tutti» non ha icona e tiene la parola. */}
+                   <span className={opt.icon ? headerFit.shiftLabel : ''}>{opt.label}</span>
                  </button>
                ))}
              </div>
@@ -2643,7 +2738,7 @@ const App: React.FC = () => {
                  (globalDate, globalShift) e permette toggle inline con
                  settings:full. */}
              {(globalShiftFilter === 'LUNCH' || globalShiftFilter === 'DINNER') && (
-               <div className="hidden xl:flex items-center flex-shrink-0">
+               <div className={`hidden items-center flex-shrink-0 ${headerFit.channels}`}>
                  <BookingChannelsBar
                    date={globalDateStr}
                    shift={globalShiftFilter}
@@ -2677,11 +2772,11 @@ const App: React.FC = () => {
                   restava visibile anche sul telefono, insieme al pallino.
                   La variante invece esce dopo le utility semplici, quindi
                   batte la base sotto md. */}
-              {/* Le icone nodo/online solo da xl: sotto, date e turni a sinistra
-                  non si restringono e la pastiglia già copriva parte di «Cena»
-                  (1075px con la barra laterale aperta). Lo stato resta
-                  nell'aria-label della pastiglia. */}
-              <LivePill connected={isConnected} time={currentTime} routes={linkRoutes} routesClassName="max-xl:hidden" className="max-md:hidden" />
+              {/* Le icone nodo/online da lg: il gruppo date/turni a sinistra
+                  cede lo spazio che prendono (container query), ma sotto lg
+                  c'è anche il marchio e il minimo del gruppo non ci starebbe
+                  più. Lo stato resta nell'aria-label della pastiglia. */}
+              <LivePill connected={isConnected} time={currentTime} routes={linkRoutes} routesClassName="max-lg:hidden" className="max-md:hidden" />
 
               {/* Mobile-only status dot */}
               <LivePill connected={isConnected} time={currentTime} variant="dot" className="md:hidden mx-1" />

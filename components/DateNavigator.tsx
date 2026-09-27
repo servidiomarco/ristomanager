@@ -14,6 +14,15 @@ interface DateNavigatorProps {
    *  against the canvas and simply vanishes there, so on canvas it takes the
    *  white-plus-shadow treatment the search field and icon buttons use. */
   onCanvas?: boolean;
+  /** Classi in più per compattarsi dove lo spazio manca (la testata le usa
+   *  con le container query del suo gruppo). Le soglie le decide chi monta,
+   *  che sa cos'altro divide la riga; qui il navigatore resta generico.
+   *  - arrows: le due frecce del giorno
+   *  - icon: l'icona del calendario nella pastiglia (la ▾ resta a dire che si apre)
+   *  - secondary: «· dom 27 set» accanto a Oggi/Domani/Ieri
+   *  - backChip / backLabel: il chip «Torna a oggi» e la sua scritta (per
+   *    ridurlo a icona: la scritta va in sr-only, non via — resta il nome) */
+  fit?: { arrows?: string; icon?: string; secondary?: string; backChip?: string; backLabel?: string };
 }
 
 const formatLocalDate = (date: Date) => {
@@ -38,6 +47,7 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
   backToToday = 'below',
   className = '',
   onCanvas = false,
+  fit = {},
 }) => {
   const { t } = useTranslation('common', { useSuspense: false });
   const { locale } = useCalendarLabels();
@@ -106,10 +116,11 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
     <button
       type="button"
       onClick={goToToday}
-      className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-[var(--ds-radius-control)] ${surface} text-[13px] font-medium text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors flex-shrink-0`}
+      title={t('date.backToToday')}
+      className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-[var(--ds-radius-control)] ${surface} text-[13px] font-medium text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] transition-colors flex-shrink-0 ${fit.backChip ?? ''}`}
     >
       <RotateCcw className="h-3 w-3" />
-      {t('date.backToToday')}
+      <span className={fit.backLabel ?? ''}>{t('date.backToToday')}</span>
     </button>
   );
 
@@ -120,7 +131,7 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
           type="button"
           onClick={() => navigate(-1)}
           aria-label={t('date.previousDay')}
-          className={`h-10 w-10 flex-shrink-0 rounded-[var(--ds-radius-control)] ${surface} text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] active:scale-[0.96] transition-all flex items-center justify-center`}
+          className={`h-10 w-10 flex-shrink-0 rounded-[var(--ds-radius-control)] ${surface} text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] active:scale-[0.96] transition-all flex items-center justify-center ${fit.arrows ?? ''}`}
         >
           <ChevronLeft className="h-4 w-4" />
         </button>
@@ -140,13 +151,13 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
             }`}
           >
             <Calendar
-              className={`h-4 w-4 flex-shrink-0 ${isToday ? 'text-[var(--ds-text-secondary)]' : 'text-[var(--ds-text-primary)]'}`}
+              className={`h-4 w-4 flex-shrink-0 ${isToday ? 'text-[var(--ds-text-secondary)]' : 'text-[var(--ds-text-primary)]'} ${fit.icon ?? ''}`}
               aria-hidden
             />
             {relativeLabel ? (
               <span className="flex items-baseline gap-1.5 min-w-0">
                 <span className="text-[15px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)] whitespace-nowrap">{relativeLabel}</span>
-                <span className="text-[13px] text-[var(--ds-text-secondary)] capitalize whitespace-nowrap hidden sm:inline">
+                <span className={`text-[13px] text-[var(--ds-text-secondary)] capitalize whitespace-nowrap hidden sm:inline ${fit.secondary ?? ''}`}>
                   · {formatDateShort(selectedDate)}
                 </span>
               </span>
@@ -179,7 +190,7 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
           type="button"
           onClick={() => navigate(1)}
           aria-label={t('date.nextDay')}
-          className={`h-10 w-10 flex-shrink-0 rounded-[var(--ds-radius-control)] ${surface} text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] active:scale-[0.96] transition-all flex items-center justify-center`}
+          className={`h-10 w-10 flex-shrink-0 rounded-[var(--ds-radius-control)] ${surface} text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] active:scale-[0.96] transition-all flex items-center justify-center ${fit.arrows ?? ''}`}
         >
           <ChevronRight className="h-4 w-4" />
         </button>
