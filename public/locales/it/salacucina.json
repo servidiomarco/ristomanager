@@ -129,5 +129,20 @@
   "billRouteToast": "{{documento}} → stampante «{{stampante}}»",
   "nodeOffline": "nodo offline da {{secondi}}s",
   "certExpires": "scade il {{data}}",
-  "certIssuedToast": "Certificato emesso per {{dominio}}"
+  "certIssuedToast": "Certificato emesso per {{dominio}}",
+  "nodeDomainManaged": "dominio gestito dalla piattaforma",
+  "nodeDnsSync": "aggiorna DNS",
+  "nodeDnsSyncHint": "Ripunta il dominio del nodo all'IP LAN salvato",
+  "nodeDnsSyncedToast": "{{dominio}} punta a {{ip}}",
+  "nodeErrDomainManaged": "Il dominio del nodo lo gestisce la piattaforma",
+  "nodeErrCertManaged": "Il certificato del nodo lo emette la piattaforma",
+  "nodeErrLanIpNotPrivate": "L'IP del nodo deve essere della rete locale (10.x, 172.16–31.x, 192.168.x o 100.64–127.x)",
+  "nodeErrDomainNotAllowed": "Dominio non ammesso: serve sala.<nome> nella zona dei nodi, non un nome riservato",
+  "nodeErrDomainTaken": "Il dominio è già di un altro ristorante",
+  "nodeErrCertStillValid": "Il certificato vale ancora più di 30 giorni: il rinnovo parte da solo",
+  "nodeErrNoLanIp": "Prima salva l'IP LAN del nodo",
+  "nodeErrTlsNotConfigured": "DNS e certificati non sono configurati sul cloud",
+  "nodeDomainManagedHint": "Dominio gestito dalla piattaforma: qui cambi solo IP e porta",
+  "nodeErrRateLimited": "Troppi aggiornamenti del DNS: riprova tra un minuto",
+  "nodeErrDnsProvider": "Cloudflare ha rifiutato l'aggiornamento del DNS: riprova più tardi o avvisa la piattaforma"
 }

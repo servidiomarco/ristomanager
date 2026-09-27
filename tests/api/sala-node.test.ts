@@ -1,5 +1,6 @@
 import { describe, it, expect, afterAll } from 'vitest';
 import { api, ownerToken, bearer } from './helpers';
+import { platformSessionFor, dropPlatformSession, assertNoCloudflareToken } from './platformSession';
 
 // Nodo di sala, fondazioni cloud (tappa 3 del piano ibrido): token per-tenant
 // su tenants.sala_node_token (backfillato per il tenant 1 dalla migration
@@ -20,7 +21,8 @@ describe('nodo di sala — fondazioni cloud', () => {
         const owner = await ownerToken();
         await api().put('/settings/entitlements').set(bearer(owner)).send({ sala_node: true });
         await api().put('/settings/features').set(bearer(owner)).send({ sala_node_enabled: false });
-        await api().put('/sala-node/settings').set(bearer(owner)).send({ domain: null, lan_ip: null, port: null });
+        // Il dominio lo toglie solo la piattaforma (audit H-05).
+        await api().put('/sala-node/settings').set(bearer(await platformSessionFor(1))).send({ domain: null, lan_ip: null, port: null });
     });
 
     it('il token per tenant esiste (backfill migration) nella forma pgcrypto', async () => {
@@ -56,14 +58,17 @@ describe('nodo di sala — fondazioni cloud', () => {
     it('PUT /sala-node/settings: valida e persiste dominio, IP LAN e porta', async () => {
         const owner = await ownerToken();
 
-        const koDomain = await api().put('/sala-node/settings').set(bearer(owner)).send({ domain: 'non un dominio' });
+        // Dal fix dell'audit H-05 il dominio lo assegna solo la sessione di
+        // piattaforma («Entra»): l'owner cambia IP e porta.
+        const platform = await platformSessionFor(1);
+        const koDomain = await api().put('/sala-node/settings').set(bearer(platform)).send({ domain: 'non un dominio' });
         expect(koDomain.status).toBe(400);
         const koIp = await api().put('/sala-node/settings').set(bearer(owner)).send({ lan_ip: '999.1.2' });
         expect(koIp.status).toBe(400);
         const koVuoto = await api().put('/sala-node/settings').set(bearer(owner)).send({});
         expect(koVuoto.status).toBe(400);
 
-        const ok = await api().put('/sala-node/settings').set(bearer(owner)).send({
+        const ok = await api().put('/sala-node/settings').set(bearer(platform)).send({
             domain: 'sala.vecchiofrantoio.sympotia.com',
             lan_ip: '192.168.1.60',
             port: 8443,
@@ -141,10 +146,34 @@ describe('nodo di sala — certificato TLS', () => {
         expect(anon.status).toBe(401);
     });
 
-    it('senza CLOUDFLARE_API_TOKEN risponde 503 tls_not_configured', async () => {
+    afterAll(async () => {
+        await dropPlatformSession();
+    });
+
+    it("l'emissione è della piattaforma: l'owner riceve 403", async () => {
         const owner = await ownerToken();
         const res = await api().post('/sala-node/provision-cert').set(bearer(owner));
-        expect(res.status).toBe(503);
-        expect(res.body.error).toBe('tls_not_configured');
+        expect(res.status).toBe(403);
+        expect(res.body.error).toBe('cert_platform_managed');
+    });
+
+    it('senza CLOUDFLARE_API_TOKEN risponde 503 tls_not_configured', async () => {
+        // Il dominio qui è quello VIVO del Frantoio: con un token vero la
+        // chiamata emetterebbe un certificato reale per quel nome.
+        assertNoCloudflareToken();
+        const platform = await platformSessionFor(1);
+        // Senza dominio si ferma prima (400 no_domain): lo si assegna e poi
+        // lo si toglie, come il ripristino del blocco sopra.
+        const senza = await api().post('/sala-node/provision-cert').set(bearer(platform));
+        expect(senza.status).toBe(400);
+        expect(senza.body.error).toBe('no_domain');
+        await api().put('/sala-node/settings').set(bearer(platform)).send({ domain: 'sala.vecchiofrantoio.sympotia.com' });
+        try {
+            const res = await api().post('/sala-node/provision-cert').set(bearer(platform));
+            expect(res.status).toBe(503);
+            expect(res.body.error).toBe('tls_not_configured');
+        } finally {
+            await api().put('/sala-node/settings').set(bearer(platform)).send({ domain: null });
+        }
     });
 });

@@ -129,5 +129,20 @@
   "billRouteToast": "{{documento}} → printer «{{stampante}}»",
   "nodeOffline": "node offline for {{secondi}}s",
   "certExpires": "expires on {{data}}",
-  "certIssuedToast": "Certificate issued for {{dominio}}"
+  "certIssuedToast": "Certificate issued for {{dominio}}",
+  "nodeDomainManaged": "domain managed by the platform",
+  "nodeDnsSync": "update DNS",
+  "nodeDnsSyncHint": "Points the node domain at the saved LAN IP",
+  "nodeDnsSyncedToast": "{{dominio}} now points to {{ip}}",
+  "nodeErrDomainManaged": "The node domain is managed by the platform",
+  "nodeErrCertManaged": "The node certificate is issued by the platform",
+  "nodeErrLanIpNotPrivate": "The node IP must be on the local network (10.x, 172.16–31.x, 192.168.x or 100.64–127.x)",
+  "nodeErrDomainNotAllowed": "Domain not allowed: use sala.<name> in the node zone, not a reserved name",
+  "nodeErrDomainTaken": "The domain already belongs to another restaurant",
+  "nodeErrCertStillValid": "The certificate is valid for more than 30 more days: renewal starts on its own",
+  "nodeErrNoLanIp": "Save the node LAN IP first",
+  "nodeErrTlsNotConfigured": "DNS and certificates are not configured on the cloud",
+  "nodeDomainManagedHint": "Domain managed by the platform: here you change only IP and port",
+  "nodeErrRateLimited": "Too many DNS updates: try again in a minute",
+  "nodeErrDnsProvider": "Cloudflare refused the DNS update: try again later or contact the platform"
 }
