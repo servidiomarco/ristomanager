@@ -14,12 +14,16 @@ import { X } from 'lucide-react';
  * bug rather than fighting it with z-index.
  */
 
-export type ModalSize = 'sm' | 'md' | 'lg' | 'fluid';
+export type ModalSize = 'sm' | 'md' | 'lg' | 'xl' | 'fluid';
 
 const SIZE: Record<ModalSize, string> = {
   sm: 'sm:max-w-md',
   md: 'sm:max-w-2xl',
   lg: 'sm:max-w-5xl',
+  // Un lg con una terza colonna accanto: le due di partenza restano larghe
+  // com'erano (≈ 1024 + un terzo). Nasce per l'Incasso che apre il QR al
+  // tavolo; su un portatile a fermarlo è il viewport, non il tetto.
+  xl: 'sm:max-w-[1520px]',
   // Fills big monitors — where the floor map benefits most — without running
   // edge to edge on an ultrawide. Il vincolo che morde su un portatile e' il
   // 96vw, non il tetto: su uno schermo da 1512pt il modal si ferma molto prima
@@ -117,7 +121,9 @@ export const ModalShell: React.FC<ModalShellProps> = ({
         onClick={e => e.stopPropagation()}
         // Full-height on mobile either way — a phone sheet already fills the
         // screen, so only the desktop panel has a choice to make here.
-        className={`flex w-full flex-col overflow-hidden bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] h-full rounded-none sm:max-h-[92vh] sm:rounded-[var(--ds-radius)] ${fixedHeight ? 'sm:h-[90vh]' : 'sm:h-auto'} ${SIZE[size]}`}
+        // The max-width transition only runs for a modal that changes size
+        // while open (lg → xl in the Incasso): it grows instead of jumping.
+        className={`flex w-full flex-col overflow-hidden bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] h-full rounded-none sm:max-h-[92vh] sm:rounded-[var(--ds-radius)] sm:transition-[max-width] sm:duration-300 sm:ease-out ${fixedHeight ? 'sm:h-[90vh]' : 'sm:h-auto'} ${SIZE[size]}`}
       >
         <header className="flex flex-shrink-0 items-start justify-between gap-4 px-5 py-5 sm:px-6 sm:py-6">
           <div className="min-w-0">

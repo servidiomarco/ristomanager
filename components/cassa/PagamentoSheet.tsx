@@ -9,7 +9,7 @@ import { isSystemLine } from '../comande/orderView';
 import { euro } from './cassaView';
 import type { SettleOpts } from '../pagamenti/BillSheet';
 import { BillSheet, InvoiceDialog } from '../pagamenti/BillSheet';
-import { ModalShell } from '../ds';
+import { ModalShell, useMediaQuery } from '../ds';
 import { socketClient } from '../../services/socketClient';
 import { Loader } from '../Loader';
 import { Pagamento } from './Pagamento';
@@ -53,6 +53,10 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
   // reloadBill tiene fresco sugli eventi — la copia restava allo snapshot
   // del tocco e barra/totali non si muovevano più (visto al collaudo).
   const [qrOpen, setQrOpen] = useState(false);
+  // Da 1280 il QR si apre dentro il modal, come terza colonna: le altre due
+  // restano in vista, residuo compreso. Sotto, tre colonne sarebbero troppo
+  // strette per i metodi di pagamento e resta il cassetto.
+  const qrBeside = useMediaQuery('(min-width: 1280px)');
   const [closed, setClosed] = useState(false);
   // Correzione del conto: la comanda dietro (con gli id delle righe) e la
   // riga in storno. Il totale si riallinea dal server, non si tocca a mano.
@@ -187,8 +191,9 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
       onClose={onClose}
       title={bill?.table_name ? t('takingTitleTable', { tavolo: bill.table_name }) : t('takingTitle')}
       // Due colonne (scelta di Marco, 30/08: le tre a tutta larghezza erano
-      // dispersive): lg le fa respirare senza occupare l'intero schermo.
-      size="lg"
+      // dispersive): lg le fa respirare senza occupare l'intero schermo. La
+      // terza arriva solo col QR al tavolo, e il modal si allarga per lei.
+      size={qrOpen && qrBeside && screen === 'payment' ? 'xl' : 'lg'}
       closeOnEscape
       bodyClassName="p-4 sm:p-5"
     >
@@ -296,11 +301,12 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
           onBack={onClose}
           onSettle={settle}
           onSplit={() => setScreen('split')}
-          onShowQr={() => setQrOpen(true)}
+          onShowQr={() => setQrOpen(o => !o)}
           onEdit={openCorreggi}
           onDiscount={() => setDiscountOpen(true)}
           embedded
           paymentPulse={paymentPulse}
+          qrColumn={qrBeside ? { open: qrOpen, onClose: () => setQrOpen(false) } : undefined}
         />
       )}
 
@@ -340,7 +346,8 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
         />
       )}
 
-      {qrOpen && bill && !closed && (
+      {/* Il cassetto solo sotto i 1280: più largo il QR è la terza colonna. */}
+      {qrOpen && bill && !closed && !qrBeside && (
         <BillSheet bill={bill} busy={busy} onClose={() => setQrOpen(false)} />
       )}
     </ModalShell>
