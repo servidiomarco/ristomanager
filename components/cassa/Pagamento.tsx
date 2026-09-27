@@ -61,8 +61,8 @@ interface PagamentoProps {
   paymentPulse?: number;
   /** Il QR al tavolo come terza colonna invece che nel cassetto: il container
    *  (PagamentoSheet su schermo largo) allarga il modal e qui la colonna si
-   *  apre accanto alle altre due, che restano in vista — il cassetto le
-   *  copriva, e con loro il residuo che scende mentre l'ospite paga.
+   *  apre tra le altre due, che restano in vista — il cassetto le copriva, e
+   *  con loro il residuo che scende mentre l'ospite paga.
    *  Assente = il QR resta nel cassetto (CassaPage, tablet, telefono). */
   qrColumn?: { open: boolean; onClose: () => void };
 }
@@ -388,219 +388,106 @@ export const Pagamento: React.FC<PagamentoProps> = ({
           un overflow qui (senza altezza fissa non scorre mai) catturava lo
           sticky del piede di conferma, che restava sotto la piega. */}
       <div className={qrColumn
-        ? 'w-full pb-1 lg:flex'
+        ? 'flex w-full pb-1'
         : embedded
         ? 'grid w-full gap-3 pb-1 lg:grid-cols-2'
         : 'mx-auto grid w-full min-h-0 max-w-[1200px] flex-1 gap-4 overflow-y-auto px-4 pb-6 lg:grid-cols-2 lg:px-8'}>
-        {/* Con la colonna QR le due sezioni hanno una griglia loro, che cede
-            spazio alla terza mentre si allarga (flex-grow 2 contro 0 → 1: a
-            colonna aperta sono tre terzi). Senza, l'involucro non esiste per
-            il layout (contents) e la resa resta quella di sempre. */}
-        <div className={qrColumn ? 'grid min-w-0 gap-3 lg:flex-[2_1_0%] lg:grid-cols-2' : 'contents'}>
-          {/* Riepilogo */}
-          <section className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
-            <h2 className="text-[13px] font-semibold text-[var(--ds-text-muted)]">{t('summary')}</h2>
-            {/* Le righe del conto: cosa si sta incassando, non solo quanto.
-                Tetto in altezza con scroll interno — un banchetto lungo non
-                deve spingere il residuo fuori dallo schermo. */}
-            {(bill.items?.length ?? 0) > 0 && (
-              <ul className="mt-3 max-h-56 space-y-1 overflow-y-auto border-b border-[var(--ds-border)] pb-3 pr-1 text-[13px]">
-                {(bill.items ?? []).map((it, idx) => {
-                  const oid = it.order_item_id;
-                  const known = oid != null && bill.item_paid_units != null;
-                  const paid = billSettled ? it.qty : known ? Math.min(it.qty, paidUnits.get(oid!) ?? 0) : 0;
-                  const paying = known ? Math.max(0, Math.min(it.qty - paid, (takenUnits.get(oid!) ?? 0) - paid)) : 0;
-                  const allPaid = paid >= it.qty;
-                  return (
-                    <li key={idx} className="flex items-baseline gap-2">
-                      <span className="shrink-0 tabular-nums text-[var(--ds-text-muted)]">{it.qty}×</span>
-                      <span className={`min-w-0 flex-1 truncate ${allPaid ? 'text-[var(--ds-text-muted)]' : 'text-[var(--ds-text-secondary)]'}`}>
-                        {it.name}
-                      </span>
-                      {allPaid ? (
-                        <span className="inline-flex shrink-0 items-center gap-0.5 text-[12px] font-medium text-[var(--ds-seated-text)]">
-                          <Check size={12} aria-hidden />{t('itemPaid')}
-                        </span>
-                      ) : (paid > 0 || paying > 0) && (
-                        <span className="shrink-0 text-[12px]">
-                          {paid > 0 && <span className="font-medium text-[var(--ds-seated-text)]">{t('itemPaidUnits', { count: paid })}</span>}
-                          {paid > 0 && paying > 0 && <span className="text-[var(--ds-text-muted)]"> · </span>}
-                          {paying > 0 && <span className="text-[var(--ds-pending-text)]">{t('itemPaying', { count: paying })}</span>}
-                        </span>
-                      )}
-                      <span className={`shrink-0 tabular-nums ${allPaid ? 'text-[var(--ds-text-muted)]' : 'text-[var(--ds-text-secondary)]'}`}>{euro(it.unit_price_cents * it.qty)}</span>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-            <dl className="mt-3 space-y-1.5 text-[14px]">
-              {discountShown > 0 && (
-                <div className="flex justify-between gap-2">
-                  <dt className="text-[var(--ds-critical-text)]">{t('discount')}</dt>
-                  <dd className="tabular-nums text-[var(--ds-critical-text)]">−{euro(discountShown)}</dd>
-                </div>
-              )}
-              <div className="flex justify-between gap-2">
-                <dt className="text-[var(--ds-text-secondary)]">{t('billTotal')}</dt>
-                <dd className="tabular-nums text-[var(--ds-text-primary)]">{euro(bill.total_cents)}</dd>
-              </div>
-            </dl>
-
-            <div className="mt-3 space-y-1.5 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3 text-[13px]">
-              {deposit > 0 && (
-                <div className="flex justify-between gap-2">
-                  <span className="text-[var(--ds-text-secondary)]">{t('bookingDeposit')}</span>
-                  <span className="tabular-nums text-[var(--ds-text-secondary)]">{euro(deposit)}</span>
-                </div>
-              )}
-              {staffPaid > 0 && (
-                <div className="flex justify-between gap-2">
-                  <span className="text-[var(--ds-text-secondary)]">{t('takenAtTill')}</span>
-                  <span className="tabular-nums text-[var(--ds-text-secondary)]">{euro(staffPaid)}</span>
-                </div>
-              )}
-              {online > 0 && (
-                <div className={`flex justify-between gap-2 ${flashCls}`}>
-                  <span className="text-[var(--ds-text-secondary)]">{t('paidOnline')}</span>
-                  <span className="tabular-nums text-[var(--ds-text-secondary)]">{euro(online)}</span>
-                </div>
-              )}
-              <div className="flex justify-between gap-2 border-t border-[var(--ds-border)] pt-1.5 font-semibold">
-                <span className="text-[var(--ds-text-primary)]">{t('alreadyPaid')}</span>
-                <span className="tabular-nums text-[var(--ds-text-primary)]">{euro(alreadyPaid)}</span>
-              </div>
-            </div>
-
-            {(bill.refund_due_cents ?? 0) > 0 && (
-              // Si mostra, non si esegue: il rimborso è un'operazione di gateway
-              // e vive in Pagamenti, non nel cassetto.
-              <Callout tone="info" className="mt-3">
-                Da rimborsare al cliente {euro(bill.refund_due_cents ?? 0)} — si fa da Pagamenti.
-              </Callout>
-            )}
-
-            <div className={`mt-4 ${flash ? 'animate-flash-row rounded-[var(--ds-radius)] p-2 -m-2' : ''}`}>
-              <div className="text-[13px] text-[var(--ds-pending-text)]">{t('remaining')}</div>
-              <div className="text-[40px] font-semibold leading-none tabular-nums tracking-[-0.02em] text-[var(--ds-text-primary)]">
-                {euro(math.remaining)}
-              </div>
-            </div>
-          </section>
-
-          {/* Come si paga */}
-          <section className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
-            <h2 className="text-[13px] font-semibold text-[var(--ds-text-muted)]">{t('collectHere')}</h2>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {METHODS.map(m => {
-                // Un sospeso su un tavolo senza cliente è un credito che nessuno
-                // può riscuotere: si abilita solo quando c'è un nome.
-                const blocked = m.value === 'SOSPESO' && !bill.customer_name;
+        {/* Con la colonna QR le tre sezioni stanno in fila, e il QR si apre
+            in mezzo: Incassa, con la conferma, resta l'ultima a destra. Il
+            QR cresce da 0 a un terzo (flex-grow e basis) mentre il modal si
+            allarga; lo stacco è il pl-3 dentro la colonna e il ml-3 di
+            Incassa, così a colonna chiusa resta un solo stacco di 12px, come
+            nella griglia, e a colonna aperta le tre sezioni sono uguali. */}
+        {/* Riepilogo */}
+        <section className={`rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]${qrColumn ? ' min-w-0 flex-1' : ''}`}>
+          <h2 className="text-[13px] font-semibold text-[var(--ds-text-muted)]">{t('summary')}</h2>
+          {/* Le righe del conto: cosa si sta incassando, non solo quanto.
+              Tetto in altezza con scroll interno — un banchetto lungo non
+              deve spingere il residuo fuori dallo schermo. */}
+          {(bill.items?.length ?? 0) > 0 && (
+            <ul className="mt-3 max-h-56 space-y-1 overflow-y-auto border-b border-[var(--ds-border)] pb-3 pr-1 text-[13px]">
+              {(bill.items ?? []).map((it, idx) => {
+                const oid = it.order_item_id;
+                const known = oid != null && bill.item_paid_units != null;
+                const paid = billSettled ? it.qty : known ? Math.min(it.qty, paidUnits.get(oid!) ?? 0) : 0;
+                const paying = known ? Math.max(0, Math.min(it.qty - paid, (takenUnits.get(oid!) ?? 0) - paid)) : 0;
+                const allPaid = paid >= it.qty;
                 return (
-                  <button
-                    key={m.value}
-                    type="button"
-                    onClick={() => setMethod(m.value)}
-                    disabled={busy || blocked}
-                    title={blocked ? t('needsCustomer') : undefined}
-                    className={`inline-flex h-11 items-center rounded-[var(--ds-radius-control)] px-3.5 text-[14px] font-medium transition-colors disabled:opacity-40 ${
-                      method === m.value
-                        ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
-                        : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'
-                    }`}
-                  >
-                    {m.label}
-                  </button>
+                  <li key={idx} className="flex items-baseline gap-2">
+                    <span className="shrink-0 tabular-nums text-[var(--ds-text-muted)]">{it.qty}×</span>
+                    <span className={`min-w-0 flex-1 truncate ${allPaid ? 'text-[var(--ds-text-muted)]' : 'text-[var(--ds-text-secondary)]'}`}>
+                      {it.name}
+                    </span>
+                    {allPaid ? (
+                      <span className="inline-flex shrink-0 items-center gap-0.5 text-[12px] font-medium text-[var(--ds-seated-text)]">
+                        <Check size={12} aria-hidden />{t('itemPaid')}
+                      </span>
+                    ) : (paid > 0 || paying > 0) && (
+                      <span className="shrink-0 text-[12px]">
+                        {paid > 0 && <span className="font-medium text-[var(--ds-seated-text)]">{t('itemPaidUnits', { count: paid })}</span>}
+                        {paid > 0 && paying > 0 && <span className="text-[var(--ds-text-muted)]"> · </span>}
+                        {paying > 0 && <span className="text-[var(--ds-pending-text)]">{t('itemPaying', { count: paying })}</span>}
+                      </span>
+                    )}
+                    <span className={`shrink-0 tabular-nums ${allPaid ? 'text-[var(--ds-text-muted)]' : 'text-[var(--ds-text-secondary)]'}`}>{euro(it.unit_price_cents * it.qty)}</span>
+                  </li>
                 );
               })}
+            </ul>
+          )}
+          <dl className="mt-3 space-y-1.5 text-[14px]">
+            {discountShown > 0 && (
+              <div className="flex justify-between gap-2">
+                <dt className="text-[var(--ds-critical-text)]">{t('discount')}</dt>
+                <dd className="tabular-nums text-[var(--ds-critical-text)]">−{euro(discountShown)}</dd>
+              </div>
+            )}
+            <div className="flex justify-between gap-2">
+              <dt className="text-[var(--ds-text-secondary)]">{t('billTotal')}</dt>
+              <dd className="tabular-nums text-[var(--ds-text-primary)]">{euro(bill.total_cents)}</dd>
             </div>
+          </dl>
 
-            {movements.length > 0 && (
-              <ul className="mt-3 space-y-1">
-                {movements.map((m, i) => (
-                  <li key={i} className="flex items-center justify-between rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3 py-1.5 text-[14px] text-[var(--ds-text-secondary)]">
-                    <span>{methodLabel(m.method)}</span>
-                    <span className="flex items-center gap-2">
-                      <span className="tabular-nums">{euro(m.amount_cents)}</span>
-                      <button
-                        type="button"
-                        aria-label={t('removeMovement')}
-                        onClick={() => setMovements(prev => prev.filter((_, j) => j !== i))}
-                        disabled={busy}
-                        className="rounded-[var(--ds-radius-control)] px-2 text-[var(--ds-text-muted)] hover:bg-[var(--ds-border)] disabled:opacity-40"
-                      >
-                        ×
-                      </button>
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-
-            {math.remaining > 0 && (
-              <div className="mt-4 flex items-end gap-2">
-                <label className="block flex-1">
-                  <span className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">
-                    {t(method === 'CONTANTI' ? 'cashReceived' : 'amount')}
-                  </span>
-                  <div className="relative">
-                    <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[17px] text-[var(--ds-text-muted)]">{moneySymbol()}</span>
-                    <input
-                      type="text" inputMode="decimal" value={amount}
-                      onChange={e => setAmount(e.target.value)} disabled={busy}
-                      className={`${field} pl-8`}
-                    />
-                  </div>
-                </label>
-                <button
-                  type="button"
-                  onClick={addMovement}
-                  disabled={busy || math.applied <= 0 || math.applied >= math.remaining}
-                  className="h-12 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)] disabled:opacity-40"
-                >
-                  {t('add')}
-                </button>
+          <div className="mt-3 space-y-1.5 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3 text-[13px]">
+            {deposit > 0 && (
+              <div className="flex justify-between gap-2">
+                <span className="text-[var(--ds-text-secondary)]">{t('bookingDeposit')}</span>
+                <span className="tabular-nums text-[var(--ds-text-secondary)]">{euro(deposit)}</span>
               </div>
             )}
-
-            {math.change > 0 && (
-              <p className="mt-2 text-[15px] font-semibold text-[var(--ds-text-primary)]">
-                Resto <span className="tabular-nums">{euro(math.change)}</span>
-              </p>
-            )}
-
-            <label className="mt-4 block">
-              <span className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">
-                Mancia <span className="font-normal text-[var(--ds-text-muted)]">(facoltativa)</span>
-              </span>
-              <div className="relative">
-                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[15px] text-[var(--ds-text-muted)]">{moneySymbol()}</span>
-                <input
-                  type="text" inputMode="decimal" placeholder="0,00" value={tip}
-                  onChange={e => setTip(e.target.value)} disabled={busy}
-                  className={`${field} h-11 pl-8 text-[15px]`}
-                />
-              </div>
-            </label>
-            {/* Dove finisce la mancia: in contanti entra nel cassetto. Senza
-                questa scelta i contanti di una mancia a un conto saldato col QR
-                restavano fuori dai contanti attesi (24/09). */}
-            {tipCents > 0 && (
-              <div className="mt-2">
-                <SegmentedControl<TipMethod>
-                  value={tipMethod}
-                  onChange={setTipChoice}
-                  options={TIP_METHODS.map(m => ({ value: m, label: methodLabel(m) }))}
-                  ariaLabel={t('tipMethod')}
-                  equalWidth={false}
-                  size="sm"
-                />
+            {staffPaid > 0 && (
+              <div className="flex justify-between gap-2">
+                <span className="text-[var(--ds-text-secondary)]">{t('takenAtTill')}</span>
+                <span className="tabular-nums text-[var(--ds-text-secondary)]">{euro(staffPaid)}</span>
               </div>
             )}
+            {online > 0 && (
+              <div className={`flex justify-between gap-2 ${flashCls}`}>
+                <span className="text-[var(--ds-text-secondary)]">{t('paidOnline')}</span>
+                <span className="tabular-nums text-[var(--ds-text-secondary)]">{euro(online)}</span>
+              </div>
+            )}
+            <div className="flex justify-between gap-2 border-t border-[var(--ds-border)] pt-1.5 font-semibold">
+              <span className="text-[var(--ds-text-primary)]">{t('alreadyPaid')}</span>
+              <span className="tabular-nums text-[var(--ds-text-primary)]">{euro(alreadyPaid)}</span>
+            </div>
+          </div>
 
-            {canaleEDocumento}
-          </section>
-        </div>
+          {(bill.refund_due_cents ?? 0) > 0 && (
+            // Si mostra, non si esegue: il rimborso è un'operazione di gateway
+            // e vive in Pagamenti, non nel cassetto.
+            <Callout tone="info" className="mt-3">
+              Da rimborsare al cliente {euro(bill.refund_due_cents ?? 0)} — si fa da Pagamenti.
+            </Callout>
+          )}
+
+          <div className={`mt-4 ${flash ? 'animate-flash-row rounded-[var(--ds-radius)] p-2 -m-2' : ''}`}>
+            <div className="text-[13px] text-[var(--ds-pending-text)]">{t('remaining')}</div>
+            <div className="text-[40px] font-semibold leading-none tabular-nums tracking-[-0.02em] text-[var(--ds-text-primary)]">
+              {euro(math.remaining)}
+            </div>
+          </div>
+        </section>
 
         {qrColumn && (
           <div
@@ -608,14 +495,17 @@ export const Pagamento: React.FC<PagamentoProps> = ({
             onTransitionEnd={e => {
               if (e.target === e.currentTarget && e.propertyName === 'flex-grow') setQrMoving(false);
             }}
-            className={`min-w-0 basis-0 transition-[flex-grow,opacity] duration-300 ease-out ${
-              qrOpen ? 'grow opacity-100' : 'grow-0 opacity-0'
+            // Base 44px = i 12 dello stacco + i 32 di padding (p-4) che
+            // Riepilogo e Incassa portano comunque nella loro base 0: con una
+            // base di 12 il QR restava 32px più stretto delle altre due.
+            className={`min-w-0 transition-[flex-grow,flex-basis,opacity] duration-300 ease-out ${
+              qrOpen ? 'grow basis-11 opacity-100' : 'grow-0 basis-0 opacity-0'
             } ${qrMoving ? 'overflow-hidden' : ''}`}
           >
             {(qrOpen || qrMoving) && (
-              // Lo stacco dalle altre due è padding dentro la colonna, non gap:
-              // un gap resterebbe anche a colonna chiusa, largo 12px sul bordo.
-              <div className="h-full pt-3 lg:pl-3 lg:pt-0">
+              // Lo stacco da Riepilogo è padding dentro la colonna, non gap:
+              // un gap resterebbe anche a colonna chiusa.
+              <div className="h-full pl-3">
                 <section className="h-full rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
                   <div className="flex items-center justify-between gap-3">
                     <h2 className="text-[13px] font-semibold text-[var(--ds-text-muted)]">
@@ -635,7 +525,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
                   </div>
                   {/* Chi sta pagando col QR, mentre paga. Il dettaglio dei
                       piatti e i totali del cassetto qui no: sono già nel
-                      Riepilogo, due colonne più in là. */}
+                      Riepilogo, subito a sinistra. */}
                   {hasShareRows(bill) && (
                     <>
                       <h2 className="mt-5 border-t border-[var(--ds-border)] pt-4 text-[13px] font-semibold text-[var(--ds-text-muted)]">
@@ -649,6 +539,119 @@ export const Pagamento: React.FC<PagamentoProps> = ({
             )}
           </div>
         )}
+
+        {/* Come si paga */}
+        <section className={`rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]${qrColumn ? ' ml-3 min-w-0 flex-1' : ''}`}>
+          <h2 className="text-[13px] font-semibold text-[var(--ds-text-muted)]">{t('collectHere')}</h2>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {METHODS.map(m => {
+              // Un sospeso su un tavolo senza cliente è un credito che nessuno
+              // può riscuotere: si abilita solo quando c'è un nome.
+              const blocked = m.value === 'SOSPESO' && !bill.customer_name;
+              return (
+                <button
+                  key={m.value}
+                  type="button"
+                  onClick={() => setMethod(m.value)}
+                  disabled={busy || blocked}
+                  title={blocked ? t('needsCustomer') : undefined}
+                  className={`inline-flex h-11 items-center rounded-[var(--ds-radius-control)] px-3.5 text-[14px] font-medium transition-colors disabled:opacity-40 ${
+                    method === m.value
+                      ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                      : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'
+                  }`}
+                >
+                  {m.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {movements.length > 0 && (
+            <ul className="mt-3 space-y-1">
+              {movements.map((m, i) => (
+                <li key={i} className="flex items-center justify-between rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3 py-1.5 text-[14px] text-[var(--ds-text-secondary)]">
+                  <span>{methodLabel(m.method)}</span>
+                  <span className="flex items-center gap-2">
+                    <span className="tabular-nums">{euro(m.amount_cents)}</span>
+                    <button
+                      type="button"
+                      aria-label={t('removeMovement')}
+                      onClick={() => setMovements(prev => prev.filter((_, j) => j !== i))}
+                      disabled={busy}
+                      className="rounded-[var(--ds-radius-control)] px-2 text-[var(--ds-text-muted)] hover:bg-[var(--ds-border)] disabled:opacity-40"
+                    >
+                      ×
+                    </button>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {math.remaining > 0 && (
+            <div className="mt-4 flex items-end gap-2">
+              <label className="block flex-1">
+                <span className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">
+                  {t(method === 'CONTANTI' ? 'cashReceived' : 'amount')}
+                </span>
+                <div className="relative">
+                  <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[17px] text-[var(--ds-text-muted)]">{moneySymbol()}</span>
+                  <input
+                    type="text" inputMode="decimal" value={amount}
+                    onChange={e => setAmount(e.target.value)} disabled={busy}
+                    className={`${field} pl-8`}
+                  />
+                </div>
+              </label>
+              <button
+                type="button"
+                onClick={addMovement}
+                disabled={busy || math.applied <= 0 || math.applied >= math.remaining}
+                className="h-12 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)] disabled:opacity-40"
+              >
+                {t('add')}
+              </button>
+            </div>
+          )}
+
+          {math.change > 0 && (
+            <p className="mt-2 text-[15px] font-semibold text-[var(--ds-text-primary)]">
+              Resto <span className="tabular-nums">{euro(math.change)}</span>
+            </p>
+          )}
+
+          <label className="mt-4 block">
+            <span className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">
+              Mancia <span className="font-normal text-[var(--ds-text-muted)]">(facoltativa)</span>
+            </span>
+            <div className="relative">
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[15px] text-[var(--ds-text-muted)]">{moneySymbol()}</span>
+              <input
+                type="text" inputMode="decimal" placeholder="0,00" value={tip}
+                onChange={e => setTip(e.target.value)} disabled={busy}
+                className={`${field} h-11 pl-8 text-[15px]`}
+              />
+            </div>
+          </label>
+          {/* Dove finisce la mancia: in contanti entra nel cassetto. Senza
+              questa scelta i contanti di una mancia a un conto saldato col QR
+              restavano fuori dai contanti attesi (24/09). */}
+          {tipCents > 0 && (
+            <div className="mt-2">
+              <SegmentedControl<TipMethod>
+                value={tipMethod}
+                onChange={setTipChoice}
+                options={TIP_METHODS.map(m => ({ value: m, label: methodLabel(m) }))}
+                ariaLabel={t('tipMethod')}
+                equalWidth={false}
+                size="sm"
+              />
+            </div>
+          )}
+
+          {canaleEDocumento}
+        </section>
       </div>
     </div>
   );
