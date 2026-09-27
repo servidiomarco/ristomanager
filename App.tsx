@@ -3108,7 +3108,9 @@ const App: React.FC = () => {
         )}
 
         {view === ViewState.PAGAMENTI && (
-          <PagamentiPage globalDate={globalDate} globalShiftFilter={globalShiftFilter} onOpenCassa={canAccessView(ViewState.CASSA) ? () => setView(ViewState.CASSA) : undefined} />
+          <CardErrorBoundary label={t('nav.items.payments')}>
+            <PagamentiPage globalDate={globalDate} globalShiftFilter={globalShiftFilter} onOpenCassa={canAccessView(ViewState.CASSA) ? () => setView(ViewState.CASSA) : undefined} />
+          </CardErrorBoundary>
         )}
 
         {view === ViewState.FISCALITA && (

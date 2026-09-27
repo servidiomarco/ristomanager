@@ -51,8 +51,10 @@ const DOC_FILTERS: { value: DocFilter; label: string; labelKey?: string }[] = [
   { value: 'none', label: 'Senza documento' },
 ];
 
+// Funzione chiamata riga per riga, non un componente: niente hook qui dentro
+// (un useTranslation qui cambiava il numero di hook a ogni cambio di righe —
+// turno, data, filtro — e React smontava la pagina).
 const docPill = (b: CashClosureBillRow) => {
-  const { t } = useTranslation('cassa', { useSuspense: false });
   const kind = docKind(b);
   // Scontrino uscito dal registratore (Passepartout o battuto a mano nel
   // periodo ponte): nel riscontro serale il numero è quello dell'RT.
