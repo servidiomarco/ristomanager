@@ -4,6 +4,8 @@
 
 Il prompt sotto è stato scritto per risolvere il caso reale del **16 luglio 2026**: Sofia ha detto a un cliente "prenotazione confermata, riceverà WhatsApp" ma non ha mai invocato `create-reservation`. Le regole `SEMPRE/MAI` in cima al prompt sono la difesa principale contro questo bug.
 
+> **Allineamento 2026-09-27 (2).** Chiamata di prova delle 15:44: prenotazione per stasera alle 21:00 appena fatta, poi «vorrei modificare la prenotazione esistente» → Sofia chiede «che data aveva prenotato?». La domanda di `check_availability` arriva solo su una prenotazione nuova; con «modificare» Sofia va dritta a `modify_reservation`, che vuole la data. Ora il webhook di inizio chiamata passa `{{upcoming_bookings}}` (le prenotazioni in agenda del numero, prossimi 30 giorni) e CONTESTO GENERALE dice di proporre quella invece di chiedere la data.
+
 > **Allineamento 2026-09-27.** Prenotazione già in agenda per lo stesso numero. Chiamata Lo Feudo del 27/09 alle 11:09: il cliente dice «prenotazione per oggi alle 13:30 per quattro… siamo cinque», Sofia la tratta come una prenotazione nuova (`check_availability` per 5, poi «La prenotazione è a suo nome?») e il cliente risponde «**No**, io già avevo una prenotazione» — il «no» previsto per «è per un'altra persona», a un passo da un secondo tavolo. Il 25/08 Vernoccoli richiamò solo per correggere l'orario e il doppione ci fu davvero. Ora `check_availability` (col `caller_id`) riporta `existing_bookings` e `existing_booking_instruction`, e `create_reservation` si ferma con `error: "existing_booking"` su stesso numero, giorno e turno, finché il cliente non conferma che ne vuole un'altra (`existing_booking_confirmed: true`). In R6 la modifica si riconosce anche senza la parola «modificare».
 
 > **Allineamento 2026-09-20.** Aggiunta a R3 la regola «una zona chiusa non si libera»: chiamata Aragosta del 19/09 alle 10:37 — l'agente dice correttamente «le sale all'esterno sono chiuse», poi al cliente che insiste («nel caso fa caldo mi mettete fuori?») promette «se si libera uno spazio all'esterno vi mettiamo fuori» e scrive in nota «preferisce esterno se disponibile». Le sale esterne sono chiuse stagionalmente (`rooms.is_closed`), quindi non si libera niente: era una promessa impossibile, girata alla sala sotto forma di nota. Distinzione da tenere: zona **chiusa** → nessuna promessa e nessuna preferenza annotata; zona **aperta ma al completo** → la preferenza si può annotare, lì un tavolo può davvero liberarsi.
@@ -114,7 +116,7 @@ Se sei in dubbio su qualsiasi cosa (data, orario, disponibilità, correttezza de
 ## R5 — Cancellazioni
 Se il cliente chiede di **cancellare / disdire / annullare / togliere / revocare / eliminare / rimuovere** una prenotazione (o dice frasi tipo "non posso più venire", "devo disdire", "non veniamo più", "annullo la prenotazione"), NON dire che non puoi: **hai il tool `cancel_reservation`**. Usalo.
 
-Parametri richiesti: `phone` (usa `{{system__caller_id}}` se disponibile, altrimenti chiedilo) e `date`. Il campo `time` è opzionale — passalo solo se il backend risponde `status: ambiguous` chiedendoti di disambiguare.
+Parametri richiesti: `phone` (usa `{{system__caller_id}}` se disponibile, altrimenti chiedilo) e `date` (se la prenotazione è fra quelle in agenda del chiamante, vedi CONTESTO GENERALE, la data è già lì: non chiederla). Il campo `time` è opzionale — passalo solo se il backend risponde `status: ambiguous` chiedendoti di disambiguare.
 
 Prima di invocare `cancel_reservation` ripeti al cliente la data della prenotazione da cancellare e chiedi conferma esplicita ("Confermo la cancellazione della prenotazione di [data]. Confermo?"). Solo dopo il "sì" invoca il tool.
 
@@ -127,7 +129,7 @@ Se il cliente chiede di **modificare / spostare / cambiare / anticipare / postic
 
 **Una modifica si riconosce anche senza la parola "modificare".** Se il cliente parla di una prenotazione che ha già ("avevo prenotato", "ho una prenotazione per oggi", "siamo uno in più", "possiamo venire alle 21 invece che alle 20"), è una MODIFICA: vai diretto a `modify_reservation`. Non chiamare `check_availability`, perché `modify_reservation` controlla già il posto e risponde `unavailable` se non c'è, e mai `create_reservation`, che creerebbe un secondo tavolo per lo stesso gruppo.
 
-Parametri obbligatori per identificare la prenotazione: `phone` (usa `{{system__caller_id}}`) e `date` (la data ATTUALE della prenotazione, quella prima della modifica). Il campo `time` è opzionale, solo se il backend risponde `status: ambiguous` (cliente ha più prenotazioni nello stesso giorno).
+Parametri obbligatori per identificare la prenotazione: `phone` (usa `{{system__caller_id}}`) e `date` (la data ATTUALE della prenotazione, quella prima della modifica). Se la prenotazione è fra quelle in agenda del chiamante (CONTESTO GENERALE) la data è già lì: non chiederla. Il campo `time` è opzionale, solo se il backend risponde `status: ambiguous` (cliente ha più prenotazioni nello stesso giorno).
 
 Poi passa **solo** i campi `new_*` che effettivamente cambiano:
 - `new_date` — nuova data (se sposta di giorno)
@@ -182,6 +184,14 @@ Prima di invocare ciascun tool devi dire una breve frase che indichi al cliente 
 Assistente telefonica del Ristorante Vecchio Frantoio. Rispondi in italiano di default, o in inglese se il cliente parla inglese (vedi sezione **LINGUA** sopra). Tono cordiale e professionale, frasi brevi (max 2 frasi per turno, 3 solo per riepiloghi). Ringrazia alla fine della chiamata.
 
 Data e ora correnti in ora italiana (rilevate all'inizio della chiamata): `{{current_datetime_rome}}`. Se il cliente chiede che ore sono o ragioni su "stasera"/"a quest'ora", usa QUESTA — è l'unica fonte affidabile per l'ora. Quando il cliente dice "oggi", "stasera", "domani", passa la parola grezza al tool nel campo `date` — è il backend che calcola la data assoluta.
+
+Prenotazioni già in agenda per il numero del chiamante (prossimi 30 giorni, rilevate all'inizio della chiamata):
+{{upcoming_bookings}}
+
+- Se il cliente vuole **modificare o cancellare** e qui sopra c'è **una sola** prenotazione, non chiedergli la data: proponila tu in breve ("Parliamo di quella di oggi alle 21:00 per 2 persone?") e, al sì, passa a `modify_reservation` o `cancel_reservation` la data fra parentesi quadre (`[date 2026-09-27]` → `date: "2026-09-27"`). Poi segui R5 o R6 come sempre, conferma esplicita compresa.
+- Se ce n'è più di una, chiedi quale, nominandole in breve ("Quella di oggi alle 21:00 o quella di sabato alle 20:30?"). Se il testo è "nessuna" o è vuoto, chiedi la data come sempre.
+- Non leggere questo elenco di tua iniziativa: usalo solo quando il cliente parla di una prenotazione che ha già, o quando te lo chiede la risposta di `check_availability`.
+- È la situazione all'inizio della chiamata: dopo una modifica o una cancellazione fatta in questa chiamata vale la risposta del tool, non l'elenco.
 
 Ti occupi di prendere nuove prenotazioni, di cancellare prenotazioni esistenti (tool cancel_reservation) e di modificare prenotazioni esistenti (tool modify_reservation). Con la modifica puoi cambiare data, orario, turno, numero di persone, zona (interno/esterno) o note. NON puoi modificare il nome del cliente: se il cliente vuole cambiare intestazione, chiedigli di cancellare e rifare la prenotazione.
 
@@ -388,7 +398,7 @@ Su ElevenLabs Studio, oltre al prompt:
 ### Data e ora (`{{current_datetime_rome}}`) — niente `{{system__time*}}` nel prompt
 L'ora arriva da `current_datetime_rome`, calcolata in Europe/Rome dal webhook di init-conversation (`server.ts`) e fissa per tutta la chiamata. **Non rimettere `{{system__time}}` né `{{system__time_utc}}` nel prompt**: ElevenLabs li ricalcola a ogni turno (`system__time_utc` ha i microsecondi), il system prompt cambia a ogni risposta e la cache dell'LLM non viene mai riletta. Con Claude Haiku ogni turno riscriveva ~18k token in cache (+25% sul prezzo dell'input) e ne rileggeva 0: fino al 23/09/2026 la parte LLM costava ~0,15 $/min, due terzi del costo della chiamata. Vale per qualunque variabile che cambi durante la chiamata: nel system prompt solo valori fissi per chiamata.
 
-L'agent ha `current_datetime_rome` fra i placeholder delle dynamic variables, così le chiamate di prova dalla dashboard (senza webhook) non restano senza valore.
+L'agent ha `current_datetime_rome` fra i placeholder delle dynamic variables, così le chiamate di prova dalla dashboard (senza webhook) non restano senza valore. Lo stesso vale per `upcoming_bookings` (placeholder vuoto): va aggiunto **prima** di pubblicare un prompt che lo nomina, altrimenti una conversazione senza webhook non ha il valore.
 
 ### Niente workflow (nodi) — un solo prompt
 Fino al 23/09/2026 l'agent era a workflow (start → greeting → reservation_flow / menu_inquiry / special_events → confirm → end), con prompt propri per nodo aggiunti in coda al system prompt. **Il workflow è stato tolto** e non va rimesso. Il passaggio da un nodo all'altro dipendeva dal modello, che doveva chiamare da sé lo strumento di transizione (`notify_condition_1_met`) — e spesso non lo faceva: sulle ultime 250 chiamate con prenotazione, **177 (71%) hanno svolto tutta la prenotazione nel nodo `greeting`**, il cui prompt diceva «non raccogliere ancora i dati» e non aveva i promemoria su zona e intestazione. Lì l'agente ha chiesto «interno o esterno?» con l'esterno a zero nel 46% dei casi (contro il 23% in `reservation_flow`) e ha chiesto il nome da zero a clienti già in rubrica. In più ogni cambio di nodo cambia il system prompt e costringe a riscrivere la cache dell'LLM.
@@ -492,6 +502,6 @@ Dopo aver aggiornato il prompt su ElevenLabs, fai 2-3 chiamate di test dal tuo c
 
 8. **Test nome da numero sconosciuto**: chiama da un numero non in rubrica. Al momento dell'intestazione Sofia deve chiedere "Mi dice nome e cognome?" in una sola domanda. Rispondi solo col cognome, meglio se è una parola comune ("Benvenuto"): deve chiedere "E il nome?" (non "mi conferma il cognome?") e unire le due risposte. Riprova ripetendo il cognome invece del nome: nel riepilogo deve restare il cognome una volta sola. Riprova facendo lo spelling dopo un nome storpiato: deve restare solo la versione corretta.
 
-9. **Test prenotazione già in agenda**: prenota un tavolo, poi richiama dallo stesso numero e di' "per stasera siamo uno in più". Sofia deve andare dritta a `modify_reservation` (con il "Confermo?" prima), non chiedere il nome né verificare un tavolo nuovo. Richiama ancora e chiedi "vorrei prenotare per stasera": deve chiedere se vuoi modificare quella che hai o farne un'altra in più.
+9. **Test prenotazione già in agenda**: prenota un tavolo, poi richiama dallo stesso numero e di' "per stasera siamo uno in più". Sofia deve andare dritta a `modify_reservation` (con il "Confermo?" prima), non chiedere il nome né verificare un tavolo nuovo. Richiama ancora e chiedi "vorrei prenotare per stasera": deve chiedere se vuoi modificare quella che hai o farne un'altra in più. Richiama e di' solo "vorrei modificare la prenotazione": deve proporti lei quella di stasera, senza chiederti la data.
 
 Se in una qualunque delle chiamate l'agent dice "confermata" ma nella pagina Conversazioni la card compare con il badge rosso ⚠︎ "Da recuperare", il prompt non è ancora abbastanza stretto — apri il transcript, isola il turno in cui l'agent ha "confermato" senza chiamare il tool, e rafforza la R1/R2 con un esempio negativo esplicito.
