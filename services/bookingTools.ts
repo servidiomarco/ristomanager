@@ -27,6 +27,7 @@
 import { Shift } from '../types.js';
 import { normalizeLanguageCode, detectLanguageFromPhonePrefix } from '../utils/language.js';
 import { spokenFirstName } from '../utils/text.js';
+import type { ActiveReservationByPhone } from './elevenlabsService.js';
 
 // Il tenant arriva come primo parametro di ogni tool (Fase C2): i canali
 // self-service non hanno JWT, quindi è l'adattatore del canale a risolverlo
@@ -121,6 +122,9 @@ export interface BookingToolsDeps {
     upsertCustomerFromReservation: (tenantId: number, name: string, phone: string, a: any, b: any, language?: string | null) => Promise<string | null>;
     /** Rubrica per numero (last-10-digits, stessa regola dell'upsert). */
     findCustomerByPhone: (tenantId: number, phone: string) => Promise<{ exists: boolean; customer_name?: string; first_name?: string }>;
+    /** Prenotazioni ancora in agenda per un numero (last-10-digits): con
+     *  `date` solo quel giorno, senza da oggi ai prossimi `horizonDays`. */
+    findActiveReservationsByPhone: (tenantId: number, phone: string, opts?: { date?: string; horizonDays?: number }) => Promise<ActiveReservationByPhone[]>;
     /** Card #27 — true se il numero appartiene a un cliente in blacklist. */
     isPhoneBlacklisted: (tenantId: number, phone: string) => Promise<boolean>;
     /** Comportamento della blacklist per fonte, deciso dal tenant. */
@@ -206,6 +210,45 @@ const msg = (english: boolean) => (english ? MSG_EN : MSG);
 const isEnglishCall = (p: { language?: any }): boolean => normalizeLanguageCode(p.language) === 'en';
 
 const isShift = (s: string): s is Shift => s === Shift.LUNCH || s === Shift.DINNER;
+
+/** Flag booleani del modello: arrivano come true o come stringa "true". */
+const isTrueFlag = (v: any): boolean => v === true || String(v ?? '').trim().toLowerCase() === 'true';
+
+// ---------------------------------------------------------------------------
+// Prenotazione già in agenda per lo stesso numero
+// ---------------------------------------------------------------------------
+
+/** Giorni in avanti in cui check_availability cerca le prenotazioni del
+ *  chiamante. Oltre, una prenotazione lontana di rado c'entra con la
+ *  chiamata; lo stesso giorno lo copre comunque il controllo di
+ *  create_reservation, che guarda la data chiesta a qualunque distanza. */
+const EXISTING_BOOKING_HORIZON_DAYS = 30;
+
+/** 'YYYY-MM-DD' di oggi nel fuso del locale. */
+const todayInTz = (tz: string): string =>
+    new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+
+const addDaysIso = (iso: string, days: number): string => {
+    const [y, m, dd] = iso.split('-').map(Number);
+    return new Date(Date.UTC(y, m - 1, dd + days)).toISOString().slice(0, 10);
+};
+
+/** Come si nomina a voce il giorno: "oggi", "domani", "domenica 27 settembre". */
+function spokenDay(date: string, tz: string, english: boolean): string {
+    const today = todayInTz(tz);
+    if (date === today) return english ? 'today' : 'oggi';
+    if (date === addDaysIso(today, 1)) return english ? 'tomorrow' : 'domani';
+    return deps().formatItalianDateReadback(date, english ? 'en' : null);
+}
+
+const guestsLabel = (n: number, english: boolean): string =>
+    english ? `${n} ${n === 1 ? 'guest' : 'guests'}` : `${n} ${n === 1 ? 'persona' : 'persone'}`;
+
+/** La prenotazione in agenda come la vede il modello: `date` è quella da
+ *  passare a modify_reservation, `day` quella da dire al cliente. */
+function describeExisting(r: ActiveReservationByPhone, tz: string, english: boolean) {
+    return { date: r.date, day: spokenDay(r.date, tz, english), time: r.time, shift: r.shift, guests: r.guests };
+}
 
 // ---------------------------------------------------------------------------
 // Tool 1 — check_availability
@@ -395,11 +438,52 @@ export async function checkAvailability(
             nameFields.name_instruction = `Chiedi nome e cognome in una sola domanda: "Mi dice nome e cognome?". Se risponde con una parola sola chiedi una volta la parte che manca ("E il nome?" o "E il cognome?"), mai "mi conferma". Unisci solo due parole diverse: se ripete la stessa parola o una simile, o ne fa lo spelling, è la stessa parte e tieni l'ultima versione. Una parola comune (Benvenuto) è un cognome valido.`;
         }
 
+        // Il chiamante ha già un tavolo in agenda: spesso chiama per QUELLO
+        // (una persona in più, un altro orario), non per un secondo. Negli
+        // ultimi 60 giorni al 27/09/2026 avevano già una prenotazione attiva
+        // 448 chiamanti su 1.925. Il 25/08 Vernoccoli richiamò per correggere
+        // l'orario e ne uscì una seconda prenotazione, con due tavoli per lo
+        // stesso gruppo; il 27/09 Lo Feudo disse "siamo uno in più" e Sofia
+        // partì con una prenotazione nuova, corretta solo dal cliente.
+        // Come per zona e nome, la domanda la mette il server nella risposta:
+        // vale anche con available:false, perché per una modifica la
+        // disponibilità di un tavolo NUOVO non conta.
+        const existingFields: Record<string, any> = {};
+        if (callerId) {
+            try {
+                const active = await d.findActiveReservationsByPhone(tenantId, callerId, { horizonDays: EXISTING_BOOKING_HORIZON_DAYS });
+                if (active.length > 0) {
+                    const tz = await d.getTenantTimeZone(tenantId);
+                    const sameDay = active.filter(r => r.date === normalizedDate);
+                    const focus = sameDay.find(r => r.shift === rawShift) ?? sameDay[0] ?? active[0];
+                    const e = describeExisting(focus, tz, english);
+                    const what = english
+                        ? `a booking for ${e.day} at ${e.time} for ${guestsLabel(e.guests, true)}`
+                        : `una prenotazione per ${e.day} alle ${e.time}, per ${guestsLabel(e.guests, false)}`;
+                    existingFields.existing_bookings = active.map(r => ({ ...describeExisting(r, tz, english), same_day: r.date === normalizedDate }));
+                    if (sameDay.length > 0) {
+                        const question = english
+                            ? `I see you already have ${what}. Would you like to change that one, or make an additional booking?`
+                            : `Vedo che ha già ${what}. Vuole modificare questa o fare un'altra prenotazione in più?`;
+                        existingFields.existing_booking_instruction = `Il numero del chiamante ha GIÀ ${what}. Se il cliente ha già detto che vuole cambiare quella, non chiedere nulla e passa a modify_reservation. Altrimenti, PRIMA di parlare di disponibilità, zona o nome, chiedi: "${question}". Per cambiarla (persone, orario, zona, note) usa modify_reservation con date "${e.date}" e solo i new_* che cambiano: NON chiamare create_reservation, creerebbe un secondo tavolo. Solo se il cliente conferma che è una prenotazione in più prosegui, e passa existing_booking_confirmed: true a create_reservation. Se ha già risposto a questa domanda, non rifarla.`;
+                    } else {
+                        const question = english
+                            ? `I see you already have ${what}. Would you like to move that one, or is this an additional booking?`
+                            : `Vedo che ha già ${what}. Vuole spostare quella o è una prenotazione in più?`;
+                        existingFields.existing_booking_instruction = `Il numero del chiamante ha già ${what}. Se il cliente non ne ha ancora parlato, chiedi una volta: "${question}". Se vuole spostarla usa modify_reservation con date "${e.date}" e new_date/new_time: NON chiamare create_reservation. Se è una prenotazione in più prosegui normalmente.`;
+                    }
+                }
+            } catch (err) {
+                // Come la rubrica: il controllo aiuta, ma non blocca mai.
+                console.warn(`${channel.logPrefix} check-availability existing-booking lookup failed (non-blocking):`, (err as Error)?.message || err);
+            }
+        }
+
         console.log(`${channel.logPrefix} check-availability`, { date: normalizedDate, raw_date: p.date, shift: rawShift, guests, location_preference: locationPreference, result });
         // date_readback è la stringa "venerdì 10 luglio" che il modello DEVE
         // ripetere alla lettera: da solo sbaglia regolarmente l'accoppiata
         // giorno della settimana / giorno del mese.
-        return { body: { ...result, ...zoneFields, ...nameFields, ...timeFields, date_readback: d.formatItalianDateReadback(normalizedDate, language) } };
+        return { body: { ...result, ...zoneFields, ...nameFields, ...existingFields, ...timeFields, date_readback: d.formatItalianDateReadback(normalizedDate, language) } };
     } catch (err) {
         console.error(`${channel.logPrefix} check-availability error`, err);
         return {
@@ -431,6 +515,10 @@ export interface CreateReservationParams {
      *  cliente ha chiarito che la prenotazione è davvero per un'altra
      *  persona: bypassa il controllo name_mismatch. */
     name_confirmed?: any;
+    /** Lo stesso numero ha già una prenotazione quel giorno e in quel turno
+     *  e il cliente ha chiarito che ne vuole un'altra in più: bypassa il
+     *  controllo existing_booking. */
+    existing_booking_confirmed?: any;
     conversation_id?: string;
     /** Card #32 — lingua rilevata dal canale: payload ElevenLabs per la voce
      *  (se disponibile), nessuna per WhatsApp (si usa il prefisso telefonico). */
@@ -565,6 +653,60 @@ export async function createReservation(
         return fail('invalid_time', msg(english).invalidTime);
     }
     if (!isShift(rawShift)) return fail('invalid_shift', msg(english).invalidShift);
+
+    // Stesso numero, stesso giorno, stesso turno: prima di scrivere un
+    // secondo tavolo si chiede se è la prenotazione che il cliente ha già.
+    // check_availability lo segnala, ma una regola può essere saltata e un
+    // doppione occupa un tavolo vero (Vernoccoli 25/08/2026: due tavoli per
+    // lo stesso gruppo delle 22:00). Stessa forma del gate name_mismatch:
+    // existing_booking_confirmed: true = il cliente vuole davvero un'altra
+    // prenotazione. Giorni o turni diversi passano: un cliente abituale può
+    // prenotare due sere, e lì basta la domanda di check_availability.
+    const existingConfirmed = isTrueFlag(p.existing_booking_confirmed);
+    try {
+        const sameShift = (await d.findActiveReservationsByPhone(tenantId, phoneRaw, { date: normalizedDate }))
+            .filter(r => r.shift === rawShift);
+        // Ripetizione della stessa create_reservation: R1 del prompt fa
+        // richiamare il tool quando la prima risposta si è persa, e se la
+        // prima era andata a buon fine la seconda creerebbe il doppione.
+        // Stessi orario e persone, stesso canale, pochi minuti fa: si
+        // risponde con la prenotazione che esiste già.
+        const replay = existingConfirmed ? undefined : sameShift.find(r =>
+            r.source === channel.sourceTag
+            && r.reservation_status === 'CONFIRMED'
+            && r.time === normalizedTime
+            && r.guests === Math.trunc(guests)
+            && Date.now() - new Date(r.created_at).getTime() < 15 * 60_000);
+        if (replay) {
+            console.log(`${channel.logPrefix} create-reservation replay: already registered`, { reservation_id: replay.id, conversation_id: conversationId });
+            return {
+                body: {
+                    success: true,
+                    already_registered: true,
+                    reservation_id: replay.id,
+                    confirmation_phrase: d.formatItalianConfirmation(replay, detectedLanguage, await d.getTenantTimeZone(tenantId)),
+                    date_readback: d.formatItalianDateReadback(normalizedDate, detectedLanguage),
+                },
+            };
+        }
+        if (sameShift.length > 0 && !existingConfirmed) {
+            const e = describeExisting(sameShift[0], await d.getTenantTimeZone(tenantId), english);
+            console.warn(`${channel.logPrefix} create-reservation stopped: existing booking same day/shift`, {
+                existing_id: sameShift[0].id, date: normalizedDate, shift: rawShift, conversation_id: conversationId,
+            });
+            return fail('existing_booking',
+                english
+                    ? `There is already a booking with this number for ${e.day} at ${e.time} for ${guestsLabel(e.guests, true)}. Would you like to change that one, or make an additional booking?`
+                    : `Con questo numero risulta già una prenotazione per ${e.day} alle ${e.time}, per ${guestsLabel(e.guests, false)}. Vuole modificare quella o fare un'altra prenotazione in più?`,
+                {
+                    existing_booking: e,
+                    hint: `Se il cliente vuole cambiare quella, usa modify_reservation con date "${e.date}" e solo i new_* che cambiano (es. new_guests, new_time). Se è davvero una prenotazione in più, richiama create_reservation con gli stessi dati e existing_booking_confirmed: true.`,
+                });
+        }
+    } catch (err) {
+        // Come la rubrica: il controllo non deve mai impedire di prenotare.
+        console.warn(`${channel.logPrefix} existing-booking lookup failed (non-blocking):`, (err as Error)?.message || err);
+    }
 
     // Doppia difesa sul blocco data: un modello che salta il controllo di
     // disponibilità non deve comunque poter prenotare un giorno riservato.
