@@ -150,6 +150,7 @@ import {
     verifyElevenLabsSignature,
     findAvailability,
     findCustomerByPhone,
+    findActiveReservationsByPhone,
     createVoiceReservation,
     cancelVoiceReservation,
     modifyVoiceReservation,
@@ -10135,8 +10136,10 @@ app.post('/messages/agent/proposals/:id/confirm', authenticate, requirePermissio
         // letta e approvata — la conferma umana vale come chiarimento, quindi
         // il gate name_mismatch di bookingTools non deve bloccarla. Se il nome
         // differisce dal titolare del numero resta la nota "Numero in
-        // rubrica: ..." sulla prenotazione.
-        const outcome = await esegui(req.tenantId!, prop.tool === 'create_reservation' ? { ...args, name_confirmed: true } : args, WHATSAPP_CHANNEL);
+        // rubrica: ..." sulla prenotazione. Stesso discorso per
+        // existing_booking_confirmed: l'operatore vede la chat e l'agenda, e
+        // da qui non avrebbe modo di rispondere alla domanda del gate.
+        const outcome = await esegui(req.tenantId!, prop.tool === 'create_reservation' ? { ...args, name_confirmed: true, existing_booking_confirmed: true } : args, WHATSAPP_CHANNEL);
         const riuscito = outcome.body?.success === true;
         await queryWithRetry(
             `UPDATE agent_proposals
@@ -37553,6 +37556,7 @@ bookingTools.configureBookingTools({
     recordCallbackRequest,
     upsertCustomerFromReservation,
     findCustomerByPhone,
+    findActiveReservationsByPhone,
     isPhoneBlacklisted,
     getBlacklistPolicy,
 
