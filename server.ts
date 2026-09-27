@@ -1397,6 +1397,9 @@ async function handleElevenLabsInitConversation(tenantId: number, req: express.R
         customer_id: '',
         caller_id_spelled: '',
         customer_known: 'false',
+        // Prenotazioni in agenda del chiamante: '' = non note (anonimo,
+        // sospensione, errore), 'nessuna' = cercate e non ce ne sono.
+        upcoming_bookings: '',
         // Invariante fondamentale a sospensione attiva: booking_status_message
         // DEVE coincidere col saluto (first_message). Il prompt (STATO SERVIZIO)
         // usa booking_status_message come regola di rifiuto assoluto; se diverge
@@ -1451,13 +1454,25 @@ async function handleElevenLabsInitConversation(tenantId: number, req: express.R
     const normalized = normalizeItalianPhone(callerIdRaw);
     const callerIdSpelled = spellItalianPhoneDigits(normalized);
 
+    // Le prenotazioni già in agenda per questo numero, dall'inizio della
+    // chiamata: a "vorrei modificare la prenotazione" Sofia rispondeva "che
+    // data aveva prenotato?" anche con un tavolo per stasera (prova del
+    // 27/09/2026), perché la domanda di check_availability arriva solo su una
+    // prenotazione nuova. Fissa per tutta la chiamata come
+    // current_datetime_rome, quindi non rompe la cache dell'LLM. Parte in
+    // parallelo alla rubrica e non fa mai fallire il saluto.
+    const upcomingBookings = bookingTools.upcomingBookingsForPrompt(tenantId, normalized).catch((err) => {
+        console.warn('[ElevenLabs] init-conversation upcoming bookings failed (non-blocking):', err?.message || err);
+        return '';
+    });
+
     try {
         const lookup = await findCustomerByPhone(tenantId, normalized);
         if (!lookup.exists) {
             console.log('[ElevenLabs] init-conversation miss', { phone: normalized });
             res.json({
                 type: 'conversation_initiation_client_data',
-                dynamic_variables: { ...baseDynamicVars, caller_id_spelled: callerIdSpelled },
+                dynamic_variables: { ...baseDynamicVars, caller_id_spelled: callerIdSpelled, upcoming_bookings: await upcomingBookings },
                 conversation_config_override: {
                     agent: { first_message: genericGreeting },
                 },
@@ -1493,6 +1508,7 @@ async function handleElevenLabsInitConversation(tenantId: number, req: express.R
                 customer_id: String(lookup.customer_id || ''),
                 caller_id_spelled: callerIdSpelled,
                 customer_known: 'true',
+                upcoming_bookings: await upcomingBookings,
                 booking_status_message: '',
             },
             conversation_config_override: {
@@ -1504,7 +1520,7 @@ async function handleElevenLabsInitConversation(tenantId: number, req: express.R
         // Always 200 — see comment at top of handler.
         res.json({
             type: 'conversation_initiation_client_data',
-            dynamic_variables: { ...baseDynamicVars, caller_id_spelled: callerIdSpelled },
+            dynamic_variables: { ...baseDynamicVars, caller_id_spelled: callerIdSpelled, upcoming_bookings: await upcomingBookings },
             conversation_config_override: {
                 agent: { first_message: genericGreeting },
             },

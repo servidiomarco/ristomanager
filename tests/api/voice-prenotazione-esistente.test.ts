@@ -117,6 +117,22 @@ describe('voce: prenotazione già in agenda per lo stesso numero', () => {
         expect(res.body.existing_booking_instruction).toBeUndefined();
     });
 
+    // Inizio chiamata: a "vorrei modificare la prenotazione" Sofia non passa
+    // da check_availability, quindi l'elenco deve arrivarle già col saluto
+    // (prova del 27/09/2026: "che data aveva prenotato?").
+    it('init-conversation: le prenotazioni in agenda arrivano a Sofia', async () => {
+        const res = await api().post('/webhook/elevenlabs/init-conversation').send({ caller_id: `+39${TELEFONO}` });
+        expect(res.status).toBe(200);
+        expect(res.body.dynamic_variables.upcoming_bookings).toContain(`alle ${orarioCena}, 4 persone, a nome Lo Feudo Giuseppe [date ${DATA}]`);
+    });
+
+    it('init-conversation: numero senza prenotazioni → "nessuna", anonimo → vuoto', async () => {
+        const senza = await api().post('/webhook/elevenlabs/init-conversation').send({ caller_id: '+393398877099' });
+        expect(senza.body.dynamic_variables.upcoming_bookings).toBe('nessuna');
+        const anonimo = await api().post('/webhook/elevenlabs/init-conversation').send({});
+        expect(anonimo.body.dynamic_variables.upcoming_bookings).toBe('');
+    });
+
     it('create_reservation stesso giorno e turno: si ferma con existing_booking', async () => {
         const res = await crea({});
         expect(res.status).toBe(200);

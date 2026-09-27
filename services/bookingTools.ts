@@ -250,6 +250,25 @@ function describeExisting(r: ActiveReservationByPhone, tz: string, english: bool
     return { date: r.date, day: spokenDay(r.date, tz, english), time: r.time, shift: r.shift, guests: r.guests };
 }
 
+/**
+ * Le prenotazioni in agenda del chiamante come testo per il prompt, una per
+ * riga: "- oggi alle 21:00, 2 persone, a nome Marco Servidio [date 2026-09-27]".
+ * "nessuna" se non ce ne sono. Serve dall'inizio della chiamata: con
+ * "vorrei modificare la prenotazione" Sofia non passa da check_availability
+ * e senza questo elenco chiedeva la data (chiamata di prova del 27/09/2026).
+ */
+export async function upcomingBookingsForPrompt(tenantId: number, phone: string): Promise<string> {
+    const d = deps();
+    const active = await d.findActiveReservationsByPhone(tenantId, phone, { horizonDays: EXISTING_BOOKING_HORIZON_DAYS });
+    if (active.length === 0) return 'nessuna';
+    const tz = await d.getTenantTimeZone(tenantId);
+    return active.map(r => {
+        const e = describeExisting(r, tz, false);
+        const name = d.toTitleCase(r.customer_name || '').trim();
+        return `- ${e.day} alle ${e.time}, ${guestsLabel(e.guests, false)}${name ? `, a nome ${name}` : ''} [date ${e.date}]`;
+    }).join('\n');
+}
+
 // ---------------------------------------------------------------------------
 // Tool 1 — check_availability
 // ---------------------------------------------------------------------------
