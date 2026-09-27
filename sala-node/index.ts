@@ -11,6 +11,7 @@
 //
 // Avvio (dal checkout del repo, Node >= 20):
 //   SALA_NODE_TOKEN=<tenants.sala_node_token>  \
+//   JWT_SECRET=<lo stesso del cloud>  \
 //   CLOUD_URL=https://ristomanager-production.up.railway.app \
 //   node --loader ts-node/esm sala-node/index.ts
 //
@@ -33,8 +34,14 @@ const VERSION = process.env.SALA_NODE_VERSION || 'dev';
 const STATE_FILE = join(dirname(fileURLToPath(import.meta.url)), 'state', 'credentials.json');
 const CREDENTIALS_REFRESH_MS = 12 * 60 * 60 * 1000;
 
+// Il segreto con cui il relay verifica i token dei client LAN. Dal 25/09 il
+// cloud non lo consegna più nelle credenziali: arriva dall'env, come per il
+// full-server (tappa 4). Il ripiego sul file di stato vale solo per i nodi
+// installati prima, e smette di funzionare alla prima rotazione del segreto.
+const ENV_JWT_SECRET = (process.env.JWT_SECRET || '').trim();
+
 if (!TOKEN) {
-    console.error('Config mancante: serve SALA_NODE_TOKEN (tenants.sala_node_token, da Impostazioni → webhook-info).');
+    console.error('Config mancante: serve SALA_NODE_TOKEN (tenants.sala_node_token, dal DB o da chi installa il nodo).');
     process.exit(1);
 }
 
@@ -65,6 +72,11 @@ async function obtainCredentials(): Promise<SalaNodeCredentials> {
 const main = async () => {
     let creds = await obtainCredentials();
     console.log(`[sala-node] credenziali ok: tenant ${creds.tenant_id}, dominio ${creds.domain ?? '(non configurato)'}`);
+    const jwtSecret = ENV_JWT_SECRET || creds.jwt_secret || '';
+    if (!jwtSecret) {
+        console.error('Config mancante: serve JWT_SECRET (lo stesso del cloud) per verificare i client LAN.');
+        process.exit(1);
+    }
 
     // Con certificato si serve HTTPS (i client arrivano dalla SPA su Vercel,
     // che è HTTPS: un nodo in chiaro sarebbe mixed content). Senza — collaudo
@@ -78,7 +90,7 @@ const main = async () => {
             const m = /^Bearer\s+(.+)$/i.exec(header || '');
             if (!m) return false;
             return verifyClientToken(m[1], {
-                secret: creds.jwt_secret,
+                secret: jwtSecret,
                 tenantId: creds.tenant_id,
                 cloudUp: uplink.isCloudUp(),
             }) != null;
@@ -124,7 +136,7 @@ const main = async () => {
 
     const io = createLocalSocket(server, {
         tenantId: () => creds.tenant_id,
-        jwtSecret: () => creds.jwt_secret,
+        jwtSecret: () => jwtSecret,
         allowedHostnames: () => creds.allowed_origins,
         nodeDomain: () => creds.domain,
         cloudUp: () => uplink.isCloudUp(),
