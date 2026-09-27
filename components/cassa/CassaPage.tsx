@@ -87,6 +87,19 @@ export const CassaPage: React.FC<CassaPageProps> = ({
   const [tableMerges, setTableMerges] = useState<any[]>([]);
   const [openBill, setOpenBill] = useState<OpenBillRow | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Il QR al tavolo dell'incasso: con spazio per tre colonne si apre in mezzo
+  // alla pagina (Pagamento, qrColumn), altrimenti nel cassetto. Conta la
+  // larghezza della pagina, non del viewport: la sidebar (250 o 76px) decide
+  // quanto resta, e sotto i 1200 tre colonne non ci stanno.
+  const [qrOpen, setQrOpen] = useState(false);
+  const [payWidth, setPayWidth] = useState(0);
+  const payRef = useCallback((el: HTMLDivElement | null) => {
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => setPayWidth(entry.contentRect.width));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const qrBeside = payWidth >= 1200;
 
   // Il tavolo aperto e la sua comanda.
   const [tableId, setTableId] = useState<number | null>(null);
@@ -306,6 +319,33 @@ export const CassaPage: React.FC<CassaPageProps> = ({
       socket?.off('bill:split-claimed', onClaim); socket?.off('bill:split-released', onClaim);
     };
   }, [payingBill?.id, serviceFilter]);
+
+  // Col QR aperto accanto vale quello che vale per il cassetto qui sotto: un
+  // poll di cortesia fa sparire i claim scaduti, che non emettono nessun
+  // evento (TTL 5′ lato server) e resterebbero «sta pagando» per sempre.
+  useEffect(() => {
+    const id = payingBill?.id;
+    if (id == null || !qrOpen) return;
+    const poll = setInterval(() => {
+      getOpenBills(serviceFilter, { status: 'open' })
+        .then(r => { const row = r.bills.find(b => b.id === id); if (row) setPayingBill(row); })
+        .catch(() => {});
+    }, 15_000);
+    return () => clearInterval(poll);
+  }, [payingBill?.id, qrOpen, serviceFilter]);
+
+  // Il QR accanto è dell'incasso in corso: uscendone si richiude (Dividi
+  // conto no, è un giro dentro lo stesso incasso). E se lo spazio sparisce a
+  // colonna aperta — sidebar allargata, finestra ristretta — il QR passa al
+  // cassetto invece di sparire.
+  useEffect(() => {
+    if (screen !== 'payment' && screen !== 'split') setQrOpen(false);
+  }, [screen]);
+  useEffect(() => {
+    if (!qrOpen || qrBeside || payWidth === 0) return;
+    setQrOpen(false);
+    if (payingBill) setOpenBill(payingBill);
+  }, [qrOpen, qrBeside, payWidth, payingBill]);
 
   // Stesso destino per il cassetto del conto (BillSheet): è un altro
   // snapshot, e al collaudo la quota pagata muoveva il pannello ma non lui —
@@ -878,20 +918,24 @@ export const CassaPage: React.FC<CassaPageProps> = ({
           onUseAmount={(cents, itemUnits) => { setQuotaCents(cents); setQuotaItemUnits(itemUnits ?? null); setScreen('payment'); }}
         />
       ) : screen === 'payment' && payingBill ? (
-        <Pagamento
-          bill={payingBill}
-          busy={busyBillId != null}
-          error={error}
-          fiscalReady={fiscalReady}
-          onBack={() => { setScreen(order ? 'table' : 'queue'); setError(null); }}
-          onSettle={opts => settle(payingBill, opts)}
-          quotaCents={quotaCents}
-          quotaItemUnits={quotaItemUnits}
-          onSplit={() => setScreen('split')}
-          onShowQr={() => setOpenBill(payingBill)}
-          onDiscount={() => setBillDiscountOpen(true)}
-          paymentPulse={paymentPulse}
-        />
+        // L'involucro serve solo a misurare la pagina (payRef).
+        <div ref={payRef} className="h-full">
+          <Pagamento
+            bill={payingBill}
+            busy={busyBillId != null}
+            error={error}
+            fiscalReady={fiscalReady}
+            onBack={() => { setScreen(order ? 'table' : 'queue'); setError(null); }}
+            onSettle={opts => settle(payingBill, opts)}
+            quotaCents={quotaCents}
+            quotaItemUnits={quotaItemUnits}
+            onSplit={() => setScreen('split')}
+            onShowQr={() => (qrBeside ? setQrOpen(o => !o) : setOpenBill(payingBill))}
+            onDiscount={() => setBillDiscountOpen(true)}
+            paymentPulse={paymentPulse}
+            qrColumn={qrBeside ? { open: qrOpen, onClose: () => setQrOpen(false) } : undefined}
+          />
+        </div>
       ) : screen === 'table' && order ? (
         <TavoloAttivo
           tableName={tables.find(t => t.id === tableId)?.name ?? '—'}
