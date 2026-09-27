@@ -679,6 +679,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-27 | Agente vocale "Sofia" (sezione Chiamate) | La chiamata aperta resta evidenziata nell'elenco, come la conversazione attiva in Messaggi ed Email. |
 | 2026-09-26 | Personale · Piano ferie | Il monte ferie conta 6 giorni ogni 7 consecutivi per chi non ha un riposo fisso (prima un fisso risultava a 28,5 giorni su 26) e si proporziona ai mesi di contratto; nuova data «Avvio del registro ferie» nelle Regole, già impostata al giorno della prima scheda creata. |
 | 2026-09-26 | Personale | La scheda di un dipendente senza date d'assunzione o di fine contratto si salva di nuovo: il salvataggio rispondeva «Errore nel salvataggio» (emerso collegando gli account per il piano ferie). Svuotare una data dal modulo ora la cancella davvero. |
 | 2026-09-26 | Personale; Utenti (profilo) | Piano ferie: i dipendenti chiedono le ferie da «Le mie ferie» nel profilo (con l'account collegato alla scheda), il responsabile le vede nell'area Ferie di Personale con monte annuo, piano del mese e copertura per reparto, e una proposta automatica che rispetta copertura minima e monte ferie; approvate, diventano assenze in calendario. |
