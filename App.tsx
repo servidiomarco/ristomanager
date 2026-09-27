@@ -76,6 +76,7 @@ import { CommandPalette } from './components/CommandPalette';
 import { AppVersionBanner } from './components/AppVersionBanner';
 import { BookingChannelsBar } from './components/BookingChannelsBar';
 import { useSocket } from './hooks/useSocket';
+import { useLinkRoutes } from './hooks/useLinkRoutes';
 import { useTokenExpiryWarning } from './hooks/useTokenExpiryWarning';
 import { useAppBadge } from './hooks/useAppBadge';
 import { useScrollFade } from './hooks/useScrollFade';
@@ -1322,6 +1323,7 @@ const App: React.FC = () => {
 
   // Socket.IO connection
   const { socket, isConnected } = useSocket();
+  const linkRoutes = useLinkRoutes(isConnected);
 
   // Reconnect socket when user logs in
   useEffect(() => {
@@ -2675,7 +2677,11 @@ const App: React.FC = () => {
                   restava visibile anche sul telefono, insieme al pallino.
                   La variante invece esce dopo le utility semplici, quindi
                   batte la base sotto md. */}
-              <LivePill connected={isConnected} time={currentTime} className="max-md:hidden" />
+              {/* Le icone nodo/online solo da xl: sotto, date e turni a sinistra
+                  non si restringono e la pastiglia già copriva parte di «Cena»
+                  (1075px con la barra laterale aperta). Lo stato resta
+                  nell'aria-label della pastiglia. */}
+              <LivePill connected={isConnected} time={currentTime} routes={linkRoutes} routesClassName="max-xl:hidden" className="max-md:hidden" />
 
               {/* Mobile-only status dot */}
               <LivePill connected={isConnected} time={currentTime} variant="dot" className="md:hidden mx-1" />

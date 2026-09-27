@@ -26,6 +26,7 @@ import { billsApiService, printBill } from '../services/billsApiService';
 
 import { socketClient } from '../services/socketClient';
 import { useSocket } from '../hooks/useSocket';
+import { useLinkRoutes } from '../hooks/useLinkRoutes';
 import type { ServiceBill } from '../services/ordersApiService';
 import {
   ModalShell, Callout, LivePill, SectionHeader, useMediaQuery,
@@ -126,6 +127,7 @@ interface OrderPadProps {
 export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, dishes: allDishes, menus, tables, rooms = [], reservations, globalDate, globalShiftFilter, onImmersive, initialTableId, onInitialTableConsumed, brand: padBrand }) => {
   const { t } = useTranslation('comande', { useSuspense: false });
   const { isConnected } = useSocket();
+  const linkRoutes = useLinkRoutes(isConnected);
   // L'orologio della pastiglia Live. Un tick al minuto: l'ora al minuto non
   // ha bisogno di più, e un secondo di intervallo ridisegnerebbe la griglia
   // sessanta volte al minuto durante il servizio.
@@ -1879,7 +1881,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
           onRoom={(id) => setGridRoom(id === -1 ? null : id)}
           wide={isWide}
           brand={isWide ? padBrand : undefined}
-          live={isWide ? <LivePill connected={isConnected} time={clock} /> : undefined}
+          live={isWide ? <LivePill connected={isConnected} time={clock} routes={linkRoutes} /> : undefined}
           notice={(error || serviceBills.size > 0) ? (
             <div className="flex flex-col gap-2">
               {notices}
@@ -2358,7 +2360,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
               <ArrowLeft size={20} aria-hidden />
             </button>
             {topBar}
-            <LivePill connected={isConnected} time={clock} />
+            <LivePill connected={isConnected} time={clock} routes={linkRoutes} />
           </div>
         </div>
         <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_380px] gap-5 xl:grid-cols-[minmax(0,1fr)_420px]">

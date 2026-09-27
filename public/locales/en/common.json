@@ -264,7 +264,20 @@
     "connected": "Connected",
     "disconnected": "Not connected",
     "at": "Live {{ora}}",
-    "offline": "Offline"
+    "offline": "Offline",
+    "routes": {
+      "both": "Node and online",
+      "nodeOnly": "Node only",
+      "cloudOnly": "Online only"
+    },
+    "node": {
+      "on": "Working with the floor node",
+      "off": "Floor node unreachable"
+    },
+    "cloud": {
+      "on": "Working online",
+      "off": "Can't reach online"
+    }
   },
   "palette": {
     "aria": "Global search",

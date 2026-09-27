@@ -427,6 +427,7 @@ Per i ristoranti con cassa **Passepartout Menù** (modulo dedicato):
 - **Un piccolo server sulla rete del locale** (add-on, hardware fornito) che fa da ripetitore per comande, cucina, passe e conti aperti: gli schermi parlano col nodo, il nodo col cloud.
 - **Se cade la linea internet il servizio non si ferma**: i monitor restano vivi sull'ultima copia buona, con un avviso "dati fermi alle HH:MM" — la sala sa di essere in modalità isola. Al ritorno della linea tutto si riallinea da solo.
 - **Se invece è il nodo a non rispondere** (PC spento, in standby, firewall), l'app se ne accorge in pochi secondi e passa da sola al cloud — nessuno schermo resta appeso; il nodo rientra in gioco solo quando torna davvero raggiungibile.
+- **La pastiglia «Live» dice da dove si sta lavorando**: accanto all'ora due icone, nodo e online, accese o barrate — solo nodo (linea caduta), solo online (nodo giù) o tutti e due. Compaiono solo con il nodo attivo; nella testata da 1280 px di larghezza in su, in Comande sempre.
 - **L'app riparte anche senza internet**: la schermata vive in una copia sul dispositivo (PWA), quindi un refresh o una riapertura a linea caduta non finisce più in pagina bianca — l'app si apre e parla col nodo di sala per quello che il nodo sa servire.
 - Le **scritture** (nuove comande, incassi) passano sempre dal cloud: a linea caduta il palmare lo dice chiaramente, e il rinvio è sicuro (nessun piatto duplicato).
 - Si attiva e disattiva da **Impostazioni → Sala & Cucina → Nodo di sala** (interruttore, IP e porta del nodo, stato online e dispositivi collegati). Certificato e credenziali li distribuisce il cloud: il nodo si installa e si dimentica.
@@ -679,6 +680,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-27 | Nodo di sala (modalità ibrida) | La pastiglia «Live» mostra due icone, nodo e online, accese o barrate: si vede se il dispositivo lavora solo col nodo, solo online o con tutti e due. Solo con il nodo attivo; nella testata da 1280 px in su, in Comande sempre. |
 | 2026-09-27 | Agente vocale "Sofia" (sezione Chiamate) | La chiamata aperta resta evidenziata nell'elenco, come la conversazione attiva in Messaggi ed Email. |
 | 2026-09-26 | Personale · Piano ferie | Il monte ferie conta 6 giorni ogni 7 consecutivi per chi non ha un riposo fisso (prima un fisso risultava a 28,5 giorni su 26) e si proporziona ai mesi di contratto; nuova data «Avvio del registro ferie» nelle Regole, già impostata al giorno della prima scheda creata. |
 | 2026-09-26 | Personale | La scheda di un dipendente senza date d'assunzione o di fine contratto si salva di nuovo: il salvataggio rispondeva «Errore nel salvataggio» (emerso collegando gli account per il piano ferie). Svuotare una data dal modulo ora la cancella davvero. |
