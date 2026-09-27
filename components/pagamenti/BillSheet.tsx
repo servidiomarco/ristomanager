@@ -460,14 +460,16 @@ const PaymentProgress: React.FC<{ bill: BillLike; live: boolean }> = ({ bill, li
   );
 };
 
-/** The QR, the items and the totals — identical in the pane and in the sheet. */
-const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
+/** Il QR con la barra dei pagamenti e le azioni (copia, stampe), senza card
+ *  attorno: il cassetto lo mette in una FormCard, l'Incasso della cassa nella
+ *  sua terza colonna, che è già una card. Uno solo, così il QR che l'ospite
+ *  inquadra è lo stesso ovunque lo si apra. */
+export const BillQr: React.FC<{ bill: BillLike }> = ({ bill }) => {
   const { t } = useTranslation('cassa', { useSuspense: false });
   const [copied, setCopied] = useState(false);
   const [printState, setPrintState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
   const [printingKind, setPrintingKind] = useState<'PRECONTO' | 'QR'>('PRECONTO');
   const url = bill.share_token ? `${window.location.origin}/pay/${bill.share_token}` : null;
-  const settled = isSettled(bill);
 
   const copy = async () => {
     if (!url) return;
@@ -494,52 +496,145 @@ const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
     }
   };
 
+  // Etichette su una riga sola: in una card stretta (il cassetto, la colonna
+  // dell'Incasso) a parti uguali «Stampa QR» andava a capo su due righe; così
+  // è il bottone intero a scendere alla fila sotto, e la riempie.
   const quiet =
-    'inline-flex h-11 flex-1 items-center justify-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+    'inline-flex h-11 flex-auto items-center justify-center gap-1.5 whitespace-nowrap rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+
+  return url ? (
+    <div className="flex flex-col items-center gap-3">
+      {/* Fixed white plate: in dark mode a QR on a dark ground will not
+          scan. This is the one place a hardcoded #ffffff is correct. */}
+      <div className="rounded-[var(--ds-radius)] bg-[#ffffff] p-3">
+        <QRCodeSVG value={url} size={168} level="M" />
+      </div>
+      <p className="text-center text-[13px] text-[var(--ds-text-muted)]">
+        {t('guestScansPays')}
+      </p>
+      <PaymentProgress bill={bill} live />
+      <div className="flex w-full flex-wrap items-center gap-2">
+        <button type="button" onClick={copy} className={quiet}>
+          {copied ? <><Check className="h-4 w-4" /> {t('linkCopied')}</> : <><Copy className="h-4 w-4" /> {t('copyLink')}</>}
+        </button>
+        <button type="button" onClick={() => print('QR')} disabled={printState === 'sending'} className={quiet}>
+          {printingKind === 'QR' && printState === 'sending' ? <><Loader2 className="h-4 w-4 animate-spin" /> Invio…</>
+            : printingKind === 'QR' && printState === 'sent' ? <><Check className="h-4 w-4" /> {t('printing')}</>
+            : printingKind === 'QR' && printState === 'error' ? <><X className="h-4 w-4" /> {t('printFailed')}</>
+            : <><QrCode className="h-4 w-4" /> {t('printQr')}</>}
+        </button>
+        <button type="button" onClick={() => print('PRECONTO')} disabled={printState === 'sending'} className={quiet}>
+          {printingKind === 'PRECONTO' && printState === 'sending' ? <><Loader2 className="h-4 w-4 animate-spin" /> Invio…</>
+            : printingKind === 'PRECONTO' && printState === 'sent' ? <><Check className="h-4 w-4" /> {t('printing')}</>
+            : printingKind === 'PRECONTO' && printState === 'error' ? <><X className="h-4 w-4" /> {t('printFailed')}</>
+            : <><Printer className="h-4 w-4" /> {t('printPreBill')}</>}
+        </button>
+      </div>
+    </div>
+  ) : (
+    <div className="space-y-3">
+      <PaymentProgress bill={bill} live={false} />
+      <p className="flex items-center gap-2 text-[14px] text-[var(--ds-text-muted)]">
+        <QrCode className="h-4 w-4 flex-shrink-0" aria-hidden />
+        {(bill.residual_cents ?? 0) > 0
+          ? t('qrNoLongerActive')
+          : t('billSettledCode')}
+      </p>
+    </div>
+  );
+};
+
+/** Le quote del QR e gli incassi dello staff, senza card (vedi BillQr). */
+const shareRows = (bill: BillLike) => ({
+  splits: bill.splits ?? [],
+  staffPayments: (bill.payments ?? []).filter((p) => !p.online),
+});
+export const hasShareRows = (bill: BillLike) => {
+  const { splits, staffPayments } = shareRows(bill);
+  return splits.length > 0 || staffPayments.length > 0;
+};
+export const BillShareRows: React.FC<{ bill: BillLike }> = ({ bill }) => {
+  const { t } = useTranslation('cassa', { useSuspense: false });
+  const { splits, staffPayments } = shareRows(bill);
+  return (
+    <ul>
+      {splits.map((s) => {
+        const failed = s.status === 'ABANDONED';
+        const provider = s.payment?.provider === 'sumup' ? 'SumUp'
+          : s.payment?.provider === 'revolut' ? 'Revolut'
+          : s.payment?.provider ?? null;
+        return (
+          <li
+            key={`s${s.id}`}
+            className="flex items-center justify-between gap-3 py-2.5 text-[14px] [&+li]:border-t [&+li]:border-[var(--ds-border)]"
+          >
+            <span className="flex min-w-0 items-center gap-2">
+              {s.status === 'PAID'
+                ? <Check className="h-4 w-4 flex-shrink-0 text-[var(--ds-seated-text)]" aria-hidden />
+                : failed
+                  ? <X className="h-4 w-4 flex-shrink-0 text-[var(--ds-critical-text)]" aria-hidden />
+                  : <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin text-[var(--ds-pending-text)]" aria-hidden />}
+              <span className="min-w-0">
+                <span className={`block truncate ${failed ? 'text-[var(--ds-text-muted)]' : 'text-[var(--ds-text-primary)]'}`}>
+                  {s.claimant_label || t('guest')}
+                </span>
+                {s.payment && (
+                  <span className="block truncate text-[12px] text-[var(--ds-text-muted)]">
+                    {provider}{s.payment.order_id ? ` · ${s.payment.order_id}` : ''}
+                  </span>
+                )}
+              </span>
+            </span>
+            <span className="flex flex-shrink-0 items-center gap-3">
+              {failed
+                ? <span className="text-[13px] text-[var(--ds-critical-text)]">{t('failedWord')}</span>
+                : s.status === 'CLAIMED'
+                  ? <span className="text-[13px] text-[var(--ds-pending-text)]">{t('paying')}</span>
+                  : s.paid_at && <span className="text-[13px] text-[var(--ds-text-muted)]">{timePart(s.paid_at)}</span>}
+              <span className={`tabular-nums ${s.status === 'PAID' ? 'text-[var(--ds-text-secondary)]' : 'text-[var(--ds-text-muted)]'}`}>
+                {euro(s.amount_cents)}
+              </span>
+              {s.payment?.url && (
+                <a
+                  href={s.payment.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label={t('paymentReceipt')}
+                  title={t('paymentReceipt')}
+                  className="-my-2 inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                >
+                  <ExternalLink className="h-4 w-4" aria-hidden />
+                </a>
+              )}
+            </span>
+          </li>
+        );
+      })}
+      {staffPayments.map((p) => (
+        <li
+          key={`p${p.id}`}
+          className="flex items-center justify-between gap-3 py-2.5 text-[14px] [&+li]:border-t [&+li]:border-[var(--ds-border)]"
+        >
+          <span className="min-w-0 truncate text-[var(--ds-text-primary)]">{methodLabel(p.method)}</span>
+          <span className="flex flex-shrink-0 items-baseline gap-3">
+            <span className="text-[13px] text-[var(--ds-text-muted)]">{timePart(p.recorded_at)}</span>
+            <span className="tabular-nums text-[var(--ds-text-secondary)]">{euro(p.amount_cents)}</span>
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+};
+
+/** The QR, the items and the totals — identical in the pane and in the sheet. */
+const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
+  const { t } = useTranslation('cassa', { useSuspense: false });
+  const settled = isSettled(bill);
 
   return (
     <>
       <FormCard>
-        {url ? (
-          <div className="flex flex-col items-center gap-3">
-            {/* Fixed white plate: in dark mode a QR on a dark ground will not
-                scan. This is the one place a hardcoded #ffffff is correct. */}
-            <div className="rounded-[var(--ds-radius)] bg-[#ffffff] p-3">
-              <QRCodeSVG value={url} size={168} level="M" />
-            </div>
-            <p className="text-center text-[13px] text-[var(--ds-text-muted)]">
-              {t('guestScansPays')}
-            </p>
-            <PaymentProgress bill={bill} live />
-            <div className="flex w-full items-center gap-2">
-              <button type="button" onClick={copy} className={quiet}>
-                {copied ? <><Check className="h-4 w-4" /> {t('linkCopied')}</> : <><Copy className="h-4 w-4" /> {t('copyLink')}</>}
-              </button>
-              <button type="button" onClick={() => print('QR')} disabled={printState === 'sending'} className={quiet}>
-                {printingKind === 'QR' && printState === 'sending' ? <><Loader2 className="h-4 w-4 animate-spin" /> Invio…</>
-                  : printingKind === 'QR' && printState === 'sent' ? <><Check className="h-4 w-4" /> {t('printing')}</>
-                  : printingKind === 'QR' && printState === 'error' ? <><X className="h-4 w-4" /> {t('printFailed')}</>
-                  : <><QrCode className="h-4 w-4" /> {t('printQr')}</>}
-              </button>
-              <button type="button" onClick={() => print('PRECONTO')} disabled={printState === 'sending'} className={quiet}>
-                {printingKind === 'PRECONTO' && printState === 'sending' ? <><Loader2 className="h-4 w-4 animate-spin" /> Invio…</>
-                  : printingKind === 'PRECONTO' && printState === 'sent' ? <><Check className="h-4 w-4" /> {t('printing')}</>
-                  : printingKind === 'PRECONTO' && printState === 'error' ? <><X className="h-4 w-4" /> {t('printFailed')}</>
-                  : <><Printer className="h-4 w-4" /> {t('printPreBill')}</>}
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <PaymentProgress bill={bill} live={false} />
-            <p className="flex items-center gap-2 text-[14px] text-[var(--ds-text-muted)]">
-              <QrCode className="h-4 w-4 flex-shrink-0" aria-hidden />
-              {(bill.residual_cents ?? 0) > 0
-                ? t('qrNoLongerActive')
-                : t('billSettledCode')}
-            </p>
-          </div>
-        )}
+        <BillQr bill={bill} />
       </FormCard>
 
       {/* Una card sola per come sta entrando il denaro: le quote del QR —
@@ -548,81 +643,11 @@ const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
           provider (fa da ricevuta, per il riuscito e per il non riuscito), e
           sotto gli incassi battuti dallo staff. Gli specchi LINK_ONLINE del
           libro cassa non si ripetono: sono le stesse quote. */}
-      {(() => {
-        const splits = bill.splits ?? [];
-        const staffPayments = (bill.payments ?? []).filter((p) => !p.online);
-        if (splits.length === 0 && staffPayments.length === 0) return null;
-        return (
-          <FormCard title={t('sharePayments')}>
-            <ul>
-              {splits.map((s) => {
-                const failed = s.status === 'ABANDONED';
-                const provider = s.payment?.provider === 'sumup' ? 'SumUp'
-                  : s.payment?.provider === 'revolut' ? 'Revolut'
-                  : s.payment?.provider ?? null;
-                return (
-                  <li
-                    key={`s${s.id}`}
-                    className="flex items-center justify-between gap-3 py-2.5 text-[14px] [&+li]:border-t [&+li]:border-[var(--ds-border)]"
-                  >
-                    <span className="flex min-w-0 items-center gap-2">
-                      {s.status === 'PAID'
-                        ? <Check className="h-4 w-4 flex-shrink-0 text-[var(--ds-seated-text)]" aria-hidden />
-                        : failed
-                          ? <X className="h-4 w-4 flex-shrink-0 text-[var(--ds-critical-text)]" aria-hidden />
-                          : <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin text-[var(--ds-pending-text)]" aria-hidden />}
-                      <span className="min-w-0">
-                        <span className={`block truncate ${failed ? 'text-[var(--ds-text-muted)]' : 'text-[var(--ds-text-primary)]'}`}>
-                          {s.claimant_label || t('guest')}
-                        </span>
-                        {s.payment && (
-                          <span className="block truncate text-[12px] text-[var(--ds-text-muted)]">
-                            {provider}{s.payment.order_id ? ` · ${s.payment.order_id}` : ''}
-                          </span>
-                        )}
-                      </span>
-                    </span>
-                    <span className="flex flex-shrink-0 items-center gap-3">
-                      {failed
-                        ? <span className="text-[13px] text-[var(--ds-critical-text)]">{t('failedWord')}</span>
-                        : s.status === 'CLAIMED'
-                          ? <span className="text-[13px] text-[var(--ds-pending-text)]">{t('paying')}</span>
-                          : s.paid_at && <span className="text-[13px] text-[var(--ds-text-muted)]">{timePart(s.paid_at)}</span>}
-                      <span className={`tabular-nums ${s.status === 'PAID' ? 'text-[var(--ds-text-secondary)]' : 'text-[var(--ds-text-muted)]'}`}>
-                        {euro(s.amount_cents)}
-                      </span>
-                      {s.payment?.url && (
-                        <a
-                          href={s.payment.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          aria-label={t('paymentReceipt')}
-                          title={t('paymentReceipt')}
-                          className="-my-2 inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                        >
-                          <ExternalLink className="h-4 w-4" aria-hidden />
-                        </a>
-                      )}
-                    </span>
-                  </li>
-                );
-              })}
-              {staffPayments.map((p) => (
-                <li
-                  key={`p${p.id}`}
-                  className="flex items-center justify-between gap-3 py-2.5 text-[14px] [&+li]:border-t [&+li]:border-[var(--ds-border)]"
-                >
-                  <span className="min-w-0 truncate text-[var(--ds-text-primary)]">{methodLabel(p.method)}</span>
-                  <span className="flex flex-shrink-0 items-baseline gap-3">
-                    <span className="text-[13px] text-[var(--ds-text-muted)]">{timePart(p.recorded_at)}</span>
-                    <span className="tabular-nums text-[var(--ds-text-secondary)]">{euro(p.amount_cents)}</span>
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </FormCard>
-        );
-      })()}
+      {hasShareRows(bill) && (
+        <FormCard title={t('sharePayments')}>
+          <BillShareRows bill={bill} />
+        </FormCard>
+      )}
 
       {bill.items && bill.items.length > 0 && (
         <FormCard title={t('detail')}>
