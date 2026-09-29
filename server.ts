@@ -19971,7 +19971,9 @@ app.post('/push/test', authenticate, async (req: any, res) => {
             title: 'Notifica di test',
             body: 'Le notifiche push funzionano correttamente.',
             url: '/',
-            tag: 'test-notification'
+            // Per utente: le generiche hanno la lettura condivisa per tag, e
+            // un tag unico farebbe spegnere il test di un collega col proprio.
+            tag: `test-notification-${userId}`
         });
 
         res.json({ ok: true, ...result });
@@ -19993,16 +19995,18 @@ app.post('/push/test', authenticate, async (req: any, res) => {
 // tablet di sala e su ogni altro dispositivo finché non si ricaricava. Ora
 // ogni lettura emette 'notifications:read' verso la room dell'utente (tutti
 // i suoi dispositivi); e per le categorie di squadra — telefonate, messaggi,
-// tavoli in sala, prenotazioni, pagamenti, sistema — la lettura vale per
-// tutti i destinatari della stessa notifica (stesso tag): una chiamata da
-// ricontattare, un'uscita pronta, una prenotazione nuova, un incasso o una
-// scorta bassa è un fatto solo, visto una volta, non un promemoria
-// personale. I tag sono per singolo evento (reservation-<id>, pending-<id>,
-// payment-<id>, bill-overpaid-<split>, low-stock-<prodotto>, todo-<id>,
-// reminder-<id>-<giorno>…), quindi non si toccano mai notifiche di altri.
+// tavoli in sala, prenotazioni, pagamenti, sistema, generiche — la lettura
+// vale per tutti i destinatari della stessa notifica (stesso tag): una
+// chiamata da ricontattare, un'uscita pronta, una prenotazione nuova, un
+// incasso o una scorta bassa è un fatto solo, visto una volta, non un
+// promemoria personale. I tag sono per singolo evento (reservation-<id>,
+// pending-<id>, payment-<id>, bill-overpaid-<split>, low-stock-<prodotto>,
+// todo-<id>, reminder-<id>-<giorno>, test-notification-<utente>…), quindi
+// non si toccano mai notifiche di altri: una push nuova con un tag
+// condiviso fra utenti diversi va resa per utente, o per evento.
 // Restano personali la chat staff e le ferie ('staff'), la fatturazione
-// ('billing') e le generiche.
-const SHARED_NOTIFICATION_CATEGORIES = ['voice', 'message', 'service', 'reservation', 'payment', 'system'];
+// ('billing') e le email ('email').
+const SHARED_NOTIFICATION_CATEGORIES = ['voice', 'message', 'service', 'reservation', 'payment', 'system', 'general'];
 
 function emitNotificationsRead(
     tenantId: number,

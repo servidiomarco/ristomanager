@@ -3,9 +3,9 @@ import { Client } from 'pg';
 import { api, ownerToken, bearer } from './helpers';
 
 // Lettura sincronizzata delle notifiche: per telefonate, messaggi, tavoli in
-// sala, prenotazioni, pagamenti e sistema la lettura di uno vale per tutti i
-// destinatari della stessa notifica (stesso tag); chat staff, fatturazione e
-// generali restano personali.
+// sala, prenotazioni, pagamenti, sistema e generiche la lettura di uno vale
+// per tutti i destinatari della stessa notifica (stesso tag); chat staff,
+// fatturazione ed email restano personali.
 
 const MANAGER_EMAIL = 'manager.notifiche@example.com';
 const PASSWORD = 'password-notifiche';
@@ -136,8 +136,18 @@ describe('notifiche · lettura condivisa', () => {
         expect(await readAt(theirs)).not.toBeNull();
     });
 
-    it('chat staff, fatturazione e generali restano personali', async () => {
-        for (const category of ['staff', 'billing', 'general']) {
+    it('generiche: letta da uno, letta per tutti', async () => {
+        const tag = 'test-condivisa-general';
+        const mine = await insert(ownerId, 'general', tag);
+        const theirs = await insert(managerId, 'general', tag);
+
+        await api().post(`/notifications/${mine}/read`).set(bearer(owner));
+        expect(await readAt(mine)).not.toBeNull();
+        expect(await readAt(theirs)).not.toBeNull();
+    });
+
+    it('chat staff, fatturazione ed email restano personali', async () => {
+        for (const category of ['staff', 'billing', 'email']) {
             const tag = `test-condivisa-${category}`;
             const mine = await insert(ownerId, category, tag);
             const theirs = await insert(managerId, category, tag);
@@ -226,8 +236,8 @@ describe('notifiche · lettura condivisa', () => {
     it('segna tutte come lette propaga solo le categorie di squadra', async () => {
         const shared = await insert(ownerId, 'voice', 'test-condivisa-all-voice');
         const sharedTheirs = await insert(managerId, 'voice', 'test-condivisa-all-voice');
-        await insert(ownerId, 'general', 'test-condivisa-all-gen');
-        const personalTheirs = await insert(managerId, 'general', 'test-condivisa-all-gen');
+        await insert(ownerId, 'billing', 'test-condivisa-all-bill');
+        const personalTheirs = await insert(managerId, 'billing', 'test-condivisa-all-bill');
 
         const res = await api().post('/notifications/read-all').set(bearer(owner));
         expect(res.status).toBe(200);
