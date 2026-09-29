@@ -9365,6 +9365,9 @@ app.post('/email/threads/:emailKey/read', authenticate, requirePermission('reser
                 count: updated.rows.length,
             });
         }
+        // Come per Messaggi: letto il thread, le campanelle «Nuova email» che
+        // lo annunciavano (imapInboundService) sono lette per tutti.
+        await markSharedNotificationsRead(req.tenantId!, updated.rows.map((r: any) => `email-inbound-${r.id}`));
         res.json({ ok: true, marked: updated.rows.length });
     } catch (err) {
         console.error('POST /email/threads/:emailKey/read error:', err);
@@ -19995,18 +19998,18 @@ app.post('/push/test', authenticate, async (req: any, res) => {
 // tablet di sala e su ogni altro dispositivo finché non si ricaricava. Ora
 // ogni lettura emette 'notifications:read' verso la room dell'utente (tutti
 // i suoi dispositivi); e per le categorie di squadra — telefonate, messaggi,
-// tavoli in sala, prenotazioni, pagamenti, sistema, generiche — la lettura
-// vale per tutti i destinatari della stessa notifica (stesso tag): una
-// chiamata da ricontattare, un'uscita pronta, una prenotazione nuova, un
+// email, tavoli in sala, prenotazioni, pagamenti, sistema, generiche — la
+// lettura vale per tutti i destinatari della stessa notifica (stesso tag):
+// una chiamata da ricontattare, un'uscita pronta, una prenotazione nuova, un
 // incasso o una scorta bassa è un fatto solo, visto una volta, non un
 // promemoria personale. I tag sono per singolo evento (reservation-<id>,
-// pending-<id>, payment-<id>, bill-overpaid-<split>, low-stock-<prodotto>,
+// pending-<id>, payment-<id>, email-inbound-<id>, low-stock-<prodotto>,
 // todo-<id>, reminder-<id>-<giorno>, test-notification-<utente>…), quindi
 // non si toccano mai notifiche di altri: una push nuova con un tag
 // condiviso fra utenti diversi va resa per utente, o per evento.
-// Restano personali la chat staff e le ferie ('staff'), la fatturazione
-// ('billing') e le email ('email').
-const SHARED_NOTIFICATION_CATEGORIES = ['voice', 'message', 'service', 'reservation', 'payment', 'system', 'general'];
+// Restano personali la chat staff e le ferie ('staff') e la fatturazione
+// ('billing').
+const SHARED_NOTIFICATION_CATEGORIES = ['voice', 'message', 'email', 'service', 'reservation', 'payment', 'system', 'general'];
 
 function emitNotificationsRead(
     tenantId: number,

@@ -2,10 +2,10 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Client } from 'pg';
 import { api, ownerToken, bearer } from './helpers';
 
-// Lettura sincronizzata delle notifiche: per telefonate, messaggi, tavoli in
-// sala, prenotazioni, pagamenti, sistema e generiche la lettura di uno vale
-// per tutti i destinatari della stessa notifica (stesso tag); chat staff,
-// fatturazione ed email restano personali.
+// Lettura sincronizzata delle notifiche: per telefonate, messaggi, email,
+// tavoli in sala, prenotazioni, pagamenti, sistema e generiche la lettura di
+// uno vale per tutti i destinatari della stessa notifica (stesso tag); chat
+// staff e fatturazione restano personali.
 
 const MANAGER_EMAIL = 'manager.notifiche@example.com';
 const PASSWORD = 'password-notifiche';
@@ -146,8 +146,35 @@ describe('notifiche · lettura condivisa', () => {
         expect(await readAt(theirs)).not.toBeNull();
     });
 
-    it('chat staff, fatturazione ed email restano personali', async () => {
-        for (const category of ['staff', 'billing', 'email']) {
+    it('email: letta da uno, letta per tutti; e il thread letto la spegne', async () => {
+        const tag = 'test-condivisa-email';
+        const mine = await insert(ownerId, 'email', tag);
+        const theirs = await insert(managerId, 'email', tag);
+        await api().post(`/notifications/${mine}/read`).set(bearer(owner));
+        expect(await readAt(theirs)).not.toBeNull();
+
+        const from = 'cliente.notifiche@example.com';
+        const msg = await db.query(
+            `INSERT INTO outbound_messages (tenant_id, provider, channel, direction, from_email, body, status)
+             VALUES (1, 'imap', 'email', 'inbound', $1, 'Avete un tavolo per sabato?', 'received') RETURNING id`,
+            [from]
+        );
+        const msgId = Number(msg.rows[0].id);
+        try {
+            const a = await insert(ownerId, 'email', `email-inbound-${msgId}`);
+            const b = await insert(managerId, 'email', `email-inbound-${msgId}`);
+            const res = await api().post(`/email/threads/${encodeURIComponent(from)}/read`).set(bearer(manager));
+            expect(res.status).toBe(200);
+            expect(await readAt(a)).not.toBeNull();
+            expect(await readAt(b)).not.toBeNull();
+        } finally {
+            await db.query(`DELETE FROM notifications WHERE tag = $1`, [`email-inbound-${msgId}`]);
+            await db.query(`DELETE FROM outbound_messages WHERE id = $1`, [msgId]);
+        }
+    });
+
+    it('chat staff e fatturazione restano personali', async () => {
+        for (const category of ['staff', 'billing']) {
             const tag = `test-condivisa-${category}`;
             const mine = await insert(ownerId, category, tag);
             const theirs = await insert(managerId, category, tag);
