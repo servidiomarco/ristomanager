@@ -66,24 +66,9 @@ export interface HaccpProductionLog extends HaccpAuditFields {
 // values are intentionally fixed in code — the cells/fryers/cleaning points
 // are physical equipment in the kitchen, not user-managed lists.
 
-export interface HaccpTemperatureLocation {
-  location: string;
-  targetMax: number;
-}
-
-export const HACCP_TEMPERATURE_LOCATIONS: HaccpTemperatureLocation[] = [
-  { location: 'Cella 1', targetMax: 4 },
-  { location: 'Cella 2', targetMax: 4 },
-  { location: 'Cella 3', targetMax: 4 },
-  { location: 'Cella 4', targetMax: 4 },
-  { location: 'Banco cella grill', targetMax: 4 },
-  { location: 'Frigo antipasti', targetMax: 4 },
-  { location: 'Frigo primi', targetMax: 4 },
-  { location: 'Frigo office', targetMax: 4 },
-  { location: 'Congelatore 1c', targetMax: -18 },
-  { location: 'Congelatore 2c', targetMax: -18 },
-  { location: 'Congelatore gelati', targetMax: -18 },
-];
+// Le postazioni temperatura stanno in utils/haccp: le legge anche il server
+// (avviso fuori soglia, promemoria rilevazioni mancanti).
+export { HACCP_TEMPERATURE_LOCATIONS, type HaccpTemperatureLocation } from '../utils/haccp';
 
 export const HACCP_FRYERS: string[] = [
   'Friggitrice 1',

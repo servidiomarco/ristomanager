@@ -577,6 +577,11 @@ Registro digitale a norma, compilabile dal telefono (campi grandi, pensati per l
 
 Ogni riga registra **automaticamente chi ha compilato e quando**. Consultazione per giorno e **stampa del report** per i controlli.
 
+Avvisi sul registro temperature:
+
+- **Temperatura fuori soglia** — appena si registra un valore sopra il limite di una postazione, titolare, direzione e cucina ricevono una notifica («Cella 1 · 7,5 °C (limite 4 °C)»); chi l'ha scritto no, lo vede già in rosso sul modulo. Si chiude per tutti quando la postazione torna in soglia o la lettura viene cancellata. Suona solo per il giorno di oggi.
+- **Temperature mancanti** — un promemoria di sistema (Impostazioni → Promemoria, di serie alle 11:00 ogni giorno) avvisa se a quell'ora il registro di oggi non è completo, con le postazioni che mancano. Tace nei giorni di chiusura e per chi non usa il registro da un mese; si chiude per tutti appena l'ultima postazione è registrata.
+
 ---
 
 ## Funzioni AI
@@ -685,6 +690,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-29 | HACCP, Notifiche | Due avvisi nuovi sul registro temperature: «temperatura fuori soglia» a titolare, direzione e cucina appena un valore supera il limite (si chiude quando la postazione torna in soglia) e il promemoria di sistema «temperature mancanti», di serie alle 11:00 e configurabile in Impostazioni → Promemoria, che avvisa solo se il registro di oggi è incompleto e si chiude quando è completo. |
 | 2026-09-29 | Notifiche, Reception | Le notifiche di prenotazione (nuova, richiesta, modificata, annullata — dal CRM, dal sito, da Sofia e da WhatsApp) arrivano anche alla reception, prima esclusa. |
 | 2026-09-29 | Notifiche, Asporto | «Asporto — nuovo ordine» si spegne per tutti appena l'ordine è preso in carico (cambio di stato o «Manda in cucina»); «Pronto l'ordine di…» si spegne al ritiro, all'annullamento o al non ritirato. |
 | 2026-09-29 | Notifiche, Cucina | I promemoria della cucina (ordine per i banchetti, pane) e i «todo assegnato» si spengono per tutti appena il todo viene spuntato o eliminato, senza doverli leggere a parte. |
