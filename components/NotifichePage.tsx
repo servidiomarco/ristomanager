@@ -2,8 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Bell, CheckCheck, RefreshCw, AlertTriangle, ListFilter } from 'lucide-react';
 import { SkeletonNotificationList } from './SkeletonCards';
-import { notificationsApiService, NotificationRow } from '../services/notificationsApiService';
-import { socketClient } from '../services/socketClient';
+import { notificationsApiService, NotificationRow, subscribeNotificationChanges } from '../services/notificationsApiService';
 import {
   SegmentedControl, SectionHeader, CountBadge, EmptyState, Callout,
   useFirstRunHint, dsIconButton,
@@ -73,23 +72,9 @@ const NotifichePage: React.FC = () => {
 
   useEffect(() => { load(); }, [load]);
 
-  // Live badge: append new notifications as they come in via socket. The
-  // backend broadcasts a 'notification:new' event to the recipient's user
-  // room in future iterations; for now the page just reloads on socket
-  // reconnect so it stays fresh without a manual refresh.
-  useEffect(() => {
-    const reload = () => load();
-    let attached: ReturnType<typeof socketClient.getSocket> = null;
-    const attach = (s: ReturnType<typeof socketClient.getSocket>) => {
-      if (attached === s) return;
-      if (attached) attached.off('notification:new', reload);
-      attached = s;
-      if (attached) attached.on('notification:new', reload);
-    };
-    attach(socketClient.getSocket());
-    const unsub = socketClient.onSocketChange((s) => attach(s));
-    return () => { unsub(); attach(null); };
-  }, [load]);
+  // Live: notifiche nuove e letture fatte altrove (altro dispositivo, o un
+  // collega per telefonate, messaggi e tavoli) ricaricano la lista.
+  useEffect(() => subscribeNotificationChanges(() => { load(); }), [load]);
 
   const handleMarkRead = async (n: NotificationRow) => {
     if (n.read_at) return;
