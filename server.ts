@@ -26618,6 +26618,8 @@ app.post('/takeaway/orders/:id/fire', authenticate, requireFeature('takeaway'), 
 
         const view = await loadTakeawayView(req.tenantId!, takeawayId);
         try { socketService?.broadcastToAll(req.tenantId!, 'takeaway:updated', view); } catch (_) {}
+        // Mandato in cucina: il «nuovo ordine» è stato gestito.
+        await markSharedNotificationsRead(req.tenantId!, await takeawayNotificationTags(req.tenantId!, takeawayId, false));
         res.json(view);
     } catch (err) {
         console.error('POST /takeaway/orders/:id/fire error:', err);
@@ -27500,6 +27502,29 @@ app.patch('/takeaway/orders/:id', authenticate, requireFeature('takeaway'), requ
 // Cambio di stato esplicito, niente DELETE: annullare È uno stato, e la
 // board deve poter correggere (un «ritirato» per sbaglio torna «pronto»).
 // I timestamp seguono lo stato: tornare indietro li azzera.
+// Le campanelle di un asporto: «nuovo ordine» (takeaway-new-<id>) e, se è
+// passato dalla cucina, «pronto l'ordine» (course-<comanda>-<uscita>, lo
+// stesso tag del passe). Servono a spegnerle quando l'ordine è gestito.
+async function takeawayNotificationTags(tenantId: number, takeawayId: number, withReady: boolean): Promise<string[]> {
+    const tags = [`takeaway-new-${takeawayId}`];
+    if (!withReady) return tags;
+    // Best-effort: un errore qui non deve far fallire il cambio di stato
+    // già committato — al peggio il «pronto» resta da leggere a mano.
+    try {
+        const courses = await queryWithRetry(
+            `SELECT DISTINCT oi.order_id, oi.course_no
+             FROM takeaway_orders t
+             JOIN order_items oi ON oi.order_id = t.kitchen_order_id AND oi.tenant_id = t.tenant_id
+             WHERE t.id = $1 AND t.tenant_id = $2`,
+            [takeawayId, tenantId]
+        );
+        for (const c of courses.rows) tags.push(`course-${c.order_id}-${c.course_no}`);
+    } catch (err: any) {
+        console.warn('[takeaway] tag campanelle non letti:', err?.message || err);
+    }
+    return tags;
+}
+
 app.post('/takeaway/orders/:id/status', authenticate, requireFeature('takeaway'), requirePermission('takeaway:manage'), async (req, res) => {
     try {
         const orderId = Math.trunc(Number(req.params.id));
@@ -27553,6 +27578,13 @@ app.post('/takeaway/orders/:id/status', authenticate, requireFeature('takeaway')
         if (updated.rows.length === 0) return res.status(404).json({ error: 'not_found' });
         const view = await loadTakeawayView(req.tenantId!, orderId);
         try { socketService?.broadcastToAll(req.tenantId!, 'takeaway:updated', view); } catch (_) {}
+        // Qualcuno ha preso in mano l'ordine: «nuovo ordine» è letto per
+        // tutti. Ritirato, annullato o non ritirato, anche il «pronto»
+        // della cucina non chiede più niente.
+        if (status !== 'REQUESTED') {
+            const closed = ['PICKED_UP', 'CANCELLED', 'NO_SHOW'].includes(status);
+            await markSharedNotificationsRead(req.tenantId!, await takeawayNotificationTags(req.tenantId!, orderId, closed));
+        }
         res.json(view);
     } catch (err) {
         console.error('POST /takeaway/orders/:id/status error:', err);

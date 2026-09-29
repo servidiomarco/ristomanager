@@ -366,6 +366,46 @@ describe('asporto — cucina', () => {
         expect(forzato.body.status).toBe('PICKED_UP');
         expect(forzato.body.picked_up_at).not.toBeNull();
     });
+
+    it('le campanelle dell\'asporto si spengono quando l\'ordine è gestito', async () => {
+        // Righe notifica scritte a mano: le push vere sono fire-and-forget.
+        const owner = await pg.query('SELECT id FROM users WHERE email = $1', [process.env.TEST_OWNER_EMAIL]);
+        const ownerId = Number(owner.rows[0].id);
+        const bell = async (tag: string) => Number((await pg.query(
+            `INSERT INTO notifications (tenant_id, recipient_user_id, category, title, body, tag)
+             VALUES (1, $1, 'service', 'Asporto', 'test', $2) RETURNING id`, [ownerId, tag]
+        )).rows[0].id);
+        const readAt = async (id: number) =>
+            (await pg.query('SELECT read_at FROM notifications WHERE id = $1', [id])).rows[0].read_at;
+
+        const created = await api().post('/takeaway/orders').set(bearer(token)).send({
+            customer_name: 'Neri Carla',
+            pickup_date: DATA_ASPORTO,
+            pickup_time: '21:00',
+            items: [{ dish_id: dishId, qty: 1 }],
+        });
+        expect(created.status).toBe(201);
+        const id = created.body.id;
+        const nuovo = await bell(`takeaway-new-${id}`);
+        try {
+            // Mandato in cucina: «nuovo ordine» è gestito.
+            const fired = await api().post(`/takeaway/orders/${id}/fire`).set(bearer(token)).send({});
+            expect(fired.status).toBe(200);
+            expect(await readAt(nuovo)).not.toBeNull();
+
+            // Il «pronto» della cucina si spegne al ritiro.
+            const pronto = await bell(`course-${fired.body.kitchen_order_id}-1`);
+            const ready = await api().post(`/takeaway/orders/${id}/status`).set(bearer(token)).send({ status: 'READY' });
+            expect(ready.status).toBe(200);
+            expect(await readAt(pronto)).toBeNull();
+            const ritirato = await api().post(`/takeaway/orders/${id}/status`).set(bearer(token))
+                .send({ status: 'PICKED_UP', force_unpaid: true });
+            expect(ritirato.status).toBe(200);
+            expect(await readAt(pronto)).not.toBeNull();
+        } finally {
+            await pg.query(`DELETE FROM notifications WHERE tag = $1 OR tag LIKE 'course-%' AND body = 'test'`, [`takeaway-new-${id}`]);
+        }
+    });
 });
 
 describe('asporto — KDS senza confini di turno', () => {
