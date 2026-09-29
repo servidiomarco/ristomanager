@@ -29,6 +29,12 @@ import { normalizeLanguageCode, detectLanguageFromPhonePrefix } from '../utils/l
 import { spokenFirstName } from '../utils/text.js';
 import type { ActiveReservationByPhone } from './elevenlabsService.js';
 
+// Chi riceve le notifiche di prenotazione (nuova, richiesta, modificata,
+// annullata), da ogni canale: CRM, sito, agente vocale e WhatsApp. Una lista
+// sola, usata anche da server.ts, così i canali non divergono. La reception
+// c'è perché è lei ad accogliere chi arriva: prima restava fuori.
+export const RESERVATION_PUSH_ROLES = ['OWNER', 'GENERAL_MANAGER', 'MANAGER', 'RECEPTION', 'WAITER'];
+
 // Il tenant arriva come primo parametro di ogni tool (Fase C2): i canali
 // self-service non hanno JWT, quindi è l'adattatore del canale a risolverlo
 // (token webhook per la voce, req.tenantId per le proposte WhatsApp) e a
@@ -929,7 +935,7 @@ export async function createReservation(
         const reservationLabel = d.reservationPushLabel(d.asUtcInstant(created.reservation_time), await d.getTenantTimeZone(tenantId));
         d.pushSendToRoles(
             tenantId,
-            ['OWNER', 'GENERAL_MANAGER', 'MANAGER', 'WAITER'],
+            RESERVATION_PUSH_ROLES,
             {
                 category: 'reservation',
                 title: channel.pushTitles.created,
@@ -1131,7 +1137,7 @@ export async function cancelReservation(
         const reservationLabel = d.reservationPushLabel(d.asUtcInstant(cancelled.reservation_time), await d.getTenantTimeZone(tenantId));
         d.pushSendToRoles(
             tenantId,
-            ['OWNER', 'GENERAL_MANAGER', 'MANAGER', 'WAITER'],
+            RESERVATION_PUSH_ROLES,
             {
                 category: 'reservation',
                 title: channel.pushTitles.cancelled,
@@ -1368,7 +1374,7 @@ export async function modifyReservation(
         const reservationLabel = d.reservationPushLabel(d.asUtcInstant(after.reservation_time), await d.getTenantTimeZone(tenantId));
         d.pushSendToRoles(
             tenantId,
-            ['OWNER', 'GENERAL_MANAGER', 'MANAGER', 'WAITER'],
+            RESERVATION_PUSH_ROLES,
             {
                 category: 'reservation',
                 title: channel.pushTitles.modified,

@@ -233,6 +233,44 @@ describe('notifiche · lettura condivisa', () => {
         }
     });
 
+    it('la reception riceve le notifiche di prenotazione', async () => {
+        const email = 'reception.notifiche@example.com';
+        const created = await api().post('/auth/users').set(bearer(owner)).send({
+            email, password: PASSWORD, full_name: 'Test Reception', role: 'RECEPTION',
+        });
+        expect(created.status).toBe(201);
+        const receptionId = Number(created.body.id);
+        let reservationId = 0;
+        try {
+            const res = await api().post('/reservations').set(bearer(owner)).send({
+                customer_name: 'Reception Notifica Test',
+                phone: '3390000997',
+                reservation_time: '2027-08-13T20:00:00',
+                shift: 'DINNER',
+                guests: 2,
+                children: 0,
+            });
+            expect(res.status).toBe(201);
+            reservationId = Number(res.body.id);
+            // La push è fire-and-forget: si aspetta la riga per qualche istante.
+            let found = 0;
+            for (let i = 0; i < 30 && found === 0; i++) {
+                const r = await db.query(
+                    `SELECT COUNT(*)::int AS n FROM notifications WHERE recipient_user_id = $1 AND tag = $2`,
+                    [receptionId, `reservation-${reservationId}`]
+                );
+                found = r.rows[0].n;
+                if (found === 0) await new Promise(ok => setTimeout(ok, 100));
+            }
+            expect(found).toBe(1);
+        } finally {
+            await db.query(`DELETE FROM notifications WHERE recipient_user_id = $1`, [receptionId]);
+            if (reservationId) await db.query(`DELETE FROM notifications WHERE tag = $1`, [`reservation-${reservationId}`]);
+            if (reservationId) await db.query(`DELETE FROM reservations WHERE id = $1`, [reservationId]);
+            await db.query(`DELETE FROM users WHERE id = $1`, [receptionId]);
+        }
+    });
+
     it('una categoria fuori lista resta personale', async () => {
         for (const category of ['categoria-nuova']) {
             const tag = `test-condivisa-${category}`;

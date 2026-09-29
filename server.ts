@@ -2649,7 +2649,7 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
         const reservationLabel = reservationPushLabel(reservation_time, (await getTenantLocale(req.tenantId!)).timezone);
         pushSendToRoles(
             req.tenantId!,
-            ['OWNER', 'GENERAL_MANAGER', 'MANAGER', 'WAITER'],
+            bookingTools.RESERVATION_PUSH_ROLES,
             {
                 category: 'reservation',
                 title: 'Nuova prenotazione',
@@ -2883,7 +2883,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
             const reservationLabel = reservationPushLabel(asUtcInstant(updatedReservation.reservation_time), (await getTenantLocale(req.tenantId!)).timezone);
             pushSendToRoles(
                 req.tenantId!,
-                ['OWNER', 'GENERAL_MANAGER', 'MANAGER', 'WAITER'],
+                bookingTools.RESERVATION_PUSH_ROLES,
                 {
                     category: 'reservation',
                     title: 'Prenotazione annullata',
@@ -30579,7 +30579,7 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
 
         pushSendToRoles(
             tenantId,
-            ['OWNER', 'GENERAL_MANAGER', 'MANAGER', 'WAITER'],
+            bookingTools.RESERVATION_PUSH_ROLES,
             {
                 category: 'reservation',
                 title: confirmedNow ? 'Prenotazione web confermata' : 'Nuova richiesta prenotazione',
