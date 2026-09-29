@@ -3,9 +3,9 @@ import { Client } from 'pg';
 import { api, ownerToken, bearer } from './helpers';
 
 // Lettura sincronizzata delle notifiche: per telefonate, messaggi, email,
-// tavoli in sala, prenotazioni, pagamenti, sistema e generiche la lettura di
-// uno vale per tutti i destinatari della stessa notifica (stesso tag); chat
-// staff e fatturazione restano personali.
+// tavoli in sala, prenotazioni, pagamenti, ferie, sistema e generiche la
+// lettura di uno vale per tutti i destinatari della stessa notifica (stesso
+// tag); la fatturazione resta personale. La chat staff non ha righe qui.
 
 const MANAGER_EMAIL = 'manager.notifiche@example.com';
 const PASSWORD = 'password-notifiche';
@@ -173,8 +173,18 @@ describe('notifiche · lettura condivisa', () => {
         }
     });
 
-    it('chat staff e fatturazione restano personali', async () => {
-        for (const category of ['staff', 'billing']) {
+    it('ferie: letta da uno, letta per tutti', async () => {
+        const tag = 'test-condivisa-staff';
+        const mine = await insert(ownerId, 'staff', tag);
+        const theirs = await insert(managerId, 'staff', tag);
+
+        await api().post(`/notifications/${mine}/read`).set(bearer(owner));
+        expect(await readAt(mine)).not.toBeNull();
+        expect(await readAt(theirs)).not.toBeNull();
+    });
+
+    it('la fatturazione resta personale', async () => {
+        for (const category of ['billing']) {
             const tag = `test-condivisa-${category}`;
             const mine = await insert(ownerId, category, tag);
             const theirs = await insert(managerId, category, tag);

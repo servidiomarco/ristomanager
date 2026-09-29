@@ -19133,9 +19133,15 @@ app.post('/staff/leave-requests/decide', authenticate, requirePermission('staff:
         for (const r of done) {
             if (!r.staffUserId || r.staffUserId === userId) continue;
             const body = formatLeaveRange(r.startDate!, r.endDate!) + (r.note ? ` · ${r.note}` : '');
-            void pushSendToUser(r.staffUserId, { title: TITLES[r.decision!], body, url: '/', tag: `leave-${r.id}`, category: 'staff' })
+            // Tag distinto da quello della richiesta (leave-<id>, ai
+            // responsabili): con la lettura condivisa per tag, l'esito letto
+            // dal dipendente spegnerebbe la richiesta nella campanella altrui.
+            void pushSendToUser(r.staffUserId, { title: TITLES[r.decision!], body, url: '/', tag: `leave-decision-${r.id}`, category: 'staff' })
                 ?.catch(err => console.warn('[ferie] notifica al dipendente fallita:', err?.message || err));
         }
+        // Richiesta decisa: la «Richiesta ferie» non chiede più niente a
+        // nessuno dei responsabili che l'hanno ricevuta.
+        await markSharedNotificationsRead(tenantId, done.map(r => `leave-${r.id}`));
 
         res.json({
             results: outcome.results.map(r => ({ id: r.id, ok: r.ok, ...(r.error ? { error: r.error } : {}) })),
@@ -19357,6 +19363,8 @@ app.delete('/staff/my-leave/:id', authenticate, async (req, res) => {
         }
         const socketId = req.headers['x-socket-id'] as string;
         if (socketService) socketService.broadcastToAll(tenantId, 'leave:changed', { ids: [id] }, socketId);
+        // Ritirata: la «Richiesta ferie» ai responsabili non ha più oggetto.
+        await markSharedNotificationsRead(tenantId, [`leave-${id}`]);
         res.status(204).send();
     } catch (err) {
         console.error('DELETE /staff/my-leave/:id error:', err);
@@ -19998,18 +20006,20 @@ app.post('/push/test', authenticate, async (req: any, res) => {
 // tablet di sala e su ogni altro dispositivo finché non si ricaricava. Ora
 // ogni lettura emette 'notifications:read' verso la room dell'utente (tutti
 // i suoi dispositivi); e per le categorie di squadra — telefonate, messaggi,
-// email, tavoli in sala, prenotazioni, pagamenti, sistema, generiche — la
-// lettura vale per tutti i destinatari della stessa notifica (stesso tag):
-// una chiamata da ricontattare, un'uscita pronta, una prenotazione nuova, un
-// incasso o una scorta bassa è un fatto solo, visto una volta, non un
-// promemoria personale. I tag sono per singolo evento (reservation-<id>,
-// pending-<id>, payment-<id>, email-inbound-<id>, low-stock-<prodotto>,
-// todo-<id>, reminder-<id>-<giorno>, test-notification-<utente>…), quindi
-// non si toccano mai notifiche di altri: una push nuova con un tag
-// condiviso fra utenti diversi va resa per utente, o per evento.
-// Restano personali la chat staff e le ferie ('staff') e la fatturazione
-// ('billing').
-const SHARED_NOTIFICATION_CATEGORIES = ['voice', 'message', 'email', 'service', 'reservation', 'payment', 'system', 'general'];
+// email, tavoli in sala, prenotazioni, pagamenti, ferie, sistema, generiche —
+// la lettura vale per tutti i destinatari della stessa notifica (stesso
+// tag): una chiamata da ricontattare, un'uscita pronta, una prenotazione
+// nuova, un incasso o una richiesta di ferie è un fatto solo, visto una
+// volta, non un promemoria personale. I tag sono per singolo evento
+// (reservation-<id>, pending-<id>, payment-<id>, email-inbound-<id>,
+// leave-<id>, leave-decision-<id>, low-stock-<prodotto>, todo-<id>,
+// test-notification-<utente>…), quindi non si toccano mai notifiche di
+// altri: una push nuova con un tag condiviso fra utenti diversi — o fra due
+// notifiche diverse dello stesso evento — va resa distinta.
+// 'staff' copre anche la chat staff, ma quelle push sono persist:false e
+// non hanno righe qui: la loro lettura resta il cursore personale per
+// thread. Resta personale la fatturazione ('billing').
+const SHARED_NOTIFICATION_CATEGORIES = ['voice', 'message', 'email', 'service', 'reservation', 'payment', 'staff', 'system', 'general'];
 
 function emitNotificationsRead(
     tenantId: number,
