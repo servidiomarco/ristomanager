@@ -20647,6 +20647,40 @@ app.post('/staff-chat/threads/:threadKey/read', authenticate, requirePermission(
         );
         // Gli altri device dello stesso utente allineano il badge.
         socketService?.broadcastToUsers(req.tenantId!, [userId], 'staffchat:read', { threadKey, lastReadMessageId }, socketId);
+
+        // Canali: lettura di squadra. Letto da uno, il cursore avanza per
+        // tutti i membri del canale (i ruoli che lo vedono), e sui loro
+        // dispositivi badge e push si spengono via lo stesso 'staffchat:read'.
+        // I DM restano personali. Due guardie, perché qui si scrive il
+        // cursore degli ALTRI: parte solo da chi è membro del canale, e il
+        // cursore si ferma all'ultimo messaggio esistente fino a quello
+        // indicato — un id gonfiato non deve far nascere «già letti» i
+        // messaggi di domani.
+        if (ref.kind === 'channel' && channelsForRole(req.user.role).includes(ref.channel)) {
+            const cap = await queryWithRetry(
+                `SELECT MAX(id) AS id FROM staff_messages
+                 WHERE tenant_id = $1 AND kind = 'channel' AND channel = $2 AND id <= $3`,
+                [req.tenantId!, ref.channel, lastReadMessageId]
+            );
+            const sharedCursor = cap.rows[0]?.id != null ? Number(cap.rows[0].id) : null;
+            if (sharedCursor) {
+                const others = await queryWithRetry(
+                    `INSERT INTO staff_message_reads (tenant_id, user_id, thread_key, last_read_message_id)
+                     SELECT $1, u.id, $3, $4 FROM users u
+                     WHERE u.tenant_id = $1 AND u.is_active = TRUE AND u.id <> $2
+                       AND u.role = ANY($5::text[])
+                     ON CONFLICT (tenant_id, user_id, thread_key)
+                     DO UPDATE SET last_read_message_id = GREATEST(staff_message_reads.last_read_message_id, EXCLUDED.last_read_message_id),
+                                   updated_at = CURRENT_TIMESTAMP
+                     RETURNING user_id`,
+                    [req.tenantId!, userId, threadKey, sharedCursor, rolesForChannel(ref.channel).map(String)]
+                );
+                const otherIds = others.rows.map((r: any) => Number(r.user_id));
+                if (otherIds.length > 0) {
+                    socketService?.broadcastToUsers(req.tenantId!, otherIds, 'staffchat:read', { threadKey, lastReadMessageId: sharedCursor });
+                }
+            }
+        }
         res.json({ ok: true });
     } catch (err) {
         console.error('POST /staff-chat/threads/:threadKey/read error:', err);

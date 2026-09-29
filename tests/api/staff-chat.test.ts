@@ -246,4 +246,47 @@ describe('chat staff', () => {
         expect(ids).toContain(waiterId);
         expect(ids).not.toContain(ownerId);
     });
+
+    it('canali: letto da uno, letto per tutti i membri; i DM restano personali', async () => {
+        const unread = async (token: string, key: string) =>
+            (await api().get('/staff-chat/threads').set(bearer(token))).body.threads
+                .find((t: any) => t.threadKey === key)?.unreadCount;
+
+        // Canale generale: il cameriere legge, anche la cucina risulta a zero.
+        const sent = await api().post('/staff-chat/messages').set(bearer(owner))
+            .send({ threadKey: 'channel:generale', body: 'briefing alle 18' });
+        expect(sent.status).toBe(201);
+        expect(await unread(kitchenToken, 'channel:generale')).toBeGreaterThan(0);
+        const read = await api().post('/staff-chat/threads/channel:generale/read').set(bearer(waiterToken))
+            .send({ lastReadMessageId: Number(sent.body.id) });
+        expect(read.status).toBe(200);
+        expect(await unread(kitchenToken, 'channel:generale')).toBe(0);
+
+        // Un cursore gonfiato si ferma all'ultimo messaggio esistente: quelli
+        // che arrivano dopo restano da leggere per i colleghi.
+        await api().post('/staff-chat/threads/channel:generale/read').set(bearer(waiterToken))
+            .send({ lastReadMessageId: 2_000_000_000 });
+        const later = await api().post('/staff-chat/messages').set(bearer(owner))
+            .send({ threadKey: 'channel:generale', body: 'si comincia alle 18:15' });
+        expect(later.status).toBe(201);
+        expect(await unread(kitchenToken, 'channel:generale')).toBe(1);
+
+        // Chi non è membro del canale non ne sposta il cursore per gli altri.
+        const salaMsg = await api().post('/staff-chat/messages').set(bearer(owner))
+            .send({ threadKey: 'channel:sala', body: 'tavolo 7 al completo' });
+        await api().post('/staff-chat/threads/channel:sala/read').set(bearer(kitchenToken))
+            .send({ lastReadMessageId: Number(salaMsg.body.id) });
+        expect(await unread(waiterToken, 'channel:sala')).toBeGreaterThan(0);
+
+        // DM: la lettura del destinatario non tocca nessun altro.
+        const dm = await api().post('/staff-chat/messages').set(bearer(kitchenToken))
+            .send({ threadKey: `dm:${waiterId}`, body: 'mi presti il coltello?' });
+        expect(dm.status).toBe(201);
+        await api().post(`/staff-chat/threads/dm:${kitchenId}/read`).set(bearer(waiterToken))
+            .send({ lastReadMessageId: Number(dm.body.id) });
+        expect(await unread(waiterToken, `dm:${kitchenId}`)).toBe(0);
+        // Il mittente non ha un thread dm:<sé stesso> da far avanzare: il
+        // canale generale, che condivide con il cameriere, resta com'era.
+        expect(await unread(kitchenToken, 'channel:generale')).toBe(1);
+    });
 });

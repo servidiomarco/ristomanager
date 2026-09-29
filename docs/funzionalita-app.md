@@ -478,7 +478,7 @@ Per i ristoranti con cassa **Passepartout Menù** (modulo dedicato):
 
 - **Canali per reparto** (Generale, Sala, Cucina, Reception, Manager, Direttore, Titolare) con membership automatica in base al ruolo, più **messaggi diretti** tra colleghi.
 - Testo e **foto**, menzioni, contatori non letti, notifiche push mirate, collegamento di un messaggio a una prenotazione o a un tavolo.
-- Un thread letto su un dispositivo si spegne su tutti gli altri della stessa persona: contatore e **push sul telefono**. La lettura resta personale — in un canale ognuno deve leggere i messaggi, e i messaggi diretti sono privati.
+- **Lettura di squadra nei canali**: un canale letto da uno risulta letto per tutti i colleghi che lo vedono — contatore e **push sul telefono** si spengono su ogni dispositivo. I **messaggi diretti** restano personali: si spengono solo sui dispositivi di chi li ha letti.
 - **Messaggi rapidi** a un tocco configurabili ("Piatto finito", "Serve un runner"…).
 - I messaggi si eliminano da soli dopo 90 giorni: è traffico di servizio, non un archivio.
 
@@ -684,6 +684,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-29 | Chat staff | Lettura di squadra nei canali: un canale letto da uno risulta letto per tutti i colleghi che lo vedono (contatore e push sul telefono). I messaggi diretti restano personali. |
 | 2026-09-29 | Notifiche | Anche le notifiche generiche sono di squadra: letta da uno, letta per tutti. La «Notifica di test» di Impostazioni resta di chi l'ha inviata. Anche le email: «Nuova email» letta da uno è letta per tutti, e si spegne da sola quando il thread viene aperto nella pagina Email. Anche le richieste di ferie ai responsabili: letta da uno è letta per tutti, e si spegne da sola quando la richiesta viene decisa o ritirata. Anche la fatturazione («Pagamento non riuscito» agli amministratori della piattaforma). Resta personale solo la chat staff: ognuno legge i propri messaggi. |
 | 2026-09-29 | Chat staff | Letto un thread su un dispositivo, la sua push sparisce anche dagli altri dispositivi della stessa persona (subito se l'app è aperta, altrimenti al rientro). La lettura resta personale: non vale per i colleghi. |
 | 2026-09-29 | Notifiche | Anche le notifiche di sistema (promemoria cucina e pane, promemoria programmati, scorta bassa, todo assegnati) sono di squadra: letta da uno, letta per tutti. Restano personali solo chat staff, ferie e fatturazione. |
