@@ -489,7 +489,7 @@ Per i ristoranti con cassa **Passepartout Menù** (modulo dedicato):
 - Ogni notifica è **persistente** (si ritrova anche se il browser era chiuso) e porta dritti all'entità: prenotazione, conversazione, thread.
 - **Notifiche push** sul telefono (PWA) per gli eventi importanti: nuova prenotazione web, richiesta da confermare, annullamento, pagamento ricevuto, sotto scorta, messaggio in chat. Le notifiche di prenotazione arrivano anche ai camerieri, oltre che ai responsabili.
 - **Badge sull'icona dell'app** con il totale delle cose da attenzionare, aggiornato anche ad app chiusa.
-- **Lettura sincronizzata fra dispositivi**: una notifica letta, rimossa o toccata dalla push su un dispositivo si spegne subito su tutti gli altri (campanella, pagina Notifiche e banner nel centro notifiche del telefono). Per **telefonate, messaggi e tavoli in sala** la lettura vale per tutto lo staff che l'ha ricevuta: basta che uno la gestisca. Si spengono da sole anche quando la cosa è gestita alla fonte: thread letto in Messaggi, chiamata segnata ricontattata o collegata a una prenotazione, uscita servita al tavolo.
+- **Lettura sincronizzata fra dispositivi**: una notifica letta, rimossa o toccata dalla push su un dispositivo si spegne subito su tutti gli altri (campanella, pagina Notifiche e banner nel centro notifiche del telefono). Per **telefonate, messaggi, tavoli in sala e prenotazioni** la lettura vale per tutto lo staff che l'ha ricevuta: basta che uno la gestisca. Si spengono da sole anche quando la cosa è gestita alla fonte: thread letto in Messaggi, chiamata segnata ricontattata o collegata a una prenotazione, uscita servita al tavolo, richiesta dal sito confermata o rifiutata, prenotazione eliminata.
 
 ---
 
@@ -683,6 +683,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-29 | Notifiche | Anche le notifiche di prenotazione sono di squadra: letta da uno, letta per tutti. «Nuova richiesta prenotazione» si spegne da sola quando la richiesta viene confermata o rifiutata, e le notifiche di una prenotazione eliminata si spengono con lei. |
 | 2026-09-29 | Notifiche | Le notifiche lette su un dispositivo si spengono su tutti gli altri, senza ricaricare; toccare la push del telefono la segna letta. Telefonate, messaggi e tavoli in sala sono notifiche di squadra: letta da uno, letta per tutti — e si spengono da sole con il thread letto, la chiamata ricontattata o l'uscita servita. |
 | 2026-09-27 | Pagamenti, conto al tavolo e cassa | Anche nell'incasso della pagina Cassa «QR al tavolo» allarga la pagina e apre il QR in mezzo, tra Riepilogo e Incassa, invece del cassetto. Serve spazio per tre colonne accanto alla barra laterale (almeno 1200px), altrimenti resta il cassetto. |
 | 2026-09-27 | Pagamenti, conto al tavolo e cassa | Il QR al tavolo nel pannello di cassa si apre in mezzo, tra Riepilogo e Incassa, invece che a destra: l'incasso con la conferma resta sempre l'ultima colonna, e a colonna aperta le tre sono larghe uguali. |

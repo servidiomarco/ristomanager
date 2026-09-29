@@ -2869,6 +2869,13 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
         const socketId = req.headers['x-socket-id'] as string;
         if (socketService) socketService.broadcastReservationUpdated(req.tenantId!, updatedReservation, socketId);
 
+        // Richiesta dal sito gestita (confermata, rifiutata, annullata): la
+        // campanella «Nuova richiesta prenotazione» non chiede più niente a
+        // nessuno.
+        if (previousStatus === 'PENDING' && updatedReservation && updatedReservation.reservation_status !== 'PENDING') {
+            await markSharedNotificationsRead(req.tenantId!, [`pending-${updatedReservation.id}`]);
+        }
+
         // Notify managers when a booking transitions to CANCELLED (soft cancel).
         // Skip if it was already CANCELLED — avoids duplicate notifications on
         // saves that don't change the status.
@@ -3116,6 +3123,10 @@ app.delete('/reservations/:id', authenticate, requirePermission('reservations:fu
         // Broadcast to all connected clients except the one who deleted it
         const socketId = req.headers['x-socket-id'] as string;
         if (socketService) socketService.broadcastReservationDeleted(req.tenantId!, Number(id), socketId);
+
+        // Prenotazione eliminata: le sue campanelle portavano a una scheda
+        // che non esiste più.
+        await markSharedNotificationsRead(req.tenantId!, [`reservation-${id}`, `pending-${id}`]);
 
         res.status(204).send();
     } catch (err) {
@@ -19978,10 +19989,13 @@ app.post('/push/test', authenticate, async (req: any, res) => {
 // tablet di sala e su ogni altro dispositivo finché non si ricaricava. Ora
 // ogni lettura emette 'notifications:read' verso la room dell'utente (tutti
 // i suoi dispositivi); e per le categorie di squadra — telefonate, messaggi,
-// tavoli in sala — la lettura vale per tutti i destinatari della stessa
-// notifica (stesso tag): una chiamata da ricontattare o un'uscita pronta è
-// un fatto solo, gestito una volta, non un promemoria personale.
-const SHARED_NOTIFICATION_CATEGORIES = ['voice', 'message', 'service'];
+// tavoli in sala, prenotazioni — la lettura vale per tutti i destinatari
+// della stessa notifica (stesso tag): una chiamata da ricontattare, un'uscita
+// pronta o una prenotazione nuova è un fatto solo, visto una volta, non un
+// promemoria personale. I tag delle prenotazioni sono per singola
+// prenotazione (reservation-<id>, pending-<id>), quindi non si toccano mai
+// notifiche di altre.
+const SHARED_NOTIFICATION_CATEGORIES = ['voice', 'message', 'service', 'reservation'];
 
 function emitNotificationsRead(
     tenantId: number,

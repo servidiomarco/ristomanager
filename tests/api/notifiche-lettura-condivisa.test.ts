@@ -2,9 +2,9 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Client } from 'pg';
 import { api, ownerToken, bearer } from './helpers';
 
-// Lettura sincronizzata delle notifiche: per telefonate, messaggi e tavoli
-// in sala la lettura di uno vale per tutti i destinatari della stessa
-// notifica (stesso tag); le altre categorie restano personali.
+// Lettura sincronizzata delle notifiche: per telefonate, messaggi, tavoli in
+// sala e prenotazioni la lettura di uno vale per tutti i destinatari della
+// stessa notifica (stesso tag); le altre categorie restano personali.
 
 const MANAGER_EMAIL = 'manager.notifiche@example.com';
 const PASSWORD = 'password-notifiche';
@@ -85,14 +85,59 @@ describe('notifiche · lettura condivisa', () => {
         expect(row.dismissed_at).toBeNull();
     });
 
-    it('le prenotazioni restano personali', async () => {
+    it('prenotazioni: letta da uno, letta per tutti', async () => {
         const tag = 'test-condivisa-reservation';
         const mine = await insert(ownerId, 'reservation', tag);
         const theirs = await insert(managerId, 'reservation', tag);
 
         await api().post(`/notifications/${mine}/read`).set(bearer(owner));
         expect(await readAt(mine)).not.toBeNull();
+        expect(await readAt(theirs)).not.toBeNull();
+    });
+
+    it('le altre categorie restano personali', async () => {
+        const tag = 'test-condivisa-payment';
+        const mine = await insert(ownerId, 'payment', tag);
+        const theirs = await insert(managerId, 'payment', tag);
+
+        await api().post(`/notifications/${mine}/read`).set(bearer(owner));
+        expect(await readAt(mine)).not.toBeNull();
         expect(await readAt(theirs)).toBeNull();
+    });
+
+    it('richiesta confermata o prenotazione eliminata: la campanella si spegne per tutti', async () => {
+        const body = {
+            customer_name: 'Notifica Condivisa Test',
+            phone: '3390000998',
+            reservation_time: '2027-08-12T20:00:00',
+            shift: 'DINNER',
+            guests: 2,
+            children: 0,
+        };
+        const created = await api().post('/reservations').set(bearer(owner)).send(body);
+        expect(created.status).toBe(201);
+        const id = Number(created.body.id);
+        try {
+            // Come una richiesta arrivata dal sito, in attesa di conferma.
+            await db.query(`UPDATE reservations SET reservation_status = 'PENDING' WHERE id = $1`, [id]);
+            // La push di creazione è fire-and-forget: si parte da righe note.
+            await db.query(`DELETE FROM notifications WHERE tag IN ($1, $2)`, [`pending-${id}`, `reservation-${id}`]);
+            const pending = await insert(managerId, 'reservation', `pending-${id}`);
+            const created2 = await insert(managerId, 'reservation', `reservation-${id}`);
+
+            const confirmed = await api().put(`/reservations/${id}`).set(bearer(owner))
+                .send({ ...body, reservation_status: 'CONFIRMED' });
+            expect(confirmed.status).toBe(200);
+            expect(await readAt(pending)).not.toBeNull();
+            expect(await readAt(created2)).toBeNull();
+
+            const del = await api().delete(`/reservations/${id}`).set(bearer(owner));
+            expect(del.status).toBe(204);
+            expect(await readAt(created2)).not.toBeNull();
+        } finally {
+            await db.query(`DELETE FROM notifications WHERE tag IN ($1, $2)`, [`pending-${id}`, `reservation-${id}`]);
+            await db.query(`DELETE FROM reservations WHERE id = $1`, [id]);
+        }
     });
 
     it('tap sulla push: segna letta per tag, e per i colleghi se è di squadra', async () => {
@@ -138,8 +183,8 @@ describe('notifiche · lettura condivisa', () => {
     it('segna tutte come lette propaga solo le categorie di squadra', async () => {
         const shared = await insert(ownerId, 'voice', 'test-condivisa-all-voice');
         const sharedTheirs = await insert(managerId, 'voice', 'test-condivisa-all-voice');
-        await insert(ownerId, 'reservation', 'test-condivisa-all-resv');
-        const personalTheirs = await insert(managerId, 'reservation', 'test-condivisa-all-resv');
+        await insert(ownerId, 'payment', 'test-condivisa-all-pay');
+        const personalTheirs = await insert(managerId, 'payment', 'test-condivisa-all-pay');
 
         const res = await api().post('/notifications/read-all').set(bearer(owner));
         expect(res.status).toBe(200);
