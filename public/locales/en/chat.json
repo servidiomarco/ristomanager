@@ -24,5 +24,7 @@
   "attachPhoto": "Attach a photo",
   "composerPlaceholder": "Write a message…",
   "send": "Send the message",
-  "errLoadThreads": "Could not load the chats"
+  "errLoadThreads": "Could not load the chats",
+  "receiptRead": "read",
+  "receiptSent": "sent"
 }
