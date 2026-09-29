@@ -2,10 +2,11 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Client } from 'pg';
 import { api, ownerToken, bearer } from './helpers';
 
-// Lettura sincronizzata delle notifiche: per telefonate, messaggi, email,
-// tavoli in sala, prenotazioni, pagamenti, ferie, sistema e generiche la
-// lettura di uno vale per tutti i destinatari della stessa notifica (stesso
-// tag); la fatturazione resta personale. La chat staff non ha righe qui.
+// Lettura sincronizzata delle notifiche: per ogni categoria esistente
+// (telefonate, messaggi, email, tavoli in sala, prenotazioni, pagamenti,
+// ferie, fatturazione, sistema, generiche) la lettura di uno vale per tutti
+// i destinatari della stessa notifica (stesso tag). Una categoria che non è
+// in lista resta personale. La chat staff non ha righe qui.
 
 const MANAGER_EMAIL = 'manager.notifiche@example.com';
 const PASSWORD = 'password-notifiche';
@@ -183,8 +184,18 @@ describe('notifiche · lettura condivisa', () => {
         expect(await readAt(theirs)).not.toBeNull();
     });
 
-    it('la fatturazione resta personale', async () => {
-        for (const category of ['billing']) {
+    it('fatturazione: letta da uno, letta per tutti', async () => {
+        const tag = 'test-condivisa-billing';
+        const mine = await insert(ownerId, 'billing', tag);
+        const theirs = await insert(managerId, 'billing', tag);
+
+        await api().post(`/notifications/${mine}/read`).set(bearer(owner));
+        expect(await readAt(mine)).not.toBeNull();
+        expect(await readAt(theirs)).not.toBeNull();
+    });
+
+    it('una categoria fuori lista resta personale', async () => {
+        for (const category of ['categoria-nuova']) {
             const tag = `test-condivisa-${category}`;
             const mine = await insert(ownerId, category, tag);
             const theirs = await insert(managerId, category, tag);
@@ -273,8 +284,8 @@ describe('notifiche · lettura condivisa', () => {
     it('segna tutte come lette propaga solo le categorie di squadra', async () => {
         const shared = await insert(ownerId, 'voice', 'test-condivisa-all-voice');
         const sharedTheirs = await insert(managerId, 'voice', 'test-condivisa-all-voice');
-        await insert(ownerId, 'billing', 'test-condivisa-all-bill');
-        const personalTheirs = await insert(managerId, 'billing', 'test-condivisa-all-bill');
+        await insert(ownerId, 'categoria-nuova', 'test-condivisa-all-nuova');
+        const personalTheirs = await insert(managerId, 'categoria-nuova', 'test-condivisa-all-nuova');
 
         const res = await api().post('/notifications/read-all').set(bearer(owner));
         expect(res.status).toBe(200);

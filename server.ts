@@ -20005,21 +20005,25 @@ app.post('/push/test', authenticate, async (req: any, res) => {
 // avvisava gli altri: letta una notifica sul telefono, restava non letta sul
 // tablet di sala e su ogni altro dispositivo finché non si ricaricava. Ora
 // ogni lettura emette 'notifications:read' verso la room dell'utente (tutti
-// i suoi dispositivi); e per le categorie di squadra — telefonate, messaggi,
-// email, tavoli in sala, prenotazioni, pagamenti, ferie, sistema, generiche —
-// la lettura vale per tutti i destinatari della stessa notifica (stesso
-// tag): una chiamata da ricontattare, un'uscita pronta, una prenotazione
-// nuova, un incasso o una richiesta di ferie è un fatto solo, visto una
-// volta, non un promemoria personale. I tag sono per singolo evento
-// (reservation-<id>, pending-<id>, payment-<id>, email-inbound-<id>,
-// leave-<id>, leave-decision-<id>, low-stock-<prodotto>, todo-<id>,
+// i suoi dispositivi); e per le categorie di squadra — oggi tutte quelle che
+// esistono: telefonate, messaggi, email, tavoli in sala, prenotazioni,
+// pagamenti, ferie, fatturazione, sistema, generiche — la lettura vale per
+// tutti i destinatari della stessa notifica (stesso tag): una chiamata da
+// ricontattare, un'uscita pronta, una prenotazione nuova, un incasso o una
+// richiesta di ferie è un fatto solo, visto una volta, non un promemoria
+// personale. I tag sono per singolo evento (reservation-<id>, pending-<id>,
+// payment-<id>, email-inbound-<id>, leave-<id>, leave-decision-<id>,
+// billing-past-due-<tenant>, low-stock-<prodotto>, todo-<id>,
 // test-notification-<utente>…), quindi non si toccano mai notifiche di
 // altri: una push nuova con un tag condiviso fra utenti diversi — o fra due
 // notifiche diverse dello stesso evento — va resa distinta.
+// La lista resta esplicita di proposito: una categoria nuova parte
+// personale e diventa di squadra solo quando qualcuno lo decide.
 // 'staff' copre anche la chat staff, ma quelle push sono persist:false e
 // non hanno righe qui: la loro lettura resta il cursore personale per
-// thread. Resta personale la fatturazione ('billing').
-const SHARED_NOTIFICATION_CATEGORIES = ['voice', 'message', 'email', 'service', 'reservation', 'payment', 'staff', 'system', 'general'];
+// thread. 'billing' va ai platform admin, le cui righe stanno sul tenant di
+// ciascuno: la lettura si propaga fra gli admin dello stesso tenant.
+const SHARED_NOTIFICATION_CATEGORIES = ['voice', 'message', 'email', 'service', 'reservation', 'payment', 'staff', 'billing', 'system', 'general'];
 
 function emitNotificationsRead(
     tenantId: number,
