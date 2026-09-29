@@ -3,8 +3,9 @@ import { Client } from 'pg';
 import { api, ownerToken, bearer } from './helpers';
 
 // Lettura sincronizzata delle notifiche: per telefonate, messaggi, tavoli in
-// sala e prenotazioni la lettura di uno vale per tutti i destinatari della
-// stessa notifica (stesso tag); le altre categorie restano personali.
+// sala, prenotazioni e pagamenti la lettura di uno vale per tutti i
+// destinatari della stessa notifica (stesso tag); le altre categorie (sistema,
+// generali) restano personali.
 
 const MANAGER_EMAIL = 'manager.notifiche@example.com';
 const PASSWORD = 'password-notifiche';
@@ -95,10 +96,40 @@ describe('notifiche · lettura condivisa', () => {
         expect(await readAt(theirs)).not.toBeNull();
     });
 
-    it('le altre categorie restano personali', async () => {
+    it('pagamenti: letto da uno, letto per tutti', async () => {
         const tag = 'test-condivisa-payment';
         const mine = await insert(ownerId, 'payment', tag);
         const theirs = await insert(managerId, 'payment', tag);
+
+        await api().post(`/notifications/${mine}/read`).set(bearer(owner));
+        expect(await readAt(mine)).not.toBeNull();
+        expect(await readAt(theirs)).not.toBeNull();
+    });
+
+    it('incassi visti in Pagamenti: «Pagamento ricevuto» si spegne per tutti', async () => {
+        const pr = await db.query(
+            `INSERT INTO payment_requests (tenant_id, amount_cents, currency, description, status, provider)
+             VALUES (1, 2500, 'EUR', 'notifica condivisa', 'COMPLETED', 'revolut') RETURNING id`
+        );
+        const prId = Number(pr.rows[0].id);
+        try {
+            const mine = await insert(ownerId, 'payment', `payment-${prId}`);
+            const theirs = await insert(managerId, 'payment', `payment-${prId}`);
+
+            const res = await api().post('/payments/mark-seen').set(bearer(owner));
+            expect(res.status).toBe(200);
+            expect(await readAt(mine)).not.toBeNull();
+            expect(await readAt(theirs)).not.toBeNull();
+        } finally {
+            await db.query(`DELETE FROM notifications WHERE tag = $1`, [`payment-${prId}`]);
+            await db.query(`DELETE FROM payment_requests WHERE id = $1`, [prId]);
+        }
+    });
+
+    it('le altre categorie restano personali', async () => {
+        const tag = 'test-condivisa-system';
+        const mine = await insert(ownerId, 'system', tag);
+        const theirs = await insert(managerId, 'system', tag);
 
         await api().post(`/notifications/${mine}/read`).set(bearer(owner));
         expect(await readAt(mine)).not.toBeNull();
@@ -183,8 +214,8 @@ describe('notifiche · lettura condivisa', () => {
     it('segna tutte come lette propaga solo le categorie di squadra', async () => {
         const shared = await insert(ownerId, 'voice', 'test-condivisa-all-voice');
         const sharedTheirs = await insert(managerId, 'voice', 'test-condivisa-all-voice');
-        await insert(ownerId, 'payment', 'test-condivisa-all-pay');
-        const personalTheirs = await insert(managerId, 'payment', 'test-condivisa-all-pay');
+        await insert(ownerId, 'system', 'test-condivisa-all-sys');
+        const personalTheirs = await insert(managerId, 'system', 'test-condivisa-all-sys');
 
         const res = await api().post('/notifications/read-all').set(bearer(owner));
         expect(res.status).toBe(200);

@@ -10633,6 +10633,10 @@ app.post('/payments/mark-seen', authenticate, requirePermission('payments:view')
             const socketId = req.headers['x-socket-id'] as string;
             if (socketService) socketService.broadcastToAll(req.tenantId!, 'payments:seen', { count: result.rows.length }, socketId);
         }
+        // Incassi visti in Pagamenti: le campanelle «Pagamento ricevuto» che
+        // li annunciavano sono lette per tutti. Il «Pagamento in eccesso» no:
+        // chiede un rimborso, e vederlo in lista non lo fa.
+        await markSharedNotificationsRead(req.tenantId!, result.rows.map((r: any) => `payment-${r.id}`));
         res.json({ marked: result.rows.length });
     } catch (err: any) {
         console.error('POST /payments/mark-seen error:', err);
@@ -19989,13 +19993,14 @@ app.post('/push/test', authenticate, async (req: any, res) => {
 // tablet di sala e su ogni altro dispositivo finché non si ricaricava. Ora
 // ogni lettura emette 'notifications:read' verso la room dell'utente (tutti
 // i suoi dispositivi); e per le categorie di squadra — telefonate, messaggi,
-// tavoli in sala, prenotazioni — la lettura vale per tutti i destinatari
-// della stessa notifica (stesso tag): una chiamata da ricontattare, un'uscita
-// pronta o una prenotazione nuova è un fatto solo, visto una volta, non un
-// promemoria personale. I tag delle prenotazioni sono per singola
-// prenotazione (reservation-<id>, pending-<id>), quindi non si toccano mai
-// notifiche di altre.
-const SHARED_NOTIFICATION_CATEGORIES = ['voice', 'message', 'service', 'reservation'];
+// tavoli in sala, prenotazioni, pagamenti — la lettura vale per tutti i
+// destinatari della stessa notifica (stesso tag): una chiamata da
+// ricontattare, un'uscita pronta, una prenotazione nuova o un incasso è un
+// fatto solo, visto una volta, non un promemoria personale. I tag di
+// prenotazioni e pagamenti sono per singolo evento (reservation-<id>,
+// pending-<id>, payment-<id>, bill-overpaid-<split>), quindi non si toccano
+// mai notifiche di altri.
+const SHARED_NOTIFICATION_CATEGORIES = ['voice', 'message', 'service', 'reservation', 'payment'];
 
 function emitNotificationsRead(
     tenantId: number,
