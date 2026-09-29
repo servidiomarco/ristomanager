@@ -233,6 +233,7 @@ import {
     type ServiceOpen,
 } from './utils/leavePlan.js';
 import { formatMoneyMinor } from './utils/money.js';
+import { HACCP_TEMPERATURE_LOCATIONS, haccpMissingTag, haccpTemperatureTag } from './utils/haccp.js';
 import { buildEReceiptPayload, buildFatturaPaXml, getFiscalDriver, type FiscalSeller, type InvoiceBuyer } from './services/fiscalService.js';
 import {
     getAvailableSlots,
@@ -13839,6 +13840,7 @@ const SYSTEM_REMINDER_HANDLERS: Record<string, ReminderHandler> = {
     // Forward the reminder's target_roles so the operator's Impostazioni
     // choice ("Chi riceve?") is honoured by the system handler as well.
     BREAD_DAILY: async (r) => { await runDailyBreadReminder(r.tenant_id, r.target_roles); },
+    HACCP_TEMPERATURES: async (r) => { await runHaccpMissingReminder(r.tenant_id, r.target_roles); },
 };
 
 interface ReminderRow {
@@ -23401,6 +23403,102 @@ const parseNumericOrNull = (v: unknown): number | null => {
 };
 
 // ---- TEMPERATURE READINGS ---------------------------------------------------
+// Chi riceve gli avvisi HACCP quando non passano da un promemoria
+// configurabile: chi risponde del registro e chi sta in cucina.
+const HACCP_ALERT_ROLES = ['OWNER', 'GENERAL_MANAGER', 'MANAGER', 'KITCHEN'];
+
+const formatHaccpTemp = (n: number): string =>
+    `${String(Math.round(n * 10) / 10).replace('.', ',')} °C`;
+
+interface HaccpReadingRow {
+    date: string;
+    location: string;
+    temperature: number;
+    targetMax: number | null;
+}
+
+/** Dopo il salvataggio di una rilevazione: fuori soglia → avviso a chi
+ *  risponde del registro; di nuovo in soglia → l'avviso si chiude per tutti.
+ *  Solo il giorno di oggi suona: correggere il foglio di ieri non è
+ *  un'emergenza, ma chiude comunque l'avviso rimasto aperto. */
+async function notifyHaccpTemperature(
+    tenantId: number,
+    row: HaccpReadingRow,
+    before: { temperature: number; target_max: number | null } | null,
+    recorderId: number | null,
+): Promise<void> {
+    try {
+        const tag = haccpTemperatureTag(row.date, row.location);
+        const limit = typeof row.targetMax === 'number'
+            ? row.targetMax
+            : HACCP_TEMPERATURE_LOCATIONS.find(l => l.location === row.location)?.targetMax ?? null;
+        const over = limit !== null && row.temperature > limit;
+        if (!over) {
+            await markSharedNotificationsRead(tenantId, [tag]);
+        } else {
+            const beforeLimit = before?.target_max ?? limit;
+            const sameAlert = before !== null && before.temperature === row.temperature
+                && beforeLimit !== null && before.temperature > beforeLimit;
+            const today = getItalianTodayIso(new Date(), (await getTenantLocale(tenantId)).timezone);
+            if (!sameAlert && row.date === today) {
+                // Chi ha scritto il valore lo vede già in rosso sul modulo.
+                await pushSendToRoles(tenantId, HACCP_ALERT_ROLES, {
+                    category: 'system',
+                    title: 'Temperatura fuori soglia',
+                    body: `${row.location} · ${formatHaccpTemp(row.temperature)} (limite ${formatHaccpTemp(limit)})`,
+                    url: '/?view=HACCP',
+                    tag,
+                }, recorderId ? { excludeUserId: recorderId } : undefined);
+            }
+        }
+        // Registro del giorno completo: il promemoria delle mancanti è superato.
+        const done = await queryWithRetry(
+            `SELECT COUNT(DISTINCT location)::int AS n FROM haccp_temperature_readings
+              WHERE tenant_id = $1 AND date = $2 AND location = ANY($3::text[])`,
+            [tenantId, row.date, HACCP_TEMPERATURE_LOCATIONS.map(l => l.location)]
+        );
+        if ((done.rows[0]?.n ?? 0) >= HACCP_TEMPERATURE_LOCATIONS.length) {
+            await markSharedNotificationsRead(tenantId, [haccpMissingTag(row.date)]);
+        }
+    } catch (err) {
+        console.error('[haccp] notifica temperatura fallita:', err);
+    }
+}
+
+/** Promemoria di sistema HACCP_TEMPERATURES: all'orario scelto in
+ *  Impostazioni → Promemoria avvisa solo se il registro di oggi è incompleto.
+ *  Tace nei giorni di chiusura e per chi il registro non l'ha mai usato
+ *  nell'ultimo mese — il seed crea il promemoria per ogni ristorante. */
+async function runHaccpMissingReminder(tenantId: number, targetRoles: string[]): Promise<void> {
+    const today = getItalianTodayIso(new Date(), (await getTenantLocale(tenantId)).timezone);
+    const serviceOpen = makeServiceOpen(await loadOpeningCalendar(tenantId, today, today));
+    if (!serviceOpen(today, 'LUNCH') && !serviceOpen(today, 'DINNER')) return;
+    const used = await queryWithRetry(
+        `SELECT 1 FROM haccp_temperature_readings
+          WHERE tenant_id = $1 AND date >= $2::date - 30 LIMIT 1`,
+        [tenantId, today]
+    );
+    if (used.rows.length === 0) return;
+    const recorded = await queryWithRetry(
+        `SELECT location FROM haccp_temperature_readings WHERE tenant_id = $1 AND date = $2`,
+        [tenantId, today]
+    );
+    const have = new Set(recorded.rows.map((r: any) => r.location));
+    const missing = HACCP_TEMPERATURE_LOCATIONS.filter(l => !have.has(l.location)).map(l => l.location);
+    if (missing.length === 0) return;
+    const shown = missing.slice(0, 3).join(', ');
+    const rest = missing.length > 3 ? ` e altre ${missing.length - 3}` : '';
+    await pushSendToRoles(tenantId, targetRoles.length > 0 ? targetRoles : HACCP_ALERT_ROLES, {
+        category: 'system',
+        title: missing.length === HACCP_TEMPERATURE_LOCATIONS.length
+            ? 'Temperature di oggi da registrare'
+            : missing.length === 1 ? 'Manca una temperatura' : `Mancano ${missing.length} temperature`,
+        body: `${shown}${rest}`,
+        url: '/?view=HACCP',
+        tag: haccpMissingTag(today),
+    });
+}
+
 app.get('/haccp/temperatures', authenticate, async (req, res) => {
     try {
         const { date } = req.query;
@@ -23439,6 +23537,16 @@ app.post('/haccp/temperatures', authenticate, async (req, res) => {
         if (temp === null) return res.status(400).json({ error: 'temperature is required' });
         const target = parseNumericOrNull(targetMax);
         const recorderName = req.user?.email || null;
+        const tenantId = req.tenantId!;
+        // Il valore di prima decide se avvisare: il modulo ripubblica la riga
+        // a ogni blur, e la stessa temperatura fuori soglia non deve suonare
+        // di nuovo sui telefoni della cucina.
+        const before = await queryWithRetry(
+            `SELECT temperature::float8 AS temperature, target_max::float8 AS target_max
+               FROM haccp_temperature_readings
+              WHERE tenant_id = $1 AND date = $2 AND location = $3`,
+            [tenantId, date, location.trim()]
+        );
         const result = await queryWithRetry(`
             INSERT INTO haccp_temperature_readings
                 (tenant_id, date, location, temperature, target_max, note, recorded_by_user_id, recorded_by_user_name)
@@ -23459,7 +23567,10 @@ app.post('/haccp/temperatures', authenticate, async (req, res) => {
                       recorded_by_user_id as "recordedByUserId",
                       recorded_by_user_name as "recordedByUserName",
                       recorded_at as "recordedAt"
-        `, [date, location.trim(), temp, target, note?.trim() || null, req.user?.userId || null, recorderName, req.tenantId!]);
+        `, [date, location.trim(), temp, target, note?.trim() || null, req.user?.userId || null, recorderName, tenantId]);
+        // Prima della risposta, come per le altre letture condivise: chi
+        // salva e poi apre il centro notifiche deve già trovarlo aggiornato.
+        await notifyHaccpTemperature(tenantId, result.rows[0], before.rows[0] ?? null, req.user?.userId ?? null);
         res.status(201).json(result.rows[0]);
     } catch (err) {
         console.error(err);
@@ -23469,8 +23580,15 @@ app.post('/haccp/temperatures', authenticate, async (req, res) => {
 
 app.delete('/haccp/temperatures/:id', authenticate, async (req, res) => {
     try {
-        const result = await queryWithRetry('DELETE FROM haccp_temperature_readings WHERE id = $1 AND tenant_id = $2 RETURNING id', [req.params.id, req.tenantId!]);
+        const result = await queryWithRetry(
+            `DELETE FROM haccp_temperature_readings WHERE id = $1 AND tenant_id = $2
+             RETURNING TO_CHAR(date, 'YYYY-MM-DD') AS date, location`,
+            [req.params.id, req.tenantId!]
+        );
         if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+        // Una lettura cancellata non è più fuori soglia: l'avviso si chiude.
+        const { date, location } = result.rows[0];
+        await markSharedNotificationsRead(req.tenantId!, [haccpTemperatureTag(date, location)]);
         res.status(204).send();
     } catch (err) {
         console.error(err);
