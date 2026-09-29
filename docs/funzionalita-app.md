@@ -114,7 +114,7 @@ La sezione centrale del CRM: elenco, mappa tavoli e scheda prenotazione in un'un
 - Rilevazione conflitti sul tavolo (considera anche le comande aperte) e blocco dei tavoli in sale chiuse.
 - Ogni prenotazione con telefono **aggiorna automaticamente la rubrica clienti**.
 - Prenotazione senza tavolo → l'AI **suggerisce un'assegnazione** secondo le regole scritte dal ristoratore; lo staff conferma o ignora.
-- Annullamenti e nuove prenotazioni web generano una notifica push ai responsabili e ai camerieri.
+- Annullamenti e nuove prenotazioni web generano una notifica push ai responsabili, alla reception e ai camerieri.
 
 **Mappa tavoli integrata**
 - Stato tavoli per sala con misuratore di occupazione, assegnazione con un tocco, **unione e divisione tavoli**, tavoli nascosti per turno, auto-assegnazione.
@@ -489,7 +489,7 @@ Per i ristoranti con cassa **Passepartout Menù** (modulo dedicato):
 
 - **Campanella** con contatore e pannello rapido + pagina completa con filtri per categoria (Prenotazioni, Messaggi, Chiamate, Email, Pagamenti, Sistema).
 - Ogni notifica è **persistente** (si ritrova anche se il browser era chiuso) e porta dritti all'entità: prenotazione, conversazione, thread.
-- **Notifiche push** sul telefono (PWA) per gli eventi importanti: nuova prenotazione web, richiesta da confermare, annullamento, pagamento ricevuto, sotto scorta, messaggio in chat. Le notifiche di prenotazione arrivano anche ai camerieri, oltre che ai responsabili.
+- **Notifiche push** sul telefono (PWA) per gli eventi importanti: nuova prenotazione web, richiesta da confermare, annullamento, pagamento ricevuto, sotto scorta, messaggio in chat. Le notifiche di prenotazione arrivano ai responsabili, alla reception e ai camerieri.
 - **Badge sull'icona dell'app** con il totale delle cose da attenzionare, aggiornato anche ad app chiusa.
 - **Lettura sincronizzata fra dispositivi**: una notifica letta, rimossa o toccata dalla push su un dispositivo si spegne subito su tutti gli altri (campanella, pagina Notifiche e banner nel centro notifiche del telefono). Per **telefonate, messaggi, email, tavoli in sala, prenotazioni, pagamenti, richieste di ferie, fatturazione, notifiche di sistema** (promemoria, scorte basse, todo) **e generiche** la lettura vale per tutto lo staff che l'ha ricevuta: basta che uno la gestisca. Si spengono da sole anche quando la cosa è gestita alla fonte: thread letto in Messaggi o in Email, chiamata segnata ricontattata o collegata a una prenotazione, uscita servita al tavolo, richiesta dal sito confermata o rifiutata, prenotazione eliminata, incasso visto nella pagina Pagamenti, promemoria della cucina (banchetti, pane) o todo spuntato o eliminato, ordine d'asporto preso in carico (il «nuovo ordine») o ritirato/annullato (il «pronto»).
 
@@ -685,6 +685,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-29 | Notifiche, Reception | Le notifiche di prenotazione (nuova, richiesta, modificata, annullata — dal CRM, dal sito, da Sofia e da WhatsApp) arrivano anche alla reception, prima esclusa. |
 | 2026-09-29 | Notifiche, Asporto | «Asporto — nuovo ordine» si spegne per tutti appena l'ordine è preso in carico (cambio di stato o «Manda in cucina»); «Pronto l'ordine di…» si spegne al ritiro, all'annullamento o al non ritirato. |
 | 2026-09-29 | Notifiche, Cucina | I promemoria della cucina (ordine per i banchetti, pane) e i «todo assegnato» si spengono per tutti appena il todo viene spuntato o eliminato, senza doverli leggere a parte. |
 | 2026-09-29 | Chat staff | Conferma di lettura nei messaggi diretti: sotto l'ultimo messaggio inviato compare «inviato» o «letto», aggiornato in tempo reale quando il collega apre la conversazione. Nei canali non c'è: lì la lettura è di squadra. |
