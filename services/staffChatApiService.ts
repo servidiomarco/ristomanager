@@ -24,6 +24,10 @@ export const staffMediaUrl = (token: string): string =>
  *  destinatario (dm:<mittente>). */
 export const staffChatPushTag = (threadKey: string): string => `staffchat:${threadKey}`;
 
+/** Il tag della push di menzione di un canale: distinto da quello del
+ *  canale, perché la lettura di squadra spegne il secondo e non la prima. */
+export const staffChatMentionPushTag = (threadKey: string): string => `staffchat:mention:${threadKey}`;
+
 export interface StaffThreadSummary {
   threadKey: string;
   kind: 'channel' | 'direct';
@@ -143,9 +147,10 @@ class StaffChatApiService {
       headers: { ...getHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ lastReadMessageId }),
     });
-    // Letto qui: la push del thread non ha più niente da dire su questo
-    // dispositivo. Gli altri la chiudono su 'staffchat:read' (App.tsx).
-    void closeSystemNotifications([staffChatPushTag(threadKey)]);
+    // Letto qui, di persona: la push del thread e quella di menzione non
+    // hanno più niente da dire su questo dispositivo. Gli altri le chiudono
+    // su 'staffchat:read' (App.tsx).
+    void closeSystemNotifications([staffChatPushTag(threadKey), staffChatMentionPushTag(threadKey)]);
     return res;
   }
 
@@ -159,7 +164,8 @@ class StaffChatApiService {
       const shown = await displayedSystemNotifications();
       if (!shown.some(n => n.tag?.startsWith(staffChatPushTag('')))) return;
       const { threads } = await this.listThreads();
-      const read = threads.filter(t => t.unreadCount === 0).map(t => staffChatPushTag(t.threadKey));
+      const read = threads.filter(t => t.unreadCount === 0)
+        .flatMap(t => [staffChatPushTag(t.threadKey), staffChatMentionPushTag(t.threadKey)]);
       await closeSystemNotifications(read);
     } catch { /* best-effort */ }
   }
