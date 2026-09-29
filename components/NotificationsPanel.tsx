@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
 import { ArrowRight, Bell, CheckCheck, X } from 'lucide-react';
-import { notificationsApiService, NotificationRow } from '../services/notificationsApiService';
+import { notificationsApiService, NotificationRow, subscribeNotificationChanges } from '../services/notificationsApiService';
 import { SkeletonNotificationList } from './SkeletonCards';
 import { SegmentedControl, EmptyState } from './ds';
 import { NotificationItem } from './NotificheShared';
@@ -68,6 +68,8 @@ export const NotificationsPanel: React.FC<{
   }, [onlyUnread]);
 
   useEffect(() => { load(); }, [load]);
+  // Letta su un altro dispositivo, o da un collega: la riga si spegne qui.
+  useEffect(() => subscribeNotificationChanges(() => { load(); }), [load]);
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {

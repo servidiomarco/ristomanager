@@ -85,7 +85,7 @@ import { AuthService } from './auth/authService.js';
 import { RolePermissionService, isReportsAdmin, ALL_PERMISSIONS, ALL_PERMISSION_KEYS, type Permission } from './auth/permissionService.js';
 import { canAssignToRole } from './auth/permissions.js';
 import { LogService, ActivityAction, ResourceType } from './activityLogs/logService.js';
-import { isPushConfigured, getVapidPublicKey, sendToUser as pushSendToUser, sendToRoles as pushSendToRoles, sendToPlatformAdmins as pushSendToPlatformAdmins } from './services/pushService.js';
+import { isPushConfigured, getVapidPublicKey, sendToUser as pushSendToUser, sendToRoles as pushSendToRoles, sendToPlatformAdmins as pushSendToPlatformAdmins, setNotificationPersistListener } from './services/pushService.js';
 import { channelsForRole, rolesForChannel, parseThreadKey, channelThreadKey, dmThreadKey, isStaffPresetKey, STAFF_MESSAGE_MAX_LENGTH, STAFF_MAX_MENTIONS, STAFF_MESSAGE_PRESETS, STAFF_MAX_ATTACHMENTS, staffMessagePreview } from './services/staffChat.js';
 import {
     isRevolutConfigured,
@@ -9168,6 +9168,9 @@ app.post('/messages/conversations/:phoneDigits/read', authenticate, requirePermi
                 count: updated.rows.length,
             });
         }
+        // Letto il thread, le campanelle «Nuovo messaggio» che lo annunciavano
+        // non hanno più niente da dire, su nessun dispositivo.
+        await markSharedNotificationsRead(req.tenantId!, updated.rows.map((r: any) => `msg-inbound-${r.id}`));
         res.json({ ok: true, marked: updated.rows.length });
     } catch (err) {
         console.error('POST /messages/conversations/:phoneDigits/read error:', err);
@@ -19969,6 +19972,68 @@ app.post('/push/test', authenticate, async (req: any, res) => {
 // The rows are populated by pushService.sendTo{User,Roles} *before* web-push
 // delivery, so history survives closed browsers. Everything here is scoped
 // to `req.user.userId` — no cross-user reads.
+//
+// Lettura sincronizzata. Ogni destinatario ha la sua riga, e prima nessuno
+// avvisava gli altri: letta una notifica sul telefono, restava non letta sul
+// tablet di sala e su ogni altro dispositivo finché non si ricaricava. Ora
+// ogni lettura emette 'notifications:read' verso la room dell'utente (tutti
+// i suoi dispositivi); e per le categorie di squadra — telefonate, messaggi,
+// tavoli in sala — la lettura vale per tutti i destinatari della stessa
+// notifica (stesso tag): una chiamata da ricontattare o un'uscita pronta è
+// un fatto solo, gestito una volta, non un promemoria personale.
+const SHARED_NOTIFICATION_CATEGORIES = ['voice', 'message', 'service'];
+
+function emitNotificationsRead(
+    tenantId: number,
+    userIds: number[],
+    payload: { ids?: number[]; tags?: string[]; all?: boolean }
+): void {
+    if (userIds.length === 0) return;
+    try {
+        socketService?.broadcastToUsers(tenantId, [...new Set(userIds)], 'notifications:read', {
+            ids: payload.ids ?? [], tags: payload.tags ?? [], all: payload.all === true,
+        });
+    } catch (_) { /* best-effort: il badge si riallinea comunque al focus */ }
+}
+
+// Segna lette, per TUTTI i destinatari, le notifiche di squadra con questi
+// tag. Chiamata sia dal centro notifiche sia dove la cosa si gestisce alla
+// fonte (thread letto in Messaggi, chiamata ricontattata, uscita servita).
+// Best-effort: un errore qui non deve far fallire la rotta che la chiama.
+async function markSharedNotificationsRead(tenantId: number, tags: string[]): Promise<void> {
+    const clean = [...new Set(tags.filter(t => typeof t === 'string' && t.length > 0))];
+    if (clean.length === 0) return;
+    try {
+        const r = await queryWithRetry(
+            `UPDATE notifications SET read_at = CURRENT_TIMESTAMP
+             WHERE tenant_id = $1 AND tag = ANY($2::text[]) AND read_at IS NULL
+               AND category = ANY($3::text[])
+             RETURNING id, recipient_user_id, tag`,
+            [tenantId, clean, SHARED_NOTIFICATION_CATEGORIES]
+        );
+        if (r.rows.length === 0) return;
+        emitNotificationsRead(tenantId, r.rows.map((row: any) => Number(row.recipient_user_id)), {
+            ids: r.rows.map((row: any) => Number(row.id)),
+            tags: clean,
+        });
+    } catch (err: any) {
+        console.warn('[notifications] shared read failed:', err?.message || err);
+    }
+}
+
+// Tag della propria riga (serve ai dispositivi per chiudere la push) e se è
+// di squadra, cioè se la lettura va propagata ai colleghi.
+async function tagOfNotification(tenantId: number, userId: number, id: number): Promise<{ tag: string | null; shared: boolean }> {
+    const r = await queryWithRetry(
+        `SELECT tag, category FROM notifications WHERE id = $1 AND recipient_user_id = $2 AND tenant_id = $3`,
+        [id, userId, tenantId]
+    );
+    const row = r.rows[0];
+    return {
+        tag: row?.tag ? String(row.tag) : null,
+        shared: !!row && SHARED_NOTIFICATION_CATEGORIES.includes(row.category),
+    };
+}
 
 app.get('/notifications', authenticate, async (req: any, res) => {
     try {
@@ -20074,14 +20139,45 @@ app.post('/notifications/:id/read', authenticate, async (req: any, res) => {
         if (!userId) return res.status(401).json({ error: 'Unauthorized' });
         const id = parseInt(req.params.id, 10);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+        const { tag, shared } = await tagOfNotification(req.tenantId!, userId, id);
         await queryWithRetry(
             `UPDATE notifications SET read_at = CURRENT_TIMESTAMP
              WHERE id = $1 AND recipient_user_id = $2 AND tenant_id = $3 AND read_at IS NULL`,
             [id, userId, req.tenantId!]
         );
+        if (tag && shared) await markSharedNotificationsRead(req.tenantId!, [tag]);
+        emitNotificationsRead(req.tenantId!, [userId], { ids: [id], tags: tag ? [tag] : [] });
         res.json({ ok: true });
     } catch (err) {
         console.error('POST /notifications/:id/read error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Tap sulla push del sistema operativo: il service worker conosce solo il
+// tag, non l'id della riga. Prima il tap apriva la vista giusta ma lasciava
+// la notifica non letta nella campanella di ogni dispositivo.
+app.post('/notifications/read-by-tag', authenticate, async (req: any, res) => {
+    try {
+        const userId = req.user?.userId;
+        if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+        const tag = typeof req.body?.tag === 'string' ? req.body.tag.trim() : '';
+        if (!tag || tag.length > 200) return res.status(400).json({ error: 'Invalid tag' });
+        const r = await queryWithRetry(
+            `UPDATE notifications SET read_at = CURRENT_TIMESTAMP
+             WHERE tenant_id = $1 AND recipient_user_id = $2 AND tag = $3 AND read_at IS NULL
+             RETURNING id, category`,
+            [req.tenantId!, userId, tag]
+        );
+        if (r.rows.some((row: any) => SHARED_NOTIFICATION_CATEGORIES.includes(row.category))) {
+            await markSharedNotificationsRead(req.tenantId!, [tag]);
+        }
+        if (r.rows.length > 0) {
+            emitNotificationsRead(req.tenantId!, [userId], { ids: r.rows.map((row: any) => Number(row.id)), tags: [tag] });
+        }
+        res.json({ ok: true, marked: r.rows.length });
+    } catch (err) {
+        console.error('POST /notifications/read-by-tag error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -20093,9 +20189,18 @@ app.post('/notifications/read-all', authenticate, async (req: any, res) => {
         const r = await queryWithRetry(
             `UPDATE notifications SET read_at = CURRENT_TIMESTAMP
              WHERE tenant_id = $2 AND recipient_user_id = $1 AND read_at IS NULL AND dismissed_at IS NULL
-             RETURNING id`,
+             RETURNING id, tag, category`,
             [userId, req.tenantId!]
         );
+        const sharedTags = r.rows
+            .filter((row: any) => row.tag && SHARED_NOTIFICATION_CATEGORIES.includes(row.category))
+            .map((row: any) => String(row.tag));
+        await markSharedNotificationsRead(req.tenantId!, sharedTags);
+        emitNotificationsRead(req.tenantId!, [userId], {
+            ids: r.rows.map((row: any) => Number(row.id)),
+            tags: r.rows.filter((row: any) => row.tag).map((row: any) => String(row.tag)),
+            all: true,
+        });
         res.json({ ok: true, marked: r.rows.length });
     } catch (err) {
         console.error('POST /notifications/read-all error:', err);
@@ -20109,12 +20214,17 @@ app.post('/notifications/:id/dismiss', authenticate, async (req: any, res) => {
         if (!userId) return res.status(401).json({ error: 'Unauthorized' });
         const id = parseInt(req.params.id, 10);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+        const { tag, shared } = await tagOfNotification(req.tenantId!, userId, id);
         await queryWithRetry(
             `UPDATE notifications
              SET dismissed_at = CURRENT_TIMESTAMP, read_at = COALESCE(read_at, CURRENT_TIMESTAMP)
              WHERE id = $1 AND recipient_user_id = $2 AND tenant_id = $3 AND dismissed_at IS NULL`,
             [id, userId, req.tenantId!]
         );
+        // Rimossa qui, per gli altri destinatari vale come letta: la
+        // rimozione resta una scelta personale di pulizia della lista.
+        if (tag && shared) await markSharedNotificationsRead(req.tenantId!, [tag]);
+        emitNotificationsRead(req.tenantId!, [userId], { ids: [id], tags: tag ? [tag] : [] });
         res.json({ ok: true });
     } catch (err) {
         console.error('POST /notifications/:id/dismiss error:', err);
@@ -24019,6 +24129,13 @@ app.get('/voice-calls/pending-count', authenticate, requireFeature('voice'), voi
     }
 });
 
+// Le campanelle nate da una chiamata (vedi handleElevenLabsPostCall): una
+// volta ricontattato il cliente non chiedono più niente a nessuno.
+function voiceCallNotificationTags(conversationId: unknown): string[] {
+    if (typeof conversationId !== 'string' || !conversationId) return [];
+    return [`voice-followup-${conversationId}`, `voice-phantom-${conversationId}`];
+}
+
 // Bulk: flip every call still awaiting follow-up (no linked reservation,
 // status NULL/PENDING) to CONTACTED in one shot. Powers the "segna tutte
 // come ricontattate" button in Conversazioni — returns how many rows
@@ -24033,9 +24150,11 @@ app.post('/voice-calls/mark-all-contacted', authenticate, requireFeature('voice'
              WHERE tenant_id = $2
                AND reservation_id IS NULL
                AND (follow_up_status IS NULL OR follow_up_status = 'PENDING')
-             RETURNING id`,
+             RETURNING id, conversation_id`,
             [req.user?.userId ?? null, req.tenantId!]
         );
+        await markSharedNotificationsRead(req.tenantId!,
+            result.rows.flatMap((r: any) => voiceCallNotificationTags(r.conversation_id)));
         res.json({ updated: result.rows.length });
     } catch (err) {
         console.error('POST /voice-calls/mark-all-contacted error:', err);
@@ -24083,11 +24202,15 @@ app.patch('/voice-calls/:id/follow-up', authenticate, requireFeature('voice'), v
         const result = await queryWithRetry(
             `UPDATE voice_calls SET ${sets.join(', ')}
              WHERE id = $${params.length - 1} AND tenant_id = $${params.length}
-             RETURNING id, follow_up_status, notes, follow_up_updated_at, reservation_deleted_at`,
+             RETURNING id, follow_up_status, notes, follow_up_updated_at, reservation_deleted_at, conversation_id`,
             params
         );
         if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-        res.json(result.rows[0]);
+        const { conversation_id: conversationId, ...call } = result.rows[0];
+        if (status === 'CONTACTED') {
+            await markSharedNotificationsRead(req.tenantId!, voiceCallNotificationTags(conversationId));
+        }
+        res.json(call);
     } catch (err) {
         console.error('PATCH /voice-calls/:id/follow-up error:', err);
         res.status(500).json({ error: 'Internal server error' });
@@ -24127,11 +24250,13 @@ app.patch('/voice-calls/:id/link', authenticate, requireFeature('voice'), voiceC
                  follow_up_updated_by = $2,
                  phantom_recovered = CASE WHEN phantom_confirmation THEN TRUE ELSE phantom_recovered END
              WHERE id = $3 AND tenant_id = $4
-             RETURNING id, reservation_id, follow_up_status, follow_up_updated_at, phantom_recovered`,
+             RETURNING id, reservation_id, follow_up_status, follow_up_updated_at, phantom_recovered, conversation_id`,
             [reservationId, req.user?.userId ?? null, id, req.tenantId!]
         );
         if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-        res.json(result.rows[0]);
+        const { conversation_id: conversationId, ...call } = result.rows[0];
+        await markSharedNotificationsRead(req.tenantId!, voiceCallNotificationTags(conversationId));
+        res.json(call);
     } catch (err) {
         console.error('PATCH /voice-calls/:id/link error:', err);
         res.status(500).json({ error: 'Internal server error' });
@@ -33533,6 +33658,10 @@ app.post('/orders/:id/courses/:n/serve', authenticate, requireAnyPermission('ord
         }
         outboxKick();
 
+        // Uscita portata al tavolo: il «Tavolo X — uscita pronta» è chiuso
+        // per tutta la sala, non solo per il cameriere che l'ha servita.
+        await markSharedNotificationsRead(req.tenantId!, [`course-${orderId}-${courseNo}`]);
+
         res.json({ order_id: orderId, course_no: courseNo, items: upd.rows, next_fired_course: nextFired });
     } catch (err: any) {
         await client.query('ROLLBACK').catch(() => {});
@@ -37645,6 +37774,9 @@ const startServer = async () => {
             try {
                 socketService = new SocketService(httpServer as ReturnType<typeof createServer>);
                 console.log('✅ Socket.IO initialized');
+                setNotificationPersistListener((tenantId, userIds) => {
+                    socketService?.broadcastToUsers(tenantId, userIds, 'notification:new', {});
+                });
                 if (isPassepartoutAgentConfigured() && !isServiceNode) {
                     setupPassepartoutBridge(socketService.getIO());
                     console.log('✅ Passepartout agent bridge attivo su /pp-agent');

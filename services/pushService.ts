@@ -206,6 +206,13 @@ const sendToSubscriptions = async (tenantId: number, subs: SubscriptionRow[], pa
     return { sent, removed };
 };
 
+// Chi ascolta le righe appena scritte: server.ts ci aggancia l'emissione
+// socket 'notification:new' verso la room dei destinatari. Il modulo non
+// importa socketService, così resta usabile da script e test senza server.
+type PersistListener = (tenantId: number, userIds: number[]) => void;
+let persistListener: PersistListener | null = null;
+export const setNotificationPersistListener = (fn: PersistListener | null) => { persistListener = fn; };
+
 // Persist one row per recipient in the notifications table so the
 // NotifichePage can rebuild history even for users offline at send time.
 // Uses tag-based dedupe: the same (user, tag) combination is skipped when
@@ -259,6 +266,10 @@ async function persistForUsers(
             console.warn('[push] persistForUsers failed for', uid, (err as any)?.message || err);
         }
     }));
+    // Senza questo la campanella restava ferma fino al prossimo focus o
+    // cambio vista, e la pagina Notifiche ascoltava un evento che nessuno
+    // emetteva.
+    try { persistListener?.(tenantId, userIds); } catch (_) { /* best-effort */ }
 }
 
 async function fetchUserIdsForRoles(tenantId: number, roles: string[], excludeUserId?: number | null): Promise<number[]> {

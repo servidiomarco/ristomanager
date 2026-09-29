@@ -128,7 +128,19 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const targetUrl = (event.notification.data && event.notification.data.url) || '/';
+  // Il tag accompagna il click fino all'app, che segna letta la notifica
+  // (POST /notifications/read-by-tag): toccata qui, sparisce anche dalla
+  // campanella degli altri dispositivi. Per una finestra nuova viaggia
+  // nell'URL come ?ntag=, per una già aperta nel postMessage.
+  const tag = event.notification.tag || '';
+  let targetUrl = (event.notification.data && event.notification.data.url) || '/';
+  if (tag) {
+    try {
+      const u = new URL(targetUrl, self.location.origin);
+      u.searchParams.set('ntag', tag);
+      targetUrl = u.origin === self.location.origin ? u.pathname + u.search + u.hash : u.toString();
+    } catch (e) { /* URL malformato: si apre senza segnare letta */ }
+  }
 
   event.waitUntil((async () => {
     const allClients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
@@ -138,7 +150,7 @@ self.addEventListener('notificationclick', (event) => {
         if (url.origin === self.location.origin) {
           // Tell the SPA to navigate in-app instead of reloading; client.navigate
           // would force a full reload and lose unsaved state.
-          try { client.postMessage({ type: 'NOTIFICATION_CLICK', url: targetUrl }); } catch (e) { /* ignore */ }
+          try { client.postMessage({ type: 'NOTIFICATION_CLICK', url: targetUrl, tag }); } catch (e) { /* ignore */ }
           await client.focus();
           return;
         }

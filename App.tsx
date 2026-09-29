@@ -93,7 +93,7 @@ import { staffChatApiService, staffChatCache } from './services/staffChatApiServ
 import { customersCache } from './services/customersCache';
 import { paymentsApiService } from './services/paymentsApiService';
 import { emailApiService, emailCache } from './services/emailApiService';
-import { notificationsApiService } from './services/notificationsApiService';
+import { notificationsApiService, subscribeNotificationChanges, closeSystemNotifications, reconcileSystemNotifications } from './services/notificationsApiService';
 import { useAuth } from './contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
 import { SUPPORTED_LANGUAGES } from './i18n/config';
@@ -887,10 +887,24 @@ const App: React.FC = () => {
         .catch(() => {});
     };
     refresh();
-    const onFocus = () => refresh();
+    const onFocus = () => { refresh(); void reconcileSystemNotifications(); };
     window.addEventListener('focus', onFocus);
     return () => { cancelled = true; window.removeEventListener('focus', onFocus); };
   }, [isAuthenticated, canSeeNotifications, view]);
+  // Letture fatte altrove (altro dispositivo, o un collega per telefonate,
+  // messaggi e tavoli) e notifiche nuove: la campanella si riallinea subito
+  // e la push già gestita sparisce anche dal centro notifiche del telefono.
+  // Separato dall'effetto sopra, che si rifà a ogni cambio vista.
+  useEffect(() => {
+    if (!isAuthenticated || !canSeeNotifications) return;
+    void reconcileSystemNotifications();
+    return subscribeNotificationChanges((read) => {
+      notificationsApiService.unreadCount()
+        .then(({ count }) => setNotificationsUnreadCount(count))
+        .catch(() => {});
+      if (read) void closeSystemNotifications(read.tags);
+    });
+  }, [isAuthenticated, canSeeNotifications]);
 
   // Pagamenti badge — paid-but-not-yet-seen payments. Live via the payment
   // socket events (webhook completions land without any user action) plus
@@ -1084,6 +1098,15 @@ const App: React.FC = () => {
     const accessibleViews = getAccessibleViews();
 
     const params = new URLSearchParams(window.location.search);
+    // Tap su una push ad app chiusa: il service worker ha messo il tag della
+    // notifica nell'URL (?ntag=), la si segna letta ovunque.
+    const tappedTag = params.get('ntag');
+    if (tappedTag) {
+      notificationsApiService.markReadByTag(tappedTag).catch(() => {});
+      params.delete('ntag');
+      const rest = params.toString();
+      window.history.replaceState({}, '', window.location.pathname + (rest ? `?${rest}` : '') + window.location.hash);
+    }
     const requestedView = params.get('view');
     // A notification may deep-link to a specific booking; capture it so the
     // Prenotazioni view opens that booking's detail once mounted.
@@ -1151,6 +1174,9 @@ const App: React.FC = () => {
     const handler = (event: MessageEvent) => {
       const data = event.data;
       if (!data || data.type !== 'NOTIFICATION_CLICK' || !data.url) return;
+      if (typeof data.tag === 'string' && data.tag) {
+        notificationsApiService.markReadByTag(data.tag).catch(() => {});
+      }
       try {
         const url = new URL(data.url, window.location.origin);
         // Push della chat staff: apre la vista sul thread indicato.

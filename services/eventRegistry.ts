@@ -159,6 +159,10 @@ export const DOMAIN_EVENTS: Record<string, DomainEventSpec> = {
     'staffchat:message': spec('cloud'),
     'staffchat:read': spec('cloud'),
     'staffchat:presets': spec('cloud'),
+    // Centro notifiche: le righe nascono solo sul cloud (pushService non
+    // persiste sul nodo di sala), la lettura le segue.
+    'notification:new': spec('cloud'),
+    'notifications:read': spec('cloud'),
 
     // --- Piattaforma e strumenti interni.
     'features:updated': spec('cloud'),
