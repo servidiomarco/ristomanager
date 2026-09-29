@@ -86,7 +86,7 @@ import { RolePermissionService, isReportsAdmin, ALL_PERMISSIONS, ALL_PERMISSION_
 import { canAssignToRole } from './auth/permissions.js';
 import { LogService, ActivityAction, ResourceType } from './activityLogs/logService.js';
 import { isPushConfigured, getVapidPublicKey, sendToUser as pushSendToUser, sendToRoles as pushSendToRoles, sendToPlatformAdmins as pushSendToPlatformAdmins, setNotificationPersistListener } from './services/pushService.js';
-import { channelsForRole, rolesForChannel, parseThreadKey, channelThreadKey, dmThreadKey, isStaffPresetKey, STAFF_MESSAGE_MAX_LENGTH, STAFF_MAX_MENTIONS, STAFF_MESSAGE_PRESETS, STAFF_MAX_ATTACHMENTS, staffMessagePreview } from './services/staffChat.js';
+import { channelsForRole, rolesForChannel, parseThreadKey, channelThreadKey, dmThreadKey, mentionThreadKey, STAFF_CHANNEL_UNREAD_FROM, isStaffPresetKey, STAFF_MESSAGE_MAX_LENGTH, STAFF_MAX_MENTIONS, STAFF_MESSAGE_PRESETS, STAFF_MAX_ATTACHMENTS, staffMessagePreview } from './services/staffChat.js';
 import {
     isRevolutConfigured,
     verifyWebhookSignature as verifyRevolutWebhook,
@@ -13987,7 +13987,7 @@ const startStaffChatRetentionScheduler = () => {
                  WHERE NOT EXISTS (
                      SELECT 1 FROM staff_messages m
                      WHERE m.tenant_id = r.tenant_id
-                       AND (r.thread_key = 'channel:' || m.channel
+                       AND (r.thread_key IN ('channel:' || m.channel, 'mention:channel:' || m.channel)
                          OR r.thread_key IN ('dm:' || m.sender_user_id, 'dm:' || m.recipient_user_id))
                  )
                  RETURNING user_id`
@@ -20303,13 +20303,7 @@ app.get('/staff-chat/threads', authenticate, requirePermission('staffchat:use'),
             ),
             queryWithRetry(
                 `SELECT m.channel, COUNT(*)::int AS unread
-                 FROM staff_messages m
-                 LEFT JOIN staff_message_reads r
-                   ON r.tenant_id = m.tenant_id AND r.user_id = $2
-                  AND r.thread_key = 'channel:' || m.channel
-                 WHERE m.tenant_id = $1 AND m.kind = 'channel' AND m.channel = ANY($3)
-                   AND m.sender_user_id IS DISTINCT FROM $2
-                   AND m.id > COALESCE(r.last_read_message_id, 0)
+                 ${STAFF_CHANNEL_UNREAD_FROM}
                  GROUP BY m.channel`,
                 [req.tenantId!, userId, channels]
             ),
@@ -20590,17 +20584,19 @@ app.post('/staff-chat/messages', authenticate, requirePermission('staffchat:use'
                 category: 'staff',
                 persist: false,
             };
-            // La push di menzione parte DOPO quella di canale e condivide il
-            // tag: sul device del menzionato la seconda sostituisce la prima,
-            // quindi resta una sola notifica, con la dicitura giusta.
+            // I menzionati non ricevono la push di canale ma solo la loro, con
+            // un tag suo (staffchat:mention:<canale>): quella di canale si
+            // spegne quando un collega legge il canale (lettura di squadra),
+            // la menzione resta finché non la legge chi è menzionato.
             pushSendToRoles(req.tenantId!, rolesForChannel(ref.channel).map(String), {
                 ...channelPayload,
                 title: `${senderName} · ${ref.channel}`,
                 body: preview,
-            }, { excludeUserId: userId })
+            }, { excludeUserIds: [userId, ...(mentions ?? [])] })
                 .then(() => Promise.all((mentions ?? []).map(uid =>
                     pushSendToUser(uid, {
                         ...channelPayload,
+                        tag: `staffchat:${mentionThreadKey(channelKey)}`,
                         title: `${senderName} ti ha menzionato · ${ref.channel}`,
                         body: preview,
                     })
@@ -20645,13 +20641,28 @@ app.post('/staff-chat/threads/:threadKey/read', authenticate, requirePermission(
                            updated_at = CURRENT_TIMESTAMP`,
             [req.tenantId!, userId, threadKey, lastReadMessageId]
         );
-        // Gli altri device dello stesso utente allineano il badge.
-        socketService?.broadcastToUsers(req.tenantId!, [userId], 'staffchat:read', { threadKey, lastReadMessageId }, socketId);
+        // Letto di persona: anche le menzioni del canale sono lette. È
+        // l'unica strada che fa avanzare questo cursore — la lettura di
+        // squadra qui sotto non lo tocca.
+        if (ref.kind === 'channel') {
+            await queryWithRetry(
+                `INSERT INTO staff_message_reads (tenant_id, user_id, thread_key, last_read_message_id)
+                 VALUES ($1, $2, $3, $4)
+                 ON CONFLICT (tenant_id, user_id, thread_key)
+                 DO UPDATE SET last_read_message_id = GREATEST(staff_message_reads.last_read_message_id, EXCLUDED.last_read_message_id),
+                               updated_at = CURRENT_TIMESTAMP`,
+                [req.tenantId!, userId, mentionThreadKey(threadKey), lastReadMessageId]
+            );
+        }
+        // Gli altri device dello stesso utente allineano il badge. `personal`
+        // dice al client che anche la push di menzione va chiusa.
+        socketService?.broadcastToUsers(req.tenantId!, [userId], 'staffchat:read', { threadKey, lastReadMessageId, personal: true }, socketId);
 
         // Canali: lettura di squadra. Letto da uno, il cursore avanza per
         // tutti i membri del canale (i ruoli che lo vedono), e sui loro
         // dispositivi badge e push si spengono via lo stesso 'staffchat:read'.
-        // I DM restano personali. Due guardie, perché qui si scrive il
+        // Eccezione: i messaggi che menzionano qualcuno restano da leggere
+        // per lui (cursore delle menzioni, sopra). I DM restano personali. Due guardie, perché qui si scrive il
         // cursore degli ALTRI: parte solo da chi è membro del canale, e il
         // cursore si ferma all'ultimo messaggio esistente fino a quello
         // indicato — un id gonfiato non deve far nascere «già letti» i
@@ -20664,6 +20675,21 @@ app.post('/staff-chat/threads/:threadKey/read', authenticate, requirePermission(
             );
             const sharedCursor = cap.rows[0]?.id != null ? Number(cap.rows[0].id) : null;
             if (sharedCursor) {
+                const roles = rolesForChannel(ref.channel).map(String);
+                // Prima di spostare il cursore del canale degli altri, il loro
+                // cursore delle menzioni nasce dov'era il loro cursore del
+                // canale: da lì in poi una menzione resta da leggere finché
+                // non la leggono loro. Chi la riga l'ha già non cambia.
+                await queryWithRetry(
+                    `INSERT INTO staff_message_reads (tenant_id, user_id, thread_key, last_read_message_id)
+                     SELECT $1, u.id, $4, COALESCE(r.last_read_message_id, 0) FROM users u
+                     LEFT JOIN staff_message_reads r
+                       ON r.tenant_id = $1 AND r.user_id = u.id AND r.thread_key = $3
+                     WHERE u.tenant_id = $1 AND u.is_active = TRUE AND u.id <> $2
+                       AND u.role = ANY($5::text[])
+                     ON CONFLICT (tenant_id, user_id, thread_key) DO NOTHING`,
+                    [req.tenantId!, userId, threadKey, mentionThreadKey(threadKey), roles]
+                );
                 const others = await queryWithRetry(
                     `INSERT INTO staff_message_reads (tenant_id, user_id, thread_key, last_read_message_id)
                      SELECT $1, u.id, $3, $4 FROM users u
@@ -20673,7 +20699,7 @@ app.post('/staff-chat/threads/:threadKey/read', authenticate, requirePermission(
                      DO UPDATE SET last_read_message_id = GREATEST(staff_message_reads.last_read_message_id, EXCLUDED.last_read_message_id),
                                    updated_at = CURRENT_TIMESTAMP
                      RETURNING user_id`,
-                    [req.tenantId!, userId, threadKey, sharedCursor, rolesForChannel(ref.channel).map(String)]
+                    [req.tenantId!, userId, threadKey, sharedCursor, roles]
                 );
                 const otherIds = others.rows.map((r: any) => Number(r.user_id));
                 if (otherIds.length > 0) {
@@ -20694,13 +20720,7 @@ app.get('/staff-chat/unread-count', authenticate, requirePermission('staffchat:u
         const channels = channelsForRole(req.user.role);
         const r = await queryWithRetry(
             `SELECT (
-                (SELECT COUNT(*) FROM staff_messages m
-                 LEFT JOIN staff_message_reads r
-                   ON r.tenant_id = m.tenant_id AND r.user_id = $2
-                  AND r.thread_key = 'channel:' || m.channel
-                 WHERE m.tenant_id = $1 AND m.kind = 'channel' AND m.channel = ANY($3)
-                   AND m.sender_user_id IS DISTINCT FROM $2
-                   AND m.id > COALESCE(r.last_read_message_id, 0))
+                (SELECT COUNT(*) ${STAFF_CHANNEL_UNREAD_FROM})
                 +
                 (SELECT COUNT(*) FROM staff_messages m
                  LEFT JOIN staff_message_reads r

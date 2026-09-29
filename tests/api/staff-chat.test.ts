@@ -289,4 +289,32 @@ describe('chat staff', () => {
         // canale generale, che condivide con il cameriere, resta com'era.
         expect(await unread(kitchenToken, 'channel:generale')).toBe(1);
     });
+
+    it('una menzione resta da leggere per chi è menzionato anche dopo la lettura di squadra', async () => {
+        const unread = async (token: string, key: string) =>
+            (await api().get('/staff-chat/threads').set(bearer(token))).body.threads
+                .find((t: any) => t.threadKey === key)?.unreadCount;
+        const total = async (token: string) =>
+            (await api().get('/staff-chat/unread-count').set(bearer(token))).body.count as number;
+
+        await api().post('/staff-chat/messages').set(bearer(owner))
+            .send({ threadKey: 'channel:generale', body: 'si apre alle 19' });
+        const mention = await api().post('/staff-chat/messages').set(bearer(owner))
+            .send({ threadKey: 'channel:generale', body: 'controlla il forno', mentionedUserIds: [kitchenId] });
+        expect(mention.status).toBe(201);
+
+        // Il cameriere legge il canale: per la cucina resta solo la menzione.
+        await api().post('/staff-chat/threads/channel:generale/read').set(bearer(waiterToken))
+            .send({ lastReadMessageId: Number(mention.body.id) });
+        expect(await unread(kitchenToken, 'channel:generale')).toBe(1);
+        // Il cameriere, che non è menzionato, è a zero.
+        expect(await unread(waiterToken, 'channel:generale')).toBe(0);
+
+        // La cucina legge di persona: la menzione è letta.
+        const before = await total(kitchenToken);
+        await api().post('/staff-chat/threads/channel:generale/read').set(bearer(kitchenToken))
+            .send({ lastReadMessageId: Number(mention.body.id) });
+        expect(await unread(kitchenToken, 'channel:generale')).toBe(0);
+        expect(await total(kitchenToken)).toBe(before - 1);
+    });
 });

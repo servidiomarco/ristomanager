@@ -89,7 +89,7 @@ import {
   cacheMarkThreadRead, applyMessageToConversations, type InboxMessage,
 } from './services/messagesApiService';
 import { clearConfigCache } from './services/configCache';
-import { staffChatApiService, staffChatCache, staffChatPushTag } from './services/staffChatApiService';
+import { staffChatApiService, staffChatCache, staffChatPushTag, staffChatMentionPushTag } from './services/staffChatApiService';
 import { customersCache } from './services/customersCache';
 import { paymentsApiService } from './services/paymentsApiService';
 import { emailApiService, emailCache } from './services/emailApiService';
@@ -808,11 +808,15 @@ const App: React.FC = () => {
     // Thread letto su un altro dispositivo dello stesso utente — o, per un
     // canale, da un collega (lettura di squadra, vedi POST
     // /staff-chat/threads/:key/read): oltre al badge, la push di quel thread
-    // sparisce dal centro notifiche del telefono. I DM restano personali.
-    const onRead = (payload: { threadKey?: unknown }) => {
+    // sparisce dal centro notifiche del telefono. La push di menzione solo se
+    // a leggere è stato l'utente stesso (`personal`): letta da un collega,
+    // una menzione resta da leggere. I DM restano personali.
+    const onRead = (payload: { threadKey?: unknown; personal?: unknown }) => {
       refresh();
       if (typeof payload?.threadKey === 'string' && payload.threadKey) {
-        void closeSystemNotifications([staffChatPushTag(payload.threadKey)]);
+        const tags = [staffChatPushTag(payload.threadKey)];
+        if (payload.personal === true) tags.push(staffChatMentionPushTag(payload.threadKey));
+        void closeSystemNotifications(tags);
       }
     };
 
