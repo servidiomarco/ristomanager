@@ -805,10 +805,10 @@ const App: React.FC = () => {
     refresh();
     void staffChatApiService.reconcileSystemNotifications();
     const onEvent = () => refresh();
-    // Thread letto su un altro dispositivo dello stesso utente: oltre al
-    // badge, la push di quel thread sparisce dal centro notifiche del
-    // telefono. Solo per chi ha letto — la chat non è di squadra: ognuno
-    // deve leggere i messaggi di un canale, e un DM è privato.
+    // Thread letto su un altro dispositivo dello stesso utente — o, per un
+    // canale, da un collega (lettura di squadra, vedi POST
+    // /staff-chat/threads/:key/read): oltre al badge, la push di quel thread
+    // sparisce dal centro notifiche del telefono. I DM restano personali.
     const onRead = (payload: { threadKey?: unknown }) => {
       refresh();
       if (typeof payload?.threadKey === 'string' && payload.threadKey) {
