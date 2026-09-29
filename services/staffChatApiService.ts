@@ -121,7 +121,9 @@ class StaffChatApiService {
     } catch { /* niente: il caricamento normale copre */ }
   }
 
-  async getMessages(threadKey: string, before?: number): Promise<{ messages: StaffMessage[] }> {
+  /** `peer_read_up_to`: solo per i DM, fin dove l'altro ha letto (conferma
+   *  di lettura). Assente da un backend più vecchio: leggerlo con difesa. */
+  async getMessages(threadKey: string, before?: number): Promise<{ messages: StaffMessage[]; peer_read_up_to?: number | null }> {
     const qs = before ? `?before=${before}` : '';
     return apiRequest(`${API_URL}/staff-chat/threads/${encodeURIComponent(threadKey)}/messages${qs}`, {
       headers: getHeaders(),

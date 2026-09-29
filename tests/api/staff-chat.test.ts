@@ -290,6 +290,33 @@ describe('chat staff', () => {
         expect(await unread(kitchenToken, 'channel:generale')).toBe(1);
     });
 
+    it('DM: conferma di lettura al mittente, ferma all\'ultimo messaggio esistente', async () => {
+        const peer = async () =>
+            (await api().get(`/staff-chat/threads/dm:${waiterId}/messages`).set(bearer(kitchenToken))).body.peer_read_up_to;
+
+        const first = await api().post('/staff-chat/messages').set(bearer(kitchenToken))
+            .send({ threadKey: `dm:${waiterId}`, body: 'hai visto il turno?' });
+        expect(first.status).toBe(201);
+        const before = await peer();
+        expect(before == null || before < Number(first.body.id)).toBe(true);
+
+        // Il cameriere legge: il mittente vede «letto» fino a quel messaggio.
+        await api().post(`/staff-chat/threads/dm:${kitchenId}/read`).set(bearer(waiterToken))
+            .send({ lastReadMessageId: Number(first.body.id) });
+        expect(await peer()).toBe(Number(first.body.id));
+
+        // Un id gonfiato non conferma messaggi ancora da scrivere.
+        await api().post(`/staff-chat/threads/dm:${kitchenId}/read`).set(bearer(waiterToken))
+            .send({ lastReadMessageId: 2_000_000_000 });
+        const second = await api().post('/staff-chat/messages').set(bearer(kitchenToken))
+            .send({ threadKey: `dm:${waiterId}`, body: 'dimmi quando puoi' });
+        expect(await peer()).toBeLessThan(Number(second.body.id));
+
+        // Nei canali la conferma non esiste.
+        const channel = await api().get('/staff-chat/threads/channel:generale/messages').set(bearer(kitchenToken));
+        expect(channel.body.peer_read_up_to).toBeNull();
+    });
+
     it('una menzione resta da leggere per chi è menzionato anche dopo la lettura di squadra', async () => {
         const unread = async (token: string, key: string) =>
             (await api().get('/staff-chat/threads').set(bearer(token))).body.threads

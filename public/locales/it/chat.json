@@ -24,5 +24,7 @@
   "attachPhoto": "Allega una foto",
   "composerPlaceholder": "Scrivi un messaggio…",
   "send": "Invia messaggio",
-  "errLoadThreads": "Errore caricamento chat"
+  "errLoadThreads": "Errore caricamento chat",
+  "receiptRead": "letto",
+  "receiptSent": "inviato"
 }

@@ -20400,6 +20400,10 @@ app.get('/staff-chat/threads/:threadKey/messages', authenticate, requirePermissi
         const beforeClause = Number.isFinite(before) ? before : null;
 
         let rows: any[];
+        // Conferma di lettura (solo DM): fin dove l'altro capo ha letto i
+        // messaggi di questo thread. Nei canali la lettura è di squadra e
+        // «letto» non avrebbe un significato solo.
+        let peerReadUpTo: number | null = null;
         if (ref.kind === 'channel') {
             if (!channelsForRole(req.user.role).includes(ref.channel)) {
                 return res.status(403).json({ error: 'Canale non accessibile' });
@@ -20428,9 +20432,17 @@ app.get('/staff-chat/threads/:threadKey/messages', authenticate, requirePermissi
                 [req.tenantId!, userId, ref.otherUserId, beforeClause, limit]
             );
             rows = r.rows;
+            // Il cursore dell'altro sul SUO thread con me (dm:<me>).
+            const peer = await queryWithRetry(
+                `SELECT last_read_message_id FROM staff_message_reads
+                 WHERE tenant_id = $1 AND user_id = $2 AND thread_key = $3`,
+                [req.tenantId!, ref.otherUserId, dmThreadKey(userId)]
+            );
+            const v = peer.rows[0]?.last_read_message_id;
+            peerReadUpTo = v != null ? Number(v) : null;
         }
         // Pagina restituita in ordine cronologico ascendente.
-        res.json({ messages: rows.reverse() });
+        res.json({ messages: rows.reverse(), peer_read_up_to: peerReadUpTo });
     } catch (err) {
         console.error('GET /staff-chat/threads/:threadKey/messages error:', err);
         res.status(500).json({ error: 'Internal server error' });
@@ -20628,9 +20640,23 @@ app.post('/staff-chat/threads/:threadKey/read', authenticate, requirePermission(
         const threadKey = String(req.params.threadKey);
         const ref = parseThreadKey(threadKey);
         if (!ref) return res.status(400).json({ error: 'Thread non valido' });
-        const lastReadMessageId = Number(req.body?.lastReadMessageId);
+        let lastReadMessageId = Number(req.body?.lastReadMessageId);
         if (!Number.isInteger(lastReadMessageId) || lastReadMessageId <= 0) {
             return res.status(400).json({ error: 'lastReadMessageId non valido' });
+        }
+        // DM: il cursore si ferma all'ultimo messaggio ricevuto esistente fino
+        // a quello indicato. Da questo cursore nasce la conferma di lettura
+        // del mittente: un id gonfiato marcherebbe «letti» messaggi che
+        // l'altro non ha ancora scritto.
+        if (ref.kind === 'direct') {
+            const cap = await queryWithRetry(
+                `SELECT MAX(id) AS id FROM staff_messages
+                 WHERE tenant_id = $1 AND kind = 'direct'
+                   AND sender_user_id = $2 AND recipient_user_id = $3 AND id <= $4`,
+                [req.tenantId!, ref.otherUserId, userId, lastReadMessageId]
+            );
+            if (cap.rows[0]?.id == null) return res.json({ ok: true });
+            lastReadMessageId = Number(cap.rows[0].id);
         }
         // Upsert monotono: un device in ritardo non riporta indietro il cursore.
         await queryWithRetry(
@@ -20657,6 +20683,13 @@ app.post('/staff-chat/threads/:threadKey/read', authenticate, requirePermission(
         // Gli altri device dello stesso utente allineano il badge. `personal`
         // dice al client che anche la push di menzione va chiusa.
         socketService?.broadcastToUsers(req.tenantId!, [userId], 'staffchat:read', { threadKey, lastReadMessageId, personal: true }, socketId);
+        // DM letto: il mittente vede la conferma di lettura. Dal suo punto di
+        // vista il thread è dm:<chi ha letto>.
+        if (ref.kind === 'direct') {
+            socketService?.broadcastToUsers(req.tenantId!, [ref.otherUserId], 'staffchat:receipt', {
+                threadKey: dmThreadKey(userId), lastReadMessageId,
+            });
+        }
 
         // Canali: lettura di squadra. Letto da uno, il cursore avanza per
         // tutti i membri del canale (i ruoli che lo vedono), e sui loro
