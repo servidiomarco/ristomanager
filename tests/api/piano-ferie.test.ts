@@ -22,6 +22,33 @@ const PASSWORD = 'password-ferie-test';
 
 const dbUrl = () => process.env.DATABASE_URL || 'postgresql://localhost/ristotest_api';
 
+// Una riga «Richiesta ferie» nel centro notifiche, scritta a mano sul
+// cameriere: la push vera va ai responsabili ed è fire-and-forget, e
+// aspettarla renderebbe il test dipendente dai tempi.
+const leaveNotification = async (userId: number, requestId: string): Promise<number> => {
+    const db = new Client({ connectionString: dbUrl() });
+    await db.connect();
+    try {
+        const r = await db.query(
+            `INSERT INTO notifications (tenant_id, recipient_user_id, category, title, body, tag)
+             VALUES (1, $1, 'staff', 'Richiesta ferie', 'test', $2) RETURNING id`,
+            [userId, `leave-${requestId}`]
+        );
+        return Number(r.rows[0].id);
+    } finally {
+        await db.end();
+    }
+};
+const notificationReadAt = async (id: number) => {
+    const db = new Client({ connectionString: dbUrl() });
+    await db.connect();
+    try {
+        return (await db.query(`SELECT read_at FROM notifications WHERE id = $1`, [id])).rows[0]?.read_at ?? null;
+    } finally {
+        await db.end();
+    }
+};
+
 const dayIndex = (date: string) =>
     Math.round((Date.UTC(+date.slice(0, 4), +date.slice(5, 7) - 1, +date.slice(8, 10)) - Date.UTC(YEAR, 0, 1)) / 86_400_000);
 
@@ -215,6 +242,7 @@ describe('piano ferie — richieste, proposta, decisioni', () => {
     });
 
     it('le decisioni diventano assenze; le richieste in attesa non toccano le presenze', async () => {
+        const bell = await leaveNotification(waiterId, reqC);
         const res = await api().post('/staff/leave-requests/decide').set(bearer(owner)).send({
             decisions: [
                 { id: reqA, decision: 'REJECT', note: 'monte esaurito' },
@@ -224,6 +252,8 @@ describe('piano ferie — richieste, proposta, decisioni', () => {
         });
         expect(res.status).toBe(200);
         expect(res.body.results.every((r: any) => r.ok)).toBe(true);
+        // Decisa la richiesta, la sua campanella è letta per tutti.
+        expect(await notificationReadAt(bell)).not.toBeNull();
 
         // Una decisione presa non si riprende da capo.
         const again = await api().post('/staff/leave-requests/decide').set(bearer(owner)).send({
@@ -265,8 +295,11 @@ describe('piano ferie — richieste, proposta, decisioni', () => {
         const notMine = await api().delete(`/staff/my-leave/${reqB}`).set(bearer(waiter));
         expect(notMine.status).toBe(404);
 
+        const bell = await leaveNotification(waiterId, created.body.id);
         const ok = await api().delete(`/staff/my-leave/${created.body.id}`).set(bearer(waiter));
         expect(ok.status).toBe(204);
+        // Ritirata, la «Richiesta ferie» non ha più oggetto per nessuno.
+        expect(await notificationReadAt(bell)).not.toBeNull();
         const twice = await api().delete(`/staff/my-leave/${created.body.id}`).set(bearer(waiter));
         expect(twice.status).toBe(409);
     });

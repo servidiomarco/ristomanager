@@ -9365,6 +9365,9 @@ app.post('/email/threads/:emailKey/read', authenticate, requirePermission('reser
                 count: updated.rows.length,
             });
         }
+        // Come per Messaggi: letto il thread, le campanelle «Nuova email» che
+        // lo annunciavano (imapInboundService) sono lette per tutti.
+        await markSharedNotificationsRead(req.tenantId!, updated.rows.map((r: any) => `email-inbound-${r.id}`));
         res.json({ ok: true, marked: updated.rows.length });
     } catch (err) {
         console.error('POST /email/threads/:emailKey/read error:', err);
@@ -19130,9 +19133,15 @@ app.post('/staff/leave-requests/decide', authenticate, requirePermission('staff:
         for (const r of done) {
             if (!r.staffUserId || r.staffUserId === userId) continue;
             const body = formatLeaveRange(r.startDate!, r.endDate!) + (r.note ? ` · ${r.note}` : '');
-            void pushSendToUser(r.staffUserId, { title: TITLES[r.decision!], body, url: '/', tag: `leave-${r.id}`, category: 'staff' })
+            // Tag distinto da quello della richiesta (leave-<id>, ai
+            // responsabili): con la lettura condivisa per tag, l'esito letto
+            // dal dipendente spegnerebbe la richiesta nella campanella altrui.
+            void pushSendToUser(r.staffUserId, { title: TITLES[r.decision!], body, url: '/', tag: `leave-decision-${r.id}`, category: 'staff' })
                 ?.catch(err => console.warn('[ferie] notifica al dipendente fallita:', err?.message || err));
         }
+        // Richiesta decisa: la «Richiesta ferie» non chiede più niente a
+        // nessuno dei responsabili che l'hanno ricevuta.
+        await markSharedNotificationsRead(tenantId, done.map(r => `leave-${r.id}`));
 
         res.json({
             results: outcome.results.map(r => ({ id: r.id, ok: r.ok, ...(r.error ? { error: r.error } : {}) })),
@@ -19354,6 +19363,8 @@ app.delete('/staff/my-leave/:id', authenticate, async (req, res) => {
         }
         const socketId = req.headers['x-socket-id'] as string;
         if (socketService) socketService.broadcastToAll(tenantId, 'leave:changed', { ids: [id] }, socketId);
+        // Ritirata: la «Richiesta ferie» ai responsabili non ha più oggetto.
+        await markSharedNotificationsRead(tenantId, [`leave-${id}`]);
         res.status(204).send();
     } catch (err) {
         console.error('DELETE /staff/my-leave/:id error:', err);
@@ -19971,7 +19982,9 @@ app.post('/push/test', authenticate, async (req: any, res) => {
             title: 'Notifica di test',
             body: 'Le notifiche push funzionano correttamente.',
             url: '/',
-            tag: 'test-notification'
+            // Per utente: le generiche hanno la lettura condivisa per tag, e
+            // un tag unico farebbe spegnere il test di un collega col proprio.
+            tag: `test-notification-${userId}`
         });
 
         res.json({ ok: true, ...result });
@@ -19992,17 +20005,25 @@ app.post('/push/test', authenticate, async (req: any, res) => {
 // avvisava gli altri: letta una notifica sul telefono, restava non letta sul
 // tablet di sala e su ogni altro dispositivo finché non si ricaricava. Ora
 // ogni lettura emette 'notifications:read' verso la room dell'utente (tutti
-// i suoi dispositivi); e per le categorie di squadra — telefonate, messaggi,
-// tavoli in sala, prenotazioni, pagamenti, sistema — la lettura vale per
+// i suoi dispositivi); e per le categorie di squadra — oggi tutte quelle che
+// esistono: telefonate, messaggi, email, tavoli in sala, prenotazioni,
+// pagamenti, ferie, fatturazione, sistema, generiche — la lettura vale per
 // tutti i destinatari della stessa notifica (stesso tag): una chiamata da
 // ricontattare, un'uscita pronta, una prenotazione nuova, un incasso o una
-// scorta bassa è un fatto solo, visto una volta, non un promemoria
+// richiesta di ferie è un fatto solo, visto una volta, non un promemoria
 // personale. I tag sono per singolo evento (reservation-<id>, pending-<id>,
-// payment-<id>, bill-overpaid-<split>, low-stock-<prodotto>, todo-<id>,
-// reminder-<id>-<giorno>…), quindi non si toccano mai notifiche di altri.
-// Restano personali la chat staff e le ferie ('staff'), la fatturazione
-// ('billing') e le generiche.
-const SHARED_NOTIFICATION_CATEGORIES = ['voice', 'message', 'service', 'reservation', 'payment', 'system'];
+// payment-<id>, email-inbound-<id>, leave-<id>, leave-decision-<id>,
+// billing-past-due-<tenant>, low-stock-<prodotto>, todo-<id>,
+// test-notification-<utente>…), quindi non si toccano mai notifiche di
+// altri: una push nuova con un tag condiviso fra utenti diversi — o fra due
+// notifiche diverse dello stesso evento — va resa distinta.
+// La lista resta esplicita di proposito: una categoria nuova parte
+// personale e diventa di squadra solo quando qualcuno lo decide.
+// 'staff' copre anche la chat staff, ma quelle push sono persist:false e
+// non hanno righe qui: la loro lettura resta il cursore personale per
+// thread. 'billing' va ai platform admin, le cui righe stanno sul tenant di
+// ciascuno: la lettura si propaga fra gli admin dello stesso tenant.
+const SHARED_NOTIFICATION_CATEGORIES = ['voice', 'message', 'email', 'service', 'reservation', 'payment', 'staff', 'billing', 'system', 'general'];
 
 function emitNotificationsRead(
     tenantId: number,
