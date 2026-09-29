@@ -89,7 +89,7 @@ import {
   cacheMarkThreadRead, applyMessageToConversations, type InboxMessage,
 } from './services/messagesApiService';
 import { clearConfigCache } from './services/configCache';
-import { staffChatApiService, staffChatCache } from './services/staffChatApiService';
+import { staffChatApiService, staffChatCache, staffChatPushTag } from './services/staffChatApiService';
 import { customersCache } from './services/customersCache';
 import { paymentsApiService } from './services/paymentsApiService';
 import { emailApiService, emailCache } from './services/emailApiService';
@@ -803,25 +803,36 @@ const App: React.FC = () => {
         .catch(() => {});
     };
     refresh();
+    void staffChatApiService.reconcileSystemNotifications();
     const onEvent = () => refresh();
+    // Thread letto su un altro dispositivo dello stesso utente: oltre al
+    // badge, la push di quel thread sparisce dal centro notifiche del
+    // telefono. Solo per chi ha letto — la chat non è di squadra: ognuno
+    // deve leggere i messaggi di un canale, e un DM è privato.
+    const onRead = (payload: { threadKey?: unknown }) => {
+      refresh();
+      if (typeof payload?.threadKey === 'string' && payload.threadKey) {
+        void closeSystemNotifications([staffChatPushTag(payload.threadKey)]);
+      }
+    };
 
     let attachedSocket: ReturnType<typeof socketClient.getSocket> = null;
     const attach = (s: ReturnType<typeof socketClient.getSocket>) => {
       if (attachedSocket === s) return;
       if (attachedSocket) {
         attachedSocket.off('staffchat:message', onEvent);
-        attachedSocket.off('staffchat:read', onEvent);
+        attachedSocket.off('staffchat:read', onRead);
       }
       attachedSocket = s;
       if (attachedSocket) {
         attachedSocket.on('staffchat:message', onEvent);
-        attachedSocket.on('staffchat:read', onEvent);
+        attachedSocket.on('staffchat:read', onRead);
       }
     };
     attach(socketClient.getSocket());
     const unsubSocket = socketClient.onSocketChange((s) => attach(s));
 
-    const onFocus = () => refresh();
+    const onFocus = () => { refresh(); void staffChatApiService.reconcileSystemNotifications(); };
     window.addEventListener('focus', onFocus);
     return () => {
       cancelled = true;
