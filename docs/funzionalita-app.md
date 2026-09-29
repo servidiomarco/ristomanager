@@ -489,7 +489,7 @@ Per i ristoranti con cassa **Passepartout Menù** (modulo dedicato):
 - Ogni notifica è **persistente** (si ritrova anche se il browser era chiuso) e porta dritti all'entità: prenotazione, conversazione, thread.
 - **Notifiche push** sul telefono (PWA) per gli eventi importanti: nuova prenotazione web, richiesta da confermare, annullamento, pagamento ricevuto, sotto scorta, messaggio in chat. Le notifiche di prenotazione arrivano anche ai camerieri, oltre che ai responsabili.
 - **Badge sull'icona dell'app** con il totale delle cose da attenzionare, aggiornato anche ad app chiusa.
-- **Lettura sincronizzata fra dispositivi**: una notifica letta, rimossa o toccata dalla push su un dispositivo si spegne subito su tutti gli altri (campanella, pagina Notifiche e banner nel centro notifiche del telefono). Per **telefonate, messaggi, tavoli in sala, prenotazioni e pagamenti** la lettura vale per tutto lo staff che l'ha ricevuta: basta che uno la gestisca. Si spengono da sole anche quando la cosa è gestita alla fonte: thread letto in Messaggi, chiamata segnata ricontattata o collegata a una prenotazione, uscita servita al tavolo, richiesta dal sito confermata o rifiutata, prenotazione eliminata, incasso visto nella pagina Pagamenti.
+- **Lettura sincronizzata fra dispositivi**: una notifica letta, rimossa o toccata dalla push su un dispositivo si spegne subito su tutti gli altri (campanella, pagina Notifiche e banner nel centro notifiche del telefono). Per **telefonate, messaggi, tavoli in sala, prenotazioni, pagamenti e notifiche di sistema** (promemoria, scorte basse, todo) la lettura vale per tutto lo staff che l'ha ricevuta: basta che uno la gestisca. Si spengono da sole anche quando la cosa è gestita alla fonte: thread letto in Messaggi, chiamata segnata ricontattata o collegata a una prenotazione, uscita servita al tavolo, richiesta dal sito confermata o rifiutata, prenotazione eliminata, incasso visto nella pagina Pagamenti.
 
 ---
 
@@ -683,6 +683,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-29 | Notifiche | Anche le notifiche di sistema (promemoria cucina e pane, promemoria programmati, scorta bassa, todo assegnati) sono di squadra: letta da uno, letta per tutti. Restano personali solo chat staff, ferie e fatturazione. |
 | 2026-09-29 | Notifiche, Pagamenti | Anche le notifiche di pagamento sono di squadra: letta da uno, letta per tutti. «Pagamento ricevuto» si spegne da sola quando l'incasso viene visto nella pagina Pagamenti; «Pagamento in eccesso da rimborsare» resta finché qualcuno non la legge. |
 | 2026-09-29 | Notifiche | Anche le notifiche di prenotazione sono di squadra: letta da uno, letta per tutti. «Nuova richiesta prenotazione» si spegne da sola quando la richiesta viene confermata o rifiutata, e le notifiche di una prenotazione eliminata si spengono con lei. |
 | 2026-09-29 | Notifiche | Le notifiche lette su un dispositivo si spengono su tutti gli altri, senza ricaricare; toccare la push del telefono la segna letta. Telefonate, messaggi e tavoli in sala sono notifiche di squadra: letta da uno, letta per tutti — e si spengono da sole con il thread letto, la chiamata ricontattata o l'uscita servita. |

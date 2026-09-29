@@ -19993,14 +19993,16 @@ app.post('/push/test', authenticate, async (req: any, res) => {
 // tablet di sala e su ogni altro dispositivo finché non si ricaricava. Ora
 // ogni lettura emette 'notifications:read' verso la room dell'utente (tutti
 // i suoi dispositivi); e per le categorie di squadra — telefonate, messaggi,
-// tavoli in sala, prenotazioni, pagamenti — la lettura vale per tutti i
-// destinatari della stessa notifica (stesso tag): una chiamata da
-// ricontattare, un'uscita pronta, una prenotazione nuova o un incasso è un
-// fatto solo, visto una volta, non un promemoria personale. I tag di
-// prenotazioni e pagamenti sono per singolo evento (reservation-<id>,
-// pending-<id>, payment-<id>, bill-overpaid-<split>), quindi non si toccano
-// mai notifiche di altri.
-const SHARED_NOTIFICATION_CATEGORIES = ['voice', 'message', 'service', 'reservation', 'payment'];
+// tavoli in sala, prenotazioni, pagamenti, sistema — la lettura vale per
+// tutti i destinatari della stessa notifica (stesso tag): una chiamata da
+// ricontattare, un'uscita pronta, una prenotazione nuova, un incasso o una
+// scorta bassa è un fatto solo, visto una volta, non un promemoria
+// personale. I tag sono per singolo evento (reservation-<id>, pending-<id>,
+// payment-<id>, bill-overpaid-<split>, low-stock-<prodotto>, todo-<id>,
+// reminder-<id>-<giorno>…), quindi non si toccano mai notifiche di altri.
+// Restano personali la chat staff e le ferie ('staff'), la fatturazione
+// ('billing') e le generiche.
+const SHARED_NOTIFICATION_CATEGORIES = ['voice', 'message', 'service', 'reservation', 'payment', 'system'];
 
 function emitNotificationsRead(
     tenantId: number,
