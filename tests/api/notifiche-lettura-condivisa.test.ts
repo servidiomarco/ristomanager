@@ -194,6 +194,45 @@ describe('notifiche · lettura condivisa', () => {
         expect(await readAt(theirs)).not.toBeNull();
     });
 
+    it('cucina: il todo spuntato o eliminato spegne promemoria cucina, pane e assegnazione', async () => {
+        // Un promemoria cucina di banchetto e un promemoria pane, come li
+        // scrive lo scheduler: todo per squadra, con le colonne che ne
+        // determinano il tag.
+        const kitchen = await db.query(
+            `INSERT INTO todos (tenant_id, title, priority, category, due_date, assigned_to_team, banquet_reminder_hours)
+             VALUES (1, 'test-condivisa ordine carne', 'HIGH', 'INVENTORY', '2031-05-10', 'KITCHEN', 48) RETURNING id`
+        );
+        const bread = await db.query(
+            `INSERT INTO todos (tenant_id, title, priority, category, due_date, assigned_to_team, auto_kind)
+             VALUES (1, 'test-condivisa pane', 'HIGH', 'INVENTORY', '2031-05-11', 'OWNER', 'BREAD_DAILY') RETURNING id`
+        );
+        const kitchenId = String(kitchen.rows[0].id);
+        const breadId = String(bread.rows[0].id);
+        const tags = ['kitchen-reminder-2031-05-10-48', `todo-${kitchenId}`, 'bread-2031-05-11'];
+        try {
+            const reminderMine = await insert(ownerId, 'system', tags[0]);
+            const reminderTheirs = await insert(managerId, 'system', tags[0]);
+            const assigned = await insert(managerId, 'system', tags[1]);
+            const breadBell = await insert(managerId, 'system', tags[2]);
+
+            const toggled = await api().put(`/todos/${kitchenId}/toggle`).set(bearer(owner));
+            expect(toggled.status).toBe(200);
+            expect(toggled.body.completed).toBe(true);
+            expect(await readAt(reminderMine)).not.toBeNull();
+            expect(await readAt(reminderTheirs)).not.toBeNull();
+            expect(await readAt(assigned)).not.toBeNull();
+            // Il pane è un altro todo: resta acceso finché non è svolto lui.
+            expect(await readAt(breadBell)).toBeNull();
+
+            const del = await api().delete(`/todos/${breadId}`).set(bearer(owner));
+            expect(del.status).toBe(204);
+            expect(await readAt(breadBell)).not.toBeNull();
+        } finally {
+            await db.query(`DELETE FROM notifications WHERE tag = ANY($1::text[])`, [tags]);
+            await db.query(`DELETE FROM todos WHERE id = ANY($1::uuid[])`, [[kitchenId, breadId]]);
+        }
+    });
+
     it('una categoria fuori lista resta personale', async () => {
         for (const category of ['categoria-nuova']) {
             const tag = `test-condivisa-${category}`;

@@ -13220,6 +13220,22 @@ const TODO_FULL_SELECT = `
     created_by_user_name as "createdByUserName"
 `;
 
+// Le campanelle nate da un todo, per spegnerle quando il todo è svolto o
+// eliminato: il promemoria cucina dei banchetti, il promemoria pane e il
+// «todo assegnato». I tag rispecchiano quelli delle push che li annunciano
+// (vedi le pushSendToRoles/pushSendToUser qui sotto e nelle rotte /todos).
+function todoNotificationTags(todo: {
+    id: number | string; dueDate?: string | null; banquetReminderHours?: number | null;
+    assignedToTeam?: string | null; autoKind?: string | null;
+}): string[] {
+    const tags = [`todo-${todo.id}`];
+    if (todo.dueDate && todo.assignedToTeam === 'KITCHEN' && todo.banquetReminderHours != null) {
+        tags.push(`kitchen-reminder-${todo.dueDate}-${todo.banquetReminderHours}`);
+    }
+    if (todo.dueDate && todo.autoKind === BREAD_AUTO_KIND) tags.push(`bread-${todo.dueDate}`);
+    return tags;
+}
+
 const computeReminderDueDate = (eventDateIso: string, hoursBefore: number): string => {
     const event = new Date(eventDateIso + 'T00:00:00Z');
     event.setUTCDate(event.getUTCDate() - hoursBefore / 24);
@@ -16926,6 +16942,12 @@ app.put('/todos/:id', authenticate, async (req, res) => {
             }).catch(err => console.error('Push (todo reassigned) failed:', err));
         }
 
+        // Svolto: le sue campanelle (promemoria cucina, pane, assegnazione)
+        // non chiedono più niente a nessuno.
+        if (updatedTodo.completed === true) {
+            await markSharedNotificationsRead(req.tenantId!, todoNotificationTags(updatedTodo));
+        }
+
         res.json(updatedTodo);
     } catch (err) {
         console.error(err);
@@ -16977,6 +16999,11 @@ app.put('/todos/:id/toggle', authenticate, async (req, res) => {
         const socketId = req.headers['x-socket-id'] as string;
         if (socketService) socketService.broadcastToAll(req.tenantId!, 'todo:updated', updatedTodo, socketId);
 
+        // Spuntato: le sue campanelle si spengono per tutti (vedi PUT).
+        if (updatedTodo.completed === true) {
+            await markSharedNotificationsRead(req.tenantId!, todoNotificationTags(updatedTodo));
+        }
+
         res.json(updatedTodo);
     } catch (err) {
         console.error(err);
@@ -16988,7 +17015,13 @@ app.delete('/todos/:id', authenticate, async (req, res) => {
     try {
         const { id } = req.params;
 
-        const result = await queryWithRetry('DELETE FROM todos WHERE id = $1 AND tenant_id = $2 RETURNING id', [id, req.tenantId!]);
+        const result = await queryWithRetry(
+            `DELETE FROM todos WHERE id = $1 AND tenant_id = $2
+             RETURNING id, TO_CHAR(due_date, 'YYYY-MM-DD') as "dueDate",
+                       banquet_reminder_hours as "banquetReminderHours",
+                       assigned_to_team as "assignedToTeam", auto_kind as "autoKind"`,
+            [id, req.tenantId!]
+        );
 
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Todo not found' });
@@ -16997,6 +17030,9 @@ app.delete('/todos/:id', authenticate, async (req, res) => {
         // Broadcast to all connected clients
         const socketId = req.headers['x-socket-id'] as string;
         if (socketService) socketService.broadcastToAll(req.tenantId!, 'todo:deleted', { id }, socketId);
+
+        // Eliminato: le sue campanelle portavano a un todo che non c'è più.
+        await markSharedNotificationsRead(req.tenantId!, todoNotificationTags(result.rows[0]));
 
         res.status(204).send();
     } catch (err) {
