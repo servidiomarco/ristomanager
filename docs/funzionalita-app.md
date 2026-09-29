@@ -478,6 +478,7 @@ Per i ristoranti con cassa **Passepartout Menù** (modulo dedicato):
 
 - **Canali per reparto** (Generale, Sala, Cucina, Reception, Manager, Direttore, Titolare) con membership automatica in base al ruolo, più **messaggi diretti** tra colleghi.
 - Testo e **foto**, menzioni, contatori non letti, notifiche push mirate, collegamento di un messaggio a una prenotazione o a un tavolo.
+- Un thread letto su un dispositivo si spegne su tutti gli altri della stessa persona: contatore e **push sul telefono**. La lettura resta personale — in un canale ognuno deve leggere i messaggi, e i messaggi diretti sono privati.
 - **Messaggi rapidi** a un tocco configurabili ("Piatto finito", "Serve un runner"…).
 - I messaggi si eliminano da soli dopo 90 giorni: è traffico di servizio, non un archivio.
 
@@ -683,6 +684,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-29 | Chat staff | Letto un thread su un dispositivo, la sua push sparisce anche dagli altri dispositivi della stessa persona (subito se l'app è aperta, altrimenti al rientro). La lettura resta personale: non vale per i colleghi. |
 | 2026-09-29 | Notifiche | Anche le notifiche di sistema (promemoria cucina e pane, promemoria programmati, scorta bassa, todo assegnati) sono di squadra: letta da uno, letta per tutti. Restano personali solo chat staff, ferie e fatturazione. |
 | 2026-09-29 | Notifiche, Pagamenti | Anche le notifiche di pagamento sono di squadra: letta da uno, letta per tutti. «Pagamento ricevuto» si spegne da sola quando l'incasso viene visto nella pagina Pagamenti; «Pagamento in eccesso da rimborsare» resta finché qualcuno non la legge. |
 | 2026-09-29 | Notifiche | Anche le notifiche di prenotazione sono di squadra: letta da uno, letta per tutti. «Nuova richiesta prenotazione» si spegne da sola quando la richiesta viene confermata o rifiutata, e le notifiche di una prenotazione eliminata si spengono con lei. |

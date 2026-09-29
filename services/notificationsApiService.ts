@@ -144,7 +144,7 @@ export const subscribeNotificationChanges = (
   return () => { unsub(); attach(null); };
 };
 
-const displayedSystemNotifications = async (): Promise<Notification[]> => {
+export const displayedSystemNotifications = async (): Promise<Notification[]> => {
   try {
     if (!('serviceWorker' in navigator)) return [];
     const reg = await navigator.serviceWorker.getRegistration();

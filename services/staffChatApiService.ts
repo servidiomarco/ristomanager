@@ -2,6 +2,7 @@ import { authApiService } from './authApiService';
 import { resizeImageToDataUrl } from '../utils/resizeImage';
 import { socketClient } from './socketClient';
 import { buildApiError } from './apiError';
+import { closeSystemNotifications, displayedSystemNotifications } from './notificationsApiService';
 import type { StaffChannel, StaffMessage } from './staffChat';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';
@@ -17,6 +18,11 @@ export interface StaffUploadedAttachment {
 // pubblico basta a <img>, niente fetch autenticato.
 export const staffMediaUrl = (token: string): string =>
   `${API_URL}/public/media/${encodeURIComponent(token)}`;
+
+/** Il tag che il server dà alla push di un thread (POST /staff-chat/messages):
+ *  `staffchat:<threadKey>`, dove per un DM il threadKey è quello visto dal
+ *  destinatario (dm:<mittente>). */
+export const staffChatPushTag = (threadKey: string): string => `staffchat:${threadKey}`;
 
 export interface StaffThreadSummary {
   threadKey: string;
@@ -132,11 +138,30 @@ class StaffChatApiService {
   }
 
   async markRead(threadKey: string, lastReadMessageId: number): Promise<{ ok: true }> {
-    return apiRequest(`${API_URL}/staff-chat/threads/${encodeURIComponent(threadKey)}/read`, {
+    const res = await apiRequest<{ ok: true }>(`${API_URL}/staff-chat/threads/${encodeURIComponent(threadKey)}/read`, {
       method: 'POST',
       headers: { ...getHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ lastReadMessageId }),
     });
+    // Letto qui: la push del thread non ha più niente da dire su questo
+    // dispositivo. Gli altri la chiudono su 'staffchat:read' (App.tsx).
+    void closeSystemNotifications([staffChatPushTag(threadKey)]);
+    return res;
+  }
+
+  /** Al rientro nell'app: chiude le push dei thread che risultano già letti
+   *  (letti su un altro dispositivo mentre questo dormiva e l'evento socket
+   *  è andato perso). */
+  async reconcileSystemNotifications(): Promise<void> {
+    try {
+      // La lista thread costa cinque query: la si chiede solo se c'è davvero
+      // una push della chat ancora in vista.
+      const shown = await displayedSystemNotifications();
+      if (!shown.some(n => n.tag?.startsWith(staffChatPushTag('')))) return;
+      const { threads } = await this.listThreads();
+      const read = threads.filter(t => t.unreadCount === 0).map(t => staffChatPushTag(t.threadKey));
+      await closeSystemNotifications(read);
+    } catch { /* best-effort */ }
   }
 
   async unreadCount(): Promise<{ count: number }> {
