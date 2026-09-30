@@ -516,7 +516,7 @@ Modulo a parte (si attiva con l'abbonamento «recensioni»).
 
 - Rubrica con **indice alfabetico**, ricerca e scheda cliente completa: contatti, indirizzo, **dati di fatturazione** (denominazione, P.IVA, CF, codice SDI, PEC), preferenze di servizio (tavolo preferito, note), **allergie e note alimentari**, lingua dell'ospite.
 - **Ricerca per parole**: le parole digitate si trovano in qualsiasi ordine («Servidio Marco» trova «Marco Servidio», bastano i prefissi), il telefono matcha per sole cifre ignorando spazi e prefisso internazionale, e chi inizia con la parola digitata compare prima. Vale ovunque si cerca in rubrica: suggerimenti nel form prenotazione, pagina Clienti, ricerca globale.
-- Flag **VIP** (evidenzia la prenotazione in sala) e **Blacklist** con motivo (blocca web e agente vocale, avvisa in sala), consenso **marketing** con data.
+- Flag **VIP** (evidenzia la prenotazione in sala; quando un VIP prenota da qualunque canale — CRM, sito, Sofia, WhatsApp — titolare e direzione ricevono un avviso a parte, «Prenotazione VIP · Marco Rossi · 4 ospiti · sab 3 ott 20:30», che si spegne per tutti appena uno lo legge o se la prenotazione viene annullata o cancellata) e **Blacklist** con motivo (blocca web e agente vocale, avvisa in sala), consenso **marketing** con data.
 - **Storico prenotazioni e banchetti** del cliente.
 - **Alimentazione automatica**: ogni prenotazione con telefono — da qualunque canale — crea o aggiorna la scheda; la lingua rilevata dal canale si memorizza e le comunicazioni successive partono nella lingua giusta.
 - **Unione duplicati** guidata (rileva i clienti con lo stesso numero e fonde le schede ricollegando lo storico).
@@ -697,6 +697,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-30 | Clienti, Notifiche | Nuovo avviso «Prenotazione VIP» a titolare e direzione quando prenota un cliente segnato VIP, da qualunque canale; letto da uno, letto per tutti, e si spegne se la prenotazione viene annullata o cancellata. |
 | 2026-09-30 | Recensioni Google, Notifiche | Nuovo avviso «richieste di recensione non partite» a chi vede la pagina Recensioni: raccoglie i fallimenti della giornata con nome e motivo, e si chiude per tutti aprendo la pagina. |
 | 2026-09-30 | Banchetti, Notifiche | Eliminando o spostando un banchetto, la notifica «Promemoria cucina» del promemoria che sparisce si spegne per tutti invece di restare da leggere sui telefoni della cucina. |
 | 2026-09-30 | Personale, Notifiche | Nuovo avviso «il tuo turno è cambiato» a chi ha l'account collegato alla scheda: arriva quando un responsabile modifica turni o assenze dei prossimi 30 giorni, raggruppa le modifiche fatte di seguito e riporta solo le differenze («sab 3 ott: cena → riposo»). |
