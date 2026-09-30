@@ -31677,18 +31677,25 @@ async function broadcastCourseReadyIfAutoComplete(tenantId: number, orderId: num
 async function enqueueCoursePrintsInTx(client: any, tenantId: number, orderId: number, courseNo: number, firedRows: any[], variation?: { label: 'AGGIUNTA' | 'ANNULLO CHIAMATA' | 'STORNO'; reason?: string | null }): Promise<void> {
     // Per l'asporto il ticket non ha tavolo né coperti: l'intestazione è
     // «Asporto HH:MM» — l'ora di ritiro è ciò che serve alla partita.
+    // Il cameriere del ticket è chi ha aperto il tavolo: la partita cerca
+    // lui quando il piatto è pronto (come la riga «Cameriere» di Passepartout).
     const ctx = await client.query(
         `SELECT CASE WHEN o.order_type = 'TAKEAWAY' THEN NULL ELSE o.covers END AS covers,
                 CASE WHEN o.order_type = 'TAKEAWAY' THEN 'Asporto ' || COALESCE(tw.pickup_time, '') || COALESCE(' #' || tw.daily_number, '')
-                     ELSE t.name END AS table_name
+                     ELSE t.name END AS table_name,
+                o.order_type,
+                u.full_name AS waiter_name
          FROM orders o
          LEFT JOIN tables t ON t.id = o.table_id AND t.tenant_id = o.tenant_id
          LEFT JOIN takeaway_orders tw ON tw.kitchen_order_id = o.id AND tw.tenant_id = o.tenant_id
+         LEFT JOIN users u ON u.id = o.opened_by_user_id AND u.tenant_id = o.tenant_id
          WHERE o.id = $1 AND o.tenant_id = $2`,
         [orderId, tenantId]
     );
     const tableName = ctx.rows[0]?.table_name ?? null;
     const covers = ctx.rows[0]?.covers ?? null;
+    const orderType = ctx.rows[0]?.order_type ?? null;
+    const waiterName = ctx.rows[0]?.waiter_name ?? null;
 
     // Il tenant della comanda pilota il lookup dei centri: senza filtro una
     // station_id altrui manderebbe la comanda sulla termica di un altro locale.
@@ -31756,6 +31763,9 @@ async function enqueueCoursePrintsInTx(client: any, tenantId: number, orderId: n
                     : `${courseNo}a USCITA`,
                 table_name: tableName,
                 covers,
+                // Un agente vecchio ignora i due campi e stampa come prima.
+                ...(orderType ? { order_type: orderType } : {}),
+                ...(waiterName ? { waiter_name: waiterName } : {}),
                 station_name: station.name,
                 items,
                 ...(variation ? { variation: variation.label } : {}),
