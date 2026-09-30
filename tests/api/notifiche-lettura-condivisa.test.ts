@@ -233,6 +233,30 @@ describe('notifiche · lettura condivisa', () => {
         }
     });
 
+    it('attività: riassegnato il todo, «assegnato» si chiude solo per chi lo aveva', async () => {
+        const todo = await db.query(
+            `INSERT INTO todos (tenant_id, title, priority, category, assigned_to_user_id, assigned_to_user_name)
+             VALUES (1, 'test-condivisa riassegna', 'MEDIUM', 'GENERAL', $1, 'Test Manager') RETURNING id`,
+            [managerId]
+        );
+        const todoId = String(todo.rows[0].id);
+        const tag = `todo-${todoId}`;
+        try {
+            const oldAssignee = await insert(managerId, 'system', tag);
+            // La riga del nuovo assegnatario, come se la push fosse già arrivata.
+            const newAssignee = await insert(ownerId, 'system', tag);
+
+            const res = await api().put(`/todos/${todoId}`).set(bearer(owner))
+                .send({ assignedToUserId: ownerId, assignedToUserName: 'Titolare' });
+            expect(res.status).toBe(200);
+            expect(await readAt(oldAssignee)).not.toBeNull();
+            expect(await readAt(newAssignee)).toBeNull();
+        } finally {
+            await db.query(`DELETE FROM notifications WHERE tag = $1`, [tag]);
+            await db.query(`DELETE FROM todos WHERE id = $1::uuid`, [todoId]);
+        }
+    });
+
     it('la reception riceve le notifiche di prenotazione', async () => {
         const email = 'reception.notifiche@example.com';
         const created = await api().post('/auth/users').set(bearer(owner)).send({

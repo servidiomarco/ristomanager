@@ -13319,7 +13319,7 @@ async function addBanquetToReminders(tenantId: number, banquetId: number, eventD
                         category: 'system',
                         title: 'Promemoria cucina',
                         body: created.rows[0].title,
-                        url: '/?view=DASHBOARD',
+                        url: '/?view=ATTIVITA',
                         tag: `kitchen-reminder-${dueDate}-${hours}`,
                     }
                 ).catch(err => console.error('Push (kitchen reminder) failed:', err));
@@ -13483,7 +13483,7 @@ async function runDailyBreadReminder(tenantId: number, targetRoles: string[] = [
                 category: 'system',
                 title: 'Promemoria pane',
                 body: title,
-                url: '/?view=DASHBOARD',
+                url: '/?view=ATTIVITA',
                 tag: `bread-${tomorrowIso}`,
             }
         ).catch(err => console.error('Push (bread reminder) failed:', err));
@@ -16803,7 +16803,7 @@ app.post('/todos', authenticate, async (req, res) => {
                 category: 'system',
                 title: 'Nuovo todo assegnato',
                 body: newTodo.title,
-                url: '/?view=DASHBOARD',
+                url: '/?view=ATTIVITA',
                 tag: `todo-${newTodo.id}`,
             }).catch(err => console.error('Push (todo assigned) failed:', err));
         }
@@ -16951,9 +16951,20 @@ app.put('/todos/:id', authenticate, async (req, res) => {
                 category: 'system',
                 title: 'Todo assegnato a te',
                 body: updatedTodo.title,
-                url: '/?view=DASHBOARD',
+                url: '/?view=ATTIVITA',
                 tag: `todo-${updatedTodo.id}`,
             }).catch(err => console.error('Push (todo reassigned) failed:', err));
+        }
+
+        // Riassegnato (o tolto a chi lo aveva): per il vecchio assegnatario
+        // «Todo assegnato» non vale più. Solo per lui — il nuovo ha appena
+        // ricevuto la sua, con lo stesso tag.
+        if (
+            req.body.hasOwnProperty('assignedToUserId')
+            && previousAssignee
+            && previousAssignee !== newAssignee
+        ) {
+            await markNotificationsReadForUsers(req.tenantId!, [previousAssignee], [`todo-${updatedTodo.id}`]);
         }
 
         // Svolto: le sue campanelle (promemoria cucina, pane, assegnazione)
@@ -20155,6 +20166,31 @@ async function markSharedNotificationsRead(tenantId: number, tags: string[]): Pr
         });
     } catch (err: any) {
         console.warn('[notifications] shared read failed:', err?.message || err);
+    }
+}
+
+/** Chiude le notifiche di alcuni destinatari soltanto, a prescindere dalla
+ *  categoria: serve quando una notifica smette di riguardare una persona
+ *  (un todo riassegnato ad altri) ma resta viva per chi la riceve adesso. */
+async function markNotificationsReadForUsers(tenantId: number, userIds: number[], tags: string[]): Promise<void> {
+    const users = [...new Set(userIds.filter(u => Number.isInteger(u) && u > 0))];
+    const clean = [...new Set(tags.filter(t => typeof t === 'string' && t.length > 0))];
+    if (users.length === 0 || clean.length === 0) return;
+    try {
+        const r = await queryWithRetry(
+            `UPDATE notifications SET read_at = CURRENT_TIMESTAMP
+             WHERE tenant_id = $1 AND recipient_user_id = ANY($2::int[])
+               AND tag = ANY($3::text[]) AND read_at IS NULL
+             RETURNING id, recipient_user_id`,
+            [tenantId, users, clean]
+        );
+        if (r.rows.length === 0) return;
+        emitNotificationsRead(tenantId, r.rows.map((row: any) => Number(row.recipient_user_id)), {
+            ids: r.rows.map((row: any) => Number(row.id)),
+            tags: clean,
+        });
+    } catch (err: any) {
+        console.warn('[notifications] personal read failed:', err?.message || err);
     }
 }
 
