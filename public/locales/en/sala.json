@@ -55,6 +55,8 @@
   "hideForShift": "Hide for this service",
   "show": "Show",
   "hide": "Hide",
+  "assignPriority": "Priority",
+  "assignPriorityHint": "Order in automatic bookings: 1 before 2. Same number = equal. Empty = no priority",
   "legend": "Legend",
   "roomClosed": "Room closed",
   "deleteTablesTitle": "Delete tables",

@@ -55,6 +55,8 @@
   "hideForShift": "Nascondi per questo turno",
   "show": "Mostra",
   "hide": "Nascondi",
+  "assignPriority": "Priorità",
+  "assignPriorityHint": "Ordine nelle prenotazioni automatiche: 1 prima di 2. Stesso numero = pari merito. Vuoto = nessuna priorità",
   "legend": "Legenda",
   "roomClosed": "Sala chiusa",
   "deleteTablesTitle": "Elimina tavoli",
