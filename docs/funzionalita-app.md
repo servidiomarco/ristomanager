@@ -562,6 +562,7 @@ Modulo a parte (si attiva con l'abbonamento «recensioni»).
 - **Selezione multipla**: elimina, **stampa** o **condividi** (WhatsApp ecc. via condivisione di sistema) solo gli articoli scelti.
 - **Anagrafica fornitori** (nome, telefono, note, categorie servite).
 - Sincronizzata in tempo reale tra tutti i telefoni dello staff; ogni voce ricorda chi l'ha aggiunta.
+- **Promemoria della spesa**: un promemoria di sistema (Impostazioni → Promemoria, di serie alle 9:30 ogni giorno a titolare e direzione) avvisa se in lista ci sono articoli da comprare («Da comprare: 7 articoli · Latte, Farina, Limoni e altri 4»). Con la lista vuota non suona; resta un solo avviso aggiornato, che si chiude per tutti quando l'ultima voce viene spuntata o eliminata.
 
 ---
 
@@ -690,6 +691,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-30 | Lista della spesa, Notifiche | Nuovo promemoria di sistema «da comprare»: di serie alle 9:30, configurabile in Impostazioni → Promemoria, avvisa solo se in lista ci sono articoli non spuntati e si chiude per tutti quando la lista è tutta comprata. |
 | 2026-09-29 | Inventario, Notifiche | «Scorta bassa» si spegne per tutti appena il prodotto viene ricaricato sopra soglia o eliminato, e si riaccende se ci ricade. |
 | 2026-09-29 | HACCP, Notifiche | Due avvisi nuovi sul registro temperature: «temperatura fuori soglia» a titolare, direzione e cucina appena un valore supera il limite (si chiude quando la postazione torna in soglia) e il promemoria di sistema «temperature mancanti», di serie alle 11:00 e configurabile in Impostazioni → Promemoria, che avvisa solo se il registro di oggi è incompleto e si chiude quando è completo. |
 | 2026-09-29 | Notifiche, Reception | Le notifiche di prenotazione (nuova, richiesta, modificata, annullata — dal CRM, dal sito, da Sofia e da WhatsApp) arrivano anche alla reception, prima esclusa. |

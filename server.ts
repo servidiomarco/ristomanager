@@ -13841,6 +13841,7 @@ const SYSTEM_REMINDER_HANDLERS: Record<string, ReminderHandler> = {
     // choice ("Chi riceve?") is honoured by the system handler as well.
     BREAD_DAILY: async (r) => { await runDailyBreadReminder(r.tenant_id, r.target_roles); },
     HACCP_TEMPERATURES: async (r) => { await runHaccpMissingReminder(r.tenant_id, r.target_roles); },
+    SHOPPING_LIST: async (r) => { await runShoppingListReminder(r.tenant_id, r.target_roles); },
 };
 
 interface ReminderRow {
@@ -17470,6 +17471,49 @@ app.delete('/roadmap/tasks/:id', authenticate, requireDevBoardAdmin, async (req,
 // ============================================
 // SHOPPING LIST - require authentication
 // ============================================
+// Promemoria della spesa: un solo avviso vivo per ristorante — ogni scatto
+// lo aggiorna (stesso tag) invece di accumularne uno al giorno, e si chiude
+// per tutti quando non resta niente da comprare.
+const SHOPPING_REMINDER_TAG = 'shopping-pending';
+const SHOPPING_REMINDER_ROLES = ['OWNER', 'GENERAL_MANAGER', 'MANAGER'];
+
+/** Promemoria di sistema SHOPPING_LIST: all'orario scelto in Impostazioni →
+ *  Promemoria avvisa solo se in lista ci sono articoli da comprare. La lista
+ *  mostra tutte le voci, di ogni giorno: il conteggio fa lo stesso. */
+async function runShoppingListReminder(tenantId: number, targetRoles: string[]): Promise<void> {
+    const pending = await queryWithRetry(
+        `SELECT name FROM shopping_items
+          WHERE tenant_id = $1 AND checked = false
+          ORDER BY created_at ASC`,
+        [tenantId]
+    );
+    const names: string[] = pending.rows.map((r: any) => r.name);
+    if (names.length === 0) return;
+    const shown = names.slice(0, 3).join(', ');
+    const rest = names.length > 3 ? ` e altri ${names.length - 3}` : '';
+    await pushSendToRoles(tenantId, targetRoles.length > 0 ? targetRoles : SHOPPING_REMINDER_ROLES, {
+        category: 'system',
+        title: names.length === 1 ? 'Da comprare: 1 articolo' : `Da comprare: ${names.length} articoli`,
+        body: `${shown}${rest}`,
+        url: '/?view=LISTA_DELLA_SPESA',
+        tag: SHOPPING_REMINDER_TAG,
+    });
+}
+
+/** Dopo una spunta o un'eliminazione: lista tutta comprata → il promemoria
+ *  non ha più niente da dire, si chiude per tutti. */
+async function closeShoppingReminderIfDone(tenantId: number): Promise<void> {
+    try {
+        const left = await queryWithRetry(
+            `SELECT 1 FROM shopping_items WHERE tenant_id = $1 AND checked = false LIMIT 1`,
+            [tenantId]
+        );
+        if (left.rows.length === 0) await markSharedNotificationsRead(tenantId, [SHOPPING_REMINDER_TAG]);
+    } catch (err) {
+        console.error('[spesa] chiusura promemoria fallita:', err);
+    }
+}
+
 app.get('/shopping', authenticate, async (req, res) => {
     try {
         const { date } = req.query;
@@ -17761,6 +17805,7 @@ app.put('/shopping/:id/toggle', authenticate, async (req, res) => {
         const socketId = req.headers['x-socket-id'] as string;
         if (socketService) socketService.broadcastToAll(req.tenantId!, 'shopping:updated', updatedItem, socketId);
 
+        if (updatedItem?.checked) await closeShoppingReminderIfDone(req.tenantId!);
         res.json(updatedItem);
     } catch (err) {
         console.error(err);
@@ -17804,6 +17849,7 @@ app.delete('/shopping/:id', authenticate, async (req, res) => {
         const socketId = req.headers['x-socket-id'] as string;
         if (socketService) socketService.broadcastToAll(req.tenantId!, 'shopping:deleted', { id, date: result.rows[0].date }, socketId);
 
+        await closeShoppingReminderIfDone(req.tenantId!);
         res.status(204).send();
     } catch (err) {
         console.error(err);
