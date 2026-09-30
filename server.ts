@@ -1817,6 +1817,11 @@ async function notifyVoiceUsageThresholds(tenantId: number): Promise<void> {
                 .catch(err => console.warn('[voice-usage] email failed:', err?.message || err));
         }
     }
+    // L'avviso appena mandato supera i precedenti: «minuti inclusi esauriti»
+    // rende vecchio il 90%, il tetto rende vecchi i minuti inclusi, un mese
+    // nuovo rende vecchio tutto il mese prima. Restano da leggere solo questi.
+    await closeNotificationsByPrefix(tenantId, 'voice-usage-',
+        claimed.alerts.map(a => `voice-usage-${claimed.usage.month}-${a.threshold}`));
 }
 
 async function handleElevenLabsPostCall(tenantId: number, req: express.Request, res: express.Response): Promise<void> {
@@ -8193,6 +8198,10 @@ app.post('/bills/splits/:id/refund', authenticate, requirePermission('payments:f
              RETURNING id, table_bill_id, amount_cents`,
             [splitId]
         );
+        // Rimborsata: il «Pagamento in eccesso da rimborsare» di questa quota
+        // (lo manda il webhook quando un ospite paga un conto già saldato)
+        // ha fatto il suo lavoro.
+        await markSharedNotificationsRead(req.tenantId!, [`bill-overpaid-${splitId}`]);
         // Lo specchio LINK_ONLINE nel libro cassa segue la quota: stornato,
         // così la chiusura di cassa non conta denaro restituito.
         await queryWithRetry(
@@ -11698,6 +11707,19 @@ app.post('/payments/:id/refund', authenticate, requirePermission('payments:full'
         try { socketService?.broadcastToAll(req.tenantId!, 'paymentRequest:updated', row); }
         catch (err) { console.warn('[payments] refund broadcast failed:', (err as any)?.message || err); }
 
+        // Il pagamento in eccesso di un conto si rimborsa anche da qui, dal
+        // pagamento stesso: l'avviso della quota che lo aveva generato si
+        // chiude per tutti.
+        try {
+            const splits = await queryWithRetry(
+                `SELECT id FROM table_bill_splits WHERE payment_request_id = $1 AND tenant_id = $2`,
+                [payment.id, req.tenantId!]
+            );
+            await markSharedNotificationsRead(req.tenantId!, splits.rows.map((r: any) => `bill-overpaid-${r.id}`));
+        } catch (err) {
+            console.warn('[payments] chiusura avviso eccedenza fallita:', (err as any)?.message || err);
+        }
+
         if (row.reservation_id) broadcastReservationsUpdatedByIds([row.reservation_id]).catch(() => {});
 
         // Se questo acconto era stato accreditato su un conto, storna il credito:
@@ -14079,6 +14101,11 @@ const startElevenLabsQuotaWatchdog = () => {
                 elevenLabsQuotaAlerted = { resetUnix, thresholds: new Set() };
             }
             const pct = Math.round((used / limit) * 100);
+            // Ricaricato o periodo nuovo: sotto la prima soglia gli avvisi
+            // «quota in esaurimento» non sono più veri, per nessuno.
+            if (pct < ELEVENLABS_QUOTA_THRESHOLDS[0]) {
+                await closePlatformNotifications(ELEVENLABS_QUOTA_THRESHOLDS.map(t => `elevenlabs-quota-${t}`));
+            }
             for (const threshold of ELEVENLABS_QUOTA_THRESHOLDS) {
                 if (pct < threshold || elevenLabsQuotaAlerted.thresholds.has(threshold)) continue;
                 elevenLabsQuotaAlerted.thresholds.add(threshold);
@@ -14103,6 +14130,9 @@ const startElevenLabsQuotaWatchdog = () => {
                     .catch((err: any) => console.error('Push (quota ElevenLabs) failed:', err));
                 pushSendToPlatformAdmins(payload)
                     .catch((err: any) => console.error('Push admin (quota ElevenLabs) failed:', err));
+                // Il 95% supera l'80%: resta da leggere solo l'avviso più grave.
+                const lower = ELEVENLABS_QUOTA_THRESHOLDS.filter(t => t < threshold).map(t => `elevenlabs-quota-${t}`);
+                if (lower.length > 0) void closePlatformNotifications(lower);
             }
         } catch (err: any) {
             console.warn('[quota-elevenlabs] tick failed:', err?.message || err);
@@ -20414,6 +20444,41 @@ async function closeOrderCourseNotifications(tenantId: number, orderId: number |
     }
 }
 
+/** Chiude per tutti le notifiche di un tenant il cui tag comincia con
+ *  `prefix`, tranne quelle in `keep`: serve quando un avviso nuovo supera i
+ *  precedenti della stessa famiglia (il 100% dopo l'80%). Non lancia mai. */
+async function closeNotificationsByPrefix(tenantId: number, prefix: string, keep: string[] = []): Promise<void> {
+    try {
+        const open = await queryWithRetry(
+            `SELECT DISTINCT tag FROM notifications
+              WHERE tenant_id = $1 AND tag LIKE $2 AND read_at IS NULL AND NOT (tag = ANY($3::text[]))`,
+            [tenantId, `${prefix.replace(/[\\%_]/g, m => '\\' + m)}%`, keep]
+        );
+        await markSharedNotificationsRead(tenantId, open.rows.map((r: any) => String(r.tag)));
+    } catch (err: any) {
+        console.warn('[notifications] chiusura per prefisso fallita:', err?.message || err);
+    }
+}
+
+/** Gli avvisi ai platform admin stanno sul tenant di ciascun admin, non su
+ *  quello di cui parlano: per chiuderli si cercano le righe per tag sopra i
+ *  tenant e si chiude tenant per tenant. Non lancia mai. */
+async function closePlatformNotifications(tags: string[]): Promise<void> {
+    try {
+        // rls-bypass: destinatari di piattaforma, sparsi su più tenant
+        const owners = await runAsPlatform(() => queryWithRetry(
+            `SELECT DISTINCT tenant_id FROM notifications WHERE tag = ANY($1::text[]) AND read_at IS NULL`,
+            [tags]
+        ));
+        for (const r of owners.rows) {
+            const tenantId = Number(r.tenant_id);
+            await runWithTenantContext(tenantId, () => markSharedNotificationsRead(tenantId, tags));
+        }
+    } catch (err: any) {
+        console.warn('[notifications] chiusura avvisi di piattaforma fallita:', err?.message || err);
+    }
+}
+
 // ---- Prenotazione VIP --------------------------------------------------------
 // Un avviso a parte a titolare e direzione quando prenota un cliente segnato
 // VIP in rubrica, da qualunque canale: la campanella «Nuova prenotazione» va
@@ -24616,6 +24681,16 @@ app.put('/voice-usage/cap', authenticate, requireFeature('voice'), requirePermis
                 AND month = to_char(date_trunc('month', NOW() AT TIME ZONE $2), 'YYYY-MM-DD')::date`,
             [req.tenantId!, (await getTenantLocale(req.tenantId!)).timezone]
         );
+        // E per lo stesso motivo gli avvisi sul tetto vecchio si spengono per
+        // tutti (quelli sui minuti inclusi restano veri e restano): se il
+        // nuovo tetto è di nuovo vicino, il prossimo giro li rimanda.
+        const capAlerts = await queryWithRetry(
+            `SELECT DISTINCT tag FROM notifications
+              WHERE tenant_id = $1 AND read_at IS NULL
+                AND (tag LIKE 'voice-usage-%-cap\\_80' OR tag LIKE 'voice-usage-%-cap\\_100')`,
+            [req.tenantId!]
+        );
+        await markSharedNotificationsRead(req.tenantId!, capAlerts.rows.map((r: any) => String(r.tag)));
         const plan = await getVoicePlan(req.tenantId!);
         const month = await getVoiceMonthUsage(req.tenantId!, plan);
         res.json({ plan, month });
@@ -24813,7 +24888,10 @@ app.get('/voice-calls/pending-count', authenticate, requireFeature('voice'), voi
 // volta ricontattato il cliente non chiedono più niente a nessuno.
 function voiceCallNotificationTags(conversationId: unknown): string[] {
     if (typeof conversationId !== 'string' || !conversationId) return [];
-    return [`voice-followup-${conversationId}`, `voice-phantom-${conversationId}`];
+    // voice-callback-: il «Cliente da richiamare» che Sofia manda quando il
+    // cliente chiede di essere richiamato. Stessa conversazione, stessa
+    // chiusura: richiamato è richiamato, da qualunque delle tre strade.
+    return [`voice-followup-${conversationId}`, `voice-phantom-${conversationId}`, `voice-callback-${conversationId}`];
 }
 
 // Bulk: flip every call still awaiting follow-up (no linked reservation,
@@ -29299,6 +29377,12 @@ app.post('/webhook/stripe', async (req, res) => runAsPlatform(async () => {
                         url: '/?view=PLATFORM',
                         tag: `billing-past-due-${applied.tenantId}`,
                     }).catch(err => console.warn('[billing] push past_due fallita:', (err as any)?.message || err));
+                }
+                // Uscito dalla morosità (Stripe ha incassato, o l'abbonamento è
+                // chiuso e il tenant sospeso): «Pagamento non riuscito» non
+                // chiede più niente ai platform admin.
+                if (applied && applied.previousBillingStatus === 'past_due' && applied.billingStatus !== 'past_due') {
+                    await closePlatformNotifications([`billing-past-due-${applied.tenantId}`]);
                 }
                 break;
             }
