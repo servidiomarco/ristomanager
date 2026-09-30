@@ -257,6 +257,51 @@ describe('notifiche · lettura condivisa', () => {
         }
     });
 
+    it('banchetti: eliminato il banchetto, i suoi promemoria cucina si spengono', async () => {
+        const created = await api().post('/banquet-menus').set(bearer(owner)).send({
+            name: 'test-condivisa banchetto', description: '', price_per_person: 40,
+            courses: [], event_date: '2031-03-20',
+        });
+        expect(created.status).toBe(201);
+        const banquetId = Number(created.body.id);
+        const tags: string[] = [];
+        try {
+            // I promemoria nascono in background: si aspettano le righe.
+            let reminders: any[] = [];
+            for (let i = 0; i < 30 && reminders.length === 0; i++) {
+                reminders = (await db.query(
+                    `SELECT to_char(due_date, 'YYYY-MM-DD') AS due, banquet_reminder_hours AS hours
+                       FROM todos WHERE tenant_id = 1 AND $1 = ANY(linked_banquet_ids)`,
+                    [banquetId]
+                )).rows;
+                if (reminders.length === 0) await new Promise(r => setTimeout(r, 100));
+            }
+            expect(reminders.length).toBeGreaterThan(0);
+            const bells: number[] = [];
+            for (const r of reminders) {
+                const tag = `kitchen-reminder-${r.due}-${r.hours}`;
+                tags.push(tag);
+                bells.push(await insert(managerId, 'system', tag));
+            }
+
+            const del = await api().delete(`/banquet-menus/${banquetId}`).set(bearer(owner));
+            expect(del.status).toBe(204);
+            let open = bells.length;
+            for (let i = 0; i < 30 && open > 0; i++) {
+                open = (await db.query(
+                    `SELECT COUNT(*)::int AS n FROM notifications WHERE id = ANY($1::int[]) AND read_at IS NULL`,
+                    [bells]
+                )).rows[0].n;
+                if (open > 0) await new Promise(r => setTimeout(r, 100));
+            }
+            expect(open).toBe(0);
+        } finally {
+            await db.query(`DELETE FROM notifications WHERE tag = ANY($1::text[])`, [tags]);
+            await db.query(`DELETE FROM todos WHERE tenant_id = 1 AND $1 = ANY(linked_banquet_ids)`, [banquetId]);
+            await api().delete(`/banquet-menus/${banquetId}`).set(bearer(owner));
+        }
+    });
+
     it('la reception riceve le notifiche di prenotazione', async () => {
         const email = 'reception.notifiche@example.com';
         const created = await api().post('/auth/users').set(bearer(owner)).send({

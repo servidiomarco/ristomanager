@@ -13355,6 +13355,9 @@ async function removeBanquetFromReminders(tenantId: number, banquetId: number): 
         if (newIds.length === 0) {
             await queryWithRetry('DELETE FROM todos WHERE id = $1 AND tenant_id = $2', [todo.id, tenantId]);
             if (socketService) socketService.broadcastToAll(tenantId, 'todo:deleted', { id: todo.id });
+            // Banchetto eliminato o spostato: il promemoria sparisce da
+            // Attività, e con lui la sua campanella sui telefoni della cucina.
+            await markSharedNotificationsRead(tenantId, todoNotificationTags(todo));
         } else {
             const updated = await queryWithRetry(`
                 UPDATE todos
