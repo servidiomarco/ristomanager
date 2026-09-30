@@ -208,6 +208,8 @@ import {
     finishReviewRequest,
     hasRecentReviewRequest,
     buildGoogleReviewUrl,
+    reviewFailureDigest,
+    reviewFailureTag,
 } from './services/reviewRequests.js';
 import { clampModifierN, signedModifierLabel, signedModifierDelta } from './utils/modifierScale.js';
 import { BAR_COURSE_NO, DESSERT_COURSE_NO, isOffSequenceCourse } from './utils/courses.js';
@@ -14203,6 +14205,43 @@ function reviewRequestEligibleAt(visitEnd: Date, settings: ReviewRequestSettings
     return new Date(visitEnd.getTime() + (24 * 60 - minutes + REVIEW_REQUEST_NEXT_MORNING_MIN) * 60_000);
 }
 
+/** Le richieste fallite OGGI (giorno del ristorante), in un avviso solo a chi
+ *  vede la pagina Recensioni — i ruoli si leggono dalla matrice permessi del
+ *  ristorante, come per le ferie. Stesso tag per tutta la giornata: un nuovo
+ *  fallimento aggiorna l'avviso e lo riaccende. Non lancia mai. */
+async function notifyReviewRequestFailures(tenantId: number, tz: string): Promise<void> {
+    try {
+        const today = getItalianTodayIso(new Date(), tz);
+        const failed = await queryWithRetry(
+            `SELECT customer_name, review_request_error AS error
+               FROM reservations
+              WHERE tenant_id = $1 AND review_request_status = 'failed'
+                AND (review_request_failed_at AT TIME ZONE $3)::date = $2::date
+              ORDER BY review_request_failed_at DESC`,
+            [tenantId, today, tz]
+        );
+        if (failed.rows.length === 0) return;
+        const roles = await queryWithRetry(
+            `SELECT DISTINCT role FROM role_permissions WHERE tenant_id = $1 AND permission = 'reviews:view'`,
+            [tenantId]
+        );
+        const roleList = roles.rows.map((r: any) => String(r.role));
+        if (roleList.length === 0) return;
+        const { title, body } = reviewFailureDigest(
+            failed.rows.map((r: any) => ({ customerName: r.customer_name, error: r.error }))
+        );
+        await pushSendToRoles(tenantId, roleList, {
+            category: 'system',
+            title,
+            body,
+            url: '/?view=RECENSIONI',
+            tag: reviewFailureTag(today),
+        });
+    } catch (err: any) {
+        console.warn('[review-request] avviso fallimenti non inviato:', err?.message || err);
+    }
+}
+
 const startReviewRequestScheduler = () => {
     const tick = async () => {
         try {
@@ -14232,6 +14271,7 @@ const startReviewRequestScheduler = () => {
 
             // Guardie e impostazioni per tenant, calcolate una volta per giro.
             const tenantGate = new Map<number, { ok: boolean; settings: ReviewRequestSettings; placeId: string | null; tz: string }>();
+            const failedTenants = new Set<number>();
             const gateFor = async (tenantId: number) => {
                 let gate = tenantGate.get(tenantId);
                 if (!gate) {
@@ -14329,11 +14369,17 @@ const startReviewRequestScheduler = () => {
                         console.log(`⭐ Richiesta recensione inviata (tenant ${tenantId}, prenotazione ${row.id}, canale ${outcome.channel})`);
                     } else {
                         await mark('failed', null, outcome.error || 'invio non riuscito');
+                        failedTenants.add(tenantId);
                     }
                 } catch (err: any) {
                     console.error(`[review-request] prenotazione ${row.id} fallita:`, err?.message || err);
                     await mark('failed', null, err?.message || String(err)).catch(() => {});
+                    failedTenants.add(tenantId);
                 }
+            }
+            // Un avviso per ristorante a fine giro, non uno per richiesta.
+            for (const tenantId of failedTenants) {
+                await notifyReviewRequestFailures(tenantId, tenantGate.get(tenantId)?.tz ?? 'Europe/Rome');
             }
         } catch (err) {
             console.error('Review request scheduler error:', err);
@@ -26586,6 +26632,14 @@ app.get('/reviews/requests', authenticate, requireFeature('reviews'), requirePer
                 [req.tenantId!]
             ),
         ]);
+        // Aperto il registro, gli avvisi «non partite» hanno fatto il loro
+        // lavoro: si chiudono per tutti. Solo la prima pagina, e l'ultima
+        // settimana: un avviso più vecchio non è più rimasto aperto.
+        if (offset === 0) {
+            const today = getItalianTodayIso(new Date(), (await getTenantLocale(req.tenantId!)).timezone);
+            await markSharedNotificationsRead(req.tenantId!,
+                Array.from({ length: 8 }, (_, i) => reviewFailureTag(addDaysIso(today, -i))));
+        }
         res.json({ total: count.rows[0]?.total ?? 0, requests: rows.rows });
     } catch (err) {
         console.error('GET /reviews/requests error:', err);
