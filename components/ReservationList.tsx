@@ -103,6 +103,14 @@ const getSlotsForDateShift = (
 /** Minutes a dismissal quiets the overdue-table prompt on this device. */
 const OVERDUE_SNOOZE_MIN = 15;
 
+/** Lo stesso ordine dell'assegnazione automatica lato server
+ *  (pickSelfServiceTable): prima i tavoli numerati in piantina, dal numero
+ *  più basso, poi quelli senza numero; a pari numero il più piccolo che basta.
+ *  Così il pulsante di assegnazione del modulo non contraddice quello che
+ *  fanno Sofia e il sito. */
+const byAssignPriority = (a: Table, b: Table): number =>
+  (a.assign_priority ?? Infinity) - (b.assign_priority ?? Infinity) || a.seats - b.seats;
+
 /* ── Form steps (edit only) ───────────────────────────────────────────────
    The same three sections the edit form has always had, given a screen each.
    Payments and the message log used to sit below the table grid, so reaching
@@ -2771,7 +2779,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   other.merged_with.map(id => Number(id)).includes(Number(t.id))
               ))
               .filter(t => !hiddenTableIds.has(t.id))
-              .sort((a, b) => a.seats - b.seats);
+              .sort(byAssignPriority);
 
           if (suitableTables.length > 0) {
               const suggestions = suitableTables.slice(0, 3).map(t => {
@@ -2844,7 +2852,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             other.merged_with.map(id => Number(id)).includes(Number(t.id))
         ))
         .filter(t => !hiddenTableIds.has(t.id))
-        .sort((a, b) => a.seats - b.seats);
+        .sort(byAssignPriority);
 
       if (availableTables.length > 0) {
           setFormData({ ...formData, table_id: availableTables[0].id });

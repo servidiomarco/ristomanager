@@ -11873,7 +11873,7 @@ app.put('/tables/:id', authenticate, requirePermission('floorplan:update_status'
         const values: any[] = [];
         let paramIndex = 1;
 
-        const allowedFields = ['name', 'shape', 'seats', 'x', 'y', 'room_id', 'status', 'is_locked', 'merged_with', 'temp_lock_expires_at', 'rotation', 'width_cm', 'length_cm', 'notes'];
+        const allowedFields = ['name', 'shape', 'seats', 'x', 'y', 'room_id', 'status', 'is_locked', 'merged_with', 'temp_lock_expires_at', 'rotation', 'width_cm', 'length_cm', 'notes', 'assign_priority'];
 
         allowedFields.forEach(field => {
             if (req.body.hasOwnProperty(field)) {
@@ -11894,6 +11894,16 @@ app.put('/tables/:id', authenticate, requirePermission('floorplan:update_status'
 
         if (fields.length === 0) {
             return res.status(400).json({ error: 'No fields to update' });
+        }
+
+        // Ordine di assegnazione: intero 1–99 o null (nessuna priorità). Il
+        // campo vuoto del client arriva come null; qualunque altra cosa è un
+        // 400 qui invece di un 500 dal CHECK del database.
+        if (req.body.hasOwnProperty('assign_priority')) {
+            const p = req.body.assign_priority;
+            if (p !== null && !(Number.isInteger(p) && p >= 1 && p <= 99)) {
+                return res.status(400).json({ error: 'invalid_assign_priority' });
+            }
         }
 
         // room_id arriva dal body: senza il check per tenant un id altrui
@@ -25935,7 +25945,7 @@ async function maybeSuggestTableAssignment(tenantId: number, reservationId: numb
 
         const [tablesRes, mergesRes, occupancyRes] = await Promise.all([
             queryWithRetry(
-                `SELECT t.id, t.name, t.seats, t.room_id, r.name AS room_name
+                `SELECT t.id, t.name, t.seats, t.room_id, r.name AS room_name, t.assign_priority
                    FROM tables t
                    JOIN rooms r ON r.id = t.room_id AND r.tenant_id = t.tenant_id
                   WHERE t.tenant_id = $1 AND r.is_closed = false

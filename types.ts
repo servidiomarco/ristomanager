@@ -29,6 +29,8 @@ export interface Table {
   width_cm?: number | null;
   length_cm?: number | null;
   notes?: string | null;
+  /** Ordine nell'assegnazione automatica: 1 prima di 2; null = nessuna priorità. */
+  assign_priority?: number | null;
 }
 
 export interface Room {

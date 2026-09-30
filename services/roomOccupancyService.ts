@@ -345,6 +345,12 @@ export async function listBookableRooms(
  * condiviso dai due canali self-service: l'agente vocale (che filtra per
  * dentro/fuori) e il modulo /prenota (che filtra per sala richiesta).
  *
+ * I tavoli numerati in piantina (tables.assign_priority) passano davanti a
+ * tutti gli altri, in ordine di numero e anche se più grandi: è la regola che
+ * il gestore del Vecchio Frantoio scriveva nel prompt («i tavoli da assegnare
+ * per primi sono 23 24 25…») mentre le coppie finivano sempre al 29. A pari
+ * numero, e poi fra i tavoli senza numero, vale il più piccolo che basta.
+ *
  * Esclude tavoli nascosti per il turno, sale chiuse, tavoli con una
  * prenotazione viva, tavoli accorpati e tavoli tenuti da un banchetto.
  * Restituisce null quando non c'è niente: il chiamante salva comunque la
@@ -390,7 +396,7 @@ export async function pickSelfServiceTable(
           )
           AND t.seats >= $1
           AND ${assignableTableSql('t', 2, 3, 4, undefined, overlapStartParam)}
-        ORDER BY t.seats ASC, t.id ASC
+        ORDER BY t.assign_priority ASC NULLS LAST, t.seats ASC, t.id ASC
         LIMIT 1
     `, params);
     return result.rows[0] ?? null;
