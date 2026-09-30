@@ -20398,6 +20398,22 @@ function emitNotificationsRead(
 // tag. Chiamata sia dal centro notifiche sia dove la cosa si gestisce alla
 // fonte (thread letto in Messaggi, chiamata ricontattata, uscita servita).
 // Best-effort: un errore qui non deve far fallire la rotta che la chiama.
+/** Spegne per tutti le campanelle «uscita pronta» di una comanda
+ *  (course-<comanda>-<uscita>) rimaste da leggere: comanda chiusa o
+ *  cancellata, non c'è più niente da portare al tavolo. Non lancia mai. */
+async function closeOrderCourseNotifications(tenantId: number, orderId: number | string): Promise<void> {
+    try {
+        const open = await queryWithRetry(
+            `SELECT DISTINCT tag FROM notifications
+              WHERE tenant_id = $1 AND tag LIKE $2 AND read_at IS NULL`,
+            [tenantId, `course-${Number(orderId)}-%`]
+        );
+        await markSharedNotificationsRead(tenantId, open.rows.map((r: any) => String(r.tag)));
+    } catch (err: any) {
+        console.warn('[comande] chiusura campanelle fallita:', err?.message || err);
+    }
+}
+
 // ---- Prenotazione VIP --------------------------------------------------------
 // Un avviso a parte a titolare e direzione quando prenota un cliente segnato
 // VIP in rubrica, da qualunque canale: la campanella «Nuova prenotazione» va
@@ -32153,6 +32169,7 @@ app.delete('/orders/:id', authenticate, requirePermission('orders:take'), async 
         await client.query('COMMIT');
         outboxKick();
         client.release();
+        await closeOrderCourseNotifications(req.tenantId!, id);
 
         try {
             socketService?.broadcastToAll(req.tenantId!, 'order:deleted', { order_id: id, table_id: order.table_id });
@@ -33820,6 +33837,12 @@ app.post('/kds/items/:id/status', authenticate, requirePermission('orders:kds'),
         const live = course.rows;
         const pending = live.filter((r: any) => r.status !== 'READY' && r.status !== 'SERVED');
         const courseReady = live.length > 0 && pending.length === 0;
+        // Spunta «pronto» tolta: l'uscita non è più pronta, e il «pronta al
+        // passe» già arrivato ai camerieri direbbe il falso. Tornerà quando
+        // l'ultima riga sarà di nuovo pronta.
+        if (next === 'PREPARING' && !courseReady) {
+            await markSharedNotificationsRead(req.tenantId!, [`course-${item.order_id}-${item.course_no}`]);
+        }
 
         try {
             socketService?.broadcastToStation(req.tenantId!, item.station_id, 'kds:item', item);
@@ -34921,6 +34944,7 @@ app.post('/orders/:id/close', authenticate, requirePermission('orders:take'), as
             await client.query('COMMIT');
             client.release();
             outboxKick();
+            await closeOrderCourseNotifications(req.tenantId!, orderId);
             return res.json({
                 order_id: orderId,
                 bill: null,
@@ -34991,6 +35015,9 @@ app.post('/orders/:id/close', authenticate, requirePermission('orders:take'), as
             socketService?.broadcastToAll(req.tenantId!, 'bill:updated', synced.bill);
         } catch (_) {}
         outboxKick();
+        // Comanda chiusa: un'uscita «pronta» non ancora servita non ha più
+        // un tavolo a cui arrivare.
+        await closeOrderCourseNotifications(req.tenantId!, orderId);
 
         LogService.logActivity(
             req.tenantId!,
