@@ -2664,6 +2664,7 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
             },
             { excludeUserId: req.user?.userId ?? null }
         ).catch(err => console.error('Push (new reservation) failed:', err));
+        void notifyVipReservation(req.tenantId!, { ...newReservation, customer_name, guests, phone }, reservationLabel, req.user?.userId ?? null);
 
         res.status(201).json(newReservation);
     } catch (err: any) {
@@ -2885,6 +2886,8 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
         // Skip if it was already CANCELLED — avoids duplicate notifications on
         // saves that don't change the status.
         if (previousStatus !== 'CANCELLED' && reservation_status === 'CANCELLED' && updatedReservation) {
+            // Annullata: l'avviso VIP non ha più un tavolo da preparare.
+            await markSharedNotificationsRead(req.tenantId!, [vipReservationTag(updatedReservation.id)]);
             const reservationLabel = reservationPushLabel(asUtcInstant(updatedReservation.reservation_time), (await getTenantLocale(req.tenantId!)).timezone);
             pushSendToRoles(
                 req.tenantId!,
@@ -3131,7 +3134,7 @@ app.delete('/reservations/:id', authenticate, requirePermission('reservations:fu
 
         // Prenotazione eliminata: le sue campanelle portavano a una scheda
         // che non esiste più.
-        await markSharedNotificationsRead(req.tenantId!, [`reservation-${id}`, `pending-${id}`]);
+        await markSharedNotificationsRead(req.tenantId!, [`reservation-${id}`, `pending-${id}`, vipReservationTag(id)]);
 
         res.status(204).send();
     } catch (err) {
@@ -20395,6 +20398,44 @@ function emitNotificationsRead(
 // tag. Chiamata sia dal centro notifiche sia dove la cosa si gestisce alla
 // fonte (thread letto in Messaggi, chiamata ricontattata, uscita servita).
 // Best-effort: un errore qui non deve far fallire la rotta che la chiama.
+// ---- Prenotazione VIP --------------------------------------------------------
+// Un avviso a parte a titolare e direzione quando prenota un cliente segnato
+// VIP in rubrica, da qualunque canale: la campanella «Nuova prenotazione» va
+// a tutta la sala e un VIP ci si perde in mezzo. Il cliente si aggancia per
+// telefono, come fa la lista prenotazioni (customer_is_vip). Non lancia mai.
+const VIP_PUSH_ROLES = ['OWNER', 'GENERAL_MANAGER', 'MANAGER'];
+
+const vipReservationTag = (reservationId: number | string): string => `vip-${reservationId}`;
+
+async function notifyVipReservation(
+    tenantId: number,
+    reservation: { id: number; customer_name: string | null; guests: number | null; phone: string | null },
+    when: string,
+    excludeUserId: number | null,
+): Promise<void> {
+    try {
+        const digits = String(reservation.phone ?? '').replace(/\D/g, '');
+        if (!digits) return;
+        const vip = await queryWithRetry(
+            `SELECT 1 FROM customers
+              WHERE tenant_id = $1 AND is_vip = TRUE AND phone IS NOT NULL
+                AND regexp_replace(phone, '\\D', '', 'g') = $2
+              LIMIT 1`,
+            [tenantId, digits]
+        );
+        if (vip.rows.length === 0) return;
+        await pushSendToRoles(tenantId, VIP_PUSH_ROLES, {
+            category: 'reservation',
+            title: 'Prenotazione VIP',
+            body: `${toTitleCase(reservation.customer_name ?? '')} · ${reservation.guests ?? '?'} ospiti · ${when}`,
+            url: `/?view=RESERVATIONS&reservationId=${reservation.id}`,
+            tag: vipReservationTag(reservation.id),
+        }, { excludeUserId });
+    } catch (err: any) {
+        console.warn('[vip] avviso prenotazione VIP fallito:', err?.message || err);
+    }
+}
+
 async function markSharedNotificationsRead(tenantId: number, tags: string[]): Promise<void> {
     const clean = [...new Set(tags.filter(t => typeof t === 'string' && t.length > 0))];
     if (clean.length === 0) return;
@@ -31054,6 +31095,7 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
                 tag: `pending-${created.id}`,
             }
         ).catch(err => console.error('Push (public booking) failed:', err));
+        void notifyVipReservation(tenantId, { ...created, customer_name, guests: guestsNum, phone: created.phone ?? null }, `${date} ${time}`, null);
 
         // Fire-and-forget acknowledgement to the customer: "confermata" quando
         // il tavolo è stato assegnato in automatico, "richiesta ricevuta"
@@ -38398,6 +38440,7 @@ bookingTools.configureBookingTools({
     activityAction: ActivityAction,
     resourceType: ResourceType,
     pushSendToRoles,
+    notifyVipReservation,
     // socketService è inizializzato dopo il listen: le lambda lo leggono al
     // momento della chiamata, non alla configurazione.
     broadcastReservationCreated: (r: any) => socketService?.broadcastReservationCreated(Number(r.tenant_id) || PUBLIC_TENANT_ID, r),

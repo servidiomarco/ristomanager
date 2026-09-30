@@ -156,6 +156,9 @@ export interface BookingToolsDeps {
     activityAction: { CREATE: any; UPDATE: any; DELETE: any };
     resourceType: { RESERVATION: any };
     pushSendToRoles: (tenantId: number, roles: string[], payload: any, opts?: any) => Promise<any>;
+    /** Avviso a parte a titolare e direzione se chi prenota è VIP in rubrica.
+     *  Non lancia mai. */
+    notifyVipReservation: (tenantId: number, reservation: any, when: string, excludeUserId: number | null) => Promise<void>;
     broadcastReservationCreated: (r: any) => void;
     broadcastReservationUpdated: (r: any) => void;
     broadcastPaymentRequestCreated: (r: any) => void;
@@ -945,6 +948,7 @@ export async function createReservation(
             },
             { excludeUserId: null }
         ).catch((err: any) => console.error(`Push (${channel.id} reservation) failed:`, err));
+        void d.notifyVipReservation(tenantId, created, reservationLabel, null);
 
         // Con la caparra la frase di chiusura cambia: il cliente deve sapere
         // che il tavolo è garantito solo dopo il pagamento.

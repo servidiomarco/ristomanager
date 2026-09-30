@@ -302,6 +302,53 @@ describe('notifiche · lettura condivisa', () => {
         }
     });
 
+    it('prenotazione VIP: avviso a parte, che si spegne se la prenotazione sparisce', async () => {
+        const vipPhone = '3390000881';
+        const plainPhone = '3390000882';
+        await db.query(
+            `INSERT INTO customers (tenant_id, name, phone, is_vip) VALUES (1, 'Test Vip', $1, TRUE)`,
+            [vipPhone]
+        );
+        const ids: number[] = [];
+        const vipRow = async (reservationId: number) =>
+            (await db.query(
+                `SELECT read_at FROM notifications WHERE recipient_user_id = $1 AND tag = $2`,
+                [ownerId, `vip-${reservationId}`]
+            )).rows[0] ?? null;
+        const book = async (phone: string) => {
+            const res = await api().post('/reservations').set(bearer(manager)).send({
+                customer_name: 'Test Vip', phone, reservation_time: '2027-09-10T20:30:00',
+                shift: 'DINNER', guests: 4, children: 0,
+            });
+            expect(res.status).toBe(201);
+            ids.push(Number(res.body.id));
+            return Number(res.body.id);
+        };
+        try {
+            const vipId = await book(vipPhone);
+            let row: any = null;
+            for (let i = 0; i < 30 && !row; i++) {
+                row = await vipRow(vipId);
+                if (!row) await new Promise(r => setTimeout(r, 100));
+            }
+            expect(row).not.toBeNull();
+            expect(row.read_at).toBeNull();
+
+            const plainId = await book(plainPhone);
+            await new Promise(r => setTimeout(r, 500));
+            expect(await vipRow(plainId)).toBeNull();
+
+            const del = await api().delete(`/reservations/${vipId}`).set(bearer(owner));
+            expect(del.status).toBeLessThan(300);
+            expect((await vipRow(vipId)).read_at).not.toBeNull();
+        } finally {
+            await db.query(`DELETE FROM notifications WHERE tag LIKE 'vip-%' OR tag = ANY($1::text[])`,
+                [ids.flatMap(id => [`reservation-${id}`])]);
+            await db.query(`DELETE FROM reservations WHERE id = ANY($1::int[])`, [ids]);
+            await db.query(`DELETE FROM customers WHERE tenant_id = 1 AND phone = ANY($1::text[])`, [[vipPhone, plainPhone]]);
+        }
+    });
+
     it('la reception riceve le notifiche di prenotazione', async () => {
         const email = 'reception.notifiche@example.com';
         const created = await api().post('/auth/users').set(bearer(owner)).send({
