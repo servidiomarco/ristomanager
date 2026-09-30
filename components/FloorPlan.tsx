@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { flushSync, createPortal } from 'react-dom';
 import { Table, TableShape, Room, TableStatus, Reservation, ReservationSource, Shift, TableMerge, TableHiddenOverride, RoomClosedOverride, ArrivalStatus, ReservationStatus, BanquetMenu } from '../types';
-import { Plus, Pencil, Move, RectangleHorizontal, Square, Circle, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Sunset, Loader2, Info, RotateCw, Ruler, StickyNote, Eye, EyeOff, DoorClosed, DoorOpen, BookOpen, Mic, ChevronDown } from 'lucide-react';
+import { Plus, Pencil, Move, RectangleHorizontal, Square, Circle, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Sunset, Loader2, Info, RotateCw, Ruler, StickyNote, Star, Eye, EyeOff, DoorClosed, DoorOpen, BookOpen, Mic, ChevronDown } from 'lucide-react';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
 import { useTranslation } from 'react-i18next';
 import { deriveTableDisplayStatus, isSeated, useTableStatusLabel } from './reservationState';
@@ -126,6 +126,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   // tavolo unito (che mostra la SOMMA dei coperti) ogni tasto faceva saltare
   // il numero della capienza dei tavoli agganciati.
   const [seatsDraft, setSeatsDraft] = useState<{ id: number; value: string } | null>(null);
+  const [priorityDraft, setPriorityDraft] = useState<{ ids: number[]; value: string } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [isLegendOpen, setIsLegendOpen] = useState(false);
@@ -1166,6 +1167,16 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           </div>
         )}
 
+        {/* Priority Badge — solo mentre si modificano i tavoli (modalità o
+            barra di modifica aperta): in servizio il numero non dice niente a
+            chi porta i piatti. Fuori dalle modalità un tocco seleziona un solo
+            tavolo, ed è il modo comodo di numerarli uno dopo l'altro. */}
+        {table.assign_priority != null && canEdit && (isSelectionMode || layoutMode === 'manual' || selectedTables.length > 0) && !timerDisplay && (
+          <div className="absolute bg-[var(--ds-seated-solid)] text-[var(--ds-seated-fg)] text-[11px] font-semibold tabular-nums px-1.5 py-0.5 rounded-[var(--ds-radius-control)] flex items-center gap-0.5 border border-[var(--ds-canvas)] pointer-events-none" style={{ top: -4, right: -4 }}>
+            <Star size={8} className="fill-current" />{table.assign_priority}
+          </div>
+        )}
+
         {/* Hidden-for-shift Badge */}
         {isHidden && (
           <div className="absolute bg-[var(--ds-text-muted)] text-[var(--ds-surface)] text-[10px] font-semibold px-1.5 py-0.5 rounded-[var(--ds-radius-control)] flex items-center gap-0.5 border border-[var(--ds-canvas)] pointer-events-none" style={{ top: -4, left: -4 }}>
@@ -1198,6 +1209,34 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     const partnersSeats = singleSelectedTable.seats - raw.seats;
     handleSeatsChange(Math.max(1, Math.min(99, parsed - partnersSeats)));
   };
+
+  // Ordine nell'assegnazione automatica (Sofia, WhatsApp, sito): 1 prima di 2.
+  // La bozza porta con sé i tavoli per cui è stata scritta, perché il blur
+  // arriva anche toccando un altro tavolo, quando la selezione è già cambiata.
+  // Vuoto = nessuna priorità; lo stesso numero su più tavoli = pari merito, e
+  // fra loro vince il più piccolo che basta. Si legge da `tables`, non dalla
+  // vista unita, per non scrivere i coperti combinati sul tavolo principale.
+  const commitPriorityDraft = () => {
+    if (!priorityDraft) return;
+    const { ids, value } = priorityDraft;
+    setPriorityDraft(null);
+    const raw = value.trim();
+    const next = raw === '' ? null : parseInt(raw, 10);
+    if (next !== null && (!Number.isFinite(next) || next < 1 || next > 99)) return;
+    ids.forEach(id => {
+      const table = tables.find(t => t.id === id);
+      if (table && !table.is_locked && (table.assign_priority ?? null) !== next) {
+        onUpdateTable({ ...table, assign_priority: next });
+      }
+    });
+  };
+  // Il campo mostra il numero solo se tutti i tavoli selezionati lo
+  // condividono; con numeri diversi resta vuoto e scriverne uno li allinea.
+  const selectedPriorities = new Set(
+    selectedTables.map(id => tables.find(t => t.id === id)?.assign_priority ?? null)
+  );
+  const sharedPriorityText = selectedPriorities.size === 1 ? String([...selectedPriorities][0] ?? '') : '';
+  const selectionKey = selectedTables.join(',');
 
   // Portrait orientation gate — block floor plan on mobile portrait
   if (isPortrait) {
@@ -1588,6 +1627,27 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                     <Info size={16} />
                     <span className="hidden sm:inline">{tv('details')}</span>
                 </button>
+            )}
+
+            {/* Ordine nell'assegnazione automatica */}
+            {!selectedTables.some(id => tables.find(t => t.id === id)?.is_locked) && (
+                <label className={EDIT_FIELD_WRAP} title={tv('assignPriorityHint')}>
+                    <Star size={14} className="text-[var(--ds-text-muted)]" />
+                    <span className="hidden sm:inline text-[13px] text-[var(--ds-text-muted)]">{tv('assignPriority')}</span>
+                    <input
+                        type="number"
+                        min="1"
+                        max="99"
+                        inputMode="numeric"
+                        aria-label={tv('assignPriority')}
+                        placeholder="–"
+                        className="w-8 bg-transparent text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)] outline-none placeholder:text-[var(--ds-text-muted)]"
+                        value={priorityDraft && priorityDraft.ids.join(',') === selectionKey ? priorityDraft.value : sharedPriorityText}
+                        onChange={(e) => setPriorityDraft({ ids: [...selectedTables], value: e.target.value })}
+                        onBlur={commitPriorityDraft}
+                        onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                    />
+                </label>
             )}
 
             {/* Rotate Table */}
