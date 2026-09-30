@@ -462,15 +462,37 @@ describe('notifiche · lettura condivisa', () => {
         try {
             const mine = await insert(ownerId, 'voice', `voice-followup-${conv}`);
             const theirs = await insert(managerId, 'voice', `voice-followup-${conv}`);
+            // «Cliente da richiamare» chiesto a Sofia nella stessa telefonata.
+            const callback = await insert(managerId, 'voice', `voice-callback-${conv}`);
 
             const res = await api().patch(`/voice-calls/${callId}/follow-up`).set(bearer(owner)).send({ status: 'CONTACTED' });
             expect(res.status).toBe(200);
             expect(res.body.conversation_id).toBeUndefined();
             expect(await readAt(mine)).not.toBeNull();
             expect(await readAt(theirs)).not.toBeNull();
+            expect(await readAt(callback)).not.toBeNull();
         } finally {
-            await db.query(`DELETE FROM notifications WHERE tag = $1`, [`voice-followup-${conv}`]);
+            await db.query(`DELETE FROM notifications WHERE tag = ANY($1::text[])`,
+                [[`voice-followup-${conv}`, `voice-callback-${conv}`]]);
             await db.query(`DELETE FROM voice_calls WHERE id = $1`, [callId]);
+        }
+    });
+
+    it('Sofia: cambiato il tetto degli extra, gli avvisi sul tetto vecchio si spengono', async () => {
+        const ent = await api().put('/settings/entitlements').set(bearer(owner)).send({ voice: true });
+        expect(ent.status).toBe(200);
+        const capTag = 'voice-usage-2031-01-01-cap_80';
+        const includedTag = 'voice-usage-2031-01-01-included_100';
+        try {
+            const cap = await insert(managerId, 'voice', capTag);
+            const included = await insert(managerId, 'voice', includedTag);
+            const res = await api().put('/voice-usage/cap').set(bearer(owner)).send({ extra_cap_cents: 3000 });
+            expect(res.status).toBe(200);
+            expect(await readAt(cap)).not.toBeNull();
+            // «Minuti inclusi esauriti» resta vero anche col tetto nuovo.
+            expect(await readAt(included)).toBeNull();
+        } finally {
+            await db.query(`DELETE FROM notifications WHERE tag = ANY($1::text[])`, [[capTag, includedTag]]);
         }
     });
 
