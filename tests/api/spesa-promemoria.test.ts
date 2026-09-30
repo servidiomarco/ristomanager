@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Client } from 'pg';
 import { api, ownerToken, bearer } from './helpers';
+import { shoppingReminderBody } from '../../utils/shoppingReminder';
 
 // Promemoria della spesa: un solo avviso vivo per ristorante (tag
 // shopping-pending) che si chiude per tutti quando in lista non resta niente
@@ -72,6 +73,22 @@ describe('lista della spesa · promemoria', () => {
         const del = await api().delete(`/shopping/${limoni}`).set(bearer(owner));
         expect(del.status).toBe(204);
         expect(await readAt(id)).not.toBeNull();
+    });
+
+    it('il testo dice a chi ordinare quando ci sono fornitori', () => {
+        const item = (name: string, supplier: string | null = null) => ({ name, supplier });
+        // Senza fornitori: i primi articoli.
+        expect(shoppingReminderBody([item('Latte'), item('Farina')])).toBe('Latte, Farina');
+        expect(shoppingReminderBody(['Latte', 'Farina', 'Limoni', 'Uova', 'Sale'].map(n => item(n))))
+            .toBe('Latte, Farina, Limoni e altri 2');
+        // Con fornitori: per fornitore, più voci prima, le senza fornitore in coda.
+        expect(shoppingReminderBody([
+            item('Limoni', 'Ortofrutta Rossi'), item('Farina', 'Metro'), item('Sale'),
+            item('Olio', 'Metro'), item('Basilico', 'Ortofrutta Rossi'), item('Latte', 'Metro'), item('Uova'),
+        ])).toBe('Metro 3, Ortofrutta Rossi 2, senza fornitore 2');
+        // Oltre quattro fornitori: il resto in una voce sola.
+        expect(shoppingReminderBody(['A', 'B', 'C', 'D', 'E', 'F'].map(f => item('x', f))))
+            .toBe('A 1, B 1, C 1, D 1, altri 2 fornitori');
     });
 
     it('il promemoria di sistema è seminato e si configura come gli altri', async () => {

@@ -234,6 +234,7 @@ import {
 } from './utils/leavePlan.js';
 import { formatMoneyMinor } from './utils/money.js';
 import { HACCP_TEMPERATURE_LOCATIONS, haccpMissingTag, haccpTemperatureTag } from './utils/haccp.js';
+import { shoppingReminderBody } from './utils/shoppingReminder.js';
 import { buildEReceiptPayload, buildFatturaPaXml, getFiscalDriver, type FiscalSeller, type InvoiceBuyer } from './services/fiscalService.js';
 import {
     getAvailableSlots,
@@ -17482,19 +17483,19 @@ const SHOPPING_REMINDER_ROLES = ['OWNER', 'GENERAL_MANAGER', 'MANAGER'];
  *  mostra tutte le voci, di ogni giorno: il conteggio fa lo stesso. */
 async function runShoppingListReminder(tenantId: number, targetRoles: string[]): Promise<void> {
     const pending = await queryWithRetry(
-        `SELECT name FROM shopping_items
-          WHERE tenant_id = $1 AND checked = false
-          ORDER BY created_at ASC`,
+        `SELECT si.name, s.name AS supplier
+           FROM shopping_items si
+           LEFT JOIN suppliers s ON s.id = si.supplier_id AND s.tenant_id = si.tenant_id
+          WHERE si.tenant_id = $1 AND si.checked = false
+          ORDER BY si.created_at ASC`,
         [tenantId]
     );
-    const names: string[] = pending.rows.map((r: any) => r.name);
-    if (names.length === 0) return;
-    const shown = names.slice(0, 3).join(', ');
-    const rest = names.length > 3 ? ` e altri ${names.length - 3}` : '';
+    const rows: Array<{ name: string; supplier: string | null }> = pending.rows;
+    if (rows.length === 0) return;
     await pushSendToRoles(tenantId, targetRoles.length > 0 ? targetRoles : SHOPPING_REMINDER_ROLES, {
         category: 'system',
-        title: names.length === 1 ? 'Da comprare: 1 articolo' : `Da comprare: ${names.length} articoli`,
-        body: `${shown}${rest}`,
+        title: rows.length === 1 ? 'Da comprare: 1 articolo' : `Da comprare: ${rows.length} articoli`,
+        body: shoppingReminderBody(rows),
         url: '/?view=LISTA_DELLA_SPESA',
         tag: SHOPPING_REMINDER_TAG,
     });
