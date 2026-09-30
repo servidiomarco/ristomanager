@@ -103,6 +103,9 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
             // quanti il limiter di produzione ne conceda (5).
             PUBLIC_BOOKING_RATE_LIMIT: '1000',
             PUBLIC_ORDER_RATE_LIMIT: '1000',
+            // Avviso «cambio turno»: in produzione aspetta che la griglia
+            // smetta di scrivere (20 s); nei test basta un attimo.
+            SHIFT_CHANGE_NOTIFY_DELAY_MS: '300',
             JWT_REFRESH_SECRET: 'test-jwt-refresh-secret',
             DEFAULT_OWNER_PASSWORD: OWNER_PASSWORD,
             // Gate degli endpoint /admin/tenants (Fase D1): senza questo i

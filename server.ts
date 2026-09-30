@@ -235,6 +235,7 @@ import {
 import { formatMoneyMinor } from './utils/money.js';
 import { HACCP_TEMPERATURE_LOCATIONS, haccpMissingTag, haccpTemperatureTag } from './utils/haccp.js';
 import { shoppingReminderBody } from './utils/shoppingReminder.js';
+import { describeShiftChanges, shiftDayLabel, type ShiftDayChange } from './utils/staffShiftChange.js';
 import { buildEReceiptPayload, buildFatturaPaXml, getFiscalDriver, type FiscalSeller, type InvoiceBuyer } from './services/fiscalService.js';
 import {
     getAvailableSlots,
@@ -18227,6 +18228,142 @@ app.get('/staff/shifts', authenticate, async (req, res) => {
 // un pulito "non trovato".
 const STAFF_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// ---- Cambio turno -----------------------------------------------------------
+// «Il tuo turno è cambiato» alla persona il cui giorno cambia, se ha l'account
+// collegato alla scheda (staff_members.user_id, lo stesso delle ferie).
+//
+// La griglia salva un giorno con più chiamate in parallelo (crea pranzo,
+// cancella cena…) e una settimana con decine: avvisare a ogni riga vorrebbe
+// dire un telefono che suona venti volte e stati intermedi mai esistiti. Si
+// fotografa il giorno PRIMA della prima modifica, si aspetta che la persona
+// resti ferma SHIFT_CHANGE_NOTIFY_DELAY_MS, poi si confronta con il DOPO e si
+// manda un solo avviso con le sole differenze — «cena → cena» non esiste.
+// In memoria: un riavvio a metà finestra perde l'avviso, non il turno.
+const SHIFT_CHANGE_NOTIFY_DELAY_MS = Number(process.env.SHIFT_CHANGE_NOTIFY_DELAY_MS) || 20_000;
+// Solo il futuro vicino: correggere il foglio di ieri non è un cambio turno,
+// e le ferie lunghe hanno già il loro avviso (leave-decision-<id>).
+const SHIFT_CHANGE_WINDOW_DAYS = 30;
+
+/** I giorni di un'assenza, tagliati alla finestra dell'avviso: un'assenza
+ *  di tre mesi non deve fotografare novanta giorni. */
+const timeOffDates = (start: string, end: string): string[] => {
+    const out: string[] = [];
+    if (!/^\d{4}-\d{2}-\d{2}/.test(start) || !/^\d{4}-\d{2}-\d{2}/.test(end)) return out;
+    for (let d = start.slice(0, 10); d <= end.slice(0, 10) && out.length < 400; d = addDaysIso(d, 1)) out.push(d);
+    return out;
+};
+
+interface PendingShiftChange {
+    tenantId: number;
+    staffId: string;
+    actorId: number | null;
+    before: Map<string, string>;
+    // La foto in corso: le scritture parallele la aspettano, così nessuna
+    // arriva sul database prima che il «prima» sia stato letto.
+    ready: Promise<unknown>;
+    timer: ReturnType<typeof setTimeout> | null;
+}
+const pendingShiftChanges = new Map<string, PendingShiftChange>();
+
+async function staffDayLabels(tenantId: number, staffId: string, dates: string[]): Promise<{ userId: number | null; labels: Map<string, string> }> {
+    const labels = new Map<string, string>();
+    if (dates.length === 0) return { userId: null, labels };
+    const [staffRes, shiftRes, offRes] = await Promise.all([
+        queryWithRetry(
+            `SELECT user_id, staff_type, weekly_rest_day,
+                    to_char(hire_date, 'YYYY-MM-DD') AS hire_date,
+                    to_char(contract_end_date, 'YYYY-MM-DD') AS contract_end_date
+               FROM staff_members WHERE id = $1 AND tenant_id = $2`,
+            [staffId, tenantId]
+        ),
+        queryWithRetry(
+            `SELECT to_char(date, 'YYYY-MM-DD') AS date, shift, present FROM staff_shifts
+              WHERE staff_id = $1 AND tenant_id = $2 AND date = ANY($3::date[])`,
+            [staffId, tenantId, dates]
+        ),
+        queryWithRetry(
+            `SELECT to_char(start_date, 'YYYY-MM-DD') AS start_date, to_char(end_date, 'YYYY-MM-DD') AS end_date, shift, type
+               FROM staff_time_off
+              WHERE staff_id = $1 AND tenant_id = $2 AND start_date <= $4::date AND end_date >= $3::date`,
+            [staffId, tenantId, dates.reduce((a, b) => (a < b ? a : b)), dates.reduce((a, b) => (a > b ? a : b))]
+        ),
+    ]);
+    const row = staffRes.rows[0];
+    if (!row) return { userId: null, labels };
+    const staff = {
+        staffType: String(row.staff_type),
+        weeklyRestDay: row.weekly_rest_day === null ? null : Number(row.weekly_rest_day),
+        hireDate: row.hire_date ?? null,
+        contractEndDate: row.contract_end_date ?? null,
+    };
+    const shifts = shiftRes.rows.map((r: any) => ({ date: r.date, shift: r.shift, present: r.present !== false }));
+    const offs = offRes.rows.map((r: any) => ({ startDate: r.start_date, endDate: r.end_date, shift: r.shift ?? null, type: r.type }));
+    for (const d of dates) labels.set(d, shiftDayLabel(staff, d, shifts, offs));
+    return { userId: row.user_id ?? null, labels };
+}
+
+/** Da chiamare PRIMA di scrivere: fotografa i giorni toccati (solo la prima
+ *  volta nella finestra) e rimanda l'avviso. Non lancia mai. */
+async function noteShiftChange(tenantId: number, staffId: string, dates: string[], actorId: number | null): Promise<void> {
+    try {
+        const today = getItalianTodayIso(new Date(), (await getTenantLocale(tenantId)).timezone);
+        const last = addDaysIso(today, SHIFT_CHANGE_WINDOW_DAYS);
+        const inWindow = [...new Set(dates.filter(d => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}/.test(d)).map(d => d.slice(0, 10)))]
+            .filter(d => d >= today && d <= last);
+        if (inWindow.length === 0) return;
+        const key = `${tenantId}|${staffId}`;
+        let pending = pendingShiftChanges.get(key);
+        if (!pending) {
+            pending = { tenantId, staffId, actorId, before: new Map(), ready: Promise.resolve(), timer: null };
+            pendingShiftChanges.set(key, pending);
+        }
+        pending.actorId = actorId;
+        const fresh = inWindow.filter(d => !pending!.before.has(d));
+        if (fresh.length > 0) {
+            // Segnaposto subito, senza await di mezzo: due chiamate parallele
+            // sullo stesso giorno non devono fotografarlo due volte.
+            for (const d of fresh) pending.before.set(d, '');
+            const target = pending;
+            const shot = staffDayLabels(tenantId, staffId, fresh).then(({ labels }) => {
+                for (const d of fresh) target.before.set(d, labels.get(d) ?? '');
+            }).catch(() => { /* resta il segnaposto vuoto: quel giorno non si annuncia */ });
+            pending.ready = Promise.all([pending.ready, shot]);
+        }
+        await pending.ready;
+        if (pending.timer) clearTimeout(pending.timer);
+        pending.timer = setTimeout(() => { void flushShiftChange(key); }, SHIFT_CHANGE_NOTIFY_DELAY_MS);
+    } catch (err: any) {
+        console.warn('[turni] cambio turno non registrato:', err?.message || err);
+    }
+}
+
+async function flushShiftChange(key: string): Promise<void> {
+    const pending = pendingShiftChanges.get(key);
+    if (!pending) return;
+    pendingShiftChanges.delete(key);
+    try {
+        const dates = [...pending.before.keys()];
+        const { userId, labels } = await staffDayLabels(pending.tenantId, pending.staffId, dates);
+        // Nessun account collegato, o se l'è cambiato da solo: niente da dire.
+        if (!userId || userId === pending.actorId) return;
+        const changes: ShiftDayChange[] = dates
+            .map(d => ({ date: d, before: pending.before.get(d) ?? '', after: labels.get(d) ?? '' }))
+            .filter(c => c.before && c.after && c.before !== c.after);
+        if (changes.length === 0) return;
+        await pushSendToUser(userId, {
+            category: 'staff',
+            title: changes.length === 1 ? 'Il tuo turno è cambiato' : 'I tuoi turni sono cambiati',
+            body: describeShiftChanges(changes),
+            url: '/',
+            // Uno per persona: un secondo giro di modifiche aggiorna lo stesso
+            // avviso invece di impilarne un altro.
+            tag: `shift-change-${pending.staffId}`,
+        });
+    } catch (err: any) {
+        console.warn('[turni] avviso cambio turno fallito:', err?.message || err);
+    }
+}
+
 // Create shift
 app.post('/staff/shifts', authenticate, requirePermission('staff:full'), async (req, res) => {
     try {
@@ -18249,6 +18386,8 @@ app.post('/staff/shifts', authenticate, requirePermission('staff:full'), async (
         if (staffCheck.rows.length === 0) {
             return res.status(404).json({ error: 'Staff member not found' });
         }
+
+        await noteShiftChange(req.tenantId!, String(staffId), [String(date)], req.user?.userId ?? null);
 
         const result = await queryWithRetry(
             `INSERT INTO staff_shifts (tenant_id, staff_id, date, shift, present, notes)
@@ -18309,6 +18448,14 @@ app.post('/staff/shifts/bulk', authenticate, requirePermission('staff:full'), as
             return res.status(404).json({ error: 'Staff member not found' });
         }
 
+        const datesByStaff = new Map<string, string[]>();
+        for (const sh of shifts) {
+            const list = datesByStaff.get(String(sh.staffId)) ?? [];
+            list.push(String(sh.date));
+            datesByStaff.set(String(sh.staffId), list);
+        }
+        for (const [sid, dates] of datesByStaff) await noteShiftChange(req.tenantId!, sid, dates, req.user?.userId ?? null);
+
         const createdShifts = [];
         for (const shift of shifts) {
             const result = await queryWithRetry(
@@ -18342,6 +18489,14 @@ app.put('/staff/shifts/:id', authenticate, requirePermission('staff:full'), asyn
     try {
         const { id } = req.params;
         const { present, notes } = req.body;
+
+        const prevShift = await queryWithRetry(
+            `SELECT staff_id, to_char(date, 'YYYY-MM-DD') AS date FROM staff_shifts WHERE id = $1 AND tenant_id = $2`,
+            [id, req.tenantId!]
+        );
+        if (prevShift.rows[0]) {
+            await noteShiftChange(req.tenantId!, String(prevShift.rows[0].staff_id), [prevShift.rows[0].date], req.user?.userId ?? null);
+        }
 
         const result = await queryWithRetry(
             `UPDATE staff_shifts SET
@@ -18382,6 +18537,13 @@ app.put('/staff/shifts/:id', authenticate, requirePermission('staff:full'), asyn
 app.delete('/staff/shifts/:id', authenticate, requirePermission('staff:full'), async (req, res) => {
     try {
         const { id } = req.params;
+        const prevShift = await queryWithRetry(
+            `SELECT staff_id, to_char(date, 'YYYY-MM-DD') AS date FROM staff_shifts WHERE id = $1 AND tenant_id = $2`,
+            [id, req.tenantId!]
+        );
+        if (prevShift.rows[0]) {
+            await noteShiftChange(req.tenantId!, String(prevShift.rows[0].staff_id), [prevShift.rows[0].date], req.user?.userId ?? null);
+        }
         const result = await queryWithRetry('DELETE FROM staff_shifts WHERE id = $1 AND tenant_id = $2 RETURNING id', [id, req.tenantId!]);
 
         if (result.rows.length === 0) {
@@ -18475,6 +18637,8 @@ app.post('/staff/time-off', authenticate, requirePermission('staff:full'), async
             return res.status(404).json({ error: 'Staff member not found' });
         }
 
+        await noteShiftChange(req.tenantId!, String(staffId), timeOffDates(String(startDate), String(endDate)), req.user?.userId ?? null);
+
         const result = await queryWithRetry(
             `INSERT INTO staff_time_off (tenant_id, staff_id, start_date, end_date, type, shift, notes, approved)
              VALUES ($8, $1, $2, $3, $4, $5, $6, $7)
@@ -18519,6 +18683,21 @@ app.put('/staff/time-off/:id', authenticate, requirePermission('staff:full'), as
         // shift is set unconditionally when the key is present in the body so the
         // client can clear it (full day) by sending null; COALESCE wouldn't allow that.
         const shiftProvided = 'shift' in req.body;
+
+        // Il vecchio intervallo e il nuovo: spostare un'assenza cambia i giorni
+        // da cui esce come quelli in cui entra.
+        const prevOff = await queryWithRetry(
+            `SELECT staff_id, to_char(start_date, 'YYYY-MM-DD') AS start_date, to_char(end_date, 'YYYY-MM-DD') AS end_date
+               FROM staff_time_off WHERE id = $1 AND tenant_id = $2`,
+            [id, req.tenantId!]
+        );
+        if (prevOff.rows[0]) {
+            const p = prevOff.rows[0];
+            await noteShiftChange(req.tenantId!, String(p.staff_id), [
+                ...timeOffDates(p.start_date, p.end_date),
+                ...timeOffDates(String(startDate ?? p.start_date), String(endDate ?? p.end_date)),
+            ], req.user?.userId ?? null);
+        }
 
         const result = await queryWithRetry(
             `UPDATE staff_time_off SET
@@ -18572,6 +18751,15 @@ app.delete('/staff/time-off/:id', authenticate, requirePermission('staff:full'),
         // nascevano passa ad annullata PRIMA della DELETE — dopo, la FK
         // (ON DELETE SET NULL) l'avrebbe lasciata «approvata» senza assenza,
         // e il dipendente la vedrebbe ancora confermata.
+        const prevOff = await queryWithRetry(
+            `SELECT staff_id, to_char(start_date, 'YYYY-MM-DD') AS start_date, to_char(end_date, 'YYYY-MM-DD') AS end_date
+               FROM staff_time_off WHERE id = $1 AND tenant_id = $2`,
+            [id, req.tenantId!]
+        );
+        if (prevOff.rows[0]) {
+            const p = prevOff.rows[0];
+            await noteShiftChange(req.tenantId!, String(p.staff_id), timeOffDates(p.start_date, p.end_date), req.user?.userId ?? null);
+        }
         const cancelled = await queryWithRetry(
             `UPDATE staff_leave_requests SET status = 'CANCELLED', decided_by_user_id = $3, decided_at = now()
               WHERE time_off_id = $1 AND tenant_id = $2 AND status = 'APPROVED'

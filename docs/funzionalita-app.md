@@ -539,6 +539,7 @@ Modulo a parte (si attiva con l'abbonamento «recensioni»).
 - **Griglia turni settimanale** Lun–Dom: Pranzo, Cena, Pranzo e cena, Tutto il giorno, Riposo; inserimento massivo della settimana.
 - **Assenze**: malattia, permesso, riposo, per giornata intera o singolo turno.
 - **Chi è presente oggi** per turno (incrocio automatico di turni e assenze), mostrato anche in Dashboard.
+- **Avviso «il tuo turno è cambiato»**: chi ha l'account collegato alla propria scheda riceve una notifica quando un responsabile cambia i suoi turni o le sue assenze nei prossimi 30 giorni, con le sole differenze («sab 3 ott: cena → riposo»). Più modifiche fatte di seguito arrivano come un avviso solo, e tornare allo stato di prima non avvisa nessuno.
 - **Piano ferie** (area «Ferie» dentro Personale, accanto a Personale e Compensi):
   - **Richieste dei dipendenti**: chi ha l'account collegato alla propria scheda (lo collega il responsabile dal modulo del dipendente) chiede le ferie da **«Le mie ferie»** nel proprio profilo — date, nota, e subito quanti giorni costano. Vede il proprio monte (spettanti, approvate, in attesa, residue) e lo stato di ogni richiesta, può ritirarla finché è in attesa e riceve una notifica quando viene approvata o rifiutata (con il motivo).
   - Il responsabile può inserire una richiesta **per conto di un dipendente**, dal piano o dalla tab Assenze della sua scheda; chi decide sulle ferie riceve una notifica a ogni richiesta nuova, e il segmento «Ferie» mostra quante sono in attesa.
@@ -695,6 +696,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-30 | Personale, Notifiche | Nuovo avviso «il tuo turno è cambiato» a chi ha l'account collegato alla scheda: arriva quando un responsabile modifica turni o assenze dei prossimi 30 giorni, raggruppa le modifiche fatte di seguito e riporta solo le differenze («sab 3 ott: cena → riposo»). |
 | 2026-09-30 | Sale & Tavoli, Agente vocale "Sofia", Prenotazione online | Ordine di assegnazione dei tavoli: in «Modifica tavoli» il campo «Priorità» dà a ogni tavolo, in qualunque sala, un numero (1 prima di 2; stesso numero = pari merito) che l'assegnazione automatica (Sofia, WhatsApp, sito, pulsante del modulo) segue prima di ripiegare sul più piccolo che basta. Prima vinceva sempre il tavolo più piccolo creato per primo — al Vecchio Frantoio il 29 per ogni coppia — e il prompt della logica tavoli non poteva cambiarlo, perché entra in gioco solo per le prenotazioni senza tavolo. |
 | 2026-09-30 | Stampa termica e print agent | Nuova comanda stampata: «TAV» in grande con l'ora, icona del cameriere e coperti, uscita e partita nel tratteggio, piatti in colonna in maiuscolo con allergie «!» e totale pezzi; «AGGIUNTA» e «ANNULLO» in grande. Prima era tutta centrata, con «1 x Acqua Piccola» e senza cameriere. Richiede l'agente di stampa aggiornato sul PC di sala. |
 | 2026-09-30 | Attività, Notifiche | Le notifiche dei to-do (assegnato, promemoria cucina, pane) aprono la pagina Attività invece della Dashboard; riassegnando un to-do, l'avviso di assegnazione si chiude per chi lo aveva prima. |
