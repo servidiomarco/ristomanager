@@ -526,6 +526,7 @@ Modulo a parte (si attiva con l'abbonamento «recensioni»).
 - Liste Da fare / Oggi / Scadute / Mie / Fatte, con priorità (Alta/Media/Bassa), categoria/ambito (Generale, Prenotazione, Evento, Inventario, Manutenzione, Staff…), scadenze e **assegnazione a una persona o a un intero ruolo** (si assegna a pari grado o subordinati, mai verso l'alto).
 - Selezione multipla per completare o riaprire in blocco; aggiunta rapida dalla Dashboard.
 - **Attività generate dagli automatismi**: promemoria banchetti (72/48/24h) e **promemoria pane** (alle 20:00 conta i coperti di domani e crea il to-do con la quantità).
+- **Notifiche**: «todo assegnato», promemoria cucina e promemoria pane aprono direttamente la pagina Attività e si spengono per tutti quando il to-do è fatto o eliminato. Se un to-do passa a un'altra persona, l'avviso di assegnazione si chiude per chi lo aveva prima.
 
 ---
 
@@ -691,6 +692,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-30 | Attività, Notifiche | Le notifiche dei to-do (assegnato, promemoria cucina, pane) aprono la pagina Attività invece della Dashboard; riassegnando un to-do, l'avviso di assegnazione si chiude per chi lo aveva prima. |
 | 2026-09-30 | Lista della spesa, Notifiche | Il promemoria «da comprare» raggruppa gli articoli per fornitore («Metro 3, Ortofrutta Rossi 2, senza fornitore 2»), così dice a chi ordinare; senza fornitori assegnati elenca i primi articoli come prima. |
 | 2026-09-30 | Lista della spesa, Notifiche | Nuovo promemoria di sistema «da comprare»: di serie alle 9:30, configurabile in Impostazioni → Promemoria, avvisa solo se in lista ci sono articoli non spuntati e si chiude per tutti quando la lista è tutta comprata. |
 | 2026-09-29 | Inventario, Notifiche | «Scorta bassa» si spegne per tutti appena il prodotto viene ricaricato sopra soglia o eliminato, e si riaccende se ci ricade. |
