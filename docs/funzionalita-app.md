@@ -286,7 +286,7 @@ Due voci in sidebar: **Menu** (i piatti, organizzati in menu) e **Banchetti** (g
 - Wizard a passi: evento e cliente → coperti e tariffa (prezzo adulti, bambini, sconto in € o %) → composizione del menù per uscite → tavoli assegnati → note operative (Portate, Servizio, Mise en place). La composizione pesca dal menu Banchetti, o da un menu stagionale a scelta; ogni uscita ha il suo campo di ricerca per trovare il piatto per nome o categoria senza scorrere la lista.
 - **Registro pagamenti del banchetto**: acconti e saldo per contanti/carta/bonifico, stato Saldato / Parziale / Non pagato. Prezzi e pagamenti visibili solo ai ruoli autorizzati.
 - Calendario eventi e filtri temporali (questa settimana, questo mese, più avanti, passati).
-- **Promemoria automatici in cucina a 72, 48 e 24 ore** dall'evento, a priorità crescente, che si spostano da soli se la data cambia.
+- **Promemoria automatici in cucina a 72, 48 e 24 ore** dall'evento, a priorità crescente, che si spostano da soli se la data cambia. Se il banchetto viene eliminato o spostato, la notifica del vecchio promemoria si spegne per tutti insieme al promemoria.
 - Stampa della scheda evento; colore identificativo per evento visibile su tutte le superfici.
 - **Le sale chiuse restano assegnabili al banchetto**: nel passo «Tavoli assegnati» (e nel modale prenotazioni, se la prenotazione è collegata a un banchetto) le sale chiuse — per il turno o in via estesa — compaiono con il badge «Chiusa» invece di sparire. È il flusso «sala riservata all'evento»: si chiude la sala al servizio normale e la si assegna al banchetto, in qualunque ordine (le prenotazioni del banchetto non bloccano più la chiusura della sala).
 
@@ -696,6 +696,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-30 | Banchetti, Notifiche | Eliminando o spostando un banchetto, la notifica «Promemoria cucina» del promemoria che sparisce si spegne per tutti invece di restare da leggere sui telefoni della cucina. |
 | 2026-09-30 | Personale, Notifiche | Nuovo avviso «il tuo turno è cambiato» a chi ha l'account collegato alla scheda: arriva quando un responsabile modifica turni o assenze dei prossimi 30 giorni, raggruppa le modifiche fatte di seguito e riporta solo le differenze («sab 3 ott: cena → riposo»). |
 | 2026-09-30 | Sale & Tavoli, Agente vocale "Sofia", Prenotazione online | Ordine di assegnazione dei tavoli: in «Modifica tavoli» il campo «Priorità» dà a ogni tavolo, in qualunque sala, un numero (1 prima di 2; stesso numero = pari merito) che l'assegnazione automatica (Sofia, WhatsApp, sito, pulsante del modulo) segue prima di ripiegare sul più piccolo che basta. Prima vinceva sempre il tavolo più piccolo creato per primo — al Vecchio Frantoio il 29 per ogni coppia — e il prompt della logica tavoli non poteva cambiarlo, perché entra in gioco solo per le prenotazioni senza tavolo. |
 | 2026-09-30 | Stampa termica e print agent | Nuova comanda stampata: «TAV» in grande con l'ora, icona del cameriere e coperti, uscita e partita nel tratteggio, piatti in colonna in maiuscolo con allergie «!» e totale pezzi; «AGGIUNTA» e «ANNULLO» in grande. Prima era tutta centrata, con «1 x Acqua Piccola» e senza cameriere. Richiede l'agente di stampa aggiornato sul PC di sala. |
