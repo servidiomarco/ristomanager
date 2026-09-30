@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { flushSync, createPortal } from 'react-dom';
 import { Table, TableShape, Room, TableStatus, Reservation, ReservationSource, Shift, TableMerge, TableHiddenOverride, RoomClosedOverride, ArrivalStatus, ReservationStatus, BanquetMenu } from '../types';
-import { Plus, Pencil, RectangleHorizontal, Square, Circle, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Sunset, Loader2, Info, RotateCw, Ruler, StickyNote, Eye, EyeOff, DoorClosed, DoorOpen, BookOpen, Mic, ChevronDown } from 'lucide-react';
+import { Plus, Pencil, Move, RectangleHorizontal, Square, Circle, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Sunset, Loader2, Info, RotateCw, Ruler, StickyNote, Eye, EyeOff, DoorClosed, DoorOpen, BookOpen, Mic, ChevronDown } from 'lucide-react';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
 import { useTranslation } from 'react-i18next';
 import { deriveTableDisplayStatus, isSeated, useTableStatusLabel } from './reservationState';
@@ -58,16 +58,11 @@ const ROOM_TAB_IDLE =
 const ROOM_TAB_IDLE_CLOSED =
   'bg-[var(--ds-surface-row)] text-[var(--ds-text-subtle)] hover:bg-[var(--ds-border)] line-through';
 
-// A latched tool (selection mode, layout editing) has to read as "on" at a
-// glance, so it takes the solid. It used to take the arriving tint, and
+// A latched mode («Sposta tavoli», «Modifica tavoli») has to read as "on" at
+// a glance, so it takes the solid. It used to take the arriving tint, and
 // #f0f0fb next to the surface-row grey #f4f4f5 was the same colour to the eye:
 // in the room nobody could tell whether editing was on or off.
-// The icon-only variant restates dsIconButton's shape instead of extending it,
-// because dsIconButton carries its own hover background — on a latched tool it
-// would flash the button back to grey under the pointer.
 const TOOL_BUTTON_ON = 'bg-[var(--ds-arriving-solid)] text-[var(--ds-arriving-fg)]';
-const TOOL_ICON_BUTTON_ON =
-  'inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-solid)] text-[var(--ds-arriving-fg)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
 // Selection-toolbar actions: one 44px pill shape that takes an icon and an
 // optional short label, so "Unisci", "Dividi" and "Elimina" differ by tone
@@ -1184,7 +1179,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
   const singleSelectedTable = selectedTables.length === 1 ? displayTables.find(t => t.id === selectedTables[0]) : null;
 
-  // Manual layout is what «Modifica» turns on. The mode is remembered per
+  // Manual layout is what «Sposta tavoli» turns on. The mode is remembered per
   // device, so someone without floorplan:full can land in it with no way to
   // drag: the canvas only announces editing to those who can edit.
   const isEditingLayout = canEdit && layoutMode === 'manual';
@@ -1352,28 +1347,37 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         {/* Tools section - Only shown in edit mode */}
         {canEdit && (
         <div className="flex items-center gap-2 sm:border-l sm:pl-4 border-[var(--ds-border)] overflow-x-auto shrink-0 w-full sm:w-auto">
-          {/* Editing on/off. It was an unlabelled icon under a static
-              «Strumenti» caption, so the caption read as the button and
-              nothing on it said whether editing was on. Now the button names
-              itself and, while editing, turns solid and says how to get out
-              — «Fine» — like every other edit/done toggle. */}
+          {/* The two modes, each named for what it lets you do. They used to
+              be unlabelled icons under a static «Strumenti» caption, which
+              read as the button, and nothing said whether a mode was on.
+              The names stay put and «on» is the solid plus a check.
+              One mode at a time: in selection mode a press toggles the
+              selection and returns before a drag is armed, so with both on
+              «Sposta tavoli» looked active and moved nothing. */}
           <button
-            onClick={() => setLayoutMode(m => m === 'auto' ? 'manual' : 'auto')}
+            onClick={() => {
+              if (layoutMode === 'auto') setIsSelectionMode(false);
+              setLayoutMode(m => m === 'auto' ? 'manual' : 'auto');
+            }}
             className={`${EDIT_ACTION_BASE} ${layoutMode === 'manual' ? TOOL_BUTTON_ON : EDIT_ACTION_QUIET}`}
-            title={layoutMode === 'manual' ? tv('editDoneHint') : tv('editStartHint')}
+            title={layoutMode === 'manual' ? tv('moveDoneHint') : tv('moveStartHint')}
             aria-pressed={layoutMode === 'manual'}
           >
-              {layoutMode === 'manual' ? <Check className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
-              {layoutMode === 'manual' ? tv('editDone') : tv('edit')}
+              {layoutMode === 'manual' ? <Check className="h-4 w-4" /> : <Move className="h-4 w-4" />}
+              {tv('moveTables')}
           </button>
 
           <button
-            onClick={() => setIsSelectionMode(!isSelectionMode)}
-            className={isSelectionMode ? TOOL_ICON_BUTTON_ON : `${dsIconButton} shadow-none bg-[var(--ds-surface-row)]`}
-            title={tv('multiSelect')}
+            onClick={() => {
+              if (!isSelectionMode) setLayoutMode('auto');
+              setIsSelectionMode(!isSelectionMode);
+            }}
+            className={`${EDIT_ACTION_BASE} ${isSelectionMode ? TOOL_BUTTON_ON : EDIT_ACTION_QUIET}`}
+            title={isSelectionMode ? tv('editTablesDoneHint') : tv('editTablesStartHint')}
             aria-pressed={isSelectionMode}
           >
-              <CheckSquare className="h-4 w-4" />
+              {isSelectionMode ? <Check className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
+              {tv('editTables')}
           </button>
 
           {selectedTables.length > 0 && (
@@ -1693,7 +1697,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       {/* Canvas */}
       <div
         ref={canvasRef}
-        className={`flex-1 bg-[var(--ds-canvas)] rounded-[var(--ds-radius)] border border-dashed ${isEditingLayout ? 'border-[var(--ds-arriving-solid)]' : 'border-[var(--ds-border-strong)]'} transition-colors relative overflow-hidden ${isSelectionMode ? 'cursor-crosshair' : 'cursor-default'}`}
+        className={`flex-1 bg-[var(--ds-canvas)] rounded-[var(--ds-radius)] border border-dashed ${isEditingLayout || (canEdit && isSelectionMode) ? 'border-[var(--ds-arriving-solid)]' : 'border-[var(--ds-border-strong)]'} transition-colors relative overflow-hidden ${isSelectionMode ? 'cursor-crosshair' : 'cursor-default'}`}
         onClick={() => !isSelectionMode && setSelectedTables([])}
         style={{
             backgroundImage: 'radial-gradient(var(--floor-dot) 1px, transparent 1px)',
@@ -1744,24 +1748,18 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
               </div>
           )}
 
-          {isSelectionMode && (
-              <div className="absolute top-4 left-4 bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] px-3 py-1.5 rounded-[var(--ds-radius-control)] text-[13px] font-medium pointer-events-none flex items-center gap-2">
-                  <CheckSquare size={12} /> Modalità selezione attiva
-              </div>
-          )}
-
-          {/* The canvas-side half of the «Modifica» button: the pulse says the
+          {/* The canvas-side half of the two mode buttons: the pulse says the
               mode is live, the text says what it lets you do. Bottom-left,
               opposite the Legenda: manual layout pins the room to the top-left
               corner, so a chip up there sat on the first row of tables. */}
-          {isEditingLayout && (
+          {(isEditingLayout || (canEdit && isSelectionMode)) && (
               <div className="absolute bottom-4 left-4 z-10 flex h-11 items-center gap-2 px-4 bg-[var(--ds-arriving-solid)] text-[var(--ds-arriving-fg)] rounded-[var(--ds-radius-control)] text-[13px] font-medium shadow-[var(--ds-shadow-raised)] pointer-events-none">
                   <span className="relative flex h-2 w-2 flex-shrink-0" aria-hidden>
                       <span className="ds-live-dot absolute inset-0 rounded-full bg-[var(--ds-arriving-fg)]" />
                       <span className="relative inline-flex h-2 w-2 rounded-full bg-[var(--ds-arriving-fg)]" />
                   </span>
-                  <span className="font-semibold">{tv('editingActive')}</span>
-                  <span className="hidden sm:inline">· {tv('editingHint')}</span>
+                  <span className="font-semibold">{isEditingLayout ? tv('movingActive') : tv('editingTablesActive')}</span>
+                  <span className="hidden sm:inline">· {isEditingLayout ? tv('movingHint') : tv('editingTablesHint')}</span>
               </div>
           )}
 

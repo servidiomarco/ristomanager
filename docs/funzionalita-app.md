@@ -223,7 +223,7 @@ Modulo add-on (venduto a parte, come Recensioni) per gli ordini da ritirare — 
 Editor della piantina e stato della sala in tempo reale.
 
 - Disegno sale e tavoli: forme diverse, trascinamento con mouse **e touch**, rotazione, rinomina, numero coperti, blocco posizione, rilevazione sovrapposizioni.
-- **Pulsante «Modifica»** per spostare i tavoli: premuto diventa pieno e dice «Fine», la mappa prende il bordo colorato e il chip «Modifica attiva» con un punto che pulsa; con «Fine» le posizioni restano salvate e la mappa torna ordinata per numero.
+- **Due modalità con il loro nome**: «Sposta tavoli» (trascinamento) e «Modifica tavoli» (tocchi uno o più tavoli per rinominarli, cambiare i coperti, unirli, nasconderli o eliminarli). Una alla volta: la modalità attiva è piena con la spunta, la mappa prende il bordo colorato e un chip con un punto che pulsa dice cosa si può fare. Chiudendo «Sposta tavoli» le posizioni restano salvate e la mappa torna ordinata per numero. Fuori dalle modalità, un tocco su un tavolo apre comunque la sua barra di modifica.
 - **Unione tavoli** per il turno (e divisione), con le unioni visibili identiche su ogni schermo dell'app.
 - **Tavoli nascosti per turno** e **chiusura di una sala per turno** (o estesa), programmabili anche in anticipo dalle Impostazioni.
 - Legenda colori coerente con gli stati delle prenotazioni; ogni cambiamento si propaga live a tutti i dispositivi.
@@ -692,7 +692,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
-| 2026-09-30 | Sale & Tavoli | Lo spostamento dei tavoli si apre con un pulsante «Modifica» che, attivo, diventa pieno e dice «Fine», con bordo colorato e chip «Modifica attiva» sulla mappa; prima era un'icona senza nome sotto la scritta «Strumenti» e acceso o spento aveva quasi lo stesso colore. I pulsanti per aggiungere un tavolo mostrano la forma vera (rettangolo, quadrato, cerchio): prima il quadrato sembrava tondo e il rettangolo un ovale. |
+| 2026-09-30 | Sale & Tavoli | I due strumenti della piantina hanno un nome: «Sposta tavoli» e «Modifica tavoli» (prima icone senza nome sotto la scritta «Strumenti», con acceso e spento quasi dello stesso colore). Una modalità alla volta, attiva piena con la spunta, bordo colorato e chip sulla mappa. I pulsanti per aggiungere un tavolo mostrano la forma vera (rettangolo, quadrato, cerchio): prima il quadrato sembrava tondo e il rettangolo un ovale. |
 | 2026-09-30 | Lista della spesa, Notifiche | Il promemoria «da comprare» raggruppa gli articoli per fornitore («Metro 3, Ortofrutta Rossi 2, senza fornitore 2»), così dice a chi ordinare; senza fornitori assegnati elenca i primi articoli come prima. |
 | 2026-09-30 | Lista della spesa, Notifiche | Nuovo promemoria di sistema «da comprare»: di serie alle 9:30, configurabile in Impostazioni → Promemoria, avvisa solo se in lista ci sono articoli non spuntati e si chiude per tutti quando la lista è tutta comprata. |
 | 2026-09-29 | Inventario, Notifiche | «Scorta bassa» si spegne per tutti appena il prodotto viene ricaricato sopra soglia o eliminato, e si riaccende se ci ricade. |
