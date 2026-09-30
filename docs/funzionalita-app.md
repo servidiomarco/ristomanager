@@ -551,7 +551,7 @@ Modulo a parte (si attiva con l'abbonamento «recensioni»).
 
 - Prodotti con categoria, unità di misura, quantità e **soglia di scorta**; **aree di conservazione** (celle, ripiani — Cucina / Sala / Bar) con quantità distribuite per area.
 - Movimenti di carico, scarico, rettifica e trasferimento.
-- **Avviso automatico sotto scorta** (push ai responsabili e alla cucina) e riquadro in Dashboard.
+- **Avviso automatico sotto scorta** (push ai responsabili e alla cucina) e riquadro in Dashboard. L'avviso si chiude per tutti appena il prodotto viene ricaricato sopra soglia o eliminato, e si riapre se ci ricade.
 - Categorie e aree riordinabili; stampa dell'inventario con distribuzione per area.
 
 ---
@@ -690,6 +690,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-29 | Inventario, Notifiche | «Scorta bassa» si spegne per tutti appena il prodotto viene ricaricato sopra soglia o eliminato, e si riaccende se ci ricade. |
 | 2026-09-29 | HACCP, Notifiche | Due avvisi nuovi sul registro temperature: «temperatura fuori soglia» a titolare, direzione e cucina appena un valore supera il limite (si chiude quando la postazione torna in soglia) e il promemoria di sistema «temperature mancanti», di serie alle 11:00 e configurabile in Impostazioni → Promemoria, che avvisa solo se il registro di oggi è incompleto e si chiude quando è completo. |
 | 2026-09-29 | Notifiche, Reception | Le notifiche di prenotazione (nuova, richiesta, modificata, annullata — dal CRM, dal sito, da Sofia e da WhatsApp) arrivano anche alla reception, prima esclusa. |
 | 2026-09-29 | Notifiche, Asporto | «Asporto — nuovo ordine» si spegne per tutti appena l'ordine è preso in carico (cambio di stato o «Manda in cucina»); «Pronto l'ordine di…» si spegne al ritiro, all'annullamento o al non ritirato. |

@@ -15246,6 +15246,8 @@ const ALLOWED_INVENTORY_AREAS = new Set(['CUCINA', 'SALA', 'BAR']);
 const ALLOWED_MOVEMENT_REASONS = new Set(['CARICO', 'SCARICO', 'RETTIFICA', 'TRASFERIMENTO']);
 const LOW_STOCK_THRESHOLD = 5;
 const LOW_STOCK_ALERT_ROLES = ['OWNER', 'GENERAL_MANAGER', 'KITCHEN'];
+// Il tag della push «scorta bassa»: la stessa chiave la chiude al ricarico.
+const lowStockTag = (productId: number): string => `low-stock-${productId}`;
 
 // GET /inventory/locations?area=CUCINA — all locations, optionally filtered.
 app.get('/inventory/locations', authenticate, requirePermission('inventory:view'), async (req, res) => {
@@ -15652,6 +15654,8 @@ app.delete('/inventory/products/:id', authenticate, requirePermission('inventory
             return res.status(404).json({ error: 'Product not found' });
         }
         await queryWithRetry('DELETE FROM inventory_products WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
+        // Un prodotto che non esiste più non può essere sotto scorta.
+        await markSharedNotificationsRead(req.tenantId!, [lowStockTag(Number(id))]);
         if (req.user) {
             LogService.logActivity(
                 req.tenantId!,
@@ -15827,7 +15831,9 @@ app.post('/inventory/movements', authenticate, requirePermission('inventory:full
         if (totalBefore > LOW_STOCK_THRESHOLD && totalAfter <= LOW_STOCK_THRESHOLD) {
             const unit = v.p_unit ? ` ${v.p_unit}` : '';
             const qtyText = Number.isInteger(totalAfter) ? String(totalAfter) : totalAfter.toFixed(1);
-            pushSendToRoles(
+            // Attesa prima della risposta: un ricarico subito dopo deve già
+            // trovare la riga da chiudere.
+            await pushSendToRoles(
                 req.tenantId!,
                 LOW_STOCK_ALERT_ROLES,
                 {
@@ -15835,9 +15841,13 @@ app.post('/inventory/movements', authenticate, requirePermission('inventory:full
                     title: 'Scorta bassa',
                     body: `${v.p_name}: ${qtyText}${unit} rimanenti`,
                     url: '/?view=INVENTARIO',
-                    tag: `low-stock-${productId}`,
+                    tag: lowStockTag(productId),
                 }
             ).catch(err => console.error('Push (low stock) failed:', err));
+        } else if (totalBefore <= LOW_STOCK_THRESHOLD && totalAfter > LOW_STOCK_THRESHOLD) {
+            // Ricaricato sopra soglia: la «scorta bassa» non ha più niente da
+            // dire, si chiude per tutti — anche per chi non l'aveva aperta.
+            await markSharedNotificationsRead(req.tenantId!, [lowStockTag(productId)]);
         }
 
         res.status(201).json({
