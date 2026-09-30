@@ -62,6 +62,7 @@ export const FINISH_REVIEW_REQUEST_SQL = `
        SET review_request_status = $1::varchar,
            review_request_channel = $2::varchar,
            review_request_sent_at = CASE WHEN $1::varchar = 'sent' THEN CURRENT_TIMESTAMP ELSE review_request_sent_at END,
+           review_request_failed_at = CASE WHEN $1::varchar = 'failed' THEN CURRENT_TIMESTAMP ELSE review_request_failed_at END,
            review_request_error = $3::text
      WHERE id = $4::int
        AND tenant_id = $5::bigint
@@ -102,6 +103,44 @@ export async function finishReviewRequest(
     error: string | null = null
 ): Promise<void> {
     await queryWithRetry(FINISH_REVIEW_REQUEST_SQL, [status, channel, error, reservationId, tenantId]);
+}
+
+// ---- Avviso «richieste di recensione non partite» -------------------------
+// Uno al giorno per ristorante (tag per data): ogni nuovo fallimento della
+// giornata aggiorna lo stesso avviso, e aprire la pagina Recensioni lo chiude
+// per tutti — è lì che si vede cosa è andato storto e a chi.
+
+export const reviewFailureTag = (date: string): string => `review-failed-${date}`;
+
+export interface FailedReviewRequest {
+    customerName: string | null;
+    error: string | null;
+}
+
+// L'errore arriva dal provider (Twilio, Meta, SMTP) ed è pensato per un log:
+// sul blocco schermo ne basta l'inizio.
+const shortError = (error: string | null): string => {
+    const clean = String(error ?? '').replace(/\s+/g, ' ').trim();
+    if (!clean) return '';
+    if (clean.length <= 40) return clean;
+    // Al confine di parola: «violates a bla…» si legge peggio di «violates a…».
+    const cut = clean.slice(0, 39);
+    const space = cut.lastIndexOf(' ');
+    return `${(space > 20 ? cut.slice(0, space) : cut).trimEnd()}…`;
+};
+
+/** «2 richieste di recensione non partite» · «Rossi (numero non valido), Bianchi». */
+export function reviewFailureDigest(rows: FailedReviewRequest[]): { title: string; body: string } {
+    const title = rows.length === 1
+        ? '1 richiesta di recensione non partita'
+        : `${rows.length} richieste di recensione non partite`;
+    const parts = rows.slice(0, 3).map(r => {
+        const name = (r.customerName ?? '').trim() || 'cliente senza nome';
+        const err = shortError(r.error);
+        return err ? `${name} (${err})` : name;
+    });
+    const rest = rows.length - parts.length;
+    return { title, body: parts.join(', ') + (rest > 0 ? ` e altre ${rest}` : '') };
 }
 
 /** Una richiesta è già uscita verso questo numero negli ultimi `days` giorni? */
