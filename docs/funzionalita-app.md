@@ -692,7 +692,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
-| 2026-09-30 | Sale & Tavoli | Lo spostamento dei tavoli si apre con un pulsante «Modifica» che, attivo, diventa pieno e dice «Fine», con bordo colorato e chip «Modifica attiva» sulla mappa; prima era un'icona senza nome sotto la scritta «Strumenti» e acceso o spento aveva quasi lo stesso colore. |
+| 2026-09-30 | Sale & Tavoli | Lo spostamento dei tavoli si apre con un pulsante «Modifica» che, attivo, diventa pieno e dice «Fine», con bordo colorato e chip «Modifica attiva» sulla mappa; prima era un'icona senza nome sotto la scritta «Strumenti» e acceso o spento aveva quasi lo stesso colore. I pulsanti per aggiungere un tavolo mostrano la forma vera (rettangolo, quadrato, cerchio): prima il quadrato sembrava tondo e il rettangolo un ovale. |
 | 2026-09-30 | Lista della spesa, Notifiche | Il promemoria «da comprare» raggruppa gli articoli per fornitore («Metro 3, Ortofrutta Rossi 2, senza fornitore 2»), così dice a chi ordinare; senza fornitori assegnati elenca i primi articoli come prima. |
 | 2026-09-30 | Lista della spesa, Notifiche | Nuovo promemoria di sistema «da comprare»: di serie alle 9:30, configurabile in Impostazioni → Promemoria, avvisa solo se in lista ci sono articoli non spuntati e si chiude per tutti quando la lista è tutta comprata. |
 | 2026-09-29 | Inventario, Notifiche | «Scorta bassa» si spegne per tutti appena il prodotto viene ricaricato sopra soglia o eliminato, e si riaccende se ci ricade. |

@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { flushSync, createPortal } from 'react-dom';
 import { Table, TableShape, Room, TableStatus, Reservation, ReservationSource, Shift, TableMerge, TableHiddenOverride, RoomClosedOverride, ArrivalStatus, ReservationStatus, BanquetMenu } from '../types';
-import { Plus, Pencil, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Sunset, Loader2, Info, RotateCw, Ruler, StickyNote, Eye, EyeOff, DoorClosed, DoorOpen, BookOpen, Mic, ChevronDown } from 'lucide-react';
+import { Plus, Pencil, RectangleHorizontal, Square, Circle, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Sunset, Loader2, Info, RotateCw, Ruler, StickyNote, Eye, EyeOff, DoorClosed, DoorOpen, BookOpen, Mic, ChevronDown } from 'lucide-react';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
 import { useTranslation } from 'react-i18next';
 import { deriveTableDisplayStatus, isSeated, useTableStatusLabel } from './reservationState';
@@ -1388,14 +1388,19 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
           <div className="h-6 w-px bg-[var(--ds-border)] mx-1"></div>
 
-          <button onClick={() => handleAddTable(TableShape.RECTANGLE)} className={`${dsIconButton} bg-[var(--ds-surface-row)] shadow-none`} title={tv('shapeRect')}>
-            <div className="w-6 h-4 border-2 border-current rounded-[var(--ds-radius-sm)]" />
+          {/* Add-table shapes. The glyph IS the table's geometry, so it takes
+              fixed icons rather than the radius tokens: those follow the
+              interface style, and in «classico» an 8px corner on a 16px box
+              drew the square as a circle and the rectangle as a pill — you
+              could not tell which button made which table. */}
+          <button onClick={() => handleAddTable(TableShape.RECTANGLE)} className={`${dsIconButton} bg-[var(--ds-surface-row)] shadow-none`} title={tv('shapeRect')} aria-label={tv('shapeRect')}>
+            <RectangleHorizontal className="h-5 w-5" />
           </button>
-          <button onClick={() => handleAddTable(TableShape.SQUARE)} className={`${dsIconButton} bg-[var(--ds-surface-row)] shadow-none`} title={tv('shapeSquare')}>
-            <div className="w-4 h-4 border-2 border-current rounded-[var(--ds-radius-sm)]" />
+          <button onClick={() => handleAddTable(TableShape.SQUARE)} className={`${dsIconButton} bg-[var(--ds-surface-row)] shadow-none`} title={tv('shapeSquare')} aria-label={tv('shapeSquare')}>
+            <Square className="h-5 w-5" />
           </button>
-          <button onClick={() => handleAddTable(TableShape.CIRCLE)} className={`${dsIconButton} bg-[var(--ds-surface-row)] shadow-none`} title={tv('shapeRound')}>
-             <div className="w-4 h-4 border-2 border-current rounded-[var(--ds-radius-control)]" />
+          <button onClick={() => handleAddTable(TableShape.CIRCLE)} className={`${dsIconButton} bg-[var(--ds-surface-row)] shadow-none`} title={tv('shapeRound')} aria-label={tv('shapeRound')}>
+            <Circle className="h-5 w-5" />
           </button>
 
           <div className="h-6 w-px bg-[var(--ds-border)] mx-1"></div>
