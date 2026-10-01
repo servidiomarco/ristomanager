@@ -173,6 +173,7 @@
   "copied": "Copied",
   "copyLink": "Copy the link",
   "openPage": "Open the page",
+  "translations": "Translations",
   "translateNew": "Translate the new items",
   "translateHint": "English, French and German. Only untranslated items: you can run it again after every import.",
   "allTranslated": "Everything is already translated.",
