@@ -1059,31 +1059,6 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // canvas element mounts/unmounts (e.g. when viewMode or isPhone changes).
   const [mapCanvasNode, setMapCanvasNode] = useState<HTMLDivElement | null>(null);
   const [mapCanvasSize, setMapCanvasSize] = useState({ width: 0, height: 0 });
-  // Mirror the layout mode chosen in Sale & Tavoli so both maps stay in sync.
-  // 'auto' = tidy rows via computeAutoLayout; 'manual' = saved x/y positions.
-  const [layoutMode, setLayoutMode] = useState<'auto' | 'manual'>(() => {
-    if (typeof window === 'undefined') return 'auto';
-    try {
-      const saved = window.localStorage.getItem('floorPlan.layoutMode');
-      return saved === 'manual' ? 'manual' : 'auto';
-    } catch { return 'auto'; }
-  });
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const sync = () => {
-      try {
-        const saved = window.localStorage.getItem('floorPlan.layoutMode');
-        setLayoutMode(saved === 'manual' ? 'manual' : 'auto');
-      } catch {}
-    };
-    // Re-check when the tab regains focus so toggles made elsewhere stick.
-    window.addEventListener('focus', sync);
-    window.addEventListener('storage', sync);
-    return () => {
-      window.removeEventListener('focus', sync);
-      window.removeEventListener('storage', sync);
-    };
-  }, []);
   useEffect(() => {
     if (!mapCanvasNode) {
       setMapCanvasSize({ width: 0, height: 0 });
@@ -4182,21 +4157,19 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     const activeRoomFill = typeof activeMapRoomId === 'number' ? roomFillById.get(activeMapRoomId) : undefined;
 
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
-    // Layout mirrors the choice made in Sale & Tavoli (floorPlan.layoutMode):
-    //  - auto: tidy flowing rows via computeAutoLayout, shaped to the canvas
-    //  - manual: the saved x/y of each table, so this map shows the same
-    //    planimetry the user drew in the editor.
+    // Come in Sale & Tavoli, la mappa mostra sempre le posizioni salvate: la
+    // planimetria vera, quella disegnata con «Sposta tavoli». Prima seguiva
+    // la vista scelta lì (righe ordinate per numero oppure posizioni vere) e
+    // cambiava da sola quando qualcuno spostava i tavoli. Le righe ordinate
+    // restano solo come misura di una sala vuota.
     const layoutAspect = mapCanvasSize.width > 0 && mapCanvasSize.height > 0
       ? Math.min(2.6, Math.max(0.6, mapCanvasSize.width / mapCanvasSize.height))
       : 1.6;
-    // Mirror the layout chosen in Sale & Tavoli so both views match:
-    //  - manual: the saved x/y of each table (the real planimetry)
-    //  - auto: tidy spaced rows via computeAutoLayout
     const mapLayout = computeAutoLayout(tablesInRoom, layoutAspect);
     let extentWidth: number;
     let extentHeight: number;
     let layoutPositions: Map<number, { x: number; y: number }> | undefined;
-    if (layoutMode === 'manual' && tablesInRoom.length > 0) {
+    if (tablesInRoom.length > 0) {
       // Pad the extent for the wrapped card's overhang (wider than the glyph and
       // extending below it) so edge cards aren't clipped.
       let maxRight = 0;
@@ -4247,11 +4220,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     const banquetColorByBanquetId = buildBanquetColorClassMap(banquetGroups.map(b => b.id));
 
     // Fit into the canvas minus a safe margin so tables never touch the edges
-    // or collide with the floating Legenda button in the corner. Manual layout
-    // mirrors Sale & Tavoli: never zoom past 1:1 — the user laid the room out
-    // at real size and an artificial zoom would skew their intent.
+    // or collide with the floating Legenda button in the corner, with the
+    // same zoom cap as Sale & Tavoli so the two maps read alike.
     const FIT_M = 28;
-    const scaleCap = layoutMode === 'manual' ? 1.5 : 2;
+    const scaleCap = 1.5;
     const scale = (!isMobile && mapCanvasSize.width > 0 && mapCanvasSize.height > 0)
       ? Math.min(
           Math.max(1, mapCanvasSize.width - FIT_M * 2) / extentWidth,

@@ -7,12 +7,11 @@ import { useTranslation } from 'react-i18next';
 import { deriveTableDisplayStatus, isSeated, useTableStatusLabel } from './reservationState';
 import { useNow } from '../hooks/useNow';
 import { Loader } from './Loader';
-import { computeAutoLayout } from '../utils/tableLayout';
 import { datePart, timePart } from '../utils/displayTime';
 import { buildFloorLabels } from '../utils/labelPlacement';
 import { buildBanquetColorClassMap } from '../utils/banquetColors';
 import { BanquetLabel } from './ReservationCard';
-import { snapToGrid, collidesWithOthers, findOverlappingPairs, getTableFootprint, FLOOR_CLEARANCE } from '../utils/tableOverlap';
+import { snapToGrid, collidesWithOthers, findOverlappingPairs, getTableFootprint, FLOOR_CLEARANCE, FLOOR_GRID } from '../utils/tableOverlap';
 import { toTitleCase, getInitials } from '../utils/text';
 import { getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getRoomClosed, createRoomClosed, deleteRoomClosed } from '../services/apiService';
 import { applyMerges } from '../utils/tableMerge';
@@ -159,18 +158,13 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   const [roomClosureAnchor, setRoomClosureAnchor] = useState<DOMRect | null>(null);
   const roomClosureButtonRef = useRef<HTMLButtonElement | null>(null);
 
-  // Layout mode: 'auto' uses computed tidy rows; 'manual' uses saved x/y and
-  // re-enables drag-to-position so the floor plan can mirror the real room.
-  const [layoutMode, setLayoutMode] = useState<'auto' | 'manual'>(() => {
-    if (typeof window === 'undefined') return 'auto';
-    try {
-      const saved = window.localStorage.getItem('floorPlan.layoutMode');
-      return saved === 'manual' ? 'manual' : 'auto';
-    } catch { return 'auto'; }
-  });
-  useEffect(() => {
-    try { window.localStorage.setItem('floorPlan.layoutMode', layoutMode); } catch {}
-  }, [layoutMode]);
+  // «Sposta tavoli» sblocca il trascinamento, e basta: la piantina mostra
+  // SEMPRE le posizioni salvate, la sala com'è davvero. Prima lo stesso
+  // bottone cambiava anche la vista — spento, i tavoli si ridisponevano in
+  // righe ordinate per numero e la disposizione vera si vedeva solo
+  // spostando. Non si ricorda fra un'apertura e l'altra: lasciato acceso,
+  // in servizio un tocco lungo sposterebbe un tavolo per sbaglio.
+  const [isMoving, setIsMoving] = useState(false);
 
   // Portrait orientation gate (floor-plan only, mobile/touch devices)
   const [isPortrait, setIsPortrait] = useState(() => {
@@ -490,27 +484,11 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     // Apply per-shift hide override unless the user toggled "show hidden".
     .filter(t => showHidden || !hiddenTableIds.has(t.id));
 
-  // Lay tables out into tidy flowing rows at render time, shaped to the canvas.
-  // Positions are computed fresh from the tables actually shown (after merges /
-  // hidden overrides), so every date stays neat regardless of merge state.
-  const layoutAspect = canvasSize.width > 0 && canvasSize.height > 0
-    ? Math.min(2.6, Math.max(0.6, canvasSize.width / canvasSize.height))
-    : 1.6;
-  const autoLayout = useMemo(
-    () => computeAutoLayout(currentTables, layoutAspect),
-    [currentTables, layoutAspect]
-  );
-  // Bounding box used to size the inner canvas. In auto mode it comes from
-  // the tidy layout; in manual mode it's the extent of the saved x/y plus the
-  // glyph footprint so dragged tables never escape the scaled wrapper.
+  // Bounding box used to size the inner canvas: the extent of the saved x/y
+  // plus the glyph footprint, so dragged tables never escape the scaled
+  // wrapper. Combined with contentOffset=(0,0) below, tables render at their
+  // real arrangement and only shrink if they overflow the canvas.
   const roomExtent = useMemo(() => {
-    if (layoutMode === 'auto') {
-      return { width: autoLayout.width, height: autoLayout.height };
-    }
-    // Manual mode: natural bounding box of the saved positions. Combined with
-    // contentOffset=(0,0) and scale≤1 below this matches the pre-PR floor
-    // plan: tables render at their real size and only shrink if they overflow
-    // the canvas.
     const PADDING = 60;
     if (currentTables.length === 0) return { width: 800, height: 600 };
     let maxRight = 0;
@@ -521,7 +499,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       maxBottom = Math.max(maxBottom, t.y + h);
     }
     return { width: maxRight + PADDING, height: maxBottom + PADDING };
-  }, [layoutMode, autoLayout, currentTables]);
+  }, [currentTables]);
 
   const scale = useMemo(() => {
     if (canvasSize.width === 0 || canvasSize.height === 0) return 1;
@@ -532,34 +510,28 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     const availH = Math.max(1, canvasSize.height - M * 2);
     const sx = availW / roomExtent.width;
     const sy = availH / roomExtent.height;
-    // Allow zoom-in so a sparse room actually fills the canvas. Manual mode
-    // still caps lower than auto so the drag math (which mixes scaleRef with
-    // pointer deltas) stays predictable on dense rooms.
-    return Math.min(sx, sy, layoutMode === 'manual' ? 1.5 : 2);
-  }, [canvasSize, roomExtent, layoutMode]);
+    // Allow zoom-in so a sparse room actually fills the canvas, capped so the
+    // drag math (which mixes scaleRef with pointer deltas) stays predictable.
+    return Math.min(sx, sy, 1.5);
+  }, [canvasSize, roomExtent]);
 
   useEffect(() => { scaleRef.current = scale; }, [scale]);
 
-  // Center the scaled room within the canvas so leftover space is even.
-  // In manual mode we pin the offset to (0,0): re-centering when the
-  // bounding box grows would visually drag every table back toward its
-  // original spot, which feels like the drop didn't take.
-  const contentOffset = useMemo(() => {
-    if (layoutMode === 'manual') return { x: 0, y: 0 };
-    return {
-      x: Math.max(0, (canvasSize.width - roomExtent.width * scale) / 2),
-      y: Math.max(0, (canvasSize.height - roomExtent.height * scale) / 2),
-    };
-  }, [canvasSize, roomExtent, scale, layoutMode]);
+  // The room is pinned to the top-left corner, moving or not: re-centering
+  // when the bounding box grows would visually drag every table back toward
+  // its original spot mid-drag, which feels like the drop didn't take — and
+  // a centred view that jumped to the corner on «Sposta tavoli» would look
+  // like the tables had moved.
+  const contentOffset = { x: 0, y: 0 };
 
   // Detect pre-existing overlaps among the visible tables of the active room.
-  // Only meaningful in manual mode (auto-tidy never overlaps). Older layouts
-  // were spaced before chairs were added, so some saved positions now collide —
-  // we flag them rather than moving anything.
+  // Older layouts were spaced before chairs were added, and a room never
+  // arranged by hand has its tables piled where they were created — we flag
+  // them rather than moving anything. Only to those who can fix it.
   const overlapPairs = useMemo(() => {
-    if (layoutMode !== 'manual') return [];
+    if (!canEdit) return [];
     return findOverlappingPairs(currentTables);
-  }, [layoutMode, currentTables]);
+  }, [canEdit, currentTables]);
 
   // Stable signature of the colliding set so a dismissed banner reappears only
   // when the actual set of overlaps changes.
@@ -663,12 +635,9 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
   // Collision-aware reservation cards + banquet hulls/labels for the floor.
   const floorLabels = useMemo(() => {
-    const labelTables = currentTables.map(t => {
-      const pos = layoutMode === 'manual'
-        ? { x: t.x, y: t.y }
-        : (autoLayout.positions.get(t.id) || { x: t.x, y: t.y });
-      return { id: t.id, shape: t.shape, seats: t.seats, rotation: t.rotation ?? 0, x: pos.x, y: pos.y };
-    });
+    const labelTables = currentTables.map(t => (
+      { id: t.id, shape: t.shape, seats: t.seats, rotation: t.rotation ?? 0, x: t.x, y: t.y }
+    ));
     const banquetDataById = new Map<number, BanquetMenu>();
     const banquetTableIds = new Map<number, number[]>();
     for (const t of currentTables) {
@@ -696,7 +665,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     const banquetColorByBanquetId = buildBanquetColorClassMap(banquetGroups.map(b => b.id));
     return { ...result, banquetDataById, banquetGroups, banquetColorByBanquetId };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentTables, autoLayout, layoutMode, banquetByTableId, selectedTables, reservations]);
+  }, [currentTables, banquetByTableId, selectedTables, reservations]);
 
   const getDynamicTableStatus = (table: Table): TableStatus => {
     const now = Date.now();
@@ -758,7 +727,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
     // In auto mode positions are computed at render time, so press only
     // selects. In manual mode arm a real drag against the saved x/y.
-    if (layoutMode !== 'manual') return;
+    if (!isMoving) return;
 
     dragStateRef.current = {
       isDragging: true,
@@ -902,7 +871,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
     // In auto mode positions are computed at render time; in manual mode
     // arm a real drag.
-    if (layoutMode !== 'manual') return;
+    if (!isMoving) return;
 
     const touch = e.touches[0];
     dragStateRef.current = {
@@ -931,6 +900,23 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     handleMouseUp(); // Reuse mouse up logic
   };
 
+  // Un tavolo nuovo nasce nel primo posto libero della sala, non sopra un
+  // altro: la piantina mostra le posizioni vere, e a (50,50) fisso finiva
+  // sopra il tavolo dell'angolo. Si cerca a passi di due celle di griglia
+  // dentro la larghezza già occupata, riga dopo riga; i tavoli nascosti per
+  // il turno contano, perché tornano.
+  const freeSpotFor = (draft: Table): { x: number; y: number } => {
+    const others = tables.filter(t => t.room_id === activeRoomId);
+    const step = FLOOR_GRID * 2;
+    const maxX = Math.max(800, ...others.map(t => t.x + getGlyphDimensions(t.shape, t.seats).width));
+    for (let y = step; y < 6000; y += step) {
+      for (let x = step; x < maxX; x += step) {
+        if (collidesWithOthers(draft, x, y, others).length === 0) return { x, y };
+      }
+    }
+    return { x: 50, y: 50 };
+  };
+
   const handleAddTable = (shape: TableShape) => {
     if (!activeRoomId) return;
     const newTable: Omit<Table, 'id'> = {
@@ -943,7 +929,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       status: TableStatus.FREE,
       is_locked: false
     };
-    onAddTable(newTable);
+    onAddTable({ ...newTable, ...freeSpotFor({ ...newTable, id: -1 } as Table) });
   };
 
   const handleToggleLock = () => {
@@ -972,7 +958,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   // in manual mode, where positions are the saved x/y. Auto mode reflows and can
   // never overlap, so it's always allowed there.
   const editWouldOverlap = (proposed: Table): boolean => {
-      if (layoutMode !== 'manual') return false;
+      if (!isMoving) return false;
       return collidesWithOthers(proposed, proposed.x, proposed.y, currentTables).length > 0;
   };
 
@@ -1104,11 +1090,9 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
     const accentVar = displayStatus !== 'libera' ? `var(--tg-${displayStatus}-accent)` : undefined;
 
-    const pos = layoutMode === 'manual'
-      ? { x: table.x, y: table.y }
-      : (autoLayout.positions.get(table.id) || { x: table.x, y: table.y });
+    const pos = { x: table.x, y: table.y };
 
-    const isDraggable = canEdit && layoutMode === 'manual' && !table.is_locked && !isTempLocked;
+    const isDraggable = canEdit && isMoving && !table.is_locked && !isTempLocked;
 
     return (
       <div
@@ -1171,7 +1155,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             barra di modifica aperta): in servizio il numero non dice niente a
             chi porta i piatti. Fuori dalle modalità un tocco seleziona un solo
             tavolo, ed è il modo comodo di numerarli uno dopo l'altro. */}
-        {table.assign_priority != null && canEdit && (isSelectionMode || layoutMode === 'manual' || selectedTables.length > 0) && !timerDisplay && (
+        {table.assign_priority != null && canEdit && (isSelectionMode || isMoving || selectedTables.length > 0) && !timerDisplay && (
           <div className="absolute bg-[var(--ds-seated-solid)] text-[var(--ds-seated-fg)] text-[11px] font-semibold tabular-nums px-1.5 py-0.5 rounded-[var(--ds-radius-control)] flex items-center gap-0.5 border border-[var(--ds-canvas)] pointer-events-none" style={{ top: -4, right: -4 }}>
             <Star size={8} className="fill-current" />{table.assign_priority}
           </div>
@@ -1190,10 +1174,8 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
   const singleSelectedTable = selectedTables.length === 1 ? displayTables.find(t => t.id === selectedTables[0]) : null;
 
-  // Manual layout is what «Sposta tavoli» turns on. The mode is remembered per
-  // device, so someone without floorplan:full can land in it with no way to
-  // drag: the canvas only announces editing to those who can edit.
-  const isEditingLayout = canEdit && layoutMode === 'manual';
+  // The canvas announces «Sposta tavoli» only to those who can drag.
+  const isEditingLayout = canEdit && isMoving;
 
   // Applica la bozza coperti. Il campo mostra i coperti COMBINATI (tavolo +
   // agganciati): il numero digitato va riportato al valore grezzo del tavolo
@@ -1395,20 +1377,20 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
               «Sposta tavoli» looked active and moved nothing. */}
           <button
             onClick={() => {
-              if (layoutMode === 'auto') setIsSelectionMode(false);
-              setLayoutMode(m => m === 'auto' ? 'manual' : 'auto');
+              if (!isMoving) setIsSelectionMode(false);
+              setIsMoving(m => !m);
             }}
-            className={`${EDIT_ACTION_BASE} ${layoutMode === 'manual' ? TOOL_BUTTON_ON : EDIT_ACTION_QUIET}`}
-            title={layoutMode === 'manual' ? tv('moveDoneHint') : tv('moveStartHint')}
-            aria-pressed={layoutMode === 'manual'}
+            className={`${EDIT_ACTION_BASE} ${isMoving ? TOOL_BUTTON_ON : EDIT_ACTION_QUIET}`}
+            title={isMoving ? tv('moveDoneHint') : tv('moveStartHint')}
+            aria-pressed={isMoving}
           >
-              {layoutMode === 'manual' ? <Check className="h-4 w-4" /> : <Move className="h-4 w-4" />}
+              {isMoving ? <Check className="h-4 w-4" /> : <Move className="h-4 w-4" />}
               {tv('moveTables')}
           </button>
 
           <button
             onClick={() => {
-              if (!isSelectionMode) setLayoutMode('auto');
+              if (!isSelectionMode) setIsMoving(false);
               setIsSelectionMode(!isSelectionMode);
             }}
             className={`${EDIT_ACTION_BASE} ${isSelectionMode ? TOOL_BUTTON_ON : EDIT_ACTION_QUIET}`}
@@ -1810,7 +1792,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
           {/* The canvas-side half of the two mode buttons: the pulse says the
               mode is live, the text says what it lets you do. Bottom-left,
-              opposite the Legenda: manual layout pins the room to the top-left
+              opposite the Legenda: the room is pinned to the top-left
               corner, so a chip up there sat on the first row of tables. */}
           {(isEditingLayout || (canEdit && isSelectionMode)) && (
               <div className="absolute bottom-4 left-4 z-10 flex h-11 items-center gap-2 px-4 bg-[var(--ds-arriving-solid)] text-[var(--ds-arriving-fg)] rounded-[var(--ds-radius-control)] text-[13px] font-medium shadow-[var(--ds-shadow-raised)] pointer-events-none">

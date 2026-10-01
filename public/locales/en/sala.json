@@ -37,7 +37,7 @@
   "restoreAllTitle": null,
   "moveTables": "Move tables",
   "moveStartHint": "Move tables: drag them to place them as in the real room.",
-  "moveDoneHint": "Finish moving: positions stay saved and the floor plan goes back to ordering by number.",
+  "moveDoneHint": "Finish moving: positions stay saved.",
   "movingActive": "Moving on",
   "movingHint": "drag tables to move them",
   "editTables": "Edit tables",

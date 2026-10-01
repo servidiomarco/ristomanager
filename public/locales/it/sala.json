@@ -37,7 +37,7 @@
   "restoreAllTitle": null,
   "moveTables": "Sposta tavoli",
   "moveStartHint": "Sposta i tavoli: trascinali per posizionarli come nella sala vera.",
-  "moveDoneHint": "Termina lo spostamento: le posizioni restano salvate e la piantina torna ordinata per numero.",
+  "moveDoneHint": "Termina lo spostamento: le posizioni restano salvate.",
   "movingActive": "Spostamento attivo",
   "movingHint": "trascina i tavoli per spostarli",
   "editTables": "Modifica tavoli",
