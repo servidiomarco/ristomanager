@@ -39,6 +39,7 @@ import { VOICE_CHANNEL, WHATSAPP_CHANNEL, type ToolOutcome } from './services/bo
 import { TENANT_FEATURES, getTenantFeatures, isFeatureEnabledForTenant, invalidateTenantFeaturesCache, clearTenantFeaturesCache, type TenantFeature } from './services/entitlements.js';
 import { clearTenantLocaleCache, getTenantLocale, sqlTimeZone } from './services/tenantLocale.js';
 import { normalizePhoneE164 } from './utils/phone.js';
+import { AI_KEY_INVALID, AI_KEY_INVALID_MESSAGE, isAiKeyInvalid } from './utils/aiErrors.js';
 import { provisionTenant, ProvisioningError } from './services/tenantProvisioning.js';
 import {
     createCheckoutSession,
@@ -5231,6 +5232,14 @@ app.put('/dishes/:id/enabled', authenticate, requirePermission('menu:full'), asy
     }
 });
 
+// Chiave AI rifiutata da Anthropic: 503 con un messaggio che dice cosa fare,
+// invece del 500 generico. Vale per tutte le rotte AI che rispondono a uno
+// schermo; il log resta per chi guarda Railway.
+function sendAiKeyInvalid(res: express.Response, route: string, err: any) {
+    console.error(`${route}: chiave Anthropic rifiutata —`, err?.message || err);
+    return res.status(503).json({ error: AI_KEY_INVALID, message: AI_KEY_INVALID_MESSAGE });
+}
+
 // Traduce in batch le voci mancanti (piatti attivi + categorie) nelle lingue
 // del menu. Idempotente: ritradurre non tocca ciò che è già tradotto — per
 // rifare una traduzione si svuota translations dal DB (caso raro, niente UI).
@@ -5312,6 +5321,7 @@ app.post('/menu/translate', authenticate, requirePermission('menu:full'), async 
         try { socketService?.broadcastToAll(req.tenantId!, 'dish:synced', { tradotte }); } catch (_) {}
         res.json({ tradotte, lingue: richieste, tokens });
     } catch (err: any) {
+        if (isAiKeyInvalid(err)) return sendAiKeyInvalid(res, 'POST /menu/translate', err);
         console.error('POST /menu/translate error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
     }
@@ -5370,6 +5380,7 @@ app.post('/dishes/:id/suggest-pairings', authenticate, requirePermission('menu:f
         trackWinePairingUsage(req.tenantId!, req.user?.email || null, prompt, output);
         res.json({ wine_dish_ids: mappa.get(dishId) ?? [] });
     } catch (err: any) {
+        if (isAiKeyInvalid(err)) return sendAiKeyInvalid(res, 'POST /dishes/:id/suggest-pairings', err);
         console.error('POST /dishes/:id/suggest-pairings error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
     }
@@ -5420,6 +5431,7 @@ app.post('/menu/pair-wines', authenticate, requirePermission('menu:full'), async
         }
         res.json({ abbinati, candidati: daAbbinare.rows.length, tokens: prompt + output });
     } catch (err: any) {
+        if (isAiKeyInvalid(err)) return sendAiKeyInvalid(res, 'POST /menu/pair-wines', err);
         console.error('POST /menu/pair-wines error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
     }
@@ -9543,6 +9555,7 @@ app.post('/email/threads/:emailKey/suggest-booking', authenticate, requirePermis
             reason: result.booking ? null : (result.reason || 'Nessuna richiesta di prenotazione trovata in questa email'),
         });
     } catch (err: any) {
+        if (isAiKeyInvalid(err)) return sendAiKeyInvalid(res, 'POST /email/threads/:emailKey/suggest-booking', err);
         if (err instanceof EmailBookingExtractionError) {
             const status = err.kind === 'not_configured' ? 503 : 502;
             return res.status(status).json({ error: err.kind, message: err.message });
@@ -9806,6 +9819,7 @@ app.post('/reports/ai-summary', authenticate, requireReportsAccess, async (req, 
 
         res.json({ report: markdown, days: giorni });
     } catch (err: any) {
+        if (isAiKeyInvalid(err)) return sendAiKeyInvalid(res, 'POST /reports/ai-summary', err);
         if (err instanceof aiReport.AiReportError) {
             const status = err.kind === 'not_configured' ? 503 : err.kind === 'no_data' ? 400 : 502;
             return res.status(status).json({ error: err.kind, message: err.message });
@@ -10038,6 +10052,7 @@ app.post('/messages/suggest-reply', authenticate, requirePermission('reservation
             reservation_linked: resv.rows.length > 0,
         });
     } catch (err: any) {
+        if (isAiKeyInvalid(err)) return sendAiKeyInvalid(res, 'POST /messages/suggest-reply', err);
         if (err instanceof AiReplyError) {
             const status = err.kind === 'not_configured' ? 503 : err.kind === 'no_knowledge' ? 400 : 502;
             return res.status(status).json({ error: err.kind, message: err.message });
@@ -10156,6 +10171,7 @@ app.post('/messages/agent/run', authenticate, requirePermission('reservations:fu
             knowledge_count: kb.rows.length,
         });
     } catch (err: any) {
+        if (isAiKeyInvalid(err)) return sendAiKeyInvalid(res, 'POST /messages/agent/run', err);
         if (err instanceof whatsappAgent.AgentError) {
             const status = err.kind === 'not_configured' ? 503 : err.kind === 'no_knowledge' ? 400 : 502;
             return res.status(status).json({ error: err.kind, message: err.message });
@@ -10227,6 +10243,7 @@ app.post('/messages/agent/extract-booking', authenticate, requirePermission('res
             },
         });
     } catch (err: any) {
+        if (isAiKeyInvalid(err)) return sendAiKeyInvalid(res, 'POST /messages/agent/extract-booking', err);
         if (err instanceof whatsappAgent.AgentError) {
             const status = err.kind === 'not_configured' ? 503 : 502;
             return res.status(status).json({ error: err.kind, message: err.message });
