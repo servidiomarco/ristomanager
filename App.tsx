@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChevronUp, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, AlertTriangle, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator, BarChart3, Star, ShoppingBag } from 'lucide-react';
-import { ViewState, Room, Table, Dish, RestaurantMenu, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, UserRole, ReservationSource, ReservationStatus } from './types';
+import { ViewState, Room, Table, Dish, RestaurantMenu, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Shift, UserRole, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
 import { MenuManager } from './components/MenuManager';
@@ -665,6 +665,34 @@ const App: React.FC = () => {
     window.addEventListener('focus', onFocus);
     return () => { cancelled = true; window.removeEventListener('focus', onFocus); };
   }, [isAuthenticated, canSeeVoiceCalls]);
+  // Chiamate cambiate altrove (nuova telefonata, richiamata chiesta, segnata
+  // ricontattata da un collega): badge e pagina Chiamate si rileggono. Il
+  // server manda solo il segnale; più segnali ravvicinati (fine chiamata +
+  // chiusura dei tentativi precedenti) fanno un giro solo.
+  useEffect(() => {
+    if (!isAuthenticated || !canSeeVoiceCalls) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const onChanged = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = null;
+        voiceCallsApiService.pendingCount()
+          .then(({ count }) => setVoiceCallsPendingCount(count))
+          .catch(() => {});
+        setVoiceCallsRefreshTick(tick => tick + 1);
+      }, 300);
+    };
+    let attached: ReturnType<typeof socketClient.getSocket> = null;
+    const attach = (s: ReturnType<typeof socketClient.getSocket>) => {
+      if (attached === s) return;
+      if (attached) attached.off('voiceCall:changed', onChanged);
+      attached = s;
+      if (attached) attached.on('voiceCall:changed', onChanged);
+    };
+    attach(socketClient.getSocket());
+    const unsub = socketClient.onSocketChange((s) => attach(s));
+    return () => { if (timer) clearTimeout(timer); unsub(); attach(null); };
+  }, [isAuthenticated, canSeeVoiceCalls]);
   // Re-fetch when leaving the Conversazioni page so the badge reflects any
   // reservations linked from calls the user just handled.
   useEffect(() => {
@@ -859,8 +887,8 @@ const App: React.FC = () => {
   // Cassa · «Apri in Comande»: il tavolo da aprire appena la vista monta.
   const [pendingComandeTableId, setPendingComandeTableId] = useState<number | null>(null);
 
-  // Email and Notifiche unread badges — poll on view change + on focus, no
-  // socket wiring for now (both endpoints are cheap).
+  // Email and Notifiche unread badges — refreshed on view change and on
+  // focus; the email one also live, on the server's email:new / email:read.
   const [emailUnreadCount, setEmailUnreadCount] = useState(0);
   const canSeeEmail = canAccessView(ViewState.EMAIL);
   // Stesso pre-riscaldamento di Messaggi e Chiamate: la lista thread è pronta
@@ -883,6 +911,37 @@ const App: React.FC = () => {
     window.addEventListener('focus', onFocus);
     return () => { cancelled = true; window.removeEventListener('focus', onFocus); };
   }, [isAuthenticated, canSeeEmail, view]);
+  // Una email arrivata o letta altrove (un collega, un altro dispositivo):
+  // il badge si riallinea subito. Prima restava fermo fino a un cambio pagina
+  // — e il PC della reception, sulla stessa schermata per ore, non ne fa.
+  useEffect(() => {
+    if (!isAuthenticated || !canSeeEmail) return;
+    const refresh = () => {
+      emailApiService.unreadCount()
+        .then(({ count }) => setEmailUnreadCount(count))
+        .catch(() => {});
+    };
+    const onRead = (payload: { email_key?: string }) => {
+      refresh();
+      if (payload?.email_key) emailCache.markThreadRead(payload.email_key);
+    };
+    let attached: ReturnType<typeof socketClient.getSocket> = null;
+    const attach = (s: ReturnType<typeof socketClient.getSocket>) => {
+      if (attached === s) return;
+      if (attached) {
+        attached.off('email:new', refresh);
+        attached.off('email:read', onRead);
+      }
+      attached = s;
+      if (attached) {
+        attached.on('email:new', refresh);
+        attached.on('email:read', onRead);
+      }
+    };
+    attach(socketClient.getSocket());
+    const unsub = socketClient.onSocketChange((s) => attach(s));
+    return () => { unsub(); attach(null); };
+  }, [isAuthenticated, canSeeEmail]);
 
   const [notificationsUnreadCount, setNotificationsUnreadCount] = useState(0);
   // The bell is a dropdown on pointer-sized screens and a link to the full
@@ -1237,179 +1296,17 @@ const App: React.FC = () => {
   // pageshow, socket reconnect) never flash the skeleton over real data.
   const [isInitialDataLoading, setIsInitialDataLoading] = useState(true);
 
-  // Notification State — persisted to localStorage so they survive PWA
-  // reloads and mobile app suspend/resume (iOS drops websocket in background
-  // and would otherwise lose the bell history).
-  const NOTIFICATIONS_STORAGE_KEY = 'ristomanager_notifications_v1';
-  const NOTIFICATIONS_MAX = 50;
-  const [notifications, setNotifications] = useState<Notification[]>(() => {
-    try {
-      const raw = localStorage.getItem(NOTIFICATIONS_STORAGE_KEY);
-      if (!raw) return [];
-      const parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed)) return [];
-      return parsed.map((n: any) => ({
-        ...n,
-        timestamp: new Date(n.timestamp),
-      })).filter((n: Notification) => !isNaN(n.timestamp.getTime()));
-    } catch {
-      return [];
-    }
-  });
+  // Il vecchio campanello delle prenotazioni viveva in localStorage, con la
+  // sua «letta» per dispositivo, e da tempo non era più mostrato: il centro
+  // notifiche del server l'ha sostituito. Si toglie il residuo dai browser.
   useEffect(() => {
-    try {
-      const serializable = notifications.slice(0, NOTIFICATIONS_MAX).map(n => ({
-        ...n,
-        timestamp: n.timestamp.toISOString(),
-      }));
-      localStorage.setItem(NOTIFICATIONS_STORAGE_KEY, JSON.stringify(serializable));
-    } catch { /* quota or private mode — ignore */ }
-  }, [notifications]);
+    try { localStorage.removeItem('ristomanager_notifications_v1'); } catch { /* private mode */ }
+  }, []);
 
   // Latest reservations snapshot for socket handlers (avoids stale closures).
   const reservationsRef = useRef<Reservation[]>([]);
   useEffect(() => { reservationsRef.current = reservations; }, [reservations]);
 
-  // Channel label for the bell notification title. For MANUAL (in-app)
-  // reservations we prefer the creator's actual name so the shared Reception
-  // account doesn't just read "Utente" over and over.
-  const channelLabelForReservation = (res: Reservation): string => {
-    switch (res.source) {
-      case ReservationSource.WHATSAPP: return 'WhatsApp';
-      case ReservationSource.VOICE: return t('entity.voiceAgent');
-      case ReservationSource.GOOGLE: return 'Web';
-      case ReservationSource.MANUAL:
-      default:
-        return toTitleCase((res.created_by_user_name || '').trim()) || t('entity.user');
-    }
-  };
-
-  type ReservationNotifKind = 'created' | 'confirmed' | 'declined' | 'cancelled' | 'noshow' | 'deleted';
-
-  // Push a reservation notification into the bell dropdown. Deduplicates
-  // repeats for the same reservation+kind within a 5s window so that local
-  // optimistic actions + their socket rebroadcast don't produce two entries.
-  const addReservationNotification = (res: Reservation, kind: ReservationNotifKind) => {
-    const name = toTitleCase(res.customer_name);
-    const when = (() => {
-      try {
-        const dt = new Date(res.reservation_time);
-        return dt.toLocaleString('it-IT', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
-      } catch { return res.reservation_time; }
-    })();
-    const source = channelLabelForReservation(res);
-    let title = '';
-    let message = '';
-    let type: Notification['type'] = 'info';
-    switch (kind) {
-      case 'created':
-        title = t('toast.newBookingFrom', { fonte: source });
-        message = `${name} · ${res.guests} ospiti · ${when}`;
-        type = 'info';
-        break;
-      case 'confirmed':
-        title = t('toast.bookingConfirmed');
-        message = `${name} · ${res.guests} ospiti · ${when}`;
-        type = 'success';
-        break;
-      case 'declined':
-        title = t('toast.bookingDeclined');
-        message = `${name} · ${when}`;
-        type = 'warning';
-        break;
-      case 'cancelled':
-        title = t('toast.bookingCancelled');
-        message = `${name} · ${when}`;
-        type = 'warning';
-        break;
-      case 'noshow':
-        title = t('toast.bookingNoShow');
-        message = `${name} · ${when}`;
-        type = 'warning';
-        break;
-      case 'deleted':
-        title = t('toast.bookingDeleted');
-        message = `${name} · ${when}`;
-        type = 'warning';
-        break;
-    }
-    setNotifications(prev => {
-      const now = Date.now();
-      const isDup = prev.some(n =>
-        n.reservationId === res.id
-        && n.title === title
-        && (now - n.timestamp.getTime()) < 5000
-      );
-      if (isDup) return prev;
-      return [{
-        id: Math.random().toString(),
-        title, message, type,
-        reservationId: res.id,
-        timestamp: new Date(),
-        read: false,
-      }, ...prev].slice(0, NOTIFICATIONS_MAX);
-    });
-  };
-
-  // Rebuild bell entries for reservations created in the last window from the
-  // server payload. Needed for mobile/PWA sessions that were closed (or with
-  // a suspended socket) when the reservation was actually created — without
-  // this the bell would be empty on those devices even though the reservation
-  // is visible in the list.
-  const BELL_HYDRATE_WINDOW_MS = 6 * 60 * 60 * 1000; // 6h
-  const hydrateBellFromRecentReservations = (list: Reservation[]) => {
-    const cutoff = Date.now() - BELL_HYDRATE_WINDOW_MS;
-    const recent = list.filter(r => {
-      if (!r.created_at) return false;
-      const t = new Date(r.created_at).getTime();
-      return !isNaN(t) && t >= cutoff;
-    });
-    if (recent.length === 0) return;
-    setNotifications(prev => {
-      const existingReservationIds = new Set(
-        prev.map(n => n.reservationId).filter((v): v is number => v != null)
-      );
-      const additions: Notification[] = [];
-      for (const r of recent) {
-        if (existingReservationIds.has(r.id)) continue;
-        const when = (() => {
-          try {
-            const dt = new Date(r.reservation_time);
-            return dt.toLocaleString('it-IT', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-          } catch { return ''; }
-        })();
-        const name = toTitleCase(r.customer_name);
-        const channel = channelLabelForReservation(r);
-        additions.push({
-          id: `hydrate-${r.id}-${r.created_at}`,
-          title: t('toast.newBookingFrom', { fonte: channel }),
-          message: `${name} · ${when}`,
-          type: 'info',
-          reservationId: r.id,
-          timestamp: new Date(r.created_at as string),
-          read: false,
-        });
-      }
-      if (additions.length === 0) return prev;
-      const merged = [...additions, ...prev];
-      merged.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-      return merged.slice(0, NOTIFICATIONS_MAX);
-    });
-  };
-
-  // Classify a reservation update as a notification-worthy status transition.
-  // Returns null for edits that shouldn't spam the bell (notes/guests/table).
-  const classifyReservationUpdate = (prev: Reservation, next: Reservation): ReservationNotifKind | null => {
-    const prevStatus = prev.reservation_status;
-    const nextStatus = next.reservation_status;
-    if (prevStatus !== nextStatus) {
-      if (nextStatus === ReservationStatus.CANCELLED) return 'cancelled';
-      if (nextStatus === ReservationStatus.DECLINED) return 'declined';
-      if (nextStatus === ReservationStatus.NO_SHOW) return 'noshow';
-      if (nextStatus === ReservationStatus.CONFIRMED && prevStatus === ReservationStatus.PENDING) return 'confirmed';
-    }
-    return null;
-  };
 
   // Dedup, timer e rendering vivono nel ToastProvider (contexts/ToastContext):
   // qui resta solo il nome, che continua a scendere per props ai figli.
@@ -1604,7 +1501,6 @@ const App: React.FC = () => {
       setMenus(menusData);
       setBanquetMenus(banquetMenusData);
       setReservations(mergeReservationsById(reservationsData, reservationsArchiveRef.current));
-      hydrateBellFromRecentReservations(reservationsData);
       // Solo un giro ANDATO A BUON FINE vale come «dati freschi»: se è
       // fallito, il rientro successivo deve poter riprovare subito.
       lastFetchDataAtRef.current = Date.now();
@@ -1660,19 +1556,13 @@ const App: React.FC = () => {
         return [...prev, reservation];
       });
       addToast(t('toast.newBookingNamed', { nome: toTitleCase(reservation.customer_name) }), 'info');
-      addReservationNotification(reservation, 'created');
     });
 
     socket.on('reservation:updated', (reservation: Reservation) => {
-      const previous = reservationsRef.current.find(r => r.id === reservation.id);
       setReservations(prev =>
         prev.map(r => r.id === reservation.id ? reservation : r)
       );
       addToast(t('toast.bookingUpdatedNamed', { nome: toTitleCase(reservation.customer_name) }), 'info');
-      if (previous) {
-        const kind = classifyReservationUpdate(previous, reservation);
-        if (kind) addReservationNotification(reservation, kind);
-      }
     });
 
     socket.on('reservation:deleted', (id: number) => {
@@ -1682,7 +1572,6 @@ const App: React.FC = () => {
       // mittente (riga autoritativa lato server), quindi questo toast arriva
       // pure a chi ha eliminato — niente doppione nel handler locale.
       addToast(deleted ? t('toast.bookingDeletedNamed', { nome: toTitleCase(deleted.customer_name) }) : t('toast.bookingDeleted'), 'info');
-      if (deleted) addReservationNotification(deleted, 'deleted');
     });
 
     // Silent patch — a denormalized field (e.g. customer_name/phone from a

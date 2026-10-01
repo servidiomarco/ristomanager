@@ -1989,6 +1989,9 @@ async function handleElevenLabsPostCall(tenantId: number, req: express.Request, 
     } catch (err: any) {
         console.warn('[ElevenLabs] post-call large-group detection failed:', err?.message || err);
     }
+    // Telefonata registrata (e marcata se fantasma o gruppo grande): la
+    // lista Chiamate degli altri dispositivi la mostra senza ricaricare.
+    broadcastVoiceCallsChanged(tenantId);
 
     // Look up any reservation linked to this conversation (set during create_reservation).
     // If found and we have a phone, send the WhatsApp recap.
@@ -3118,6 +3121,8 @@ app.delete('/reservations/:id', authenticate, requirePermission('reservations:fu
             }
         });
         outboxKick();
+        // La chiamata che l'aveva creata è appena passata a gestita.
+        broadcastVoiceCallsChanged(req.tenantId!);
 
         // Log activity
         if (req.user) {
@@ -24894,6 +24899,17 @@ function voiceCallNotificationTags(conversationId: unknown): string[] {
     return [`voice-followup-${conversationId}`, `voice-phantom-${conversationId}`, `voice-callback-${conversationId}`];
 }
 
+/** Le chiamate sono cambiate (nuova telefonata, richiamata chiesta, segnata
+ *  ricontattata, collegata, recuperata): gli altri dispositivi rileggono la
+ *  lista e il contatore «Chiamate». Senza questo il PC della reception,
+ *  fermo sulla stessa schermata, teneva il numero vecchio fino a un cambio
+ *  pagina. Il payload è vuoto di proposito: si rilegge, non si applica. */
+function broadcastVoiceCallsChanged(tenantId: number, excludeSocketId?: string): void {
+    try {
+        socketService?.broadcastToAll(tenantId, 'voiceCall:changed', {}, excludeSocketId);
+    } catch (_) { /* best-effort: il badge si riallinea comunque al focus */ }
+}
+
 // Bulk: flip every call still awaiting follow-up (no linked reservation,
 // status NULL/PENDING) to CONTACTED in one shot. Powers the "segna tutte
 // come ricontattate" button in Conversazioni — returns how many rows
@@ -24913,6 +24929,7 @@ app.post('/voice-calls/mark-all-contacted', authenticate, requireFeature('voice'
         );
         await markSharedNotificationsRead(req.tenantId!,
             result.rows.flatMap((r: any) => voiceCallNotificationTags(r.conversation_id)));
+        if (result.rows.length > 0) broadcastVoiceCallsChanged(req.tenantId!, req.headers['x-socket-id'] as string);
         res.json({ updated: result.rows.length });
     } catch (err) {
         console.error('POST /voice-calls/mark-all-contacted error:', err);
@@ -24968,6 +24985,7 @@ app.patch('/voice-calls/:id/follow-up', authenticate, requireFeature('voice'), v
         if (status === 'CONTACTED') {
             await markSharedNotificationsRead(req.tenantId!, voiceCallNotificationTags(conversationId));
         }
+        broadcastVoiceCallsChanged(req.tenantId!, req.headers['x-socket-id'] as string);
         res.json(call);
     } catch (err) {
         console.error('PATCH /voice-calls/:id/follow-up error:', err);
@@ -25014,6 +25032,7 @@ app.patch('/voice-calls/:id/link', authenticate, requireFeature('voice'), voiceC
         if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
         const { conversation_id: conversationId, ...call } = result.rows[0];
         await markSharedNotificationsRead(req.tenantId!, voiceCallNotificationTags(conversationId));
+        broadcastVoiceCallsChanged(req.tenantId!, req.headers['x-socket-id'] as string);
         res.json(call);
     } catch (err) {
         console.error('PATCH /voice-calls/:id/link error:', err);
@@ -25034,11 +25053,19 @@ app.patch('/voice-calls/:id/recover', authenticate, requireFeature('voice'), voi
             `UPDATE voice_calls
              SET phantom_recovered = TRUE
              WHERE id = $1 AND tenant_id = $2
-             RETURNING id, phantom_confirmation, phantom_recovered`,
+             RETURNING id, phantom_confirmation, phantom_recovered, conversation_id`,
             [id, req.tenantId!]
         );
         if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-        res.json(result.rows[0]);
+        const { conversation_id: conversationId, ...recovered } = result.rows[0];
+        // Recuperata a mano: «⚠️ Prenotazione da recuperare» ha fatto il suo
+        // lavoro, per tutti. Solo quella: la chiamata può restare da
+        // ricontattare per altro.
+        if (typeof conversationId === 'string' && conversationId) {
+            await markSharedNotificationsRead(req.tenantId!, [`voice-phantom-${conversationId}`]);
+        }
+        broadcastVoiceCallsChanged(req.tenantId!, req.headers['x-socket-id'] as string);
+        res.json(recovered);
     } catch (err) {
         console.error('PATCH /voice-calls/:id/recover error:', err);
         res.status(500).json({ error: 'Internal server error' });
@@ -38524,7 +38551,12 @@ bookingTools.configureBookingTools({
     cancelVoiceReservation,
     modifyVoiceReservation,
     recordVoiceCall,
-    recordCallbackRequest,
+    // Richiamata chiesta a metà telefonata: la chiamata entra subito fra le
+    // «Da richiamare» degli altri dispositivi.
+    recordCallbackRequest: async (tenantId: number, r: any) => {
+        await recordCallbackRequest(tenantId, r);
+        broadcastVoiceCallsChanged(tenantId);
+    },
     upsertCustomerFromReservation,
     findCustomerByPhone,
     findActiveReservationsByPhone,
@@ -38568,11 +38600,14 @@ bookingTools.configureBookingTools({
 // telefonata; gli altri canali avranno il proprio aggancio. Una chiamata
 // servita chiude anche i tentativi a vuoto dello stesso numero appena prima.
 VOICE_CHANNEL.linkConversation = ({ tenantId, conversationId, phone, reservationId }) => {
-    recordVoiceCall(tenantId, { conversation_id: conversationId, phone, reservation_id: reservationId })
+    const linked = recordVoiceCall(tenantId, { conversation_id: conversationId, phone, reservation_id: reservationId })
         .catch(err => console.warn('[ElevenLabs] recordVoiceCall failed:', err?.message || err));
-    closeEarlierMissedCalls(tenantId, conversationId, phone)
+    const closed = closeEarlierMissedCalls(tenantId, conversationId, phone)
         .then(n => { if (n > 0) console.log(`[ElevenLabs] ${conversationId}: ${n} chiamate precedenti dello stesso numero chiuse`); })
         .catch(err => console.warn('[ElevenLabs] closeEarlierMissedCalls failed:', err?.message || err));
+    // A metà telefonata: la prenotazione agganciata e i tentativi chiusi
+    // tolgono righe dalle «Da ricontattare» su tutti i dispositivi.
+    void Promise.allSettled([linked, closed]).then(() => broadcastVoiceCallsChanged(tenantId));
 };
 
 const startServer = async () => {

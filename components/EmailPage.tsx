@@ -312,17 +312,32 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
       }
     };
 
+    // Funzione con nome, non una freccia scritta due volte: l'off con una
+    // freccia nuova non stacca niente, e a ogni cambio di thread (l'effetto
+    // si rifà) si sommava un ascoltatore — una email in arrivo contava due,
+    // tre volte nei non letti.
+    const onNew = (payload: any) => { if (payload?.message) upsertThread(payload.message); };
+    // Letto da un collega o su un altro dispositivo: il pallino si toglie
+    // anche qui, senza aspettare il prossimo giro della lista.
+    const onRead = (payload: { email_key?: string }) => {
+      const key = String(payload?.email_key ?? '').trim().toLowerCase();
+      if (!key) return;
+      emailCache.markThreadRead(key);
+      setThreads(prev => prev.map(th => (th.email_key === key ? { ...th, unread_count: 0 } : th)));
+    };
     let attached: ReturnType<typeof socketClient.getSocket> = null;
     const attach = (s: ReturnType<typeof socketClient.getSocket>) => {
       if (attached === s) return;
       if (attached) {
         attached.off('email:inbound', upsertThread);
-        attached.off('email:new', (payload: any) => payload?.message && upsertThread(payload.message));
+        attached.off('email:new', onNew);
+        attached.off('email:read', onRead);
       }
       attached = s;
       if (attached) {
         attached.on('email:inbound', upsertThread);
-        attached.on('email:new', (payload: any) => payload?.message && upsertThread(payload.message));
+        attached.on('email:new', onNew);
+        attached.on('email:read', onRead);
       }
     };
     attach(socketClient.getSocket());
