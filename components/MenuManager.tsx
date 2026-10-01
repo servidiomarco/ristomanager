@@ -494,7 +494,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     try {
       setTranslateEsito(await translateMenu());
     } catch (err: any) {
-      setTranslateError(err?.data?.message ?? err?.data?.error ?? err?.message ?? t('err.translate'));
+      setTranslateError(err?.data?.error === 'ai_key_invalid' ? t('err.aiKeyInvalid')
+        : err?.data?.message ?? err?.data?.error ?? err?.message ?? t('err.translate'));
     } finally {
       setTranslating(false);
     }
@@ -511,6 +512,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       const code = err?.data?.error;
       setPairError(
         code === 'ai_disabled' ? t('err.aiDisabled')
+        : code === 'ai_key_invalid' ? t('err.aiKeyInvalid')
         : code === 'no_wines' ? t('err.noWines')
         : err?.data?.message ?? err?.data?.error ?? err?.message ?? t('err.pairing'));
     } finally {
@@ -845,6 +847,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       const code = err?.data?.error;
       setSuggestWinesError(
         code === 'ai_disabled' ? t('err.aiDisabled')
+        : code === 'ai_key_invalid' ? t('err.aiKeyInvalid')
         : code === 'no_wines' ? t('err.noWines')
         : err?.data?.message ?? err?.message ?? t('err.suggestion'));
     } finally {

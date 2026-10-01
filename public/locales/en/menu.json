@@ -104,6 +104,7 @@
     "save": "Saving failed",
     "import": "Import failed",
     "translate": "Translation failed",
+    "aiKeyInvalid": "Invalid AI key: it needs updating on the server (ANTHROPIC_API_KEY).",
     "aiDisabled": "Feature off: switch on «AI wine pairing» in the features.",
     "noWines": "Mark a category as «Wine» in the Categories dialog first.",
     "pairing": "Pairing failed",
