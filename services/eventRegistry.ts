@@ -131,6 +131,9 @@ export const DOMAIN_EVENTS: Record<string, DomainEventSpec> = {
     'email:new': spec('cloud'),
     'email:read': spec('cloud'),
     'inboundEmail:received': spec('cloud'),
+    // Chiamate di Sofia cambiate (nuova, richiamata, ricontattata,
+    // collegata): il client rilegge lista e contatore, il payload è vuoto.
+    'voiceCall:changed': spec('cloud'),
 
     // --- Gestione (staff, turni, spesa, todo, fornitori): tolleranza alta
     //     alla latenza, conflitti rari — master in cloud.

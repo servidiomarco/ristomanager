@@ -10,6 +10,7 @@ import {
   inboxThreadKey,
   cacheAppendMessage,
   cachePatchMessage,
+  cacheMarkThreadRead,
   applyMessageToConversations,
   ConversationSummary,
   InboxMessage,
@@ -387,6 +388,16 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
       }
     };
 
+    // Letto da un collega o su un altro dispositivo: il pallino dei non
+    // letti si toglie anche qui. App aggiorna la cache solo a pagina chiusa;
+    // a pagina aperta tocca a lei, o il thread resta «nuovo» fino al refresh.
+    const onRead = (payload: { phone_digits?: string }) => {
+      const key = payload?.phone_digits ? phoneMatchKey(String(payload.phone_digits)) : '';
+      if (!key) return;
+      cacheMarkThreadRead(key);
+      setConversations(prev => prev.map(c => (c.phone_digits === key ? { ...c, unread_count: 0 } : c)));
+    };
+
     // Re-attach on reconnect: if the socket isn't ready when this effect runs
     // (or drops mid-session), listeners registered directly on it are lost.
     let attached: ReturnType<typeof socketClient.getSocket> = null;
@@ -396,12 +407,14 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
         attached.off('message:inbound', onInbound);
         attached.off('message:outbound', onOutbound);
         attached.off('message:status', onStatus);
+        attached.off('message:read', onRead);
       }
       attached = s;
       if (attached) {
         attached.on('message:inbound', onInbound);
         attached.on('message:outbound', onOutbound);
         attached.on('message:status', onStatus);
+        attached.on('message:read', onRead);
       }
     };
     attach(socketClient.getSocket());
