@@ -24,6 +24,22 @@
   "childrenSuffix_one": " ({{count}} child)",
   "childrenSuffix_other": " ({{count}} children)",
   "allergens": "allergens: {{list}}",
+  "allergenNames": {
+    "glutine": "gluten",
+    "crostacei": "crustaceans",
+    "uova": "eggs",
+    "pesce": "fish",
+    "arachidi": "peanuts",
+    "soia": "soy",
+    "latte": "milk",
+    "frutta_a_guscio": "tree nuts",
+    "sedano": "celery",
+    "senape": "mustard",
+    "sesamo": "sesame",
+    "solfiti": "sulphites",
+    "lupini": "lupin",
+    "molluschi": "molluscs"
+  },
   "rates": {
     "title": "Rates",
     "adults_one": "{{count}} adult × {{price}}",
