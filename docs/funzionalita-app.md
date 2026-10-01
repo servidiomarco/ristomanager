@@ -262,12 +262,12 @@ L'analisi sul periodo, dove la Dashboard è il "adesso". L'accesso si governa co
 Due voci in sidebar: **Menu** (i piatti, organizzati in menu) e **Banchetti** (gli eventi).
 
 **Menu multipli**
-- La pagina Menu è divisa in menu: **Alla carta** (ciò che si batte in comanda e appare sul menu digitale QR), **Banchetti** (i piatti proponibili nella composizione degli eventi) e i **menu stagionali** creati dal ristoratore (es. Ferragosto, Pasqua), rinominabili ed eliminabili.
+- La pagina Menu è divisa in menu: **Alla carta** (ciò che si batte in comanda e, se non se ne sceglie un altro, appare sul menu digitale QR), **Banchetti** (i piatti proponibili nella composizione degli eventi) e i **menu stagionali** creati dal ristoratore (es. Ferragosto, Pasqua), rinominabili ed eliminabili.
 - **Si sceglie il menu da una tendina in alto a sinistra**, con la ricerca accanto; la tendina porta anche «Nuovo menu» e, sulla riga di ogni menu stagionale, la sua rinomina e la sua eliminazione (i due menu di sistema non le hanno). All'altro capo della riga, **«Gestisci»** raccoglie tutto ciò che si fa al menu: menu digitale, importa da cassa, categorie e varianti, col numero di categorie e di gruppi varianti accanto alla voce. La riga sotto resta di soli filtri: le pastiglie delle categorie su una riga sola che scorre.
 - **Ogni piatto appartiene a uno o più menu** tramite spunte nella sua scheda: lo stesso piatto può stare alla carta e nei banchetti senza doppioni in anagrafica.
 - **Anche le categorie appartengono ai menu**: nella modale «Categorie» ogni categoria ha le spunte dei menu — spuntarne una mette (o toglie) tutti i suoi piatti da quel menu in un colpo, con indicatore parziale («3/12») quando i piatti sono divisi. I singoli piatti restano regolabili dopo, e i piatti nuovi di una categoria nascono nei menu della categoria.
 - **Le categorie si creano, rinominano ed eliminano** dalla stessa modale: la rinomina sposta tutti i piatti sul nuovo nome (con avviso se contiene piatti sincronizzati dalla cassa, che al prossimo import torneranno alla categoria della cassa); si elimina solo una categoria vuota; una categoria appena creata è subito disponibile nella scheda del piatto, la cui tendina mostra le categorie vere del ristorante.
-- I piatti nuovi (anche quelli importati dalla cassa) nascono in Alla carta; il menu pubblico, il palmare comande e la cassa mostrano solo i piatti di quel menu.
+- I piatti nuovi (anche quelli importati dalla cassa) nascono in Alla carta; il palmare comande e la cassa mostrano solo i piatti di quel menu, e il menu pubblico anche, finché non gli si assegna un altro menu (vedi Menu digitale pubblico).
 
 **Piatti**
 - Anagrafica completa: categorie (Antipasti, Primi, Secondi, Contorni, Dolci, Bevande, Altro), nome, descrizione, prezzo, **aliquota IVA**, foto (con ridimensionamento automatico), **allergeni**, visibilità sul menu digitale. Viste griglia ed elenco.
@@ -298,6 +298,7 @@ Due voci in sidebar: **Menu** (i piatti, organizzati in menu) e **Banchetti** (g
 - Multilingua (usa le traduzioni del menu), con foto, descrizioni, prezzi e allergeni. Il tocco sulla miniatura apre la **foto a tutto schermo** su fondo nero con nome e prezzo, come sul palmare; un tocco ovunque chiude.
 - Sotto i piatti con vini abbinati una riga discreta «Si abbina con: …» (etichetta nelle quattro lingue) coi vini scelti dal ristoratore, se attivi e in carta.
 - Si attiva/disattiva con un interruttore; il QR si genera dalla pagina Menu.
+- **Il QR mostra un menu della lista, a scelta**: nella finestra «Menu digitale» la tendina «Menu mostrato» elenca i menu (Alla carta, Banchetti, quelli creati dal ristoratore) col numero di piatti visibili, e l'ospite vede solo i piatti spuntati in quel menu — per esempio un menu «QR» più corto della carta. Di default è Alla carta; se il menu scelto viene eliminato, il QR torna da solo su Alla carta.
 
 ---
 
@@ -697,6 +698,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-01 | Menu digitale pubblico | Il menu del QR si sceglie dalla lista dei menu: nella finestra «Menu digitale» la tendina «Menu mostrato» assegna al QR un menu (per esempio «QR») e l'ospite vede solo i piatti spuntati lì. Di default resta Alla carta, e ci torna da solo se il menu scelto viene eliminato. Comande, cassa e asporto continuano a seguire Alla carta. |
 | 2026-10-01 | Sale & Tavoli, Prenotazioni | La piantina mostra sempre la disposizione vera della sala, anche con «Sposta tavoli» spento e nella mappa delle Prenotazioni: prima, spento, i tavoli si ridisponevano in righe ordinate per numero. «Sposta tavoli» sblocca solo il trascinamento e non resta acceso alla riapertura; i tavoli nuovi nascono nel primo posto libero. |
 | 2026-10-01 | Notifiche, Agente vocale "Sofia", Email, Messaggi | Chiamate, Email e Messaggi si allineano su tutti i dispositivi senza ricaricare: il contatore e la lista Chiamate si aggiornano quando arriva una telefonata o un collega gestisce una chiamata; il contatore Email quando arriva o viene letta una mail; il pallino dei non letti in Email e in Messaggi sparisce anche a pagina aperta quando un collega legge il thread. «⚠️ Prenotazione da recuperare» si spegne anche quando la chiamata viene segnata recuperata a mano. |
 | 2026-10-01 | Notifiche, Agente vocale "Sofia", Pagamenti, Piattaforma | Si spengono da sole anche le ultime notifiche che restavano accese: «Cliente da richiamare» quando la chiamata è segnata ricontattata o collegata a una prenotazione; «Pagamento in eccesso da rimborsare» a rimborso fatto (dal conto o da Pagamenti); gli avvisi sui minuti di Sofia quando un avviso più recente li supera o cambia il tetto; «Quota ElevenLabs in esaurimento» dopo la ricarica o il reset; «Pagamento non riuscito» agli amministratori quando l'abbonamento esce dalla morosità. |

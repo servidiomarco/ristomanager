@@ -5399,6 +5399,72 @@ app.post('/menu/pair-wines', authenticate, requirePermission('menu:full'), async
     }
 });
 
+// Quale menu della lista mostra il QR al tavolo. Di default Alla carta; il
+// ristoratore può sceglierne un altro (es. un menu «QR» più corto della
+// carta) dal QR modal della pagina Menu. La scelta è un id in app_settings:
+// se quel menu viene eliminato la lettura ricade da sola su Alla carta,
+// senza bisogno di ripulire la chiave.
+const DIGITAL_MENU_KEY = 'digital_menu_id';
+
+async function getDigitalMenuId(tenantId: number): Promise<number | null> {
+    // Il menu scelto vince su Alla carta (false ordina prima di true); il
+    // confronto è fra testi, così un valore sporco nella chiave non fa
+    // saltare la query con un cast.
+    const rs = await queryWithRetry(
+        `SELECT m.id FROM menus m
+         WHERE m.tenant_id = $1
+           AND (m.id::text = (SELECT text_value FROM app_settings WHERE tenant_id = $1 AND key = $2)
+                OR m.system_key = 'ALLA_CARTA')
+         ORDER BY m.system_key IS NOT DISTINCT FROM 'ALLA_CARTA'
+         LIMIT 1`,
+        [tenantId, DIGITAL_MENU_KEY]
+    );
+    return rs.rows[0] ? Number(rs.rows[0].id) : null;
+}
+
+app.get('/menu/digital-menu', authenticate, async (req, res) => {
+    try {
+        await ensureSystemMenus(req.tenantId!);
+        res.json({ menu_id: await getDigitalMenuId(req.tenantId!) });
+    } catch (err) {
+        console.error('GET /menu/digital-menu error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Nessun broadcast: la scelta si legge solo nel QR modal, che la ricarica
+// a ogni apertura.
+app.put('/menu/digital-menu', authenticate, requirePermission('menu:full'), async (req, res) => {
+    try {
+        const menuId = Number(req.body?.menu_id);
+        if (!Number.isInteger(menuId)) return res.status(400).json({ error: 'menu_id non valido' });
+        const rs = await queryWithRetry(
+            'SELECT id, name FROM menus WHERE id = $1 AND tenant_id = $2',
+            [menuId, req.tenantId!]
+        );
+        const menu = rs.rows[0];
+        if (!menu) return res.status(404).json({ error: 'Menu non trovato' });
+        await queryWithRetry(
+            `INSERT INTO app_settings (tenant_id, key, text_value, updated_at)
+             VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+             ON CONFLICT (tenant_id, key) DO UPDATE
+               SET text_value = EXCLUDED.text_value, updated_at = CURRENT_TIMESTAMP`,
+            [req.tenantId!, DIGITAL_MENU_KEY, String(menuId)]
+        );
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!, req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.DISH, undefined,
+                `Menu digitale (QR): ora mostra «${menu.name}»`
+            ).catch(() => {});
+        }
+        res.json({ menu_id: menuId });
+    } catch (err) {
+        console.error('PUT /menu/digital-menu error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 // Dati del menu per la pagina pubblica: piatti attivi con traduzioni e
 // categorie tradotte. Niente id interni, niente campi gestionali.
 const handlePublicMenu = async (tenantId: number, _req: express.Request, res: express.Response) => {
@@ -5407,18 +5473,18 @@ const handlePublicMenu = async (tenantId: number, _req: express.Request, res: ex
     }
     // Doppio interruttore: is_active è della cassa, crm_enabled del
     // ristoratore — il menu pubblico mostra solo ciò che entrambi accendono.
-    // E solo i piatti del menu Alla carta: il QR al tavolo mostra ciò che si
-    // può ordinare, non le liste banchetti o i menu stagionali.
+    // E solo i piatti del menu scelto per il QR (di default Alla carta): il
+    // QR al tavolo non mostra le liste banchetti o gli altri menu.
+    const menuId = await getDigitalMenuId(tenantId);
     const dishesRs = await queryWithRetry(
         `SELECT d.name, d.description, d.price, d.category, d.allergens, d.photo_url, d.translations,
                 COALESCE((SELECT array_agg(w.name ORDER BY wp.sort_order, w.name)
                           FROM dish_wine_pairings wp JOIN dishes w ON w.id = wp.wine_dish_id
                           WHERE wp.dish_id = d.id AND w.is_active AND w.crm_enabled), '{}') AS abbinati
          FROM dishes d WHERE d.tenant_id = $1 AND d.is_active AND d.crm_enabled
-           AND EXISTS (SELECT 1 FROM dish_menus dm JOIN menus m ON m.id = dm.menu_id
-                       WHERE dm.dish_id = d.id AND m.system_key = 'ALLA_CARTA')
+           AND EXISTS (SELECT 1 FROM dish_menus dm WHERE dm.dish_id = d.id AND dm.menu_id = $2)
          ORDER BY d.category, d.sort_order NULLS LAST, d.name`,
-        [tenantId]
+        [tenantId, menuId]
     );
     const prefs = await getMenuCategoryPrefs(tenantId);
     const rows = dishesRs.rows.filter((d: any) => prefs[String(d.category || 'Altro')]?.enabled !== false);
@@ -12649,7 +12715,8 @@ app.delete('/rooms/:id', authenticate, requirePermission('floorplan:full'), asyn
 // ============================================
 // MENUS — "Alla carta" e "Banchetti" (di sistema) più i menu stagionali del
 // ristoratore. L'appartenenza piatto→menu vive in dish_menus; ALLA_CARTA
-// governa comande e menu digitale, BANQUETS la composizione banchetti.
+// governa comande e asporto, BANQUETS la composizione banchetti. Il menu
+// digitale (QR) mostra quello scelto in getDigitalMenuId, di default ALLA_CARTA.
 // ============================================
 
 // I menu di sistema per i tenant nati dopo la migrazione: la prima lettura

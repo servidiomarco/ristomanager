@@ -12,7 +12,7 @@ import { BanquetCompositionModal } from './BanquetCompositionModal';
 import { BanquetPaymentsModal } from './BanquetPaymentsModal';
 import { DishDetailModal } from './DishDetailModal';
 import { CustomerPickerModal } from './CustomerPickerModal';
-import { getCustomers, getTableMerges, getRoomClosed, importMenuPassepartout, translateMenu, digitalMenuUrl, getFeatureFlags, updateFeatureFlags, getMenuCategories, saveMenuCategories, saveDishOrder, setDishEnabled, createMenu, renameMenu, deleteMenu, setBanquetStatus, setCategoryMenu, setCategoryBar, setCategoryDessert, setCategoryWine, suggestDishWinePairings, pairMenuWines, createMenuCategory, renameMenuCategory, deleteMenuCategory, getBanquetShareLink, sendBanquetQuoteEmail, sendBanquetQuoteWhatsApp, getModifierGroups, getDishComponents, type AdminModifierGroup, type MenuImportResult, type MenuTranslateResult, type PairWinesResult, type MenuCategory } from '../services/apiService';
+import { getCustomers, getTableMerges, getRoomClosed, importMenuPassepartout, translateMenu, digitalMenuUrl, getFeatureFlags, updateFeatureFlags, getDigitalMenu, setDigitalMenu, getMenuCategories, saveMenuCategories, saveDishOrder, setDishEnabled, createMenu, renameMenu, deleteMenu, setBanquetStatus, setCategoryMenu, setCategoryBar, setCategoryDessert, setCategoryWine, suggestDishWinePairings, pairMenuWines, createMenuCategory, renameMenuCategory, deleteMenuCategory, getBanquetShareLink, sendBanquetQuoteEmail, sendBanquetQuoteWhatsApp, getModifierGroups, getDishComponents, type AdminModifierGroup, type MenuImportResult, type MenuTranslateResult, type PairWinesResult, type MenuCategory } from '../services/apiService';
 import { socketClient } from '../services/socketClient';
 import { getSalaConfig, type SalaStation } from '../services/salaApiService';
 import { MenuVariantsModal } from './MenuVariantsModal';
@@ -416,6 +416,11 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const [wineAiAttivo, setWineAiAttivo] = useState<boolean | null>(null);
   const [wineAiBusy, setWineAiBusy] = useState(false);
   const [menuFlagBusy, setMenuFlagBusy] = useState(false);
+  // Quale menu della lista mostra il QR (di default Alla carta). null finché
+  // non arriva, o se il backend non ha ancora la rotta: la tendina sparisce.
+  const [qrMenuId, setQrMenuId] = useState<number | null>(null);
+  const [qrMenuBusy, setQrMenuBusy] = useState(false);
+  const [qrMenuError, setQrMenuError] = useState<string | null>(null);
   const [translating, setTranslating] = useState(false);
   const [translateEsito, setTranslateEsito] = useState<MenuTranslateResult | null>(null);
   const [translateError, setTranslateError] = useState<string | null>(null);
@@ -431,8 +436,29 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     getFeatureFlags()
       .then(f => { if (!cancelled) { setMenuAttivo(f.digital_menu_enabled === true); setWineAiAttivo(f.ai_wine_pairing_enabled === true); } })
       .catch(() => { if (!cancelled) { setMenuAttivo(null); setWineAiAttivo(null); } });
+    setQrMenuError(null);
+    getDigitalMenu()
+      .then(r => { if (!cancelled) setQrMenuId(typeof r?.menu_id === 'number' ? r.menu_id : null); })
+      .catch(() => { if (!cancelled) setQrMenuId(null); });
     return () => { cancelled = true; };
   }, [qrOpen]);
+
+  const cambiaMenuQr = async (menuId: number) => {
+    if (qrMenuBusy || menuId === qrMenuId) return;
+    const prima = qrMenuId;
+    setQrMenuBusy(true);
+    setQrMenuError(null);
+    setQrMenuId(menuId);
+    try {
+      const updated = await setDigitalMenu(menuId);
+      setQrMenuId(updated.menu_id);
+    } catch (err: any) {
+      setQrMenuId(prima);
+      setQrMenuError(err?.data?.error ?? err?.message ?? t('err.save'));
+    } finally {
+      setQrMenuBusy(false);
+    }
+  };
 
   const toggleMenuDigitale = async () => {
     if (menuFlagBusy || menuAttivo == null) return;
@@ -501,8 +527,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
   const activeTab = mode;
 
-  // I due menu di sistema: ALLA_CARTA governa comande e menu digitale,
-  // BANQUETS il picker della composizione banchetti.
+  // I due menu di sistema: ALLA_CARTA governa comande e asporto (e il menu
+  // digitale finché nel QR modal non se ne sceglie un altro), BANQUETS il
+  // picker della composizione banchetti.
   const cartaMenu = useMemo(() => menus.find(m => m.system_key === 'ALLA_CARTA') ?? null, [menus]);
   const banquetsMenu = useMemo(() => menus.find(m => m.system_key === 'BANQUETS') ?? null, [menus]);
 
@@ -4217,6 +4244,34 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               {menuFlagBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : t(menuAttivo ? 'switchOff' : 'publish')}
             </button>
           </div>
+
+          {/* Quale menu della lista vede l'ospite: solo i suoi piatti finiscono
+              nella pagina del QR. Il conteggio rifà il filtro del server
+              (accesi in cassa e nel CRM, categoria accesa). */}
+          {qrMenuId != null && (
+            <Field
+              label={t('qrMenu')}
+              htmlFor="qr-menu"
+              aside={t('qrMenuDishes', {
+                count: dishes.filter(d =>
+                  d.is_active !== false && d.crm_enabled !== false
+                  && (d.menu_ids ?? []).includes(qrMenuId)
+                  && menuCats?.find(c => c.name === (d.category || 'Altro'))?.enabled !== false
+                ).length,
+              })}
+              error={qrMenuError}
+            >
+              <select
+                id="qr-menu"
+                className={dsSelect}
+                value={qrMenuId}
+                disabled={!canEdit || qrMenuBusy}
+                onChange={e => cambiaMenuQr(Number(e.target.value))}
+              >
+                {menus.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+              </select>
+            </Field>
+          )}
 
           <div className="flex flex-col items-center gap-3">
             {/* Piatto bianco fisso: un QR su fondo scuro non si inquadra. */}
