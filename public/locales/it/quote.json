@@ -24,6 +24,22 @@
   "childrenSuffix_one": " ({{count}} bambino)",
   "childrenSuffix_other": " ({{count}} bambini)",
   "allergens": "allergeni: {{list}}",
+  "allergenNames": {
+    "glutine": "glutine",
+    "crostacei": "crostacei",
+    "uova": "uova",
+    "pesce": "pesce",
+    "arachidi": "arachidi",
+    "soia": "soia",
+    "latte": "latte",
+    "frutta_a_guscio": "frutta a guscio",
+    "sedano": "sedano",
+    "senape": "senape",
+    "sesamo": "sesamo",
+    "solfiti": "solfiti",
+    "lupini": "lupini",
+    "molluschi": "molluschi"
+  },
   "rates": {
     "title": "Tariffe",
     "adults_one": "{{count}} adulto × {{price}}",

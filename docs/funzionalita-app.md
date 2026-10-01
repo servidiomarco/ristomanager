@@ -698,6 +698,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-01 | Menu digitale pubblico; Banchetti | Gli allergeni seguono la lingua scelta dall'ospite: sul menu del QR in inglese, francese e tedesco (nomi ufficiali UE: «Gluten, Eggs, Milk, Tree nuts»…) e nel preventivo banchetto in inglese. Prima restavano in italiano in ogni lingua. |
 | 2026-10-01 | Funzioni AI | Quando la chiave AI del server non è più valida (revocata o sostituita), traduzione del menu, abbinamento vini, report AI, risposta suggerita, agente WhatsApp e proposta di prenotazione dalle email dicono «Chiave AI non valida: va aggiornata sul server» invece di un generico «Internal server error». |
 | 2026-10-01 | Menu & Banchetti; Menu digitale pubblico | «Traduci le voci nuove» traduce anche le descrizioni (gli ingredienti) dei piatti che avevano già il nome tradotto: prima li saltava, e una descrizione scritta dopo la prima traduzione restava in italiano sul QR in ogni lingua. Il nome già tradotto non si tocca. |
 | 2026-10-01 | Menu digitale pubblico | Il menu del QR si sceglie dalla lista dei menu: nella finestra «Menu digitale» la tendina «Menu mostrato» assegna al QR un menu (per esempio «QR») e l'ospite vede solo i piatti spuntati lì. Di default resta Alla carta, e ci torna da solo se il menu scelto viene eliminato. Comande, cassa e asporto continuano a seguire Alla carta. |
