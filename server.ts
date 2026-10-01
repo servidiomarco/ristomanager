@@ -5234,6 +5234,10 @@ app.put('/dishes/:id/enabled', authenticate, requirePermission('menu:full'), asy
 // Traduce in batch le voci mancanti (piatti attivi + categorie) nelle lingue
 // del menu. Idempotente: ritradurre non tocca ciò che è già tradotto — per
 // rifare una traduzione si svuota translations dal DB (caso raro, niente UI).
+// Un piatto col nome già tradotto ma la descrizione no (descrizione scritta
+// dopo la prima traduzione) si ritraduce solo nella descrizione: prima
+// veniva saltato, e il 01/10/2026 c'erano 72 piatti — quasi tutti vini — con
+// gli ingredienti in italiano sul QR in ogni lingua.
 app.post('/menu/translate', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
         if (!isMenuTranslationConfigured()) {
@@ -5256,8 +5260,16 @@ app.post('/menu/translate', authenticate, requirePermission('menu:full'), async 
         let tradotte = 0;
         let tokens = 0;
         for (const lang of richieste) {
+            const soloDescrizione = new Set<string>();
             const daFare = dishesRs.rows
-                .filter((d: any) => !d.translations?.[lang]?.name)
+                .filter((d: any) => {
+                    if (!d.translations?.[lang]?.name) return true;
+                    if (String(d.description ?? '').trim() && !d.translations?.[lang]?.description) {
+                        soloDescrizione.add(`d${d.id}`);
+                        return true;
+                    }
+                    return false;
+                })
                 .map((d: any) => ({ id: `d${d.id}`, name: d.name as string, description: d.description as string | null }));
             for (const c of catRs.rows) {
                 if (!catTrad[c.category]?.[lang]) daFare.push({ id: `c:${c.category}`, name: c.category, description: null });
@@ -5268,6 +5280,20 @@ app.post('/menu/translate', authenticate, requirePermission('menu:full'), async 
                 if (id.startsWith('d')) {
                     const dishId = Number(id.slice(1));
                     if (!Number.isFinite(dishId)) continue;
+                    if (soloDescrizione.has(id)) {
+                        // Il nome già tradotto resta (può essere stato
+                        // ritoccato a mano): si aggiunge solo la descrizione.
+                        if (!t.description) continue;
+                        await queryWithRetry(
+                            `UPDATE dishes
+                             SET translations = COALESCE(translations, '{}'::jsonb)
+                                 || jsonb_build_object($3::text, COALESCE(translations->$3, '{}'::jsonb) || jsonb_build_object('description', $4::text))
+                             WHERE id = $1 AND tenant_id = $2`,
+                            [dishId, req.tenantId!, lang, t.description]
+                        );
+                        tradotte++;
+                        continue;
+                    }
                     await queryWithRetry(
                         `UPDATE dishes
                          SET translations = COALESCE(translations, '{}'::jsonb) || jsonb_build_object($3::text, $4::jsonb)
