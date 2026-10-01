@@ -107,6 +107,41 @@ describe('menu multipli e stato banchetti', () => {
         expect(names).not.toContain('Piatto Due Menu');       // solo in Banchetti
     });
 
+    it('il QR mostra il menu scelto fra quelli della lista, e ricade su Alla carta se sparisce', async () => {
+        const def = await api().get('/menu/digital-menu').set(bearer(token));
+        expect(def.status).toBe(200);
+        expect(def.body.menu_id).toBe(cartaId);
+
+        const qr = await api().post('/menus').set(bearer(token)).send({ name: 'QR' });
+        expect(qr.status).toBe(201);
+        const qrId = qr.body.id;
+        const dish = await api().post('/dishes').set(bearer(token)).send({
+            name: 'Piatto solo qr', description: '', price: 7, category: 'Primi', allergens: [],
+            menu_ids: [qrId],
+        });
+        expect(dish.status).toBe(201);
+        dishIds.push(dish.body.id);
+
+        expect((await api().put('/menu/digital-menu').set(bearer(token)).send({ menu_id: 'x' })).status).toBe(400);
+        expect((await api().put('/menu/digital-menu').set(bearer(token)).send({ menu_id: 999999 })).status).toBe(404);
+        const set = await api().put('/menu/digital-menu').set(bearer(token)).send({ menu_id: qrId });
+        expect(set.status).toBe(200);
+        expect(set.body.menu_id).toBe(qrId);
+        expect((await api().get('/menu/digital-menu').set(bearer(token))).body.menu_id).toBe(qrId);
+
+        const scelto = await api().get('/public/menu');
+        expect(scelto.status).toBe(200);
+        const nomi = scelto.body.piatti.map((p: any) => p.name.toLowerCase());
+        expect(nomi).toEqual(['piatto solo qr']);
+
+        // Eliminato il menu scelto, la chiave resta ma non punta a nulla:
+        // il QR torna sulla carta da solo.
+        expect((await api().delete(`/menus/${qrId}`).set(bearer(token))).status).toBe(204);
+        expect((await api().get('/menu/digital-menu').set(bearer(token))).body.menu_id).toBe(cartaId);
+        const carta = await api().get('/public/menu');
+        expect(carta.body.piatti.map((p: any) => p.name)).toContain('Piatto Default Menu');
+    });
+
     it('la spunta di menu su una categoria applica in blocco e fa da default per i piatti nuovi', async () => {
         const CAT = 'Categoria Menu Test';
         for (const name of ['Cat uno', 'Cat due']) {

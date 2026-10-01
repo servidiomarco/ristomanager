@@ -452,6 +452,22 @@ export const deleteMenu = async (id: number): Promise<void> => {
   }, false);
 };
 
+// Il menu della lista che il QR al tavolo mostra agli ospiti (di default
+// Alla carta). menu_id null: il tenant non ha ancora i menu di sistema.
+export const getDigitalMenu = async (): Promise<{ menu_id: number | null }> => {
+  return apiRequest<{ menu_id: number | null }>(`${API_URL}/menu/digital-menu`, {
+    headers: getHeaders(false)
+  });
+};
+
+export const setDigitalMenu = async (menuId: number): Promise<{ menu_id: number }> => {
+  return apiRequest<{ menu_id: number }>(`${API_URL}/menu/digital-menu`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify({ menu_id: menuId }),
+  });
+};
+
 /** Esito del sync menu dalla cassa Passepartout (feature 'passepartout'). */
 export interface MenuImportResult {
   totale_cassa: number;
