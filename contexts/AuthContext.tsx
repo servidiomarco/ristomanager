@@ -258,6 +258,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!user) return false;
       return user.role !== UserRole.PLATFORM_ADMIN || isPlatformScopedSessionToken();
     }
+    // La sessione di pannello non sta in nessun ristorante: il suo tenant è
+    // solo quello di casa della riga utente, e ogni vista del CRM le
+    // mostrerebbe i dati del Frantoio. Non bastano i permessi: tre migration
+    // hanno dato righe di matrice anche a PLATFORM_ADMIN, e la Reportistica
+    // si apre per allowlist. Per lavorare in un ristorante c'è «Entra».
+    if (user?.role === UserRole.PLATFORM_ADMIN && !isPlatformScopedSessionToken()) {
+      return false;
+    }
     // Lancio ristretto: gli account in allowlist (flag dal backend) vedono la
     // Reportistica anche senza reports:view; il permesso resta la via
     // ordinaria, assegnabile dalla matrice ruoli.

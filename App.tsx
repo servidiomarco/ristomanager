@@ -154,6 +154,15 @@ import { swrConfig } from './services/configCache';
 const isPlatformScopedToken = (): boolean =>
   !!decodeJwtPayload(authApiService.getAccessToken())?.scopedTenantId;
 
+// La sessione di pannello: PLATFORM_ADMIN senza scope. Anche lei dal token,
+// che c'è prima dello user: i gestori del socket si agganciano una volta
+// sola, quando lo user non è ancora noto, e una guardia su `user` lì dentro
+// non scatterebbe mai.
+const isPlatformPanelToken = (): boolean => {
+  const claims = decodeJwtPayload(authApiService.getAccessToken());
+  return claims?.role === UserRole.PLATFORM_ADMIN && !claims.scopedTenantId;
+};
+
 // ---------------------------------------------------------------------------
 // Navigation taxonomy — single source of truth for the desktop sidebar AND the
 // mobile "Altro" sheet. Both surfaces map over NAV_ITEMS; only their filters and
@@ -459,15 +468,32 @@ const App: React.FC = () => {
      relativo cercherebbe l'immagine su Vercel.
 
      Finche' non arriva resta null e in testa si vede Sympotia: meglio il
-     marchio del prodotto per un istante che un buco che poi si riempie. */
+     marchio del prodotto per un istante che un buco che poi si riempie.
+
+     Il pannello di piattaforma (PLATFORM_ADMIN senza «Entra») un ristorante
+     non ce l'ha: il suo tenant è quello di casa della riga utente, e
+     /settings/legal gli dava il logo del Frantoio. Lì resta Sympotia.
+     La sessione si legge dal token e non dallo user: il token c'è già al
+     montaggio, lo user solo dopo /auth/me, e il logo del ristorante
+     partirebbe in ritardo a ogni avvio. Login e logout cambiano il token e
+     ricaricano il marchio giusto. */
   const [tenantLogo, setTenantLogo] = useState<string | null>(null);
   const [tenantLogoDark, setTenantLogoDark] = useState<string | null>(null);
   const [tenantName, setTenantName] = useState<string>('');
-  useEffect(() => swrConfig('legalSettings', getLegalSettings, l => {
-    setTenantLogo(l.logo_url ? tenantLogoSrc(l.logo_url) : null);
-    setTenantLogoDark(l.logo_dark_url ? tenantLogoSrc(l.logo_dark_url) : null);
-    setTenantName(l.business_name || '');
-  }), []);
+  const hasTenantBranding = !!authApiService.getAccessToken() && !isPlatformPanelToken();
+  useEffect(() => {
+    if (!hasTenantBranding) {
+      setTenantLogo(null);
+      setTenantLogoDark(null);
+      setTenantName('');
+      return;
+    }
+    return swrConfig('legalSettings', getLegalSettings, l => {
+      setTenantLogo(l.logo_url ? tenantLogoSrc(l.logo_url) : null);
+      setTenantLogoDark(l.logo_dark_url ? tenantLogoSrc(l.logo_dark_url) : null);
+      setTenantName(l.business_name || '');
+    });
+  }, [hasTenantBranding]);
   // L'URL del logo arriva subito (cache config), ma l'immagine e' un download
   // a parte: finche' non e' davvero renderizzabile in testa si mostra il NOME
   // del ristorante, non un buco — e se il download fallisce (rete, 404) il
@@ -1475,8 +1501,11 @@ const App: React.FC = () => {
     // endpoint gli risponderebbero 403 — il toast "insufficient permissions"
     // a ogni login. Atterra sulla vista Piattaforma. Con lo scope invece
     // (claim scopedTenantId: è entrato in un tenant con «Entra») la sessione
-    // è operativa e i dati vanno caricati come per chiunque altro.
-    if (user?.role === UserRole.PLATFORM_ADMIN && !isPlatformScopedToken()) {
+    // è operativa e i dati vanno caricati come per chiunque altro. Il ruolo
+    // si legge dal token: il gestore `connect` del socket chiama questa
+    // funzione da una closure in cui `user` è ancora null, e da lì il
+    // «Error fetching data» a ogni apertura del pannello.
+    if (isPlatformPanelToken()) {
       setIsInitialDataLoading(false);
       return;
     }

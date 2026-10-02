@@ -327,9 +327,16 @@ export const PlatformSupportTab: React.FC<{
       detailOpen={selectedId != null}
       toolbar={
         <div className="space-y-2">
+          {/* Cambiare filtro chiude la richiesta aperta: restava a destra
+              anche quando la lista nuova non la conteneva («Risolte» vuota
+              accanto a una richiesta in corso). */}
           <SegmentedControl
             value={statusFilter}
-            onChange={next => setStatusFilter(next as StatusFilter)}
+            onChange={next => {
+              if (next === statusFilter) return;
+              setStatusFilter(next as StatusFilter);
+              setSelectedId(null);
+            }}
             options={filterOptions}
             ariaLabel={t('platform.filter.aria', 'Filtra per stato')}
             equalWidth={false}
@@ -340,7 +347,7 @@ export const PlatformSupportTab: React.FC<{
             <select
               className={dsSelect}
               value={tenantFilter}
-              onChange={e => setTenantFilter(Number(e.target.value))}
+              onChange={e => { setTenantFilter(Number(e.target.value)); setSelectedId(null); }}
               aria-label={t('platform.filter.tenant', 'Ristorante')}
             >
               <option value={0}>{t('platform.filter.allTenants', 'Tutti i ristoranti')}</option>
