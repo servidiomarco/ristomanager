@@ -415,8 +415,13 @@ export class SocketService {
   // Pannello piattaforma. Unico emit che NON passa da emitTo, di proposito:
   // non è un evento di un ristorante e non deve arrivare al nodo di sala di
   // nessuno. Solo per eventi del pannello, mai per dati di dominio.
-  broadcastToPlatformAdmins(event: string, data: any) {
-    this.io.to(PLATFORM_ADMINS_ROOM).emit(event, data);
+  // excludeSocketId come in broadcastToAll: chi ha scritto ha già il suo stato.
+  broadcastToPlatformAdmins(event: string, data: any, excludeSocketId?: string) {
+    if (excludeSocketId) {
+      this.io.to(PLATFORM_ADMINS_ROOM).except(excludeSocketId).emit(event, data);
+    } else {
+      this.io.to(PLATFORM_ADMINS_ROOM).emit(event, data);
+    }
   }
 
   // Il nome evita la collisione con pushService.sendToRoles.

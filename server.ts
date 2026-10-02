@@ -17302,13 +17302,19 @@ app.delete('/todos/:id', authenticate, async (req, res) => {
 });
 
 // ============================================
-// DEV BOARD — pagina Development, riservata all'account admin
+// DEV BOARD — Development, Roadmap e Consumi AI, riservati al pannello di piattaforma
 // ============================================
-// Non passa da role_permissions: il board è uno strumento di sviluppo del
-// progetto legato a un account preciso, non a un ruolo del ristorante.
-const DEV_BOARD_ADMIN_EMAIL = (process.env.DEV_BOARD_ADMIN_EMAIL || 'admin@ristomanager.com').toLowerCase();
+// Non passa da role_permissions: sono strumenti del progetto, non un ruolo
+// del ristorante. Fino al 02/10 li apriva una sola email
+// (admin@ristomanager.com): cambiata quella il 26/09, non li apriva più
+// nessuno. Ora li apre la sessione di pannello, PLATFORM_ADMIN senza
+// «Entra». Con lo scope no: board, roadmap e consumi si leggono per
+// req.tenantId, che dentro un ristorante è il ristorante, non il tenant di
+// casa dell'admin dove i dati stanno. Per la stessa ragione devboard:changed
+// e roadmap:changed vanno alla stanza del pannello: il suo socket non entra
+// in quella del tenant (vedi socketService).
 const requireDevBoardAdmin = (req: any, res: any, next: any) => {
-    if ((req.user?.email || '').toLowerCase() !== DEV_BOARD_ADMIN_EMAIL) {
+    if (req.user?.role !== UserRole.PLATFORM_ADMIN || isPlatformScopedSession(req.user)) {
         return res.status(403).json({ error: 'Accesso riservato' });
     }
     next();
@@ -17357,7 +17363,7 @@ app.post('/dev-board/cards', authenticate, requireDevBoardAdmin, async (req, res
             [String(title).trim(), description ? String(description).trim() || null : null, column, labels, req.tenantId!]
         );
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll(req.tenantId!, 'devboard:changed', {}, socketId);
+        if (socketService) socketService.broadcastToPlatformAdmins('devboard:changed', {}, socketId);
         res.status(201).json(result.rows[0]);
     } catch (err) {
         console.error(err);
@@ -17395,7 +17401,7 @@ app.put('/dev-board/cards/:id', authenticate, requireDevBoardAdmin, async (req, 
             return res.status(404).json({ error: 'Card non trovata' });
         }
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll(req.tenantId!, 'devboard:changed', {}, socketId);
+        if (socketService) socketService.broadcastToPlatformAdmins('devboard:changed', {}, socketId);
         res.json(result.rows[0]);
     } catch (err) {
         console.error(err);
@@ -17430,7 +17436,7 @@ app.put('/dev-board/cards/:id/move', authenticate, requireDevBoardAdmin, async (
         }
         await client.query('COMMIT');
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll(req.tenantId!, 'devboard:changed', {}, socketId);
+        if (socketService) socketService.broadcastToPlatformAdmins('devboard:changed', {}, socketId);
         res.json({ ok: true });
     } catch (err) {
         await client.query('ROLLBACK').catch(() => {});
@@ -17449,7 +17455,7 @@ app.delete('/dev-board/cards/:id', authenticate, requireDevBoardAdmin, async (re
             return res.status(404).json({ error: 'Card non trovata' });
         }
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll(req.tenantId!, 'devboard:changed', {}, socketId);
+        if (socketService) socketService.broadcastToPlatformAdmins('devboard:changed', {}, socketId);
         res.status(204).send();
     } catch (err) {
         console.error(err);
@@ -17521,7 +17527,7 @@ app.post('/dev-board/cards/:id/claude/approve', authenticate, requireDevBoardAdm
             [id, req.tenantId!]
         );
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll(req.tenantId!, 'devboard:changed', {}, socketId);
+        if (socketService) socketService.broadcastToPlatformAdmins('devboard:changed', {}, socketId);
         res.json(result.rows[0]);
     } catch (err) {
         console.error(err);
@@ -17543,7 +17549,7 @@ app.post('/dev-board/cards/:id/claude/reset', authenticate, requireDevBoardAdmin
             return res.status(404).json({ error: 'Card non trovata' });
         }
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll(req.tenantId!, 'devboard:changed', {}, socketId);
+        if (socketService) socketService.broadcastToPlatformAdmins('devboard:changed', {}, socketId);
         res.json(result.rows[0]);
     } catch (err) {
         console.error(err);
@@ -17586,7 +17592,7 @@ app.post('/dev-board/claude-callback', async (req, res) => {
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Card non trovata' });
         }
-        if (socketService) socketService.broadcastToAll(Number(result.rows[0].tenant_id), 'devboard:changed', {});
+        if (socketService) socketService.broadcastToPlatformAdmins('devboard:changed', {});
         res.json({ ok: true });
     } catch (err) {
         console.error(err);
@@ -17641,7 +17647,7 @@ app.post('/roadmap/tasks', authenticate, requireDevBoardAdmin, async (req, res) 
             ]
         );
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll(req.tenantId!, 'roadmap:changed', {}, socketId);
+        if (socketService) socketService.broadcastToPlatformAdmins('roadmap:changed', {}, socketId);
         res.status(201).json(result.rows[0]);
     } catch (err) {
         console.error(err);
@@ -17691,7 +17697,7 @@ app.put('/roadmap/tasks/:id', authenticate, requireDevBoardAdmin, async (req, re
             return res.status(404).json({ error: 'Task non trovato' });
         }
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll(req.tenantId!, 'roadmap:changed', {}, socketId);
+        if (socketService) socketService.broadcastToPlatformAdmins('roadmap:changed', {}, socketId);
         res.json(result.rows[0]);
     } catch (err) {
         console.error(err);
@@ -17707,7 +17713,7 @@ app.delete('/roadmap/tasks/:id', authenticate, requireDevBoardAdmin, async (req,
             return res.status(404).json({ error: 'Task non trovato' });
         }
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll(req.tenantId!, 'roadmap:changed', {}, socketId);
+        if (socketService) socketService.broadcastToPlatformAdmins('roadmap:changed', {}, socketId);
         res.status(204).send();
     } catch (err) {
         console.error(err);
@@ -30244,12 +30250,16 @@ app.post('/admin/support/tickets/:id/dev-card', platformAdminAuth, async (req, r
         if (ticket.dev_card_id) {
             return res.status(409).json({ error: 'dev_card_exists', dev_card_id: ticket.dev_card_id });
         }
-        // Il board vive nel tenant dell'account che lo usa (vedi
-        // requireDevBoardAdmin): la card va lì, non nel ristorante.
-        const owner = await queryWithRetry(
-            `SELECT tenant_id FROM users WHERE lower(email) = $1 ORDER BY id LIMIT 1`,
-            [DEV_BOARD_ADMIN_EMAIL]
-        );
+        // Il board vive nel tenant di casa dell'admin di piattaforma (vedi
+        // requireDevBoardAdmin): la card va lì, non nel ristorante. Dalla
+        // riga utente e non dal token: a /admin arriva anche un token
+        // scopato, il cui tenantId è il ristorante. Con PLATFORM_ADMIN_TOKEN
+        // (nessun utente) vale il primo admin attivo.
+        const owner = req.user?.userId
+            ? await queryWithRetry(`SELECT tenant_id FROM users WHERE id = $1`, [req.user.userId])
+            : await queryWithRetry(
+                `SELECT tenant_id FROM users WHERE role = 'PLATFORM_ADMIN' AND is_active = TRUE ORDER BY id LIMIT 1`
+            );
         const boardTenant = Number(owner.rows[0]?.tenant_id);
         if (!Number.isInteger(boardTenant) || boardTenant <= 0) {
             return res.status(409).json({ error: 'dev_board_unavailable', message: "L'account del dev board non esiste." });
@@ -30280,7 +30290,7 @@ app.post('/admin/support/tickets/:id/dev-card', platformAdminAuth, async (req, r
         await withTenant(Number(ticket.tenant_id), client => client.query(
             `UPDATE support_tickets SET dev_card_id = $2, updated_at = now() WHERE id = $1`, [id, card]
         ));
-        socketService?.broadcastToAll(boardTenant, 'devboard:changed', {});
+        socketService?.broadcastToPlatformAdmins('devboard:changed', {});
         res.status(201).json({ dev_card_id: card });
     } catch (err) {
         console.error('POST /admin/support/tickets/:id/dev-card error:', err);

@@ -48,9 +48,6 @@ const VIEW_PERMISSIONS: Record<ViewState, string> = {
   [ViewState.SUPPORTO]: '' // every tenant user, no permission — see canAccessView
 };
 
-/** The dev board is a project tool tied to one specific account, not a role. */
-const DEV_BOARD_ADMIN_EMAIL = 'admin@ristomanager.com';
-
 /** «Entra» dal pannello: il token porta scopedTenantId. Si legge dal JWT (lo
  *  stesso controllo di App.tsx) perché /auth/me non lo espone; qui a parte
  *  e non importato dal pannello, che a sua volta importa questo contesto. */
@@ -243,8 +240,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [user]);
 
   const canAccessView = useCallback((view: ViewState): boolean => {
+    // Development, Consumi AI e Roadmap sono strumenti del progetto, non del
+    // ristorante: li apre la sessione di pannello, come requireDevBoardAdmin
+    // sul server. Dentro «Entra» no: i loro dati stanno nel tenant di casa
+    // dell'admin, e lì si leggerebbe il ristorante.
     if (view === ViewState.DEVELOPMENT || view === ViewState.MONITORING || view === ViewState.ROADMAP) {
-      return (user?.email || '').toLowerCase() === DEV_BOARD_ADMIN_EMAIL;
+      return user?.role === UserRole.PLATFORM_ADMIN && !isPlatformScopedSessionToken();
     }
     // Il pannello piattaforma è legato al ruolo, non a un permesso per-tenant:
     // PLATFORM_ADMIN sta sopra i tenant e la matrice permessi è per-tenant.

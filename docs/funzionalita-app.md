@@ -81,7 +81,7 @@ Navigazione a gruppi (sidebar desktop, bottom bar + sheet "Altro" su mobile):
 | Comunicazioni | Chiamate · Messaggi · Email · Chat staff · Notifiche |
 | Operazioni | Attività · Inventario · Lista della Spesa · HACCP |
 | Gestione | Pagamenti · Clienti · Personale · Utenti |
-| Sistema | Impostazioni · (Piattaforma, Consumi AI, Development, Roadmap — solo amministrazione) |
+| Sistema | Impostazioni · (Piattaforma, Consumi AI, Development, Roadmap — solo nel pannello di piattaforma) |
 
 Le voci compaiono solo se l'utente ha il permesso corrispondente **e** se il modulo è incluso nel piano del ristorante (vedi [Piattaforma SaaS](#piattaforma-saas-multi-tenant-moduli-e-abbonamenti)).
 
@@ -607,7 +607,7 @@ Tutte le funzioni AI girano sul server (nessuna chiave nel browser) e seguono un
 | Abbinamenti vino | Propone i vini della carta da abbinare ai piatti (in scheda o su tutta la carta); il ristoratore cura e salva |
 | Report Dashboard | Spiega in italiano l'andamento del periodo (i numeri li calcola il database, l'AI li racconta) |
 
-**Consumi AI**: pagina di monitoraggio (riservata) con generazioni, token e **costi in euro** per funzione, più i crediti dell'agente vocale. Per Sofia mostra il **costo reale di ogni chiamata** (dai dati ElevenLabs) e i **minuti del mese contro i 250 inclusi nell'add-on**, con stima a fine mese, ricavo stimato e margine; il pannello Piattaforma riporta gli stessi numeri per ogni ristorante.
+**Consumi AI**: pagina di monitoraggio (riservata al pannello di piattaforma, come Development e Roadmap) con generazioni, token e **costi in euro** per funzione, più i crediti dell'agente vocale. Per Sofia mostra il **costo reale di ogni chiamata** (dai dati ElevenLabs) e i **minuti del mese contro i 250 inclusi nell'add-on**, con stima a fine mese, ricavo stimato e margine; il pannello Piattaforma riporta gli stessi numeri per ogni ristorante.
 
 ---
 
@@ -655,7 +655,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 - **Billing con Stripe**: abbonamento per tenant con add-on, checkout e portale clienti; lo stato dell'abbonamento accende/spegne i moduli da solo (webhook). Quadro MRR e stato clienti per l'amministrazione.
 - **Pannello Piattaforma** (solo admin): creazione nuovo ristorante in un click (con owner e password temporanea mostrata una sola volta), sospensione/riattivazione (la sospensione spegne anche login e pagine pubbliche), accensione moduli, **impersonificazione** dell'owner per assistenza (sessione breve, tracciata e con banner visibile). Fuori dal pannello la sessione dell'admin vale solo per il suo ristorante di casa e senza permessi: report e liste non mescolano mai i dati di più ristoranti. Un admin disattivato o retrocesso perde subito l'accesso al pannello, senza aspettare la scadenza della sessione.
 - **Sessione di piattaforma dentro un ristorante** («Entra» dal pannello): l'admin opera nel tenant con la propria identità e un livello sopra il Proprietario — tutti i permessi, matrice compresa — con banner visibile e ingresso tracciato nel log attività del ristorante. È la base per riservare funzionalità alla sola piattaforma; «Entra come» resta per vedere l'app con gli occhi del titolare.
-- **Fuori da «Entra»** il pannello non mostra niente di un ristorante: nel menu c'è solo Piattaforma e in testa il marchio Sympotia, mai il logo o le viste del tenant di casa dell'admin.
+- **Fuori da «Entra»** il pannello non mostra niente di un ristorante: nel menu ci sono Piattaforma e gli strumenti del progetto (Development, Roadmap, Consumi AI), in testa il marchio Sympotia, mai il logo o le viste del tenant di casa dell'admin. Gli strumenti del progetto si aprono solo da qui, non dentro «Entra».
 - **Permessi riservati alla piattaforma** («Permessi» sulla card del tenant): l'admin blocca singoli permessi della matrice — nel ristorante appaiono col lucchetto e il Proprietario non può più concederli né toglierli; con «revoca anche ai ruoli» il permesso resta alla sola piattaforma. Ogni cambio di perimetro finisce nel log attività del ristorante.
 - **Onboarding self-service** del nuovo ristorante col wizard in 4 passi.
 
@@ -712,6 +712,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-02 | Piattaforma, Development, Roadmap, Consumi AI | Development, Roadmap e Consumi AI tornano visibili: si aprono dal pannello di piattaforma, solo fuori da «Entra». Prima li apriva una sola email, cambiata il 26/09, e da allora non li vedeva nessuno. «Crea card dev» del Supporto torna a funzionare, e board e roadmap si aggiornano da sole anche nel pannello. |
 | 2026-10-02 | Piattaforma SaaS | Il pannello Piattaforma non mostra più logo, Chat staff, Fiscalità e Reportistica del Vecchio Frantoio: fuori da «Entra» restano Piattaforma e il marchio Sympotia. All'apertura non compare più «Error fetching data», e nella tab «Supporto» cambiare filtro chiude la richiesta aperta, che prima restava a destra anche fuori dalla lista. |
 | 2026-10-02 | Aiuto e supporto | Le risposte compaiono senza ricaricare: nella tab «Supporto» del pannello (lista, contatore e conversazione aperta) e nella vista «Aiuto», dove titolare e direzione vedono aggiornarsi anche le richieste dei colleghi. Con la scheda in background la conversazione si aggiorna al rientro, così la notifica non si spegne da sola. |
 | 2026-10-02 | Piattaforma · Reportistica | La sessione del pannello piattaforma, fuori dal pannello, vede solo il ristorante di casa dell'admin: la Lettura AI della Reportistica non mescola più i dati dei ristoranti demo, e l'admin di piattaforma non ha più permessi nella matrice di nessun ristorante (Cassa, Fiscalità e Chat staff rispondevano comunque con un errore). Un admin disattivato o retrocesso perde subito l'accesso al pannello. La Lettura AI porta il nome di ogni ristorante, non più quello del Frantoio per tutti. |

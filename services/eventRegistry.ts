@@ -170,6 +170,8 @@ export const DOMAIN_EVENTS: Record<string, DomainEventSpec> = {
 
     // --- Piattaforma e strumenti interni.
     'features:updated': spec('cloud'),
+    // Development e Roadmap: alla stanza degli admin di piattaforma, come
+    // support:admin-updated. Sono strumenti del pannello, non del ristorante.
     'devboard:changed': spec('cloud'),
     'roadmap:changed': spec('cloud'),
     // Supporto clienti: le richieste vivono solo sul cloud. support:updated
