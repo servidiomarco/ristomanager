@@ -71,6 +71,11 @@ import {
 } from './services/passepartoutBridge.js';
 import { setupSalaNodeBridge, getSalaNodeStatus, disconnectSalaNode, askNodeStatus } from './services/salaNodeBridge.js';
 import {
+    SUPPORT_CATEGORIES, SUPPORT_STATUSES, SUPPORT_SUBJECT_MAX, SUPPORT_BODY_MAX, SUPPORT_ATTACHMENTS_MAX,
+    sanitizeClientContext, supportTenantTag, supportPlatformTag,
+    type SupportAttachment, type SupportCategory, type SupportPriority, type SupportStatus,
+} from './services/supportShared.js';
+import {
     provisionSalaNodeCert, startSalaNodeCertRenewal, SalaNodeTlsError,
     syncSalaNodeDnsRecord, validateNewNodeDomain, isNodeDomainTakenByOtherTenant, isPrivateLanIp,
 } from './services/salaNodeTls.js';
@@ -328,7 +333,7 @@ const jsonVerify = (req: any, _res: any, buf: Buffer) => { req.rawBody = buf; };
 const standardJson = express.json({ limit: '2mb', verify: jsonVerify });
 const largeJson = express.json({ limit: '8mb', verify: jsonVerify });
 app.use((req, res, next) => (
-    req.path === '/messages/attachments' || req.path === '/media' || req.path === '/staff-chat/attachments' || req.path === '/settings/logo' ? largeJson(req, res, next) : standardJson(req, res, next)
+    req.path === '/messages/attachments' || req.path === '/media' || req.path === '/staff-chat/attachments' || req.path === '/support/attachments' || req.path === '/settings/logo' ? largeJson(req, res, next) : standardJson(req, res, next)
 ));
 
 // Un body oltre il limite fa fallire il parser PRIMA della rotta: senza
@@ -20524,7 +20529,7 @@ app.post('/push/test', authenticate, async (req: any, res) => {
 // non hanno righe qui: la loro lettura resta il cursore personale per
 // thread. 'billing' va ai platform admin, le cui righe stanno sul tenant di
 // ciascuno: la lettura si propaga fra gli admin dello stesso tenant.
-const SHARED_NOTIFICATION_CATEGORIES = ['voice', 'message', 'email', 'service', 'reservation', 'payment', 'staff', 'billing', 'system', 'general'];
+const SHARED_NOTIFICATION_CATEGORIES = ['voice', 'message', 'email', 'service', 'reservation', 'payment', 'staff', 'billing', 'system', 'general', 'support'];
 
 function emitNotificationsRead(
     tenantId: number,
@@ -20885,6 +20890,502 @@ app.post('/notifications/:id/dismiss', authenticate, async (req: any, res) => {
         res.json({ ok: true });
     } catch (err) {
         console.error('POST /notifications/:id/dismiss error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ==================== SUPPORTO CLIENTI (Aiuto) ====================
+// Le richieste di assistenza dal ristorante al team Sympotia. Nessun
+// permesso di matrice: l'assistenza non deve poter essere tolta a un ruolo,
+// basta essere un utente del ristorante. Chi apre vede le proprie richieste;
+// titolare e direzione vedono tutte quelle del ristorante. Le azioni della
+// piattaforma (rispondere, cambiare stato, card del dev board) stanno sotto
+// /admin/support, dietro platformAdminAuth.
+
+const SUPPORT_SEE_ALL_ROLES: string[] = [UserRole.OWNER, UserRole.GENERAL_MANAGER];
+
+// tenant_id è BIGINT: pg lo restituirebbe come stringa, il client lo vuole
+// numero (lo passa a «Entra» e ai filtri del pannello).
+const SUPPORT_TICKET_FIELDS = `t.id, t.tenant_id::int AS tenant_id, t.category, t.priority, t.status, t.subject,
+    t.created_by_user_id, COALESCE(NULLIF(u.full_name, ''), u.email) AS created_by_name,
+    t.tenant_unread, t.platform_unread, t.dev_card_id,
+    t.created_at, t.updated_at, t.last_message_at, t.resolved_at`;
+
+const SUPPORT_MESSAGE_FIELDS = `id, author_type, author_name, body, attachments, created_at`;
+
+// Il token di pannello (PLATFORM_ADMIN senza scope) non sta dentro nessun
+// ristorante: da questo lato non ha niente da leggere né da aprire.
+const requireTenantSession = (req: any, res: any, next: any) => {
+    if (req.user?.role === UserRole.PLATFORM_ADMIN && !isPlatformScopedSession(req.user)) {
+        return res.status(403).json({ error: 'tenant_session_required' });
+    }
+    next();
+};
+
+// Impersonation o «Entra»: la piattaforma guarda il ristorante, non scrive
+// al proprio supporto al suo posto — e leggendo non deve spegnere il «da
+// leggere» di chi ha aperto la richiesta.
+const isPlatformActingInTenant = (user: any): boolean =>
+    !!user?.impersonated_by || isPlatformScopedSession(user);
+
+const supportSeesAll = (req: any): boolean =>
+    SUPPORT_SEE_ALL_ROLES.includes(req.user?.role) || isPlatformScopedSession(req.user);
+
+const supportCreateLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    limit: 10,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    keyGenerator: (req: any) => `support:${req.user?.userId ?? 'anon'}`,
+    message: { error: 'rate_limited', message: 'Troppe richieste aperte in poco tempo: scrivi nella richiesta già aperta.' },
+});
+
+async function loadVisibleSupportTicket(req: any, id: number): Promise<any | null> {
+    const params: any[] = [id, req.tenantId!];
+    let where = 't.id = $1 AND t.tenant_id = $2';
+    if (!supportSeesAll(req)) {
+        params.push(req.user.userId);
+        where += ' AND t.created_by_user_id = $3';
+    }
+    const r = await queryWithRetry(
+        `SELECT ${SUPPORT_TICKET_FIELDS}, t.context
+           FROM support_tickets t
+           LEFT JOIN users u ON u.id = t.created_by_user_id
+          WHERE ${where}`,
+        params
+    );
+    return r.rows[0] ?? null;
+}
+
+async function loadSupportMessages(tenantId: number, ticketId: number): Promise<any[]> {
+    const r = await queryWithRetry(
+        `SELECT ${SUPPORT_MESSAGE_FIELDS} FROM support_messages
+          WHERE tenant_id = $1 AND ticket_id = $2
+          ORDER BY created_at, id`,
+        [tenantId, ticketId]
+    );
+    return r.rows;
+}
+
+// I token arrivano dal client: valgono solo le foto caricate da QUESTO
+// utente in questo ristorante, così una richiesta non può allegare file
+// altrui conoscendone il token.
+async function resolveSupportAttachments(tenantId: number, userId: number | null, input: unknown): Promise<SupportAttachment[] | null> {
+    if (input === undefined || input === null) return [];
+    if (!Array.isArray(input)) return null;
+    const tokens = [...new Set(input.filter((t): t is string => typeof t === 'string' && /^[A-Za-z0-9_-]{20,64}$/.test(t)))];
+    if (tokens.length !== input.length || tokens.length > SUPPORT_ATTACHMENTS_MAX) return null;
+    if (tokens.length === 0) return [];
+    const r = await queryWithRetry(
+        `SELECT token, content_type, filename FROM outbound_media
+          WHERE tenant_id = $1 AND token = ANY($2::text[]) AND created_by_user_id IS NOT DISTINCT FROM $3`,
+        [tenantId, tokens, userId]
+    );
+    if (r.rows.length !== tokens.length) return null;
+    return tokens.map(tok => {
+        const row = r.rows.find((x: any) => x.token === tok);
+        return { token: tok, content_type: row.content_type, filename: row.filename ?? null };
+    });
+}
+
+// La fotografia tecnica presa all'apertura: chi risponde non deve chiedere
+// «che versione hai?» né «il nodo è acceso?». Best-effort pezzo per pezzo —
+// un dato che non arriva non deve impedire di chiedere aiuto.
+async function buildSupportServerContext(tenantId: number, userId: number, category: SupportCategory): Promise<Record<string, unknown>> {
+    const settled = await Promise.allSettled([
+        queryWithRetry(`SELECT name, slug, status, billing_status FROM tenants WHERE id = $1`, [tenantId]),
+        queryWithRetry(`SELECT id, role, full_name, email FROM users WHERE id = $1 AND tenant_id = $2`, [userId, tenantId]),
+        getTenantFeatures(tenantId),
+        getFeatureFlag(tenantId, 'sala_node_enabled', false),
+        queryWithRetry(
+            `SELECT status, COUNT(*)::int AS n FROM print_jobs
+              WHERE tenant_id = $1 AND status IN ('PENDING','FAILED') AND created_at > NOW() - INTERVAL '24 hours'
+              GROUP BY status`,
+            [tenantId]
+        ),
+        queryWithRetry(
+            `SELECT kind, printer, error, created_at FROM print_jobs
+              WHERE tenant_id = $1 AND status = 'FAILED' AND created_at > NOW() - INTERVAL '24 hours'
+              ORDER BY created_at DESC LIMIT 3`,
+            [tenantId]
+        ),
+        category === 'cassa_fiscale'
+            ? queryWithRetry(
+                `SELECT provider, error, created_at FROM fiscal_documents
+                  WHERE tenant_id = $1 AND status = 'FAILED' AND created_at > NOW() - INTERVAL '24 hours'
+                  ORDER BY created_at DESC LIMIT 5`,
+                [tenantId]
+            )
+            : Promise.resolve(null),
+    ]);
+    const ok = <T,>(i: number): T | null => (settled[i].status === 'fulfilled' ? (settled[i] as PromiseFulfilledResult<T>).value : null);
+    const tenantRow = ok<any>(0)?.rows?.[0] ?? null;
+    const userRow = ok<any>(1)?.rows?.[0] ?? null;
+    const features = ok<Record<string, boolean>>(2);
+    const nodeEnabled = ok<boolean>(3) === true;
+    const jobCounts = ok<any>(4)?.rows ?? [];
+    const jobErrors = ok<any>(5)?.rows ?? [];
+    const fiscal = ok<any>(6);
+    const count = (s: string) => jobCounts.find((r: any) => r.status === s)?.n ?? 0;
+    return {
+        captured_at: new Date().toISOString(),
+        server_version: (process.env.RAILWAY_GIT_COMMIT_SHA || '').slice(0, 7) || 'dev',
+        tenant: tenantRow ? { id: tenantId, ...tenantRow } : { id: tenantId },
+        user: userRow,
+        features: features ? Object.keys(features).filter(k => features[k]) : null,
+        sala_node: nodeEnabled ? getSalaNodeStatus(tenantId) : { enabled: false },
+        print_jobs_24h: {
+            pending: count('PENDING'),
+            failed: count('FAILED'),
+            last_errors: jobErrors.map((r: any) => ({ kind: r.kind, printer: r.printer, error: String(r.error ?? '').slice(0, 300), at: r.created_at })),
+        },
+        // L'agente di stampa ha un solo «ultimo contatto» per tutta la
+        // piattaforma, non per ristorante: il nome lo dice, per non leggerlo
+        // come lo stato della stampante di QUESTO locale.
+        print_agent_global: {
+            online: printAgentLastSeen != null && Date.now() - printAgentLastSeen < 30_000,
+            last_seen_seconds: printAgentLastSeen != null ? Math.round((Date.now() - printAgentLastSeen) / 1000) : null,
+        },
+        ...(fiscal ? {
+            fiscal_failed_24h: fiscal.rows.map((r: any) => ({ provider: r.provider, error: String(r.error ?? '').slice(0, 300), at: r.created_at })),
+        } : {}),
+    };
+}
+
+// Dove arrivano le email degli urgenti: un indirizzo vero da env (gli
+// account PLATFORM_ADMIN possono avere email di servizio che nessuno
+// legge), altrimenti quelle degli admin attivi.
+async function supportAlertRecipients(): Promise<string[]> {
+    const fromEnv = (process.env.SUPPORT_ALERT_EMAIL || '')
+        .split(',').map(s => s.trim()).filter(s => s.includes('@'));
+    if (fromEnv.length > 0) return fromEnv;
+    // rls-bypass: gli admin di piattaforma stanno sopra i tenant, la richiesta arriva da uno qualunque
+    const r = await runAsPlatform(() => queryWithRetry(
+        `SELECT email FROM users WHERE role = 'PLATFORM_ADMIN' AND is_active = TRUE`
+    ));
+    return r.rows.map((row: any) => String(row.email)).filter(e => e.includes('@'));
+}
+
+const supportPreview = (text: string, max = 140): string => {
+    const flat = text.replace(/\s+/g, ' ').trim();
+    return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+};
+
+/** Avviso ai platform admin per una richiesta nuova, una risposta del
+ *  ristorante o un'escalation. Push sempre (una riga per ticket: il tag la
+ *  riaccende); email solo quando il ristorante dice che il servizio è
+ *  bloccato — è l'unico caso in cui aspettare la prossima occhiata al
+ *  telefono costa. Non lancia mai. */
+async function notifySupportToPlatform(
+    ticket: { id: number; tenant_id: number; subject: string; priority: string },
+    kind: 'nuovo' | 'risposta' | 'urgente',
+    text: string,
+    authorName: string | null,
+): Promise<void> {
+    try {
+        // rls-bypass: il nome del ristorante per l'avviso agli admin; tenants non ha RLS, il WHERE fissa l'id
+        const t = await runAsPlatform(() => queryWithRetry(`SELECT name FROM tenants WHERE id = $1`, [ticket.tenant_id]));
+        const tenantName = String(t.rows[0]?.name ?? `tenant ${ticket.tenant_id}`);
+        const urgent = ticket.priority === 'urgente';
+        const title = kind === 'risposta'
+            ? `${tenantName} ha risposto`
+            : `${urgent ? 'Urgente · ' : ''}${tenantName} chiede aiuto`;
+        await pushSendToPlatformAdmins({
+            category: 'support',
+            title,
+            body: `#${ticket.id} ${ticket.subject} — ${supportPreview(text, 90)}`,
+            url: `/?view=PLATFORM&support=${ticket.id}`,
+            tag: supportPlatformTag(ticket.id),
+        });
+        if (urgent && kind !== 'risposta' && isPlatformMailConfigured()) {
+            const recipients = await supportAlertRecipients();
+            const link = `${publicBaseUrl()}/?view=PLATFORM&support=${ticket.id}`;
+            const lines = [
+                `${tenantName} segnala un problema che blocca il servizio.`,
+                '',
+                `Richiesta #${ticket.id}: ${ticket.subject}`,
+                authorName ? `Da: ${authorName}` : '',
+                '',
+                text,
+                '',
+                `Apri la richiesta: ${link}`,
+            ].filter((l, i, all) => l !== '' || all[i - 1] !== '');
+            for (const to of recipients) {
+                await sendPlatformMail({
+                    to,
+                    subject: `[Urgente] ${tenantName}: ${ticket.subject}`,
+                    text: lines.join('\n'),
+                }).catch(err => console.warn('[support] email urgente fallita:', err?.message || err));
+            }
+        }
+    } catch (err: any) {
+        console.warn('[support] avviso alla piattaforma fallito:', err?.message || err);
+    }
+}
+
+app.post('/support/attachments', authenticate, requireTenantSession, async (req: any, res) => {
+    try {
+        if (isPlatformActingInTenant(req.user)) {
+            return res.status(403).json({ error: 'platform_session' });
+        }
+        const contentType = String(req.body?.content_type || '').toLowerCase().split(';')[0].trim();
+        const dataB64 = String(req.body?.data || '');
+        const filename = req.body?.filename ? String(req.body.filename).slice(0, 200) : null;
+        if (!contentType || !dataB64) {
+            return res.status(400).json({ error: 'content_type e data sono obbligatori' });
+        }
+        if (!/^image\/(jpeg|png|webp|gif)$/.test(contentType)) {
+            return res.status(415).json({ error: `Solo foto: ${contentType} non supportato` });
+        }
+        const buf = Buffer.from(dataB64.replace(/^data:[^,]+,/, ''), 'base64');
+        if (buf.length === 0) return res.status(400).json({ error: 'File vuoto' });
+        if (buf.length > OUTBOUND_MEDIA_MAX_BYTES) {
+            return res.status(413).json({ error: 'File troppo grande: massimo 5 MB' });
+        }
+        const token = crypto.randomBytes(32).toString('base64url');
+        const ins = await queryWithRetry(
+            `INSERT INTO outbound_media (tenant_id, token, content_type, filename, bytes, size_bytes, created_by_user_id)
+             VALUES ($7, $1, $2, $3, $4, $5, $6) RETURNING token, content_type, filename, size_bytes`,
+            [token, contentType, filename, buf, buf.length, req.user?.userId ?? null, req.tenantId!]
+        );
+        res.status(201).json(ins.rows[0]);
+    } catch (err) {
+        console.error('POST /support/attachments error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Le foto del supporto NON passano da /public/media: uno screenshot della
+// cassa o delle prenotazioni porta nomi e telefoni di clienti. Si servono
+// solo a chi vede la richiesta che le contiene.
+app.get('/support/attachments/:token', authenticate, requireTenantSession, async (req: any, res) => {
+    try {
+        const token = String(req.params.token || '');
+        if (!/^[A-Za-z0-9_-]{20,64}$/.test(token)) return res.status(404).json({ error: 'Not found' });
+        const params: any[] = [token, req.tenantId!];
+        let visible = '';
+        if (!supportSeesAll(req)) {
+            params.push(req.user.userId);
+            visible = 'AND t.created_by_user_id = $3';
+        }
+        const r = await queryWithRetry(
+            `SELECT o.content_type, o.bytes, o.size_bytes
+               FROM outbound_media o
+              WHERE o.token = $1 AND o.tenant_id = $2
+                AND EXISTS (
+                    SELECT 1 FROM support_messages m
+                      JOIN support_tickets t ON t.id = m.ticket_id
+                     WHERE m.tenant_id = $2
+                       AND m.attachments @> jsonb_build_array(jsonb_build_object('token', $1::text))
+                       ${visible}
+                )`,
+            params
+        );
+        const row = r.rows[0];
+        if (!row) return res.status(404).json({ error: 'Not found' });
+        res.setHeader('Content-Type', row.content_type);
+        res.setHeader('Content-Length', String(row.size_bytes));
+        res.setHeader('Cache-Control', 'private, max-age=3600');
+        res.end(row.bytes);
+    } catch (err) {
+        console.error('GET /support/attachments error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.get('/support/tickets', authenticate, requireTenantSession, async (req: any, res) => {
+    try {
+        const seesAll = supportSeesAll(req);
+        const params: any[] = [req.tenantId!];
+        let where = 't.tenant_id = $1';
+        if (!seesAll) {
+            params.push(req.user.userId);
+            where += ' AND t.created_by_user_id = $2';
+        }
+        // Aperte prima delle risolte, poi la più recente: la lista è una
+        // coda di cose da seguire, non un archivio.
+        const r = await queryWithRetry(
+            `SELECT ${SUPPORT_TICKET_FIELDS}
+               FROM support_tickets t
+               LEFT JOIN users u ON u.id = t.created_by_user_id
+              WHERE ${where}
+              ORDER BY (t.status = 'risolto'), t.last_message_at DESC
+              LIMIT 200`,
+            params
+        );
+        res.json({ tickets: r.rows, sees_all: seesAll });
+    } catch (err) {
+        console.error('GET /support/tickets error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/support/tickets', authenticate, requireTenantSession, supportCreateLimiter, async (req: any, res) => {
+    try {
+        if (isPlatformActingInTenant(req.user)) {
+            return res.status(403).json({ error: 'platform_session', message: 'Dentro un ristorante come piattaforma non si aprono richieste a suo nome.' });
+        }
+        const category = String(req.body?.category ?? 'altro') as SupportCategory;
+        if (!(SUPPORT_CATEGORIES as readonly string[]).includes(category)) {
+            return res.status(400).json({ error: 'invalid_category' });
+        }
+        const priority: SupportPriority = req.body?.urgent === true ? 'urgente' : 'normale';
+        const subject = String(req.body?.subject ?? '').replace(/\s+/g, ' ').trim();
+        const body = String(req.body?.body ?? '').trim();
+        if (!subject || subject.length > SUPPORT_SUBJECT_MAX) {
+            return res.status(400).json({ error: 'invalid_subject', message: `Oggetto obbligatorio, massimo ${SUPPORT_SUBJECT_MAX} caratteri.` });
+        }
+        if (!body || body.length > SUPPORT_BODY_MAX) {
+            return res.status(400).json({ error: 'invalid_body', message: `Descrizione obbligatoria, massimo ${SUPPORT_BODY_MAX} caratteri.` });
+        }
+        const userId = Number(req.user.userId);
+        const attachments = await resolveSupportAttachments(req.tenantId!, userId, req.body?.attachments);
+        if (attachments === null) {
+            return res.status(400).json({ error: 'invalid_attachments' });
+        }
+        const context = {
+            client: sanitizeClientContext(req.body?.context),
+            server: await buildSupportServerContext(req.tenantId!, userId, category),
+        };
+        const authorName = String((context.server.user as any)?.full_name || req.user.email || '') || null;
+        const ticketId = await withTenant(req.tenantId!, async client => {
+            const ins = await client.query(
+                `INSERT INTO support_tickets (tenant_id, created_by_user_id, category, priority, subject, context)
+                 VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+                [req.tenantId!, userId, category, priority, subject, JSON.stringify(context)]
+            );
+            const id = Number(ins.rows[0].id);
+            await client.query(
+                `INSERT INTO support_messages (tenant_id, ticket_id, author_type, author_user_id, author_name, body, attachments)
+                 VALUES ($1, $2, 'utente', $3, $4, $5, $6)`,
+                [req.tenantId!, id, userId, authorName, body, JSON.stringify(attachments)]
+            );
+            return id;
+        });
+        const ticket = await loadVisibleSupportTicket(req, ticketId);
+        const messages = await loadSupportMessages(req.tenantId!, ticketId);
+        void notifySupportToPlatform(ticket, 'nuovo', body, authorName);
+        res.status(201).json({ ...ticket, messages });
+    } catch (err) {
+        console.error('POST /support/tickets error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.get('/support/tickets/:id', authenticate, requireTenantSession, async (req: any, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+        const ticket = await loadVisibleSupportTicket(req, id);
+        if (!ticket) return res.status(404).json({ error: 'not_found' });
+        const messages = await loadSupportMessages(req.tenantId!, id);
+        // Il «da leggere» è di chi ha aperto la richiesta: il titolare che la
+        // sfoglia non lo spegne al posto del cameriere che aspetta la risposta.
+        const userId = Number(req.user.userId);
+        if (!isPlatformActingInTenant(req.user) && ticket.created_by_user_id === userId) {
+            if (ticket.tenant_unread) {
+                await queryWithRetry(
+                    `UPDATE support_tickets SET tenant_unread = FALSE WHERE id = $1 AND tenant_id = $2`,
+                    [id, req.tenantId!]
+                );
+                ticket.tenant_unread = false;
+            }
+            await markNotificationsReadForUsers(req.tenantId!, [userId], [supportTenantTag(id)]);
+        }
+        res.json({ ...ticket, messages });
+    } catch (err) {
+        console.error('GET /support/tickets/:id error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/support/tickets/:id/messages', authenticate, requireTenantSession, async (req: any, res) => {
+    try {
+        if (isPlatformActingInTenant(req.user)) {
+            return res.status(403).json({ error: 'platform_session', message: 'Rispondi dal pannello piattaforma.' });
+        }
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+        const ticket = await loadVisibleSupportTicket(req, id);
+        if (!ticket) return res.status(404).json({ error: 'not_found' });
+        const body = String(req.body?.body ?? '').trim();
+        if (!body || body.length > SUPPORT_BODY_MAX) {
+            return res.status(400).json({ error: 'invalid_body', message: `Messaggio obbligatorio, massimo ${SUPPORT_BODY_MAX} caratteri.` });
+        }
+        const userId = Number(req.user.userId);
+        const attachments = await resolveSupportAttachments(req.tenantId!, userId, req.body?.attachments);
+        if (attachments === null) return res.status(400).json({ error: 'invalid_attachments' });
+        const nameRes = await queryWithRetry(`SELECT full_name, email FROM users WHERE id = $1 AND tenant_id = $2`, [userId, req.tenantId!]);
+        const authorName = String(nameRes.rows[0]?.full_name || nameRes.rows[0]?.email || req.user.email || '') || null;
+        await withTenant(req.tenantId!, async client => {
+            await client.query(
+                `INSERT INTO support_messages (tenant_id, ticket_id, author_type, author_user_id, author_name, body, attachments)
+                 VALUES ($1, $2, 'utente', $3, $4, $5, $6)`,
+                [req.tenantId!, id, userId, authorName, body, JSON.stringify(attachments)]
+            );
+            // Il ristorante che risponde rimette la palla alla piattaforma:
+            // «in attesa del cliente» torna in corso, una risolta si riapre.
+            // Chi ha aperto e risponde ha letto per forza: il suo pallino si
+            // spegne anche se la risposta parte senza aver riaperto il dettaglio.
+            await client.query(
+                `UPDATE support_tickets
+                    SET status = CASE status WHEN 'attesa_cliente' THEN 'in_corso' WHEN 'risolto' THEN 'nuovo' ELSE status END,
+                        resolved_at = CASE WHEN status = 'risolto' THEN NULL ELSE resolved_at END,
+                        platform_unread = TRUE,
+                        tenant_unread = CASE WHEN created_by_user_id = $3 THEN FALSE ELSE tenant_unread END,
+                        last_message_at = now(), updated_at = now()
+                  WHERE id = $1 AND tenant_id = $2`,
+                [id, req.tenantId!, userId]
+            );
+        });
+        const updated = await loadVisibleSupportTicket(req, id);
+        const messages = await loadSupportMessages(req.tenantId!, id);
+        void notifySupportToPlatform(updated, 'risposta', body, authorName);
+        res.status(201).json({ ...updated, messages });
+    } catch (err) {
+        console.error('POST /support/tickets/:id/messages error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Due sole mosse per il ristorante: chiudere una richiesta risolta, e dire
+// che il problema è diventato bloccante. Lo stato di lavorazione resta della
+// piattaforma.
+app.patch('/support/tickets/:id', authenticate, requireTenantSession, async (req: any, res) => {
+    try {
+        if (isPlatformActingInTenant(req.user)) {
+            return res.status(403).json({ error: 'platform_session' });
+        }
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+        const ticket = await loadVisibleSupportTicket(req, id);
+        if (!ticket) return res.status(404).json({ error: 'not_found' });
+        const wantsResolved = req.body?.status === 'risolto';
+        const wantsUrgent = req.body?.priority === 'urgente';
+        if (!wantsResolved && !wantsUrgent) {
+            return res.status(400).json({ error: 'invalid_patch', message: "Si può solo chiudere la richiesta o segnarla urgente." });
+        }
+        const escalated = wantsUrgent && ticket.priority !== 'urgente' && ticket.status !== 'risolto';
+        await queryWithRetry(
+            `UPDATE support_tickets
+                SET status = CASE WHEN $3::boolean THEN 'risolto' ELSE status END,
+                    resolved_at = CASE WHEN $3::boolean AND status <> 'risolto' THEN now() ELSE resolved_at END,
+                    priority = CASE WHEN $4::boolean THEN 'urgente' ELSE priority END,
+                    platform_unread = CASE WHEN $4::boolean THEN TRUE ELSE platform_unread END,
+                    updated_at = now()
+              WHERE id = $1 AND tenant_id = $2`,
+            [id, req.tenantId!, wantsResolved, escalated]
+        );
+        const updated = await loadVisibleSupportTicket(req, id);
+        const messages = await loadSupportMessages(req.tenantId!, id);
+        if (escalated) {
+            void notifySupportToPlatform(updated, 'urgente', messages[messages.length - 1]?.body ?? '', null);
+        }
+        // Chiusa dal ristorante: l'avviso alla piattaforma non chiede più niente.
+        if (wantsResolved) void closePlatformNotifications([supportPlatformTag(id)]);
+        res.json({ ...updated, messages });
+    } catch (err) {
+        console.error('PATCH /support/tickets/:id error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -29425,6 +29926,319 @@ app.patch('/admin/tenants/:id/billing/addons', platformAdminAuth, async (req, re
         });
     } catch (err) {
         billingErrorToResponse(res, err, 'PATCH /admin/tenants/:id/billing/addons');
+    }
+});
+
+// ============================================
+// PANNELLO PIATTAFORMA — SUPPORTO CLIENTI
+// ============================================
+// L'altro lato delle richieste aperte da «Aiuto» (vedi /support/tickets):
+// la coda di tutti i ristoranti, la risposta, lo stato, la card del dev
+// board. platformAdminAuth fa girare tutto in runAsPlatform; le SCRITTURE
+// invece passano da withTenant(ticket.tenant_id), così il WITH CHECK della
+// policy garantisce che una risposta finisca nel ristorante della richiesta.
+
+const loadPlatformSupportTicket = async (id: number): Promise<any | null> => {
+    const r = await queryWithRetry(
+        `SELECT ${SUPPORT_TICKET_FIELDS}, t.context, tn.name AS tenant_name, tn.slug AS tenant_slug
+           FROM support_tickets t
+           JOIN tenants tn ON tn.id = t.tenant_id
+           LEFT JOIN users u ON u.id = t.created_by_user_id
+          WHERE t.id = $1`,
+        [id]
+    );
+    return r.rows[0] ?? null;
+};
+
+/** Risposta della piattaforma: push e riga notifica a chi ha aperto la
+ *  richiesta, un'email (il ristoratore non tiene l'app aperta fuori dal
+ *  servizio) e l'evento socket per la vista Aiuto già aperta. Non lancia. */
+async function notifySupportReplyToTenant(ticket: any, text: string): Promise<void> {
+    const creator = Number(ticket.created_by_user_id);
+    if (!Number.isInteger(creator) || creator <= 0) return;
+    try {
+        await pushSendToUser(creator, {
+            category: 'support',
+            title: 'Risposta dal supporto Sympotia',
+            body: `${ticket.subject} — ${supportPreview(text, 90)}`,
+            url: `/?view=SUPPORTO&ticket=${ticket.id}`,
+            tag: supportTenantTag(ticket.id),
+        });
+        socketService?.broadcastToUsers(Number(ticket.tenant_id), [creator], 'support:updated', { id: ticket.id });
+        if (isPlatformMailConfigured()) {
+            const u = await queryWithRetry(`SELECT email FROM users WHERE id = $1 AND is_active = TRUE`, [creator]);
+            const to = String(u.rows[0]?.email ?? '');
+            if (to.includes('@')) {
+                await sendPlatformMail({
+                    to,
+                    subject: `Risposta alla tua richiesta #${ticket.id}: ${ticket.subject}`,
+                    text: [
+                        'Il supporto Sympotia ha risposto alla tua richiesta.',
+                        '',
+                        text,
+                        '',
+                        `Rispondi dall'app: ${publicBaseUrl()}/?view=SUPPORTO&ticket=${ticket.id}`,
+                    ].join('\n'),
+                });
+            }
+        }
+    } catch (err: any) {
+        console.warn('[support] avviso al ristorante fallito:', err?.message || err);
+    }
+}
+
+app.get('/admin/support/tickets', platformAdminAuth, async (req, res) => {
+    try {
+        const params: any[] = [];
+        const where: string[] = [];
+        // Senza filtro la coda mostra le aperte: le risolte si chiedono.
+        const status = String(req.query.status ?? 'aperte');
+        if ((SUPPORT_STATUSES as readonly string[]).includes(status)) {
+            params.push(status);
+            where.push(`t.status = $${params.length}`);
+        } else if (status !== 'tutte') {
+            where.push(`t.status <> 'risolto'`);
+        }
+        if (req.query.priority === 'urgente' || req.query.priority === 'normale') {
+            params.push(req.query.priority);
+            where.push(`t.priority = $${params.length}`);
+        }
+        const tenantFilter = Number(req.query.tenant_id);
+        if (Number.isInteger(tenantFilter) && tenantFilter > 0) {
+            params.push(tenantFilter);
+            where.push(`t.tenant_id = $${params.length}`);
+        }
+        const [list, counts] = await Promise.all([
+            queryWithRetry(
+                `SELECT ${SUPPORT_TICKET_FIELDS}, tn.name AS tenant_name, tn.slug AS tenant_slug
+                   FROM support_tickets t
+                   JOIN tenants tn ON tn.id = t.tenant_id
+                   LEFT JOIN users u ON u.id = t.created_by_user_id
+                  ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+                  ORDER BY (t.status = 'risolto'), (t.priority = 'urgente') DESC, t.last_message_at DESC
+                  LIMIT 300`,
+                params
+            ),
+            queryWithRetry(
+                `SELECT status, COUNT(*)::int AS n,
+                        COUNT(*) FILTER (WHERE platform_unread)::int AS unread
+                   FROM support_tickets GROUP BY status`
+            ),
+        ]);
+        const byStatus = Object.fromEntries(SUPPORT_STATUSES.map(s => [s, 0])) as Record<SupportStatus, number>;
+        let unread = 0;
+        for (const r of counts.rows) {
+            byStatus[r.status as SupportStatus] = Number(r.n);
+            unread += Number(r.unread);
+        }
+        res.json({ tickets: list.rows, counts: byStatus, unread });
+    } catch (err) {
+        console.error('GET /admin/support/tickets error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.get('/admin/support/tickets/:id', platformAdminAuth, async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+        const ticket = await loadPlatformSupportTicket(id);
+        if (!ticket) return res.status(404).json({ error: 'not_found' });
+        const messages = await loadSupportMessages(Number(ticket.tenant_id), id);
+        if (ticket.platform_unread) {
+            await withTenant(Number(ticket.tenant_id), client => client.query(
+                `UPDATE support_tickets SET platform_unread = FALSE WHERE id = $1`, [id]
+            ));
+            ticket.platform_unread = false;
+        }
+        await closePlatformNotifications([supportPlatformTag(id)]);
+        res.json({ ...ticket, messages });
+    } catch (err) {
+        console.error('GET /admin/support/tickets/:id error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/admin/support/tickets/:id/messages', platformAdminAuth, async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+        const ticket = await loadPlatformSupportTicket(id);
+        if (!ticket) return res.status(404).json({ error: 'not_found' });
+        const body = String(req.body?.body ?? '').trim();
+        if (!body || body.length > SUPPORT_BODY_MAX) {
+            return res.status(400).json({ error: 'invalid_body', message: `Messaggio obbligatorio, massimo ${SUPPORT_BODY_MAX} caratteri.` });
+        }
+        const requested = req.body?.status;
+        if (requested !== undefined && !(SUPPORT_STATUSES as readonly string[]).includes(requested)) {
+            return res.status(400).json({ error: 'invalid_status' });
+        }
+        // Senza uno stato esplicito, la prima risposta prende in carico.
+        const nextStatus: SupportStatus = requested ?? (ticket.status === 'nuovo' ? 'in_corso' : ticket.status);
+        // Il nome che il ristorante legge: quello dell'admin, se c'è un
+        // account dietro; il token env di bootstrap risponde come «supporto».
+        let authorName = 'Supporto Sympotia';
+        if (req.user?.userId) {
+            const me = await queryWithRetry(`SELECT full_name FROM users WHERE id = $1`, [req.user.userId]);
+            if (me.rows[0]?.full_name) authorName = String(me.rows[0].full_name);
+        }
+        await withTenant(Number(ticket.tenant_id), async client => {
+            await client.query(
+                `INSERT INTO support_messages (tenant_id, ticket_id, author_type, author_user_id, author_name, body)
+                 VALUES ($1, $2, 'piattaforma', $3, $4, $5)`,
+                [ticket.tenant_id, id, req.user?.userId ?? null, authorName, body]
+            );
+            await client.query(
+                `UPDATE support_tickets
+                    SET status = $2::varchar,
+                        resolved_at = CASE WHEN $2::varchar = 'risolto' THEN COALESCE(resolved_at, now()) ELSE NULL END,
+                        tenant_unread = TRUE, platform_unread = FALSE,
+                        last_message_at = now(), updated_at = now()
+                  WHERE id = $1`,
+                [id, nextStatus]
+            );
+        });
+        const updated = await loadPlatformSupportTicket(id);
+        const messages = await loadSupportMessages(Number(ticket.tenant_id), id);
+        await closePlatformNotifications([supportPlatformTag(id)]);
+        void notifySupportReplyToTenant(updated, body);
+        res.status(201).json({ ...updated, messages });
+    } catch (err) {
+        console.error('POST /admin/support/tickets/:id/messages error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.patch('/admin/support/tickets/:id', platformAdminAuth, async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+        const ticket = await loadPlatformSupportTicket(id);
+        if (!ticket) return res.status(404).json({ error: 'not_found' });
+        const status = req.body?.status;
+        const priority = req.body?.priority;
+        if (status !== undefined && !(SUPPORT_STATUSES as readonly string[]).includes(status)) {
+            return res.status(400).json({ error: 'invalid_status' });
+        }
+        if (priority !== undefined && priority !== 'urgente' && priority !== 'normale') {
+            return res.status(400).json({ error: 'invalid_priority' });
+        }
+        if (status === undefined && priority === undefined) {
+            return res.status(400).json({ error: 'empty_patch' });
+        }
+        await withTenant(Number(ticket.tenant_id), client => client.query(
+            `UPDATE support_tickets
+                SET status = COALESCE($2::varchar, status),
+                    priority = COALESCE($3::varchar, priority),
+                    resolved_at = CASE
+                        WHEN COALESCE($2::varchar, status) = 'risolto' THEN COALESCE(resolved_at, now())
+                        ELSE NULL END,
+                    updated_at = now()
+              WHERE id = $1`,
+            [id, status ?? null, priority ?? null]
+        ));
+        const updated = await loadPlatformSupportTicket(id);
+        const messages = await loadSupportMessages(Number(ticket.tenant_id), id);
+        // Lo stato cambia sotto gli occhi del ristorante se ha la vista
+        // aperta; niente push: è la risposta scritta che merita il telefono.
+        if (updated.created_by_user_id) {
+            socketService?.broadcastToUsers(Number(updated.tenant_id), [Number(updated.created_by_user_id)], 'support:updated', { id });
+        }
+        res.json({ ...updated, messages });
+    } catch (err) {
+        console.error('PATCH /admin/support/tickets/:id error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// La richiesta diventa una card del dev board, con il contesto già dentro:
+// è la strada verso «Approva per Claude» e la PR. La card NON parte da sola
+// — l'approvazione resta un gesto sulla pagina Development.
+const SUPPORT_DEV_LABEL: Partial<Record<SupportCategory, string>> = {
+    stampa: 'stampa',
+    prenotazioni: 'prenotazioni',
+    cassa_fiscale: 'pagamenti',
+};
+
+app.post('/admin/support/tickets/:id/dev-card', platformAdminAuth, async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+        const ticket = await loadPlatformSupportTicket(id);
+        if (!ticket) return res.status(404).json({ error: 'not_found' });
+        if (ticket.dev_card_id) {
+            return res.status(409).json({ error: 'dev_card_exists', dev_card_id: ticket.dev_card_id });
+        }
+        // Il board vive nel tenant dell'account che lo usa (vedi
+        // requireDevBoardAdmin): la card va lì, non nel ristorante.
+        const owner = await queryWithRetry(
+            `SELECT tenant_id FROM users WHERE lower(email) = $1 ORDER BY id LIMIT 1`,
+            [DEV_BOARD_ADMIN_EMAIL]
+        );
+        const boardTenant = Number(owner.rows[0]?.tenant_id);
+        if (!Number.isInteger(boardTenant) || boardTenant <= 0) {
+            return res.status(409).json({ error: 'dev_board_unavailable', message: "L'account del dev board non esiste." });
+        }
+        const messages = await loadSupportMessages(Number(ticket.tenant_id), id);
+        const first = messages.find((m: any) => m.author_type === 'utente');
+        const description = [
+            `Richiesta di supporto #${id} da ${ticket.tenant_name} (${ticket.tenant_slug}) · categoria ${ticket.category} · priorità ${ticket.priority}`,
+            ticket.created_by_name ? `Aperta da ${ticket.created_by_name}` : '',
+            '',
+            first?.body ?? '',
+            '',
+            'Contesto raccolto all\'apertura:',
+            JSON.stringify(ticket.context ?? {}, null, 2),
+        ].filter((l, i, all) => l !== '' || all[i - 1] !== '').join('\n');
+        const label = SUPPORT_DEV_LABEL[ticket.category as SupportCategory];
+        const card = await withTenant(boardTenant, async client => {
+            const ins = await client.query(
+                `INSERT INTO dev_board_cards (title, description, column_key, position, labels, tenant_id)
+                 VALUES ($1, $2, 'in_progress'::varchar,
+                         (SELECT COALESCE(MAX(position), -1) + 1 FROM dev_board_cards WHERE column_key = 'in_progress' AND tenant_id = $4),
+                         $3, $4)
+                 RETURNING id`,
+                [`[Supporto #${id}] ${ticket.subject}`.slice(0, 255), description, label ? [label] : [], boardTenant]
+            );
+            return Number(ins.rows[0].id);
+        });
+        await withTenant(Number(ticket.tenant_id), client => client.query(
+            `UPDATE support_tickets SET dev_card_id = $2, updated_at = now() WHERE id = $1`, [id, card]
+        ));
+        socketService?.broadcastToAll(boardTenant, 'devboard:changed', {});
+        res.status(201).json({ dev_card_id: card });
+    } catch (err) {
+        console.error('POST /admin/support/tickets/:id/dev-card error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.get('/admin/support/attachments/:token', platformAdminAuth, async (req, res) => {
+    try {
+        const token = String(req.params.token || '');
+        if (!/^[A-Za-z0-9_-]{20,64}$/.test(token)) return res.status(404).json({ error: 'Not found' });
+        // Solo file allegati a una richiesta: il pannello non diventa una
+        // porta su tutto outbound_media.
+        const r = await queryWithRetry(
+            `SELECT o.content_type, o.bytes, o.size_bytes
+               FROM outbound_media o
+              WHERE o.token = $1
+                AND EXISTS (
+                    SELECT 1 FROM support_messages m
+                     WHERE m.tenant_id = o.tenant_id
+                       AND m.attachments @> jsonb_build_array(jsonb_build_object('token', $1::text))
+                )`,
+            [token]
+        );
+        const row = r.rows[0];
+        if (!row) return res.status(404).json({ error: 'Not found' });
+        res.setHeader('Content-Type', row.content_type);
+        res.setHeader('Content-Length', String(row.size_bytes));
+        res.setHeader('Cache-Control', 'private, max-age=3600');
+        res.end(row.bytes);
+    } catch (err) {
+        console.error('GET /admin/support/attachments error:', err);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 

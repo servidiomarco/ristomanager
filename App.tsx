@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChevronUp, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, AlertTriangle, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator, BarChart3, Star, ShoppingBag } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChevronUp, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, AlertTriangle, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator, BarChart3, Star, ShoppingBag, LifeBuoy } from 'lucide-react';
 import { ViewState, Room, Table, Dish, RestaurantMenu, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Shift, UserRole, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -28,6 +28,7 @@ import { HaccpPage } from './components/HaccpPage';
 import ConversazioniPage from './components/ConversazioniPage';
 import InboxPage from './components/InboxPage';
 import StaffChatPage from './components/StaffChatPage';
+import SupportPanel from './components/SupportPanel';
 import { LivePill, SegmentedControl, StatusPill, useMediaQuery, dsSelect } from './components/ds';
 import { NotificationsPanel } from './components/NotificationsPanel';
 import EmailPage from './components/EmailPage';
@@ -230,6 +231,8 @@ const NAV_ITEMS: NavItem[] = [
   // Visibile solo al ruolo PLATFORM_ADMIN (gate per ruolo in canAccessView)
   { kind: 'link', label: 'Piattaforma', labelKey: 'nav.items.platform', Icon: Building2, group: 'sistema', isTab: false, view: ViewState.PLATFORM, sidebarCollapse: false },
   { kind: 'link', label: 'Impostazioni', labelKey: 'nav.items.settings', Icon: Settings, group: 'sistema', isTab: false, view: ViewState.SETTINGS, sidebarCollapse: false },
+  // Aiuto: richieste al team Sympotia, per ogni ruolo del ristorante (gate in canAccessView)
+  { kind: 'link', label: 'Aiuto', labelKey: 'nav.items.support', Icon: LifeBuoy, group: 'sistema', isTab: false, view: ViewState.SUPPORTO, sidebarCollapse: false },
   // Visibili solo all'account admin (gate email-based in canAccessView)
   { kind: 'link', label: 'Consumi AI', labelKey: 'nav.items.aiUsage', Icon: Gauge, group: 'sistema', isTab: false, view: ViewState.MONITORING, sidebarCollapse: false },
   { kind: 'link', label: 'Development', labelKey: 'nav.items.development', Icon: Kanban, group: 'sistema', isTab: false, view: ViewState.DEVELOPMENT, sidebarCollapse: false },
@@ -435,6 +438,12 @@ const App: React.FC = () => {
   const { t, i18n } = useTranslation('common', { useSuspense: false });
 
   const [view, setView] = useState<ViewState>(ViewState.DASHBOARD);
+  // L'ultima vista di lavoro prima dell'Aiuto: la richiesta la porta nel
+  // contesto («scrivo da Cassa»), che è il primo indizio per chi risponde.
+  const lastWorkViewRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (view !== ViewState.SUPPORTO) lastWorkViewRef.current = view;
+  }, [view]);
   // La vista corrente letta dai gestori socket, che sono agganciati una volta
   // sola: metterla nelle dipendenze li staccherebbe e riattaccherebbe a ogni
   // navigazione.
@@ -637,6 +646,10 @@ const App: React.FC = () => {
   // Set when a notification deep-links to a specific booking (?reservationId=…);
   // handed to ReservationList so it opens that booking's detail drawer.
   const [pendingReservationId, setPendingReservationId] = useState<number | null>(null);
+  // Deep link delle notifiche del supporto: ?ticket= apre la richiesta nella
+  // vista Aiuto, ?support= la apre nella tab Supporto del pannello.
+  const [pendingSupportTicketId, setPendingSupportTicketId] = useState<number | null>(null);
+  const [pendingPlatformSupportId, setPendingPlatformSupportId] = useState<number | null>(null);
 
   // Global command palette (Cmd/Ctrl+K). Lets the operator find a
   // reservation without knowing its date — the daily list stays intact.
@@ -1189,6 +1202,10 @@ const App: React.FC = () => {
       const parsed = Number(requestedReservationId);
       if (Number.isFinite(parsed)) setPendingReservationId(parsed);
     }
+    const requestedTicket = Number(params.get('ticket'));
+    if (Number.isInteger(requestedTicket) && requestedTicket > 0) setPendingSupportTicketId(requestedTicket);
+    const requestedSupport = Number(params.get('support'));
+    if (Number.isInteger(requestedSupport) && requestedSupport > 0) setPendingPlatformSupportId(requestedSupport);
     if (requestedView && (Object.values(ViewState) as string[]).includes(requestedView)) {
       const target = requestedView as ViewState;
       if (accessibleViews.includes(target)) {
@@ -1198,6 +1215,8 @@ const App: React.FC = () => {
       // Strip the params either way so reloads don't keep re-navigating.
       params.delete('view');
       params.delete('reservationId');
+      params.delete('ticket');
+      params.delete('support');
       const search = params.toString();
       window.history.replaceState({}, '', window.location.pathname + (search ? `?${search}` : '') + window.location.hash);
       if (accessibleViews.includes(target)) return;
@@ -1272,6 +1291,10 @@ const App: React.FC = () => {
             const parsed = Number(requestedReservationId);
             if (Number.isFinite(parsed)) setPendingReservationId(parsed);
           }
+          const requestedTicket = Number(url.searchParams.get('ticket'));
+          if (Number.isInteger(requestedTicket) && requestedTicket > 0) setPendingSupportTicketId(requestedTicket);
+          const requestedSupport = Number(url.searchParams.get('support'));
+          if (Number.isInteger(requestedSupport) && requestedSupport > 0) setPendingPlatformSupportId(requestedSupport);
           setView(target);
         }
       } catch {
@@ -3173,7 +3196,21 @@ const App: React.FC = () => {
         )}
 
         {view === ViewState.PLATFORM && canAccessView(ViewState.PLATFORM) && (
-          <PlatformPanel showToast={addToast} />
+          <PlatformPanel
+            showToast={addToast}
+            initialSupportTicketId={pendingPlatformSupportId}
+            onInitialSupportTicketConsumed={() => setPendingPlatformSupportId(null)}
+          />
+        )}
+
+        {view === ViewState.SUPPORTO && user && canAccessView(ViewState.SUPPORTO) && (
+          <SupportPanel
+            currentUserId={user.id}
+            originView={lastWorkViewRef.current}
+            initialTicketId={pendingSupportTicketId}
+            onInitialTicketConsumed={() => setPendingSupportTicketId(null)}
+            showToast={addToast}
+          />
         )}
 
         {view === ViewState.RECEPTION && (

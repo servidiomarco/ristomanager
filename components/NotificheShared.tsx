@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Bell, X, Phone, CreditCard, Calendar, MessageCircle, Mail, AlertTriangle, Check, MoreHorizontal } from 'lucide-react';
+import { Bell, X, Phone, CreditCard, Calendar, MessageCircle, Mail, AlertTriangle, Check, MoreHorizontal, LifeBuoy } from 'lucide-react';
 import { NotificationRow } from '../services/notificationsApiService';
 import { SwipeRow } from './ds';
 import { relativeTime } from '../utils/relativeTime';
@@ -53,6 +53,12 @@ export const categoryStyle = (cat: string | null): { Icon: React.ComponentType<{
     };
     case 'system': return {
       Icon: AlertTriangle,
+      tile: 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]',
+    };
+    // Supporto: neutro come system — una risposta del team non è uno stato
+    // del servizio; la boa la distingue.
+    case 'support': return {
+      Icon: LifeBuoy,
       tile: 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]',
     };
     default: return {

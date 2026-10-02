@@ -44,9 +44,10 @@
 32. [Utenti, ruoli e permessi](#utenti-ruoli-e-permessi)
 33. [Privacy e GDPR](#privacy-e-gdpr)
 34. [Piattaforma SaaS: multi-tenant, moduli e abbonamenti](#piattaforma-saas-multi-tenant-moduli-e-abbonamenti)
-35. [Funzionalità trasversali](#funzionalità-trasversali)
-36. [Integrazioni esterne](#integrazioni-esterne)
-37. [Registro aggiornamenti](#registro-aggiornamenti)
+35. [Aiuto e supporto](#aiuto-e-supporto)
+36. [Funzionalità trasversali](#funzionalità-trasversali)
+37. [Integrazioni esterne](#integrazioni-esterne)
+38. [Registro aggiornamenti](#registro-aggiornamenti)
 
 ---
 
@@ -659,6 +660,18 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 ---
 
+## Aiuto e supporto
+
+- **Voce «Aiuto» nel menu**, per ogni ruolo del ristorante (non si toglie dalla matrice permessi): da lì si apre una richiesta al team Sympotia e si segue la conversazione, su telefono e desktop.
+- **Richiesta in pochi tocchi**: categoria (stampa, cassa e scontrini, Sofia, prenotazioni, menu, abbonamento, altro), oggetto, descrizione e fino a tre foto (es. lo schermo o lo scontrino).
+- **«Blocca il servizio»**: l'interruttore segna la richiesta come urgente e avvisa subito il team (notifica e email), senza promesse sui tempi di risposta. Si può segnare urgente anche una richiesta già aperta.
+- **Contesto tecnico allegato da solo**: versione dell'app e del server, schermata da cui si scrive, dispositivo e connessione, stato del nodo di sala, stampe ferme o fallite nelle ultime 24 ore, scontrini falliti (per le richieste sulla cassa). Nessun dato dei clienti; l'elenco è visibile nel modulo («Dati inviati automaticamente»).
+- **Chi vede cosa**: ognuno vede le proprie richieste; Proprietario e General Manager vedono tutte quelle del ristorante. Le foto si aprono solo con login e solo a chi vede la richiesta.
+- **Risposte**: arrivano come notifica (campanella e push) ed email a chi ha aperto la richiesta; lo stato dice di chi è la prossima mossa (inviata, presa in carico, tocca a te, risolta). Scrivere su una richiesta risolta la riapre.
+- **Lato piattaforma** (tab «Supporto» del pannello Piattaforma): coda di tutti i ristoranti con filtri per stato e ristorante, contesto tecnico leggibile, risposta («Rispondi» / «Rispondi e chiudi»), cambio di stato, «Entra» e «Vedi come il titolare» sul ristorante della richiesta, e **«Crea card dev»** che porta la richiesta nel dev board con il contesto già dentro.
+
+---
+
 ## Funzionalità trasversali
 
 - **Tempo reale ovunque**: ~70 tipi di eventi live; ogni schermo si aggiorna da solo su tutti i dispositivi.
@@ -698,6 +711,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-02 | Aiuto e supporto | Nuova voce «Aiuto»: il ristorante apre richieste di supporto al team Sympotia (categoria, foto, «Blocca il servizio» che avvisa subito) con il contesto tecnico allegato da solo, e segue la conversazione; il pannello Piattaforma ha la tab «Supporto» con la coda di tutti i ristoranti, risposta, stato e «Crea card dev». |
 | 2026-10-01 | Menu digitale pubblico; Banchetti | Gli allergeni seguono la lingua scelta dall'ospite: sul menu del QR in inglese, francese e tedesco (nomi ufficiali UE: «Gluten, Eggs, Milk, Tree nuts»…) e nel preventivo banchetto in inglese. Prima restavano in italiano in ogni lingua. |
 | 2026-10-01 | Funzioni AI | Quando la chiave AI del server non è più valida (revocata o sostituita), traduzione del menu, abbinamento vini, report AI, risposta suggerita, agente WhatsApp e proposta di prenotazione dalle email dicono «Chiave AI non valida: va aggiornata sul server» invece di un generico «Internal server error». |
 | 2026-10-01 | Menu & Banchetti; Menu digitale pubblico | «Traduci le voci nuove» traduce anche le descrizioni (gli ingredienti) dei piatti che avevano già il nome tradotto: prima li saltava, e una descrizione scritta dopo la prima traduzione restava in italiano sul QR in ogni lingua. Il nome già tradotto non si tocca. |
