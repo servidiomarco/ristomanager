@@ -23,6 +23,8 @@
 //                     porta il nome della sua stampante di destinazione
 //   PRINTER_IP/PORT   legacy: se PRINTERS manca, diventa la voce 'preconti'
 //   POLL_MS           default 2500
+//   COMANDA_ICONE     'off' per stampare la scritta «Cameriere» al posto
+//                     dell'icona (termiche che non conoscono ESC &)
 import net from 'net';
 
 const API_URL = process.env.API_URL || 'http://localhost:3005';
@@ -283,103 +285,265 @@ function renderQr(p) {
   return Buffer.from(bytes);
 }
 
-// Comanda di partita: cosa preparare, niente prezzi. Caratteri grandi e
-// quantità in evidenza — si legge da in piedi, col vapore in mezzo.
-function renderComanda(p) {
-  const bytes = [];
-  const push = (...b) => bytes.push(...b);
-  const text = s => push(...Buffer.from(s, 'latin1'));
+// ---------------------------------------------------------------------------
+// Comanda di partita
+// ---------------------------------------------------------------------------
+// Gerarchia pensata per chi la legge in piedi alla partita, col vapore in
+// mezzo (il ticket di prima era tutto centrato, «1 x Acqua Piccola», e non
+// diceva di chi era il tavolo):
+//   1. che ticket è — la norma parla, l'eccezione urla: «CHIAMATA» in corpo
+//      alto, «+ AGGIUNTA +» e «X ANNULLO CHIAMATA X» in grande;
+//   2. il TAVOLO è l'elemento più grande: è ciò che va sul passe col piatto;
+//   3. cameriere (icona) e coperti arretrano in corpo alto;
+//   4. uscita e partita in una fascia sola, dentro il tratteggio;
+//   5. i piatti in colonna: quantità allineate, aria fra un piatto e l'altro,
+//      varianti sotto il nome, allergie «!» in maiuscolo e neretto;
+//   6. il totale pezzi in fondo, per contare prima di strappare.
 
-  push(ESC, 0x40);
-  push(ESC, 0x74, 16);
-  push(ESC, 0x47, 1);        // doppia battuta
-  push(ESC, 0x61, 1);        // center
-  push(GS, 0x21, 0x11);      // double w+h
-  text(`TAV ${p.table_name ?? '-'}\n`);
-  push(GS, 0x21, 0x01);      // solo double height
-  // course_label arriva dal server («Bar», «2a USCITA»): il fallback compone
-  // il numero per i job accodati da un server più vecchio dell'agente.
-  text(`${p.course_label ?? `${p.course_no}a USCITA`} - ${(p.station_name ?? '').toUpperCase()}\n`);
-  // «AGGIUNTA»: righe entrate in un'uscita già partita — senza banner il
-  // ticket si confonde con una ristampa del lancio.
-  if (p.variation) {
-    push(ESC, 0x45, 1);
-    text(`*** ${p.variation} ***\n`);
-    push(ESC, 0x45, 0);
-  }
-  push(GS, 0x21, 0x00);
-  const now = new Date();
-  text(`${p.covers ?? '-'} coperti - ${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}\n`);
-  text('-'.repeat(COLS) + '\n');
-  push(ESC, 0x61, 0);        // left
+// Corpi di GS ! n. Il doppio largo occupa due colonne per carattere: le
+// righe con blocchi a sinistra e a destra si contano in colonne di font A.
+const NORMAL = 0x00, TALL = 0x01, BIG = 0x11;
+const BIG_COLS = Math.floor(COLS / 2);
 
-  push(GS, 0x21, 0x01);      // righe piatto a doppia altezza
-  for (const i of p.items ?? []) {
-    text(`${i.qty} x ${i.name}\n`);
-    push(GS, 0x21, 0x00);
-    for (const m of i.modifiers ?? []) text(`    + ${m}\n`);
-    if (i.note) text(`    ** ${i.note}\n`);
-    push(GS, 0x21, 0x01);
-  }
-  push(GS, 0x21, 0x00);
-  // «Uscita intera» della partita: sotto il tratteggio, in corpo normale,
-  // cosa fanno le altre partite nella stessa uscita — contesto per chi
-  // impiatta guardando cosa esce insieme, non piatti da fare qui.
-  if (Array.isArray(p.others) && p.others.length > 0) {
-    text('-'.repeat(COLS) + '\n');
-    for (const o of p.others) {
-      text(`${(o.station_name ?? '').toUpperCase()}\n`);
-      for (const i of o.items ?? []) text(`  ${i.qty} x ${i.name}\n`);
+// La termica stampa in WPC1252 (ESC t 16) e il testo va giù in latin1: gli
+// apostrofi e le virgolette tipografiche che la tastiera del telefono mette
+// nei nomi dei piatti uscirebbero come caratteri di controllo.
+const toLatin = s => String(s ?? '')
+  .replace(/[‘’‛′]/g, "'")
+  .replace(/[“”„″]/g, '"')
+  .replace(/[–—−]/g, '-')
+  .replace(/…/g, '...')
+  .replace(/[^\x00-\xFF]/g, '?');
+const upper = s => toLatin(s).toLocaleUpperCase('it-IT');
+
+const colsOf = segs => segs.reduce((n, s) => n + s.text.length * (s.size === BIG ? 2 : 1), 0);
+const gap = n => ({ text: ' '.repeat(Math.max(0, n)) });
+const clip = (s, n) => (s.length > n ? s.slice(0, Math.max(1, n - 1)) + '.' : s);
+const hhmm = () => {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+};
+
+// Icona del cameriere al posto della scritta. Le termiche non hanno icone:
+// è un carattere definito dall'utente (ESC &), due celle di font A da
+// 12×24 punti che, stampate in doppio largo e alto, fanno un quadrato di 48
+// punti — alto esattamente quanto la riga del nome in corpo alto, così icona
+// e nome poggiano sulla stessa linea. Il disegno si rimanda a ogni ticket
+// (dopo ESC @) e il set utente si accende solo per i due caratteri
+// dell'icona (ESC % 1 … ESC % 0): il resto della riga è il font della
+// stampante. COMANDA_ICONE=off torna alla scritta «Cameriere», per una
+// termica che non conosce ESC & e stamperebbe i byte del disegno come testo.
+const ICONS = (process.env.COMANDA_ICONE || '').toLowerCase() !== 'off';
+const WAITER_ICON = [
+  '........................',
+  '.........######.........',
+  '........########........',
+  '.......##########.......',
+  '.......##########.......',
+  '.......##########.......',
+  '.......##########.......',
+  '........########........',
+  '.........######.........',
+  '........................',
+  '...#####........#####...',
+  '..######.##..##.######..',
+  '.#######.######.#######.',
+  '.#######.##..##.#######.',
+  '#########......#########',
+  '##########....##########',
+  '###########..###########',
+  '########################',
+  '########################',
+  '########################',
+  '########################',
+  '########################',
+  '########################',
+  '########################',
+];
+const WAITER_CODES = [0x7b, 0x7c];   // '{' '|': solo dentro ESC % 1
+const WAITER_TEXT = String.fromCharCode(...WAITER_CODES);
+
+// ESC & 3 c1 c2, poi per ogni carattere la larghezza (12) e le colonne da
+// sinistra a destra, tre byte ciascuna dall'alto in basso (bit alto = punto
+// più in alto).
+function defineChars(rows, first) {
+  const cells = rows[0].length / 12;
+  const out = [ESC, 0x26, 3, first, first + cells - 1];
+  for (let c = 0; c < cells; c++) {
+    out.push(12);
+    for (let x = c * 12; x < c * 12 + 12; x++) {
+      for (let k = 0; k < 3; k++) {
+        let byte = 0;
+        for (let bit = 0; bit < 8; bit++) if (rows[k * 8 + bit][x] === '#') byte |= 0x80 >> bit;
+        out.push(byte);
+      }
     }
   }
-  text('\n\n');
-  push(GS, 0x56, 0x42, 0x00);
-  return Buffer.from(bytes);
+  return out;
+}
+const WAITER_DEF = defineChars(WAITER_ICON, WAITER_CODES[0]);
+
+// Blocchi su una riga: sinistra al margine, destra al margine, l'eventuale
+// centro a metà dello spazio che avanza. null se non ci stanno.
+function spread(left, middle, right) {
+  const free = COLS - colsOf(left) - colsOf(middle) - colsOf(right);
+  if (free < (middle.length ? 2 : left.length && right.length ? 1 : 0)) return null;
+  if (!middle.length) return [...left, gap(free), ...right];
+  const a = Math.floor(free / 2);
+  return [...left, gap(a), ...middle, gap(free - a), ...right];
+}
+
+// A capo per parole, non a metà parola come farebbe la termica da sola.
+function wrapWords(s, width) {
+  const lines = [];
+  let cur = '';
+  for (const word of s.split(/\s+/).filter(Boolean)) {
+    const w = word.length > width ? word.slice(0, width) : word;
+    if (!cur) cur = w;
+    else if (cur.length + 1 + w.length <= width) cur += ' ' + w;
+    else { lines.push(cur); cur = w; }
+  }
+  if (cur) lines.push(cur);
+  return lines.length ? lines : [''];
+}
+
+function ticketWriter() {
+  const bytes = [];
+  const push = (...b) => bytes.push(...b);
+  const text = s => push(...Buffer.from(toLatin(s), 'latin1'));
+  // Una riga di segmenti {text, size, bold, icon}: ogni segmento si porta il
+  // suo corpo; a fine riga si torna al normale, così la riga dopo parte pulita.
+  const line = (segs = []) => {
+    for (const s of segs) {
+      push(GS, 0x21, s.size ?? NORMAL, ESC, 0x45, s.bold ? 1 : 0);
+      if (s.icon) push(ESC, 0x25, 1);
+      text(s.text);
+      if (s.icon) push(ESC, 0x25, 0);
+    }
+    push(GS, 0x21, NORMAL, ESC, 0x45, 0);
+    text('\n');
+  };
+  const rule = (ch = '-') => line([{ text: ch.repeat(COLS) }]);
+  return { bytes, push, text, line, rule };
+}
+
+// Intestazione comune a comanda e annullo.
+function comandaHeader(w, p, title, loud) {
+  w.push(ESC, 0x40);
+  w.push(ESC, 0x74, 16);
+  w.push(ESC, 0x47, 1);      // doppia battuta
+  if (ICONS) w.push(...WAITER_DEF);
+  w.push(ESC, 0x61, 1);      // center
+  w.line([{ text: title, size: loud ? BIG : TALL, bold: true }]);
+  w.push(ESC, 0x61, 0);      // left
+  w.rule('=');
+
+  // L'asporto non ha tavolo: il «nome» è «Asporto 20:30 #12». order_type
+  // manca nei job di un server più vecchio dell'agente: lì si riconosce dal
+  // nome che il server compone.
+  const name = String(p.table_name ?? '-');
+  const takeaway = p.order_type ? p.order_type === 'TAKEAWAY' : /^Asporto\b/.test(name);
+  const tav = takeaway ? upper(name) : `TAV ${toLatin(name)}`;
+  const ora = [{ text: hhmm(), size: TALL, bold: true }];
+  w.line(spread([{ text: tav, size: BIG, bold: true }], [], ora)
+      ?? spread([{ text: clip(tav, COLS - 6), size: TALL, bold: true }], [], ora));
+
+  // Cameriere (chi ha aperto il tavolo: la partita cerca lui quando il
+  // piatto è pronto) e coperti, tutto in corpo alto: numero e parola alti
+  // uguale, icona alta quanto il nome — stanno sulla stessa linea.
+  const waiter = p.waiter_name ? toLatin(String(p.waiter_name).trim()) : '';
+  const cop = p.covers != null
+    ? [{ text: String(p.covers), size: TALL, bold: true }, { text: Number(p.covers) === 1 ? ' coperto' : ' coperti', size: TALL }]
+    : [];
+  if (waiter || cop.length) {
+    const who = ICONS ? [{ text: WAITER_TEXT, size: BIG, icon: true }, { text: ' ' }] : [{ text: 'Cameriere ', size: TALL }];
+    const room = COLS - colsOf(who) - colsOf(cop) - (cop.length ? 1 : 0);
+    w.line(spread(waiter ? [...who, { text: clip(waiter, room), size: TALL }] : [], [], cop));
+  }
+
+  // Fascia dell'uscita: «USCITA 1 · ANTIPASTI»; per il Bar l'uscita ha il
+  // nome della partita e basta una parola. I job di un server vecchio
+  // dicono «1a USCITA».
+  const course = String(p.course_label ?? `${p.course_no}a USCITA`).replace(/^(\d+)a USCITA$/i, 'Uscita $1');
+  const station = String(p.station_name ?? '');
+  const band = upper(station && course.toLowerCase() !== station.toLowerCase() ? `${course} · ${station}` : course || station);
+  const mid = ` ${band} `;
+  const side = Math.max(4, COLS - mid.length);
+  const a = Math.floor(side / 2);
+  w.line([{ text: '-'.repeat(a) }, { text: mid, size: TALL, bold: true }, { text: '-'.repeat(side - a) }]);
+}
+
+// I piatti in colonna: quantità in neretto e allineate, nome in grande e in
+// maiuscolo (niente «x»: «1 ACQUA GAS»), a capo per parole rientrato sotto
+// il nome. `strike` è la parola che dice cosa fare di un piatto annullato.
+function comandaItems(w, list, strike) {
+  const qw = Math.max(1, ...list.map(i => String(i.qty).length));
+  const pad = ' '.repeat((qw + 1) * 2);      // sotto il nome, non sotto la quantità
+  for (const i of list) {
+    w.line();                                // aria fra un piatto e l'altro
+    const qty = String(i.qty).padStart(qw);
+    const name = upper(i.name);
+    if (strike) {
+      // Il «barrato» delle termiche: l'ESC/POS non sovrastampa un tratto sul
+      // testo, quindi la riga annullata si attraversa col tratteggio.
+      const lbl = clip(`${qty} ${name}`, BIG_COLS - 4);
+      w.line([{ text: `${lbl} ${'-'.repeat(Math.max(2, BIG_COLS - lbl.length - 1))}`, size: BIG }]);
+      w.line([{ text: `${pad}${strike}`, size: TALL, bold: true }]);
+    } else {
+      const lines = wrapWords(name, BIG_COLS - qw - 1);
+      w.line([{ text: `${qty} `, size: BIG, bold: true }, { text: lines[0], size: BIG }]);
+      for (const l of lines.slice(1)) w.line([{ text: `${' '.repeat(qw + 1)}${l}`, size: BIG }]);
+    }
+    for (const m of i.modifiers ?? []) w.line([{ text: `${pad}+ ${m}`, size: TALL }]);
+    // La nota è dove stanno le allergie: maiuscolo, neretto, «!» davanti.
+    if (i.note) w.line([{ text: `${pad}! ${upper(i.note)}`, size: TALL, bold: true }]);
+  }
+}
+
+function comandaFooter(w, list, others) {
+  w.line();
+  const pz = list.reduce((n, i) => n + Number(i.qty || 0), 0);
+  if (list.length > 1 || pz > 1) w.line(spread([], [], [{ text: `totale ${pz} pz`, bold: true }]));
+  // «Uscita intera» della partita: cosa fanno le altre partite nella stessa
+  // uscita, in corpo normale — contesto per chi impiatta guardando cosa
+  // esce insieme, non piatti da fare qui.
+  if (Array.isArray(others) && others.length > 0) {
+    w.rule();
+    w.line([{ text: 'Nella stessa uscita:' }]);
+    for (const o of others) {
+      const lbl = `${upper(o.station_name ?? '')}: `;
+      const its = (o.items ?? []).map(i => `${i.qty} ${toLatin(i.name)}`).join(', ');
+      wrapWords(its, COLS - lbl.length).forEach((l, k) =>
+        w.line([{ text: k === 0 ? lbl : ' '.repeat(lbl.length), bold: k === 0 }, { text: l }]));
+    }
+  }
+  w.rule('=');
+  w.text('\n\n');
+  w.push(GS, 0x56, 0x42, 0x00);
+}
+
+// Comanda di partita: cosa preparare, niente prezzi. «CHIAMATA» come la
+// chiama il CRM («Uscita chiamata in cucina»); «AGGIUNTA» per righe entrate
+// in un'uscita già partita — senza, il ticket si confonde con una ristampa.
+function renderComanda(p) {
+  const w = ticketWriter();
+  const items = p.items ?? [];
+  comandaHeader(w, p, p.variation === 'AGGIUNTA' ? '+ AGGIUNTA +' : (p.variation ?? 'CHIAMATA'), Boolean(p.variation));
+  comandaItems(w, items, null);
+  comandaFooter(w, items, p.others);
+  return Buffer.from(w.bytes);
 }
 
 // Annullo chiamata o storno di righe già in cucina: il ticket dice di NON
-// fare (o buttare) i piatti elencati — kind apposta, così un agente vecchio
-// che non lo conosce si arena invece di stamparli come piatti da cucinare.
+// fare (o che è stornato) — kind apposta, così un agente vecchio che non lo
+// conosce si arena invece di stamparli come piatti da cucinare.
 function renderComandaAnnullo(p) {
-  const bytes = [];
-  const push = (...b) => bytes.push(...b);
-  const text = s => push(...Buffer.from(s, 'latin1'));
-
-  push(ESC, 0x40);
-  push(ESC, 0x74, 16);
-  push(ESC, 0x47, 1);        // doppia battuta
-  push(ESC, 0x61, 1);        // center
-  push(GS, 0x21, 0x11);      // double w+h
-  push(ESC, 0x45, 1);
-  text(`${p.variation ?? 'ANNULLO'}\n`);
-  push(ESC, 0x45, 0);
-  text(`TAV ${p.table_name ?? '-'}\n`);
-  push(GS, 0x21, 0x01);      // solo double height
-  text(`${p.course_label ?? `${p.course_no}a USCITA`} - ${(p.station_name ?? '').toUpperCase()}\n`);
-  push(GS, 0x21, 0x00);
-  const now = new Date();
-  text(`${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}\n`);
-  text('-'.repeat(COLS) + '\n');
-  push(ESC, 0x61, 0);        // left
-
-  push(GS, 0x21, 0x01);
-  for (const i of p.items ?? []) {
-    // Il «barrato» delle termiche: l'ESC/POS non sa sovrastampare un tratto
-    // sul testo, quindi la riga annullata si attraversa col tratteggio —
-    // «-- 1 x ACQUA GAS ----»: si legge cosa era, e si legge che non vale.
-    const label = `-- ${i.qty} x ${i.name} `;
-    const cut = label.length > COLS - 2 ? label.slice(0, COLS - 3) + ' ' : label;
-    text(cut + '-'.repeat(Math.max(2, COLS - cut.length)) + '\n');
-    push(GS, 0x21, 0x00);
-    for (const m of i.modifiers ?? []) text(`    + ${m}\n`);
-    if (i.note) text(`    ** ${i.note}\n`);
-    push(GS, 0x21, 0x01);
-  }
-  push(GS, 0x21, 0x00);
-  if (p.reason) text(`\nmotivo: ${p.reason}\n`);
-  text('\n\n');
-  push(GS, 0x56, 0x42, 0x00);
-  return Buffer.from(bytes);
+  const w = ticketWriter();
+  comandaHeader(w, p, `X ${p.variation ?? 'ANNULLO'} X`, true);
+  comandaItems(w, p.items ?? [], p.variation === 'STORNO' ? 'STORNATO' : 'NON FARE');
+  if (p.reason) { w.line(); w.line([{ text: `Motivo: ${p.reason}`, size: TALL }]); }
+  comandaFooter(w, [], null);
+  return Buffer.from(w.bytes);
 }
 
 // Pagina di prova dal bottone "Stampa prova" in Impostazioni.
@@ -397,7 +561,19 @@ function renderTest(p) {
   text(`stampante: ${p.printer_name ?? '-'}\n${p.host ?? ''}:${p.port ?? ''}\n`);
   const now = new Date();
   text(`${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')} - RistoManager\n`);
-  text('\nse leggi questo, la configurazione\ne\' corretta.\n\n\n');
+  text('\nse leggi questo, la configurazione\ne\' corretta.\n');
+  // L'icona del cameriere delle comande: la prova dice subito se questa
+  // termica conosce i caratteri utente (ESC &), prima che lo scopra la
+  // cucina in servizio.
+  if (ICONS) {
+    push(...WAITER_DEF);
+    text('\nicona cameriere delle comande:\n');
+    push(GS, 0x21, BIG, ESC, 0x25, 1);
+    text(WAITER_TEXT);
+    push(ESC, 0x25, 0, GS, 0x21, NORMAL);
+    text('\nse al posto dell\'omino col papillon\nvedi simboli strani, avviare l\'agente\ncon COMANDA_ICONE=off\n');
+  }
+  text('\n\n');
   push(GS, 0x56, 0x42, 0x00);
   return Buffer.from(bytes);
 }

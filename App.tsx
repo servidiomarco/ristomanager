@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChevronUp, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, AlertTriangle, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator, BarChart3, Star, ShoppingBag } from 'lucide-react';
-import { ViewState, Room, Table, Dish, RestaurantMenu, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, UserRole, ReservationSource, ReservationStatus } from './types';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChevronUp, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, AlertTriangle, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator, BarChart3, Star, ShoppingBag, LifeBuoy } from 'lucide-react';
+import { ViewState, Room, Table, Dish, RestaurantMenu, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Shift, UserRole, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
 import { MenuManager } from './components/MenuManager';
@@ -28,6 +28,7 @@ import { HaccpPage } from './components/HaccpPage';
 import ConversazioniPage from './components/ConversazioniPage';
 import InboxPage from './components/InboxPage';
 import StaffChatPage from './components/StaffChatPage';
+import SupportPanel from './components/SupportPanel';
 import { LivePill, SegmentedControl, StatusPill, useMediaQuery, dsSelect } from './components/ds';
 import { NotificationsPanel } from './components/NotificationsPanel';
 import EmailPage from './components/EmailPage';
@@ -76,6 +77,7 @@ import { CommandPalette } from './components/CommandPalette';
 import { AppVersionBanner } from './components/AppVersionBanner';
 import { BookingChannelsBar } from './components/BookingChannelsBar';
 import { useSocket } from './hooks/useSocket';
+import { useLinkRoutes } from './hooks/useLinkRoutes';
 import { useTokenExpiryWarning } from './hooks/useTokenExpiryWarning';
 import { useAppBadge } from './hooks/useAppBadge';
 import { useScrollFade } from './hooks/useScrollFade';
@@ -88,11 +90,11 @@ import {
   cacheMarkThreadRead, applyMessageToConversations, type InboxMessage,
 } from './services/messagesApiService';
 import { clearConfigCache } from './services/configCache';
-import { staffChatApiService, staffChatCache } from './services/staffChatApiService';
+import { staffChatApiService, staffChatCache, staffChatPushTag, staffChatMentionPushTag } from './services/staffChatApiService';
 import { customersCache } from './services/customersCache';
 import { paymentsApiService } from './services/paymentsApiService';
 import { emailApiService, emailCache } from './services/emailApiService';
-import { notificationsApiService } from './services/notificationsApiService';
+import { notificationsApiService, subscribeNotificationChanges, closeSystemNotifications, reconcileSystemNotifications } from './services/notificationsApiService';
 import { useAuth } from './contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
 import { SUPPORTED_LANGUAGES } from './i18n/config';
@@ -229,6 +231,8 @@ const NAV_ITEMS: NavItem[] = [
   // Visibile solo al ruolo PLATFORM_ADMIN (gate per ruolo in canAccessView)
   { kind: 'link', label: 'Piattaforma', labelKey: 'nav.items.platform', Icon: Building2, group: 'sistema', isTab: false, view: ViewState.PLATFORM, sidebarCollapse: false },
   { kind: 'link', label: 'Impostazioni', labelKey: 'nav.items.settings', Icon: Settings, group: 'sistema', isTab: false, view: ViewState.SETTINGS, sidebarCollapse: false },
+  // Aiuto: richieste al team Sympotia, per ogni ruolo del ristorante (gate in canAccessView)
+  { kind: 'link', label: 'Aiuto', labelKey: 'nav.items.support', Icon: LifeBuoy, group: 'sistema', isTab: false, view: ViewState.SUPPORTO, sidebarCollapse: false },
   // Visibili solo all'account admin (gate email-based in canAccessView)
   { kind: 'link', label: 'Consumi AI', labelKey: 'nav.items.aiUsage', Icon: Gauge, group: 'sistema', isTab: false, view: ViewState.MONITORING, sidebarCollapse: false },
   { kind: 'link', label: 'Development', labelKey: 'nav.items.development', Icon: Kanban, group: 'sistema', isTab: false, view: ViewState.DEVELOPMENT, sidebarCollapse: false },
@@ -243,6 +247,68 @@ const COMMS_VIEWS: ViewState[] = [ViewState.CONVERSAZIONI, ViewState.MESSAGGI, V
 
 // Stato aperto/chiuso della sidebar desktop. Scritto solo dalla linguetta.
 const SIDEBAR_COLLAPSED_KEY = 'ristocrm_sidebar_collapsed';
+
+// Soglie di compattazione del gruppo date/turni della testata (container
+// query: vedi il commento sul gruppo in testata). Quattro serie: con tre turni
+// (Dashboard, c'è «Tutti») o due, e per oggi o per un altro giorno — su un
+// altro giorno il gruppo porta il chip «Torna a oggi» e una data più lunga di
+// «Oggi». Con una serie sola, tarata sul caso peggiore, a 1024px Prenotazioni
+// rinunciava alle frecce con 157px liberi. Le serie a due turni sono quelle a
+// tre spostate della larghezza di «Tutti» (67px, 59 compatto). Misurate con
+// la barra laterale aperta, dal minimo di 768px a 1440, nodo acceso e spento:
+// margine minimo 10px. Stringhe intere: Tailwind non vede le classi composte.
+const HEADER_FIT = {
+  3: {
+    today: {
+      channels: '@min-[662px]:flex',
+      backChip: '', backLabel: '',
+      shiftIcon: '@max-[574px]:w-10 @max-[574px]:px-0 @max-[574px]:justify-center',
+      shiftText: '@max-[574px]:px-3',
+      shiftLabel: '@max-[574px]:sr-only',
+      dateWidth: 'w-[200px] @max-[452px]:w-auto',
+      dateSecondary: '@max-[452px]:hidden',
+      arrows: '@max-[366px]:hidden',
+      icon: '@max-[366px]:hidden',
+    },
+    other: {
+      channels: '@min-[700px]:flex',
+      backChip: '@max-[790px]:w-8 @max-[790px]:px-0 @max-[790px]:justify-center',
+      backLabel: '@max-[790px]:sr-only',
+      shiftIcon: '@max-[612px]:w-10 @max-[612px]:px-0 @max-[612px]:justify-center',
+      shiftText: '@max-[612px]:px-3',
+      shiftLabel: '@max-[612px]:sr-only',
+      dateWidth: 'w-[200px] @max-[490px]:w-auto',
+      dateSecondary: '@max-[490px]:hidden',
+      arrows: '@max-[440px]:hidden',
+      icon: '@max-[440px]:hidden',
+    },
+  },
+  2: {
+    today: {
+      channels: '@min-[595px]:flex',
+      backChip: '', backLabel: '',
+      shiftIcon: '@max-[507px]:w-10 @max-[507px]:px-0 @max-[507px]:justify-center',
+      shiftText: '',
+      shiftLabel: '@max-[507px]:sr-only',
+      dateWidth: 'w-[200px] @max-[393px]:w-auto',
+      dateSecondary: '@max-[393px]:hidden',
+      arrows: '@max-[307px]:hidden',
+      icon: '@max-[307px]:hidden',
+    },
+    other: {
+      channels: '@min-[633px]:flex',
+      backChip: '@max-[723px]:w-8 @max-[723px]:px-0 @max-[723px]:justify-center',
+      backLabel: '@max-[723px]:sr-only',
+      shiftIcon: '@max-[545px]:w-10 @max-[545px]:px-0 @max-[545px]:justify-center',
+      shiftText: '',
+      shiftLabel: '@max-[545px]:sr-only',
+      dateWidth: 'w-[200px] @max-[431px]:w-auto',
+      dateSecondary: '@max-[431px]:hidden',
+      arrows: '@max-[381px]:hidden',
+      icon: '@max-[381px]:hidden',
+    },
+  },
+} as const;
 
 // La lingua dell'ultimo operatore: chiave SUA, separata da quella del
 // detector i18n — che sulle pagine pubbliche la scrive l'ospite.
@@ -372,6 +438,12 @@ const App: React.FC = () => {
   const { t, i18n } = useTranslation('common', { useSuspense: false });
 
   const [view, setView] = useState<ViewState>(ViewState.DASHBOARD);
+  // L'ultima vista di lavoro prima dell'Aiuto: la richiesta la porta nel
+  // contesto («scrivo da Cassa»), che è il primo indizio per chi risponde.
+  const lastWorkViewRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (view !== ViewState.SUPPORTO) lastWorkViewRef.current = view;
+  }, [view]);
   // La vista corrente letta dai gestori socket, che sono agganciati una volta
   // sola: metterla nelle dipendenze li staccherebbe e riattaccherebbe a ogni
   // navigazione.
@@ -574,6 +646,10 @@ const App: React.FC = () => {
   // Set when a notification deep-links to a specific booking (?reservationId=…);
   // handed to ReservationList so it opens that booking's detail drawer.
   const [pendingReservationId, setPendingReservationId] = useState<number | null>(null);
+  // Deep link delle notifiche del supporto: ?ticket= apre la richiesta nella
+  // vista Aiuto, ?support= la apre nella tab Supporto del pannello.
+  const [pendingSupportTicketId, setPendingSupportTicketId] = useState<number | null>(null);
+  const [pendingPlatformSupportId, setPendingPlatformSupportId] = useState<number | null>(null);
 
   // Global command palette (Cmd/Ctrl+K). Lets the operator find a
   // reservation without knowing its date — the daily list stays intact.
@@ -601,6 +677,34 @@ const App: React.FC = () => {
     const onFocus = () => refresh();
     window.addEventListener('focus', onFocus);
     return () => { cancelled = true; window.removeEventListener('focus', onFocus); };
+  }, [isAuthenticated, canSeeVoiceCalls]);
+  // Chiamate cambiate altrove (nuova telefonata, richiamata chiesta, segnata
+  // ricontattata da un collega): badge e pagina Chiamate si rileggono. Il
+  // server manda solo il segnale; più segnali ravvicinati (fine chiamata +
+  // chiusura dei tentativi precedenti) fanno un giro solo.
+  useEffect(() => {
+    if (!isAuthenticated || !canSeeVoiceCalls) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const onChanged = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = null;
+        voiceCallsApiService.pendingCount()
+          .then(({ count }) => setVoiceCallsPendingCount(count))
+          .catch(() => {});
+        setVoiceCallsRefreshTick(tick => tick + 1);
+      }, 300);
+    };
+    let attached: ReturnType<typeof socketClient.getSocket> = null;
+    const attach = (s: ReturnType<typeof socketClient.getSocket>) => {
+      if (attached === s) return;
+      if (attached) attached.off('voiceCall:changed', onChanged);
+      attached = s;
+      if (attached) attached.on('voiceCall:changed', onChanged);
+    };
+    attach(socketClient.getSocket());
+    const unsub = socketClient.onSocketChange((s) => attach(s));
+    return () => { if (timer) clearTimeout(timer); unsub(); attach(null); };
   }, [isAuthenticated, canSeeVoiceCalls]);
   // Re-fetch when leaving the Conversazioni page so the badge reflects any
   // reservations linked from calls the user just handled.
@@ -740,25 +844,40 @@ const App: React.FC = () => {
         .catch(() => {});
     };
     refresh();
+    void staffChatApiService.reconcileSystemNotifications();
     const onEvent = () => refresh();
+    // Thread letto su un altro dispositivo dello stesso utente — o, per un
+    // canale, da un collega (lettura di squadra, vedi POST
+    // /staff-chat/threads/:key/read): oltre al badge, la push di quel thread
+    // sparisce dal centro notifiche del telefono. La push di menzione solo se
+    // a leggere è stato l'utente stesso (`personal`): letta da un collega,
+    // una menzione resta da leggere. I DM restano personali.
+    const onRead = (payload: { threadKey?: unknown; personal?: unknown }) => {
+      refresh();
+      if (typeof payload?.threadKey === 'string' && payload.threadKey) {
+        const tags = [staffChatPushTag(payload.threadKey)];
+        if (payload.personal === true) tags.push(staffChatMentionPushTag(payload.threadKey));
+        void closeSystemNotifications(tags);
+      }
+    };
 
     let attachedSocket: ReturnType<typeof socketClient.getSocket> = null;
     const attach = (s: ReturnType<typeof socketClient.getSocket>) => {
       if (attachedSocket === s) return;
       if (attachedSocket) {
         attachedSocket.off('staffchat:message', onEvent);
-        attachedSocket.off('staffchat:read', onEvent);
+        attachedSocket.off('staffchat:read', onRead);
       }
       attachedSocket = s;
       if (attachedSocket) {
         attachedSocket.on('staffchat:message', onEvent);
-        attachedSocket.on('staffchat:read', onEvent);
+        attachedSocket.on('staffchat:read', onRead);
       }
     };
     attach(socketClient.getSocket());
     const unsubSocket = socketClient.onSocketChange((s) => attach(s));
 
-    const onFocus = () => refresh();
+    const onFocus = () => { refresh(); void staffChatApiService.reconcileSystemNotifications(); };
     window.addEventListener('focus', onFocus);
     return () => {
       cancelled = true;
@@ -781,8 +900,8 @@ const App: React.FC = () => {
   // Cassa · «Apri in Comande»: il tavolo da aprire appena la vista monta.
   const [pendingComandeTableId, setPendingComandeTableId] = useState<number | null>(null);
 
-  // Email and Notifiche unread badges — poll on view change + on focus, no
-  // socket wiring for now (both endpoints are cheap).
+  // Email and Notifiche unread badges — refreshed on view change and on
+  // focus; the email one also live, on the server's email:new / email:read.
   const [emailUnreadCount, setEmailUnreadCount] = useState(0);
   const canSeeEmail = canAccessView(ViewState.EMAIL);
   // Stesso pre-riscaldamento di Messaggi e Chiamate: la lista thread è pronta
@@ -805,6 +924,37 @@ const App: React.FC = () => {
     window.addEventListener('focus', onFocus);
     return () => { cancelled = true; window.removeEventListener('focus', onFocus); };
   }, [isAuthenticated, canSeeEmail, view]);
+  // Una email arrivata o letta altrove (un collega, un altro dispositivo):
+  // il badge si riallinea subito. Prima restava fermo fino a un cambio pagina
+  // — e il PC della reception, sulla stessa schermata per ore, non ne fa.
+  useEffect(() => {
+    if (!isAuthenticated || !canSeeEmail) return;
+    const refresh = () => {
+      emailApiService.unreadCount()
+        .then(({ count }) => setEmailUnreadCount(count))
+        .catch(() => {});
+    };
+    const onRead = (payload: { email_key?: string }) => {
+      refresh();
+      if (payload?.email_key) emailCache.markThreadRead(payload.email_key);
+    };
+    let attached: ReturnType<typeof socketClient.getSocket> = null;
+    const attach = (s: ReturnType<typeof socketClient.getSocket>) => {
+      if (attached === s) return;
+      if (attached) {
+        attached.off('email:new', refresh);
+        attached.off('email:read', onRead);
+      }
+      attached = s;
+      if (attached) {
+        attached.on('email:new', refresh);
+        attached.on('email:read', onRead);
+      }
+    };
+    attach(socketClient.getSocket());
+    const unsub = socketClient.onSocketChange((s) => attach(s));
+    return () => { unsub(); attach(null); };
+  }, [isAuthenticated, canSeeEmail]);
 
   const [notificationsUnreadCount, setNotificationsUnreadCount] = useState(0);
   // The bell is a dropdown on pointer-sized screens and a link to the full
@@ -824,10 +974,24 @@ const App: React.FC = () => {
         .catch(() => {});
     };
     refresh();
-    const onFocus = () => refresh();
+    const onFocus = () => { refresh(); void reconcileSystemNotifications(); };
     window.addEventListener('focus', onFocus);
     return () => { cancelled = true; window.removeEventListener('focus', onFocus); };
   }, [isAuthenticated, canSeeNotifications, view]);
+  // Letture fatte altrove (altro dispositivo, o un collega per telefonate,
+  // messaggi e tavoli) e notifiche nuove: la campanella si riallinea subito
+  // e la push già gestita sparisce anche dal centro notifiche del telefono.
+  // Separato dall'effetto sopra, che si rifà a ogni cambio vista.
+  useEffect(() => {
+    if (!isAuthenticated || !canSeeNotifications) return;
+    void reconcileSystemNotifications();
+    return subscribeNotificationChanges((read) => {
+      notificationsApiService.unreadCount()
+        .then(({ count }) => setNotificationsUnreadCount(count))
+        .catch(() => {});
+      if (read) void closeSystemNotifications(read.tags);
+    });
+  }, [isAuthenticated, canSeeNotifications]);
 
   // Pagamenti badge — paid-but-not-yet-seen payments. Live via the payment
   // socket events (webhook completions land without any user action) plus
@@ -917,6 +1081,9 @@ const App: React.FC = () => {
     return `${y}-${m}-${day}`;
   };
   const globalDateStr = formatLocalDateGlobal(globalDate);
+  // Serie di soglie della testata (HEADER_FIT): «Tutti» c'è solo in Dashboard.
+  const headerDayIsToday = globalDateStr === formatLocalDateGlobal(currentTime);
+  const headerFit = HEADER_FIT[view === ViewState.DASHBOARD ? 3 : 2][headerDayIsToday ? 'today' : 'other'];
   // Il bollo vive solo dove la sidebar si ritira: Comande sullo schermo largo.
   // Sotto lg la sidebar non c'è comunque (c'è la barra in basso), quindi la
   // bandiera non deve spegnere niente lì.
@@ -1018,6 +1185,15 @@ const App: React.FC = () => {
     const accessibleViews = getAccessibleViews();
 
     const params = new URLSearchParams(window.location.search);
+    // Tap su una push ad app chiusa: il service worker ha messo il tag della
+    // notifica nell'URL (?ntag=), la si segna letta ovunque.
+    const tappedTag = params.get('ntag');
+    if (tappedTag) {
+      notificationsApiService.markReadByTag(tappedTag).catch(() => {});
+      params.delete('ntag');
+      const rest = params.toString();
+      window.history.replaceState({}, '', window.location.pathname + (rest ? `?${rest}` : '') + window.location.hash);
+    }
     const requestedView = params.get('view');
     // A notification may deep-link to a specific booking; capture it so the
     // Prenotazioni view opens that booking's detail once mounted.
@@ -1026,6 +1202,10 @@ const App: React.FC = () => {
       const parsed = Number(requestedReservationId);
       if (Number.isFinite(parsed)) setPendingReservationId(parsed);
     }
+    const requestedTicket = Number(params.get('ticket'));
+    if (Number.isInteger(requestedTicket) && requestedTicket > 0) setPendingSupportTicketId(requestedTicket);
+    const requestedSupport = Number(params.get('support'));
+    if (Number.isInteger(requestedSupport) && requestedSupport > 0) setPendingPlatformSupportId(requestedSupport);
     if (requestedView && (Object.values(ViewState) as string[]).includes(requestedView)) {
       const target = requestedView as ViewState;
       if (accessibleViews.includes(target)) {
@@ -1035,6 +1215,8 @@ const App: React.FC = () => {
       // Strip the params either way so reloads don't keep re-navigating.
       params.delete('view');
       params.delete('reservationId');
+      params.delete('ticket');
+      params.delete('support');
       const search = params.toString();
       window.history.replaceState({}, '', window.location.pathname + (search ? `?${search}` : '') + window.location.hash);
       if (accessibleViews.includes(target)) return;
@@ -1085,6 +1267,9 @@ const App: React.FC = () => {
     const handler = (event: MessageEvent) => {
       const data = event.data;
       if (!data || data.type !== 'NOTIFICATION_CLICK' || !data.url) return;
+      if (typeof data.tag === 'string' && data.tag) {
+        notificationsApiService.markReadByTag(data.tag).catch(() => {});
+      }
       try {
         const url = new URL(data.url, window.location.origin);
         // Push della chat staff: apre la vista sul thread indicato.
@@ -1106,6 +1291,10 @@ const App: React.FC = () => {
             const parsed = Number(requestedReservationId);
             if (Number.isFinite(parsed)) setPendingReservationId(parsed);
           }
+          const requestedTicket = Number(url.searchParams.get('ticket'));
+          if (Number.isInteger(requestedTicket) && requestedTicket > 0) setPendingSupportTicketId(requestedTicket);
+          const requestedSupport = Number(url.searchParams.get('support'));
+          if (Number.isInteger(requestedSupport) && requestedSupport > 0) setPendingPlatformSupportId(requestedSupport);
           setView(target);
         }
       } catch {
@@ -1130,179 +1319,17 @@ const App: React.FC = () => {
   // pageshow, socket reconnect) never flash the skeleton over real data.
   const [isInitialDataLoading, setIsInitialDataLoading] = useState(true);
 
-  // Notification State — persisted to localStorage so they survive PWA
-  // reloads and mobile app suspend/resume (iOS drops websocket in background
-  // and would otherwise lose the bell history).
-  const NOTIFICATIONS_STORAGE_KEY = 'ristomanager_notifications_v1';
-  const NOTIFICATIONS_MAX = 50;
-  const [notifications, setNotifications] = useState<Notification[]>(() => {
-    try {
-      const raw = localStorage.getItem(NOTIFICATIONS_STORAGE_KEY);
-      if (!raw) return [];
-      const parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed)) return [];
-      return parsed.map((n: any) => ({
-        ...n,
-        timestamp: new Date(n.timestamp),
-      })).filter((n: Notification) => !isNaN(n.timestamp.getTime()));
-    } catch {
-      return [];
-    }
-  });
+  // Il vecchio campanello delle prenotazioni viveva in localStorage, con la
+  // sua «letta» per dispositivo, e da tempo non era più mostrato: il centro
+  // notifiche del server l'ha sostituito. Si toglie il residuo dai browser.
   useEffect(() => {
-    try {
-      const serializable = notifications.slice(0, NOTIFICATIONS_MAX).map(n => ({
-        ...n,
-        timestamp: n.timestamp.toISOString(),
-      }));
-      localStorage.setItem(NOTIFICATIONS_STORAGE_KEY, JSON.stringify(serializable));
-    } catch { /* quota or private mode — ignore */ }
-  }, [notifications]);
+    try { localStorage.removeItem('ristomanager_notifications_v1'); } catch { /* private mode */ }
+  }, []);
 
   // Latest reservations snapshot for socket handlers (avoids stale closures).
   const reservationsRef = useRef<Reservation[]>([]);
   useEffect(() => { reservationsRef.current = reservations; }, [reservations]);
 
-  // Channel label for the bell notification title. For MANUAL (in-app)
-  // reservations we prefer the creator's actual name so the shared Reception
-  // account doesn't just read "Utente" over and over.
-  const channelLabelForReservation = (res: Reservation): string => {
-    switch (res.source) {
-      case ReservationSource.WHATSAPP: return 'WhatsApp';
-      case ReservationSource.VOICE: return t('entity.voiceAgent');
-      case ReservationSource.GOOGLE: return 'Web';
-      case ReservationSource.MANUAL:
-      default:
-        return toTitleCase((res.created_by_user_name || '').trim()) || t('entity.user');
-    }
-  };
-
-  type ReservationNotifKind = 'created' | 'confirmed' | 'declined' | 'cancelled' | 'noshow' | 'deleted';
-
-  // Push a reservation notification into the bell dropdown. Deduplicates
-  // repeats for the same reservation+kind within a 5s window so that local
-  // optimistic actions + their socket rebroadcast don't produce two entries.
-  const addReservationNotification = (res: Reservation, kind: ReservationNotifKind) => {
-    const name = toTitleCase(res.customer_name);
-    const when = (() => {
-      try {
-        const dt = new Date(res.reservation_time);
-        return dt.toLocaleString('it-IT', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
-      } catch { return res.reservation_time; }
-    })();
-    const source = channelLabelForReservation(res);
-    let title = '';
-    let message = '';
-    let type: Notification['type'] = 'info';
-    switch (kind) {
-      case 'created':
-        title = t('toast.newBookingFrom', { fonte: source });
-        message = `${name} · ${res.guests} ospiti · ${when}`;
-        type = 'info';
-        break;
-      case 'confirmed':
-        title = t('toast.bookingConfirmed');
-        message = `${name} · ${res.guests} ospiti · ${when}`;
-        type = 'success';
-        break;
-      case 'declined':
-        title = t('toast.bookingDeclined');
-        message = `${name} · ${when}`;
-        type = 'warning';
-        break;
-      case 'cancelled':
-        title = t('toast.bookingCancelled');
-        message = `${name} · ${when}`;
-        type = 'warning';
-        break;
-      case 'noshow':
-        title = t('toast.bookingNoShow');
-        message = `${name} · ${when}`;
-        type = 'warning';
-        break;
-      case 'deleted':
-        title = t('toast.bookingDeleted');
-        message = `${name} · ${when}`;
-        type = 'warning';
-        break;
-    }
-    setNotifications(prev => {
-      const now = Date.now();
-      const isDup = prev.some(n =>
-        n.reservationId === res.id
-        && n.title === title
-        && (now - n.timestamp.getTime()) < 5000
-      );
-      if (isDup) return prev;
-      return [{
-        id: Math.random().toString(),
-        title, message, type,
-        reservationId: res.id,
-        timestamp: new Date(),
-        read: false,
-      }, ...prev].slice(0, NOTIFICATIONS_MAX);
-    });
-  };
-
-  // Rebuild bell entries for reservations created in the last window from the
-  // server payload. Needed for mobile/PWA sessions that were closed (or with
-  // a suspended socket) when the reservation was actually created — without
-  // this the bell would be empty on those devices even though the reservation
-  // is visible in the list.
-  const BELL_HYDRATE_WINDOW_MS = 6 * 60 * 60 * 1000; // 6h
-  const hydrateBellFromRecentReservations = (list: Reservation[]) => {
-    const cutoff = Date.now() - BELL_HYDRATE_WINDOW_MS;
-    const recent = list.filter(r => {
-      if (!r.created_at) return false;
-      const t = new Date(r.created_at).getTime();
-      return !isNaN(t) && t >= cutoff;
-    });
-    if (recent.length === 0) return;
-    setNotifications(prev => {
-      const existingReservationIds = new Set(
-        prev.map(n => n.reservationId).filter((v): v is number => v != null)
-      );
-      const additions: Notification[] = [];
-      for (const r of recent) {
-        if (existingReservationIds.has(r.id)) continue;
-        const when = (() => {
-          try {
-            const dt = new Date(r.reservation_time);
-            return dt.toLocaleString('it-IT', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-          } catch { return ''; }
-        })();
-        const name = toTitleCase(r.customer_name);
-        const channel = channelLabelForReservation(r);
-        additions.push({
-          id: `hydrate-${r.id}-${r.created_at}`,
-          title: t('toast.newBookingFrom', { fonte: channel }),
-          message: `${name} · ${when}`,
-          type: 'info',
-          reservationId: r.id,
-          timestamp: new Date(r.created_at as string),
-          read: false,
-        });
-      }
-      if (additions.length === 0) return prev;
-      const merged = [...additions, ...prev];
-      merged.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-      return merged.slice(0, NOTIFICATIONS_MAX);
-    });
-  };
-
-  // Classify a reservation update as a notification-worthy status transition.
-  // Returns null for edits that shouldn't spam the bell (notes/guests/table).
-  const classifyReservationUpdate = (prev: Reservation, next: Reservation): ReservationNotifKind | null => {
-    const prevStatus = prev.reservation_status;
-    const nextStatus = next.reservation_status;
-    if (prevStatus !== nextStatus) {
-      if (nextStatus === ReservationStatus.CANCELLED) return 'cancelled';
-      if (nextStatus === ReservationStatus.DECLINED) return 'declined';
-      if (nextStatus === ReservationStatus.NO_SHOW) return 'noshow';
-      if (nextStatus === ReservationStatus.CONFIRMED && prevStatus === ReservationStatus.PENDING) return 'confirmed';
-    }
-    return null;
-  };
 
   // Dedup, timer e rendering vivono nel ToastProvider (contexts/ToastContext):
   // qui resta solo il nome, che continua a scendere per props ai figli.
@@ -1322,6 +1349,7 @@ const App: React.FC = () => {
 
   // Socket.IO connection
   const { socket, isConnected } = useSocket();
+  const linkRoutes = useLinkRoutes(isConnected);
 
   // Reconnect socket when user logs in
   useEffect(() => {
@@ -1496,7 +1524,6 @@ const App: React.FC = () => {
       setMenus(menusData);
       setBanquetMenus(banquetMenusData);
       setReservations(mergeReservationsById(reservationsData, reservationsArchiveRef.current));
-      hydrateBellFromRecentReservations(reservationsData);
       // Solo un giro ANDATO A BUON FINE vale come «dati freschi»: se è
       // fallito, il rientro successivo deve poter riprovare subito.
       lastFetchDataAtRef.current = Date.now();
@@ -1552,19 +1579,13 @@ const App: React.FC = () => {
         return [...prev, reservation];
       });
       addToast(t('toast.newBookingNamed', { nome: toTitleCase(reservation.customer_name) }), 'info');
-      addReservationNotification(reservation, 'created');
     });
 
     socket.on('reservation:updated', (reservation: Reservation) => {
-      const previous = reservationsRef.current.find(r => r.id === reservation.id);
       setReservations(prev =>
         prev.map(r => r.id === reservation.id ? reservation : r)
       );
       addToast(t('toast.bookingUpdatedNamed', { nome: toTitleCase(reservation.customer_name) }), 'info');
-      if (previous) {
-        const kind = classifyReservationUpdate(previous, reservation);
-        if (kind) addReservationNotification(reservation, kind);
-      }
     });
 
     socket.on('reservation:deleted', (id: number) => {
@@ -1574,7 +1595,6 @@ const App: React.FC = () => {
       // mittente (riga autoritativa lato server), quindi questo toast arriva
       // pure a chi ha eliminato — niente doppione nel handler locale.
       addToast(deleted ? t('toast.bookingDeletedNamed', { nome: toTitleCase(deleted.customer_name) }) : t('toast.bookingDeleted'), 'info');
-      if (deleted) addReservationNotification(deleted, 'deleted');
     });
 
     // Silent patch — a denormalized field (e.g. customer_name/phone from a
@@ -2596,16 +2616,40 @@ const App: React.FC = () => {
            {/* Desktop date/time/shift control group. Uses flex-1 (not a fixed
                w-1/2) so it takes exactly the free space between the mobile logo
                and the right actions — with the sidebar open at lg the content
-               area shrinks and a fixed half would overflow into the "+" button. */}
-           <div className={`hidden md:flex items-center gap-2.5 flex-1 min-w-0 ${[ViewState.SETTINGS, ViewState.USERS, ViewState.CLIENTI, ViewState.STAFF, ViewState.PLATFORM, ViewState.ASPORTO].includes(view) ? '!hidden' : ''}`}>
+               area shrinks and a fixed half would overflow into the "+" button.
+               flex-1 da solo non bastava: i figli non si restringono, e fra 768
+               e ~1180px uscivano dal gruppo finendo SOTTO il blocco di destra
+               (la pastiglia Live copriva «Cena», fino a 206px di sovrapposizione
+               in Dashboard a 768). Il gruppo è un @container e si compatta sullo
+               spazio che ha davvero — barra laterale aperta o chiusa, icone del
+               nodo o no — rinunciando prima al meno importante. Soglie misurate
+               in Dashboard (tre turni), per un giorno diverso da oggi / per oggi:
+                 < 790        «Torna a oggi» solo icona   (419 → 330 la data)
+                 < 700 / 662  via la barra dei canali
+                 < 612 / 574  Pranzo/Cena solo icona       (271 → 149 i turni)
+                 < 490 / 452  data stretta, senza «· dom 27 set»
+                 < 440 / 366  via frecce e icona del calendario: resta la data ▾
+               md:pl-3 stacca il gruppo dal marchio (sotto lg); le container
+               query misurano il contenuto al netto del padding, quindi i
+               gradini ne tengono conto da soli. Il minimo sta nei 347px che
+               il gruppo ha a 768, con 24px di margine anche su una data lunga. Le quattro serie, due turni compresi, sono in
+               HEADER_FIT in cima al file. */}
+           <div className={`hidden md:flex @container items-center gap-2.5 flex-1 min-w-0 md:pl-3 lg:pl-0 ${[ViewState.SETTINGS, ViewState.USERS, ViewState.CLIENTI, ViewState.STAFF, ViewState.PLATFORM, ViewState.ASPORTO].includes(view) ? '!hidden' : ''}`}>
              <DateNavigator
                value={globalDateStr}
                onChange={(dateOnly) => {
                  const [y, m, d] = dateOnly.split('-').map(Number);
                  if (y && m && d) setGlobalDate(new Date(y, m - 1, d));
                }}
-               widthClass="w-[200px]"
+               widthClass={headerFit.dateWidth}
                backToToday="inline"
+               fit={{
+                 arrows: headerFit.arrows,
+                 icon: headerFit.icon,
+                 secondary: headerFit.dateSecondary,
+                 backChip: headerFit.backChip,
+                 backLabel: headerFit.backLabel,
+               }}
              />
 
              {/* The standalone clock chip is gone — the time now lives inside
@@ -2622,7 +2666,10 @@ const App: React.FC = () => {
                  <button
                    key={opt.key}
                    onClick={() => setGlobalShiftFilter(opt.key)}
+                   title={opt.label}
                    className={`inline-flex items-center gap-1.5 px-4 h-9 rounded-[var(--ds-radius-control)] text-[15px] font-medium transition-colors ${
+                     opt.icon ? headerFit.shiftIcon : headerFit.shiftText
+                   } ${
                      globalShiftFilter === opt.key
                        ? 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]'
                        : 'text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
@@ -2630,7 +2677,10 @@ const App: React.FC = () => {
                    aria-pressed={globalShiftFilter === opt.key}
                  >
                    {opt.icon}
-                   {opt.label}
+                   {/* Stretti, Pranzo e Cena restano sole e tramonto: il nome
+                       va in sr-only (resta il nome del bottone) e nel title.
+                       «Tutti» non ha icona e tiene la parola. */}
+                   <span className={opt.icon ? headerFit.shiftLabel : ''}>{opt.label}</span>
                  </button>
                ))}
              </div>
@@ -2641,7 +2691,7 @@ const App: React.FC = () => {
                  (globalDate, globalShift) e permette toggle inline con
                  settings:full. */}
              {(globalShiftFilter === 'LUNCH' || globalShiftFilter === 'DINNER') && (
-               <div className="hidden xl:flex items-center flex-shrink-0">
+               <div className={`hidden items-center flex-shrink-0 ${headerFit.channels}`}>
                  <BookingChannelsBar
                    date={globalDateStr}
                    shift={globalShiftFilter}
@@ -2675,7 +2725,11 @@ const App: React.FC = () => {
                   restava visibile anche sul telefono, insieme al pallino.
                   La variante invece esce dopo le utility semplici, quindi
                   batte la base sotto md. */}
-              <LivePill connected={isConnected} time={currentTime} className="max-md:hidden" />
+              {/* Le icone nodo/online da lg: il gruppo date/turni a sinistra
+                  cede lo spazio che prendono (container query), ma sotto lg
+                  c'è anche il marchio e il minimo del gruppo non ci starebbe
+                  più. Lo stato resta nell'aria-label della pastiglia. */}
+              <LivePill connected={isConnected} time={currentTime} routes={linkRoutes} routesClassName="max-lg:hidden" className="max-md:hidden" />
 
               {/* Mobile-only status dot */}
               <LivePill connected={isConnected} time={currentTime} variant="dot" className="md:hidden mx-1" />
@@ -3108,7 +3162,9 @@ const App: React.FC = () => {
         )}
 
         {view === ViewState.PAGAMENTI && (
-          <PagamentiPage globalDate={globalDate} globalShiftFilter={globalShiftFilter} onOpenCassa={canAccessView(ViewState.CASSA) ? () => setView(ViewState.CASSA) : undefined} />
+          <CardErrorBoundary label={t('nav.items.payments')}>
+            <PagamentiPage globalDate={globalDate} globalShiftFilter={globalShiftFilter} onOpenCassa={canAccessView(ViewState.CASSA) ? () => setView(ViewState.CASSA) : undefined} />
+          </CardErrorBoundary>
         )}
 
         {view === ViewState.FISCALITA && (
@@ -3140,7 +3196,21 @@ const App: React.FC = () => {
         )}
 
         {view === ViewState.PLATFORM && canAccessView(ViewState.PLATFORM) && (
-          <PlatformPanel showToast={addToast} />
+          <PlatformPanel
+            showToast={addToast}
+            initialSupportTicketId={pendingPlatformSupportId}
+            onInitialSupportTicketConsumed={() => setPendingPlatformSupportId(null)}
+          />
+        )}
+
+        {view === ViewState.SUPPORTO && user && canAccessView(ViewState.SUPPORTO) && (
+          <SupportPanel
+            currentUserId={user.id}
+            originView={lastWorkViewRef.current}
+            initialTicketId={pendingSupportTicketId}
+            onInitialTicketConsumed={() => setPendingSupportTicketId(null)}
+            showToast={addToast}
+          />
         )}
 
         {view === ViewState.RECEPTION && (

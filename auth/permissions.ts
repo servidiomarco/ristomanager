@@ -357,7 +357,11 @@ const VIEW_PERMISSIONS: Record<ViewState, Permission[]> = {
   // Pannello piattaforma (Fase D2): gate sul ruolo PLATFORM_ADMIN (vedi
   // canAccessView nel frontend e platformAdminAuth in server.ts), non sulla
   // matrice per-tenant. Nessun permesso lo apre.
-  [ViewState.PLATFORM]: []
+  [ViewState.PLATFORM]: [],
+  // Aiuto: aperto a ogni utente del ristorante, senza permesso di matrice —
+  // l'assistenza non deve poter essere tolta a un ruolo. Gate in
+  // canAccessView (frontend) e requireTenantSession (server.ts).
+  [ViewState.SUPPORTO]: []
 };
 
 export class PermissionService {

@@ -1,18 +1,17 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { flushSync, createPortal } from 'react-dom';
 import { Table, TableShape, Room, TableStatus, Reservation, ReservationSource, Shift, TableMerge, TableHiddenOverride, RoomClosedOverride, ArrivalStatus, ReservationStatus, BanquetMenu } from '../types';
-import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Sunset, Loader2, Info, RotateCw, Ruler, StickyNote, Eye, EyeOff, DoorClosed, DoorOpen, BookOpen, Mic, ChevronDown } from 'lucide-react';
+import { Plus, Pencil, Move, RectangleHorizontal, Square, Circle, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Sunset, Loader2, Info, RotateCw, Ruler, StickyNote, Star, Eye, EyeOff, DoorClosed, DoorOpen, BookOpen, Mic, ChevronDown } from 'lucide-react';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
 import { useTranslation } from 'react-i18next';
 import { deriveTableDisplayStatus, isSeated, useTableStatusLabel } from './reservationState';
 import { useNow } from '../hooks/useNow';
 import { Loader } from './Loader';
-import { computeAutoLayout } from '../utils/tableLayout';
 import { datePart, timePart } from '../utils/displayTime';
 import { buildFloorLabels } from '../utils/labelPlacement';
 import { buildBanquetColorClassMap } from '../utils/banquetColors';
 import { BanquetLabel } from './ReservationCard';
-import { snapToGrid, collidesWithOthers, findOverlappingPairs, getTableFootprint, FLOOR_CLEARANCE } from '../utils/tableOverlap';
+import { snapToGrid, collidesWithOthers, findOverlappingPairs, getTableFootprint, FLOOR_CLEARANCE, FLOOR_GRID } from '../utils/tableOverlap';
 import { toTitleCase, getInitials } from '../utils/text';
 import { getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getRoomClosed, createRoomClosed, deleteRoomClosed } from '../services/apiService';
 import { applyMerges } from '../utils/tableMerge';
@@ -58,9 +57,11 @@ const ROOM_TAB_IDLE =
 const ROOM_TAB_IDLE_CLOSED =
   'bg-[var(--ds-surface-row)] text-[var(--ds-text-subtle)] hover:bg-[var(--ds-border)] line-through';
 
-// A latched tool (selection mode, manual layout) has to read as "on" and not
-// merely hovered, so it takes the tint rather than a darker grey.
-const TOOL_BUTTON_ON = 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]';
+// A latched mode («Sposta tavoli», «Modifica tavoli») has to read as "on" at
+// a glance, so it takes the solid. It used to take the arriving tint, and
+// #f0f0fb next to the surface-row grey #f4f4f5 was the same colour to the eye:
+// in the room nobody could tell whether editing was on or off.
+const TOOL_BUTTON_ON = 'bg-[var(--ds-arriving-solid)] text-[var(--ds-arriving-fg)]';
 
 // Selection-toolbar actions: one 44px pill shape that takes an icon and an
 // optional short label, so "Unisci", "Dividi" and "Elimina" differ by tone
@@ -124,6 +125,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   // tavolo unito (che mostra la SOMMA dei coperti) ogni tasto faceva saltare
   // il numero della capienza dei tavoli agganciati.
   const [seatsDraft, setSeatsDraft] = useState<{ id: number; value: string } | null>(null);
+  const [priorityDraft, setPriorityDraft] = useState<{ ids: number[]; value: string } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [isLegendOpen, setIsLegendOpen] = useState(false);
@@ -156,18 +158,13 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   const [roomClosureAnchor, setRoomClosureAnchor] = useState<DOMRect | null>(null);
   const roomClosureButtonRef = useRef<HTMLButtonElement | null>(null);
 
-  // Layout mode: 'auto' uses computed tidy rows; 'manual' uses saved x/y and
-  // re-enables drag-to-position so the floor plan can mirror the real room.
-  const [layoutMode, setLayoutMode] = useState<'auto' | 'manual'>(() => {
-    if (typeof window === 'undefined') return 'auto';
-    try {
-      const saved = window.localStorage.getItem('floorPlan.layoutMode');
-      return saved === 'manual' ? 'manual' : 'auto';
-    } catch { return 'auto'; }
-  });
-  useEffect(() => {
-    try { window.localStorage.setItem('floorPlan.layoutMode', layoutMode); } catch {}
-  }, [layoutMode]);
+  // «Sposta tavoli» sblocca il trascinamento, e basta: la piantina mostra
+  // SEMPRE le posizioni salvate, la sala com'è davvero. Prima lo stesso
+  // bottone cambiava anche la vista — spento, i tavoli si ridisponevano in
+  // righe ordinate per numero e la disposizione vera si vedeva solo
+  // spostando. Non si ricorda fra un'apertura e l'altra: lasciato acceso,
+  // in servizio un tocco lungo sposterebbe un tavolo per sbaglio.
+  const [isMoving, setIsMoving] = useState(false);
 
   // Portrait orientation gate (floor-plan only, mobile/touch devices)
   const [isPortrait, setIsPortrait] = useState(() => {
@@ -487,27 +484,11 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     // Apply per-shift hide override unless the user toggled "show hidden".
     .filter(t => showHidden || !hiddenTableIds.has(t.id));
 
-  // Lay tables out into tidy flowing rows at render time, shaped to the canvas.
-  // Positions are computed fresh from the tables actually shown (after merges /
-  // hidden overrides), so every date stays neat regardless of merge state.
-  const layoutAspect = canvasSize.width > 0 && canvasSize.height > 0
-    ? Math.min(2.6, Math.max(0.6, canvasSize.width / canvasSize.height))
-    : 1.6;
-  const autoLayout = useMemo(
-    () => computeAutoLayout(currentTables, layoutAspect),
-    [currentTables, layoutAspect]
-  );
-  // Bounding box used to size the inner canvas. In auto mode it comes from
-  // the tidy layout; in manual mode it's the extent of the saved x/y plus the
-  // glyph footprint so dragged tables never escape the scaled wrapper.
+  // Bounding box used to size the inner canvas: the extent of the saved x/y
+  // plus the glyph footprint, so dragged tables never escape the scaled
+  // wrapper. Combined with contentOffset=(0,0) below, tables render at their
+  // real arrangement and only shrink if they overflow the canvas.
   const roomExtent = useMemo(() => {
-    if (layoutMode === 'auto') {
-      return { width: autoLayout.width, height: autoLayout.height };
-    }
-    // Manual mode: natural bounding box of the saved positions. Combined with
-    // contentOffset=(0,0) and scale≤1 below this matches the pre-PR floor
-    // plan: tables render at their real size and only shrink if they overflow
-    // the canvas.
     const PADDING = 60;
     if (currentTables.length === 0) return { width: 800, height: 600 };
     let maxRight = 0;
@@ -518,7 +499,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       maxBottom = Math.max(maxBottom, t.y + h);
     }
     return { width: maxRight + PADDING, height: maxBottom + PADDING };
-  }, [layoutMode, autoLayout, currentTables]);
+  }, [currentTables]);
 
   const scale = useMemo(() => {
     if (canvasSize.width === 0 || canvasSize.height === 0) return 1;
@@ -529,34 +510,28 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     const availH = Math.max(1, canvasSize.height - M * 2);
     const sx = availW / roomExtent.width;
     const sy = availH / roomExtent.height;
-    // Allow zoom-in so a sparse room actually fills the canvas. Manual mode
-    // still caps lower than auto so the drag math (which mixes scaleRef with
-    // pointer deltas) stays predictable on dense rooms.
-    return Math.min(sx, sy, layoutMode === 'manual' ? 1.5 : 2);
-  }, [canvasSize, roomExtent, layoutMode]);
+    // Allow zoom-in so a sparse room actually fills the canvas, capped so the
+    // drag math (which mixes scaleRef with pointer deltas) stays predictable.
+    return Math.min(sx, sy, 1.5);
+  }, [canvasSize, roomExtent]);
 
   useEffect(() => { scaleRef.current = scale; }, [scale]);
 
-  // Center the scaled room within the canvas so leftover space is even.
-  // In manual mode we pin the offset to (0,0): re-centering when the
-  // bounding box grows would visually drag every table back toward its
-  // original spot, which feels like the drop didn't take.
-  const contentOffset = useMemo(() => {
-    if (layoutMode === 'manual') return { x: 0, y: 0 };
-    return {
-      x: Math.max(0, (canvasSize.width - roomExtent.width * scale) / 2),
-      y: Math.max(0, (canvasSize.height - roomExtent.height * scale) / 2),
-    };
-  }, [canvasSize, roomExtent, scale, layoutMode]);
+  // The room is pinned to the top-left corner, moving or not: re-centering
+  // when the bounding box grows would visually drag every table back toward
+  // its original spot mid-drag, which feels like the drop didn't take — and
+  // a centred view that jumped to the corner on «Sposta tavoli» would look
+  // like the tables had moved.
+  const contentOffset = { x: 0, y: 0 };
 
   // Detect pre-existing overlaps among the visible tables of the active room.
-  // Only meaningful in manual mode (auto-tidy never overlaps). Older layouts
-  // were spaced before chairs were added, so some saved positions now collide —
-  // we flag them rather than moving anything.
+  // Older layouts were spaced before chairs were added, and a room never
+  // arranged by hand has its tables piled where they were created — we flag
+  // them rather than moving anything. Only to those who can fix it.
   const overlapPairs = useMemo(() => {
-    if (layoutMode !== 'manual') return [];
+    if (!canEdit) return [];
     return findOverlappingPairs(currentTables);
-  }, [layoutMode, currentTables]);
+  }, [canEdit, currentTables]);
 
   // Stable signature of the colliding set so a dismissed banner reappears only
   // when the actual set of overlaps changes.
@@ -660,12 +635,9 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
   // Collision-aware reservation cards + banquet hulls/labels for the floor.
   const floorLabels = useMemo(() => {
-    const labelTables = currentTables.map(t => {
-      const pos = layoutMode === 'manual'
-        ? { x: t.x, y: t.y }
-        : (autoLayout.positions.get(t.id) || { x: t.x, y: t.y });
-      return { id: t.id, shape: t.shape, seats: t.seats, rotation: t.rotation ?? 0, x: pos.x, y: pos.y };
-    });
+    const labelTables = currentTables.map(t => (
+      { id: t.id, shape: t.shape, seats: t.seats, rotation: t.rotation ?? 0, x: t.x, y: t.y }
+    ));
     const banquetDataById = new Map<number, BanquetMenu>();
     const banquetTableIds = new Map<number, number[]>();
     for (const t of currentTables) {
@@ -693,7 +665,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     const banquetColorByBanquetId = buildBanquetColorClassMap(banquetGroups.map(b => b.id));
     return { ...result, banquetDataById, banquetGroups, banquetColorByBanquetId };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentTables, autoLayout, layoutMode, banquetByTableId, selectedTables, reservations]);
+  }, [currentTables, banquetByTableId, selectedTables, reservations]);
 
   const getDynamicTableStatus = (table: Table): TableStatus => {
     const now = Date.now();
@@ -755,7 +727,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
     // In auto mode positions are computed at render time, so press only
     // selects. In manual mode arm a real drag against the saved x/y.
-    if (layoutMode !== 'manual') return;
+    if (!isMoving) return;
 
     dragStateRef.current = {
       isDragging: true,
@@ -899,7 +871,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
     // In auto mode positions are computed at render time; in manual mode
     // arm a real drag.
-    if (layoutMode !== 'manual') return;
+    if (!isMoving) return;
 
     const touch = e.touches[0];
     dragStateRef.current = {
@@ -928,6 +900,23 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     handleMouseUp(); // Reuse mouse up logic
   };
 
+  // Un tavolo nuovo nasce nel primo posto libero della sala, non sopra un
+  // altro: la piantina mostra le posizioni vere, e a (50,50) fisso finiva
+  // sopra il tavolo dell'angolo. Si cerca a passi di due celle di griglia
+  // dentro la larghezza già occupata, riga dopo riga; i tavoli nascosti per
+  // il turno contano, perché tornano.
+  const freeSpotFor = (draft: Table): { x: number; y: number } => {
+    const others = tables.filter(t => t.room_id === activeRoomId);
+    const step = FLOOR_GRID * 2;
+    const maxX = Math.max(800, ...others.map(t => t.x + getGlyphDimensions(t.shape, t.seats).width));
+    for (let y = step; y < 6000; y += step) {
+      for (let x = step; x < maxX; x += step) {
+        if (collidesWithOthers(draft, x, y, others).length === 0) return { x, y };
+      }
+    }
+    return { x: 50, y: 50 };
+  };
+
   const handleAddTable = (shape: TableShape) => {
     if (!activeRoomId) return;
     const newTable: Omit<Table, 'id'> = {
@@ -940,7 +929,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       status: TableStatus.FREE,
       is_locked: false
     };
-    onAddTable(newTable);
+    onAddTable({ ...newTable, ...freeSpotFor({ ...newTable, id: -1 } as Table) });
   };
 
   const handleToggleLock = () => {
@@ -969,7 +958,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   // in manual mode, where positions are the saved x/y. Auto mode reflows and can
   // never overlap, so it's always allowed there.
   const editWouldOverlap = (proposed: Table): boolean => {
-      if (layoutMode !== 'manual') return false;
+      if (!isMoving) return false;
       return collidesWithOthers(proposed, proposed.x, proposed.y, currentTables).length > 0;
   };
 
@@ -1101,11 +1090,9 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
     const accentVar = displayStatus !== 'libera' ? `var(--tg-${displayStatus}-accent)` : undefined;
 
-    const pos = layoutMode === 'manual'
-      ? { x: table.x, y: table.y }
-      : (autoLayout.positions.get(table.id) || { x: table.x, y: table.y });
+    const pos = { x: table.x, y: table.y };
 
-    const isDraggable = canEdit && layoutMode === 'manual' && !table.is_locked && !isTempLocked;
+    const isDraggable = canEdit && isMoving && !table.is_locked && !isTempLocked;
 
     return (
       <div
@@ -1164,6 +1151,16 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           </div>
         )}
 
+        {/* Priority Badge — solo mentre si modificano i tavoli (modalità o
+            barra di modifica aperta): in servizio il numero non dice niente a
+            chi porta i piatti. Fuori dalle modalità un tocco seleziona un solo
+            tavolo, ed è il modo comodo di numerarli uno dopo l'altro. */}
+        {table.assign_priority != null && canEdit && (isSelectionMode || isMoving || selectedTables.length > 0) && !timerDisplay && (
+          <div className="absolute bg-[var(--ds-seated-solid)] text-[var(--ds-seated-fg)] text-[11px] font-semibold tabular-nums px-1.5 py-0.5 rounded-[var(--ds-radius-control)] flex items-center gap-0.5 border border-[var(--ds-canvas)] pointer-events-none" style={{ top: -4, right: -4 }}>
+            <Star size={8} className="fill-current" />{table.assign_priority}
+          </div>
+        )}
+
         {/* Hidden-for-shift Badge */}
         {isHidden && (
           <div className="absolute bg-[var(--ds-text-muted)] text-[var(--ds-surface)] text-[10px] font-semibold px-1.5 py-0.5 rounded-[var(--ds-radius-control)] flex items-center gap-0.5 border border-[var(--ds-canvas)] pointer-events-none" style={{ top: -4, left: -4 }}>
@@ -1176,6 +1173,9 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   };
 
   const singleSelectedTable = selectedTables.length === 1 ? displayTables.find(t => t.id === selectedTables[0]) : null;
+
+  // The canvas announces «Sposta tavoli» only to those who can drag.
+  const isEditingLayout = canEdit && isMoving;
 
   // Applica la bozza coperti. Il campo mostra i coperti COMBINATI (tavolo +
   // agganciati): il numero digitato va riportato al valore grezzo del tavolo
@@ -1191,6 +1191,34 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     const partnersSeats = singleSelectedTable.seats - raw.seats;
     handleSeatsChange(Math.max(1, Math.min(99, parsed - partnersSeats)));
   };
+
+  // Ordine nell'assegnazione automatica (Sofia, WhatsApp, sito): 1 prima di 2.
+  // La bozza porta con sé i tavoli per cui è stata scritta, perché il blur
+  // arriva anche toccando un altro tavolo, quando la selezione è già cambiata.
+  // Vuoto = nessuna priorità; lo stesso numero su più tavoli = pari merito, e
+  // fra loro vince il più piccolo che basta. Si legge da `tables`, non dalla
+  // vista unita, per non scrivere i coperti combinati sul tavolo principale.
+  const commitPriorityDraft = () => {
+    if (!priorityDraft) return;
+    const { ids, value } = priorityDraft;
+    setPriorityDraft(null);
+    const raw = value.trim();
+    const next = raw === '' ? null : parseInt(raw, 10);
+    if (next !== null && (!Number.isFinite(next) || next < 1 || next > 99)) return;
+    ids.forEach(id => {
+      const table = tables.find(t => t.id === id);
+      if (table && !table.is_locked && (table.assign_priority ?? null) !== next) {
+        onUpdateTable({ ...table, assign_priority: next });
+      }
+    });
+  };
+  // Il campo mostra il numero solo se tutti i tavoli selezionati lo
+  // condividono; con numeri diversi resta vuoto e scriverne uno li allinea.
+  const selectedPriorities = new Set(
+    selectedTables.map(id => tables.find(t => t.id === id)?.assign_priority ?? null)
+  );
+  const sharedPriorityText = selectedPriorities.size === 1 ? String([...selectedPriorities][0] ?? '') : '';
+  const selectionKey = selectedTables.join(',');
 
   // Portrait orientation gate — block floor plan on mobile portrait
   if (isPortrait) {
@@ -1340,22 +1368,37 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         {/* Tools section - Only shown in edit mode */}
         {canEdit && (
         <div className="flex items-center gap-2 sm:border-l sm:pl-4 border-[var(--ds-border)] overflow-x-auto shrink-0 w-full sm:w-auto">
-          <span className="text-[13px] font-semibold text-[var(--ds-text-muted)] hidden xl:block">{tv('tools')}</span>
-
+          {/* The two modes, each named for what it lets you do. They used to
+              be unlabelled icons under a static «Strumenti» caption, which
+              read as the button, and nothing said whether a mode was on.
+              The names stay put and «on» is the solid plus a check.
+              One mode at a time: in selection mode a press toggles the
+              selection and returns before a drag is armed, so with both on
+              «Sposta tavoli» looked active and moved nothing. */}
           <button
-            onClick={() => setIsSelectionMode(!isSelectionMode)}
-            className={`${dsIconButton} shadow-none ${isSelectionMode ? TOOL_BUTTON_ON : 'bg-[var(--ds-surface-row)]'}`}
-            title={tv('multiSelect')}
+            onClick={() => {
+              if (!isMoving) setIsSelectionMode(false);
+              setIsMoving(m => !m);
+            }}
+            className={`${EDIT_ACTION_BASE} ${isMoving ? TOOL_BUTTON_ON : EDIT_ACTION_QUIET}`}
+            title={isMoving ? tv('moveDoneHint') : tv('moveStartHint')}
+            aria-pressed={isMoving}
           >
-              <CheckSquare className="h-4 w-4" />
+              {isMoving ? <Check className="h-4 w-4" /> : <Move className="h-4 w-4" />}
+              {tv('moveTables')}
           </button>
 
           <button
-            onClick={() => setLayoutMode(m => m === 'auto' ? 'manual' : 'auto')}
-            className={`${dsIconButton} shadow-none ${layoutMode === 'manual' ? TOOL_BUTTON_ON : 'bg-[var(--ds-surface-row)]'}`}
-            title={layoutMode === 'manual' ? tv('layoutManual') : tv('layoutAuto')}
+            onClick={() => {
+              if (!isSelectionMode) setIsMoving(false);
+              setIsSelectionMode(!isSelectionMode);
+            }}
+            className={`${EDIT_ACTION_BASE} ${isSelectionMode ? TOOL_BUTTON_ON : EDIT_ACTION_QUIET}`}
+            title={isSelectionMode ? tv('editTablesDoneHint') : tv('editTablesStartHint')}
+            aria-pressed={isSelectionMode}
           >
-              {layoutMode === 'manual' ? <Move className="h-4 w-4" /> : <Layout className="h-4 w-4" />}
+              {isSelectionMode ? <Check className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
+              {tv('editTables')}
           </button>
 
           {selectedTables.length > 0 && (
@@ -1370,14 +1413,19 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
           <div className="h-6 w-px bg-[var(--ds-border)] mx-1"></div>
 
-          <button onClick={() => handleAddTable(TableShape.RECTANGLE)} className={`${dsIconButton} bg-[var(--ds-surface-row)] shadow-none`} title={tv('shapeRect')}>
-            <div className="w-6 h-4 border-2 border-current rounded-[var(--ds-radius-sm)]" />
+          {/* Add-table shapes. The glyph IS the table's geometry, so it takes
+              fixed icons rather than the radius tokens: those follow the
+              interface style, and in «classico» an 8px corner on a 16px box
+              drew the square as a circle and the rectangle as a pill — you
+              could not tell which button made which table. */}
+          <button onClick={() => handleAddTable(TableShape.RECTANGLE)} className={`${dsIconButton} bg-[var(--ds-surface-row)] shadow-none`} title={tv('shapeRect')} aria-label={tv('shapeRect')}>
+            <RectangleHorizontal className="h-5 w-5" />
           </button>
-          <button onClick={() => handleAddTable(TableShape.SQUARE)} className={`${dsIconButton} bg-[var(--ds-surface-row)] shadow-none`} title={tv('shapeSquare')}>
-            <div className="w-4 h-4 border-2 border-current rounded-[var(--ds-radius-sm)]" />
+          <button onClick={() => handleAddTable(TableShape.SQUARE)} className={`${dsIconButton} bg-[var(--ds-surface-row)] shadow-none`} title={tv('shapeSquare')} aria-label={tv('shapeSquare')}>
+            <Square className="h-5 w-5" />
           </button>
-          <button onClick={() => handleAddTable(TableShape.CIRCLE)} className={`${dsIconButton} bg-[var(--ds-surface-row)] shadow-none`} title={tv('shapeRound')}>
-             <div className="w-4 h-4 border-2 border-current rounded-[var(--ds-radius-control)]" />
+          <button onClick={() => handleAddTable(TableShape.CIRCLE)} className={`${dsIconButton} bg-[var(--ds-surface-row)] shadow-none`} title={tv('shapeRound')} aria-label={tv('shapeRound')}>
+            <Circle className="h-5 w-5" />
           </button>
 
           <div className="h-6 w-px bg-[var(--ds-border)] mx-1"></div>
@@ -1488,7 +1536,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         {/* Edit toolbar - Only shown when tables selected AND in edit mode */}
         {canEdit && selectedTables.length > 0 && (
  <div className="flex flex-wrap items-center gap-2 sm:border-l sm:pl-4 border-[var(--ds-border)] duration-200 shrink-0 w-full sm:w-auto">
-            <span className="text-[13px] font-semibold text-[var(--ds-text-muted)] hidden xl:block">{tv('edit')}</span>
+            <span className="text-[13px] font-semibold text-[var(--ds-text-muted)] hidden xl:block">{tv('selection')}</span>
 
             {/* Lock/Unlock */}
             <button
@@ -1561,6 +1609,27 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                     <Info size={16} />
                     <span className="hidden sm:inline">{tv('details')}</span>
                 </button>
+            )}
+
+            {/* Ordine nell'assegnazione automatica */}
+            {!selectedTables.some(id => tables.find(t => t.id === id)?.is_locked) && (
+                <label className={EDIT_FIELD_WRAP} title={tv('assignPriorityHint')}>
+                    <Star size={14} className="text-[var(--ds-text-muted)]" />
+                    <span className="hidden sm:inline text-[13px] text-[var(--ds-text-muted)]">{tv('assignPriority')}</span>
+                    <input
+                        type="number"
+                        min="1"
+                        max="99"
+                        inputMode="numeric"
+                        aria-label={tv('assignPriority')}
+                        placeholder="–"
+                        className="w-8 bg-transparent text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)] outline-none placeholder:text-[var(--ds-text-muted)]"
+                        value={priorityDraft && priorityDraft.ids.join(',') === selectionKey ? priorityDraft.value : sharedPriorityText}
+                        onChange={(e) => setPriorityDraft({ ids: [...selectedTables], value: e.target.value })}
+                        onBlur={commitPriorityDraft}
+                        onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                    />
+                </label>
             )}
 
             {/* Rotate Table */}
@@ -1670,7 +1739,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       {/* Canvas */}
       <div
         ref={canvasRef}
-        className={`flex-1 bg-[var(--ds-canvas)] rounded-[var(--ds-radius)] border border-dashed border-[var(--ds-border-strong)] relative overflow-hidden ${isSelectionMode ? 'cursor-crosshair' : 'cursor-default'}`}
+        className={`flex-1 bg-[var(--ds-canvas)] rounded-[var(--ds-radius)] border border-dashed ${isEditingLayout || (canEdit && isSelectionMode) ? 'border-[var(--ds-arriving-solid)]' : 'border-[var(--ds-border-strong)]'} transition-colors relative overflow-hidden ${isSelectionMode ? 'cursor-crosshair' : 'cursor-default'}`}
         onClick={() => !isSelectionMode && setSelectedTables([])}
         style={{
             backgroundImage: 'radial-gradient(var(--floor-dot) 1px, transparent 1px)',
@@ -1721,9 +1790,18 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
               </div>
           )}
 
-          {isSelectionMode && (
-              <div className="absolute top-4 left-4 bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] px-3 py-1.5 rounded-[var(--ds-radius-control)] text-[13px] font-medium pointer-events-none flex items-center gap-2">
-                  <CheckSquare size={12} /> Modalità selezione attiva
+          {/* The canvas-side half of the two mode buttons: the pulse says the
+              mode is live, the text says what it lets you do. Bottom-left,
+              opposite the Legenda: the room is pinned to the top-left
+              corner, so a chip up there sat on the first row of tables. */}
+          {(isEditingLayout || (canEdit && isSelectionMode)) && (
+              <div className="absolute bottom-4 left-4 z-10 flex h-11 items-center gap-2 px-4 bg-[var(--ds-arriving-solid)] text-[var(--ds-arriving-fg)] rounded-[var(--ds-radius-control)] text-[13px] font-medium shadow-[var(--ds-shadow-raised)] pointer-events-none">
+                  <span className="relative flex h-2 w-2 flex-shrink-0" aria-hidden>
+                      <span className="ds-live-dot absolute inset-0 rounded-full bg-[var(--ds-arriving-fg)]" />
+                      <span className="relative inline-flex h-2 w-2 rounded-full bg-[var(--ds-arriving-fg)]" />
+                  </span>
+                  <span className="font-semibold">{isEditingLayout ? tv('movingActive') : tv('editingTablesActive')}</span>
+                  <span className="hidden sm:inline">· {isEditingLayout ? tv('movingHint') : tv('editingTablesHint')}</span>
               </div>
           )}
 

@@ -926,6 +926,9 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
     const phantomOpen = item.phantom_confirmation && !item.phantom_recovered;
     const pending = needsCallback(item);
     const tel = (item.phone || '').replace(/[^\d+]/g, '');
+    // La card di un gruppo mostra il tentativo più recente: resta attiva
+    // anche se la chiamata aperta è uno dei tentativi nascosti.
+    const active = group.some(c => c.id === selectedId);
     return (
       <SwipeRow
         key={item.id}
@@ -946,7 +949,10 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
         <button
           type="button"
           onClick={() => setSelectedId(item.id)}
-          className="flex w-full gap-3 bg-[var(--ds-surface)] p-3 text-left transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)]"
+          aria-current={active ? 'true' : undefined}
+          className={`flex w-full gap-3 p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)] ${
+            active ? 'bg-[var(--ds-surface-row)]' : 'bg-[var(--ds-surface)] hover:bg-[var(--ds-surface-row)]'
+          }`}
         >
           <Avatar icon={Phone} tone={pending || phantomOpen ? 'critical' : 'neutral'} />
           <div className="min-w-0 flex-1">

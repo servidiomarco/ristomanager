@@ -103,6 +103,14 @@ const getSlotsForDateShift = (
 /** Minutes a dismissal quiets the overdue-table prompt on this device. */
 const OVERDUE_SNOOZE_MIN = 15;
 
+/** Lo stesso ordine dell'assegnazione automatica lato server
+ *  (pickSelfServiceTable): prima i tavoli numerati in piantina, dal numero
+ *  più basso, poi quelli senza numero; a pari numero il più piccolo che basta.
+ *  Così il pulsante di assegnazione del modulo non contraddice quello che
+ *  fanno Sofia e il sito. */
+const byAssignPriority = (a: Table, b: Table): number =>
+  (a.assign_priority ?? Infinity) - (b.assign_priority ?? Infinity) || a.seats - b.seats;
+
 /* ── Form steps (edit only) ───────────────────────────────────────────────
    The same three sections the edit form has always had, given a screen each.
    Payments and the message log used to sit below the table grid, so reaching
@@ -1051,31 +1059,6 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // canvas element mounts/unmounts (e.g. when viewMode or isPhone changes).
   const [mapCanvasNode, setMapCanvasNode] = useState<HTMLDivElement | null>(null);
   const [mapCanvasSize, setMapCanvasSize] = useState({ width: 0, height: 0 });
-  // Mirror the layout mode chosen in Sale & Tavoli so both maps stay in sync.
-  // 'auto' = tidy rows via computeAutoLayout; 'manual' = saved x/y positions.
-  const [layoutMode, setLayoutMode] = useState<'auto' | 'manual'>(() => {
-    if (typeof window === 'undefined') return 'auto';
-    try {
-      const saved = window.localStorage.getItem('floorPlan.layoutMode');
-      return saved === 'manual' ? 'manual' : 'auto';
-    } catch { return 'auto'; }
-  });
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const sync = () => {
-      try {
-        const saved = window.localStorage.getItem('floorPlan.layoutMode');
-        setLayoutMode(saved === 'manual' ? 'manual' : 'auto');
-      } catch {}
-    };
-    // Re-check when the tab regains focus so toggles made elsewhere stick.
-    window.addEventListener('focus', sync);
-    window.addEventListener('storage', sync);
-    return () => {
-      window.removeEventListener('focus', sync);
-      window.removeEventListener('storage', sync);
-    };
-  }, []);
   useEffect(() => {
     if (!mapCanvasNode) {
       setMapCanvasSize({ width: 0, height: 0 });
@@ -2771,7 +2754,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   other.merged_with.map(id => Number(id)).includes(Number(t.id))
               ))
               .filter(t => !hiddenTableIds.has(t.id))
-              .sort((a, b) => a.seats - b.seats);
+              .sort(byAssignPriority);
 
           if (suitableTables.length > 0) {
               const suggestions = suitableTables.slice(0, 3).map(t => {
@@ -2844,7 +2827,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             other.merged_with.map(id => Number(id)).includes(Number(t.id))
         ))
         .filter(t => !hiddenTableIds.has(t.id))
-        .sort((a, b) => a.seats - b.seats);
+        .sort(byAssignPriority);
 
       if (availableTables.length > 0) {
           setFormData({ ...formData, table_id: availableTables[0].id });
@@ -4174,21 +4157,19 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     const activeRoomFill = typeof activeMapRoomId === 'number' ? roomFillById.get(activeMapRoomId) : undefined;
 
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
-    // Layout mirrors the choice made in Sale & Tavoli (floorPlan.layoutMode):
-    //  - auto: tidy flowing rows via computeAutoLayout, shaped to the canvas
-    //  - manual: the saved x/y of each table, so this map shows the same
-    //    planimetry the user drew in the editor.
+    // Come in Sale & Tavoli, la mappa mostra sempre le posizioni salvate: la
+    // planimetria vera, quella disegnata con «Sposta tavoli». Prima seguiva
+    // la vista scelta lì (righe ordinate per numero oppure posizioni vere) e
+    // cambiava da sola quando qualcuno spostava i tavoli. Le righe ordinate
+    // restano solo come misura di una sala vuota.
     const layoutAspect = mapCanvasSize.width > 0 && mapCanvasSize.height > 0
       ? Math.min(2.6, Math.max(0.6, mapCanvasSize.width / mapCanvasSize.height))
       : 1.6;
-    // Mirror the layout chosen in Sale & Tavoli so both views match:
-    //  - manual: the saved x/y of each table (the real planimetry)
-    //  - auto: tidy spaced rows via computeAutoLayout
     const mapLayout = computeAutoLayout(tablesInRoom, layoutAspect);
     let extentWidth: number;
     let extentHeight: number;
     let layoutPositions: Map<number, { x: number; y: number }> | undefined;
-    if (layoutMode === 'manual' && tablesInRoom.length > 0) {
+    if (tablesInRoom.length > 0) {
       // Pad the extent for the wrapped card's overhang (wider than the glyph and
       // extending below it) so edge cards aren't clipped.
       let maxRight = 0;
@@ -4239,11 +4220,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     const banquetColorByBanquetId = buildBanquetColorClassMap(banquetGroups.map(b => b.id));
 
     // Fit into the canvas minus a safe margin so tables never touch the edges
-    // or collide with the floating Legenda button in the corner. Manual layout
-    // mirrors Sale & Tavoli: never zoom past 1:1 — the user laid the room out
-    // at real size and an artificial zoom would skew their intent.
+    // or collide with the floating Legenda button in the corner, with the
+    // same zoom cap as Sale & Tavoli so the two maps read alike.
     const FIT_M = 28;
-    const scaleCap = layoutMode === 'manual' ? 1.5 : 2;
+    const scaleCap = 1.5;
     const scale = (!isMobile && mapCanvasSize.width > 0 && mapCanvasSize.height > 0)
       ? Math.min(
           Math.max(1, mapCanvasSize.width - FIT_M * 2) / extentWidth,

@@ -37,6 +37,7 @@
       "users": "Utenti",
       "platform": "Piattaforma",
       "settings": "Impostazioni",
+      "support": "Aiuto",
       "aiUsage": "Consumi AI",
       "development": "Development",
       "roadmap": "Roadmap",
@@ -264,7 +265,20 @@
     "connected": "Connesso",
     "disconnected": "Non connesso",
     "at": "Live {{ora}}",
-    "offline": "Offline"
+    "offline": "Offline",
+    "routes": {
+      "both": "Nodo e online",
+      "nodeOnly": "Solo nodo",
+      "cloudOnly": "Solo online"
+    },
+    "node": {
+      "on": "Lavora col nodo di sala",
+      "off": "Nodo di sala non raggiungibile"
+    },
+    "cloud": {
+      "on": "Lavora online",
+      "off": "Online non raggiungibile"
+    }
   },
   "palette": {
     "aria": "Ricerca globale",

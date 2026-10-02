@@ -1,6 +1,6 @@
 import webpush from 'web-push';
 import { queryWithRetry, runAsPlatform } from '../db.js';
-import { channelsForRole } from './staffChat.js';
+import { channelsForRole, STAFF_CHANNEL_UNREAD_FROM } from './staffChat.js';
 import type { UserRole } from '../types.js';
 import { isServiceNode } from './topology.js';
 
@@ -98,13 +98,7 @@ async function countStaffChatUnread(tenantId: number, userId: number, role: stri
         const channels = channelsForRole(role as UserRole);
         const result = await queryWithRetry(`
             SELECT (
-                (SELECT COUNT(*) FROM staff_messages m
-                 LEFT JOIN staff_message_reads r
-                   ON r.tenant_id = m.tenant_id AND r.user_id = $2
-                  AND r.thread_key = 'channel:' || m.channel
-                 WHERE m.tenant_id = $1 AND m.kind = 'channel' AND m.channel = ANY($3)
-                   AND m.sender_user_id IS DISTINCT FROM $2
-                   AND m.id > COALESCE(r.last_read_message_id, 0))
+                (SELECT COUNT(*) ${STAFF_CHANNEL_UNREAD_FROM})
                 +
                 (SELECT COUNT(*) FROM staff_messages m
                  LEFT JOIN staff_message_reads r
@@ -134,16 +128,16 @@ const fetchSubscriptionsForUser = async (userId: number): Promise<SubscriptionRo
     return result.rows;
 };
 
-const fetchSubscriptionsForRoles = async (tenantId: number, roles: string[], excludeUserId?: number | null): Promise<SubscriptionRow[]> => {
+const fetchSubscriptionsForRoles = async (tenantId: number, roles: string[], excludeUserIds: number[] = []): Promise<SubscriptionRow[]> => {
     if (roles.length === 0) return [];
     // Il tenant è obbligatorio: senza filtro una push per ruolo arriverebbe
     // allo staff di TUTTI i ristoranti (con due tenant l'altro locale vedrebbe
     // le prenotazioni altrui nel centro notifiche).
     const params: any[] = [roles, tenantId];
     let where = 'u.role = ANY($1::text[]) AND u.is_active = TRUE AND u.tenant_id = $2';
-    if (excludeUserId) {
-        params.push(excludeUserId);
-        where += ` AND u.id <> $${params.length}`;
+    if (excludeUserIds.length > 0) {
+        params.push(excludeUserIds);
+        where += ` AND u.id <> ALL($${params.length}::int[])`;
     }
     const result = await queryWithRetry(
         `SELECT ps.id, ps.endpoint, ps.p256dh, ps.auth, ps.user_id, u.role
@@ -206,6 +200,13 @@ const sendToSubscriptions = async (tenantId: number, subs: SubscriptionRow[], pa
     return { sent, removed };
 };
 
+// Chi ascolta le righe appena scritte: server.ts ci aggancia l'emissione
+// socket 'notification:new' verso la room dei destinatari. Il modulo non
+// importa socketService, così resta usabile da script e test senza server.
+type PersistListener = (tenantId: number, userIds: number[]) => void;
+let persistListener: PersistListener | null = null;
+export const setNotificationPersistListener = (fn: PersistListener | null) => { persistListener = fn; };
+
 // Persist one row per recipient in the notifications table so the
 // NotifichePage can rebuild history even for users offline at send time.
 // Uses tag-based dedupe: the same (user, tag) combination is skipped when
@@ -259,15 +260,19 @@ async function persistForUsers(
             console.warn('[push] persistForUsers failed for', uid, (err as any)?.message || err);
         }
     }));
+    // Senza questo la campanella restava ferma fino al prossimo focus o
+    // cambio vista, e la pagina Notifiche ascoltava un evento che nessuno
+    // emetteva.
+    try { persistListener?.(tenantId, userIds); } catch (_) { /* best-effort */ }
 }
 
-async function fetchUserIdsForRoles(tenantId: number, roles: string[], excludeUserId?: number | null): Promise<number[]> {
+async function fetchUserIdsForRoles(tenantId: number, roles: string[], excludeUserIds: number[] = []): Promise<number[]> {
     if (roles.length === 0) return [];
     const params: any[] = [roles, tenantId];
     let where = 'role = ANY($1::text[]) AND is_active = TRUE AND tenant_id = $2';
-    if (excludeUserId) {
-        params.push(excludeUserId);
-        where += ` AND id <> $${params.length}`;
+    if (excludeUserIds.length > 0) {
+        params.push(excludeUserIds);
+        where += ` AND id <> ALL($${params.length}::int[])`;
     }
     const r = await queryWithRetry(`SELECT id FROM users WHERE ${where}`, params);
     return r.rows.map((row: any) => row.id as number);
@@ -298,12 +303,18 @@ export const sendToRoles = async (
     tenantId: number,
     roles: string[],
     payload: PushPayload,
-    options?: { excludeUserId?: number | null }
+    // excludeUserIds: più esclusi insieme — la chat staff toglie dalla push
+    // di canale sia il mittente sia i menzionati, che ricevono la loro.
+    options?: { excludeUserId?: number | null; excludeUserIds?: number[] }
 ) => {
     if (isServiceNode) return; // vedi sendToUser
-    const recipients = await fetchUserIdsForRoles(tenantId, roles, options?.excludeUserId);
+    const exclude = [
+        ...(options?.excludeUserId ? [options.excludeUserId] : []),
+        ...(options?.excludeUserIds ?? []),
+    ].filter(id => Number.isInteger(id));
+    const recipients = await fetchUserIdsForRoles(tenantId, roles, exclude);
     await persistForUsers(tenantId, recipients, payload);
-    const subs = await fetchSubscriptionsForRoles(tenantId, roles, options?.excludeUserId);
+    const subs = await fetchSubscriptionsForRoles(tenantId, roles, exclude);
     return sendToSubscriptions(tenantId, subs, payload);
 };
 
@@ -317,6 +328,7 @@ export const sendToPlatformAdmins = async (payload: PushPayload) => {
     try {
         // Lettura di piattaforma dichiarata: i destinatari stanno sopra i
         // tenant, e il chiamante (webhook Stripe) può avere ogni contesto.
+        // rls-bypass: gli admin stanno sopra i tenant; badge e notifica sul tenant di ciascun destinatario
         await runAsPlatform(async () => {
             const r = await queryWithRetry(
                 `SELECT id FROM users WHERE role = 'PLATFORM_ADMIN' AND is_active = TRUE`

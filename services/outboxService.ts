@@ -136,6 +136,7 @@ export const outboxRegister = (event: string, handler: OutboxHandler): void => {
  *  sovrapposto al timer, o due repliche un domani) non si pestano i piedi.
  *  Gira come lavoro di piattaforma dichiarato: la coda attraversa i tenant,
  *  e ogni handler riceve il tenant_id della riga per scoparsi da solo. */
+// rls-bypass: la coda attraversa i tenant; ogni handler si scopa sul tenant_id della riga
 const sweep = async (): Promise<void> => runAsPlatform(async () => {
     if (draining) return;
     draining = true;

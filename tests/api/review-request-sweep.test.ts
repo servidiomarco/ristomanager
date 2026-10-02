@@ -6,7 +6,10 @@ import {
     RECENT_REVIEW_REQUEST_SQL,
     GOOGLE_REVIEW_LINK_HOST,
     buildGoogleReviewUrl,
+    reviewFailureDigest,
+    reviewFailureTag,
 } from '../../services/reviewRequests';
+import { api, ownerToken, bearer } from './helpers';
 
 // Le query della richiesta di recensione, eseguite contro un Postgres vero.
 //
@@ -37,7 +40,8 @@ const nuovaPrenotazione = async (phone: string): Promise<number> => {
 
 const statoDi = async (id: number) => {
     const r = await db.query(
-        `SELECT review_request_status, review_request_channel, review_request_sent_at, review_request_error
+        `SELECT review_request_status, review_request_channel, review_request_sent_at, review_request_error,
+                review_request_failed_at
          FROM reservations WHERE id = $1`,
         [id]
     );
@@ -89,7 +93,51 @@ describe('richiesta recensione — query di marcatura', () => {
         const fallita = await nuovaPrenotazione('+393335556667');
         await db.query(CLAIM_REVIEW_REQUEST_SQL, [fallita, TENANT]);
         await db.query(FINISH_REVIEW_REQUEST_SQL, ['failed', null, 'Twilio 21211', fallita, TENANT]);
-        expect((await statoDi(fallita)).review_request_error).toBe('Twilio 21211');
+        const riga2 = await statoDi(fallita);
+        expect(riga2.review_request_error).toBe('Twilio 21211');
+        // L'ora del fallimento è quella che raccoglie l'avviso della giornata.
+        expect(riga2.review_request_failed_at).not.toBeNull();
+        expect(riga.review_request_failed_at).toBeNull();
+    });
+
+    it("l'avviso «non partite» dice chi e perché, in breve", () => {
+        expect(reviewFailureDigest([{ customerName: 'Rossi', error: 'Twilio 21211' }]))
+            .toEqual({ title: '1 richiesta di recensione non partita', body: 'Rossi (Twilio 21211)' });
+        const lungo = 'The message From/To pair violates a blacklist rule set by the carrier';
+        const d = reviewFailureDigest([
+            { customerName: 'Rossi', error: lungo },
+            { customerName: 'Bianchi', error: null },
+            { customerName: '', error: 'x' },
+            { customerName: 'Verdi', error: 'y' },
+        ]);
+        expect(d.title).toBe('4 richieste di recensione non partite');
+        expect(d.body).toBe('Rossi (The message From/To pair violates a…), Bianchi, cliente senza nome (x) e altre 1');
+    });
+
+    it('aprire il registro chiude l\'avviso per tutti', async () => {
+        const today = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'Europe/Rome', year: 'numeric', month: '2-digit', day: '2-digit',
+        }).format(new Date());
+        const users = await db.query(`SELECT id FROM users WHERE tenant_id = $1 LIMIT 2`, [TENANT]);
+        const ids: number[] = [];
+        for (const u of users.rows) {
+            const r = await db.query(
+                `INSERT INTO notifications (tenant_id, recipient_user_id, category, title, body, tag)
+                 VALUES ($1, $2, 'system', 'Richieste non partite', 'Rossi', $3) RETURNING id`,
+                [TENANT, u.id, reviewFailureTag(today)]
+            );
+            ids.push(Number(r.rows[0].id));
+        }
+        try {
+            const res = await api().get('/reviews/requests').set(bearer(await ownerToken()));
+            expect(res.status).toBe(200);
+            const open = await db.query(
+                `SELECT COUNT(*)::int AS n FROM notifications WHERE id = ANY($1::int[]) AND read_at IS NULL`, [ids]
+            );
+            expect(open.rows[0].n).toBe(0);
+        } finally {
+            await db.query(`DELETE FROM notifications WHERE id = ANY($1::int[])`, [ids]);
+        }
     });
 
     it('una riga non presa in carico non si può chiudere', async () => {

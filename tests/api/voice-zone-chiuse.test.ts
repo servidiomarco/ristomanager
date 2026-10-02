@@ -202,6 +202,12 @@ describe('zone chiuse sul canale voce (check_availability)', () => {
         const sconosciuto = await disponibilita({ caller_id: '+393390000999' });
         expect(sconosciuto.body.available).toBe(true);
         expect(sconosciuto.body.customer_known).toBeUndefined();
-        expect(sconosciuto.body.name_instruction).toBeUndefined();
+        // Sconosciuto al telefono: nome e cognome in una sola domanda.
+        expect(sconosciuto.body.name_instruction).toContain('Mi dice nome e cognome?');
+        expect(sconosciuto.body.name_instruction).not.toContain('a suo nome');
+
+        // Numero nascosto: stessa domanda.
+        const anonimo = await disponibilita();
+        expect(anonimo.body.name_instruction).toContain('Mi dice nome e cognome?');
     });
 });

@@ -117,6 +117,9 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
   const [listError, setListError] = useState<string | null>(null);
 
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  // Conferma di lettura del DM aperto: fin dove l'altro ha letto. Null nei
+  // canali, o finché il server non lo dice.
+  const [peerReadUpTo, setPeerReadUpTo] = useState<number | null>(null);
   const [messages, setMessages] = useState<StaffMessage[]>([]);
   const [msgLoading, setMsgLoading] = useState(false);
   const [msgError, setMsgError] = useState<string | null>(null);
@@ -208,10 +211,11 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
     setMsgLoading(!cached);
     setMsgError(null);
     try {
-      const { messages } = await staffChatApiService.getMessages(threadKey);
+      const { messages, peer_read_up_to } = await staffChatApiService.getMessages(threadKey);
       staffChatCache.setTimeline(threadKey, messages);
       if (selectedKeyRef.current !== threadKey) return;
       setMessages(messages);
+      setPeerReadUpTo(typeof peer_read_up_to === 'number' ? peer_read_up_to : null);
       setHasMore(messages.length === PAGE_SIZE);
       const last = messages[messages.length - 1];
       if (last) markReadLocally(threadKey, last.id);
@@ -227,6 +231,7 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
   useEffect(() => {
     setMentionDraft(new Map());
     setAttachments([]);
+    setPeerReadUpTo(null);
     if (!selectedKey) { setMessages([]); return; }
     loadMessages(selectedKey);
   }, [selectedKey, loadMessages]);
@@ -283,6 +288,12 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
     // Lettura da un altro device dello stesso utente: i contatori locali
     // sono stantii, si riparte dal server.
     const onRead = () => { loadThreads(); };
+    // Il collega ha letto il DM aperto: la conferma si aggiorna sul posto.
+    const onReceipt = (data: { threadKey?: unknown; lastReadMessageId?: unknown }) => {
+      if (data?.threadKey !== selectedKeyRef.current || typeof data?.lastReadMessageId !== 'number') return;
+      const upTo = data.lastReadMessageId;
+      setPeerReadUpTo(prev => (prev != null && prev >= upTo ? prev : upTo));
+    };
     // Preset cambiati da Impostazioni: le chip si aggiornano da sole.
     const onPresets = (data: { presets?: StaffPreset[] }) => {
       if (Array.isArray(data?.presets) && data.presets.length > 0) setPresets(data.presets);
@@ -294,12 +305,14 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
       if (attached) {
         attached.off('staffchat:message', onMessage);
         attached.off('staffchat:read', onRead);
+        attached.off('staffchat:receipt', onReceipt);
         attached.off('staffchat:presets', onPresets);
       }
       attached = s;
       if (attached) {
         attached.on('staffchat:message', onMessage);
         attached.on('staffchat:read', onRead);
+        attached.on('staffchat:receipt', onReceipt);
         attached.on('staffchat:presets', onPresets);
       }
     };
@@ -429,6 +442,15 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
     }
     return groups;
   }, [messages]);
+
+  // L'ultimo messaggio mio del DM aperto: porta la conferma di lettura.
+  const lastMineId = useMemo(() => {
+    if (selected?.kind !== 'direct') return null;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].sender_user_id === currentUserId) return messages[i].id;
+    }
+    return null;
+  }, [messages, selected?.kind, currentUserId]);
 
   const renderThread = (t: StaffThreadSummary) => (
     <button
@@ -614,8 +636,16 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
                                       : m.body}
                                   </p>
                                 )}
-                                <div className={`mt-1 flex justify-end text-[12px] ${mine ? 'text-[var(--ds-action-fg)] opacity-75' : 'text-[var(--ds-text-muted)]'}`}>
+                                <div className={`mt-1 flex justify-end gap-1 text-[12px] ${mine ? 'text-[var(--ds-action-fg)] opacity-75' : 'text-[var(--ds-text-muted)]'}`}>
                                   <span className="tabular-nums">{formatTime(m.created_at)}</span>
+                                  {/* Conferma di lettura: solo DM e solo
+                                      sull'ultimo messaggio mio — su ogni
+                                      bolla sarebbe rumore (§10). */}
+                                  {m.id === lastMineId && (
+                                    <span>· {peerReadUpTo != null && Number(m.id) <= peerReadUpTo
+                                      ? tr('receiptRead', 'letto')
+                                      : tr('receiptSent', 'inviato')}</span>
+                                  )}
                                 </div>
                               </div>
                             </div>

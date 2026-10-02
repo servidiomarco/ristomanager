@@ -73,6 +73,34 @@ export type StaffThreadRef =
 export const channelThreadKey = (channel: StaffChannel): string => `channel:${channel}`;
 export const dmThreadKey = (otherUserId: number): string => `dm:${otherUserId}`;
 
+// Cursore delle menzioni di un canale, nella stessa staff_message_reads.
+// Il cursore del canale è di squadra (letto da uno, letto per tutti); questo
+// no: avanza solo quando l'utente legge il canale di persona, così una
+// menzione resta da leggere per chi è menzionato anche se un collega ha già
+// letto il canale.
+export const mentionThreadKey = (channelKey: string): string => `mention:${channelKey}`;
+
+// Non letti dei canali per un utente, stessa clausola ovunque si contino
+// (lista thread, badge, badge della push). Parametri: $1 tenant, $2 utente,
+// $3 canali visibili. Un messaggio è da leggere se sta oltre il cursore del
+// canale, oppure se menziona l'utente e sta oltre il suo cursore delle
+// menzioni. Senza riga menzioni vale il cursore del canale: la riga nasce
+// (vedi la lettura di squadra) prima che un collega faccia avanzare il
+// cursore del canale.
+export const STAFF_CHANNEL_UNREAD_FROM = `
+    FROM staff_messages m
+    LEFT JOIN staff_message_reads r
+      ON r.tenant_id = m.tenant_id AND r.user_id = $2
+     AND r.thread_key = 'channel:' || m.channel
+    LEFT JOIN staff_message_reads mr
+      ON mr.tenant_id = m.tenant_id AND mr.user_id = $2
+     AND mr.thread_key = 'mention:channel:' || m.channel
+    WHERE m.tenant_id = $1 AND m.kind = 'channel' AND m.channel = ANY($3)
+      AND m.sender_user_id IS DISTINCT FROM $2
+      AND (m.id > COALESCE(r.last_read_message_id, 0)
+           OR ($2 = ANY(m.mentioned_user_ids)
+               AND m.id > COALESCE(mr.last_read_message_id, r.last_read_message_id, 0)))`;
+
 export const parseThreadKey = (key: string): StaffThreadRef | null => {
     if (key.startsWith('channel:')) {
         const channel = key.slice('channel:'.length);

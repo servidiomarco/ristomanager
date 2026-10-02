@@ -22,7 +22,7 @@ import * as tableAssignmentAgent from './services/tableAssignmentAgent.js';
 import * as aiReport from './services/aiReportService.js';
 import { renderPrenota } from './services/prenotaSeo.js';
 import { COST_USD_SQL, UNPRICED_SQL, USD_EUR } from './services/aiPricing.js';
-import { BILLABLE_SECONDS_SQL, billableMinutes, estimatedRevenueCents } from './services/voicePlan.js';
+import { BILLABLE_SECONDS_SQL, billableMinutes, estimatedRevenueCents, VOICE_ALERT_PERCENT_OPTIONS } from './services/voicePlan.js';
 import { getVoicePlan, getVoiceMonthUsage, mergeVoicePlan, claimNewVoiceUsageAlerts } from './services/voiceUsage.js';
 import { outboxEnqueueInTx, outboxKick, outboxRegister, startOutboxDispatcher } from './services/outboxService.js';
 import { SERVER_PROFILE, isServiceNode } from './services/topology.js';
@@ -39,6 +39,7 @@ import { VOICE_CHANNEL, WHATSAPP_CHANNEL, type ToolOutcome } from './services/bo
 import { TENANT_FEATURES, getTenantFeatures, isFeatureEnabledForTenant, invalidateTenantFeaturesCache, clearTenantFeaturesCache, type TenantFeature } from './services/entitlements.js';
 import { clearTenantLocaleCache, getTenantLocale, sqlTimeZone } from './services/tenantLocale.js';
 import { normalizePhoneE164 } from './utils/phone.js';
+import { AI_KEY_INVALID, AI_KEY_INVALID_MESSAGE, isAiKeyInvalid } from './utils/aiErrors.js';
 import { provisionTenant, ProvisioningError } from './services/tenantProvisioning.js';
 import {
     createCheckoutSession,
@@ -69,7 +70,16 @@ import {
     PassepartoutBridgeError,
 } from './services/passepartoutBridge.js';
 import { setupSalaNodeBridge, getSalaNodeStatus, disconnectSalaNode, askNodeStatus } from './services/salaNodeBridge.js';
-import { provisionSalaNodeCert, startSalaNodeCertRenewal, isSalaNodeTlsConfigured, SalaNodeTlsError } from './services/salaNodeTls.js';
+import {
+    SUPPORT_CATEGORIES, SUPPORT_STATUSES, SUPPORT_SUBJECT_MAX, SUPPORT_BODY_MAX, SUPPORT_ATTACHMENTS_MAX,
+    sanitizeClientContext, supportTenantTag, supportPlatformTag,
+    type SupportAttachment, type SupportCategory, type SupportPriority, type SupportStatus,
+} from './services/supportShared.js';
+import {
+    provisionSalaNodeCert, startSalaNodeCertRenewal, SalaNodeTlsError,
+    syncSalaNodeDnsRecord, validateNewNodeDomain, isNodeDomainTakenByOtherTenant, isPrivateLanIp,
+} from './services/salaNodeTls.js';
+import { isPlatformScopedSession } from './auth/authService.js';
 import type { PassepartoutComanda, EsitoChiusuraComanda, PassepartoutArticolo } from './services/passepartoutService.js';
 import { MENU_LANGS, isMenuTranslationConfigured, translateMenuEntries } from './services/menuTranslationService.js';
 import { isWinePairingConfigured, suggestWinePairings } from './services/aiWinePairingService.js';
@@ -81,8 +91,8 @@ import { AuthService } from './auth/authService.js';
 import { RolePermissionService, isReportsAdmin, ALL_PERMISSIONS, ALL_PERMISSION_KEYS, type Permission } from './auth/permissionService.js';
 import { canAssignToRole } from './auth/permissions.js';
 import { LogService, ActivityAction, ResourceType } from './activityLogs/logService.js';
-import { isPushConfigured, getVapidPublicKey, sendToUser as pushSendToUser, sendToRoles as pushSendToRoles, sendToPlatformAdmins as pushSendToPlatformAdmins } from './services/pushService.js';
-import { channelsForRole, rolesForChannel, parseThreadKey, channelThreadKey, dmThreadKey, isStaffPresetKey, STAFF_MESSAGE_MAX_LENGTH, STAFF_MAX_MENTIONS, STAFF_MESSAGE_PRESETS, STAFF_MAX_ATTACHMENTS, staffMessagePreview } from './services/staffChat.js';
+import { isPushConfigured, getVapidPublicKey, sendToUser as pushSendToUser, sendToRoles as pushSendToRoles, sendToPlatformAdmins as pushSendToPlatformAdmins, setNotificationPersistListener } from './services/pushService.js';
+import { channelsForRole, rolesForChannel, parseThreadKey, channelThreadKey, dmThreadKey, mentionThreadKey, STAFF_CHANNEL_UNREAD_FROM, isStaffPresetKey, STAFF_MESSAGE_MAX_LENGTH, STAFF_MAX_MENTIONS, STAFF_MESSAGE_PRESETS, STAFF_MAX_ATTACHMENTS, staffMessagePreview } from './services/staffChat.js';
 import {
     isRevolutConfigured,
     verifyWebhookSignature as verifyRevolutWebhook,
@@ -146,10 +156,12 @@ import {
     verifyElevenLabsSignature,
     findAvailability,
     findCustomerByPhone,
+    findActiveReservationsByPhone,
     createVoiceReservation,
     cancelVoiceReservation,
     modifyVoiceReservation,
     recordVoiceCall,
+    closeEarlierMissedCalls,
     extractVoiceCallCost,
     recordCallbackRequest,
     formatItalianConfirmation,
@@ -202,11 +214,36 @@ import {
     finishReviewRequest,
     hasRecentReviewRequest,
     buildGoogleReviewUrl,
+    reviewFailureDigest,
+    reviewFailureTag,
 } from './services/reviewRequests.js';
 import { clampModifierN, signedModifierLabel, signedModifierDelta } from './utils/modifierScale.js';
 import { BAR_COURSE_NO, DESSERT_COURSE_NO, isOffSequenceCourse } from './utils/courses.js';
 import { getRomeDatePart, getRomeTimePart, getDatePartInTz, getTimePartInTz } from './utils/reservationTime.js';
+import {
+    addIsoDays,
+    countLeaveDays,
+    coverageTimeline,
+    isIsoDay,
+    leaveDaysByYear,
+    makeServiceOpen,
+    MAX_LEAVE_SPAN_DAYS,
+    prorateEntitlement,
+    proposeLeavePlan,
+    spanDays,
+    type CoverageMinimums,
+    type LeaveAbsence,
+    type LeavePriority,
+    type LeaveRequestLike,
+    type LeaveShiftRow,
+    type LeaveStaff,
+    type OpeningCalendar,
+    type ServiceOpen,
+} from './utils/leavePlan.js';
 import { formatMoneyMinor } from './utils/money.js';
+import { HACCP_TEMPERATURE_LOCATIONS, haccpMissingTag, haccpTemperatureTag } from './utils/haccp.js';
+import { shoppingReminderBody } from './utils/shoppingReminder.js';
+import { describeShiftChanges, shiftDayLabel, type ShiftDayChange } from './utils/staffShiftChange.js';
 import { buildEReceiptPayload, buildFatturaPaXml, getFiscalDriver, type FiscalSeller, type InvoiceBuyer } from './services/fiscalService.js';
 import {
     getAvailableSlots,
@@ -296,7 +333,7 @@ const jsonVerify = (req: any, _res: any, buf: Buffer) => { req.rawBody = buf; };
 const standardJson = express.json({ limit: '2mb', verify: jsonVerify });
 const largeJson = express.json({ limit: '8mb', verify: jsonVerify });
 app.use((req, res, next) => (
-    req.path === '/messages/attachments' || req.path === '/media' || req.path === '/staff-chat/attachments' || req.path === '/settings/logo' ? largeJson(req, res, next) : standardJson(req, res, next)
+    req.path === '/messages/attachments' || req.path === '/media' || req.path === '/staff-chat/attachments' || req.path === '/support/attachments' || req.path === '/settings/logo' ? largeJson(req, res, next) : standardJson(req, res, next)
 ));
 
 // Un body oltre il limite fa fallire il parser PRIMA della rotta: senza
@@ -454,6 +491,7 @@ async function resolveTenantByDomain(hostname: string): Promise<TenantDomainHit 
         // si decide PRIMA che esista un tenant — con la RLS rigida, senza
         // questa dichiarazione la lookup tornerebbe vuota e i domini custom
         // smetterebbero di instradare.
+        // rls-bypass: dominio→tenant si risolve prima del contesto; lookup sulla PK globale domain
         const result = await runAsPlatform(() => queryWithRetry(
             `SELECT t.id, t.slug FROM tenant_domains d
              JOIN tenants t ON t.id = d.tenant_id
@@ -596,6 +634,7 @@ app.get('/ready', async (_req, res) => {
     return res.status(503).json({ ready: false, reason: 'migrations_pending' });
   }
   try {
+    // rls-bypass: sonda di readiness, SELECT 1 senza tabelle: nessun dato tenant da scopare
     await pool.query('SELECT 1');
     res.json({ ready: true });
   } catch {
@@ -1369,6 +1408,9 @@ async function handleElevenLabsInitConversation(tenantId: number, req: express.R
         customer_id: '',
         caller_id_spelled: '',
         customer_known: 'false',
+        // Prenotazioni in agenda del chiamante: '' = non note (anonimo,
+        // sospensione, errore), 'nessuna' = cercate e non ce ne sono.
+        upcoming_bookings: '',
         // Invariante fondamentale a sospensione attiva: booking_status_message
         // DEVE coincidere col saluto (first_message). Il prompt (STATO SERVIZIO)
         // usa booking_status_message come regola di rifiuto assoluto; se diverge
@@ -1423,13 +1465,25 @@ async function handleElevenLabsInitConversation(tenantId: number, req: express.R
     const normalized = normalizeItalianPhone(callerIdRaw);
     const callerIdSpelled = spellItalianPhoneDigits(normalized);
 
+    // Le prenotazioni già in agenda per questo numero, dall'inizio della
+    // chiamata: a "vorrei modificare la prenotazione" Sofia rispondeva "che
+    // data aveva prenotato?" anche con un tavolo per stasera (prova del
+    // 27/09/2026), perché la domanda di check_availability arriva solo su una
+    // prenotazione nuova. Fissa per tutta la chiamata come
+    // current_datetime_rome, quindi non rompe la cache dell'LLM. Parte in
+    // parallelo alla rubrica e non fa mai fallire il saluto.
+    const upcomingBookings = bookingTools.upcomingBookingsForPrompt(tenantId, normalized).catch((err) => {
+        console.warn('[ElevenLabs] init-conversation upcoming bookings failed (non-blocking):', err?.message || err);
+        return '';
+    });
+
     try {
         const lookup = await findCustomerByPhone(tenantId, normalized);
         if (!lookup.exists) {
             console.log('[ElevenLabs] init-conversation miss', { phone: normalized });
             res.json({
                 type: 'conversation_initiation_client_data',
-                dynamic_variables: { ...baseDynamicVars, caller_id_spelled: callerIdSpelled },
+                dynamic_variables: { ...baseDynamicVars, caller_id_spelled: callerIdSpelled, upcoming_bookings: await upcomingBookings },
                 conversation_config_override: {
                     agent: { first_message: genericGreeting },
                 },
@@ -1465,6 +1519,7 @@ async function handleElevenLabsInitConversation(tenantId: number, req: express.R
                 customer_id: String(lookup.customer_id || ''),
                 caller_id_spelled: callerIdSpelled,
                 customer_known: 'true',
+                upcoming_bookings: await upcomingBookings,
                 booking_status_message: '',
             },
             conversation_config_override: {
@@ -1476,7 +1531,7 @@ async function handleElevenLabsInitConversation(tenantId: number, req: express.R
         // Always 200 — see comment at top of handler.
         res.json({
             type: 'conversation_initiation_client_data',
-            dynamic_variables: { ...baseDynamicVars, caller_id_spelled: callerIdSpelled },
+            dynamic_variables: { ...baseDynamicVars, caller_id_spelled: callerIdSpelled, upcoming_bookings: await upcomingBookings },
             conversation_config_override: {
                 agent: { first_message: genericGreeting },
             },
@@ -1768,6 +1823,11 @@ async function notifyVoiceUsageThresholds(tenantId: number): Promise<void> {
                 .catch(err => console.warn('[voice-usage] email failed:', err?.message || err));
         }
     }
+    // L'avviso appena mandato supera i precedenti: «minuti inclusi esauriti»
+    // rende vecchio il 90%, il tetto rende vecchi i minuti inclusi, un mese
+    // nuovo rende vecchio tutto il mese prima. Restano da leggere solo questi.
+    await closeNotificationsByPrefix(tenantId, 'voice-usage-',
+        claimed.alerts.map(a => `voice-usage-${claimed.usage.month}-${a.threshold}`));
 }
 
 async function handleElevenLabsPostCall(tenantId: number, req: express.Request, res: express.Response): Promise<void> {
@@ -1867,8 +1927,9 @@ async function handleElevenLabsPostCall(tenantId: number, req: express.Request, 
         console.warn('[ElevenLabs] post-call recordVoiceCall failed:', err?.message || err);
     }
 
-    // Minuti di Sofia: avvisi all'80%/100% dei minuti inclusi e del tetto
-    // extra, una volta per soglia per mese. Dopo la risposta, mai bloccante.
+    // Minuti di Sofia: avvisi alle soglie dei minuti inclusi scelte dal
+    // ristoratore e all'80%/100% del tetto extra, una volta per soglia per
+    // mese. Dopo la risposta, mai bloccante.
     notifyVoiceUsageThresholds(tenantId).catch(err =>
         console.warn('[ElevenLabs] post-call usage alerts failed:', err?.message || err));
 
@@ -1934,6 +1995,9 @@ async function handleElevenLabsPostCall(tenantId: number, req: express.Request, 
     } catch (err: any) {
         console.warn('[ElevenLabs] post-call large-group detection failed:', err?.message || err);
     }
+    // Telefonata registrata (e marcata se fantasma o gruppo grande): la
+    // lista Chiamate degli altri dispositivi la mostra senza ricaricare.
+    broadcastVoiceCallsChanged(tenantId);
 
     // Look up any reservation linked to this conversation (set during create_reservation).
     // If found and we have a phone, send the WhatsApp recap.
@@ -2604,7 +2668,7 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
         const reservationLabel = reservationPushLabel(reservation_time, (await getTenantLocale(req.tenantId!)).timezone);
         pushSendToRoles(
             req.tenantId!,
-            ['OWNER', 'GENERAL_MANAGER', 'MANAGER', 'WAITER'],
+            bookingTools.RESERVATION_PUSH_ROLES,
             {
                 category: 'reservation',
                 title: 'Nuova prenotazione',
@@ -2614,6 +2678,7 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
             },
             { excludeUserId: req.user?.userId ?? null }
         ).catch(err => console.error('Push (new reservation) failed:', err));
+        void notifyVipReservation(req.tenantId!, { ...newReservation, customer_name, guests, phone }, reservationLabel, req.user?.userId ?? null);
 
         res.status(201).json(newReservation);
     } catch (err: any) {
@@ -2824,14 +2889,23 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
         const socketId = req.headers['x-socket-id'] as string;
         if (socketService) socketService.broadcastReservationUpdated(req.tenantId!, updatedReservation, socketId);
 
+        // Richiesta dal sito gestita (confermata, rifiutata, annullata): la
+        // campanella «Nuova richiesta prenotazione» non chiede più niente a
+        // nessuno.
+        if (previousStatus === 'PENDING' && updatedReservation && updatedReservation.reservation_status !== 'PENDING') {
+            await markSharedNotificationsRead(req.tenantId!, [`pending-${updatedReservation.id}`]);
+        }
+
         // Notify managers when a booking transitions to CANCELLED (soft cancel).
         // Skip if it was already CANCELLED — avoids duplicate notifications on
         // saves that don't change the status.
         if (previousStatus !== 'CANCELLED' && reservation_status === 'CANCELLED' && updatedReservation) {
+            // Annullata: l'avviso VIP non ha più un tavolo da preparare.
+            await markSharedNotificationsRead(req.tenantId!, [vipReservationTag(updatedReservation.id)]);
             const reservationLabel = reservationPushLabel(asUtcInstant(updatedReservation.reservation_time), (await getTenantLocale(req.tenantId!)).timezone);
             pushSendToRoles(
                 req.tenantId!,
-                ['OWNER', 'GENERAL_MANAGER', 'MANAGER', 'WAITER'],
+                bookingTools.RESERVATION_PUSH_ROLES,
                 {
                     category: 'reservation',
                     title: 'Prenotazione annullata',
@@ -3053,6 +3127,8 @@ app.delete('/reservations/:id', authenticate, requirePermission('reservations:fu
             }
         });
         outboxKick();
+        // La chiamata che l'aveva creata è appena passata a gestita.
+        broadcastVoiceCallsChanged(req.tenantId!);
 
         // Log activity
         if (req.user) {
@@ -3071,6 +3147,10 @@ app.delete('/reservations/:id', authenticate, requirePermission('reservations:fu
         // Broadcast to all connected clients except the one who deleted it
         const socketId = req.headers['x-socket-id'] as string;
         if (socketService) socketService.broadcastReservationDeleted(req.tenantId!, Number(id), socketId);
+
+        // Prenotazione eliminata: le sue campanelle portavano a una scheda
+        // che non esiste più.
+        await markSharedNotificationsRead(req.tenantId!, [`reservation-${id}`, `pending-${id}`, vipReservationTag(id)]);
 
         res.status(204).send();
     } catch (err) {
@@ -5157,9 +5237,21 @@ app.put('/dishes/:id/enabled', authenticate, requirePermission('menu:full'), asy
     }
 });
 
+// Chiave AI rifiutata da Anthropic: 503 con un messaggio che dice cosa fare,
+// invece del 500 generico. Vale per tutte le rotte AI che rispondono a uno
+// schermo; il log resta per chi guarda Railway.
+function sendAiKeyInvalid(res: express.Response, route: string, err: any) {
+    console.error(`${route}: chiave Anthropic rifiutata —`, err?.message || err);
+    return res.status(503).json({ error: AI_KEY_INVALID, message: AI_KEY_INVALID_MESSAGE });
+}
+
 // Traduce in batch le voci mancanti (piatti attivi + categorie) nelle lingue
 // del menu. Idempotente: ritradurre non tocca ciò che è già tradotto — per
 // rifare una traduzione si svuota translations dal DB (caso raro, niente UI).
+// Un piatto col nome già tradotto ma la descrizione no (descrizione scritta
+// dopo la prima traduzione) si ritraduce solo nella descrizione: prima
+// veniva saltato, e il 01/10/2026 c'erano 72 piatti — quasi tutti vini — con
+// gli ingredienti in italiano sul QR in ogni lingua.
 app.post('/menu/translate', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
         if (!isMenuTranslationConfigured()) {
@@ -5182,8 +5274,16 @@ app.post('/menu/translate', authenticate, requirePermission('menu:full'), async 
         let tradotte = 0;
         let tokens = 0;
         for (const lang of richieste) {
+            const soloDescrizione = new Set<string>();
             const daFare = dishesRs.rows
-                .filter((d: any) => !d.translations?.[lang]?.name)
+                .filter((d: any) => {
+                    if (!d.translations?.[lang]?.name) return true;
+                    if (String(d.description ?? '').trim() && !d.translations?.[lang]?.description) {
+                        soloDescrizione.add(`d${d.id}`);
+                        return true;
+                    }
+                    return false;
+                })
                 .map((d: any) => ({ id: `d${d.id}`, name: d.name as string, description: d.description as string | null }));
             for (const c of catRs.rows) {
                 if (!catTrad[c.category]?.[lang]) daFare.push({ id: `c:${c.category}`, name: c.category, description: null });
@@ -5194,6 +5294,20 @@ app.post('/menu/translate', authenticate, requirePermission('menu:full'), async 
                 if (id.startsWith('d')) {
                     const dishId = Number(id.slice(1));
                     if (!Number.isFinite(dishId)) continue;
+                    if (soloDescrizione.has(id)) {
+                        // Il nome già tradotto resta (può essere stato
+                        // ritoccato a mano): si aggiunge solo la descrizione.
+                        if (!t.description) continue;
+                        await queryWithRetry(
+                            `UPDATE dishes
+                             SET translations = COALESCE(translations, '{}'::jsonb)
+                                 || jsonb_build_object($3::text, COALESCE(translations->$3, '{}'::jsonb) || jsonb_build_object('description', $4::text))
+                             WHERE id = $1 AND tenant_id = $2`,
+                            [dishId, req.tenantId!, lang, t.description]
+                        );
+                        tradotte++;
+                        continue;
+                    }
                     await queryWithRetry(
                         `UPDATE dishes
                          SET translations = COALESCE(translations, '{}'::jsonb) || jsonb_build_object($3::text, $4::jsonb)
@@ -5212,6 +5326,7 @@ app.post('/menu/translate', authenticate, requirePermission('menu:full'), async 
         try { socketService?.broadcastToAll(req.tenantId!, 'dish:synced', { tradotte }); } catch (_) {}
         res.json({ tradotte, lingue: richieste, tokens });
     } catch (err: any) {
+        if (isAiKeyInvalid(err)) return sendAiKeyInvalid(res, 'POST /menu/translate', err);
         console.error('POST /menu/translate error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
     }
@@ -5270,6 +5385,7 @@ app.post('/dishes/:id/suggest-pairings', authenticate, requirePermission('menu:f
         trackWinePairingUsage(req.tenantId!, req.user?.email || null, prompt, output);
         res.json({ wine_dish_ids: mappa.get(dishId) ?? [] });
     } catch (err: any) {
+        if (isAiKeyInvalid(err)) return sendAiKeyInvalid(res, 'POST /dishes/:id/suggest-pairings', err);
         console.error('POST /dishes/:id/suggest-pairings error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
     }
@@ -5320,8 +5436,75 @@ app.post('/menu/pair-wines', authenticate, requirePermission('menu:full'), async
         }
         res.json({ abbinati, candidati: daAbbinare.rows.length, tokens: prompt + output });
     } catch (err: any) {
+        if (isAiKeyInvalid(err)) return sendAiKeyInvalid(res, 'POST /menu/pair-wines', err);
         console.error('POST /menu/pair-wines error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Quale menu della lista mostra il QR al tavolo. Di default Alla carta; il
+// ristoratore può sceglierne un altro (es. un menu «QR» più corto della
+// carta) dal QR modal della pagina Menu. La scelta è un id in app_settings:
+// se quel menu viene eliminato la lettura ricade da sola su Alla carta,
+// senza bisogno di ripulire la chiave.
+const DIGITAL_MENU_KEY = 'digital_menu_id';
+
+async function getDigitalMenuId(tenantId: number): Promise<number | null> {
+    // Il menu scelto vince su Alla carta (false ordina prima di true); il
+    // confronto è fra testi, così un valore sporco nella chiave non fa
+    // saltare la query con un cast.
+    const rs = await queryWithRetry(
+        `SELECT m.id FROM menus m
+         WHERE m.tenant_id = $1
+           AND (m.id::text = (SELECT text_value FROM app_settings WHERE tenant_id = $1 AND key = $2)
+                OR m.system_key = 'ALLA_CARTA')
+         ORDER BY m.system_key IS NOT DISTINCT FROM 'ALLA_CARTA'
+         LIMIT 1`,
+        [tenantId, DIGITAL_MENU_KEY]
+    );
+    return rs.rows[0] ? Number(rs.rows[0].id) : null;
+}
+
+app.get('/menu/digital-menu', authenticate, async (req, res) => {
+    try {
+        await ensureSystemMenus(req.tenantId!);
+        res.json({ menu_id: await getDigitalMenuId(req.tenantId!) });
+    } catch (err) {
+        console.error('GET /menu/digital-menu error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Nessun broadcast: la scelta si legge solo nel QR modal, che la ricarica
+// a ogni apertura.
+app.put('/menu/digital-menu', authenticate, requirePermission('menu:full'), async (req, res) => {
+    try {
+        const menuId = Number(req.body?.menu_id);
+        if (!Number.isInteger(menuId)) return res.status(400).json({ error: 'menu_id non valido' });
+        const rs = await queryWithRetry(
+            'SELECT id, name FROM menus WHERE id = $1 AND tenant_id = $2',
+            [menuId, req.tenantId!]
+        );
+        const menu = rs.rows[0];
+        if (!menu) return res.status(404).json({ error: 'Menu non trovato' });
+        await queryWithRetry(
+            `INSERT INTO app_settings (tenant_id, key, text_value, updated_at)
+             VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+             ON CONFLICT (tenant_id, key) DO UPDATE
+               SET text_value = EXCLUDED.text_value, updated_at = CURRENT_TIMESTAMP`,
+            [req.tenantId!, DIGITAL_MENU_KEY, String(menuId)]
+        );
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!, req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.DISH, undefined,
+                `Menu digitale (QR): ora mostra «${menu.name}»`
+            ).catch(() => {});
+        }
+        res.json({ menu_id: menuId });
+    } catch (err) {
+        console.error('PUT /menu/digital-menu error:', err);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
@@ -5333,18 +5516,18 @@ const handlePublicMenu = async (tenantId: number, _req: express.Request, res: ex
     }
     // Doppio interruttore: is_active è della cassa, crm_enabled del
     // ristoratore — il menu pubblico mostra solo ciò che entrambi accendono.
-    // E solo i piatti del menu Alla carta: il QR al tavolo mostra ciò che si
-    // può ordinare, non le liste banchetti o i menu stagionali.
+    // E solo i piatti del menu scelto per il QR (di default Alla carta): il
+    // QR al tavolo non mostra le liste banchetti o gli altri menu.
+    const menuId = await getDigitalMenuId(tenantId);
     const dishesRs = await queryWithRetry(
         `SELECT d.name, d.description, d.price, d.category, d.allergens, d.photo_url, d.translations,
                 COALESCE((SELECT array_agg(w.name ORDER BY wp.sort_order, w.name)
                           FROM dish_wine_pairings wp JOIN dishes w ON w.id = wp.wine_dish_id
                           WHERE wp.dish_id = d.id AND w.is_active AND w.crm_enabled), '{}') AS abbinati
          FROM dishes d WHERE d.tenant_id = $1 AND d.is_active AND d.crm_enabled
-           AND EXISTS (SELECT 1 FROM dish_menus dm JOIN menus m ON m.id = dm.menu_id
-                       WHERE dm.dish_id = d.id AND m.system_key = 'ALLA_CARTA')
+           AND EXISTS (SELECT 1 FROM dish_menus dm WHERE dm.dish_id = d.id AND dm.menu_id = $2)
          ORDER BY d.category, d.sort_order NULLS LAST, d.name`,
-        [tenantId]
+        [tenantId, menuId]
     );
     const prefs = await getMenuCategoryPrefs(tenantId);
     const rows = dishesRs.rows.filter((d: any) => prefs[String(d.category || 'Altro')]?.enabled !== false);
@@ -8129,6 +8312,10 @@ app.post('/bills/splits/:id/refund', authenticate, requirePermission('payments:f
              RETURNING id, table_bill_id, amount_cents`,
             [splitId]
         );
+        // Rimborsata: il «Pagamento in eccesso da rimborsare» di questa quota
+        // (lo manda il webhook quando un ospite paga un conto già saldato)
+        // ha fatto il suo lavoro.
+        await markSharedNotificationsRead(req.tenantId!, [`bill-overpaid-${splitId}`]);
         // Lo specchio LINK_ONLINE nel libro cassa segue la quota: stornato,
         // così la chiusura di cassa non conta denaro restituito.
         await queryWithRetry(
@@ -8304,6 +8491,7 @@ async function loadBillByToken(token: string) {
 // GET /pay/:token — the mobile page fetches this on load and after any
 // action. Response mirrors the authenticated GET, minus internal ids on
 // the splits.
+// rls-bypass: pagina ospite senza JWT, conto per share_token unico; ogni query filtra per bill.id/tenant_id
 app.get('/pay/:token', publicPayLimiter, async (req, res) => runAsPlatform(async () => {
     try {
         const token = String(req.params.token || '');
@@ -8436,6 +8624,7 @@ app.get('/pay/:token', publicPayLimiter, async (req, res) => runAsPlatform(async
 // data leak), and Meta's template approval / cache warm-up hits this
 // endpoint with the sample token, which won't correspond to any real
 // bill. Gated on the feature flag and on a minimum token shape.
+// rls-bypass: QR senza JWT, tenant dal dominio; i flag si leggono con tenant_id esplicito
 app.get('/pay/:token/qr.png', publicPayLimiter, async (req, res) => runAsPlatform(async () => {
     try {
         const token = String(req.params.token || '');
@@ -8485,6 +8674,7 @@ app.get('/pay/:token/qr.png', publicPayLimiter, async (req, res) => runAsPlatfor
 // schema dello share_token del conto, ma sopravvive alla chiusura perché lo
 // scontrino si mostra anche il giorno dopo. Lookup globale e runAsPlatform
 // come le altre route per token: è la riga trovata a dire il tenant.
+// rls-bypass: scontrino senza JWT, documento per public_token unico; join scopate su fd.tenant_id
 app.get('/scontrino/:token', publicPayLimiter, async (req, res) => runAsPlatform(async () => {
     try {
         const token = String(req.params.token || '');
@@ -8550,6 +8740,7 @@ app.get('/scontrino/:token', publicPayLimiter, async (req, res) => runAsPlatform
     }
 }));
 
+// rls-bypass: quota ospite senza JWT, conto per share_token unico; ogni scrittura porta bill.tenant_id
 app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (req, res) => runAsPlatform(async () => {
     const client = await pool.connect();
     try {
@@ -8821,6 +9012,7 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
 // the split_id and the token must match — this prevents someone with the
 // token from cancelling a split they didn't create (still not
 // authenticated, but at least you need to know the id you're releasing).
+// rls-bypass: rilascio quota senza JWT, conto per share_token unico; UPDATE per split_id + bill.id
 app.post('/pay/:token/release', publicPayLimiter, async (req, res) => runAsPlatform(async () => {
     try {
         const token = String(req.params.token || '');
@@ -9118,6 +9310,9 @@ app.post('/messages/conversations/:phoneDigits/read', authenticate, requirePermi
                 count: updated.rows.length,
             });
         }
+        // Letto il thread, le campanelle «Nuovo messaggio» che lo annunciavano
+        // non hanno più niente da dire, su nessun dispositivo.
+        await markSharedNotificationsRead(req.tenantId!, updated.rows.map((r: any) => `msg-inbound-${r.id}`));
         res.json({ ok: true, marked: updated.rows.length });
     } catch (err) {
         console.error('POST /messages/conversations/:phoneDigits/read error:', err);
@@ -9301,6 +9496,9 @@ app.post('/email/threads/:emailKey/read', authenticate, requirePermission('reser
                 count: updated.rows.length,
             });
         }
+        // Come per Messaggi: letto il thread, le campanelle «Nuova email» che
+        // lo annunciavano (imapInboundService) sono lette per tutti.
+        await markSharedNotificationsRead(req.tenantId!, updated.rows.map((r: any) => `email-inbound-${r.id}`));
         res.json({ ok: true, marked: updated.rows.length });
     } catch (err) {
         console.error('POST /email/threads/:emailKey/read error:', err);
@@ -9362,6 +9560,7 @@ app.post('/email/threads/:emailKey/suggest-booking', authenticate, requirePermis
             reason: result.booking ? null : (result.reason || 'Nessuna richiesta di prenotazione trovata in questa email'),
         });
     } catch (err: any) {
+        if (isAiKeyInvalid(err)) return sendAiKeyInvalid(res, 'POST /email/threads/:emailKey/suggest-booking', err);
         if (err instanceof EmailBookingExtractionError) {
             const status = err.kind === 'not_configured' ? 503 : 502;
             return res.status(status).json({ error: err.kind, message: err.message });
@@ -9646,6 +9845,7 @@ app.post('/reports/ai-summary', authenticate, requireReportsAccess, async (req, 
 
         res.json({ report: markdown, days: giorni });
     } catch (err: any) {
+        if (isAiKeyInvalid(err)) return sendAiKeyInvalid(res, 'POST /reports/ai-summary', err);
         if (err instanceof aiReport.AiReportError) {
             const status = err.kind === 'not_configured' ? 503 : err.kind === 'no_data' ? 400 : 502;
             return res.status(status).json({ error: err.kind, message: err.message });
@@ -9776,6 +9976,7 @@ app.post('/messages/attachments', authenticate, requirePermission('reservations:
 // credenziali. La protezione e' il token da 32 byte nel path — e' anche il
 // motivo per cui qui NON c'e' filtro tenant: il token e' unico globale e
 // non indovinabile, il tenant e' implicito nella riga trovata.
+// rls-bypass: media per Twilio senza JWT, riga per token casuale unico da 32 byte
 app.get('/public/media/:token', async (req, res) => runAsPlatform(async () => {
     try {
         const token = String(req.params.token || '');
@@ -9877,6 +10078,7 @@ app.post('/messages/suggest-reply', authenticate, requirePermission('reservation
             reservation_linked: resv.rows.length > 0,
         });
     } catch (err: any) {
+        if (isAiKeyInvalid(err)) return sendAiKeyInvalid(res, 'POST /messages/suggest-reply', err);
         if (err instanceof AiReplyError) {
             const status = err.kind === 'not_configured' ? 503 : err.kind === 'no_knowledge' ? 400 : 502;
             return res.status(status).json({ error: err.kind, message: err.message });
@@ -9995,6 +10197,7 @@ app.post('/messages/agent/run', authenticate, requirePermission('reservations:fu
             knowledge_count: kb.rows.length,
         });
     } catch (err: any) {
+        if (isAiKeyInvalid(err)) return sendAiKeyInvalid(res, 'POST /messages/agent/run', err);
         if (err instanceof whatsappAgent.AgentError) {
             const status = err.kind === 'not_configured' ? 503 : err.kind === 'no_knowledge' ? 400 : 502;
             return res.status(status).json({ error: err.kind, message: err.message });
@@ -10066,6 +10269,7 @@ app.post('/messages/agent/extract-booking', authenticate, requirePermission('res
             },
         });
     } catch (err: any) {
+        if (isAiKeyInvalid(err)) return sendAiKeyInvalid(res, 'POST /messages/agent/extract-booking', err);
         if (err instanceof whatsappAgent.AgentError) {
             const status = err.kind === 'not_configured' ? 503 : 502;
             return res.status(status).json({ error: err.kind, message: err.message });
@@ -10122,8 +10326,10 @@ app.post('/messages/agent/proposals/:id/confirm', authenticate, requirePermissio
         // letta e approvata — la conferma umana vale come chiarimento, quindi
         // il gate name_mismatch di bookingTools non deve bloccarla. Se il nome
         // differisce dal titolare del numero resta la nota "Numero in
-        // rubrica: ..." sulla prenotazione.
-        const outcome = await esegui(req.tenantId!, prop.tool === 'create_reservation' ? { ...args, name_confirmed: true } : args, WHATSAPP_CHANNEL);
+        // rubrica: ..." sulla prenotazione. Stesso discorso per
+        // existing_booking_confirmed: l'operatore vede la chat e l'agenda, e
+        // da qui non avrebbe modo di rispondere alla domanda del gate.
+        const outcome = await esegui(req.tenantId!, prop.tool === 'create_reservation' ? { ...args, name_confirmed: true, existing_booking_confirmed: true } : args, WHATSAPP_CHANNEL);
         const riuscito = outcome.body?.success === true;
         await queryWithRetry(
             `UPDATE agent_proposals
@@ -10587,6 +10793,10 @@ app.post('/payments/mark-seen', authenticate, requirePermission('payments:view')
             const socketId = req.headers['x-socket-id'] as string;
             if (socketService) socketService.broadcastToAll(req.tenantId!, 'payments:seen', { count: result.rows.length }, socketId);
         }
+        // Incassi visti in Pagamenti: le campanelle «Pagamento ricevuto» che
+        // li annunciavano sono lette per tutti. Il «Pagamento in eccesso» no:
+        // chiede un rimborso, e vederlo in lista non lo fa.
+        await markSharedNotificationsRead(req.tenantId!, result.rows.map((r: any) => `payment-${r.id}`));
         res.json({ marked: result.rows.length });
     } catch (err: any) {
         console.error('POST /payments/mark-seen error:', err);
@@ -11250,6 +11460,7 @@ async function applyPaymentOrderTransition(
 // side-effects because we key on `provider_order_id` and gate the
 // "first-completion" side-effects on the old `completed_at` being NULL under
 // a row-level lock.
+// rls-bypass: webhook senza JWT, tenant dalla riga per provider_order_id (unico globale), firma del tenant
 app.post('/webhook/revolut', async (req, res) => runAsPlatform(async () => {
     try {
         const body = req.body || {};
@@ -11303,6 +11514,7 @@ app.post('/webhook/revolut', async (req, res) => runAsPlatform(async () => {
 //
 // Idempotent for the same reason the Revolut receiver is: we key on
 // provider_order_id and gate first-completion side-effects on completed_at.
+// rls-bypass: callback SumUp senza JWT, tenant dalla riga per provider_order_id (unico globale)
 app.post('/webhook/sumup/:token', async (req, res) => runAsPlatform(async () => {
     try {
         // SumUp has shipped a few payload shapes over the years (and wraps
@@ -11635,6 +11847,19 @@ app.post('/payments/:id/refund', authenticate, requirePermission('payments:full'
         try { socketService?.broadcastToAll(req.tenantId!, 'paymentRequest:updated', row); }
         catch (err) { console.warn('[payments] refund broadcast failed:', (err as any)?.message || err); }
 
+        // Il pagamento in eccesso di un conto si rimborsa anche da qui, dal
+        // pagamento stesso: l'avviso della quota che lo aveva generato si
+        // chiude per tutti.
+        try {
+            const splits = await queryWithRetry(
+                `SELECT id FROM table_bill_splits WHERE payment_request_id = $1 AND tenant_id = $2`,
+                [payment.id, req.tenantId!]
+            );
+            await markSharedNotificationsRead(req.tenantId!, splits.rows.map((r: any) => `bill-overpaid-${r.id}`));
+        } catch (err) {
+            console.warn('[payments] chiusura avviso eccedenza fallita:', (err as any)?.message || err);
+        }
+
         if (row.reservation_id) broadcastReservationsUpdatedByIds([row.reservation_id]).catch(() => {});
 
         // Se questo acconto era stato accreditato su un conto, storna il credito:
@@ -11816,7 +12041,7 @@ app.put('/tables/:id', authenticate, requirePermission('floorplan:update_status'
         const values: any[] = [];
         let paramIndex = 1;
 
-        const allowedFields = ['name', 'shape', 'seats', 'x', 'y', 'room_id', 'status', 'is_locked', 'merged_with', 'temp_lock_expires_at', 'rotation', 'width_cm', 'length_cm', 'notes'];
+        const allowedFields = ['name', 'shape', 'seats', 'x', 'y', 'room_id', 'status', 'is_locked', 'merged_with', 'temp_lock_expires_at', 'rotation', 'width_cm', 'length_cm', 'notes', 'assign_priority'];
 
         allowedFields.forEach(field => {
             if (req.body.hasOwnProperty(field)) {
@@ -11837,6 +12062,16 @@ app.put('/tables/:id', authenticate, requirePermission('floorplan:update_status'
 
         if (fields.length === 0) {
             return res.status(400).json({ error: 'No fields to update' });
+        }
+
+        // Ordine di assegnazione: intero 1–99 o null (nessuna priorità). Il
+        // campo vuoto del client arriva come null; qualunque altra cosa è un
+        // 400 qui invece di un 500 dal CHECK del database.
+        if (req.body.hasOwnProperty('assign_priority')) {
+            const p = req.body.assign_priority;
+            if (p !== null && !(Number.isInteger(p) && p >= 1 && p <= 99)) {
+                return res.status(400).json({ error: 'invalid_assign_priority' });
+            }
         }
 
         // room_id arriva dal body: senza il check per tenant un id altrui
@@ -12549,7 +12784,8 @@ app.delete('/rooms/:id', authenticate, requirePermission('floorplan:full'), asyn
 // ============================================
 // MENUS — "Alla carta" e "Banchetti" (di sistema) più i menu stagionali del
 // ristoratore. L'appartenenza piatto→menu vive in dish_menus; ALLA_CARTA
-// governa comande e menu digitale, BANQUETS la composizione banchetti.
+// governa comande e asporto, BANQUETS la composizione banchetti. Il menu
+// digitale (QR) mostra quello scelto in getDigitalMenuId, di default ALLA_CARTA.
 // ============================================
 
 // I menu di sistema per i tenant nati dopo la migrazione: la prima lettura
@@ -13165,6 +13401,22 @@ const TODO_FULL_SELECT = `
     created_by_user_name as "createdByUserName"
 `;
 
+// Le campanelle nate da un todo, per spegnerle quando il todo è svolto o
+// eliminato: il promemoria cucina dei banchetti, il promemoria pane e il
+// «todo assegnato». I tag rispecchiano quelli delle push che li annunciano
+// (vedi le pushSendToRoles/pushSendToUser qui sotto e nelle rotte /todos).
+function todoNotificationTags(todo: {
+    id: number | string; dueDate?: string | null; banquetReminderHours?: number | null;
+    assignedToTeam?: string | null; autoKind?: string | null;
+}): string[] {
+    const tags = [`todo-${todo.id}`];
+    if (todo.dueDate && todo.assignedToTeam === 'KITCHEN' && todo.banquetReminderHours != null) {
+        tags.push(`kitchen-reminder-${todo.dueDate}-${todo.banquetReminderHours}`);
+    }
+    if (todo.dueDate && todo.autoKind === BREAD_AUTO_KIND) tags.push(`bread-${todo.dueDate}`);
+    return tags;
+}
+
 const computeReminderDueDate = (eventDateIso: string, hoursBefore: number): string => {
     const event = new Date(eventDateIso + 'T00:00:00Z');
     event.setUTCDate(event.getUTCDate() - hoursBefore / 24);
@@ -13246,7 +13498,7 @@ async function addBanquetToReminders(tenantId: number, banquetId: number, eventD
                         category: 'system',
                         title: 'Promemoria cucina',
                         body: created.rows[0].title,
-                        url: '/?view=DASHBOARD',
+                        url: '/?view=ATTIVITA',
                         tag: `kitchen-reminder-${dueDate}-${hours}`,
                     }
                 ).catch(err => console.error('Push (kitchen reminder) failed:', err));
@@ -13271,6 +13523,9 @@ async function removeBanquetFromReminders(tenantId: number, banquetId: number): 
         if (newIds.length === 0) {
             await queryWithRetry('DELETE FROM todos WHERE id = $1 AND tenant_id = $2', [todo.id, tenantId]);
             if (socketService) socketService.broadcastToAll(tenantId, 'todo:deleted', { id: todo.id });
+            // Banchetto eliminato o spostato: il promemoria sparisce da
+            // Attività, e con lui la sua campanella sui telefoni della cucina.
+            await markSharedNotificationsRead(tenantId, todoNotificationTags(todo));
         } else {
             const updated = await queryWithRetry(`
                 UPDATE todos
@@ -13410,7 +13665,7 @@ async function runDailyBreadReminder(tenantId: number, targetRoles: string[] = [
                 category: 'system',
                 title: 'Promemoria pane',
                 body: title,
-                url: '/?view=DASHBOARD',
+                url: '/?view=ATTIVITA',
                 tag: `bread-${tomorrowIso}`,
             }
         ).catch(err => console.error('Push (bread reminder) failed:', err));
@@ -13464,6 +13719,7 @@ const runSchedulerTickWithLock = async (
         }
         // Lavoro di piattaforma dichiarato: i tick attraversano i tenant per
         // mestiere (promemoria e riconcili di tutti i ristoranti insieme).
+        // rls-bypass: tick di scheduler cross-tenant per mestiere, ogni riga porta il suo tenant_id a valle
         await runAsPlatform(() => tick());
     } finally {
         if (acquired) {
@@ -13767,6 +14023,8 @@ const SYSTEM_REMINDER_HANDLERS: Record<string, ReminderHandler> = {
     // Forward the reminder's target_roles so the operator's Impostazioni
     // choice ("Chi riceve?") is honoured by the system handler as well.
     BREAD_DAILY: async (r) => { await runDailyBreadReminder(r.tenant_id, r.target_roles); },
+    HACCP_TEMPERATURES: async (r) => { await runHaccpMissingReminder(r.tenant_id, r.target_roles); },
+    SHOPPING_LIST: async (r) => { await runShoppingListReminder(r.tenant_id, r.target_roles); },
 };
 
 interface ReminderRow {
@@ -13931,7 +14189,7 @@ const startStaffChatRetentionScheduler = () => {
                  WHERE NOT EXISTS (
                      SELECT 1 FROM staff_messages m
                      WHERE m.tenant_id = r.tenant_id
-                       AND (r.thread_key = 'channel:' || m.channel
+                       AND (r.thread_key IN ('channel:' || m.channel, 'mention:channel:' || m.channel)
                          OR r.thread_key IN ('dm:' || m.sender_user_id, 'dm:' || m.recipient_user_id))
                  )
                  RETURNING user_id`
@@ -13984,6 +14242,11 @@ const startElevenLabsQuotaWatchdog = () => {
                 elevenLabsQuotaAlerted = { resetUnix, thresholds: new Set() };
             }
             const pct = Math.round((used / limit) * 100);
+            // Ricaricato o periodo nuovo: sotto la prima soglia gli avvisi
+            // «quota in esaurimento» non sono più veri, per nessuno.
+            if (pct < ELEVENLABS_QUOTA_THRESHOLDS[0]) {
+                await closePlatformNotifications(ELEVENLABS_QUOTA_THRESHOLDS.map(t => `elevenlabs-quota-${t}`));
+            }
             for (const threshold of ELEVENLABS_QUOTA_THRESHOLDS) {
                 if (pct < threshold || elevenLabsQuotaAlerted.thresholds.has(threshold)) continue;
                 elevenLabsQuotaAlerted.thresholds.add(threshold);
@@ -14008,6 +14271,9 @@ const startElevenLabsQuotaWatchdog = () => {
                     .catch((err: any) => console.error('Push (quota ElevenLabs) failed:', err));
                 pushSendToPlatformAdmins(payload)
                     .catch((err: any) => console.error('Push admin (quota ElevenLabs) failed:', err));
+                // Il 95% supera l'80%: resta da leggere solo l'avviso più grave.
+                const lower = ELEVENLABS_QUOTA_THRESHOLDS.filter(t => t < threshold).map(t => `elevenlabs-quota-${t}`);
+                if (lower.length > 0) void closePlatformNotifications(lower);
             }
         } catch (err: any) {
             console.warn('[quota-elevenlabs] tick failed:', err?.message || err);
@@ -14113,6 +14379,43 @@ function reviewRequestEligibleAt(visitEnd: Date, settings: ReviewRequestSettings
     return new Date(visitEnd.getTime() + (24 * 60 - minutes + REVIEW_REQUEST_NEXT_MORNING_MIN) * 60_000);
 }
 
+/** Le richieste fallite OGGI (giorno del ristorante), in un avviso solo a chi
+ *  vede la pagina Recensioni — i ruoli si leggono dalla matrice permessi del
+ *  ristorante, come per le ferie. Stesso tag per tutta la giornata: un nuovo
+ *  fallimento aggiorna l'avviso e lo riaccende. Non lancia mai. */
+async function notifyReviewRequestFailures(tenantId: number, tz: string): Promise<void> {
+    try {
+        const today = getItalianTodayIso(new Date(), tz);
+        const failed = await queryWithRetry(
+            `SELECT customer_name, review_request_error AS error
+               FROM reservations
+              WHERE tenant_id = $1 AND review_request_status = 'failed'
+                AND (review_request_failed_at AT TIME ZONE $3)::date = $2::date
+              ORDER BY review_request_failed_at DESC`,
+            [tenantId, today, tz]
+        );
+        if (failed.rows.length === 0) return;
+        const roles = await queryWithRetry(
+            `SELECT DISTINCT role FROM role_permissions WHERE tenant_id = $1 AND permission = 'reviews:view'`,
+            [tenantId]
+        );
+        const roleList = roles.rows.map((r: any) => String(r.role));
+        if (roleList.length === 0) return;
+        const { title, body } = reviewFailureDigest(
+            failed.rows.map((r: any) => ({ customerName: r.customer_name, error: r.error }))
+        );
+        await pushSendToRoles(tenantId, roleList, {
+            category: 'system',
+            title,
+            body,
+            url: '/?view=RECENSIONI',
+            tag: reviewFailureTag(today),
+        });
+    } catch (err: any) {
+        console.warn('[review-request] avviso fallimenti non inviato:', err?.message || err);
+    }
+}
+
 const startReviewRequestScheduler = () => {
     const tick = async () => {
         try {
@@ -14142,6 +14445,7 @@ const startReviewRequestScheduler = () => {
 
             // Guardie e impostazioni per tenant, calcolate una volta per giro.
             const tenantGate = new Map<number, { ok: boolean; settings: ReviewRequestSettings; placeId: string | null; tz: string }>();
+            const failedTenants = new Set<number>();
             const gateFor = async (tenantId: number) => {
                 let gate = tenantGate.get(tenantId);
                 if (!gate) {
@@ -14239,11 +14543,17 @@ const startReviewRequestScheduler = () => {
                         console.log(`⭐ Richiesta recensione inviata (tenant ${tenantId}, prenotazione ${row.id}, canale ${outcome.channel})`);
                     } else {
                         await mark('failed', null, outcome.error || 'invio non riuscito');
+                        failedTenants.add(tenantId);
                     }
                 } catch (err: any) {
                     console.error(`[review-request] prenotazione ${row.id} fallita:`, err?.message || err);
                     await mark('failed', null, err?.message || String(err)).catch(() => {});
+                    failedTenants.add(tenantId);
                 }
+            }
+            // Un avviso per ristorante a fine giro, non uno per richiesta.
+            for (const tenantId of failedTenants) {
+                await notifyReviewRequestFailures(tenantId, tenantGate.get(tenantId)?.tz ?? 'Europe/Rome');
             }
         } catch (err) {
             console.error('Review request scheduler error:', err);
@@ -15172,6 +15482,8 @@ const ALLOWED_INVENTORY_AREAS = new Set(['CUCINA', 'SALA', 'BAR']);
 const ALLOWED_MOVEMENT_REASONS = new Set(['CARICO', 'SCARICO', 'RETTIFICA', 'TRASFERIMENTO']);
 const LOW_STOCK_THRESHOLD = 5;
 const LOW_STOCK_ALERT_ROLES = ['OWNER', 'GENERAL_MANAGER', 'KITCHEN'];
+// Il tag della push «scorta bassa»: la stessa chiave la chiude al ricarico.
+const lowStockTag = (productId: number): string => `low-stock-${productId}`;
 
 // GET /inventory/locations?area=CUCINA — all locations, optionally filtered.
 app.get('/inventory/locations', authenticate, requirePermission('inventory:view'), async (req, res) => {
@@ -15578,6 +15890,8 @@ app.delete('/inventory/products/:id', authenticate, requirePermission('inventory
             return res.status(404).json({ error: 'Product not found' });
         }
         await queryWithRetry('DELETE FROM inventory_products WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
+        // Un prodotto che non esiste più non può essere sotto scorta.
+        await markSharedNotificationsRead(req.tenantId!, [lowStockTag(Number(id))]);
         if (req.user) {
             LogService.logActivity(
                 req.tenantId!,
@@ -15753,7 +16067,9 @@ app.post('/inventory/movements', authenticate, requirePermission('inventory:full
         if (totalBefore > LOW_STOCK_THRESHOLD && totalAfter <= LOW_STOCK_THRESHOLD) {
             const unit = v.p_unit ? ` ${v.p_unit}` : '';
             const qtyText = Number.isInteger(totalAfter) ? String(totalAfter) : totalAfter.toFixed(1);
-            pushSendToRoles(
+            // Attesa prima della risposta: un ricarico subito dopo deve già
+            // trovare la riga da chiudere.
+            await pushSendToRoles(
                 req.tenantId!,
                 LOW_STOCK_ALERT_ROLES,
                 {
@@ -15761,9 +16077,13 @@ app.post('/inventory/movements', authenticate, requirePermission('inventory:full
                     title: 'Scorta bassa',
                     body: `${v.p_name}: ${qtyText}${unit} rimanenti`,
                     url: '/?view=INVENTARIO',
-                    tag: `low-stock-${productId}`,
+                    tag: lowStockTag(productId),
                 }
             ).catch(err => console.error('Push (low stock) failed:', err));
+        } else if (totalBefore <= LOW_STOCK_THRESHOLD && totalAfter > LOW_STOCK_THRESHOLD) {
+            // Ricaricato sopra soglia: la «scorta bassa» non ha più niente da
+            // dire, si chiude per tutti — anche per chi non l'aveva aperta.
+            await markSharedNotificationsRead(req.tenantId!, [lowStockTag(productId)]);
         }
 
         res.status(201).json({
@@ -16159,6 +16479,7 @@ app.post('/banquet-menus/:id/send-quote-whatsapp', authenticate, requirePermissi
 // La pagina pubblica del preventivo: composizione per uscite, tariffe e
 // totali. Niente note operative (cucina/sala/mise en place) né riferimenti
 // interni — è il documento che il cliente inoltra alla famiglia.
+// rls-bypass: pagina a token senza JWT, tenant da share_token (unico globale), piatti per tenant_id
 app.get('/preventivo/:token', publicPayLimiter, async (req, res) => runAsPlatform(async () => {
     try {
         const token = String(req.params.token || '');
@@ -16716,7 +17037,7 @@ app.post('/todos', authenticate, async (req, res) => {
                 category: 'system',
                 title: 'Nuovo todo assegnato',
                 body: newTodo.title,
-                url: '/?view=DASHBOARD',
+                url: '/?view=ATTIVITA',
                 tag: `todo-${newTodo.id}`,
             }).catch(err => console.error('Push (todo assigned) failed:', err));
         }
@@ -16864,9 +17185,26 @@ app.put('/todos/:id', authenticate, async (req, res) => {
                 category: 'system',
                 title: 'Todo assegnato a te',
                 body: updatedTodo.title,
-                url: '/?view=DASHBOARD',
+                url: '/?view=ATTIVITA',
                 tag: `todo-${updatedTodo.id}`,
             }).catch(err => console.error('Push (todo reassigned) failed:', err));
+        }
+
+        // Riassegnato (o tolto a chi lo aveva): per il vecchio assegnatario
+        // «Todo assegnato» non vale più. Solo per lui — il nuovo ha appena
+        // ricevuto la sua, con lo stesso tag.
+        if (
+            req.body.hasOwnProperty('assignedToUserId')
+            && previousAssignee
+            && previousAssignee !== newAssignee
+        ) {
+            await markNotificationsReadForUsers(req.tenantId!, [previousAssignee], [`todo-${updatedTodo.id}`]);
+        }
+
+        // Svolto: le sue campanelle (promemoria cucina, pane, assegnazione)
+        // non chiedono più niente a nessuno.
+        if (updatedTodo.completed === true) {
+            await markSharedNotificationsRead(req.tenantId!, todoNotificationTags(updatedTodo));
         }
 
         res.json(updatedTodo);
@@ -16920,6 +17258,11 @@ app.put('/todos/:id/toggle', authenticate, async (req, res) => {
         const socketId = req.headers['x-socket-id'] as string;
         if (socketService) socketService.broadcastToAll(req.tenantId!, 'todo:updated', updatedTodo, socketId);
 
+        // Spuntato: le sue campanelle si spengono per tutti (vedi PUT).
+        if (updatedTodo.completed === true) {
+            await markSharedNotificationsRead(req.tenantId!, todoNotificationTags(updatedTodo));
+        }
+
         res.json(updatedTodo);
     } catch (err) {
         console.error(err);
@@ -16931,7 +17274,13 @@ app.delete('/todos/:id', authenticate, async (req, res) => {
     try {
         const { id } = req.params;
 
-        const result = await queryWithRetry('DELETE FROM todos WHERE id = $1 AND tenant_id = $2 RETURNING id', [id, req.tenantId!]);
+        const result = await queryWithRetry(
+            `DELETE FROM todos WHERE id = $1 AND tenant_id = $2
+             RETURNING id, TO_CHAR(due_date, 'YYYY-MM-DD') as "dueDate",
+                       banquet_reminder_hours as "banquetReminderHours",
+                       assigned_to_team as "assignedToTeam", auto_kind as "autoKind"`,
+            [id, req.tenantId!]
+        );
 
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Todo not found' });
@@ -16940,6 +17289,9 @@ app.delete('/todos/:id', authenticate, async (req, res) => {
         // Broadcast to all connected clients
         const socketId = req.headers['x-socket-id'] as string;
         if (socketService) socketService.broadcastToAll(req.tenantId!, 'todo:deleted', { id }, socketId);
+
+        // Eliminato: le sue campanelle portavano a un todo che non c'è più.
+        await markSharedNotificationsRead(req.tenantId!, todoNotificationTags(result.rows[0]));
 
         res.status(204).send();
     } catch (err) {
@@ -17214,6 +17566,7 @@ app.post('/dev-board/claude-callback', async (req, res) => {
         // nessuna riga ("Card non trovata" sul collaudo del 21/08). Il
         // segreto condiviso è già il gate; il bypass è il contratto delle
         // operazioni di sistema cross-tenant.
+        // rls-bypass: callback del workflow senza JWT, gate a segreto condiviso, card per id globale
         const result = await runAsPlatform(() => queryWithRetry(
             `UPDATE dev_board_cards
              SET claude_status = $2,
@@ -17364,6 +17717,49 @@ app.delete('/roadmap/tasks/:id', authenticate, requireDevBoardAdmin, async (req,
 // ============================================
 // SHOPPING LIST - require authentication
 // ============================================
+// Promemoria della spesa: un solo avviso vivo per ristorante — ogni scatto
+// lo aggiorna (stesso tag) invece di accumularne uno al giorno, e si chiude
+// per tutti quando non resta niente da comprare.
+const SHOPPING_REMINDER_TAG = 'shopping-pending';
+const SHOPPING_REMINDER_ROLES = ['OWNER', 'GENERAL_MANAGER', 'MANAGER'];
+
+/** Promemoria di sistema SHOPPING_LIST: all'orario scelto in Impostazioni →
+ *  Promemoria avvisa solo se in lista ci sono articoli da comprare. La lista
+ *  mostra tutte le voci, di ogni giorno: il conteggio fa lo stesso. */
+async function runShoppingListReminder(tenantId: number, targetRoles: string[]): Promise<void> {
+    const pending = await queryWithRetry(
+        `SELECT si.name, s.name AS supplier
+           FROM shopping_items si
+           LEFT JOIN suppliers s ON s.id = si.supplier_id AND s.tenant_id = si.tenant_id
+          WHERE si.tenant_id = $1 AND si.checked = false
+          ORDER BY si.created_at ASC`,
+        [tenantId]
+    );
+    const rows: Array<{ name: string; supplier: string | null }> = pending.rows;
+    if (rows.length === 0) return;
+    await pushSendToRoles(tenantId, targetRoles.length > 0 ? targetRoles : SHOPPING_REMINDER_ROLES, {
+        category: 'system',
+        title: rows.length === 1 ? 'Da comprare: 1 articolo' : `Da comprare: ${rows.length} articoli`,
+        body: shoppingReminderBody(rows),
+        url: '/?view=LISTA_DELLA_SPESA',
+        tag: SHOPPING_REMINDER_TAG,
+    });
+}
+
+/** Dopo una spunta o un'eliminazione: lista tutta comprata → il promemoria
+ *  non ha più niente da dire, si chiude per tutti. */
+async function closeShoppingReminderIfDone(tenantId: number): Promise<void> {
+    try {
+        const left = await queryWithRetry(
+            `SELECT 1 FROM shopping_items WHERE tenant_id = $1 AND checked = false LIMIT 1`,
+            [tenantId]
+        );
+        if (left.rows.length === 0) await markSharedNotificationsRead(tenantId, [SHOPPING_REMINDER_TAG]);
+    } catch (err) {
+        console.error('[spesa] chiusura promemoria fallita:', err);
+    }
+}
+
 app.get('/shopping', authenticate, async (req, res) => {
     try {
         const { date } = req.query;
@@ -17655,6 +18051,7 @@ app.put('/shopping/:id/toggle', authenticate, async (req, res) => {
         const socketId = req.headers['x-socket-id'] as string;
         if (socketService) socketService.broadcastToAll(req.tenantId!, 'shopping:updated', updatedItem, socketId);
 
+        if (updatedItem?.checked) await closeShoppingReminderIfDone(req.tenantId!);
         res.json(updatedItem);
     } catch (err) {
         console.error(err);
@@ -17698,6 +18095,7 @@ app.delete('/shopping/:id', authenticate, async (req, res) => {
         const socketId = req.headers['x-socket-id'] as string;
         if (socketService) socketService.broadcastToAll(req.tenantId!, 'shopping:deleted', { id, date: result.rows[0].date }, socketId);
 
+        await closeShoppingReminderIfDone(req.tenantId!);
         res.status(204).send();
     } catch (err) {
         console.error(err);
@@ -17860,6 +18258,70 @@ app.delete('/suppliers/:id', authenticate, async (req, res) => {
 // STAFF MANAGEMENT ROUTES
 // ============================================
 
+// La forma JSON di una scheda, unica per lista, dettaglio, creazione e
+// modifica. annual_leave_days è NUMERIC: pg lo restituisce come stringa.
+const staffRowJson = (row: any) => ({
+    id: row.id,
+    name: row.name,
+    surname: row.surname,
+    category: row.category,
+    staffType: row.staff_type,
+    phone: row.phone,
+    email: row.email,
+    role: row.role,
+    hireDate: row.hire_date,
+    contractEndDate: row.contract_end_date,
+    weeklyRestDay: row.weekly_rest_day,
+    notes: row.notes,
+    isActive: row.is_active,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    userId: row.user_id ?? null,
+    annualLeaveDays: row.annual_leave_days != null ? Number(row.annual_leave_days) : null
+});
+
+// Il collegamento scheda ↔ account è ciò che apre «Le mie ferie» al
+// dipendente: l'account deve essere di questo ristorante e non già legato a
+// un'altra scheda (l'indice unico lo impedirebbe comunque, ma con un 500).
+async function checkLinkableUser(
+    tenantId: number,
+    userId: unknown,
+    staffId: string | null
+): Promise<{ ok: true; value: number | null } | { ok: false; status: number; error: string }> {
+    if (userId === null || userId === '') return { ok: true, value: null };
+    const id = Number(userId);
+    if (!Number.isInteger(id) || id <= 0) return { ok: false, status: 400, error: 'invalid_user_id' };
+    const r = await queryWithRetry(
+        `SELECT u.id, sm.id AS staff_id
+           FROM users u
+           LEFT JOIN staff_members sm ON sm.user_id = u.id
+          WHERE u.id = $1 AND u.tenant_id = $2 AND u.role <> 'PLATFORM_ADMIN'`,
+        [id, tenantId]
+    );
+    if (r.rows.length === 0) return { ok: false, status: 404, error: 'user_not_found' };
+    if (r.rows[0].staff_id && r.rows[0].staff_id !== staffId) return { ok: false, status: 409, error: 'user_already_linked' };
+    return { ok: true, value: id };
+}
+
+// Una data della scheda in modifica: undefined/null = lascia com'è, "" =
+// svuota (è ciò che manda il modulo per un campo vuoto), YYYY-MM-DD valida =
+// sostituisce. null come ritorno = valore non accettabile.
+const staffDateField = (v: unknown): { mode: 'KEEP' | 'SET'; value: string | null } | null => {
+    if (v === undefined || v === null) return { mode: 'KEEP', value: null };
+    if (v === '') return { mode: 'SET', value: null };
+    if (typeof v === 'string' && isIsoDay(v.slice(0, 10))) return { mode: 'SET', value: v.slice(0, 10) };
+    return null;
+};
+
+// Giorni di ferie l'anno: mezze giornate ammesse (un'assenza su un solo
+// servizio vale 0,5), vuoto = si eredita il default del ristorante.
+const parseAnnualLeaveDays = (v: unknown): { ok: true; value: number | null } | { ok: false } => {
+    if (v === null || v === '') return { ok: true, value: null };
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < 0 || n > 365) return { ok: false };
+    return { ok: true, value: Math.round(n * 2) / 2 };
+};
+
 // Get all staff members
 app.get('/staff', authenticate, async (req, res) => {
     try {
@@ -17876,23 +18338,7 @@ app.get('/staff', authenticate, async (req, res) => {
 
         const result = await queryWithRetry(query, params);
 
-        const staff = result.rows.map(row => ({
-            id: row.id,
-            name: row.name,
-            surname: row.surname,
-            category: row.category,
-            staffType: row.staff_type,
-            phone: row.phone,
-            email: row.email,
-            role: row.role,
-            hireDate: row.hire_date,
-            contractEndDate: row.contract_end_date,
-            weeklyRestDay: row.weekly_rest_day,
-            notes: row.notes,
-            isActive: row.is_active,
-            createdAt: row.created_at,
-            updatedAt: row.updated_at
-        }));
+        const staff = result.rows.map(staffRowJson);
 
         res.json(staff);
     } catch (err) {
@@ -17904,11 +18350,16 @@ app.get('/staff', authenticate, async (req, res) => {
 // Create staff member
 app.post('/staff', authenticate, requirePermission('staff:full'), async (req, res) => {
     try {
-        const { name, surname, category, staffType, phone, email, role, hireDate, contractEndDate, weeklyRestDay, notes } = req.body;
+        const { name, surname, category, staffType, phone, email, role, hireDate, contractEndDate, weeklyRestDay, notes, userId, annualLeaveDays } = req.body;
 
         if (!name || !surname || !category || !staffType) {
             return res.status(400).json({ error: 'Name, surname, category, and staffType are required' });
         }
+
+        const leaveDays = annualLeaveDays === undefined ? { ok: true as const, value: null } : parseAnnualLeaveDays(annualLeaveDays);
+        if (!leaveDays.ok) return res.status(400).json({ error: 'invalid_annual_leave_days' });
+        const link = userId === undefined ? { ok: true as const, value: null } : await checkLinkableUser(req.tenantId!, userId, null);
+        if (link.ok === false) return res.status(link.status).json({ error: link.error });
 
         // Nome, cognome e ruolo nascono già in Title Case (stessa forma
         // della migration nomi-personale-title-case): le superfici che
@@ -17919,30 +18370,14 @@ app.post('/staff', authenticate, requirePermission('staff:full'), async (req, re
         const cleanRole = typeof role === 'string' && role.trim() ? toTitleCase(role.trim()) : null;
 
         const result = await queryWithRetry(
-            `INSERT INTO staff_members (tenant_id, name, surname, category, staff_type, phone, email, role, hire_date, contract_end_date, weekly_rest_day, notes)
-             VALUES ($12, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            `INSERT INTO staff_members (tenant_id, name, surname, category, staff_type, phone, email, role, hire_date, contract_end_date, weekly_rest_day, notes, user_id, annual_leave_days)
+             VALUES ($12, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $13, $14)
              RETURNING *`,
-            [cleanName, cleanSurname, category, staffType, phone || null, email || null, cleanRole, hireDate || null, contractEndDate || null, weeklyRestDay ?? null, notes || null, req.tenantId!]
+            [cleanName, cleanSurname, category, staffType, phone || null, email || null, cleanRole, hireDate || null, contractEndDate || null, weeklyRestDay ?? null, notes || null, req.tenantId!, link.value, leaveDays.value]
         );
 
         const row = result.rows[0];
-        const staffMember = {
-            id: row.id,
-            name: row.name,
-            surname: row.surname,
-            category: row.category,
-            staffType: row.staff_type,
-            phone: row.phone,
-            email: row.email,
-            role: row.role,
-            hireDate: row.hire_date,
-            contractEndDate: row.contract_end_date,
-            weeklyRestDay: row.weekly_rest_day,
-            notes: row.notes,
-            isActive: row.is_active,
-            createdAt: row.created_at,
-            updatedAt: row.updated_at
-        };
+        const staffMember = staffRowJson(row);
 
         // Broadcast to all connected clients
         const socketId = req.headers['x-socket-id'] as string;
@@ -18016,6 +18451,142 @@ app.get('/staff/shifts', authenticate, async (req, res) => {
 // un pulito "non trovato".
 const STAFF_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// ---- Cambio turno -----------------------------------------------------------
+// «Il tuo turno è cambiato» alla persona il cui giorno cambia, se ha l'account
+// collegato alla scheda (staff_members.user_id, lo stesso delle ferie).
+//
+// La griglia salva un giorno con più chiamate in parallelo (crea pranzo,
+// cancella cena…) e una settimana con decine: avvisare a ogni riga vorrebbe
+// dire un telefono che suona venti volte e stati intermedi mai esistiti. Si
+// fotografa il giorno PRIMA della prima modifica, si aspetta che la persona
+// resti ferma SHIFT_CHANGE_NOTIFY_DELAY_MS, poi si confronta con il DOPO e si
+// manda un solo avviso con le sole differenze — «cena → cena» non esiste.
+// In memoria: un riavvio a metà finestra perde l'avviso, non il turno.
+const SHIFT_CHANGE_NOTIFY_DELAY_MS = Number(process.env.SHIFT_CHANGE_NOTIFY_DELAY_MS) || 20_000;
+// Solo il futuro vicino: correggere il foglio di ieri non è un cambio turno,
+// e le ferie lunghe hanno già il loro avviso (leave-decision-<id>).
+const SHIFT_CHANGE_WINDOW_DAYS = 30;
+
+/** I giorni di un'assenza, tagliati alla finestra dell'avviso: un'assenza
+ *  di tre mesi non deve fotografare novanta giorni. */
+const timeOffDates = (start: string, end: string): string[] => {
+    const out: string[] = [];
+    if (!/^\d{4}-\d{2}-\d{2}/.test(start) || !/^\d{4}-\d{2}-\d{2}/.test(end)) return out;
+    for (let d = start.slice(0, 10); d <= end.slice(0, 10) && out.length < 400; d = addDaysIso(d, 1)) out.push(d);
+    return out;
+};
+
+interface PendingShiftChange {
+    tenantId: number;
+    staffId: string;
+    actorId: number | null;
+    before: Map<string, string>;
+    // La foto in corso: le scritture parallele la aspettano, così nessuna
+    // arriva sul database prima che il «prima» sia stato letto.
+    ready: Promise<unknown>;
+    timer: ReturnType<typeof setTimeout> | null;
+}
+const pendingShiftChanges = new Map<string, PendingShiftChange>();
+
+async function staffDayLabels(tenantId: number, staffId: string, dates: string[]): Promise<{ userId: number | null; labels: Map<string, string> }> {
+    const labels = new Map<string, string>();
+    if (dates.length === 0) return { userId: null, labels };
+    const [staffRes, shiftRes, offRes] = await Promise.all([
+        queryWithRetry(
+            `SELECT user_id, staff_type, weekly_rest_day,
+                    to_char(hire_date, 'YYYY-MM-DD') AS hire_date,
+                    to_char(contract_end_date, 'YYYY-MM-DD') AS contract_end_date
+               FROM staff_members WHERE id = $1 AND tenant_id = $2`,
+            [staffId, tenantId]
+        ),
+        queryWithRetry(
+            `SELECT to_char(date, 'YYYY-MM-DD') AS date, shift, present FROM staff_shifts
+              WHERE staff_id = $1 AND tenant_id = $2 AND date = ANY($3::date[])`,
+            [staffId, tenantId, dates]
+        ),
+        queryWithRetry(
+            `SELECT to_char(start_date, 'YYYY-MM-DD') AS start_date, to_char(end_date, 'YYYY-MM-DD') AS end_date, shift, type
+               FROM staff_time_off
+              WHERE staff_id = $1 AND tenant_id = $2 AND start_date <= $4::date AND end_date >= $3::date`,
+            [staffId, tenantId, dates.reduce((a, b) => (a < b ? a : b)), dates.reduce((a, b) => (a > b ? a : b))]
+        ),
+    ]);
+    const row = staffRes.rows[0];
+    if (!row) return { userId: null, labels };
+    const staff = {
+        staffType: String(row.staff_type),
+        weeklyRestDay: row.weekly_rest_day === null ? null : Number(row.weekly_rest_day),
+        hireDate: row.hire_date ?? null,
+        contractEndDate: row.contract_end_date ?? null,
+    };
+    const shifts = shiftRes.rows.map((r: any) => ({ date: r.date, shift: r.shift, present: r.present !== false }));
+    const offs = offRes.rows.map((r: any) => ({ startDate: r.start_date, endDate: r.end_date, shift: r.shift ?? null, type: r.type }));
+    for (const d of dates) labels.set(d, shiftDayLabel(staff, d, shifts, offs));
+    return { userId: row.user_id ?? null, labels };
+}
+
+/** Da chiamare PRIMA di scrivere: fotografa i giorni toccati (solo la prima
+ *  volta nella finestra) e rimanda l'avviso. Non lancia mai. */
+async function noteShiftChange(tenantId: number, staffId: string, dates: string[], actorId: number | null): Promise<void> {
+    try {
+        const today = getItalianTodayIso(new Date(), (await getTenantLocale(tenantId)).timezone);
+        const last = addDaysIso(today, SHIFT_CHANGE_WINDOW_DAYS);
+        const inWindow = [...new Set(dates.filter(d => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}/.test(d)).map(d => d.slice(0, 10)))]
+            .filter(d => d >= today && d <= last);
+        if (inWindow.length === 0) return;
+        const key = `${tenantId}|${staffId}`;
+        let pending = pendingShiftChanges.get(key);
+        if (!pending) {
+            pending = { tenantId, staffId, actorId, before: new Map(), ready: Promise.resolve(), timer: null };
+            pendingShiftChanges.set(key, pending);
+        }
+        pending.actorId = actorId;
+        const fresh = inWindow.filter(d => !pending!.before.has(d));
+        if (fresh.length > 0) {
+            // Segnaposto subito, senza await di mezzo: due chiamate parallele
+            // sullo stesso giorno non devono fotografarlo due volte.
+            for (const d of fresh) pending.before.set(d, '');
+            const target = pending;
+            const shot = staffDayLabels(tenantId, staffId, fresh).then(({ labels }) => {
+                for (const d of fresh) target.before.set(d, labels.get(d) ?? '');
+            }).catch(() => { /* resta il segnaposto vuoto: quel giorno non si annuncia */ });
+            pending.ready = Promise.all([pending.ready, shot]);
+        }
+        await pending.ready;
+        if (pending.timer) clearTimeout(pending.timer);
+        pending.timer = setTimeout(() => { void flushShiftChange(key); }, SHIFT_CHANGE_NOTIFY_DELAY_MS);
+    } catch (err: any) {
+        console.warn('[turni] cambio turno non registrato:', err?.message || err);
+    }
+}
+
+async function flushShiftChange(key: string): Promise<void> {
+    const pending = pendingShiftChanges.get(key);
+    if (!pending) return;
+    pendingShiftChanges.delete(key);
+    try {
+        const dates = [...pending.before.keys()];
+        const { userId, labels } = await staffDayLabels(pending.tenantId, pending.staffId, dates);
+        // Nessun account collegato, o se l'è cambiato da solo: niente da dire.
+        if (!userId || userId === pending.actorId) return;
+        const changes: ShiftDayChange[] = dates
+            .map(d => ({ date: d, before: pending.before.get(d) ?? '', after: labels.get(d) ?? '' }))
+            .filter(c => c.before && c.after && c.before !== c.after);
+        if (changes.length === 0) return;
+        await pushSendToUser(userId, {
+            category: 'staff',
+            title: changes.length === 1 ? 'Il tuo turno è cambiato' : 'I tuoi turni sono cambiati',
+            body: describeShiftChanges(changes),
+            url: '/',
+            // Uno per persona: un secondo giro di modifiche aggiorna lo stesso
+            // avviso invece di impilarne un altro.
+            tag: `shift-change-${pending.staffId}`,
+        });
+    } catch (err: any) {
+        console.warn('[turni] avviso cambio turno fallito:', err?.message || err);
+    }
+}
+
 // Create shift
 app.post('/staff/shifts', authenticate, requirePermission('staff:full'), async (req, res) => {
     try {
@@ -18038,6 +18609,8 @@ app.post('/staff/shifts', authenticate, requirePermission('staff:full'), async (
         if (staffCheck.rows.length === 0) {
             return res.status(404).json({ error: 'Staff member not found' });
         }
+
+        await noteShiftChange(req.tenantId!, String(staffId), [String(date)], req.user?.userId ?? null);
 
         const result = await queryWithRetry(
             `INSERT INTO staff_shifts (tenant_id, staff_id, date, shift, present, notes)
@@ -18098,6 +18671,14 @@ app.post('/staff/shifts/bulk', authenticate, requirePermission('staff:full'), as
             return res.status(404).json({ error: 'Staff member not found' });
         }
 
+        const datesByStaff = new Map<string, string[]>();
+        for (const sh of shifts) {
+            const list = datesByStaff.get(String(sh.staffId)) ?? [];
+            list.push(String(sh.date));
+            datesByStaff.set(String(sh.staffId), list);
+        }
+        for (const [sid, dates] of datesByStaff) await noteShiftChange(req.tenantId!, sid, dates, req.user?.userId ?? null);
+
         const createdShifts = [];
         for (const shift of shifts) {
             const result = await queryWithRetry(
@@ -18131,6 +18712,14 @@ app.put('/staff/shifts/:id', authenticate, requirePermission('staff:full'), asyn
     try {
         const { id } = req.params;
         const { present, notes } = req.body;
+
+        const prevShift = await queryWithRetry(
+            `SELECT staff_id, to_char(date, 'YYYY-MM-DD') AS date FROM staff_shifts WHERE id = $1 AND tenant_id = $2`,
+            [id, req.tenantId!]
+        );
+        if (prevShift.rows[0]) {
+            await noteShiftChange(req.tenantId!, String(prevShift.rows[0].staff_id), [prevShift.rows[0].date], req.user?.userId ?? null);
+        }
 
         const result = await queryWithRetry(
             `UPDATE staff_shifts SET
@@ -18171,6 +18760,13 @@ app.put('/staff/shifts/:id', authenticate, requirePermission('staff:full'), asyn
 app.delete('/staff/shifts/:id', authenticate, requirePermission('staff:full'), async (req, res) => {
     try {
         const { id } = req.params;
+        const prevShift = await queryWithRetry(
+            `SELECT staff_id, to_char(date, 'YYYY-MM-DD') AS date FROM staff_shifts WHERE id = $1 AND tenant_id = $2`,
+            [id, req.tenantId!]
+        );
+        if (prevShift.rows[0]) {
+            await noteShiftChange(req.tenantId!, String(prevShift.rows[0].staff_id), [prevShift.rows[0].date], req.user?.userId ?? null);
+        }
         const result = await queryWithRetry('DELETE FROM staff_shifts WHERE id = $1 AND tenant_id = $2 RETURNING id', [id, req.tenantId!]);
 
         if (result.rows.length === 0) {
@@ -18264,6 +18860,8 @@ app.post('/staff/time-off', authenticate, requirePermission('staff:full'), async
             return res.status(404).json({ error: 'Staff member not found' });
         }
 
+        await noteShiftChange(req.tenantId!, String(staffId), timeOffDates(String(startDate), String(endDate)), req.user?.userId ?? null);
+
         const result = await queryWithRetry(
             `INSERT INTO staff_time_off (tenant_id, staff_id, start_date, end_date, type, shift, notes, approved)
              VALUES ($8, $1, $2, $3, $4, $5, $6, $7)
@@ -18308,6 +18906,21 @@ app.put('/staff/time-off/:id', authenticate, requirePermission('staff:full'), as
         // shift is set unconditionally when the key is present in the body so the
         // client can clear it (full day) by sending null; COALESCE wouldn't allow that.
         const shiftProvided = 'shift' in req.body;
+
+        // Il vecchio intervallo e il nuovo: spostare un'assenza cambia i giorni
+        // da cui esce come quelli in cui entra.
+        const prevOff = await queryWithRetry(
+            `SELECT staff_id, to_char(start_date, 'YYYY-MM-DD') AS start_date, to_char(end_date, 'YYYY-MM-DD') AS end_date
+               FROM staff_time_off WHERE id = $1 AND tenant_id = $2`,
+            [id, req.tenantId!]
+        );
+        if (prevOff.rows[0]) {
+            const p = prevOff.rows[0];
+            await noteShiftChange(req.tenantId!, String(p.staff_id), [
+                ...timeOffDates(p.start_date, p.end_date),
+                ...timeOffDates(String(startDate ?? p.start_date), String(endDate ?? p.end_date)),
+            ], req.user?.userId ?? null);
+        }
 
         const result = await queryWithRetry(
             `UPDATE staff_time_off SET
@@ -18354,6 +18967,28 @@ app.put('/staff/time-off/:id', authenticate, requirePermission('staff:full'), as
 app.delete('/staff/time-off/:id', authenticate, requirePermission('staff:full'), async (req, res) => {
     try {
         const { id } = req.params;
+        if (!STAFF_UUID_RE.test(String(id))) {
+            return res.status(404).json({ error: 'Time off record not found' });
+        }
+        // Ferie approvate cancellate dal calendario: la richiesta da cui
+        // nascevano passa ad annullata PRIMA della DELETE — dopo, la FK
+        // (ON DELETE SET NULL) l'avrebbe lasciata «approvata» senza assenza,
+        // e il dipendente la vedrebbe ancora confermata.
+        const prevOff = await queryWithRetry(
+            `SELECT staff_id, to_char(start_date, 'YYYY-MM-DD') AS start_date, to_char(end_date, 'YYYY-MM-DD') AS end_date
+               FROM staff_time_off WHERE id = $1 AND tenant_id = $2`,
+            [id, req.tenantId!]
+        );
+        if (prevOff.rows[0]) {
+            const p = prevOff.rows[0];
+            await noteShiftChange(req.tenantId!, String(p.staff_id), timeOffDates(p.start_date, p.end_date), req.user?.userId ?? null);
+        }
+        const cancelled = await queryWithRetry(
+            `UPDATE staff_leave_requests SET status = 'CANCELLED', decided_by_user_id = $3, decided_at = now()
+              WHERE time_off_id = $1 AND tenant_id = $2 AND status = 'APPROVED'
+              RETURNING id`,
+            [id, req.tenantId!, req.user?.userId ?? null]
+        );
         const result = await queryWithRetry('DELETE FROM staff_time_off WHERE id = $1 AND tenant_id = $2 RETURNING id', [id, req.tenantId!]);
 
         if (result.rows.length === 0) {
@@ -18363,6 +18998,9 @@ app.delete('/staff/time-off/:id', authenticate, requirePermission('staff:full'),
         // Broadcast
         const socketId = req.headers['x-socket-id'] as string;
         if (socketService) socketService.broadcastToAll(req.tenantId!, 'timeoff:deleted', { id }, socketId);
+        if (socketService && cancelled.rows.length > 0) {
+            socketService.broadcastToAll(req.tenantId!, 'leave:changed', { ids: cancelled.rows.map(r => r.id) });
+        }
 
         res.status(204).send();
     } catch (err) {
@@ -18454,6 +19092,809 @@ app.get('/staff/presence', authenticate, async (req, res) => {
         res.json(staffByShift);
     } catch (err) {
         console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ============================================
+// PIANO FERIE (richieste, monte ferie, proposta automatica)
+// IMPORTANT: specific paths BEFORE /staff/:id, come per shifts/time-off.
+//
+// Due porte. Il responsabile: staff:view per leggere il piano, staff:full
+// per decidere, inserire per conto di un dipendente e cambiare le regole.
+// Il dipendente: /staff/my-leave, SENZA permessi di matrice — lo autorizza
+// il collegamento fra il suo account e la scheda (staff_members.user_id),
+// che solo chi ha staff:full può creare. Vede e tocca solo le proprie.
+//
+// La logica (quanti giorni costa una richiesta, chi è in servizio, la
+// proposta) sta in utils/leavePlan.ts, condivisa col client che conta i
+// giorni mentre il dipendente sceglie le date.
+// ============================================
+
+interface LeaveSettingsJson {
+    defaultAnnualDays: number | null;
+    minimums: CoverageMinimums;
+    priority: LeavePriority;
+    trackingStart: string | null; // avvio del registro ferie, vedi prorateEntitlement
+}
+
+async function loadLeaveSettings(tenantId: number): Promise<LeaveSettingsJson> {
+    const r = await queryWithRetry('SELECT * FROM staff_leave_settings WHERE tenant_id = $1', [tenantId]);
+    const row = r.rows[0];
+    return {
+        defaultAnnualDays: row?.default_annual_days != null ? Number(row.default_annual_days) : null,
+        minimums: {
+            SALA: { LUNCH: Number(row?.min_sala_lunch ?? 0), DINNER: Number(row?.min_sala_dinner ?? 0) },
+            CUCINA: { LUNCH: Number(row?.min_cucina_lunch ?? 0), DINNER: Number(row?.min_cucina_dinner ?? 0) },
+        },
+        priority: row?.priority === 'FEWEST_DAYS' ? 'FEWEST_DAYS' : 'FIRST_COME',
+        trackingStart: row?.leave_start_date ? leaveIsoDay(row.leave_start_date) : null,
+    };
+}
+
+// Quando il ristorante lavora, sulla finestra: orari per giorno della
+// settimana più chiusure straordinarie. Serve a non far pagare sul monte i
+// giorni di chiusura e a non segnare scoperto un servizio che non c'è.
+async function loadOpeningCalendar(tenantId: number, from: string, to: string): Promise<OpeningCalendar> {
+    const [hours, closures] = await Promise.all([
+        getAllOpeningHours(tenantId),
+        queryWithRetry(
+            `SELECT to_char(date, 'YYYY-MM-DD') AS date, shift FROM special_closures
+              WHERE tenant_id = $1 AND date BETWEEN $2::date AND $3::date`,
+            [tenantId, from, to]
+        ),
+    ]);
+    const weekly: OpeningCalendar['weekly'] = {};
+    for (const h of hours) {
+        weekly[h.weekday] = { LUNCH: !!(h.lunch_open && h.lunch_close), DINNER: !!(h.dinner_open && h.dinner_close) };
+    }
+    return {
+        weekly,
+        closures: closures.rows.map((c: any) => ({
+            date: c.date,
+            shift: c.shift === 'LUNCH' || c.shift === 'DINNER' ? c.shift : null,
+        })),
+    };
+}
+
+const leaveIsoDay = (v: any): string => String(v).slice(0, 10);
+
+const parseLeaveYear = (v: unknown): number | null => {
+    const n = Number(v);
+    return Number.isInteger(n) && n >= 2000 && n <= 2100 ? n : null;
+};
+
+const toLeaveStaff = (row: any): LeaveStaff => ({
+    id: row.id,
+    category: row.category === 'CUCINA' ? 'CUCINA' : 'SALA',
+    staffType: row.staff_type,
+    weeklyRestDay: row.weekly_rest_day ?? null,
+    hireDate: row.hire_date ? leaveIsoDay(row.hire_date) : null,
+    contractEndDate: row.contract_end_date ? leaveIsoDay(row.contract_end_date) : null,
+    isActive: row.is_active !== false,
+});
+
+const toLeaveShift = (row: any): LeaveShiftRow => ({
+    staffId: row.staff_id,
+    date: leaveIsoDay(row.date),
+    shift: row.shift,
+    present: row.present !== false,
+});
+
+const toLeaveAbsence = (row: any): LeaveAbsence => ({
+    staffId: row.staff_id,
+    startDate: leaveIsoDay(row.start_date),
+    endDate: leaveIsoDay(row.end_date),
+    shift: row.shift === 'LUNCH' || row.shift === 'DINNER' ? row.shift : null,
+});
+
+const toLeaveRequestLike = (row: any): LeaveRequestLike => ({
+    id: row.id,
+    staffId: row.staff_id,
+    startDate: leaveIsoDay(row.start_date),
+    endDate: leaveIsoDay(row.end_date),
+    createdAt: new Date(row.created_at).toISOString(),
+});
+
+// Il monte di una persona in un anno: il suo, o il default del ristorante
+// per chi ha un contratto — gli EXTRA a chiamata non hanno ferie da
+// pianificare — in proporzione ai mesi di contratto dentro l'anno.
+const leaveEntitlement = (row: any, settings: LeaveSettingsJson, year: number | string): number | null => {
+    const annual = row.annual_leave_days != null
+        ? Number(row.annual_leave_days)
+        : row.staff_type !== 'EXTRA' ? settings.defaultAnnualDays : null;
+    if (annual === null) return null;
+    return prorateEntitlement(
+        annual,
+        Number(year),
+        row.hire_date ? leaveIsoDay(row.hire_date) : null,
+        row.contract_end_date ? leaveIsoDay(row.contract_end_date) : null,
+        settings.trackingStart
+    );
+};
+
+// Giorni per persona e anno di un insieme di assenze o richieste. Il monte
+// si legge dalle VACANZA in staff_time_off, non dalle richieste: le ferie
+// registrate a mano dal responsabile pesano quanto quelle chieste dall'app.
+const leaveDaysByStaffYear = (rows: any[], restDayOf: (staffId: string) => number | null, isOpen: ServiceOpen): Map<string, number> => {
+    const out = new Map<string, number>();
+    for (const r of rows) {
+        const shift = r.shift === 'LUNCH' || r.shift === 'DINNER' ? r.shift : null;
+        const byYear = leaveDaysByYear(restDayOf(r.staff_id), leaveIsoDay(r.start_date), leaveIsoDay(r.end_date), isOpen, shift);
+        for (const [year, n] of Object.entries(byYear)) {
+            const key = `${r.staff_id}|${year}`;
+            out.set(key, (out.get(key) ?? 0) + n);
+        }
+    }
+    return out;
+};
+
+function computeLeaveBalances(
+    year: number,
+    staffRows: any[],
+    vacations: any[],
+    pendingRows: any[],
+    settings: LeaveSettingsJson,
+    isOpen: ServiceOpen
+) {
+    const restDay = new Map<string, number | null>(staffRows.map(r => [r.id, r.weekly_rest_day ?? null]));
+    const restDayOf = (id: string) => restDay.get(id) ?? null;
+    const approved = leaveDaysByStaffYear(vacations, restDayOf, isOpen);
+    const pending = leaveDaysByStaffYear(pendingRows, restDayOf, isOpen);
+    return staffRows.map(row => {
+        const entitled = leaveEntitlement(row, settings, year);
+        const used = approved.get(`${row.id}|${year}`) ?? 0;
+        return {
+            staffId: row.id,
+            entitled,
+            approved: used,
+            pending: pending.get(`${row.id}|${year}`) ?? 0,
+            remaining: entitled === null ? null : entitled - used,
+        };
+    });
+}
+
+const LEAVE_REQUEST_SELECT = `
+    SELECT r.id, r.staff_id, r.start_date, r.end_date, r.note, r.status, r.decided_at,
+           r.decision_note, r.created_at, r.time_off_id,
+           (r.requested_by_user_id IS NOT NULL AND r.requested_by_user_id = sm.user_id) AS by_staff,
+           du.full_name AS decided_by_name,
+           sm.weekly_rest_day
+      FROM staff_leave_requests r
+      JOIN staff_members sm ON sm.id = r.staff_id
+      LEFT JOIN users du ON du.id = r.decided_by_user_id
+`;
+
+const leaveRequestJson = (row: any, isOpen: ServiceOpen) => ({
+    id: row.id,
+    staffId: row.staff_id,
+    startDate: leaveIsoDay(row.start_date),
+    endDate: leaveIsoDay(row.end_date),
+    note: row.note ?? null,
+    status: row.status,
+    days: countLeaveDays(row.weekly_rest_day ?? null, leaveIsoDay(row.start_date), leaveIsoDay(row.end_date), isOpen),
+    requestedByStaff: row.by_staff === true,
+    decidedByName: row.decided_by_name ?? null,
+    decidedAt: row.decided_at ?? null,
+    decisionNote: row.decision_note ?? null,
+    createdAt: row.created_at,
+});
+
+const timeOffRowJson = (row: any) => ({
+    id: row.id,
+    staffId: row.staff_id,
+    startDate: row.start_date,
+    endDate: row.end_date,
+    type: row.type,
+    shift: row.shift,
+    notes: row.notes,
+    approved: row.approved,
+    createdAt: row.created_at,
+});
+
+const LEAVE_DAY_FMT = new Intl.DateTimeFormat('it-IT', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+const formatLeaveRange = (start: string, end: string): string => {
+    const f = (d: string) => LEAVE_DAY_FMT.format(new Date(`${d}T00:00:00Z`));
+    if (start === end) return f(start);
+    // Stesso mese: «23–29 nov», come lo scrive il piano.
+    if (start.slice(0, 7) === end.slice(0, 7)) return `${Number(start.slice(8, 10))}–${f(end)}`;
+    return `${f(start)} – ${f(end)}`;
+};
+const formatLeaveDays = (n: number): string => `${String(n).replace('.', ',')} ${n === 1 ? 'giorno' : 'giorni'}`;
+
+type LeaveCheck =
+    | { ok: true; days: number; isOpen: ServiceOpen }
+    | { ok: false; status: number; error: string };
+
+// Le regole di una richiesta nuova, uguali per il dipendente e per il
+// responsabile che la inserisce al suo posto (al quale però il passato è
+// concesso: registrare a posteriori ferie già fatte è normale).
+async function checkNewLeaveRequest(
+    tenantId: number,
+    staffRow: any,
+    startDate: unknown,
+    endDate: unknown,
+    notBefore: string | null
+): Promise<LeaveCheck> {
+    if (!isIsoDay(startDate) || !isIsoDay(endDate) || endDate < startDate) {
+        return { ok: false, status: 400, error: 'invalid_dates' };
+    }
+    if (spanDays(startDate, endDate) > MAX_LEAVE_SPAN_DAYS) return { ok: false, status: 400, error: 'too_long' };
+    if (notBefore && startDate < notBefore) return { ok: false, status: 400, error: 'in_the_past' };
+    if (staffRow.is_active === false) return { ok: false, status: 409, error: 'staff_inactive' };
+
+    const [overlap, calendar] = await Promise.all([
+        queryWithRetry(
+            `SELECT 1 FROM staff_leave_requests
+              WHERE tenant_id = $1 AND staff_id = $2 AND status IN ('PENDING', 'APPROVED')
+                AND start_date <= $4::date AND end_date >= $3::date
+             UNION ALL
+             SELECT 1 FROM staff_time_off
+              WHERE tenant_id = $1 AND staff_id = $2 AND type = 'VACANZA'
+                AND start_date <= $4::date AND end_date >= $3::date
+             LIMIT 1`,
+            [tenantId, staffRow.id, startDate, endDate]
+        ),
+        loadOpeningCalendar(tenantId, startDate, endDate),
+    ]);
+    if (overlap.rows.length > 0) return { ok: false, status: 409, error: 'overlap' };
+
+    const isOpen = makeServiceOpen(calendar);
+    const days = countLeaveDays(staffRow.weekly_rest_day ?? null, startDate, endDate, isOpen);
+    // Solo riposi e chiusure: non costerebbe niente e non toglierebbe
+    // nessuno dal turno — quasi sempre date sbagliate.
+    if (days <= 0) return { ok: false, status: 400, error: 'no_working_days' };
+    return { ok: true, days, isOpen };
+}
+
+async function insertLeaveRequest(
+    tenantId: number,
+    staffId: string,
+    startDate: string,
+    endDate: string,
+    note: unknown,
+    requestedBy: number | null
+): Promise<any> {
+    const cleanNote = typeof note === 'string' && note.trim() ? note.trim().slice(0, 500) : null;
+    const ins = await queryWithRetry(
+        `INSERT INTO staff_leave_requests (tenant_id, staff_id, start_date, end_date, note, requested_by_user_id)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+        [tenantId, staffId, startDate, endDate, cleanNote, requestedBy]
+    );
+    const r = await queryWithRetry(`${LEAVE_REQUEST_SELECT} WHERE r.id = $1 AND r.tenant_id = $2`, [ins.rows[0].id, tenantId]);
+    return r.rows[0];
+}
+
+// Chi decide sulle ferie è chi ha staff:full nella matrice di QUESTO
+// ristorante: i ruoli si leggono da role_permissions, non da una lista
+// fissa, così un titolare che apre la gestione al MANAGER lo trova avvisato.
+async function notifyLeaveManagers(tenantId: number, excludeUserId: number | null, title: string, body: string, tag: string): Promise<void> {
+    try {
+        const r = await queryWithRetry(
+            `SELECT DISTINCT role FROM role_permissions WHERE tenant_id = $1 AND permission = 'staff:full'`,
+            [tenantId]
+        );
+        const roles = r.rows.map((x: any) => String(x.role));
+        if (roles.length === 0) return;
+        await pushSendToRoles(tenantId, roles, { title, body, url: '/?view=STAFF', tag, category: 'staff' }, { excludeUserId });
+    } catch (err) {
+        console.warn('[ferie] notifica ai responsabili fallita:', (err as any)?.message || err);
+    }
+}
+
+async function loadMyStaffRow(tenantId: number, userId: number | undefined): Promise<any | null> {
+    if (!userId) return null;
+    const r = await queryWithRetry('SELECT * FROM staff_members WHERE tenant_id = $1 AND user_id = $2', [tenantId, userId]);
+    return r.rows[0] ?? null;
+}
+
+// Il piano di un anno: richieste, monte per persona, assenze in calendario
+// e copertura giorno per giorno. Le richieste in attesa arrivano anche se
+// cadono in un altro anno: sono la coda da smaltire, non un dato del piano.
+app.get('/staff/leave-plan', authenticate, requirePermission('staff:view'), async (req, res) => {
+    try {
+        const tenantId = req.tenantId!;
+        const today = getRomeDatePart(new Date());
+        const year = parseLeaveYear(req.query.year) ?? Number(today.slice(0, 4));
+        const from = `${year}-01-01`;
+        const to = `${year}-12-31`;
+
+        const [settings, staffRs, shiftsRs, absRs, reqRs, calendar] = await Promise.all([
+            loadLeaveSettings(tenantId),
+            queryWithRetry('SELECT * FROM staff_members WHERE tenant_id = $1 ORDER BY surname, name', [tenantId]),
+            queryWithRetry(
+                `SELECT staff_id, date, shift, present FROM staff_shifts
+                  WHERE tenant_id = $1 AND date BETWEEN $2::date AND $3::date`,
+                [tenantId, from, to]
+            ),
+            queryWithRetry(
+                `SELECT id, staff_id, start_date, end_date, type, shift FROM staff_time_off
+                  WHERE tenant_id = $1 AND start_date <= $3::date AND end_date >= $2::date
+                  ORDER BY start_date`,
+                [tenantId, from, to]
+            ),
+            queryWithRetry(
+                `${LEAVE_REQUEST_SELECT}
+                  WHERE r.tenant_id = $1
+                    AND ((r.start_date <= $3::date AND r.end_date >= $2::date) OR r.status = 'PENDING')
+                  ORDER BY r.start_date, r.created_at`,
+                [tenantId, from, to]
+            ),
+            loadOpeningCalendar(tenantId, addIsoDays(from, -MAX_LEAVE_SPAN_DAYS), addIsoDays(to, MAX_LEAVE_SPAN_DAYS)),
+        ]);
+
+        const isOpen = makeServiceOpen(calendar);
+        const pendingRows = reqRs.rows.filter((r: any) => r.status === 'PENDING');
+        const coverage = coverageTimeline({
+            staff: staffRs.rows.map(toLeaveStaff),
+            shifts: shiftsRs.rows.map(toLeaveShift),
+            absences: absRs.rows.map(toLeaveAbsence),
+            pending: pendingRows.map(toLeaveRequestLike),
+            isOpen,
+            from,
+            to,
+        });
+        const balances = computeLeaveBalances(
+            year,
+            staffRs.rows,
+            absRs.rows.filter((a: any) => a.type === 'VACANZA'),
+            pendingRows,
+            settings,
+            isOpen
+        );
+
+        res.json({
+            year,
+            today,
+            settings,
+            requests: reqRs.rows.map((r: any) => leaveRequestJson(r, isOpen)),
+            balances,
+            absences: absRs.rows.map((a: any) => ({
+                id: a.id,
+                staffId: a.staff_id,
+                startDate: leaveIsoDay(a.start_date),
+                endDate: leaveIsoDay(a.end_date),
+                type: a.type,
+                shift: a.shift ?? null,
+            })),
+            coverage,
+        });
+    } catch (err) {
+        console.error('GET /staff/leave-plan error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Il numero sul segmento «Ferie» di Personale e, per persona, sulla sua
+// scheda: leggero apposta, lo si chiede a ogni apertura della pagina.
+app.get('/staff/leave-requests/pending-count', authenticate, requirePermission('staff:view'), async (req, res) => {
+    try {
+        const r = await queryWithRetry(
+            `SELECT staff_id, COUNT(*)::int AS n FROM staff_leave_requests
+              WHERE tenant_id = $1 AND status = 'PENDING'
+              GROUP BY staff_id`,
+            [req.tenantId!]
+        );
+        const byStaff: Record<string, number> = {};
+        let count = 0;
+        for (const row of r.rows) { byStaff[row.staff_id] = row.n; count += row.n; }
+        res.json({ count, byStaff });
+    } catch (err) {
+        console.error('GET /staff/leave-requests/pending-count error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/staff/leave-settings', authenticate, requirePermission('staff:full'), async (req, res) => {
+    try {
+        const b = req.body ?? {};
+        const days = parseAnnualLeaveDays(b.defaultAnnualDays ?? null);
+        if (!days.ok) return res.status(400).json({ error: 'invalid_annual_leave_days' });
+        const m = b.minimums ?? {};
+        const mins: number[] = [m?.SALA?.LUNCH, m?.SALA?.DINNER, m?.CUCINA?.LUNCH, m?.CUCINA?.DINNER].map((v: unknown) => Number(v ?? 0));
+        if (mins.some(n => !Number.isInteger(n) || n < 0 || n > 50)) {
+            return res.status(400).json({ error: 'invalid_minimums' });
+        }
+        const priority = b.priority === 'FEWEST_DAYS' ? 'FEWEST_DAYS' : b.priority === 'FIRST_COME' || b.priority === undefined ? 'FIRST_COME' : null;
+        if (!priority) return res.status(400).json({ error: 'invalid_priority' });
+        // Avvio del registro: assente = lascia com'è (il client di prima non
+        // lo manda e non deve azzerarlo), null o "" = nessun avvio.
+        const startProvided = b.trackingStart !== undefined;
+        const trackingStart = b.trackingStart === null || b.trackingStart === '' || b.trackingStart === undefined ? null : b.trackingStart;
+        if (trackingStart !== null && !isIsoDay(trackingStart)) return res.status(400).json({ error: 'invalid_date' });
+
+        await queryWithRetry(
+            `INSERT INTO staff_leave_settings
+                (tenant_id, default_annual_days, min_sala_lunch, min_sala_dinner, min_cucina_lunch, min_cucina_dinner, priority, leave_start_date, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $9::date, now())
+             ON CONFLICT (tenant_id) DO UPDATE SET
+                default_annual_days = EXCLUDED.default_annual_days,
+                min_sala_lunch = EXCLUDED.min_sala_lunch,
+                min_sala_dinner = EXCLUDED.min_sala_dinner,
+                min_cucina_lunch = EXCLUDED.min_cucina_lunch,
+                min_cucina_dinner = EXCLUDED.min_cucina_dinner,
+                priority = EXCLUDED.priority,
+                leave_start_date = CASE WHEN $8::boolean THEN EXCLUDED.leave_start_date ELSE staff_leave_settings.leave_start_date END,
+                updated_at = now()`,
+            [req.tenantId!, days.value, ...mins, priority, startProvided, trackingStart]
+        );
+        const settings = await loadLeaveSettings(req.tenantId!);
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll(req.tenantId!, 'leave:changed', { settings: true }, socketId);
+        res.json(settings);
+    } catch (err) {
+        console.error('PUT /staff/leave-settings error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Il responsabile inserisce una richiesta per conto di un dipendente (chi
+// la chiede a voce, chi non ha l'app). Nasce in attesa come le altre: la
+// decisione resta un passo distinto e passa dalla stessa proposta.
+app.post('/staff/leave-requests', authenticate, requirePermission('staff:full'), async (req, res) => {
+    try {
+        const tenantId = req.tenantId!;
+        const { staffId, startDate, endDate, note } = req.body ?? {};
+        if (!STAFF_UUID_RE.test(String(staffId))) return res.status(404).json({ error: 'Staff member not found' });
+        const staffRs = await queryWithRetry('SELECT * FROM staff_members WHERE id = $1 AND tenant_id = $2', [staffId, tenantId]);
+        const staffRow = staffRs.rows[0];
+        if (!staffRow) return res.status(404).json({ error: 'Staff member not found' });
+
+        const check = await checkNewLeaveRequest(tenantId, staffRow, startDate, endDate, null);
+        if (check.ok === false) return res.status(check.status).json({ error: check.error });
+
+        const row = await insertLeaveRequest(tenantId, staffRow.id, startDate, endDate, note, req.user?.userId ?? null);
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll(tenantId, 'leave:changed', { ids: [row.id] }, socketId);
+        res.status(201).json(leaveRequestJson(row, check.isOpen));
+    } catch (err) {
+        console.error('POST /staff/leave-requests error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Approva, rifiuta o revoca, una o molte insieme (la proposta si applica
+// in blocco). Una transazione sola: se una riga fallisce a metà non resta
+// un piano applicato per tre quarti. Approvare crea l'assenza VACANZA —
+// è da lì che presenze e calendario turni vedono le ferie.
+app.post('/staff/leave-requests/decide', authenticate, requirePermission('staff:full'), async (req, res) => {
+    try {
+        const tenantId = req.tenantId!;
+        const userId = req.user?.userId ?? null;
+        const raw = Array.isArray(req.body?.decisions) ? req.body.decisions : null;
+        if (!raw || raw.length === 0 || raw.length > 200) return res.status(400).json({ error: 'invalid_decisions' });
+
+        const seen = new Set<string>();
+        const decisions: Array<{ id: string; decision: 'APPROVE' | 'REJECT' | 'REVOKE'; note: string | null }> = [];
+        for (const d of raw) {
+            const id = String(d?.id ?? '');
+            if (!STAFF_UUID_RE.test(id) || !['APPROVE', 'REJECT', 'REVOKE'].includes(d?.decision)) {
+                return res.status(400).json({ error: 'invalid_decisions' });
+            }
+            if (seen.has(id)) continue;
+            seen.add(id);
+            const note = typeof d.note === 'string' && d.note.trim() ? d.note.trim().slice(0, 500) : null;
+            decisions.push({ id, decision: d.decision, note });
+        }
+
+        const outcome = await withTenant(tenantId, async client => {
+            const results: Array<{ id: string; ok: boolean; error?: string; decision?: string; staffUserId?: number | null; startDate?: string; endDate?: string; note?: string | null }> = [];
+            const createdTimeOffs: any[] = [];
+            const deletedTimeOffIds: string[] = [];
+            for (const d of decisions) {
+                const cur = await client.query(
+                    `SELECT r.*, sm.user_id AS staff_user_id
+                       FROM staff_leave_requests r
+                       JOIN staff_members sm ON sm.id = r.staff_id
+                      WHERE r.id = $1 AND r.tenant_id = $2
+                      FOR UPDATE OF r`,
+                    [d.id, tenantId]
+                );
+                const row = cur.rows[0];
+                if (!row) { results.push({ id: d.id, ok: false, error: 'not_found' }); continue; }
+
+                if (d.decision === 'REVOKE') {
+                    if (row.status !== 'APPROVED') { results.push({ id: d.id, ok: false, error: 'not_approved' }); continue; }
+                    if (row.time_off_id) {
+                        await client.query('DELETE FROM staff_time_off WHERE id = $1 AND tenant_id = $2', [row.time_off_id, tenantId]);
+                        deletedTimeOffIds.push(row.time_off_id);
+                    }
+                    await client.query(
+                        `UPDATE staff_leave_requests
+                            SET status = 'CANCELLED', time_off_id = NULL, decided_by_user_id = $3, decided_at = now(), decision_note = $4
+                          WHERE id = $1 AND tenant_id = $2`,
+                        [d.id, tenantId, userId, d.note]
+                    );
+                } else {
+                    if (row.status !== 'PENDING') { results.push({ id: d.id, ok: false, error: 'not_pending' }); continue; }
+                    if (d.decision === 'APPROVE') {
+                        const t = await client.query(
+                            `INSERT INTO staff_time_off (tenant_id, staff_id, start_date, end_date, type, shift, notes, approved)
+                             VALUES ($1, $2, $3, $4, 'VACANZA', NULL, $5, true)
+                             RETURNING *`,
+                            [tenantId, row.staff_id, row.start_date, row.end_date, row.note ?? null]
+                        );
+                        createdTimeOffs.push(t.rows[0]);
+                        await client.query(
+                            `UPDATE staff_leave_requests
+                                SET status = 'APPROVED', time_off_id = $3, decided_by_user_id = $4, decided_at = now(), decision_note = $5
+                              WHERE id = $1 AND tenant_id = $2`,
+                            [d.id, tenantId, t.rows[0].id, userId, d.note]
+                        );
+                    } else {
+                        await client.query(
+                            `UPDATE staff_leave_requests
+                                SET status = 'REJECTED', decided_by_user_id = $3, decided_at = now(), decision_note = $4
+                              WHERE id = $1 AND tenant_id = $2`,
+                            [d.id, tenantId, userId, d.note]
+                        );
+                    }
+                }
+                results.push({
+                    id: d.id,
+                    ok: true,
+                    decision: d.decision,
+                    staffUserId: row.staff_user_id ?? null,
+                    startDate: leaveIsoDay(row.start_date),
+                    endDate: leaveIsoDay(row.end_date),
+                    note: d.note,
+                });
+            }
+            return { results, createdTimeOffs, deletedTimeOffIds };
+        });
+
+        const done = outcome.results.filter(r => r.ok);
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) {
+            for (const t of outcome.createdTimeOffs) socketService.broadcastToAll(tenantId, 'timeoff:created', timeOffRowJson(t), socketId);
+            for (const id of outcome.deletedTimeOffIds) socketService.broadcastToAll(tenantId, 'timeoff:deleted', { id }, socketId);
+            if (done.length > 0) socketService.broadcastToAll(tenantId, 'leave:changed', { ids: done.map(r => r.id) }, socketId);
+        }
+
+        // Il dipendente lo sa senza dover riaprire il profilo.
+        const TITLES: Record<string, string> = {
+            APPROVE: 'Ferie approvate',
+            REJECT: 'Ferie non approvate',
+            REVOKE: 'Ferie annullate',
+        };
+        for (const r of done) {
+            if (!r.staffUserId || r.staffUserId === userId) continue;
+            const body = formatLeaveRange(r.startDate!, r.endDate!) + (r.note ? ` · ${r.note}` : '');
+            // Tag distinto da quello della richiesta (leave-<id>, ai
+            // responsabili): con la lettura condivisa per tag, l'esito letto
+            // dal dipendente spegnerebbe la richiesta nella campanella altrui.
+            void pushSendToUser(r.staffUserId, { title: TITLES[r.decision!], body, url: '/', tag: `leave-decision-${r.id}`, category: 'staff' })
+                ?.catch(err => console.warn('[ferie] notifica al dipendente fallita:', err?.message || err));
+        }
+        // Richiesta decisa: la «Richiesta ferie» non chiede più niente a
+        // nessuno dei responsabili che l'hanno ricevuta.
+        await markSharedNotificationsRead(tenantId, done.map(r => `leave-${r.id}`));
+
+        res.json({
+            results: outcome.results.map(r => ({ id: r.id, ok: r.ok, ...(r.error ? { error: r.error } : {}) })),
+        });
+    } catch (err) {
+        console.error('POST /staff/leave-requests/decide error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// La proposta: su TUTTE le richieste in attesa, con la copertura minima e
+// il monte di ciascuno. Non scrive niente — il responsabile la rilegge,
+// la ritocca e la applica da /decide.
+app.post('/staff/leave-plan/proposal', authenticate, requirePermission('staff:full'), async (req, res) => {
+    try {
+        const tenantId = req.tenantId!;
+        const pendingRs = await queryWithRetry(
+            `SELECT id, staff_id, start_date, end_date, created_at FROM staff_leave_requests
+              WHERE tenant_id = $1 AND status = 'PENDING'`,
+            [tenantId]
+        );
+        if (pendingRs.rows.length === 0) return res.json({ items: [] });
+        const pending = pendingRs.rows.map(toLeaveRequestLike);
+
+        const minStart = pending.reduce((m, r) => (r.startDate < m ? r.startDate : m), pending[0].startDate);
+        const maxEnd = pending.reduce((m, r) => (r.endDate > m ? r.endDate : m), pending[0].endDate);
+        // Il monte è annuale: servono le ferie già in calendario sugli anni
+        // interi toccati dalle richieste, non solo sui giorni richiesti.
+        const winFrom = `${minStart.slice(0, 4)}-01-01`;
+        const winTo = `${maxEnd.slice(0, 4)}-12-31`;
+
+        const [settings, staffRs, shiftsRs, absRs, calendar] = await Promise.all([
+            loadLeaveSettings(tenantId),
+            queryWithRetry('SELECT * FROM staff_members WHERE tenant_id = $1', [tenantId]),
+            queryWithRetry(
+                `SELECT staff_id, date, shift, present FROM staff_shifts
+                  WHERE tenant_id = $1 AND date BETWEEN $2::date AND $3::date`,
+                [tenantId, minStart, maxEnd]
+            ),
+            queryWithRetry(
+                `SELECT staff_id, start_date, end_date, type, shift FROM staff_time_off
+                  WHERE tenant_id = $1 AND start_date <= $3::date AND end_date >= $2::date`,
+                [tenantId, winFrom, winTo]
+            ),
+            loadOpeningCalendar(tenantId, winFrom, winTo),
+        ]);
+
+        const isOpen = makeServiceOpen(calendar);
+        const byId = new Map<string, any>(staffRs.rows.map((r: any) => [r.id, r]));
+        const used = leaveDaysByStaffYear(
+            absRs.rows.filter((a: any) => a.type === 'VACANZA'),
+            id => byId.get(id)?.weekly_rest_day ?? null,
+            isOpen
+        );
+        const items = proposeLeavePlan({
+            staff: staffRs.rows.map(toLeaveStaff),
+            shifts: shiftsRs.rows.map(toLeaveShift),
+            absences: absRs.rows.map(toLeaveAbsence),
+            pending,
+            minimums: settings.minimums,
+            isOpen,
+            priority: settings.priority,
+            entitlement: (id, year) => {
+                const row = byId.get(id);
+                return row ? leaveEntitlement(row, settings, year) : null;
+            },
+            usedDays: (id, year) => used.get(`${id}|${year}`) ?? 0,
+        });
+        res.json({ items });
+    } catch (err) {
+        console.error('POST /staff/leave-plan/proposal error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Gli account a cui collegare una scheda, per il selettore nel modulo del
+// dipendente. Con la scheda a cui ognuno è già legato, così il selettore
+// può dire «già collegato a …» invece di fallire al salvataggio.
+app.get('/staff/linkable-users', authenticate, requirePermission('staff:full'), async (req, res) => {
+    try {
+        const r = await queryWithRetry(
+            `SELECT u.id, u.full_name, u.email, u.role, sm.id AS staff_id
+               FROM users u
+               LEFT JOIN staff_members sm ON sm.user_id = u.id
+              WHERE u.tenant_id = $1 AND u.is_active = true AND u.role <> 'PLATFORM_ADMIN'
+              ORDER BY u.full_name`,
+            [req.tenantId!]
+        );
+        res.json(r.rows.map((u: any) => ({
+            id: u.id,
+            fullName: u.full_name,
+            email: u.email,
+            role: u.role,
+            staffId: u.staff_id ?? null,
+        })));
+    } catch (err) {
+        console.error('GET /staff/linkable-users error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ── Self-service: «Le mie ferie» nel profilo ─────────────────────────────
+
+app.get('/staff/my-leave', authenticate, async (req, res) => {
+    try {
+        const tenantId = req.tenantId!;
+        const me = await loadMyStaffRow(tenantId, req.user?.userId);
+        if (!me) return res.json({ linked: false });
+
+        const today = getRomeDatePart(new Date());
+        const year = parseLeaveYear(req.query.year) ?? Number(today.slice(0, 4));
+        const from = `${year}-01-01`;
+        const to = `${year}-12-31`;
+        // Il calendario copre l'anno e i prossimi diciotto mesi: è quello con
+        // cui il client conta i giorni mentre il dipendente sceglie le date.
+        const horizon = addIsoDays(today, 548);
+        const calTo = horizon > to ? horizon : addIsoDays(to, MAX_LEAVE_SPAN_DAYS);
+
+        const [settings, vacRs, reqRs, calendar] = await Promise.all([
+            loadLeaveSettings(tenantId),
+            queryWithRetry(
+                `SELECT staff_id, start_date, end_date, shift FROM staff_time_off
+                  WHERE tenant_id = $1 AND staff_id = $2 AND type = 'VACANZA'
+                    AND start_date <= $4::date AND end_date >= $3::date`,
+                [tenantId, me.id, from, to]
+            ),
+            queryWithRetry(
+                `${LEAVE_REQUEST_SELECT}
+                  WHERE r.tenant_id = $1 AND r.staff_id = $2 AND (r.end_date >= $3::date OR r.status = 'PENDING')
+                  ORDER BY r.start_date DESC
+                  LIMIT 50`,
+                [tenantId, me.id, from]
+            ),
+            loadOpeningCalendar(tenantId, addIsoDays(from, -MAX_LEAVE_SPAN_DAYS), calTo),
+        ]);
+
+        const isOpen = makeServiceOpen(calendar);
+        const [balance] = computeLeaveBalances(
+            year,
+            [me],
+            vacRs.rows,
+            reqRs.rows.filter((r: any) => r.status === 'PENDING'),
+            settings,
+            isOpen
+        );
+        res.json({
+            linked: true,
+            staffId: me.id,
+            weeklyRestDay: me.weekly_rest_day ?? null,
+            year,
+            today,
+            balance,
+            requests: reqRs.rows.map((r: any) => leaveRequestJson(r, isOpen)),
+            calendar,
+        });
+    } catch (err) {
+        console.error('GET /staff/my-leave error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/staff/my-leave', authenticate, async (req, res) => {
+    try {
+        const tenantId = req.tenantId!;
+        const userId = req.user?.userId ?? null;
+        const me = await loadMyStaffRow(tenantId, req.user?.userId);
+        if (!me) return res.status(403).json({ error: 'not_linked' });
+
+        const { startDate, endDate, note } = req.body ?? {};
+        const check = await checkNewLeaveRequest(tenantId, me, startDate, endDate, getRomeDatePart(new Date()));
+        if (check.ok === false) return res.status(check.status).json({ error: check.error });
+
+        const row = await insertLeaveRequest(tenantId, me.id, startDate, endDate, note, userId);
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll(tenantId, 'leave:changed', { ids: [row.id] }, socketId);
+
+        const who = `${toTitleCase(me.name)} ${toTitleCase(me.surname)}`;
+        void notifyLeaveManagers(
+            tenantId,
+            userId,
+            'Richiesta ferie',
+            `${who} · ${formatLeaveRange(startDate, endDate)} (${formatLeaveDays(check.days)})`,
+            `leave-${row.id}`
+        );
+
+        res.status(201).json(leaveRequestJson(row, check.isOpen));
+    } catch (err) {
+        console.error('POST /staff/my-leave error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Il dipendente ritira una richiesta finché è in attesa. Una volta decisa
+// passa dal responsabile: annullare ferie approvate libera un turno che
+// qualcuno potrebbe aver già riorganizzato.
+app.delete('/staff/my-leave/:id', authenticate, async (req, res) => {
+    try {
+        const tenantId = req.tenantId!;
+        const { id } = req.params;
+        const me = await loadMyStaffRow(tenantId, req.user?.userId);
+        if (!me) return res.status(403).json({ error: 'not_linked' });
+        if (!STAFF_UUID_RE.test(String(id))) return res.status(404).json({ error: 'not_found' });
+
+        const r = await queryWithRetry(
+            `UPDATE staff_leave_requests
+                SET status = 'CANCELLED', decided_by_user_id = $4, decided_at = now()
+              WHERE id = $1 AND tenant_id = $2 AND staff_id = $3 AND status = 'PENDING'
+              RETURNING id`,
+            [id, tenantId, me.id, req.user?.userId ?? null]
+        );
+        if (r.rows.length === 0) {
+            const exists = await queryWithRetry(
+                'SELECT 1 FROM staff_leave_requests WHERE id = $1 AND tenant_id = $2 AND staff_id = $3',
+                [id, tenantId, me.id]
+            );
+            return exists.rows.length > 0
+                ? res.status(409).json({ error: 'not_pending' })
+                : res.status(404).json({ error: 'not_found' });
+        }
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll(tenantId, 'leave:changed', { ids: [id] }, socketId);
+        // Ritirata: la «Richiesta ferie» ai responsabili non ha più oggetto.
+        await markSharedNotificationsRead(tenantId, [`leave-${id}`]);
+        res.status(204).send();
+    } catch (err) {
+        console.error('DELETE /staff/my-leave/:id error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -18866,23 +20307,7 @@ app.get('/staff/:id', authenticate, async (req, res) => {
         }
 
         const row = result.rows[0];
-        res.json({
-            id: row.id,
-            name: row.name,
-            surname: row.surname,
-            category: row.category,
-            staffType: row.staff_type,
-            phone: row.phone,
-            email: row.email,
-            role: row.role,
-            hireDate: row.hire_date,
-            contractEndDate: row.contract_end_date,
-            weeklyRestDay: row.weekly_rest_day,
-            notes: row.notes,
-            isActive: row.is_active,
-            createdAt: row.created_at,
-            updatedAt: row.updated_at
-        });
+        res.json(staffRowJson(row));
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Internal server error' });
@@ -18893,7 +20318,26 @@ app.get('/staff/:id', authenticate, async (req, res) => {
 app.put('/staff/:id', authenticate, requirePermission('staff:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, surname, category, staffType, phone, email, role, hireDate, contractEndDate, weeklyRestDay, notes, isActive } = req.body;
+        const { name, surname, category, staffType, phone, email, role, hireDate, contractEndDate, weeklyRestDay, notes, isActive, userId, annualLeaveDays } = req.body;
+
+        // Account collegato e giorni di ferie: stessa regola del riposo
+        // settimanale — undefined lascia com'è, null svuota.
+        if (!STAFF_UUID_RE.test(String(id))) {
+            return res.status(404).json({ error: 'Staff member not found' });
+        }
+        const leaveDays = annualLeaveDays === undefined ? null : parseAnnualLeaveDays(annualLeaveDays);
+        if (leaveDays && !leaveDays.ok) return res.status(400).json({ error: 'invalid_annual_leave_days' });
+        const link = userId === undefined ? null : await checkLinkableUser(req.tenantId!, userId, String(id));
+        if (link && link.ok === false) return res.status(link.status).json({ error: link.error });
+
+        // Date del contratto: il modulo manda "" per un campo vuoto, e finiva
+        // dritto nel cast a DATE — 500 «invalid input syntax for type date»,
+        // e una scheda senza date non si salvava più (visto in produzione
+        // collegando l'account di un cuoco). Ora "" svuota, undefined/null
+        // lasciano com'è, una data valida sostituisce, il resto è un 400.
+        const hire = staffDateField(hireDate);
+        const contractEnd = staffDateField(contractEndDate);
+        if (!hire || !contractEnd) return res.status(400).json({ error: 'invalid_date' });
 
         // Stessa forma del POST: quello che arriva scritto si titola, quello
         // che non arriva (undefined/null) passa alla COALESCE com'è.
@@ -18911,19 +20355,24 @@ app.put('/staff/:id', authenticate, requirePermission('staff:full'), async (req,
                 phone = COALESCE($5, phone),
                 email = COALESCE($6, email),
                 role = COALESCE($7, role),
-                hire_date = COALESCE($8, hire_date),
-                contract_end_date = COALESCE($9, contract_end_date),
+                hire_date = CASE WHEN $20::text = 'KEEP' THEN hire_date ELSE $8::date END,
+                contract_end_date = CASE WHEN $21::text = 'KEEP' THEN contract_end_date ELSE $9::date END,
                 weekly_rest_day = CASE WHEN $10::text = 'KEEP' THEN weekly_rest_day ELSE $11::smallint END,
                 notes = COALESCE($12, notes),
                 is_active = COALESCE($13, is_active),
+                user_id = CASE WHEN $16::boolean THEN $17::integer ELSE user_id END,
+                annual_leave_days = CASE WHEN $18::boolean THEN $19::numeric ELSE annual_leave_days END,
                 updated_at = CURRENT_TIMESTAMP
              WHERE id = $14 AND tenant_id = $15
              RETURNING *`,
             [
-                cleanName, cleanSurname, category, staffType, phone, email, cleanRole, hireDate, contractEndDate,
+                cleanName, cleanSurname, category, staffType, phone, email, cleanRole, hire.value, contractEnd.value,
                 weeklyRestDay === undefined ? 'KEEP' : 'SET',
                 weeklyRestDay === undefined ? null : weeklyRestDay,
-                notes, isActive, id, req.tenantId!
+                notes, isActive, id, req.tenantId!,
+                link !== null, link && link.ok ? link.value : null,
+                leaveDays !== null, leaveDays && leaveDays.ok ? leaveDays.value : null,
+                hire.mode, contractEnd.mode
             ]
         );
 
@@ -18932,23 +20381,7 @@ app.put('/staff/:id', authenticate, requirePermission('staff:full'), async (req,
         }
 
         const row = result.rows[0];
-        const staffMember = {
-            id: row.id,
-            name: row.name,
-            surname: row.surname,
-            category: row.category,
-            staffType: row.staff_type,
-            phone: row.phone,
-            email: row.email,
-            role: row.role,
-            hireDate: row.hire_date,
-            contractEndDate: row.contract_end_date,
-            weeklyRestDay: row.weekly_rest_day,
-            notes: row.notes,
-            isActive: row.is_active,
-            createdAt: row.created_at,
-            updatedAt: row.updated_at
-        };
+        const staffMember = staffRowJson(row);
 
         // Broadcast to all connected clients
         const socketId = req.headers['x-socket-id'] as string;
@@ -19076,7 +20509,9 @@ app.post('/push/test', authenticate, async (req: any, res) => {
             title: 'Notifica di test',
             body: 'Le notifiche push funzionano correttamente.',
             url: '/',
-            tag: 'test-notification'
+            // Per utente: le generiche hanno la lettura condivisa per tag, e
+            // un tag unico farebbe spegnere il test di un collega col proprio.
+            tag: `test-notification-${userId}`
         });
 
         res.json({ ok: true, ...result });
@@ -19092,6 +20527,196 @@ app.post('/push/test', authenticate, async (req: any, res) => {
 // The rows are populated by pushService.sendTo{User,Roles} *before* web-push
 // delivery, so history survives closed browsers. Everything here is scoped
 // to `req.user.userId` — no cross-user reads.
+//
+// Lettura sincronizzata. Ogni destinatario ha la sua riga, e prima nessuno
+// avvisava gli altri: letta una notifica sul telefono, restava non letta sul
+// tablet di sala e su ogni altro dispositivo finché non si ricaricava. Ora
+// ogni lettura emette 'notifications:read' verso la room dell'utente (tutti
+// i suoi dispositivi); e per le categorie di squadra — oggi tutte quelle che
+// esistono: telefonate, messaggi, email, tavoli in sala, prenotazioni,
+// pagamenti, ferie, fatturazione, sistema, generiche — la lettura vale per
+// tutti i destinatari della stessa notifica (stesso tag): una chiamata da
+// ricontattare, un'uscita pronta, una prenotazione nuova, un incasso o una
+// richiesta di ferie è un fatto solo, visto una volta, non un promemoria
+// personale. I tag sono per singolo evento (reservation-<id>, pending-<id>,
+// payment-<id>, email-inbound-<id>, leave-<id>, leave-decision-<id>,
+// billing-past-due-<tenant>, low-stock-<prodotto>, todo-<id>,
+// test-notification-<utente>…), quindi non si toccano mai notifiche di
+// altri: una push nuova con un tag condiviso fra utenti diversi — o fra due
+// notifiche diverse dello stesso evento — va resa distinta.
+// La lista resta esplicita di proposito: una categoria nuova parte
+// personale e diventa di squadra solo quando qualcuno lo decide.
+// 'staff' copre anche la chat staff, ma quelle push sono persist:false e
+// non hanno righe qui: la loro lettura resta il cursore personale per
+// thread. 'billing' va ai platform admin, le cui righe stanno sul tenant di
+// ciascuno: la lettura si propaga fra gli admin dello stesso tenant.
+const SHARED_NOTIFICATION_CATEGORIES = ['voice', 'message', 'email', 'service', 'reservation', 'payment', 'staff', 'billing', 'system', 'general', 'support'];
+
+function emitNotificationsRead(
+    tenantId: number,
+    userIds: number[],
+    payload: { ids?: number[]; tags?: string[]; all?: boolean }
+): void {
+    if (userIds.length === 0) return;
+    try {
+        socketService?.broadcastToUsers(tenantId, [...new Set(userIds)], 'notifications:read', {
+            ids: payload.ids ?? [], tags: payload.tags ?? [], all: payload.all === true,
+        });
+    } catch (_) { /* best-effort: il badge si riallinea comunque al focus */ }
+}
+
+// Segna lette, per TUTTI i destinatari, le notifiche di squadra con questi
+// tag. Chiamata sia dal centro notifiche sia dove la cosa si gestisce alla
+// fonte (thread letto in Messaggi, chiamata ricontattata, uscita servita).
+// Best-effort: un errore qui non deve far fallire la rotta che la chiama.
+/** Spegne per tutti le campanelle «uscita pronta» di una comanda
+ *  (course-<comanda>-<uscita>) rimaste da leggere: comanda chiusa o
+ *  cancellata, non c'è più niente da portare al tavolo. Non lancia mai. */
+async function closeOrderCourseNotifications(tenantId: number, orderId: number | string): Promise<void> {
+    try {
+        const open = await queryWithRetry(
+            `SELECT DISTINCT tag FROM notifications
+              WHERE tenant_id = $1 AND tag LIKE $2 AND read_at IS NULL`,
+            [tenantId, `course-${Number(orderId)}-%`]
+        );
+        await markSharedNotificationsRead(tenantId, open.rows.map((r: any) => String(r.tag)));
+    } catch (err: any) {
+        console.warn('[comande] chiusura campanelle fallita:', err?.message || err);
+    }
+}
+
+/** Chiude per tutti le notifiche di un tenant il cui tag comincia con
+ *  `prefix`, tranne quelle in `keep`: serve quando un avviso nuovo supera i
+ *  precedenti della stessa famiglia (il 100% dopo l'80%). Non lancia mai. */
+async function closeNotificationsByPrefix(tenantId: number, prefix: string, keep: string[] = []): Promise<void> {
+    try {
+        const open = await queryWithRetry(
+            `SELECT DISTINCT tag FROM notifications
+              WHERE tenant_id = $1 AND tag LIKE $2 AND read_at IS NULL AND NOT (tag = ANY($3::text[]))`,
+            [tenantId, `${prefix.replace(/[\\%_]/g, m => '\\' + m)}%`, keep]
+        );
+        await markSharedNotificationsRead(tenantId, open.rows.map((r: any) => String(r.tag)));
+    } catch (err: any) {
+        console.warn('[notifications] chiusura per prefisso fallita:', err?.message || err);
+    }
+}
+
+/** Gli avvisi ai platform admin stanno sul tenant di ciascun admin, non su
+ *  quello di cui parlano: per chiuderli si cercano le righe per tag sopra i
+ *  tenant e si chiude tenant per tenant. Non lancia mai. */
+async function closePlatformNotifications(tags: string[]): Promise<void> {
+    try {
+        // rls-bypass: destinatari di piattaforma, sparsi su più tenant
+        const owners = await runAsPlatform(() => queryWithRetry(
+            `SELECT DISTINCT tenant_id FROM notifications WHERE tag = ANY($1::text[]) AND read_at IS NULL`,
+            [tags]
+        ));
+        for (const r of owners.rows) {
+            const tenantId = Number(r.tenant_id);
+            await runWithTenantContext(tenantId, () => markSharedNotificationsRead(tenantId, tags));
+        }
+    } catch (err: any) {
+        console.warn('[notifications] chiusura avvisi di piattaforma fallita:', err?.message || err);
+    }
+}
+
+// ---- Prenotazione VIP --------------------------------------------------------
+// Un avviso a parte a titolare e direzione quando prenota un cliente segnato
+// VIP in rubrica, da qualunque canale: la campanella «Nuova prenotazione» va
+// a tutta la sala e un VIP ci si perde in mezzo. Il cliente si aggancia per
+// telefono, come fa la lista prenotazioni (customer_is_vip). Non lancia mai.
+const VIP_PUSH_ROLES = ['OWNER', 'GENERAL_MANAGER', 'MANAGER'];
+
+const vipReservationTag = (reservationId: number | string): string => `vip-${reservationId}`;
+
+async function notifyVipReservation(
+    tenantId: number,
+    reservation: { id: number; customer_name: string | null; guests: number | null; phone: string | null },
+    when: string,
+    excludeUserId: number | null,
+): Promise<void> {
+    try {
+        const digits = String(reservation.phone ?? '').replace(/\D/g, '');
+        if (!digits) return;
+        const vip = await queryWithRetry(
+            `SELECT 1 FROM customers
+              WHERE tenant_id = $1 AND is_vip = TRUE AND phone IS NOT NULL
+                AND regexp_replace(phone, '\\D', '', 'g') = $2
+              LIMIT 1`,
+            [tenantId, digits]
+        );
+        if (vip.rows.length === 0) return;
+        await pushSendToRoles(tenantId, VIP_PUSH_ROLES, {
+            category: 'reservation',
+            title: 'Prenotazione VIP',
+            body: `${toTitleCase(reservation.customer_name ?? '')} · ${reservation.guests ?? '?'} ospiti · ${when}`,
+            url: `/?view=RESERVATIONS&reservationId=${reservation.id}`,
+            tag: vipReservationTag(reservation.id),
+        }, { excludeUserId });
+    } catch (err: any) {
+        console.warn('[vip] avviso prenotazione VIP fallito:', err?.message || err);
+    }
+}
+
+async function markSharedNotificationsRead(tenantId: number, tags: string[]): Promise<void> {
+    const clean = [...new Set(tags.filter(t => typeof t === 'string' && t.length > 0))];
+    if (clean.length === 0) return;
+    try {
+        const r = await queryWithRetry(
+            `UPDATE notifications SET read_at = CURRENT_TIMESTAMP
+             WHERE tenant_id = $1 AND tag = ANY($2::text[]) AND read_at IS NULL
+               AND category = ANY($3::text[])
+             RETURNING id, recipient_user_id, tag`,
+            [tenantId, clean, SHARED_NOTIFICATION_CATEGORIES]
+        );
+        if (r.rows.length === 0) return;
+        emitNotificationsRead(tenantId, r.rows.map((row: any) => Number(row.recipient_user_id)), {
+            ids: r.rows.map((row: any) => Number(row.id)),
+            tags: clean,
+        });
+    } catch (err: any) {
+        console.warn('[notifications] shared read failed:', err?.message || err);
+    }
+}
+
+/** Chiude le notifiche di alcuni destinatari soltanto, a prescindere dalla
+ *  categoria: serve quando una notifica smette di riguardare una persona
+ *  (un todo riassegnato ad altri) ma resta viva per chi la riceve adesso. */
+async function markNotificationsReadForUsers(tenantId: number, userIds: number[], tags: string[]): Promise<void> {
+    const users = [...new Set(userIds.filter(u => Number.isInteger(u) && u > 0))];
+    const clean = [...new Set(tags.filter(t => typeof t === 'string' && t.length > 0))];
+    if (users.length === 0 || clean.length === 0) return;
+    try {
+        const r = await queryWithRetry(
+            `UPDATE notifications SET read_at = CURRENT_TIMESTAMP
+             WHERE tenant_id = $1 AND recipient_user_id = ANY($2::int[])
+               AND tag = ANY($3::text[]) AND read_at IS NULL
+             RETURNING id, recipient_user_id`,
+            [tenantId, users, clean]
+        );
+        if (r.rows.length === 0) return;
+        emitNotificationsRead(tenantId, r.rows.map((row: any) => Number(row.recipient_user_id)), {
+            ids: r.rows.map((row: any) => Number(row.id)),
+            tags: clean,
+        });
+    } catch (err: any) {
+        console.warn('[notifications] personal read failed:', err?.message || err);
+    }
+}
+
+// Tag della propria riga (serve ai dispositivi per chiudere la push) e se è
+// di squadra, cioè se la lettura va propagata ai colleghi.
+async function tagOfNotification(tenantId: number, userId: number, id: number): Promise<{ tag: string | null; shared: boolean }> {
+    const r = await queryWithRetry(
+        `SELECT tag, category FROM notifications WHERE id = $1 AND recipient_user_id = $2 AND tenant_id = $3`,
+        [id, userId, tenantId]
+    );
+    const row = r.rows[0];
+    return {
+        tag: row?.tag ? String(row.tag) : null,
+        shared: !!row && SHARED_NOTIFICATION_CATEGORIES.includes(row.category),
+    };
+}
 
 app.get('/notifications', authenticate, async (req: any, res) => {
     try {
@@ -19197,14 +20822,45 @@ app.post('/notifications/:id/read', authenticate, async (req: any, res) => {
         if (!userId) return res.status(401).json({ error: 'Unauthorized' });
         const id = parseInt(req.params.id, 10);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+        const { tag, shared } = await tagOfNotification(req.tenantId!, userId, id);
         await queryWithRetry(
             `UPDATE notifications SET read_at = CURRENT_TIMESTAMP
              WHERE id = $1 AND recipient_user_id = $2 AND tenant_id = $3 AND read_at IS NULL`,
             [id, userId, req.tenantId!]
         );
+        if (tag && shared) await markSharedNotificationsRead(req.tenantId!, [tag]);
+        emitNotificationsRead(req.tenantId!, [userId], { ids: [id], tags: tag ? [tag] : [] });
         res.json({ ok: true });
     } catch (err) {
         console.error('POST /notifications/:id/read error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Tap sulla push del sistema operativo: il service worker conosce solo il
+// tag, non l'id della riga. Prima il tap apriva la vista giusta ma lasciava
+// la notifica non letta nella campanella di ogni dispositivo.
+app.post('/notifications/read-by-tag', authenticate, async (req: any, res) => {
+    try {
+        const userId = req.user?.userId;
+        if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+        const tag = typeof req.body?.tag === 'string' ? req.body.tag.trim() : '';
+        if (!tag || tag.length > 200) return res.status(400).json({ error: 'Invalid tag' });
+        const r = await queryWithRetry(
+            `UPDATE notifications SET read_at = CURRENT_TIMESTAMP
+             WHERE tenant_id = $1 AND recipient_user_id = $2 AND tag = $3 AND read_at IS NULL
+             RETURNING id, category`,
+            [req.tenantId!, userId, tag]
+        );
+        if (r.rows.some((row: any) => SHARED_NOTIFICATION_CATEGORIES.includes(row.category))) {
+            await markSharedNotificationsRead(req.tenantId!, [tag]);
+        }
+        if (r.rows.length > 0) {
+            emitNotificationsRead(req.tenantId!, [userId], { ids: r.rows.map((row: any) => Number(row.id)), tags: [tag] });
+        }
+        res.json({ ok: true, marked: r.rows.length });
+    } catch (err) {
+        console.error('POST /notifications/read-by-tag error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -19216,9 +20872,18 @@ app.post('/notifications/read-all', authenticate, async (req: any, res) => {
         const r = await queryWithRetry(
             `UPDATE notifications SET read_at = CURRENT_TIMESTAMP
              WHERE tenant_id = $2 AND recipient_user_id = $1 AND read_at IS NULL AND dismissed_at IS NULL
-             RETURNING id`,
+             RETURNING id, tag, category`,
             [userId, req.tenantId!]
         );
+        const sharedTags = r.rows
+            .filter((row: any) => row.tag && SHARED_NOTIFICATION_CATEGORIES.includes(row.category))
+            .map((row: any) => String(row.tag));
+        await markSharedNotificationsRead(req.tenantId!, sharedTags);
+        emitNotificationsRead(req.tenantId!, [userId], {
+            ids: r.rows.map((row: any) => Number(row.id)),
+            tags: r.rows.filter((row: any) => row.tag).map((row: any) => String(row.tag)),
+            all: true,
+        });
         res.json({ ok: true, marked: r.rows.length });
     } catch (err) {
         console.error('POST /notifications/read-all error:', err);
@@ -19232,15 +20897,541 @@ app.post('/notifications/:id/dismiss', authenticate, async (req: any, res) => {
         if (!userId) return res.status(401).json({ error: 'Unauthorized' });
         const id = parseInt(req.params.id, 10);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+        const { tag, shared } = await tagOfNotification(req.tenantId!, userId, id);
         await queryWithRetry(
             `UPDATE notifications
              SET dismissed_at = CURRENT_TIMESTAMP, read_at = COALESCE(read_at, CURRENT_TIMESTAMP)
              WHERE id = $1 AND recipient_user_id = $2 AND tenant_id = $3 AND dismissed_at IS NULL`,
             [id, userId, req.tenantId!]
         );
+        // Rimossa qui, per gli altri destinatari vale come letta: la
+        // rimozione resta una scelta personale di pulizia della lista.
+        if (tag && shared) await markSharedNotificationsRead(req.tenantId!, [tag]);
+        emitNotificationsRead(req.tenantId!, [userId], { ids: [id], tags: tag ? [tag] : [] });
         res.json({ ok: true });
     } catch (err) {
         console.error('POST /notifications/:id/dismiss error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ==================== SUPPORTO CLIENTI (Aiuto) ====================
+// Le richieste di assistenza dal ristorante al team Sympotia. Nessun
+// permesso di matrice: l'assistenza non deve poter essere tolta a un ruolo,
+// basta essere un utente del ristorante. Chi apre vede le proprie richieste;
+// titolare e direzione vedono tutte quelle del ristorante. Le azioni della
+// piattaforma (rispondere, cambiare stato, card del dev board) stanno sotto
+// /admin/support, dietro platformAdminAuth.
+
+const SUPPORT_SEE_ALL_ROLES: string[] = [UserRole.OWNER, UserRole.GENERAL_MANAGER];
+
+// tenant_id è BIGINT: pg lo restituirebbe come stringa, il client lo vuole
+// numero (lo passa a «Entra» e ai filtri del pannello).
+const SUPPORT_TICKET_FIELDS = `t.id, t.tenant_id::int AS tenant_id, t.category, t.priority, t.status, t.subject,
+    t.created_by_user_id, COALESCE(NULLIF(u.full_name, ''), u.email) AS created_by_name,
+    t.tenant_unread, t.platform_unread, t.dev_card_id,
+    t.created_at, t.updated_at, t.last_message_at, t.resolved_at`;
+
+const SUPPORT_MESSAGE_FIELDS = `id, author_type, author_name, body, attachments, created_at`;
+
+// Il token di pannello (PLATFORM_ADMIN senza scope) non sta dentro nessun
+// ristorante: da questo lato non ha niente da leggere né da aprire.
+const requireTenantSession = (req: any, res: any, next: any) => {
+    if (req.user?.role === UserRole.PLATFORM_ADMIN && !isPlatformScopedSession(req.user)) {
+        return res.status(403).json({ error: 'tenant_session_required' });
+    }
+    next();
+};
+
+// Impersonation o «Entra»: la piattaforma guarda il ristorante, non scrive
+// al proprio supporto al suo posto — e leggendo non deve spegnere il «da
+// leggere» di chi ha aperto la richiesta.
+const isPlatformActingInTenant = (user: any): boolean =>
+    !!user?.impersonated_by || isPlatformScopedSession(user);
+
+const supportSeesAll = (req: any): boolean =>
+    SUPPORT_SEE_ALL_ROLES.includes(req.user?.role) || isPlatformScopedSession(req.user);
+
+const supportCreateLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    limit: 10,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    keyGenerator: (req: any) => `support:${req.user?.userId ?? 'anon'}`,
+    message: { error: 'rate_limited', message: 'Troppe richieste aperte in poco tempo: scrivi nella richiesta già aperta.' },
+});
+
+async function loadVisibleSupportTicket(req: any, id: number): Promise<any | null> {
+    const params: any[] = [id, req.tenantId!];
+    let where = 't.id = $1 AND t.tenant_id = $2';
+    if (!supportSeesAll(req)) {
+        params.push(req.user.userId);
+        where += ' AND t.created_by_user_id = $3';
+    }
+    const r = await queryWithRetry(
+        `SELECT ${SUPPORT_TICKET_FIELDS}, t.context
+           FROM support_tickets t
+           LEFT JOIN users u ON u.id = t.created_by_user_id
+          WHERE ${where}`,
+        params
+    );
+    return r.rows[0] ?? null;
+}
+
+async function loadSupportMessages(tenantId: number, ticketId: number): Promise<any[]> {
+    const r = await queryWithRetry(
+        `SELECT ${SUPPORT_MESSAGE_FIELDS} FROM support_messages
+          WHERE tenant_id = $1 AND ticket_id = $2
+          ORDER BY created_at, id`,
+        [tenantId, ticketId]
+    );
+    return r.rows;
+}
+
+// I token arrivano dal client: valgono solo le foto caricate da QUESTO
+// utente in questo ristorante, così una richiesta non può allegare file
+// altrui conoscendone il token.
+async function resolveSupportAttachments(tenantId: number, userId: number | null, input: unknown): Promise<SupportAttachment[] | null> {
+    if (input === undefined || input === null) return [];
+    if (!Array.isArray(input)) return null;
+    const tokens = [...new Set(input.filter((t): t is string => typeof t === 'string' && /^[A-Za-z0-9_-]{20,64}$/.test(t)))];
+    if (tokens.length !== input.length || tokens.length > SUPPORT_ATTACHMENTS_MAX) return null;
+    if (tokens.length === 0) return [];
+    const r = await queryWithRetry(
+        `SELECT token, content_type, filename FROM outbound_media
+          WHERE tenant_id = $1 AND token = ANY($2::text[]) AND created_by_user_id IS NOT DISTINCT FROM $3`,
+        [tenantId, tokens, userId]
+    );
+    if (r.rows.length !== tokens.length) return null;
+    return tokens.map(tok => {
+        const row = r.rows.find((x: any) => x.token === tok);
+        return { token: tok, content_type: row.content_type, filename: row.filename ?? null };
+    });
+}
+
+// La fotografia tecnica presa all'apertura: chi risponde non deve chiedere
+// «che versione hai?» né «il nodo è acceso?». Best-effort pezzo per pezzo —
+// un dato che non arriva non deve impedire di chiedere aiuto.
+async function buildSupportServerContext(tenantId: number, userId: number, category: SupportCategory): Promise<Record<string, unknown>> {
+    const settled = await Promise.allSettled([
+        queryWithRetry(`SELECT name, slug, status, billing_status FROM tenants WHERE id = $1`, [tenantId]),
+        queryWithRetry(`SELECT id, role, full_name, email FROM users WHERE id = $1 AND tenant_id = $2`, [userId, tenantId]),
+        getTenantFeatures(tenantId),
+        getFeatureFlag(tenantId, 'sala_node_enabled', false),
+        queryWithRetry(
+            `SELECT status, COUNT(*)::int AS n FROM print_jobs
+              WHERE tenant_id = $1 AND status IN ('PENDING','FAILED') AND created_at > NOW() - INTERVAL '24 hours'
+              GROUP BY status`,
+            [tenantId]
+        ),
+        queryWithRetry(
+            `SELECT kind, printer, error, created_at FROM print_jobs
+              WHERE tenant_id = $1 AND status = 'FAILED' AND created_at > NOW() - INTERVAL '24 hours'
+              ORDER BY created_at DESC LIMIT 3`,
+            [tenantId]
+        ),
+        category === 'cassa_fiscale'
+            ? queryWithRetry(
+                `SELECT provider, error, created_at FROM fiscal_documents
+                  WHERE tenant_id = $1 AND status = 'FAILED' AND created_at > NOW() - INTERVAL '24 hours'
+                  ORDER BY created_at DESC LIMIT 5`,
+                [tenantId]
+            )
+            : Promise.resolve(null),
+    ]);
+    const ok = <T,>(i: number): T | null => (settled[i].status === 'fulfilled' ? (settled[i] as PromiseFulfilledResult<T>).value : null);
+    const tenantRow = ok<any>(0)?.rows?.[0] ?? null;
+    const userRow = ok<any>(1)?.rows?.[0] ?? null;
+    const features = ok<Record<string, boolean>>(2);
+    const nodeEnabled = ok<boolean>(3) === true;
+    const jobCounts = ok<any>(4)?.rows ?? [];
+    const jobErrors = ok<any>(5)?.rows ?? [];
+    const fiscal = ok<any>(6);
+    const count = (s: string) => jobCounts.find((r: any) => r.status === s)?.n ?? 0;
+    return {
+        captured_at: new Date().toISOString(),
+        server_version: (process.env.RAILWAY_GIT_COMMIT_SHA || '').slice(0, 7) || 'dev',
+        tenant: tenantRow ? { id: tenantId, ...tenantRow } : { id: tenantId },
+        user: userRow,
+        features: features ? Object.keys(features).filter(k => features[k]) : null,
+        sala_node: nodeEnabled ? getSalaNodeStatus(tenantId) : { enabled: false },
+        print_jobs_24h: {
+            pending: count('PENDING'),
+            failed: count('FAILED'),
+            last_errors: jobErrors.map((r: any) => ({ kind: r.kind, printer: r.printer, error: String(r.error ?? '').slice(0, 300), at: r.created_at })),
+        },
+        // L'agente di stampa ha un solo «ultimo contatto» per tutta la
+        // piattaforma, non per ristorante: il nome lo dice, per non leggerlo
+        // come lo stato della stampante di QUESTO locale.
+        print_agent_global: {
+            online: printAgentLastSeen != null && Date.now() - printAgentLastSeen < 30_000,
+            last_seen_seconds: printAgentLastSeen != null ? Math.round((Date.now() - printAgentLastSeen) / 1000) : null,
+        },
+        ...(fiscal ? {
+            fiscal_failed_24h: fiscal.rows.map((r: any) => ({ provider: r.provider, error: String(r.error ?? '').slice(0, 300), at: r.created_at })),
+        } : {}),
+    };
+}
+
+// Dove arrivano le email degli urgenti: un indirizzo vero da env (gli
+// account PLATFORM_ADMIN possono avere email di servizio che nessuno
+// legge), altrimenti quelle degli admin attivi.
+async function supportAlertRecipients(): Promise<string[]> {
+    const fromEnv = (process.env.SUPPORT_ALERT_EMAIL || '')
+        .split(',').map(s => s.trim()).filter(s => s.includes('@'));
+    if (fromEnv.length > 0) return fromEnv;
+    // rls-bypass: gli admin di piattaforma stanno sopra i tenant, la richiesta arriva da uno qualunque
+    const r = await runAsPlatform(() => queryWithRetry(
+        `SELECT email FROM users WHERE role = 'PLATFORM_ADMIN' AND is_active = TRUE`
+    ));
+    return r.rows.map((row: any) => String(row.email)).filter(e => e.includes('@'));
+}
+
+/** Il pannello di piattaforma aperto si aggiorna da solo: lista, contatore
+ *  e, se è quella aperta, la conversazione. Gli admin hanno una stanza
+ *  socket propria (vedi socketService): senza questo una risposta del
+ *  ristorante compariva solo ricaricando. Non lancia. */
+const emitSupportToPlatform = (ticketId: number, tenantId: number): void => {
+    try {
+        socketService?.broadcastToPlatformAdmins('support:admin-updated', { id: ticketId, tenant_id: tenantId });
+    } catch { /* best-effort: la tab si riallinea comunque al focus */ }
+};
+
+/** Lato ristorante: chi ha aperto la richiesta e chi le vede tutte
+ *  (titolare e direzione) la vedono cambiare senza ricaricare. Non lancia. */
+const emitSupportToTenant = (tenantId: number, creatorId: number | null, ticketId: number): void => {
+    try {
+        if (creatorId) socketService?.broadcastToUsers(tenantId, [creatorId], 'support:updated', { id: ticketId });
+        socketService?.broadcastToRolesRoom(tenantId, SUPPORT_SEE_ALL_ROLES, 'support:updated', { id: ticketId });
+    } catch { /* best-effort: la vista si riallinea al focus */ }
+};
+
+const supportPreview = (text: string, max = 140): string => {
+    const flat = text.replace(/\s+/g, ' ').trim();
+    return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+};
+
+/** Avviso ai platform admin per una richiesta nuova, una risposta del
+ *  ristorante o un'escalation. Push sempre (una riga per ticket: il tag la
+ *  riaccende); email solo quando il ristorante dice che il servizio è
+ *  bloccato — è l'unico caso in cui aspettare la prossima occhiata al
+ *  telefono costa. Non lancia mai. */
+async function notifySupportToPlatform(
+    ticket: { id: number; tenant_id: number; subject: string; priority: string },
+    kind: 'nuovo' | 'risposta' | 'urgente',
+    text: string,
+    authorName: string | null,
+): Promise<void> {
+    try {
+        // rls-bypass: il nome del ristorante per l'avviso agli admin; tenants non ha RLS, il WHERE fissa l'id
+        const t = await runAsPlatform(() => queryWithRetry(`SELECT name FROM tenants WHERE id = $1`, [ticket.tenant_id]));
+        const tenantName = String(t.rows[0]?.name ?? `tenant ${ticket.tenant_id}`);
+        const urgent = ticket.priority === 'urgente';
+        const title = kind === 'risposta'
+            ? `${tenantName} ha risposto`
+            : `${urgent ? 'Urgente · ' : ''}${tenantName} chiede aiuto`;
+        await pushSendToPlatformAdmins({
+            category: 'support',
+            title,
+            body: `#${ticket.id} ${ticket.subject} — ${supportPreview(text, 90)}`,
+            url: `/?view=PLATFORM&support=${ticket.id}`,
+            tag: supportPlatformTag(ticket.id),
+        });
+        if (urgent && kind !== 'risposta' && isPlatformMailConfigured()) {
+            const recipients = await supportAlertRecipients();
+            const link = `${publicBaseUrl()}/?view=PLATFORM&support=${ticket.id}`;
+            const lines = [
+                `${tenantName} segnala un problema che blocca il servizio.`,
+                '',
+                `Richiesta #${ticket.id}: ${ticket.subject}`,
+                authorName ? `Da: ${authorName}` : '',
+                '',
+                text,
+                '',
+                `Apri la richiesta: ${link}`,
+            ].filter((l, i, all) => l !== '' || all[i - 1] !== '');
+            for (const to of recipients) {
+                await sendPlatformMail({
+                    to,
+                    subject: `[Urgente] ${tenantName}: ${ticket.subject}`,
+                    text: lines.join('\n'),
+                }).catch(err => console.warn('[support] email urgente fallita:', err?.message || err));
+            }
+        }
+    } catch (err: any) {
+        console.warn('[support] avviso alla piattaforma fallito:', err?.message || err);
+    }
+}
+
+app.post('/support/attachments', authenticate, requireTenantSession, async (req: any, res) => {
+    try {
+        if (isPlatformActingInTenant(req.user)) {
+            return res.status(403).json({ error: 'platform_session' });
+        }
+        const contentType = String(req.body?.content_type || '').toLowerCase().split(';')[0].trim();
+        const dataB64 = String(req.body?.data || '');
+        const filename = req.body?.filename ? String(req.body.filename).slice(0, 200) : null;
+        if (!contentType || !dataB64) {
+            return res.status(400).json({ error: 'content_type e data sono obbligatori' });
+        }
+        if (!/^image\/(jpeg|png|webp|gif)$/.test(contentType)) {
+            return res.status(415).json({ error: `Solo foto: ${contentType} non supportato` });
+        }
+        const buf = Buffer.from(dataB64.replace(/^data:[^,]+,/, ''), 'base64');
+        if (buf.length === 0) return res.status(400).json({ error: 'File vuoto' });
+        if (buf.length > OUTBOUND_MEDIA_MAX_BYTES) {
+            return res.status(413).json({ error: 'File troppo grande: massimo 5 MB' });
+        }
+        const token = crypto.randomBytes(32).toString('base64url');
+        const ins = await queryWithRetry(
+            `INSERT INTO outbound_media (tenant_id, token, content_type, filename, bytes, size_bytes, created_by_user_id)
+             VALUES ($7, $1, $2, $3, $4, $5, $6) RETURNING token, content_type, filename, size_bytes`,
+            [token, contentType, filename, buf, buf.length, req.user?.userId ?? null, req.tenantId!]
+        );
+        res.status(201).json(ins.rows[0]);
+    } catch (err) {
+        console.error('POST /support/attachments error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Le foto del supporto NON passano da /public/media: uno screenshot della
+// cassa o delle prenotazioni porta nomi e telefoni di clienti. Si servono
+// solo a chi vede la richiesta che le contiene.
+app.get('/support/attachments/:token', authenticate, requireTenantSession, async (req: any, res) => {
+    try {
+        const token = String(req.params.token || '');
+        if (!/^[A-Za-z0-9_-]{20,64}$/.test(token)) return res.status(404).json({ error: 'Not found' });
+        const params: any[] = [token, req.tenantId!];
+        let visible = '';
+        if (!supportSeesAll(req)) {
+            params.push(req.user.userId);
+            visible = 'AND t.created_by_user_id = $3';
+        }
+        const r = await queryWithRetry(
+            `SELECT o.content_type, o.bytes, o.size_bytes
+               FROM outbound_media o
+              WHERE o.token = $1 AND o.tenant_id = $2
+                AND EXISTS (
+                    SELECT 1 FROM support_messages m
+                      JOIN support_tickets t ON t.id = m.ticket_id
+                     WHERE m.tenant_id = $2
+                       AND m.attachments @> jsonb_build_array(jsonb_build_object('token', $1::text))
+                       ${visible}
+                )`,
+            params
+        );
+        const row = r.rows[0];
+        if (!row) return res.status(404).json({ error: 'Not found' });
+        res.setHeader('Content-Type', row.content_type);
+        res.setHeader('Content-Length', String(row.size_bytes));
+        res.setHeader('Cache-Control', 'private, max-age=3600');
+        res.end(row.bytes);
+    } catch (err) {
+        console.error('GET /support/attachments error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.get('/support/tickets', authenticate, requireTenantSession, async (req: any, res) => {
+    try {
+        const seesAll = supportSeesAll(req);
+        const params: any[] = [req.tenantId!];
+        let where = 't.tenant_id = $1';
+        if (!seesAll) {
+            params.push(req.user.userId);
+            where += ' AND t.created_by_user_id = $2';
+        }
+        // Aperte prima delle risolte, poi la più recente: la lista è una
+        // coda di cose da seguire, non un archivio.
+        const r = await queryWithRetry(
+            `SELECT ${SUPPORT_TICKET_FIELDS}
+               FROM support_tickets t
+               LEFT JOIN users u ON u.id = t.created_by_user_id
+              WHERE ${where}
+              ORDER BY (t.status = 'risolto'), t.last_message_at DESC
+              LIMIT 200`,
+            params
+        );
+        res.json({ tickets: r.rows, sees_all: seesAll });
+    } catch (err) {
+        console.error('GET /support/tickets error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/support/tickets', authenticate, requireTenantSession, supportCreateLimiter, async (req: any, res) => {
+    try {
+        if (isPlatformActingInTenant(req.user)) {
+            return res.status(403).json({ error: 'platform_session', message: 'Dentro un ristorante come piattaforma non si aprono richieste a suo nome.' });
+        }
+        const category = String(req.body?.category ?? 'altro') as SupportCategory;
+        if (!(SUPPORT_CATEGORIES as readonly string[]).includes(category)) {
+            return res.status(400).json({ error: 'invalid_category' });
+        }
+        const priority: SupportPriority = req.body?.urgent === true ? 'urgente' : 'normale';
+        const subject = String(req.body?.subject ?? '').replace(/\s+/g, ' ').trim();
+        const body = String(req.body?.body ?? '').trim();
+        if (!subject || subject.length > SUPPORT_SUBJECT_MAX) {
+            return res.status(400).json({ error: 'invalid_subject', message: `Oggetto obbligatorio, massimo ${SUPPORT_SUBJECT_MAX} caratteri.` });
+        }
+        if (!body || body.length > SUPPORT_BODY_MAX) {
+            return res.status(400).json({ error: 'invalid_body', message: `Descrizione obbligatoria, massimo ${SUPPORT_BODY_MAX} caratteri.` });
+        }
+        const userId = Number(req.user.userId);
+        const attachments = await resolveSupportAttachments(req.tenantId!, userId, req.body?.attachments);
+        if (attachments === null) {
+            return res.status(400).json({ error: 'invalid_attachments' });
+        }
+        const context = {
+            client: sanitizeClientContext(req.body?.context),
+            server: await buildSupportServerContext(req.tenantId!, userId, category),
+        };
+        const authorName = String((context.server.user as any)?.full_name || req.user.email || '') || null;
+        const ticketId = await withTenant(req.tenantId!, async client => {
+            const ins = await client.query(
+                `INSERT INTO support_tickets (tenant_id, created_by_user_id, category, priority, subject, context)
+                 VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+                [req.tenantId!, userId, category, priority, subject, JSON.stringify(context)]
+            );
+            const id = Number(ins.rows[0].id);
+            await client.query(
+                `INSERT INTO support_messages (tenant_id, ticket_id, author_type, author_user_id, author_name, body, attachments)
+                 VALUES ($1, $2, 'utente', $3, $4, $5, $6)`,
+                [req.tenantId!, id, userId, authorName, body, JSON.stringify(attachments)]
+            );
+            return id;
+        });
+        const ticket = await loadVisibleSupportTicket(req, ticketId);
+        const messages = await loadSupportMessages(req.tenantId!, ticketId);
+        void notifySupportToPlatform(ticket, 'nuovo', body, authorName);
+        emitSupportToPlatform(ticketId, req.tenantId!);
+        emitSupportToTenant(req.tenantId!, userId, ticketId);
+        res.status(201).json({ ...ticket, messages });
+    } catch (err) {
+        console.error('POST /support/tickets error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.get('/support/tickets/:id', authenticate, requireTenantSession, async (req: any, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+        const ticket = await loadVisibleSupportTicket(req, id);
+        if (!ticket) return res.status(404).json({ error: 'not_found' });
+        const messages = await loadSupportMessages(req.tenantId!, id);
+        // Il «da leggere» è di chi ha aperto la richiesta: il titolare che la
+        // sfoglia non lo spegne al posto del cameriere che aspetta la risposta.
+        const userId = Number(req.user.userId);
+        if (!isPlatformActingInTenant(req.user) && ticket.created_by_user_id === userId) {
+            if (ticket.tenant_unread) {
+                await queryWithRetry(
+                    `UPDATE support_tickets SET tenant_unread = FALSE WHERE id = $1 AND tenant_id = $2`,
+                    [id, req.tenantId!]
+                );
+                ticket.tenant_unread = false;
+            }
+            await markNotificationsReadForUsers(req.tenantId!, [userId], [supportTenantTag(id)]);
+        }
+        res.json({ ...ticket, messages });
+    } catch (err) {
+        console.error('GET /support/tickets/:id error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/support/tickets/:id/messages', authenticate, requireTenantSession, async (req: any, res) => {
+    try {
+        if (isPlatformActingInTenant(req.user)) {
+            return res.status(403).json({ error: 'platform_session', message: 'Rispondi dal pannello piattaforma.' });
+        }
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+        const ticket = await loadVisibleSupportTicket(req, id);
+        if (!ticket) return res.status(404).json({ error: 'not_found' });
+        const body = String(req.body?.body ?? '').trim();
+        if (!body || body.length > SUPPORT_BODY_MAX) {
+            return res.status(400).json({ error: 'invalid_body', message: `Messaggio obbligatorio, massimo ${SUPPORT_BODY_MAX} caratteri.` });
+        }
+        const userId = Number(req.user.userId);
+        const attachments = await resolveSupportAttachments(req.tenantId!, userId, req.body?.attachments);
+        if (attachments === null) return res.status(400).json({ error: 'invalid_attachments' });
+        const nameRes = await queryWithRetry(`SELECT full_name, email FROM users WHERE id = $1 AND tenant_id = $2`, [userId, req.tenantId!]);
+        const authorName = String(nameRes.rows[0]?.full_name || nameRes.rows[0]?.email || req.user.email || '') || null;
+        await withTenant(req.tenantId!, async client => {
+            await client.query(
+                `INSERT INTO support_messages (tenant_id, ticket_id, author_type, author_user_id, author_name, body, attachments)
+                 VALUES ($1, $2, 'utente', $3, $4, $5, $6)`,
+                [req.tenantId!, id, userId, authorName, body, JSON.stringify(attachments)]
+            );
+            // Il ristorante che risponde rimette la palla alla piattaforma:
+            // «in attesa del cliente» torna in corso, una risolta si riapre.
+            // Chi ha aperto e risponde ha letto per forza: il suo pallino si
+            // spegne anche se la risposta parte senza aver riaperto il dettaglio.
+            await client.query(
+                `UPDATE support_tickets
+                    SET status = CASE status WHEN 'attesa_cliente' THEN 'in_corso' WHEN 'risolto' THEN 'nuovo' ELSE status END,
+                        resolved_at = CASE WHEN status = 'risolto' THEN NULL ELSE resolved_at END,
+                        platform_unread = TRUE,
+                        tenant_unread = CASE WHEN created_by_user_id = $3 THEN FALSE ELSE tenant_unread END,
+                        last_message_at = now(), updated_at = now()
+                  WHERE id = $1 AND tenant_id = $2`,
+                [id, req.tenantId!, userId]
+            );
+        });
+        const updated = await loadVisibleSupportTicket(req, id);
+        const messages = await loadSupportMessages(req.tenantId!, id);
+        void notifySupportToPlatform(updated, 'risposta', body, authorName);
+        emitSupportToPlatform(id, req.tenantId!);
+        emitSupportToTenant(req.tenantId!, updated.created_by_user_id ?? null, id);
+        res.status(201).json({ ...updated, messages });
+    } catch (err) {
+        console.error('POST /support/tickets/:id/messages error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Due sole mosse per il ristorante: chiudere una richiesta risolta, e dire
+// che il problema è diventato bloccante. Lo stato di lavorazione resta della
+// piattaforma.
+app.patch('/support/tickets/:id', authenticate, requireTenantSession, async (req: any, res) => {
+    try {
+        if (isPlatformActingInTenant(req.user)) {
+            return res.status(403).json({ error: 'platform_session' });
+        }
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+        const ticket = await loadVisibleSupportTicket(req, id);
+        if (!ticket) return res.status(404).json({ error: 'not_found' });
+        const wantsResolved = req.body?.status === 'risolto';
+        const wantsUrgent = req.body?.priority === 'urgente';
+        if (!wantsResolved && !wantsUrgent) {
+            return res.status(400).json({ error: 'invalid_patch', message: "Si può solo chiudere la richiesta o segnarla urgente." });
+        }
+        const escalated = wantsUrgent && ticket.priority !== 'urgente' && ticket.status !== 'risolto';
+        await queryWithRetry(
+            `UPDATE support_tickets
+                SET status = CASE WHEN $3::boolean THEN 'risolto' ELSE status END,
+                    resolved_at = CASE WHEN $3::boolean AND status <> 'risolto' THEN now() ELSE resolved_at END,
+                    priority = CASE WHEN $4::boolean THEN 'urgente' ELSE priority END,
+                    platform_unread = CASE WHEN $4::boolean THEN TRUE ELSE platform_unread END,
+                    updated_at = now()
+              WHERE id = $1 AND tenant_id = $2`,
+            [id, req.tenantId!, wantsResolved, escalated]
+        );
+        const updated = await loadVisibleSupportTicket(req, id);
+        const messages = await loadSupportMessages(req.tenantId!, id);
+        if (escalated) {
+            void notifySupportToPlatform(updated, 'urgente', messages[messages.length - 1]?.body ?? '', null);
+        }
+        // Chiusa dal ristorante: l'avviso alla piattaforma non chiede più niente.
+        if (wantsResolved) void closePlatformNotifications([supportPlatformTag(id)]);
+        emitSupportToPlatform(id, req.tenantId!);
+        emitSupportToTenant(req.tenantId!, updated.created_by_user_id ?? null, id);
+        res.json({ ...updated, messages });
+    } catch (err) {
+        console.error('PATCH /support/tickets/:id error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -19274,13 +21465,7 @@ app.get('/staff-chat/threads', authenticate, requirePermission('staffchat:use'),
             ),
             queryWithRetry(
                 `SELECT m.channel, COUNT(*)::int AS unread
-                 FROM staff_messages m
-                 LEFT JOIN staff_message_reads r
-                   ON r.tenant_id = m.tenant_id AND r.user_id = $2
-                  AND r.thread_key = 'channel:' || m.channel
-                 WHERE m.tenant_id = $1 AND m.kind = 'channel' AND m.channel = ANY($3)
-                   AND m.sender_user_id IS DISTINCT FROM $2
-                   AND m.id > COALESCE(r.last_read_message_id, 0)
+                 ${STAFF_CHANNEL_UNREAD_FROM}
                  GROUP BY m.channel`,
                 [req.tenantId!, userId, channels]
             ),
@@ -19377,6 +21562,10 @@ app.get('/staff-chat/threads/:threadKey/messages', authenticate, requirePermissi
         const beforeClause = Number.isFinite(before) ? before : null;
 
         let rows: any[];
+        // Conferma di lettura (solo DM): fin dove l'altro capo ha letto i
+        // messaggi di questo thread. Nei canali la lettura è di squadra e
+        // «letto» non avrebbe un significato solo.
+        let peerReadUpTo: number | null = null;
         if (ref.kind === 'channel') {
             if (!channelsForRole(req.user.role).includes(ref.channel)) {
                 return res.status(403).json({ error: 'Canale non accessibile' });
@@ -19405,9 +21594,17 @@ app.get('/staff-chat/threads/:threadKey/messages', authenticate, requirePermissi
                 [req.tenantId!, userId, ref.otherUserId, beforeClause, limit]
             );
             rows = r.rows;
+            // Il cursore dell'altro sul SUO thread con me (dm:<me>).
+            const peer = await queryWithRetry(
+                `SELECT last_read_message_id FROM staff_message_reads
+                 WHERE tenant_id = $1 AND user_id = $2 AND thread_key = $3`,
+                [req.tenantId!, ref.otherUserId, dmThreadKey(userId)]
+            );
+            const v = peer.rows[0]?.last_read_message_id;
+            peerReadUpTo = v != null ? Number(v) : null;
         }
         // Pagina restituita in ordine cronologico ascendente.
-        res.json({ messages: rows.reverse() });
+        res.json({ messages: rows.reverse(), peer_read_up_to: peerReadUpTo });
     } catch (err) {
         console.error('GET /staff-chat/threads/:threadKey/messages error:', err);
         res.status(500).json({ error: 'Internal server error' });
@@ -19561,17 +21758,19 @@ app.post('/staff-chat/messages', authenticate, requirePermission('staffchat:use'
                 category: 'staff',
                 persist: false,
             };
-            // La push di menzione parte DOPO quella di canale e condivide il
-            // tag: sul device del menzionato la seconda sostituisce la prima,
-            // quindi resta una sola notifica, con la dicitura giusta.
+            // I menzionati non ricevono la push di canale ma solo la loro, con
+            // un tag suo (staffchat:mention:<canale>): quella di canale si
+            // spegne quando un collega legge il canale (lettura di squadra),
+            // la menzione resta finché non la legge chi è menzionato.
             pushSendToRoles(req.tenantId!, rolesForChannel(ref.channel).map(String), {
                 ...channelPayload,
                 title: `${senderName} · ${ref.channel}`,
                 body: preview,
-            }, { excludeUserId: userId })
+            }, { excludeUserIds: [userId, ...(mentions ?? [])] })
                 .then(() => Promise.all((mentions ?? []).map(uid =>
                     pushSendToUser(uid, {
                         ...channelPayload,
+                        tag: `staffchat:${mentionThreadKey(channelKey)}`,
                         title: `${senderName} ti ha menzionato · ${ref.channel}`,
                         body: preview,
                     })
@@ -19603,9 +21802,23 @@ app.post('/staff-chat/threads/:threadKey/read', authenticate, requirePermission(
         const threadKey = String(req.params.threadKey);
         const ref = parseThreadKey(threadKey);
         if (!ref) return res.status(400).json({ error: 'Thread non valido' });
-        const lastReadMessageId = Number(req.body?.lastReadMessageId);
+        let lastReadMessageId = Number(req.body?.lastReadMessageId);
         if (!Number.isInteger(lastReadMessageId) || lastReadMessageId <= 0) {
             return res.status(400).json({ error: 'lastReadMessageId non valido' });
+        }
+        // DM: il cursore si ferma all'ultimo messaggio ricevuto esistente fino
+        // a quello indicato. Da questo cursore nasce la conferma di lettura
+        // del mittente: un id gonfiato marcherebbe «letti» messaggi che
+        // l'altro non ha ancora scritto.
+        if (ref.kind === 'direct') {
+            const cap = await queryWithRetry(
+                `SELECT MAX(id) AS id FROM staff_messages
+                 WHERE tenant_id = $1 AND kind = 'direct'
+                   AND sender_user_id = $2 AND recipient_user_id = $3 AND id <= $4`,
+                [req.tenantId!, ref.otherUserId, userId, lastReadMessageId]
+            );
+            if (cap.rows[0]?.id == null) return res.json({ ok: true });
+            lastReadMessageId = Number(cap.rows[0].id);
         }
         // Upsert monotono: un device in ritardo non riporta indietro il cursore.
         await queryWithRetry(
@@ -19616,8 +21829,79 @@ app.post('/staff-chat/threads/:threadKey/read', authenticate, requirePermission(
                            updated_at = CURRENT_TIMESTAMP`,
             [req.tenantId!, userId, threadKey, lastReadMessageId]
         );
-        // Gli altri device dello stesso utente allineano il badge.
-        socketService?.broadcastToUsers(req.tenantId!, [userId], 'staffchat:read', { threadKey, lastReadMessageId }, socketId);
+        // Letto di persona: anche le menzioni del canale sono lette. È
+        // l'unica strada che fa avanzare questo cursore — la lettura di
+        // squadra qui sotto non lo tocca.
+        if (ref.kind === 'channel') {
+            await queryWithRetry(
+                `INSERT INTO staff_message_reads (tenant_id, user_id, thread_key, last_read_message_id)
+                 VALUES ($1, $2, $3, $4)
+                 ON CONFLICT (tenant_id, user_id, thread_key)
+                 DO UPDATE SET last_read_message_id = GREATEST(staff_message_reads.last_read_message_id, EXCLUDED.last_read_message_id),
+                               updated_at = CURRENT_TIMESTAMP`,
+                [req.tenantId!, userId, mentionThreadKey(threadKey), lastReadMessageId]
+            );
+        }
+        // Gli altri device dello stesso utente allineano il badge. `personal`
+        // dice al client che anche la push di menzione va chiusa.
+        socketService?.broadcastToUsers(req.tenantId!, [userId], 'staffchat:read', { threadKey, lastReadMessageId, personal: true }, socketId);
+        // DM letto: il mittente vede la conferma di lettura. Dal suo punto di
+        // vista il thread è dm:<chi ha letto>.
+        if (ref.kind === 'direct') {
+            socketService?.broadcastToUsers(req.tenantId!, [ref.otherUserId], 'staffchat:receipt', {
+                threadKey: dmThreadKey(userId), lastReadMessageId,
+            });
+        }
+
+        // Canali: lettura di squadra. Letto da uno, il cursore avanza per
+        // tutti i membri del canale (i ruoli che lo vedono), e sui loro
+        // dispositivi badge e push si spengono via lo stesso 'staffchat:read'.
+        // Eccezione: i messaggi che menzionano qualcuno restano da leggere
+        // per lui (cursore delle menzioni, sopra). I DM restano personali. Due guardie, perché qui si scrive il
+        // cursore degli ALTRI: parte solo da chi è membro del canale, e il
+        // cursore si ferma all'ultimo messaggio esistente fino a quello
+        // indicato — un id gonfiato non deve far nascere «già letti» i
+        // messaggi di domani.
+        if (ref.kind === 'channel' && channelsForRole(req.user.role).includes(ref.channel)) {
+            const cap = await queryWithRetry(
+                `SELECT MAX(id) AS id FROM staff_messages
+                 WHERE tenant_id = $1 AND kind = 'channel' AND channel = $2 AND id <= $3`,
+                [req.tenantId!, ref.channel, lastReadMessageId]
+            );
+            const sharedCursor = cap.rows[0]?.id != null ? Number(cap.rows[0].id) : null;
+            if (sharedCursor) {
+                const roles = rolesForChannel(ref.channel).map(String);
+                // Prima di spostare il cursore del canale degli altri, il loro
+                // cursore delle menzioni nasce dov'era il loro cursore del
+                // canale: da lì in poi una menzione resta da leggere finché
+                // non la leggono loro. Chi la riga l'ha già non cambia.
+                await queryWithRetry(
+                    `INSERT INTO staff_message_reads (tenant_id, user_id, thread_key, last_read_message_id)
+                     SELECT $1, u.id, $4, COALESCE(r.last_read_message_id, 0) FROM users u
+                     LEFT JOIN staff_message_reads r
+                       ON r.tenant_id = $1 AND r.user_id = u.id AND r.thread_key = $3
+                     WHERE u.tenant_id = $1 AND u.is_active = TRUE AND u.id <> $2
+                       AND u.role = ANY($5::text[])
+                     ON CONFLICT (tenant_id, user_id, thread_key) DO NOTHING`,
+                    [req.tenantId!, userId, threadKey, mentionThreadKey(threadKey), roles]
+                );
+                const others = await queryWithRetry(
+                    `INSERT INTO staff_message_reads (tenant_id, user_id, thread_key, last_read_message_id)
+                     SELECT $1, u.id, $3, $4 FROM users u
+                     WHERE u.tenant_id = $1 AND u.is_active = TRUE AND u.id <> $2
+                       AND u.role = ANY($5::text[])
+                     ON CONFLICT (tenant_id, user_id, thread_key)
+                     DO UPDATE SET last_read_message_id = GREATEST(staff_message_reads.last_read_message_id, EXCLUDED.last_read_message_id),
+                                   updated_at = CURRENT_TIMESTAMP
+                     RETURNING user_id`,
+                    [req.tenantId!, userId, threadKey, sharedCursor, roles]
+                );
+                const otherIds = others.rows.map((r: any) => Number(r.user_id));
+                if (otherIds.length > 0) {
+                    socketService?.broadcastToUsers(req.tenantId!, otherIds, 'staffchat:read', { threadKey, lastReadMessageId: sharedCursor });
+                }
+            }
+        }
         res.json({ ok: true });
     } catch (err) {
         console.error('POST /staff-chat/threads/:threadKey/read error:', err);
@@ -19631,13 +21915,7 @@ app.get('/staff-chat/unread-count', authenticate, requirePermission('staffchat:u
         const channels = channelsForRole(req.user.role);
         const r = await queryWithRetry(
             `SELECT (
-                (SELECT COUNT(*) FROM staff_messages m
-                 LEFT JOIN staff_message_reads r
-                   ON r.tenant_id = m.tenant_id AND r.user_id = $2
-                  AND r.thread_key = 'channel:' || m.channel
-                 WHERE m.tenant_id = $1 AND m.kind = 'channel' AND m.channel = ANY($3)
-                   AND m.sender_user_id IS DISTINCT FROM $2
-                   AND m.id > COALESCE(r.last_read_message_id, 0))
+                (SELECT COUNT(*) ${STAFF_CHANNEL_UNREAD_FROM})
                 +
                 (SELECT COUNT(*) FROM staff_messages m
                  LEFT JOIN staff_message_reads r
@@ -22249,6 +24527,102 @@ const parseNumericOrNull = (v: unknown): number | null => {
 };
 
 // ---- TEMPERATURE READINGS ---------------------------------------------------
+// Chi riceve gli avvisi HACCP quando non passano da un promemoria
+// configurabile: chi risponde del registro e chi sta in cucina.
+const HACCP_ALERT_ROLES = ['OWNER', 'GENERAL_MANAGER', 'MANAGER', 'KITCHEN'];
+
+const formatHaccpTemp = (n: number): string =>
+    `${String(Math.round(n * 10) / 10).replace('.', ',')} °C`;
+
+interface HaccpReadingRow {
+    date: string;
+    location: string;
+    temperature: number;
+    targetMax: number | null;
+}
+
+/** Dopo il salvataggio di una rilevazione: fuori soglia → avviso a chi
+ *  risponde del registro; di nuovo in soglia → l'avviso si chiude per tutti.
+ *  Solo il giorno di oggi suona: correggere il foglio di ieri non è
+ *  un'emergenza, ma chiude comunque l'avviso rimasto aperto. */
+async function notifyHaccpTemperature(
+    tenantId: number,
+    row: HaccpReadingRow,
+    before: { temperature: number; target_max: number | null } | null,
+    recorderId: number | null,
+): Promise<void> {
+    try {
+        const tag = haccpTemperatureTag(row.date, row.location);
+        const limit = typeof row.targetMax === 'number'
+            ? row.targetMax
+            : HACCP_TEMPERATURE_LOCATIONS.find(l => l.location === row.location)?.targetMax ?? null;
+        const over = limit !== null && row.temperature > limit;
+        if (!over) {
+            await markSharedNotificationsRead(tenantId, [tag]);
+        } else {
+            const beforeLimit = before?.target_max ?? limit;
+            const sameAlert = before !== null && before.temperature === row.temperature
+                && beforeLimit !== null && before.temperature > beforeLimit;
+            const today = getItalianTodayIso(new Date(), (await getTenantLocale(tenantId)).timezone);
+            if (!sameAlert && row.date === today) {
+                // Chi ha scritto il valore lo vede già in rosso sul modulo.
+                await pushSendToRoles(tenantId, HACCP_ALERT_ROLES, {
+                    category: 'system',
+                    title: 'Temperatura fuori soglia',
+                    body: `${row.location} · ${formatHaccpTemp(row.temperature)} (limite ${formatHaccpTemp(limit)})`,
+                    url: '/?view=HACCP',
+                    tag,
+                }, recorderId ? { excludeUserId: recorderId } : undefined);
+            }
+        }
+        // Registro del giorno completo: il promemoria delle mancanti è superato.
+        const done = await queryWithRetry(
+            `SELECT COUNT(DISTINCT location)::int AS n FROM haccp_temperature_readings
+              WHERE tenant_id = $1 AND date = $2 AND location = ANY($3::text[])`,
+            [tenantId, row.date, HACCP_TEMPERATURE_LOCATIONS.map(l => l.location)]
+        );
+        if ((done.rows[0]?.n ?? 0) >= HACCP_TEMPERATURE_LOCATIONS.length) {
+            await markSharedNotificationsRead(tenantId, [haccpMissingTag(row.date)]);
+        }
+    } catch (err) {
+        console.error('[haccp] notifica temperatura fallita:', err);
+    }
+}
+
+/** Promemoria di sistema HACCP_TEMPERATURES: all'orario scelto in
+ *  Impostazioni → Promemoria avvisa solo se il registro di oggi è incompleto.
+ *  Tace nei giorni di chiusura e per chi il registro non l'ha mai usato
+ *  nell'ultimo mese — il seed crea il promemoria per ogni ristorante. */
+async function runHaccpMissingReminder(tenantId: number, targetRoles: string[]): Promise<void> {
+    const today = getItalianTodayIso(new Date(), (await getTenantLocale(tenantId)).timezone);
+    const serviceOpen = makeServiceOpen(await loadOpeningCalendar(tenantId, today, today));
+    if (!serviceOpen(today, 'LUNCH') && !serviceOpen(today, 'DINNER')) return;
+    const used = await queryWithRetry(
+        `SELECT 1 FROM haccp_temperature_readings
+          WHERE tenant_id = $1 AND date >= $2::date - 30 LIMIT 1`,
+        [tenantId, today]
+    );
+    if (used.rows.length === 0) return;
+    const recorded = await queryWithRetry(
+        `SELECT location FROM haccp_temperature_readings WHERE tenant_id = $1 AND date = $2`,
+        [tenantId, today]
+    );
+    const have = new Set(recorded.rows.map((r: any) => r.location));
+    const missing = HACCP_TEMPERATURE_LOCATIONS.filter(l => !have.has(l.location)).map(l => l.location);
+    if (missing.length === 0) return;
+    const shown = missing.slice(0, 3).join(', ');
+    const rest = missing.length > 3 ? ` e altre ${missing.length - 3}` : '';
+    await pushSendToRoles(tenantId, targetRoles.length > 0 ? targetRoles : HACCP_ALERT_ROLES, {
+        category: 'system',
+        title: missing.length === HACCP_TEMPERATURE_LOCATIONS.length
+            ? 'Temperature di oggi da registrare'
+            : missing.length === 1 ? 'Manca una temperatura' : `Mancano ${missing.length} temperature`,
+        body: `${shown}${rest}`,
+        url: '/?view=HACCP',
+        tag: haccpMissingTag(today),
+    });
+}
+
 app.get('/haccp/temperatures', authenticate, async (req, res) => {
     try {
         const { date } = req.query;
@@ -22287,6 +24661,16 @@ app.post('/haccp/temperatures', authenticate, async (req, res) => {
         if (temp === null) return res.status(400).json({ error: 'temperature is required' });
         const target = parseNumericOrNull(targetMax);
         const recorderName = req.user?.email || null;
+        const tenantId = req.tenantId!;
+        // Il valore di prima decide se avvisare: il modulo ripubblica la riga
+        // a ogni blur, e la stessa temperatura fuori soglia non deve suonare
+        // di nuovo sui telefoni della cucina.
+        const before = await queryWithRetry(
+            `SELECT temperature::float8 AS temperature, target_max::float8 AS target_max
+               FROM haccp_temperature_readings
+              WHERE tenant_id = $1 AND date = $2 AND location = $3`,
+            [tenantId, date, location.trim()]
+        );
         const result = await queryWithRetry(`
             INSERT INTO haccp_temperature_readings
                 (tenant_id, date, location, temperature, target_max, note, recorded_by_user_id, recorded_by_user_name)
@@ -22307,7 +24691,10 @@ app.post('/haccp/temperatures', authenticate, async (req, res) => {
                       recorded_by_user_id as "recordedByUserId",
                       recorded_by_user_name as "recordedByUserName",
                       recorded_at as "recordedAt"
-        `, [date, location.trim(), temp, target, note?.trim() || null, req.user?.userId || null, recorderName, req.tenantId!]);
+        `, [date, location.trim(), temp, target, note?.trim() || null, req.user?.userId || null, recorderName, tenantId]);
+        // Prima della risposta, come per le altre letture condivise: chi
+        // salva e poi apre il centro notifiche deve già trovarlo aggiornato.
+        await notifyHaccpTemperature(tenantId, result.rows[0], before.rows[0] ?? null, req.user?.userId ?? null);
         res.status(201).json(result.rows[0]);
     } catch (err) {
         console.error(err);
@@ -22317,8 +24704,15 @@ app.post('/haccp/temperatures', authenticate, async (req, res) => {
 
 app.delete('/haccp/temperatures/:id', authenticate, async (req, res) => {
     try {
-        const result = await queryWithRetry('DELETE FROM haccp_temperature_readings WHERE id = $1 AND tenant_id = $2 RETURNING id', [req.params.id, req.tenantId!]);
+        const result = await queryWithRetry(
+            `DELETE FROM haccp_temperature_readings WHERE id = $1 AND tenant_id = $2
+             RETURNING TO_CHAR(date, 'YYYY-MM-DD') AS date, location`,
+            [req.params.id, req.tenantId!]
+        );
         if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+        // Una lettura cancellata non è più fuori soglia: l'avviso si chiude.
+        const { date, location } = result.rows[0];
+        await markSharedNotificationsRead(req.tenantId!, [haccpTemperatureTag(date, location)]);
         res.status(204).send();
     } catch (err) {
         console.error(err);
@@ -22949,11 +25343,49 @@ app.put('/voice-usage/cap', authenticate, requireFeature('voice'), requirePermis
                 AND month = to_char(date_trunc('month', NOW() AT TIME ZONE $2), 'YYYY-MM-DD')::date`,
             [req.tenantId!, (await getTenantLocale(req.tenantId!)).timezone]
         );
+        // E per lo stesso motivo gli avvisi sul tetto vecchio si spengono per
+        // tutti (quelli sui minuti inclusi restano veri e restano): se il
+        // nuovo tetto è di nuovo vicino, il prossimo giro li rimanda.
+        const capAlerts = await queryWithRetry(
+            `SELECT DISTINCT tag FROM notifications
+              WHERE tenant_id = $1 AND read_at IS NULL
+                AND (tag LIKE 'voice-usage-%-cap\\_80' OR tag LIKE 'voice-usage-%-cap\\_100')`,
+            [req.tenantId!]
+        );
+        await markSharedNotificationsRead(req.tenantId!, capAlerts.rows.map((r: any) => String(r.tag)));
         const plan = await getVoicePlan(req.tenantId!);
         const month = await getVoiceMonthUsage(req.tenantId!, plan);
         res.json({ plan, month });
     } catch (err) {
         console.error('PUT /voice-usage/cap error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// A quali percentuali dei minuti inclusi avvisare il ristoratore, fra quelle
+// offerte. [] = nessun avviso sui minuti inclusi; quelli sul tetto partono
+// comunque. Gli avvisi già mandati nel mese restano: claimNewVoiceUsageAlerts
+// avvisa solo sopra l'ultimo.
+app.put('/voice-usage/alerts', authenticate, requireFeature('voice'), requirePermission('settings:full'), async (req, res) => {
+    try {
+        const raw = req.body?.alert_percents;
+        const options: readonly number[] = VOICE_ALERT_PERCENT_OPTIONS;
+        if (!Array.isArray(raw) || raw.some(p => !options.includes(p))) {
+            return res.status(400).json({ error: 'invalid_value', message: `Soglie ammesse: ${options.join(', ')}.` });
+        }
+        const percents = [...new Set<number>(raw)].sort((a, b) => a - b);
+        await queryWithRetry(
+            `INSERT INTO voice_plans (tenant_id, alert_percents, updated_at, updated_by)
+             VALUES ($1, $2::smallint[], NOW(), $3)
+             ON CONFLICT (tenant_id) DO UPDATE
+                SET alert_percents = EXCLUDED.alert_percents, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
+            [req.tenantId!, percents, req.user?.userId ?? null]
+        );
+        const plan = await getVoicePlan(req.tenantId!);
+        const month = await getVoiceMonthUsage(req.tenantId!, plan);
+        res.json({ plan, month });
+    } catch (err) {
+        console.error('PUT /voice-usage/alerts error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -23114,6 +25546,27 @@ app.get('/voice-calls/pending-count', authenticate, requireFeature('voice'), voi
     }
 });
 
+// Le campanelle nate da una chiamata (vedi handleElevenLabsPostCall): una
+// volta ricontattato il cliente non chiedono più niente a nessuno.
+function voiceCallNotificationTags(conversationId: unknown): string[] {
+    if (typeof conversationId !== 'string' || !conversationId) return [];
+    // voice-callback-: il «Cliente da richiamare» che Sofia manda quando il
+    // cliente chiede di essere richiamato. Stessa conversazione, stessa
+    // chiusura: richiamato è richiamato, da qualunque delle tre strade.
+    return [`voice-followup-${conversationId}`, `voice-phantom-${conversationId}`, `voice-callback-${conversationId}`];
+}
+
+/** Le chiamate sono cambiate (nuova telefonata, richiamata chiesta, segnata
+ *  ricontattata, collegata, recuperata): gli altri dispositivi rileggono la
+ *  lista e il contatore «Chiamate». Senza questo il PC della reception,
+ *  fermo sulla stessa schermata, teneva il numero vecchio fino a un cambio
+ *  pagina. Il payload è vuoto di proposito: si rilegge, non si applica. */
+function broadcastVoiceCallsChanged(tenantId: number, excludeSocketId?: string): void {
+    try {
+        socketService?.broadcastToAll(tenantId, 'voiceCall:changed', {}, excludeSocketId);
+    } catch (_) { /* best-effort: il badge si riallinea comunque al focus */ }
+}
+
 // Bulk: flip every call still awaiting follow-up (no linked reservation,
 // status NULL/PENDING) to CONTACTED in one shot. Powers the "segna tutte
 // come ricontattate" button in Conversazioni — returns how many rows
@@ -23128,9 +25581,12 @@ app.post('/voice-calls/mark-all-contacted', authenticate, requireFeature('voice'
              WHERE tenant_id = $2
                AND reservation_id IS NULL
                AND (follow_up_status IS NULL OR follow_up_status = 'PENDING')
-             RETURNING id`,
+             RETURNING id, conversation_id`,
             [req.user?.userId ?? null, req.tenantId!]
         );
+        await markSharedNotificationsRead(req.tenantId!,
+            result.rows.flatMap((r: any) => voiceCallNotificationTags(r.conversation_id)));
+        if (result.rows.length > 0) broadcastVoiceCallsChanged(req.tenantId!, req.headers['x-socket-id'] as string);
         res.json({ updated: result.rows.length });
     } catch (err) {
         console.error('POST /voice-calls/mark-all-contacted error:', err);
@@ -23178,11 +25634,16 @@ app.patch('/voice-calls/:id/follow-up', authenticate, requireFeature('voice'), v
         const result = await queryWithRetry(
             `UPDATE voice_calls SET ${sets.join(', ')}
              WHERE id = $${params.length - 1} AND tenant_id = $${params.length}
-             RETURNING id, follow_up_status, notes, follow_up_updated_at, reservation_deleted_at`,
+             RETURNING id, follow_up_status, notes, follow_up_updated_at, reservation_deleted_at, conversation_id`,
             params
         );
         if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-        res.json(result.rows[0]);
+        const { conversation_id: conversationId, ...call } = result.rows[0];
+        if (status === 'CONTACTED') {
+            await markSharedNotificationsRead(req.tenantId!, voiceCallNotificationTags(conversationId));
+        }
+        broadcastVoiceCallsChanged(req.tenantId!, req.headers['x-socket-id'] as string);
+        res.json(call);
     } catch (err) {
         console.error('PATCH /voice-calls/:id/follow-up error:', err);
         res.status(500).json({ error: 'Internal server error' });
@@ -23222,11 +25683,14 @@ app.patch('/voice-calls/:id/link', authenticate, requireFeature('voice'), voiceC
                  follow_up_updated_by = $2,
                  phantom_recovered = CASE WHEN phantom_confirmation THEN TRUE ELSE phantom_recovered END
              WHERE id = $3 AND tenant_id = $4
-             RETURNING id, reservation_id, follow_up_status, follow_up_updated_at, phantom_recovered`,
+             RETURNING id, reservation_id, follow_up_status, follow_up_updated_at, phantom_recovered, conversation_id`,
             [reservationId, req.user?.userId ?? null, id, req.tenantId!]
         );
         if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-        res.json(result.rows[0]);
+        const { conversation_id: conversationId, ...call } = result.rows[0];
+        await markSharedNotificationsRead(req.tenantId!, voiceCallNotificationTags(conversationId));
+        broadcastVoiceCallsChanged(req.tenantId!, req.headers['x-socket-id'] as string);
+        res.json(call);
     } catch (err) {
         console.error('PATCH /voice-calls/:id/link error:', err);
         res.status(500).json({ error: 'Internal server error' });
@@ -23246,11 +25710,19 @@ app.patch('/voice-calls/:id/recover', authenticate, requireFeature('voice'), voi
             `UPDATE voice_calls
              SET phantom_recovered = TRUE
              WHERE id = $1 AND tenant_id = $2
-             RETURNING id, phantom_confirmation, phantom_recovered`,
+             RETURNING id, phantom_confirmation, phantom_recovered, conversation_id`,
             [id, req.tenantId!]
         );
         if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-        res.json(result.rows[0]);
+        const { conversation_id: conversationId, ...recovered } = result.rows[0];
+        // Recuperata a mano: «⚠️ Prenotazione da recuperare» ha fatto il suo
+        // lavoro, per tutti. Solo quella: la chiamata può restare da
+        // ricontattare per altro.
+        if (typeof conversationId === 'string' && conversationId) {
+            await markSharedNotificationsRead(req.tenantId!, [`voice-phantom-${conversationId}`]);
+        }
+        broadcastVoiceCallsChanged(req.tenantId!, req.headers['x-socket-id'] as string);
+        res.json(recovered);
     } catch (err) {
         console.error('PATCH /voice-calls/:id/recover error:', err);
         res.status(500).json({ error: 'Internal server error' });
@@ -24263,10 +26735,16 @@ function normalizeLegalMode(v: unknown): LegalMode {
 async function getLegalConfig(tenantId: number): Promise<Record<string, string | boolean>> {
     const base = emptyLegalConfig();
     try {
-        const result = await queryWithRetry(
+        // Sempre nel contesto del tenant richiesto: i chiamanti pubblici
+        // (l'informativa /privacy, il refresh dell'identità partito da una
+        // pagina anonima) non ne hanno uno. In produzione, ruolo non
+        // superuser con RLS rigida, la lettura senza contesto vedeva 0 righe
+        // e l'informativa del Frantoio usciva coi segnaposto «[Ragione
+        // sociale]» (scoperto il 25/09/2026, audit isolamento tenant).
+        const result = await runWithTenantContext(tenantId, () => queryWithRetry(
             'SELECT text_value FROM app_settings WHERE tenant_id = $1 AND key = $2',
             [tenantId, LEGAL_CONFIG_KEY]
-        );
+        ));
         const raw = result.rows[0]?.text_value;
         if (typeof raw === 'string' && raw.trim()) {
             const parsed = JSON.parse(raw);
@@ -24523,7 +27001,7 @@ async function maybeSuggestTableAssignment(tenantId: number, reservationId: numb
 
         const [tablesRes, mergesRes, occupancyRes] = await Promise.all([
             queryWithRetry(
-                `SELECT t.id, t.name, t.seats, t.room_id, r.name AS room_name
+                `SELECT t.id, t.name, t.seats, t.room_id, r.name AS room_name, t.assign_priority
                    FROM tables t
                    JOIN rooms r ON r.id = t.room_id AND r.tenant_id = t.tenant_id
                   WHERE t.tenant_id = $1 AND r.is_closed = false
@@ -24973,6 +27451,14 @@ app.get('/reviews/requests', authenticate, requireFeature('reviews'), requirePer
                 [req.tenantId!]
             ),
         ]);
+        // Aperto il registro, gli avvisi «non partite» hanno fatto il loro
+        // lavoro: si chiudono per tutti. Solo la prima pagina, e l'ultima
+        // settimana: un avviso più vecchio non è più rimasto aperto.
+        if (offset === 0) {
+            const today = getItalianTodayIso(new Date(), (await getTenantLocale(req.tenantId!)).timezone);
+            await markSharedNotificationsRead(req.tenantId!,
+                Array.from({ length: 8 }, (_, i) => reviewFailureTag(addDaysIso(today, -i))));
+        }
         res.json({ total: count.rows[0]?.total ?? 0, requests: rows.rows });
     } catch (err) {
         console.error('GET /reviews/requests error:', err);
@@ -25417,6 +27903,8 @@ app.post('/takeaway/orders/:id/fire', authenticate, requireFeature('takeaway'), 
 
         const view = await loadTakeawayView(req.tenantId!, takeawayId);
         try { socketService?.broadcastToAll(req.tenantId!, 'takeaway:updated', view); } catch (_) {}
+        // Mandato in cucina: il «nuovo ordine» è stato gestito.
+        await markSharedNotificationsRead(req.tenantId!, await takeawayNotificationTags(req.tenantId!, takeawayId, false));
         res.json(view);
     } catch (err) {
         console.error('POST /takeaway/orders/:id/fire error:', err);
@@ -26299,6 +28787,29 @@ app.patch('/takeaway/orders/:id', authenticate, requireFeature('takeaway'), requ
 // Cambio di stato esplicito, niente DELETE: annullare È uno stato, e la
 // board deve poter correggere (un «ritirato» per sbaglio torna «pronto»).
 // I timestamp seguono lo stato: tornare indietro li azzera.
+// Le campanelle di un asporto: «nuovo ordine» (takeaway-new-<id>) e, se è
+// passato dalla cucina, «pronto l'ordine» (course-<comanda>-<uscita>, lo
+// stesso tag del passe). Servono a spegnerle quando l'ordine è gestito.
+async function takeawayNotificationTags(tenantId: number, takeawayId: number, withReady: boolean): Promise<string[]> {
+    const tags = [`takeaway-new-${takeawayId}`];
+    if (!withReady) return tags;
+    // Best-effort: un errore qui non deve far fallire il cambio di stato
+    // già committato — al peggio il «pronto» resta da leggere a mano.
+    try {
+        const courses = await queryWithRetry(
+            `SELECT DISTINCT oi.order_id, oi.course_no
+             FROM takeaway_orders t
+             JOIN order_items oi ON oi.order_id = t.kitchen_order_id AND oi.tenant_id = t.tenant_id
+             WHERE t.id = $1 AND t.tenant_id = $2`,
+            [takeawayId, tenantId]
+        );
+        for (const c of courses.rows) tags.push(`course-${c.order_id}-${c.course_no}`);
+    } catch (err: any) {
+        console.warn('[takeaway] tag campanelle non letti:', err?.message || err);
+    }
+    return tags;
+}
+
 app.post('/takeaway/orders/:id/status', authenticate, requireFeature('takeaway'), requirePermission('takeaway:manage'), async (req, res) => {
     try {
         const orderId = Math.trunc(Number(req.params.id));
@@ -26352,6 +28863,13 @@ app.post('/takeaway/orders/:id/status', authenticate, requireFeature('takeaway')
         if (updated.rows.length === 0) return res.status(404).json({ error: 'not_found' });
         const view = await loadTakeawayView(req.tenantId!, orderId);
         try { socketService?.broadcastToAll(req.tenantId!, 'takeaway:updated', view); } catch (_) {}
+        // Qualcuno ha preso in mano l'ordine: «nuovo ordine» è letto per
+        // tutti. Ritirato, annullato o non ritirato, anche il «pronto»
+        // della cucina non chiede più niente.
+        if (status !== 'REQUESTED') {
+            const closed = ['PICKED_UP', 'CANCELLED', 'NO_SHOW'].includes(status);
+            await markSharedNotificationsRead(req.tenantId!, await takeawayNotificationTags(req.tenantId!, orderId, closed));
+        }
         res.json(view);
     } catch (err) {
         console.error('POST /takeaway/orders/:id/status error:', err);
@@ -26671,15 +29189,17 @@ app.put('/settings/entitlements', authenticate, requirePermission('settings:full
 // print_agent_token nella config dell'agente di stampa. Endpoint separato da
 // /settings/entitlements, che risponde i soli tre boolean e ha chi ci fa
 // asserzioni sopra. settings:full: i token equivalgono a credenziali.
+// Il sala_node_token NON passa di qui (audit isolamento, 25/09): apre lo
+// snapshot del tenant e l'upstream verso il cloud, quindi è un segreto di
+// macchina, non del gestore: chi installa il nodo lo legge dal DB.
 app.get('/settings/webhook-info', authenticate, requirePermission('settings:full'), async (req, res) => {
     try {
         const r = await queryWithRetry(
-            'SELECT webhook_token, print_agent_token, sala_node_token, slug FROM tenants WHERE id = $1',
+            'SELECT webhook_token, print_agent_token, slug FROM tenants WHERE id = $1',
             [req.tenantId!]
         );
         const webhookToken: string | null = r.rows[0]?.webhook_token ?? null;
         const printAgentToken: string | null = r.rows[0]?.print_agent_token ?? null;
-        const salaNodeToken: string | null = r.rows[0]?.sala_node_token ?? null;
         const tenantSlug: string | null = r.rows[0]?.slug ?? null;
         // Domini custom del tenant (Fase C3): mostrati accanto all'URL di
         // prenotazione così chi configura il DNS vede cosa punta già qui.
@@ -26695,7 +29215,6 @@ app.get('/settings/webhook-info', authenticate, requirePermission('settings:full
         res.json({
             webhook_token: webhookToken,
             print_agent_token: printAgentToken,
-            sala_node_token: salaNodeToken,
             webhook_base_url: webhookBase,
             booking_url: tenantSlug ? `${base}/prenota/${tenantSlug}` : null,
             domains: domainsRes.rows,
@@ -26841,6 +29360,7 @@ const platformAdminCredentials = (req: express.Request, res: express.Response, n
             // L'identità finisce in req.user per l'audit (impersonation):
             // niente req.tenantId, questi endpoint non hanno un tenant.
             req.user = payload;
+            // rls-bypass: pannello /admin cross-tenant per mestiere (JWT PLATFORM_ADMIN, oggi anche se scopato)
             return runAsPlatform(() => next());
         }
         // Bearer presente ma non da platform admin: si prova comunque la via
@@ -26862,6 +29382,7 @@ const platformAdminCredentials = (req: express.Request, res: express.Response, n
     if (!crypto.timingSafeEqual(a, b)) {
         return res.status(401).json({ error: 'invalid_platform_admin_token' });
     }
+    // rls-bypass: pannello /admin cross-tenant via PLATFORM_ADMIN_TOKEN env, confronto timing-safe
     runAsPlatform(() => next());
 };
 
@@ -26979,7 +29500,7 @@ app.get('/admin/tenants', platformAdminAuth, async (_req, res) => {
         );
         const voiceByTenant = new Map<number, any>(voiceMonth.rows.map((r: any) => [Number(r.tenant_id), r]));
         const plans = await queryWithRetry(
-            `SELECT tenant_id, price_cents, included_minutes, overage_cents_per_minute, extra_cap_cents FROM voice_plans`
+            `SELECT tenant_id, price_cents, included_minutes, overage_cents_per_minute, extra_cap_cents, alert_percents FROM voice_plans`
         );
         const planRowByTenant = new Map<number, any>(plans.rows.map((p: any) => [Number(p.tenant_id), p]));
         res.json(result.rows.map((r: any) => ({
@@ -27438,7 +29959,7 @@ app.patch('/admin/tenants/:id/voice-plan', platformAdminAuth, async (req, res) =
                     included_minutes = EXCLUDED.included_minutes,
                     overage_cents_per_minute = EXCLUDED.overage_cents_per_minute,
                     updated_at = NOW()
-             RETURNING price_cents, included_minutes, overage_cents_per_minute, extra_cap_cents`,
+             RETURNING price_cents, included_minutes, overage_cents_per_minute, extra_cap_cents, alert_percents`,
             [tenantId, ...values]
         );
         res.json(mergeVoicePlan(r.rows[0]));
@@ -27481,6 +30002,320 @@ app.patch('/admin/tenants/:id/billing/addons', platformAdminAuth, async (req, re
     }
 });
 
+// ============================================
+// PANNELLO PIATTAFORMA — SUPPORTO CLIENTI
+// ============================================
+// L'altro lato delle richieste aperte da «Aiuto» (vedi /support/tickets):
+// la coda di tutti i ristoranti, la risposta, lo stato, la card del dev
+// board. platformAdminAuth fa girare tutto in runAsPlatform; le SCRITTURE
+// invece passano da withTenant(ticket.tenant_id), così il WITH CHECK della
+// policy garantisce che una risposta finisca nel ristorante della richiesta.
+
+const loadPlatformSupportTicket = async (id: number): Promise<any | null> => {
+    const r = await queryWithRetry(
+        `SELECT ${SUPPORT_TICKET_FIELDS}, t.context, tn.name AS tenant_name, tn.slug AS tenant_slug
+           FROM support_tickets t
+           JOIN tenants tn ON tn.id = t.tenant_id
+           LEFT JOIN users u ON u.id = t.created_by_user_id
+          WHERE t.id = $1`,
+        [id]
+    );
+    return r.rows[0] ?? null;
+};
+
+/** Risposta della piattaforma: push e riga notifica a chi ha aperto la
+ *  richiesta, un'email (il ristoratore non tiene l'app aperta fuori dal
+ *  servizio) e l'evento socket per la vista Aiuto già aperta. Non lancia. */
+async function notifySupportReplyToTenant(ticket: any, text: string): Promise<void> {
+    const creator = Number(ticket.created_by_user_id);
+    if (!Number.isInteger(creator) || creator <= 0) return;
+    try {
+        await pushSendToUser(creator, {
+            category: 'support',
+            title: 'Risposta dal supporto Sympotia',
+            body: `${ticket.subject} — ${supportPreview(text, 90)}`,
+            url: `/?view=SUPPORTO&ticket=${ticket.id}`,
+            tag: supportTenantTag(ticket.id),
+        });
+        if (isPlatformMailConfigured()) {
+            const u = await queryWithRetry(`SELECT email FROM users WHERE id = $1 AND is_active = TRUE`, [creator]);
+            const to = String(u.rows[0]?.email ?? '');
+            if (to.includes('@')) {
+                await sendPlatformMail({
+                    to,
+                    subject: `Risposta alla tua richiesta #${ticket.id}: ${ticket.subject}`,
+                    text: [
+                        'Il supporto Sympotia ha risposto alla tua richiesta.',
+                        '',
+                        text,
+                        '',
+                        `Rispondi dall'app: ${publicBaseUrl()}/?view=SUPPORTO&ticket=${ticket.id}`,
+                    ].join('\n'),
+                });
+            }
+        }
+    } catch (err: any) {
+        console.warn('[support] avviso al ristorante fallito:', err?.message || err);
+    }
+}
+
+app.get('/admin/support/tickets', platformAdminAuth, async (req, res) => {
+    try {
+        const params: any[] = [];
+        const where: string[] = [];
+        // Senza filtro la coda mostra le aperte: le risolte si chiedono.
+        const status = String(req.query.status ?? 'aperte');
+        if ((SUPPORT_STATUSES as readonly string[]).includes(status)) {
+            params.push(status);
+            where.push(`t.status = $${params.length}`);
+        } else if (status !== 'tutte') {
+            where.push(`t.status <> 'risolto'`);
+        }
+        if (req.query.priority === 'urgente' || req.query.priority === 'normale') {
+            params.push(req.query.priority);
+            where.push(`t.priority = $${params.length}`);
+        }
+        const tenantFilter = Number(req.query.tenant_id);
+        if (Number.isInteger(tenantFilter) && tenantFilter > 0) {
+            params.push(tenantFilter);
+            where.push(`t.tenant_id = $${params.length}`);
+        }
+        const [list, counts] = await Promise.all([
+            queryWithRetry(
+                `SELECT ${SUPPORT_TICKET_FIELDS}, tn.name AS tenant_name, tn.slug AS tenant_slug
+                   FROM support_tickets t
+                   JOIN tenants tn ON tn.id = t.tenant_id
+                   LEFT JOIN users u ON u.id = t.created_by_user_id
+                  ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+                  ORDER BY (t.status = 'risolto'), (t.priority = 'urgente') DESC, t.last_message_at DESC
+                  LIMIT 300`,
+                params
+            ),
+            queryWithRetry(
+                `SELECT status, COUNT(*)::int AS n,
+                        COUNT(*) FILTER (WHERE platform_unread)::int AS unread
+                   FROM support_tickets GROUP BY status`
+            ),
+        ]);
+        const byStatus = Object.fromEntries(SUPPORT_STATUSES.map(s => [s, 0])) as Record<SupportStatus, number>;
+        let unread = 0;
+        for (const r of counts.rows) {
+            byStatus[r.status as SupportStatus] = Number(r.n);
+            unread += Number(r.unread);
+        }
+        res.json({ tickets: list.rows, counts: byStatus, unread });
+    } catch (err) {
+        console.error('GET /admin/support/tickets error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.get('/admin/support/tickets/:id', platformAdminAuth, async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+        const ticket = await loadPlatformSupportTicket(id);
+        if (!ticket) return res.status(404).json({ error: 'not_found' });
+        const messages = await loadSupportMessages(Number(ticket.tenant_id), id);
+        if (ticket.platform_unread) {
+            await withTenant(Number(ticket.tenant_id), client => client.query(
+                `UPDATE support_tickets SET platform_unread = FALSE WHERE id = $1`, [id]
+            ));
+            ticket.platform_unread = false;
+        }
+        await closePlatformNotifications([supportPlatformTag(id)]);
+        res.json({ ...ticket, messages });
+    } catch (err) {
+        console.error('GET /admin/support/tickets/:id error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/admin/support/tickets/:id/messages', platformAdminAuth, async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+        const ticket = await loadPlatformSupportTicket(id);
+        if (!ticket) return res.status(404).json({ error: 'not_found' });
+        const body = String(req.body?.body ?? '').trim();
+        if (!body || body.length > SUPPORT_BODY_MAX) {
+            return res.status(400).json({ error: 'invalid_body', message: `Messaggio obbligatorio, massimo ${SUPPORT_BODY_MAX} caratteri.` });
+        }
+        const requested = req.body?.status;
+        if (requested !== undefined && !(SUPPORT_STATUSES as readonly string[]).includes(requested)) {
+            return res.status(400).json({ error: 'invalid_status' });
+        }
+        // Senza uno stato esplicito, la prima risposta prende in carico.
+        const nextStatus: SupportStatus = requested ?? (ticket.status === 'nuovo' ? 'in_corso' : ticket.status);
+        // Il nome che il ristorante legge: quello dell'admin, se c'è un
+        // account dietro; il token env di bootstrap risponde come «supporto».
+        let authorName = 'Supporto Sympotia';
+        if (req.user?.userId) {
+            const me = await queryWithRetry(`SELECT full_name FROM users WHERE id = $1`, [req.user.userId]);
+            if (me.rows[0]?.full_name) authorName = String(me.rows[0].full_name);
+        }
+        await withTenant(Number(ticket.tenant_id), async client => {
+            await client.query(
+                `INSERT INTO support_messages (tenant_id, ticket_id, author_type, author_user_id, author_name, body)
+                 VALUES ($1, $2, 'piattaforma', $3, $4, $5)`,
+                [ticket.tenant_id, id, req.user?.userId ?? null, authorName, body]
+            );
+            await client.query(
+                `UPDATE support_tickets
+                    SET status = $2::varchar,
+                        resolved_at = CASE WHEN $2::varchar = 'risolto' THEN COALESCE(resolved_at, now()) ELSE NULL END,
+                        tenant_unread = TRUE, platform_unread = FALSE,
+                        last_message_at = now(), updated_at = now()
+                  WHERE id = $1`,
+                [id, nextStatus]
+            );
+        });
+        const updated = await loadPlatformSupportTicket(id);
+        const messages = await loadSupportMessages(Number(ticket.tenant_id), id);
+        await closePlatformNotifications([supportPlatformTag(id)]);
+        void notifySupportReplyToTenant(updated, body);
+        emitSupportToTenant(Number(updated.tenant_id), updated.created_by_user_id ?? null, id);
+        // Gli altri dispositivi dell'admin (telefono e portatile) restano allineati.
+        emitSupportToPlatform(id, Number(ticket.tenant_id));
+        res.status(201).json({ ...updated, messages });
+    } catch (err) {
+        console.error('POST /admin/support/tickets/:id/messages error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.patch('/admin/support/tickets/:id', platformAdminAuth, async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+        const ticket = await loadPlatformSupportTicket(id);
+        if (!ticket) return res.status(404).json({ error: 'not_found' });
+        const status = req.body?.status;
+        const priority = req.body?.priority;
+        if (status !== undefined && !(SUPPORT_STATUSES as readonly string[]).includes(status)) {
+            return res.status(400).json({ error: 'invalid_status' });
+        }
+        if (priority !== undefined && priority !== 'urgente' && priority !== 'normale') {
+            return res.status(400).json({ error: 'invalid_priority' });
+        }
+        if (status === undefined && priority === undefined) {
+            return res.status(400).json({ error: 'empty_patch' });
+        }
+        await withTenant(Number(ticket.tenant_id), client => client.query(
+            `UPDATE support_tickets
+                SET status = COALESCE($2::varchar, status),
+                    priority = COALESCE($3::varchar, priority),
+                    resolved_at = CASE
+                        WHEN COALESCE($2::varchar, status) = 'risolto' THEN COALESCE(resolved_at, now())
+                        ELSE NULL END,
+                    updated_at = now()
+              WHERE id = $1`,
+            [id, status ?? null, priority ?? null]
+        ));
+        const updated = await loadPlatformSupportTicket(id);
+        const messages = await loadSupportMessages(Number(ticket.tenant_id), id);
+        // Lo stato cambia sotto gli occhi del ristorante se ha la vista
+        // aperta; niente push: è la risposta scritta che merita il telefono.
+        emitSupportToTenant(Number(updated.tenant_id), updated.created_by_user_id ?? null, id);
+        emitSupportToPlatform(id, Number(updated.tenant_id));
+        res.json({ ...updated, messages });
+    } catch (err) {
+        console.error('PATCH /admin/support/tickets/:id error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// La richiesta diventa una card del dev board, con il contesto già dentro:
+// è la strada verso «Approva per Claude» e la PR. La card NON parte da sola
+// — l'approvazione resta un gesto sulla pagina Development.
+const SUPPORT_DEV_LABEL: Partial<Record<SupportCategory, string>> = {
+    stampa: 'stampa',
+    prenotazioni: 'prenotazioni',
+    cassa_fiscale: 'pagamenti',
+};
+
+app.post('/admin/support/tickets/:id/dev-card', platformAdminAuth, async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+        const ticket = await loadPlatformSupportTicket(id);
+        if (!ticket) return res.status(404).json({ error: 'not_found' });
+        if (ticket.dev_card_id) {
+            return res.status(409).json({ error: 'dev_card_exists', dev_card_id: ticket.dev_card_id });
+        }
+        // Il board vive nel tenant dell'account che lo usa (vedi
+        // requireDevBoardAdmin): la card va lì, non nel ristorante.
+        const owner = await queryWithRetry(
+            `SELECT tenant_id FROM users WHERE lower(email) = $1 ORDER BY id LIMIT 1`,
+            [DEV_BOARD_ADMIN_EMAIL]
+        );
+        const boardTenant = Number(owner.rows[0]?.tenant_id);
+        if (!Number.isInteger(boardTenant) || boardTenant <= 0) {
+            return res.status(409).json({ error: 'dev_board_unavailable', message: "L'account del dev board non esiste." });
+        }
+        const messages = await loadSupportMessages(Number(ticket.tenant_id), id);
+        const first = messages.find((m: any) => m.author_type === 'utente');
+        const description = [
+            `Richiesta di supporto #${id} da ${ticket.tenant_name} (${ticket.tenant_slug}) · categoria ${ticket.category} · priorità ${ticket.priority}`,
+            ticket.created_by_name ? `Aperta da ${ticket.created_by_name}` : '',
+            '',
+            first?.body ?? '',
+            '',
+            'Contesto raccolto all\'apertura:',
+            JSON.stringify(ticket.context ?? {}, null, 2),
+        ].filter((l, i, all) => l !== '' || all[i - 1] !== '').join('\n');
+        const label = SUPPORT_DEV_LABEL[ticket.category as SupportCategory];
+        const card = await withTenant(boardTenant, async client => {
+            const ins = await client.query(
+                `INSERT INTO dev_board_cards (title, description, column_key, position, labels, tenant_id)
+                 VALUES ($1, $2, 'in_progress'::varchar,
+                         (SELECT COALESCE(MAX(position), -1) + 1 FROM dev_board_cards WHERE column_key = 'in_progress' AND tenant_id = $4),
+                         $3, $4)
+                 RETURNING id`,
+                [`[Supporto #${id}] ${ticket.subject}`.slice(0, 255), description, label ? [label] : [], boardTenant]
+            );
+            return Number(ins.rows[0].id);
+        });
+        await withTenant(Number(ticket.tenant_id), client => client.query(
+            `UPDATE support_tickets SET dev_card_id = $2, updated_at = now() WHERE id = $1`, [id, card]
+        ));
+        socketService?.broadcastToAll(boardTenant, 'devboard:changed', {});
+        res.status(201).json({ dev_card_id: card });
+    } catch (err) {
+        console.error('POST /admin/support/tickets/:id/dev-card error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.get('/admin/support/attachments/:token', platformAdminAuth, async (req, res) => {
+    try {
+        const token = String(req.params.token || '');
+        if (!/^[A-Za-z0-9_-]{20,64}$/.test(token)) return res.status(404).json({ error: 'Not found' });
+        // Solo file allegati a una richiesta: il pannello non diventa una
+        // porta su tutto outbound_media.
+        const r = await queryWithRetry(
+            `SELECT o.content_type, o.bytes, o.size_bytes
+               FROM outbound_media o
+              WHERE o.token = $1
+                AND EXISTS (
+                    SELECT 1 FROM support_messages m
+                     WHERE m.tenant_id = o.tenant_id
+                       AND m.attachments @> jsonb_build_array(jsonb_build_object('token', $1::text))
+                )`,
+            [token]
+        );
+        const row = r.rows[0];
+        if (!row) return res.status(404).json({ error: 'Not found' });
+        res.setHeader('Content-Type', row.content_type);
+        res.setHeader('Content-Length', String(row.size_bytes));
+        res.setHeader('Cache-Control', 'private, max-age=3600');
+        res.end(row.bytes);
+    } catch (err) {
+        console.error('GET /admin/support/attachments error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 // Pagine di ritorno di checkout e portal. Prima non esistevano e Stripe
 // atterrava su "Cannot GET /admin/billing/success" — pagamento riuscito,
 // faccia di errore. Una riga di esito e nient'altro: chi arriva qui è
@@ -27514,6 +30349,7 @@ app.get('/admin/billing/return', (_req, res) => {
 // DB. Stripe firma i byte esatti del payload: la verifica usa req.rawBody
 // (catturato dal verify hook di express.json in testa al file), MAI il body
 // già parsato — una ri-serializzazione riordina le chiavi e rompe la firma.
+// rls-bypass: webhook Stripe firmato: tenant da stripe_customer_id (UNIQUE), feature scritte su quel tenant
 app.post('/webhook/stripe', async (req, res) => runAsPlatform(async () => {
     if (!process.env.STRIPE_WEBHOOK_SECRET || !isBillingEnabled()) {
         // Env assente = funzionalità spenta, stessa semantica del pannello
@@ -27566,6 +30402,12 @@ app.post('/webhook/stripe', async (req, res) => runAsPlatform(async () => {
                         url: '/?view=PLATFORM',
                         tag: `billing-past-due-${applied.tenantId}`,
                     }).catch(err => console.warn('[billing] push past_due fallita:', (err as any)?.message || err));
+                }
+                // Uscito dalla morosità (Stripe ha incassato, o l'abbonamento è
+                // chiuso e il tenant sospeso): «Pagamento non riuscito» non
+                // chiede più niente ai platform admin.
+                if (applied && applied.previousBillingStatus === 'past_due' && applied.billingStatus !== 'past_due') {
+                    await closePlatformNotifications([`billing-past-due-${applied.tenantId}`]);
                 }
                 break;
             }
@@ -29380,7 +32222,7 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
 
         pushSendToRoles(
             tenantId,
-            ['OWNER', 'GENERAL_MANAGER', 'MANAGER', 'WAITER'],
+            bookingTools.RESERVATION_PUSH_ROLES,
             {
                 category: 'reservation',
                 title: confirmedNow ? 'Prenotazione web confermata' : 'Nuova richiesta prenotazione',
@@ -29389,6 +32231,7 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
                 tag: `pending-${created.id}`,
             }
         ).catch(err => console.error('Push (public booking) failed:', err));
+        void notifyVipReservation(tenantId, { ...created, customer_name, guests: guestsNum, phone: created.phone ?? null }, `${date} ${time}`, null);
 
         // Fire-and-forget acknowledgement to the customer: "confermata" quando
         // il tavolo è stato assegnato in automatico, "richiesta ricevuta"
@@ -29616,6 +32459,7 @@ app.get('/sitemap.xml', async (req, res) => {
         const base = `${req.protocol}://${req.get('host')}`;
         // Attraversa i tenant per mestiere: e' lavoro di piattaforma, va
         // dichiarato o con la policy rigida la query non vede nulla.
+        // rls-bypass: sitemap pubblica, elenca gli slug di tutti i tenant attivi (cross-tenant per mestiere)
         const r = await runAsPlatform(() => queryWithRetry(
             `SELECT slug FROM tenants
               WHERE slug IS NOT NULL AND slug <> ''
@@ -30266,18 +33110,25 @@ async function broadcastCourseReadyIfAutoComplete(tenantId: number, orderId: num
 async function enqueueCoursePrintsInTx(client: any, tenantId: number, orderId: number, courseNo: number, firedRows: any[], variation?: { label: 'AGGIUNTA' | 'ANNULLO CHIAMATA' | 'STORNO'; reason?: string | null }): Promise<void> {
     // Per l'asporto il ticket non ha tavolo né coperti: l'intestazione è
     // «Asporto HH:MM» — l'ora di ritiro è ciò che serve alla partita.
+    // Il cameriere del ticket è chi ha aperto il tavolo: la partita cerca
+    // lui quando il piatto è pronto (come la riga «Cameriere» di Passepartout).
     const ctx = await client.query(
         `SELECT CASE WHEN o.order_type = 'TAKEAWAY' THEN NULL ELSE o.covers END AS covers,
                 CASE WHEN o.order_type = 'TAKEAWAY' THEN 'Asporto ' || COALESCE(tw.pickup_time, '') || COALESCE(' #' || tw.daily_number, '')
-                     ELSE t.name END AS table_name
+                     ELSE t.name END AS table_name,
+                o.order_type,
+                u.full_name AS waiter_name
          FROM orders o
          LEFT JOIN tables t ON t.id = o.table_id AND t.tenant_id = o.tenant_id
          LEFT JOIN takeaway_orders tw ON tw.kitchen_order_id = o.id AND tw.tenant_id = o.tenant_id
+         LEFT JOIN users u ON u.id = o.opened_by_user_id AND u.tenant_id = o.tenant_id
          WHERE o.id = $1 AND o.tenant_id = $2`,
         [orderId, tenantId]
     );
     const tableName = ctx.rows[0]?.table_name ?? null;
     const covers = ctx.rows[0]?.covers ?? null;
+    const orderType = ctx.rows[0]?.order_type ?? null;
+    const waiterName = ctx.rows[0]?.waiter_name ?? null;
 
     // Il tenant della comanda pilota il lookup dei centri: senza filtro una
     // station_id altrui manderebbe la comanda sulla termica di un altro locale.
@@ -30345,6 +33196,9 @@ async function enqueueCoursePrintsInTx(client: any, tenantId: number, orderId: n
                     : `${courseNo}a USCITA`,
                 table_name: tableName,
                 covers,
+                // Un agente vecchio ignora i due campi e stampa come prima.
+                ...(orderType ? { order_type: orderType } : {}),
+                ...(waiterName ? { waiter_name: waiterName } : {}),
                 station_name: station.name,
                 items,
                 ...(variation ? { variation: variation.label } : {}),
@@ -30435,6 +33289,7 @@ app.delete('/orders/:id', authenticate, requirePermission('orders:take'), async 
         await client.query('COMMIT');
         outboxKick();
         client.release();
+        await closeOrderCourseNotifications(req.tenantId!, id);
 
         try {
             socketService?.broadcastToAll(req.tenantId!, 'order:deleted', { order_id: id, table_id: order.table_id });
@@ -32102,6 +34957,12 @@ app.post('/kds/items/:id/status', authenticate, requirePermission('orders:kds'),
         const live = course.rows;
         const pending = live.filter((r: any) => r.status !== 'READY' && r.status !== 'SERVED');
         const courseReady = live.length > 0 && pending.length === 0;
+        // Spunta «pronto» tolta: l'uscita non è più pronta, e il «pronta al
+        // passe» già arrivato ai camerieri direbbe il falso. Tornerà quando
+        // l'ultima riga sarà di nuovo pronta.
+        if (next === 'PREPARING' && !courseReady) {
+            await markSharedNotificationsRead(req.tenantId!, [`course-${item.order_id}-${item.course_no}`]);
+        }
 
         try {
             socketService?.broadcastToStation(req.tenantId!, item.station_id, 'kds:item', item);
@@ -32655,6 +35516,10 @@ app.post('/orders/:id/courses/:n/serve', authenticate, requireAnyPermission('ord
         }
         outboxKick();
 
+        // Uscita portata al tavolo: il «Tavolo X — uscita pronta» è chiuso
+        // per tutta la sala, non solo per il cameriere che l'ha servita.
+        await markSharedNotificationsRead(req.tenantId!, [`course-${orderId}-${courseNo}`]);
+
         res.json({ order_id: orderId, course_no: courseNo, items: upd.rows, next_fired_course: nextFired });
     } catch (err: any) {
         await client.query('ROLLBACK').catch(() => {});
@@ -33199,6 +36064,7 @@ app.post('/orders/:id/close', authenticate, requirePermission('orders:take'), as
             await client.query('COMMIT');
             client.release();
             outboxKick();
+            await closeOrderCourseNotifications(req.tenantId!, orderId);
             return res.json({
                 order_id: orderId,
                 bill: null,
@@ -33269,6 +36135,9 @@ app.post('/orders/:id/close', authenticate, requirePermission('orders:take'), as
             socketService?.broadcastToAll(req.tenantId!, 'bill:updated', synced.bill);
         } catch (_) {}
         outboxKick();
+        // Comanda chiusa: un'uscita «pronta» non ancora servita non ha più
+        // un tavolo a cui arrivare.
+        await closeOrderCourseNotifications(req.tenantId!, orderId);
 
         LogService.logActivity(
             req.tenantId!,
@@ -35560,6 +38429,7 @@ const salaNodeTenantAuthorized = async (tenantId: number): Promise<boolean> => {
     // lettura a vuoto avvelena la cache degli entitlement per 60s.
     if (!(await runWithTenantContext(tenantId, () => isFeatureEnabledForTenant(tenantId, 'sala_node')))) return false;
     try {
+        // rls-bypass: stato del tenant già risolto dal token del nodo, filtro esplicito su id (fuori contesto)
         const rs = await runAsPlatform(() => queryWithRetry('SELECT status FROM tenants WHERE id = $1', [tenantId]));
         return rs.rows[0]?.status === 'active';
     } catch (err: any) {
@@ -35615,10 +38485,14 @@ function salaNodeUrl(settings: { domain: string | null; port: number }): string 
     return settings.port === 443 ? `https://${settings.domain}` : `https://${settings.domain}:${settings.port}`;
 }
 
-// Bootstrap del nodo: segreto JWT (per verificare i client in locale, anche
-// a linea caduta), allowlist CORS del tenant e certificato TLS. Il nodo la
+// Bootstrap del nodo: allowlist CORS del tenant e certificato TLS. Il nodo la
 // chiama all'avvio e ogni 12h; l'ultima copia la tiene su disco, così un
 // riavvio durante un outage riparte comunque.
+// Il segreto JWT NON viaggia più qui (audit isolamento, 25/09): è la chiave
+// che firma i token di OGNI tenant e della piattaforma, e chi aveva il token
+// del nodo poteva farsi un PLATFORM_ADMIN. Il nodo lo riceve dal .cmd come
+// JWT_SECRET finché la firma non passa a una chiave asimmetrica (tappa ES256,
+// sul nodo la sola chiave pubblica).
 app.get('/sala-node/credentials', salaNodeAuth, async (req: any, res) => {
     try {
         const tenantId = req.salaNodeTenantId as number;
@@ -35637,7 +38511,6 @@ app.get('/sala-node/credentials', salaNodeAuth, async (req: any, res) => {
             tenant_id: tenantId,
             domain: settings.domain,
             port: settings.port,
-            jwt_secret: AuthService.getAccessTokenSecret(),
             allowed_origins: origins,
             // Il token legacy dell'agente di stampa (env del cloud, alias
             // tenant 1 in printAgentAuth): il nodo lo eredita così, invece
@@ -36047,21 +38920,47 @@ app.post('/sala-node/authority', authenticate, requirePermission('settings:full'
 // Dominio, IP LAN e porta del nodo, dalla card Impostazioni → Nodo di sala.
 // Sentinella "campo presente nel body": assente = non toccare, null/'' =
 // azzera (come /sala/print-routes).
-app.put('/sala-node/settings', authenticate, requirePermission('settings:full'), async (req, res) => {
+//
+// Audit isolamento tenant H-05 (25/09): il dominio lo decide la piattaforma.
+// Prima qualunque utente con settings:full di QUALUNQUE tenant (il login demo
+// della Pizzeria è in mano ai prospect) sceglieva un host qualsiasi della
+// zona, apex e www compresi, e poi puntava il record A dove voleva. Ora
+// cambiarlo (o azzerarlo) vuole la sessione di piattaforma («Entra»); lo
+// stesso valore già salvato è un no-op, perché la card lo rimanda a ogni
+// salvataggio e il gestore deve poter ancora cambiare IP e porta.
+// requireFeature in più come cintura: la card è già nascosta senza add-on.
+app.put('/sala-node/settings', authenticate, requirePermission('settings:full'), requireFeature('sala_node'), async (req, res) => {
     try {
         const body = req.body ?? {};
         const upserts: Array<{ key: string; text: string | null; int: number | null }> = [];
         if ('domain' in body) {
             const raw = body.domain == null ? '' : String(body.domain).trim().toLowerCase();
-            if (raw && !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(raw)) {
-                return res.status(400).json({ error: 'invalid_domain' });
+            const current = ((await getSalaNodeSettings(req.tenantId!)).domain ?? '').toLowerCase();
+            if (raw !== current) {
+                if (!isPlatformScopedSession(req.user!)) {
+                    return res.status(403).json({ error: 'domain_platform_managed', message: 'Il dominio del nodo lo gestisce la piattaforma' });
+                }
+                if (raw) {
+                    const invalid = validateNewNodeDomain(raw);
+                    if (invalid) {
+                        return res.status(400).json({ error: invalid, message: 'Il dominio del nodo deve essere sala.<nome> sotto la zona dei nodi, non un nome riservato' });
+                    }
+                    if (await isNodeDomainTakenByOtherTenant(req.tenantId!, raw)) {
+                        return res.status(409).json({ error: 'domain_taken', message: 'Il dominio è già di un altro ristorante' });
+                    }
+                }
+                upserts.push({ key: SALA_NODE_DOMAIN_KEY, text: raw || null, int: null });
             }
-            upserts.push({ key: SALA_NODE_DOMAIN_KEY, text: raw || null, int: null });
         }
         if ('lan_ip' in body) {
             const raw = body.lan_ip == null ? '' : String(body.lan_ip).trim();
             if (raw && !/^\d{1,3}(\.\d{1,3}){3}$/.test(raw)) {
                 return res.status(400).json({ error: 'invalid_lan_ip' });
+            }
+            // Solo LAN privata o CGNAT (Tailscale): il record A sotto il brand
+            // verso un IP pubblico è il dirottamento dell'audit H-05.
+            if (raw && !isPrivateLanIp(raw)) {
+                return res.status(400).json({ error: 'lan_ip_not_private', message: "L'IP del nodo deve essere della rete locale (10.x, 172.16-31.x, 192.168.x o 100.64-127.x)" });
             }
             upserts.push({ key: SALA_NODE_LAN_IP_KEY, text: raw || null, int: null });
         }
@@ -36072,7 +38971,7 @@ app.put('/sala-node/settings', authenticate, requirePermission('settings:full'),
             }
             upserts.push({ key: SALA_NODE_PORT_KEY, text: null, int: raw });
         }
-        if (upserts.length === 0) {
+        if (!['domain', 'lan_ip', 'port'].some(k => k in body)) {
             return res.status(400).json({ error: 'no_updates' });
         }
         for (const u of upserts) {
@@ -36092,22 +38991,48 @@ app.put('/sala-node/settings', authenticate, requirePermission('settings:full'),
     }
 });
 
+// Codici di SalaNodeTlsError → HTTP. Tutti i controlli su dominio, IP e
+// collisioni girano PRIMA di Cloudflare: anche senza token si vede l'esito.
+const SALA_NODE_TLS_STATUS: Record<string, number> = {
+    no_domain: 400, no_lan_ip: 400, domain_not_allowed: 400, lan_ip_not_private: 400,
+    domain_platform_managed: 403, domain_taken: 409, cert_still_valid: 409, rate_limited: 429,
+    tls_not_configured: 503,
+};
+const salaNodeTlsErrorResponse = (res: express.Response, err: SalaNodeTlsError) =>
+    res.status(SALA_NODE_TLS_STATUS[err.code] ?? 502).json({ error: err.code, message: err.message });
+
 // Emissione/rinnovo manuale del certificato TLS del nodo (primo giro dal
 // bottone in card; poi ci pensa il rinnovo giornaliero). Sincrona e lenta:
 // la validazione DNS-01 prende decine di secondi.
-app.post('/sala-node/provision-cert', authenticate, requirePermission('settings:full'), async (req, res) => {
-    if (!isSalaNodeTlsConfigured()) {
-        return res.status(503).json({ error: 'tls_not_configured' });
+// Solo piattaforma (audit H-05): l'emissione è un TXT scritto nella zona del
+// brand e un certificato a nome della piattaforma, non un'azione del
+// gestore. force=true scavalca il rifiuto «certificato ancora valido».
+app.post('/sala-node/provision-cert', authenticate, requirePermission('settings:full'), requireFeature('sala_node'), async (req, res) => {
+    if (!isPlatformScopedSession(req.user!)) {
+        return res.status(403).json({ error: 'cert_platform_managed', message: 'Il certificato del nodo lo emette la piattaforma' });
     }
     try {
-        const result = await provisionSalaNodeCert(req.tenantId!);
+        const result = await provisionSalaNodeCert(req.tenantId!, { manual: true, force: req.body?.force === true });
         res.json(result);
     } catch (err: any) {
-        if (err instanceof SalaNodeTlsError) {
-            const status = err.code === 'no_domain' ? 400 : 502;
-            return res.status(status).json({ error: err.code, message: err.message });
-        }
+        if (err instanceof SalaNodeTlsError) return salaNodeTlsErrorResponse(res, err);
         console.error('POST /sala-node/provision-cert error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Solo il record A verso l'IP LAN salvato, senza certificato: il gestore
+// deve poter ripuntare il nodo dopo un cambio di IP (DHCP) anche ora che
+// l'emissione è della piattaforma. Il dominio resta quello assegnato e l'IP
+// dev'essere privato — il servizio lo ricontrolla prima di Cloudflare,
+// insieme alla regola sul nome che vale per il gestore e non per la
+// piattaforma, e al freno per tenant (429 rate_limited).
+app.post('/sala-node/sync-dns', authenticate, requirePermission('settings:full'), requireFeature('sala_node'), async (req, res) => {
+    try {
+        res.json(await syncSalaNodeDnsRecord(req.tenantId!, { platform: isPlatformScopedSession(req.user!) }));
+    } catch (err: any) {
+        if (err instanceof SalaNodeTlsError) return salaNodeTlsErrorResponse(res, err);
+        console.error('POST /sala-node/sync-dns error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -36635,9 +39560,15 @@ bookingTools.configureBookingTools({
     cancelVoiceReservation,
     modifyVoiceReservation,
     recordVoiceCall,
-    recordCallbackRequest,
+    // Richiamata chiesta a metà telefonata: la chiamata entra subito fra le
+    // «Da richiamare» degli altri dispositivi.
+    recordCallbackRequest: async (tenantId: number, r: any) => {
+        await recordCallbackRequest(tenantId, r);
+        broadcastVoiceCallsChanged(tenantId);
+    },
     upsertCustomerFromReservation,
     findCustomerByPhone,
+    findActiveReservationsByPhone,
     isPhoneBlacklisted,
     getBlacklistPolicy,
 
@@ -36661,6 +39592,7 @@ bookingTools.configureBookingTools({
     activityAction: ActivityAction,
     resourceType: ResourceType,
     pushSendToRoles,
+    notifyVipReservation,
     // socketService è inizializzato dopo il listen: le lambda lo leggono al
     // momento della chiamata, non alla configurazione.
     broadcastReservationCreated: (r: any) => socketService?.broadcastReservationCreated(Number(r.tenant_id) || PUBLIC_TENANT_ID, r),
@@ -36674,10 +39606,17 @@ bookingTools.configureBookingTools({
 });
 
 // La voce aggancia ogni azione alla riga di voice_calls per l'audit della
-// telefonata; gli altri canali avranno il proprio aggancio.
+// telefonata; gli altri canali avranno il proprio aggancio. Una chiamata
+// servita chiude anche i tentativi a vuoto dello stesso numero appena prima.
 VOICE_CHANNEL.linkConversation = ({ tenantId, conversationId, phone, reservationId }) => {
-    recordVoiceCall(tenantId, { conversation_id: conversationId, phone, reservation_id: reservationId })
+    const linked = recordVoiceCall(tenantId, { conversation_id: conversationId, phone, reservation_id: reservationId })
         .catch(err => console.warn('[ElevenLabs] recordVoiceCall failed:', err?.message || err));
+    const closed = closeEarlierMissedCalls(tenantId, conversationId, phone)
+        .then(n => { if (n > 0) console.log(`[ElevenLabs] ${conversationId}: ${n} chiamate precedenti dello stesso numero chiuse`); })
+        .catch(err => console.warn('[ElevenLabs] closeEarlierMissedCalls failed:', err?.message || err));
+    // A metà telefonata: la prenotazione agganciata e i tentativi chiusi
+    // tolgono righe dalle «Da ricontattare» su tutti i dispositivi.
+    void Promise.allSettled([linked, closed]).then(() => broadcastVoiceCallsChanged(tenantId));
 };
 
 const startServer = async () => {
@@ -36706,6 +39645,9 @@ const startServer = async () => {
             try {
                 socketService = new SocketService(httpServer as ReturnType<typeof createServer>);
                 console.log('✅ Socket.IO initialized');
+                setNotificationPersistListener((tenantId, userIds) => {
+                    socketService?.broadcastToUsers(tenantId, userIds, 'notification:new', {});
+                });
                 if (isPassepartoutAgentConfigured() && !isServiceNode) {
                     setupPassepartoutBridge(socketService.getIO());
                     console.log('✅ Passepartout agent bridge attivo su /pp-agent');
@@ -36728,7 +39670,13 @@ const startServer = async () => {
             // Initialize database schema in background, then backfill banquet reminders
             // Tutta la catena di boot è lavoro di piattaforma dichiarato:
             // schema, migration, seed e warm-up attraversano i tenant.
+            // rls-bypass: boot senza richiesta, createSchema fa DDL e seed/backfill su tutti i tenant
             runAsPlatform(() => createSchema())
+                // Timer e listener avviati qui dentro EREDITANO il contesto di
+                // piattaforma (AsyncLocalStorage): chi deve lavorare su un
+                // tenant apre runWithTenantContext, chi se ne dimentica vede
+                // tutti i tenant — non zero righe, e nessun test se ne accorge.
+                // rls-bypass: boot cross-tenant: migration, policy, warm-up e avvio dei job di piattaforma
                 .then(async () => await runAsPlatform(async () => {
                     console.log('✅ Database schema initialized');
                     // Le migration girano DOPO createSchema: la baseline

@@ -1,10 +1,15 @@
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import { Server as HTTPServer } from 'http';
 import type { Reservation, Table, Room, Dish, BanquetMenu, UserRole, TableMerge, TableHiddenOverride, RoomClosedOverride } from '../types.js';
-import { AuthService, TokenPayload } from '../auth/authService.js';
+import { AuthService, TokenPayload, isPlatformScopedSession } from '../auth/authService.js';
 import { isAllowedOrigin } from './corsAllowlist.js';
-import pool from '../db.js';
+import { queryWithRetry, runWithTenantContext, runAsPlatform } from '../db.js';
 import { mirrorToSalaNode } from './salaNodeBridge.js';
+
+// La stanza del pannello di piattaforma: un nome che nessuna stanza di
+// tenant (sempre `tenant:<id>…`) può avere. Senza «:» di proposito: il check
+// del registro eventi legge ogni literal `parola:parola` come un evento.
+const PLATFORM_ADMINS_ROOM = 'platform-admins';
 
 // Extended socket type with user data
 interface AuthenticatedSocket extends Socket {
@@ -108,6 +113,12 @@ export class SocketService {
         // vive nel token.
         socket.join(`tenant:${tenantId}:user:${socket.user!.userId}`);
         socket.join(`tenant:${tenantId}:role:${socket.user!.role}`);
+      } else if (!isPlatformScopedSession(socket.user!)) {
+        // Il pannello di piattaforma ha una stanza sua, fuori da ogni
+        // tenant: ci passano solo gli eventi pensati per lui (oggi il
+        // supporto), così la richiesta che arriva compare senza ricaricare.
+        // La sessione «Entra» resta fuori: lavora dentro un ristorante.
+        socket.join(PLATFORM_ADMINS_ROOM);
       }
 
       socket.emit('connection:acknowledged', socket.id);
@@ -210,11 +221,24 @@ export class SocketService {
     const cached = this.padNames.get(user.userId);
     if (cached) return cached;
     let name = user.email.split('@')[0];
+    // Gli handler socket girano fuori da authenticate, quindi senza contesto
+    // tenant: col pool nudo, sotto la RLS rigida di produzione, users dava
+    // zero righe e il palmare mostrava il prefisso dell'email invece del
+    // nome. In cache va solo un nome letto davvero: un errore o una riga non
+    // vista non devono fissare il ripiego fino al riavvio.
     try {
-      const r = await pool.query(`SELECT full_name FROM users WHERE id = $1`, [user.userId]);
-      if (r.rows[0]?.full_name) name = String(r.rows[0].full_name);
+      const r = isPlatformScopedSession(user)
+        // rls-bypass: sessione «Entra», la riga dell'admin sta nel tenant di casa; lettura per id dal JWT
+        ? await runAsPlatform(() => queryWithRetry(`SELECT full_name FROM users WHERE id = $1`, [user.userId]))
+        : await runWithTenantContext(user.tenantId, () => queryWithRetry(
+            `SELECT full_name FROM users WHERE id = $1 AND tenant_id = $2`,
+            [user.userId, user.tenantId]
+          ));
+      if (r.rows[0]?.full_name) {
+        name = String(r.rows[0].full_name);
+        this.padNames.set(user.userId, name);
+      }
     } catch { /* fallback: parte locale dell'email */ }
-    this.padNames.set(user.userId, name);
     return name;
   }
 
@@ -386,6 +410,13 @@ export class SocketService {
   broadcastToUsers(tenantId: number, userIds: number[], event: string, data: any, excludeSocketId?: string) {
     const rooms = userIds.map(id => `tenant:${tenantId}:user:${id}`);
     this.emitTo(tenantId, rooms, event, data, excludeSocketId);
+  }
+
+  // Pannello piattaforma. Unico emit che NON passa da emitTo, di proposito:
+  // non è un evento di un ristorante e non deve arrivare al nodo di sala di
+  // nessuno. Solo per eventi del pannello, mai per dati di dominio.
+  broadcastToPlatformAdmins(event: string, data: any) {
+    this.io.to(PLATFORM_ADMINS_ROOM).emit(event, data);
   }
 
   // Il nome evita la collisione con pushService.sendToRoles.

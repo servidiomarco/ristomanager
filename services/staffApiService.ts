@@ -1,4 +1,7 @@
-import { StaffMember, StaffShift, StaffTimeOff, StaffCategory, StaffType, Shift, TimeOffType } from '../types';
+import {
+  StaffMember, StaffShift, StaffTimeOff, StaffCategory, StaffType, Shift, TimeOffType,
+  LeavePlan, LeaveRequest, LeaveSettings, LeaveProposalItem, MyLeave, LinkableUser,
+} from '../types';
 import { authApiService } from './authApiService';
 import { socketClient } from './socketClient';
 import { buildApiError } from './apiError';
@@ -82,6 +85,8 @@ export interface CreateStaffInput {
   contractEndDate?: string;
   weeklyRestDay?: number | null;
   notes?: string;
+  userId?: number | null;
+  annualLeaveDays?: number | null;
 }
 
 export interface UpdateStaffInput {
@@ -97,6 +102,8 @@ export interface UpdateStaffInput {
   weeklyRestDay?: number | null;
   notes?: string;
   isActive?: boolean;
+  userId?: number | null;
+  annualLeaveDays?: number | null;
 }
 
 // ============================================
@@ -286,6 +293,84 @@ class StaffApiService {
 
   async deleteTimeOff(id: string): Promise<void> {
     return apiRequest<void>(`${API_URL}/staff/time-off/${id}`, {
+      method: 'DELETE',
+      headers: getHeaders(false),
+    }, false);
+  }
+
+  // ============================================
+  // PIANO FERIE
+  // ============================================
+
+  async getLeavePlan(year: number): Promise<LeavePlan> {
+    return apiRequest<LeavePlan>(`${API_URL}/staff/leave-plan?year=${year}`, { headers: getHeaders(false) });
+  }
+
+  async getPendingLeaveCount(): Promise<{ count: number; byStaff: Record<string, number> }> {
+    const r = await apiRequest<{ count?: number; byStaff?: Record<string, number> }>(
+      `${API_URL}/staff/leave-requests/pending-count`,
+      { headers: getHeaders(false) }
+    );
+    return {
+      count: typeof r?.count === 'number' ? r.count : 0,
+      byStaff: r?.byStaff && typeof r.byStaff === 'object' ? r.byStaff : {},
+    };
+  }
+
+  async updateLeaveSettings(settings: LeaveSettings): Promise<LeaveSettings> {
+    return apiRequest<LeaveSettings>(`${API_URL}/staff/leave-settings`, {
+      method: 'PUT',
+      headers: getHeaders(),
+      body: JSON.stringify(settings),
+    });
+  }
+
+  async createLeaveRequestFor(input: { staffId: string; startDate: string; endDate: string; note?: string }): Promise<LeaveRequest> {
+    return apiRequest<LeaveRequest>(`${API_URL}/staff/leave-requests`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify(input),
+    });
+  }
+
+  async decideLeaveRequests(
+    decisions: Array<{ id: string; decision: 'APPROVE' | 'REJECT' | 'REVOKE'; note?: string }>
+  ): Promise<Array<{ id: string; ok: boolean; error?: string }>> {
+    const r = await apiRequest<{ results: Array<{ id: string; ok: boolean; error?: string }> }>(
+      `${API_URL}/staff/leave-requests/decide`,
+      { method: 'POST', headers: getHeaders(), body: JSON.stringify({ decisions }) }
+    );
+    return r.results ?? [];
+  }
+
+  async proposeLeavePlan(): Promise<LeaveProposalItem[]> {
+    const r = await apiRequest<{ items: LeaveProposalItem[] }>(`${API_URL}/staff/leave-plan/proposal`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: '{}',
+    });
+    return r.items ?? [];
+  }
+
+  async getLinkableUsers(): Promise<LinkableUser[]> {
+    return apiRequest<LinkableUser[]>(`${API_URL}/staff/linkable-users`, { headers: getHeaders(false) });
+  }
+
+  async getMyLeave(year?: number): Promise<MyLeave> {
+    const q = year ? `?year=${year}` : '';
+    return apiRequest<MyLeave>(`${API_URL}/staff/my-leave${q}`, { headers: getHeaders(false) });
+  }
+
+  async requestMyLeave(input: { startDate: string; endDate: string; note?: string }): Promise<LeaveRequest> {
+    return apiRequest<LeaveRequest>(`${API_URL}/staff/my-leave`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify(input),
+    });
+  }
+
+  async cancelMyLeave(id: string): Promise<void> {
+    return apiRequest<void>(`${API_URL}/staff/my-leave/${id}`, {
       method: 'DELETE',
       headers: getHeaders(false),
     }, false);

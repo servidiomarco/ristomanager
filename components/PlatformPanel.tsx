@@ -3,9 +3,11 @@ import { useTranslation } from 'react-i18next';
 import { displayLocale } from '../utils/formatLocale';
 import { AlertTriangle, Building2, Check, Copy, Lock, Plus, RefreshCw } from 'lucide-react';
 import {
-  ModalShell, FormCard, Field, Callout, EmptyState, StatusPill, CountBadge, StatStrip,
+  ModalShell, FormCard, Field, Callout, EmptyState, StatusPill, CountBadge, StatStrip, SegmentedControl,
   dsInput, dsButton,
 } from './ds';
+import { PlatformSupportTab } from './PlatformSupportTab';
+import { supportApiService, onSupportSocketEvent } from '../services/supportApiService';
 import { useAuth } from '../contexts/AuthContext';
 import { authApiService } from '../services/authApiService';
 import {
@@ -42,6 +44,36 @@ const readSavedPlatformSession = (): SavedPlatformSession | null => {
   } catch {
     return null;
   }
+};
+
+/** Sessione di piattaforma: dentro il tenant con la propria identità, sopra
+ *  la matrice permessi. Stessa foto della sessione dell'impersonation ("torna
+ *  al pannello" la ripristina), ma qui il refresh token c'è. Esportata perché
+ *  la usano sia la scheda cliente sia la tab Supporto; ricarica la pagina,
+ *  quindi ritorna solo se fallisce (e allora lancia). */
+export const enterTenantSession = async (tenantId: number): Promise<void> => {
+  const res = await adminEnterTenant(tenantId);
+  const saved: SavedPlatformSession = {
+    snapshot: authApiService.getSessionSnapshot(),
+    tenant: res.tenant,
+  };
+  localStorage.setItem(PLATFORM_SESSION_KEY, JSON.stringify(saved));
+  authApiService.enterPlatformSession(res.accessToken, res.refreshToken);
+  window.location.reload();
+};
+
+/** Impersonation dell'OWNER (15 minuti, senza refresh). Prima la foto della
+ *  sessione corrente, poi il token corto: il banner la ripristina con "torna
+ *  al pannello". */
+export const impersonateTenantOwner = async (tenantId: number): Promise<void> => {
+  const res = await adminImpersonateTenant(tenantId);
+  const saved: SavedPlatformSession = {
+    snapshot: authApiService.getSessionSnapshot(),
+    tenant: res.tenant,
+  };
+  localStorage.setItem(PLATFORM_SESSION_KEY, JSON.stringify(saved));
+  authApiService.enterImpersonation(res.accessToken);
+  window.location.reload();
 };
 
 /** Solo il payload, senza verificare la firma: qui serve leggere un claim,
@@ -327,20 +359,10 @@ const TenantCard: React.FC<{
     }
   };
 
-  // Sessione di piattaforma: dentro il tenant con la propria identità,
-  // sopra la matrice permessi. Stessa foto della sessione dell'impersonation
-  // ("torna al pannello" la ripristina), ma qui il refresh token c'è.
   const enterTenant = async () => {
     setBusy('enter');
     try {
-      const res = await adminEnterTenant(tenant.id);
-      const saved: SavedPlatformSession = {
-        snapshot: authApiService.getSessionSnapshot(),
-        tenant: res.tenant,
-      };
-      localStorage.setItem(PLATFORM_SESSION_KEY, JSON.stringify(saved));
-      authApiService.enterPlatformSession(res.accessToken, res.refreshToken);
-      window.location.reload();
+      await enterTenantSession(tenant.id);
     } catch (err) {
       setBusy(null);
       showToast((err as ApiError).message || t('errEnter', 'Ingresso non riuscito'), 'error');
@@ -350,16 +372,7 @@ const TenantCard: React.FC<{
   const impersonate = async () => {
     setBusy('impersonate');
     try {
-      const res = await adminImpersonateTenant(tenant.id);
-      // Prima la foto della sessione corrente, poi il token corto: il banner
-      // la ripristina con "torna al pannello".
-      const saved: SavedPlatformSession = {
-        snapshot: authApiService.getSessionSnapshot(),
-        tenant: res.tenant,
-      };
-      localStorage.setItem(PLATFORM_SESSION_KEY, JSON.stringify(saved));
-      authApiService.enterImpersonation(res.accessToken);
-      window.location.reload();
+      await impersonateTenantOwner(tenant.id);
     } catch (err) {
       setBusy(null);
       showToast((err as ApiError).message || t('errImpersonate', 'Impersonation non riuscita'), 'error');
@@ -814,8 +827,18 @@ const NewTenantModal: React.FC<{
 };
 
 /* ── Pannello ────────────────────────────────────────────────────────── */
-export const PlatformPanel: React.FC<{ showToast: ShowToast }> = ({ showToast }) => {
+export const PlatformPanel: React.FC<{
+  showToast: ShowToast;
+  /** Deep link della push di supporto (?support=): apre la tab su quella richiesta. */
+  initialSupportTicketId?: number | null;
+  onInitialSupportTicketConsumed?: () => void;
+}> = ({ showToast, initialSupportTicketId = null, onInitialSupportTicketConsumed }) => {
   const { t } = useTranslation('piattaforma', { useSuspense: false });
+  const { t: ts } = useTranslation('supporto', { useSuspense: false });
+  const [tab, setTab] = useState<'clienti' | 'supporto'>(initialSupportTicketId ? 'supporto' : 'clienti');
+  // Le richieste da leggere, anche a tab chiusa: il numero sul segmento è
+  // il motivo per aprirla. La tab, quando è aperta, lo tiene aggiornato.
+  const [supportUnread, setSupportUnread] = useState(0);
   const [tenants, setTenants] = useState<AdminTenant[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -839,12 +862,66 @@ export const PlatformPanel: React.FC<{ showToast: ShowToast }> = ({ showToast })
 
   useEffect(() => { load(); }, [load]);
 
+  // A tab Clienti aperta il numero sul segmento segue gli eventi del
+  // supporto; a tab Supporto aperta ci pensa la tab stessa.
+  useEffect(() => {
+    const refresh = () => {
+      supportApiService.adminList().then(r => setSupportUnread(typeof r.unread === 'number' ? r.unread : 0)).catch(() => {});
+    };
+    refresh();
+    if (tab !== 'clienti') return;
+    return onSupportSocketEvent('support:admin-updated', refresh);
+  }, [tab]);
+
+  // Una notifica toccata a pannello già aperto: si passa alla tab.
+  useEffect(() => {
+    if (initialSupportTicketId) setTab('supporto');
+  }, [initialSupportTicketId]);
+
+  const consumeSupportDeepLink = useCallback(() => onInitialSupportTicketConsumed?.(), [onInitialSupportTicketConsumed]);
+
   const patchTenant = useCallback((next: AdminTenant) => {
     setTenants(prev => prev.map(t => (t.id === next.id ? next : t)));
   }, []);
 
+  const tabSwitch = (
+    <div className="flex-shrink-0 px-4 pt-4 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-4xl">
+        <SegmentedControl
+          value={tab}
+          onChange={next => setTab(next === 'supporto' ? 'supporto' : 'clienti')}
+          ariaLabel={ts('platform.tabsAria', 'Sezione del pannello')}
+          options={[
+            { value: 'clienti', label: t('customers', 'Clienti') },
+            { value: 'supporto', label: ts('platform.tab', 'Supporto'), badge: supportUnread || undefined, badgeTone: 'alert' },
+          ]}
+        />
+      </div>
+    </div>
+  );
+
+  if (tab === 'supporto') {
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        {tabSwitch}
+        <div className="min-h-0 flex-1 pt-3">
+          <PlatformSupportTab
+            tenants={tenants.map(x => ({ id: x.id, name: x.name }))}
+            initialTicketId={initialSupportTicketId}
+            onInitialTicketConsumed={consumeSupportDeepLink}
+            onUnreadChange={setSupportUnread}
+            onEnter={enterTenantSession}
+            onImpersonate={impersonateTenantOwner}
+            showToast={showToast}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col">
+      {tabSwitch}
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-4xl p-4 sm:p-6 lg:p-8">
           <div className="mb-4 flex items-center gap-3">

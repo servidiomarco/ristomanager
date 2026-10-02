@@ -34,6 +34,7 @@ const publicBaseUrl = (): string | null => {
 // l'identità per email/token su TUTTA la piattaforma — non c'è ancora un
 // tenant. Con la RLS rigida, senza questa dichiarazione la SELECT su users
 // tornerebbe vuota e ogni login fallirebbe.
+// rls-bypass: login pre-auth, utente per email (UNIQUE globale), il resto filtra sul suo tenant_id
 router.post('/login', (req: Request, res: Response) => runAsPlatform(async () => {
   try {
     const { email, password } = req.body;
@@ -117,6 +118,7 @@ router.post('/logout', authenticate, async (req: Request, res: Response) => {
 });
 
 // POST /auth/refresh - Refresh access token
+// rls-bypass: refresh pre-auth, utente per id dal refresh token firmato (PK globale), sessione per user_id
 router.post('/refresh', (req: Request, res: Response) => runAsPlatform(async () => {
   try {
     const { refreshToken } = req.body;
@@ -154,6 +156,7 @@ router.get('/me', authenticate, async (req: Request, res: Response) => {
     // dichiarata come lavoro di piattaforma, o torna vuota.
     const scoped = isPlatformScopedSession(req.user);
     const user = scoped
+      // rls-bypass: sessione scopata, la riga dell'admin sta nel tenant di casa; lettura per id dal JWT
       ? await runAsPlatform(() => AuthService.getUserById(req.user!.userId))
       : await AuthService.getUserById(req.user.userId);
 
@@ -166,6 +169,7 @@ router.get('/me', authenticate, async (req: Request, res: Response) => {
     // deve vedere branding e feature del tenant bersaglio, non di casa. I
     // permessi sono la lista piena: la sessione bypassa la matrice.
     if (scoped) {
+      // rls-bypass: tenant bersaglio per id dal JWT scopato; tenants è fuori RLS, il bypass è solo difensivo
       const t = await runAsPlatform(() => queryWithRetry('SELECT id, slug, name FROM tenants WHERE id = $1', [req.user!.tenantId]));
       if (t.rows.length === 0) {
         return res.status(404).json({ error: 'Tenant not found' });
@@ -519,6 +523,7 @@ const forgotPasswordLimiter = rateLimit({
 // per email esistente, inesistente, utente disattivato o SMTP mancante.
 // Qualunque differenza (status, corpo, perfino un errore 500) direbbe a un
 // attaccante quali indirizzi hanno un account.
+// rls-bypass: reset pre-auth, utente per email (UNIQUE globale); SMTP e token sul suo tenant_id
 router.post('/forgot-password', forgotPasswordLimiter, (req: Request, res: Response) => runAsPlatform(async () => {
   const uniformReply = () => res.json({ ok: true });
 
@@ -613,6 +618,7 @@ router.post('/forgot-password', forgotPasswordLimiter, (req: Request, res: Respo
 }));
 
 // POST /auth/reset-password - Consume a reset token and set a new password
+// rls-bypass: reset pre-auth, utente per hash del token casuale a 256 bit (unico di fatto)
 router.post('/reset-password', (req: Request, res: Response) => runAsPlatform(async () => {
   try {
     const { token, new_password } = req.body as { token?: unknown; new_password?: unknown };

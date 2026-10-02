@@ -89,6 +89,7 @@ const closeCircuit = (): void => {
     circuitOpen = false;
     console.info('[sala-node] nodo di nuovo raggiungibile: si torna a instradare in LAN');
     notifyChange();
+    notifyStatus();
 };
 
 /** Probe di salute in background: l'unica cosa che richiude il circuito.
@@ -182,6 +183,7 @@ export const noteNodeFailure = (): void => {
     circuitOpen = true;
     nextProbeAt = Date.now() + PROBE_EVERY_MS;
     console.warn('[sala-node] nodo non raggiungibile: si torna al cloud (probe fra 30s)');
+    notifyStatus();
 };
 
 /** fetch con guinzaglio per gli URL del nodo: un nodo che inghiotte i
@@ -237,6 +239,25 @@ const notifyChange = () => changeCallbacks.forEach(cb => cb());
 
 export const isHybridActive = (): boolean => config.enabled && Boolean(config.node_url);
 
+// --- Stato per la pastiglia Live --------------------------------------------
+// Chi deve solo MOSTRARE da dove lavora il dispositivo (nodo, cloud o tutti e
+// due) si abbona qui. Canale separato da onRoutingChange di proposito: quello
+// riattacca il socket, e l'apertura del circuito non deve farlo — dopo due
+// connect_error ci pensa già socketClient, e un secondo riaggancio in corsa
+// da qui lo raddoppierebbe.
+const statusCallbacks = new Set<RoutingChangeCallback>();
+const notifyStatus = () => statusCallbacks.forEach(cb => cb());
+
+export const onRoutingStatus = (cb: RoutingChangeCallback): (() => void) => {
+    statusCallbacks.add(cb);
+    return () => statusCallbacks.delete(cb);
+};
+
+/** Il nodo è in gioco su questo dispositivo: modalità accesa e circuito
+ *  chiuso. Senza effetti collaterali, a differenza di nodeActive (che a
+ *  circuito aperto lancia il probe). */
+export const isNodeInUse = (): boolean => isHybridActive() && !circuitOpen;
+
 /** Rilegge la config dal cloud (bootstrap e features:updated). Se la
  *  modalità si accende, un probe veloce su /healthz decide se partire dal
  *  nodo o col circuito già aperto — niente primo giro di fetch a vuoto. */
@@ -284,4 +305,5 @@ export const refreshNodeConfig = async (): Promise<void> => {
         }
     }
     if (changed) notifyChange();
+    notifyStatus();
 };

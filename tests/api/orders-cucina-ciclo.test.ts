@@ -852,6 +852,15 @@ describe('ciclo cucina (stati linee, fuoco, passe)', () => {
         expect(jobs).toHaveLength(1);
         expect(jobs[0].kind).toBe('COMANDA');
         expect(jobs[0].payload.variation).toBeUndefined();
+        // Il ticket porta il cameriere (chi ha aperto il tavolo) e il tipo di
+        // comanda: l'agente li stampa nella riga «Cameriere … Coperti» e
+        // toglie «Tavolo:» davanti al nome dell'asporto.
+        const opener = await db.query(
+            `SELECT u.full_name, o.order_type FROM orders o JOIN users u ON u.id = o.opened_by_user_id WHERE o.id = $1`,
+            [orderId]
+        );
+        expect(jobs[0].payload.waiter_name).toBe(opener.rows[0].full_name);
+        expect(jobs[0].payload.order_type).toBe(opener.rows[0].order_type);
 
         // Righe aggiunte all'uscita già partita: partono subito e il ticket
         // porta il banner AGGIUNTA (kind COMANDA: sono piatti da fare).

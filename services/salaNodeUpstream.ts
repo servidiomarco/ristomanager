@@ -32,6 +32,7 @@ export const startNodeUpstream = (tenantId: number, socket: Socket): (() => void
     let stopped = false;
     let lastErrorLogged = 0;
 
+    // rls-bypass: timer del bridge senza sessione; cursore scopato, l'applier no: da rifare prima dell'autorità
     const pullOnce = async (): Promise<boolean> => runAsPlatform(async () => {
         // queryWithRetry, non pool.query: il pool nudo non porta il contesto
         // di piattaforma, e con la RLS rigida di produzione la riga del

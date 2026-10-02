@@ -31,6 +31,7 @@ const refreshTenantDomains = async (): Promise<void> => {
     try {
         // Lettura di piattaforma: la allowlist CORS è per definizione l'unione
         // dei domini di TUTTI i tenant.
+        // rls-bypass: allowlist CORS = domini di TUTTI i tenant, letta prima dell'auth (sola lettura)
         const res = await runAsPlatform(() => queryWithRetry('SELECT domain FROM tenant_domains'));
         tenantDomainsCache = new Set(
             res.rows.map((r: { domain: string }) => String(r.domain).trim().toLowerCase())

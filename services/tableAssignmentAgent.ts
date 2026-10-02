@@ -21,6 +21,8 @@ export interface TableInfo {
     seats: number;
     room_id: number;
     room_name: string;
+    /** Ordine di assegnazione dato in piantina: 1 prima di 2; null = nessuno. */
+    assign_priority?: number | null;
 }
 
 export interface OccupancyRow {
@@ -102,7 +104,7 @@ const declaration: Anthropic.Tool = {
 
 function buildSystem(ctx: AssignmentContext): string {
     const tableLines = ctx.tables
-        .map(t => `- #${t.id} "${t.name}" · sala ${t.room_name} · ${t.seats} posti`)
+        .map(t => `- #${t.id} "${t.name}" · sala ${t.room_name} · ${t.seats} posti${t.assign_priority != null ? ` · priorità ${t.assign_priority}` : ''}`)
         .join('\n') || '(nessun tavolo disponibile)';
     const mergeLines = ctx.merges.length
         ? ctx.merges.map(m => `- tavolo #${m.primary_id} unito con [${m.merged_ids.join(', ')}]`).join('\n')
@@ -122,7 +124,7 @@ PRENOTAZIONE DA ASSEGNARE:
 - Turno: ${ctx.reservation.shift === 'LUNCH' ? 'pranzo' : 'cena'}, ore ${ctx.reservation.time}
 ${ctx.reservation.notes ? `- Note: ${ctx.reservation.notes}` : ''}
 
-TAVOLI DISPONIBILI (capienza, non superarla senza unione):
+TAVOLI DISPONIBILI (capienza, non superarla senza unione; il nome del tavolo è quello tra virgolette, #N è solo l'ID interno — quando il gestore scrive un numero di tavolo intende il nome):
 ${tableLines}
 
 UNIONI GIÀ ATTIVE IN QUESTO SERVIZIO:
@@ -131,7 +133,7 @@ ${mergeLines}
 ALTRE PRENOTAZIONI GIÀ ASSEGNATE IN QUESTO SERVIZIO:
 ${occupancyLines}
 
-Proponi UN tavolo (o un'unione di più tavoli se il gruppo non ci sta in uno solo) rispettando sempre la capienza reale. Se non riesci a proporre nulla di sensato con questi dati, non chiamare lo strumento e basta.`;
+Proponi UN tavolo (o un'unione di più tavoli se il gruppo non ci sta in uno solo) rispettando sempre la capienza reale. I tavoli con una priorità vanno usati prima di quelli senza, in ordine (priorità 1 prima di 2; a pari priorità il più piccolo che basta), se liberi e abbastanza grandi. Se non riesci a proporre nulla di sensato con questi dati, non chiamare lo strumento e basta.`;
 }
 
 export async function suggestTableAssignment(ctx: AssignmentContext): Promise<AssignmentResult> {

@@ -20,21 +20,37 @@ repo marketing (sez. 3–7).
 - Checkout del repo in `C:\ristomanager-agents\app` (già presente per gli
   altri agenti; update = `git pull` + riavvio dell'attività).
 - Node.js ≥ 20 (lo stesso usato dagli altri agenti).
-- Token del nodo: `tenants.sala_node_token` — si legge dal CRM (endpoint
-  `/settings/webhook-info`, permesso `settings:full`).
+- Token del nodo: `tenants.sala_node_token` — si legge dal DB (psql sul
+  database di produzione). Dal 25/09 il CRM non lo mostra più: apre snapshot
+  e upstream del tenant, è un segreto di macchina come le env di Railway.
+- Segreto JWT: `JWT_SECRET` di Railway (variables). Dal 25/09 il cloud non
+  lo consegna più al nodo: va scritto nel `.cmd`, e riscritto a ogni
+  rotazione del segreto sul cloud.
 - Rete: **prenotazione DHCP** per il PC (l'IP del record A non deve cambiare
   dopo un blackout — stessa raccomandazione mai attuata per le stampanti).
 
 ## Configurazione cloud (una volta)
 
-1. In **Impostazioni → Sala & Cucina → Nodo di sala**: dominio
-   (`sala.<slug>.sympotia.com`), IP LAN del PC, porta (443, o 8443 se la 443
-   è occupata — l'URL la include da solo).
-2. Bottone **emetti certificato**: il cloud crea il record A (DNS-only) su
-   Cloudflare e ordina il certificato Let's Encrypt via DNS-01. Richiede in
-   Railway gli env `CLOUDFLARE_API_TOKEN` (Zone.DNS:Edit su sympotia.com) e
-   facoltativi `ACME_CONTACT_EMAIL`, `ACME_STAGING=1` per collaudo.
-3. Accendere l'interruttore **Modalità ibrida** solo a nodo installato e
+1. In **Impostazioni → Sala & Cucina → Nodo di sala**, da una sessione di
+   piattaforma («Entra» dal pannello: dal 25/09, audit H-05, il gestore non
+   può cambiarlo): dominio `sala.<nome>.sympotia.com` (una sola etichetta,
+   unica fra i ristoranti, non derivata dallo slug — il Frantoio è
+   `sala.vecchiofrantoio.sympotia.com`). Il gestore imposta IP LAN del PC
+   (solo 10/8, 172.16/12, 192.168/16 o 100.64/10) e porta (443, o 8443 se la
+   443 è occupata — l'URL la include da solo).
+2. Bottone **aggiorna DNS** (anche il gestore): crea o ripunta il record A
+   (DNS-only) su Cloudflare verso l'IP LAN salvato. Da rifare se il PC cambia
+   IP. Al massimo 5 volte al minuto per ristorante (il limite API di
+   Cloudflare è dell'intero account). Il gestore ripunta solo un dominio
+   `sala.<nome>.<zona>` o quello di cui ha già il certificato: un nome di
+   altra forma lo riallinea la piattaforma.
+3. Bottone **emetti certificato** (solo piattaforma): ordina il certificato
+   Let's Encrypt via DNS-01; se quello salvato vale oltre 30 giorni si
+   rifiuta (il rinnovo parte da solo). Richiede in Railway gli env
+   `CLOUDFLARE_API_TOKEN` (Zone.DNS:Edit su sympotia.com) e facoltativi
+   `SALA_NODE_ZONE` (default `sympotia.com`), `ACME_CONTACT_EMAIL`,
+   `ACME_STAGING=1` per collaudo.
+4. Accendere l'interruttore **Modalità ibrida** solo a nodo installato e
    online (la card mostra lo stato).
 
 ## Installazione sul PC Windows
@@ -44,7 +60,8 @@ repo marketing (sez. 3–7).
 ```bat
 @echo off
 cd /d C:\ristomanager-agents\app
-set SALA_NODE_TOKEN=<token dal CRM>
+set SALA_NODE_TOKEN=<token dal DB>
+set JWT_SECRET=<lo stesso del cloud - Railway, variables>
 set CLOUD_URL=https://ristomanager-production.up.railway.app
 node --loader ts-node/esm sala-node\index.ts
 ```
@@ -122,17 +139,18 @@ cd /d C:\ristomanager-agents\app
 set SERVER_PROFILE=service-node
 set DATABASE_URL=postgresql://postgres:<password>@localhost:5432/ristonodo
 set SALA_NODE_CLOUD_URL=https://ristomanager-production.up.railway.app
-set SALA_NODE_TOKEN=<token dal CRM>
+set SALA_NODE_TOKEN=<token dal DB>
 set SALA_NODE_STATE_DIR=C:\ristomanager-agents\sala-node-state
 set PORT=8443
-set JWT_SECRET=<lo stesso del cloud - gia' nelle credenziali del relay>
-set JWT_REFRESH_SECRET=<idem>
+set JWT_SECRET=<lo stesso del cloud - Railway, variables>
 node dist\server.js
 ```
 
-Nota JWT: il nodo verifica i token dei client col segreto condiviso — gli
-stessi due valori del cloud (Railway → variables). Senza, i palmari
-riceverebbero 401 sul nodo.
+Nota JWT: il nodo verifica i token dei client col segreto condiviso — lo
+stesso `JWT_SECRET` del cloud (Railway → variables). Senza, i palmari
+riceverebbero 401 sul nodo. `JWT_REFRESH_SECRET` NON serve: login e refresh
+vanno sempre al cloud. A ogni rotazione di `JWT_SECRET` sul cloud va
+aggiornato anche questo `.cmd`, a modalità ibrida spenta.
 
 Lo scambio (fuori servizio):
 

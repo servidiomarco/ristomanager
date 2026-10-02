@@ -1110,6 +1110,68 @@ async function findVoiceReservationMatches(
     return byName.rows;
 }
 
+export interface ActiveReservationByPhone {
+    id: number;
+    customer_name: string;
+    reservation_time: Date;
+    /** Data e ora nel fuso del locale: 'YYYY-MM-DD' e 'HH:MM'. */
+    date: string;
+    time: string;
+    shift: Shift;
+    guests: number;
+    children: number;
+    reservation_status: string;
+    source: string | null;
+    created_at: Date;
+}
+
+/**
+ * Prenotazioni ancora "in agenda" per un numero: non annullate/rifiutate/no
+ * show, cliente non ancora arrivato, orario non passato da più di 3 ore (il
+ * pranzo di oggi già finito non conta per chi richiama per la cena).
+ *
+ * Con `date` guarda solo quel giorno, qualunque sia la distanza; senza, da
+ * oggi ai prossimi `horizonDays` giorni. Serve a Sofia per accorgersi che chi
+ * chiama ha già un tavolo: il 25/08/2026 Vernoccoli richiamò solo per
+ * correggere l'orario e ne uscì una seconda prenotazione (due tavoli per lo
+ * stesso gruppo); il 27/09 Lo Feudo chiese "siamo uno in più" e la chiamata
+ * partì come prenotazione nuova.
+ */
+export async function findActiveReservationsByPhone(
+    tenantId: number,
+    phone: string,
+    opts: { date?: string; horizonDays?: number } = {}
+): Promise<ActiveReservationByPhone[]> {
+    const last10 = phoneLast10Variants(phone);
+    if (last10.length === 0) return [];
+    const tz = (await getTenantLocale(tenantId)).timezone;
+    const params: any[] = [tenantId, last10, tz];
+    let dayFilter: string;
+    if (opts.date) {
+        params.push(opts.date);
+        dayFilter = `(reservation_time AT TIME ZONE $3)::date = $4::date`;
+    } else {
+        params.push(Math.max(0, Math.trunc(opts.horizonDays ?? 30)));
+        dayFilter = `(reservation_time AT TIME ZONE $3)::date <= (now() AT TIME ZONE $3)::date + $4::int`;
+    }
+    const result = await queryWithRetry(`
+        SELECT id, customer_name, reservation_time, shift, guests, children, source, created_at,
+               COALESCE(reservation_status, 'CONFIRMED') AS reservation_status,
+               to_char(reservation_time AT TIME ZONE $3, 'YYYY-MM-DD') AS date,
+               to_char(reservation_time AT TIME ZONE $3, 'HH24:MI') AS time
+        FROM reservations
+        WHERE tenant_id = $1
+          AND right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = ANY($2::text[])
+          AND COALESCE(reservation_status, 'CONFIRMED') NOT IN ('CANCELLED', 'DECLINED', 'NO_SHOW')
+          AND COALESCE(arrival_status, 'WAITING') = 'WAITING'
+          AND reservation_time > now() - interval '3 hours'
+          AND ${dayFilter}
+        ORDER BY reservation_time ASC
+        LIMIT 5
+    `, params);
+    return result.rows;
+}
+
 export interface CancelCandidate {
     id: number;
     customer_name: string;
@@ -1490,6 +1552,34 @@ export async function recordVoiceCall(tenantId: number, record: VoiceCallRecord)
         record.llm_cost_usd ?? null,
         record.platform_cost_usd ?? null,
     ]);
+}
+
+// Chi richiama e viene servito (prenota, sposta o disdice) chiude da sé i
+// tentativi precedenti dallo stesso numero rimasti «Da ricontattare»: caso
+// Sarubbi 26/09/2026, 7 secondi di saluto e riaggancio, poi un minuto dopo
+// la prenotazione — la prima chiamata restava aperta. Stessa chiave della
+// lista e del badge (ultime 10 cifre), solo le ultime 24 ore e solo le
+// chiamate senza una richiesta propria: richiamata chiesta, gruppo grande e
+// conferma fantasma restano da guardare a mano. follow_up_updated_by NULL:
+// l'ha chiusa il sistema, non un operatore.
+export async function closeEarlierMissedCalls(tenantId: number, conversationId: string, phone: string): Promise<number> {
+    const result = await queryWithRetry(`
+        UPDATE voice_calls
+        SET follow_up_status = 'CONTACTED',
+            follow_up_updated_by = NULL,
+            follow_up_updated_at = NOW()
+        WHERE tenant_id = $1
+          AND conversation_id <> $2
+          AND length(regexp_replace($3::text, '\\D', '', 'g')) >= 8
+          AND right(regexp_replace(phone, '\\D', '', 'g'), 10) = right(regexp_replace($3::text, '\\D', '', 'g'), 10)
+          AND reservation_id IS NULL
+          AND (follow_up_status IS NULL OR follow_up_status = 'PENDING')
+          AND callback_requested = FALSE
+          AND large_group_handoff = FALSE
+          AND phantom_confirmation = FALSE
+          AND created_at >= NOW() - INTERVAL '24 hours'
+    `, [tenantId, conversationId, phone]);
+    return result.rowCount ?? 0;
 }
 
 export interface CallbackRequestRecord {

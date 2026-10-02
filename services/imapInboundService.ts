@@ -338,6 +338,7 @@ async function desiredTenantIds(): Promise<Set<number>> {
 
 // Sweep di piattaforma: legge i tenant abilitati attraversandoli tutti.
 async function superviseOnce(): Promise<void> {
+    // rls-bypass: sweep dei tenant con IMAP attivo; le query del listener filtrano per tenant_id
     return runAsPlatform(() => superviseOnceInner());
 }
 

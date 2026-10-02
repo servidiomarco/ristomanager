@@ -82,6 +82,13 @@ export const emailCache = {
       if (oldest !== undefined) this.timelines.delete(oldest);
     }
   },
+  /** Thread letto altrove (email:read): rientrando in Email il pallino dei
+   *  non letti non deve ricomparire dalla cache. */
+  markThreadRead(emailKey: string) {
+    const key = emailKey.trim().toLowerCase();
+    if (!this.threads) return;
+    this.threads = this.threads.map(t => (t.email_key === key ? { ...t, unread_count: 0 } : t));
+  },
   clear() {
     this.threads = null;
     this.timelines.clear();

@@ -67,6 +67,12 @@ export const PublicQuotePage: React.FC = () => {
   const [view, setView] = useState<QuoteView | null>(null);
   // La valuta del preventivo vale per tutti i suoi importi.
   const eur = (n: number): string => euro(n, lang, view?.currency);
+  // Allergeni: nel CRM sono i 14 nomi UE in italiano (COMMON_ALLERGENS), qui
+  // in minuscolo dentro la frase. Un valore fuori elenco resta com'è.
+  const nomeAllergene = (a: string): string => {
+    const key = a.trim().toLowerCase();
+    return t(`allergenNames.${key.replace(/\s+/g, '_')}`, { defaultValue: key });
+  };
   const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
@@ -170,7 +176,7 @@ export const PublicQuotePage: React.FC = () => {
                       )}
                       {d.allergens.length > 0 && (
                         <p className="mt-0.5 text-[12px] text-[var(--ds-critical-text)]">
-                          {t('allergens', { list: d.allergens.join(', ').toLowerCase() })}
+                          {t('allergens', { list: d.allergens.map(nomeAllergene).join(', ') })}
                         </p>
                       )}
                     </li>

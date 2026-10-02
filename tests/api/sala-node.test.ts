@@ -1,5 +1,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
+import { Client } from 'pg';
 import { api, ownerToken, bearer } from './helpers';
+import { platformSessionFor, dropPlatformSession, assertNoCloudflareToken } from './platformSession';
 
 // Nodo di sala, fondazioni cloud (tappa 3 del piano ibrido): token per-tenant
 // su tenants.sala_node_token (backfillato per il tenant 1 dalla migration
@@ -7,10 +9,17 @@ import { api, ownerToken, bearer } from './helpers';
 // la SPA /sala-node/client-config e interruttore sala_node_enabled mascherato
 // dall'entitlement 'sala_node' come pay_at_table.
 
-const salaNodeToken = async (owner: string): Promise<string> => {
-    const res = await api().get('/settings/webhook-info').set(bearer(owner));
-    expect(res.status).toBe(200);
-    return res.body.sala_node_token;
+// Il token del nodo si legge dal DB, come fa chi installa il nodo: il CRM
+// non lo espone più (audit isolamento, 25/09).
+const salaNodeToken = async (): Promise<string> => {
+    const db = new Client({ connectionString: process.env.DATABASE_URL || 'postgresql://localhost/ristotest_api' });
+    await db.connect();
+    try {
+        const t = await db.query('SELECT sala_node_token FROM tenants WHERE id = 1');
+        return t.rows[0].sala_node_token;
+    } finally {
+        await db.end();
+    }
 };
 
 describe('nodo di sala — fondazioni cloud', () => {
@@ -20,13 +29,22 @@ describe('nodo di sala — fondazioni cloud', () => {
         const owner = await ownerToken();
         await api().put('/settings/entitlements').set(bearer(owner)).send({ sala_node: true });
         await api().put('/settings/features').set(bearer(owner)).send({ sala_node_enabled: false });
-        await api().put('/sala-node/settings').set(bearer(owner)).send({ domain: null, lan_ip: null, port: null });
+        // Il dominio lo toglie solo la piattaforma (audit H-05).
+        await api().put('/sala-node/settings').set(bearer(await platformSessionFor(1))).send({ domain: null, lan_ip: null, port: null });
     });
 
     it('il token per tenant esiste (backfill migration) nella forma pgcrypto', async () => {
-        const owner = await ownerToken();
-        const token = await salaNodeToken(owner);
+        const token = await salaNodeToken();
         expect(token).toMatch(/^[0-9a-f]{48}$/);
+    });
+
+    it('webhook-info non espone il token del nodo', async () => {
+        const owner = await ownerToken();
+        const res = await api().get('/settings/webhook-info').set(bearer(owner));
+        expect(res.status).toBe(200);
+        expect(res.body).not.toHaveProperty('sala_node_token');
+        // Gli altri token di instradamento restano dove li cerca chi configura.
+        expect(typeof res.body.webhook_token).toBe('string');
     });
 
     it('/sala-node/credentials: 401 senza token o con token inventato', async () => {
@@ -36,17 +54,14 @@ describe('nodo di sala — fondazioni cloud', () => {
         expect(finto.status).toBe(401);
     });
 
-    it('/sala-node/credentials: col token vero consegna segreto e allowlist', async () => {
-        const owner = await ownerToken();
-        const token = await salaNodeToken(owner);
+    it('/sala-node/credentials: col token vero consegna allowlist, MAI il segreto JWT', async () => {
+        const token = await salaNodeToken();
         const res = await api().get('/sala-node/credentials').set('x-sala-node-token', token);
         expect(res.status).toBe(200);
         expect(res.body.tenant_id).toBe(1);
-        // In test JWT_SECRET non è impostato: vale il fallback dev di
-        // authService — quel che conta è che sia LO STESSO con cui il server
-        // firma, così il nodo verifica i client in locale.
-        expect(typeof res.body.jwt_secret).toBe('string');
-        expect(res.body.jwt_secret.length).toBeGreaterThan(0);
+        // Il segreto firma i token di ogni tenant e della piattaforma: chi
+        // aveva il token del nodo poteva firmarsi un PLATFORM_ADMIN.
+        expect(res.body).not.toHaveProperty('jwt_secret');
         expect(Array.isArray(res.body.allowed_origins)).toBe(true);
         // Senza dominio configurato: niente certificato, dominio null.
         expect(res.body.domain).toBeNull();
@@ -56,14 +71,17 @@ describe('nodo di sala — fondazioni cloud', () => {
     it('PUT /sala-node/settings: valida e persiste dominio, IP LAN e porta', async () => {
         const owner = await ownerToken();
 
-        const koDomain = await api().put('/sala-node/settings').set(bearer(owner)).send({ domain: 'non un dominio' });
+        // Dal fix dell'audit H-05 il dominio lo assegna solo la sessione di
+        // piattaforma («Entra»): l'owner cambia IP e porta.
+        const platform = await platformSessionFor(1);
+        const koDomain = await api().put('/sala-node/settings').set(bearer(platform)).send({ domain: 'non un dominio' });
         expect(koDomain.status).toBe(400);
         const koIp = await api().put('/sala-node/settings').set(bearer(owner)).send({ lan_ip: '999.1.2' });
         expect(koIp.status).toBe(400);
         const koVuoto = await api().put('/sala-node/settings').set(bearer(owner)).send({});
         expect(koVuoto.status).toBe(400);
 
-        const ok = await api().put('/sala-node/settings').set(bearer(owner)).send({
+        const ok = await api().put('/sala-node/settings').set(bearer(platform)).send({
             domain: 'sala.vecchiofrantoio.sympotia.com',
             lan_ip: '192.168.1.60',
             port: 8443,
@@ -113,7 +131,7 @@ describe('nodo di sala — fondazioni cloud', () => {
         // E il NODO stesso resta fuori: senza add-on le credenziali sono 403
         // (idem per l'handshake del bridge) — un cliente sospeso o cessato
         // non tiene il nodo agganciato al flusso eventi.
-        const token = await salaNodeToken(owner);
+        const token = await salaNodeToken();
         const creds = await api().get('/sala-node/credentials').set('x-sala-node-token', token);
         expect(creds.status).toBe(403);
         expect(creds.body.error).toBe('tenant_suspended_or_module_off');
@@ -141,10 +159,34 @@ describe('nodo di sala — certificato TLS', () => {
         expect(anon.status).toBe(401);
     });
 
-    it('senza CLOUDFLARE_API_TOKEN risponde 503 tls_not_configured', async () => {
+    afterAll(async () => {
+        await dropPlatformSession();
+    });
+
+    it("l'emissione è della piattaforma: l'owner riceve 403", async () => {
         const owner = await ownerToken();
         const res = await api().post('/sala-node/provision-cert').set(bearer(owner));
-        expect(res.status).toBe(503);
-        expect(res.body.error).toBe('tls_not_configured');
+        expect(res.status).toBe(403);
+        expect(res.body.error).toBe('cert_platform_managed');
+    });
+
+    it('senza CLOUDFLARE_API_TOKEN risponde 503 tls_not_configured', async () => {
+        // Il dominio qui è quello VIVO del Frantoio: con un token vero la
+        // chiamata emetterebbe un certificato reale per quel nome.
+        assertNoCloudflareToken();
+        const platform = await platformSessionFor(1);
+        // Senza dominio si ferma prima (400 no_domain): lo si assegna e poi
+        // lo si toglie, come il ripristino del blocco sopra.
+        const senza = await api().post('/sala-node/provision-cert').set(bearer(platform));
+        expect(senza.status).toBe(400);
+        expect(senza.body.error).toBe('no_domain');
+        await api().put('/sala-node/settings').set(bearer(platform)).send({ domain: 'sala.vecchiofrantoio.sympotia.com' });
+        try {
+            const res = await api().post('/sala-node/provision-cert').set(bearer(platform));
+            expect(res.status).toBe(503);
+            expect(res.body.error).toBe('tls_not_configured');
+        } finally {
+            await api().put('/sala-node/settings').set(bearer(platform)).send({ domain: null });
+        }
     });
 });

@@ -29,6 +29,8 @@ export interface Table {
   width_cm?: number | null;
   length_cm?: number | null;
   notes?: string | null;
+  /** Ordine nell'assegnazione automatica: 1 prima di 2; null = nessuna priorità. */
+  assign_priority?: number | null;
 }
 
 export interface Room {
@@ -974,7 +976,11 @@ export enum ViewState {
   ROADMAP = 'ROADMAP',
   RECENSIONI = 'RECENSIONI',
   // Pannello piattaforma (Fase D2): sopra i tenant, solo PLATFORM_ADMIN.
-  PLATFORM = 'PLATFORM'
+  PLATFORM = 'PLATFORM',
+  // Aiuto: richieste di supporto al team Sympotia, aperta a ogni ruolo del
+  // ristorante. In fondo di proposito: getAccessibleViews()[0] fa da vista
+  // di ripiego, e l'Aiuto non deve mai essere dove si atterra.
+  SUPPORTO = 'SUPPORTO'
 }
 
 // Dati di fatturazione del cliente (fase 4 fatturazione): alimentano il
@@ -1259,6 +1265,9 @@ export interface StaffMember {
   isActive: boolean;
   createdAt: string;
   updatedAt?: string;
+  // Piano ferie. Opzionali: il backend precedente non li manda.
+  userId?: number | null;          // account collegato (self-service ferie)
+  annualLeaveDays?: number | null; // null = default del ristorante
 }
 
 export interface StaffShift {
@@ -1351,6 +1360,103 @@ export interface StaffTimeOff {
   notes?: string;
   approved: boolean;
   createdAt?: string;
+}
+
+// ── Piano ferie ────────────────────────────────────────────────────────
+// Le richieste vivono fuori da staff_time_off finché non sono approvate:
+// all'approvazione diventano un'assenza VACANZA (timeOffId) e da lì il
+// calendario turni e le presenze le vedono come ogni altra assenza.
+
+export type LeaveRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
+
+export interface LeaveRequest {
+  id: string;
+  staffId: string;
+  startDate: string; // YYYY-MM-DD
+  endDate: string;   // YYYY-MM-DD
+  note?: string | null;
+  status: LeaveRequestStatus;
+  days: number;      // giorni che costa sul monte (riposo e chiusure esclusi)
+  requestedByStaff: boolean; // inserita dal dipendente, non dal responsabile
+  decidedByName?: string | null;
+  decidedAt?: string | null;
+  decisionNote?: string | null;
+  createdAt: string;
+}
+
+export interface LeaveSettings {
+  defaultAnnualDays: number | null; // null = monte non tenuto
+  minimums: Record<'SALA' | 'CUCINA', Record<'LUNCH' | 'DINNER', number>>;
+  priority: 'FIRST_COME' | 'FEWEST_DAYS';
+  // Avvio del registro ferie: chi risulta assunto fino a questo giorno
+  // matura da inizio anno. Opzionale: il backend precedente non lo manda.
+  trackingStart?: string | null;
+}
+
+export interface LeaveBalance {
+  staffId: string;
+  entitled: number | null; // null = monte non tenuto per questa persona
+  approved: number;        // in calendario, godute o programmate
+  pending: number;
+  remaining: number | null;
+}
+
+export interface LeaveCoverage {
+  from: string;
+  onDuty: Record<'SALA' | 'CUCINA', Record<'LUNCH' | 'DINNER', number[]>>; // -1 = chiuso
+  pendingLoss: Record<'SALA' | 'CUCINA', Record<'LUNCH' | 'DINNER', number[]>>;
+}
+
+export interface LeavePlanAbsence {
+  id: string;
+  staffId: string;
+  startDate: string;
+  endDate: string;
+  type: TimeOffType;
+  shift: Shift | null;
+}
+
+export interface LeavePlan {
+  year: number;
+  today: string;
+  settings: LeaveSettings;
+  requests: LeaveRequest[];
+  balances: LeaveBalance[];
+  absences: LeavePlanAbsence[];
+  coverage: LeaveCoverage;
+}
+
+export type LeaveProposalReason =
+  | { kind: 'COVERAGE'; date: string; service: 'LUNCH' | 'DINNER'; category: 'SALA' | 'CUCINA'; left: number; min: number }
+  | { kind: 'BALANCE'; year: string; over: number };
+
+export interface LeaveProposalItem {
+  requestId: string;
+  verdict: 'APPROVE' | 'REJECT';
+  days: number;
+  reasons: LeaveProposalReason[];
+}
+
+export interface MyLeave {
+  linked: boolean;
+  staffId?: string;
+  weeklyRestDay?: number | null;
+  year?: number;
+  today?: string;
+  balance?: LeaveBalance;
+  requests?: LeaveRequest[];
+  calendar?: {
+    weekly: Partial<Record<number, Record<'LUNCH' | 'DINNER', boolean>>>;
+    closures: Array<{ date: string; shift: 'LUNCH' | 'DINNER' | null }>;
+  };
+}
+
+export interface LinkableUser {
+  id: number;
+  fullName: string;
+  email: string;
+  role: UserRole;
+  staffId: string | null; // la scheda a cui è già collegato, se c'è
 }
 
 // ── Compensi del personale ─────────────────────────────────────────────

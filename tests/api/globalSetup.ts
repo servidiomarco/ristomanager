@@ -47,7 +47,8 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     // acceso a livello di ruolo — l'intera suite diventa la prova che ogni
     // percorso dell'app dichiara il proprio contesto. I client diretti dei
     // singoli file restano superuser (seed e cleanup non c'entrano con la
-    // policy). In CI resta spenta: è una prova da lanciare deliberatamente.
+    // policy). In CI gira in un job suo, «Test API (RLS rigida)», accanto a
+    // quello normale.
     let serverDbUrl = dbUrl;
     if (process.env.TEST_STRICT_RLS === '1') {
         const ROLE = 'app_test_rls';
@@ -78,6 +79,19 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
         throw new Error('dist/server.js mancante: `npm test` compila prima il server (npm run build:server).');
     }
 
+    // Niente Cloudflare né Let's Encrypt veri dai test (revisione audit
+    // H-05, 25/09). I test del nodo di sala ora passano APPOSTA tutti i
+    // controlli e contano solo sull'assenza del token per fermarsi al 503:
+    // con CLOUDFLARE_API_TOKEN esportato nella shell (è la variabile che
+    // legge wrangler) avrebbero scritto record veri in sympotia.com ed
+    // emesso certificati veri, anche per il nome vivo del Frantoio.
+    // Scritto in process.env e non solo nell'env del server: lo ereditano
+    // anche i worker di vitest e i server che i singoli file avviano.
+    // Stringa vuota e non delete: dotenv non tocca una chiave già presente,
+    // quindi nemmeno un .env locale col token lo riaccende nel server.
+    process.env.CLOUDFLARE_API_TOKEN = '';
+    process.env.ACME_STAGING = '1';
+
     const port = Number(process.env.TEST_API_PORT || 3199);
     const child: ChildProcess = spawn('node', [distServer], {
         env: {
@@ -89,6 +103,9 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
             // quanti il limiter di produzione ne conceda (5).
             PUBLIC_BOOKING_RATE_LIMIT: '1000',
             PUBLIC_ORDER_RATE_LIMIT: '1000',
+            // Avviso «cambio turno»: in produzione aspetta che la griglia
+            // smetta di scrivere (20 s); nei test basta un attimo.
+            SHIFT_CHANGE_NOTIFY_DELAY_MS: '300',
             JWT_REFRESH_SECRET: 'test-jwt-refresh-secret',
             DEFAULT_OWNER_PASSWORD: OWNER_PASSWORD,
             // Gate degli endpoint /admin/tenants (Fase D1): senza questo i

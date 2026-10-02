@@ -9,6 +9,9 @@ import { api, bearer, ownerToken } from './helpers';
 // nome di rubrica (o le stesse parole in altro ordine) viene completato al
 // nome registrato; name_confirmed: true bypassa il gate e lascia in nota il
 // titolare del numero.
+//
+// Ogni prenotazione salvata ha un giorno suo: due tavoli per lo stesso numero
+// nello stesso turno si fermano su existing_booking, che qui non c'entra.
 const TELEFONO = '3391230456';
 const DATA = '2027-08-10';
 
@@ -69,7 +72,7 @@ describe('nome dettato vs rubrica (create_reservation)', () => {
     });
 
     it('stesse parole in altro ordine («Sergio Taddeo»): forma di rubrica', async () => {
-        const res = await crea({ customer_name: 'Sergio Taddeo', time: '20:30' });
+        const res = await crea({ customer_name: 'Sergio Taddeo', time: '20:30', date: '2027-08-11' });
         expect(res.status).toBe(200);
         expect(res.body.success).toBe(true);
 
@@ -79,7 +82,7 @@ describe('nome dettato vs rubrica (create_reservation)', () => {
     });
 
     it('name_confirmed: salva il nome dettato col titolare del numero in nota', async () => {
-        const res = await crea({ customer_name: 'Caddeo Taddeo', time: '21:00', name_confirmed: true });
+        const res = await crea({ customer_name: 'Caddeo Taddeo', time: '21:00', date: '2027-08-12', name_confirmed: true });
         expect(res.status).toBe(200);
         expect(res.body.success).toBe(true);
 

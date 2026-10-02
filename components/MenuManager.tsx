@@ -12,7 +12,7 @@ import { BanquetCompositionModal } from './BanquetCompositionModal';
 import { BanquetPaymentsModal } from './BanquetPaymentsModal';
 import { DishDetailModal } from './DishDetailModal';
 import { CustomerPickerModal } from './CustomerPickerModal';
-import { getCustomers, getTableMerges, getRoomClosed, importMenuPassepartout, translateMenu, digitalMenuUrl, getFeatureFlags, updateFeatureFlags, getMenuCategories, saveMenuCategories, saveDishOrder, setDishEnabled, createMenu, renameMenu, deleteMenu, setBanquetStatus, setCategoryMenu, setCategoryBar, setCategoryDessert, setCategoryWine, suggestDishWinePairings, pairMenuWines, createMenuCategory, renameMenuCategory, deleteMenuCategory, getBanquetShareLink, sendBanquetQuoteEmail, sendBanquetQuoteWhatsApp, getModifierGroups, getDishComponents, type AdminModifierGroup, type MenuImportResult, type MenuTranslateResult, type PairWinesResult, type MenuCategory } from '../services/apiService';
+import { getCustomers, getTableMerges, getRoomClosed, importMenuPassepartout, translateMenu, digitalMenuUrl, getFeatureFlags, updateFeatureFlags, getDigitalMenu, setDigitalMenu, getMenuCategories, saveMenuCategories, saveDishOrder, setDishEnabled, createMenu, renameMenu, deleteMenu, setBanquetStatus, setCategoryMenu, setCategoryBar, setCategoryDessert, setCategoryWine, suggestDishWinePairings, pairMenuWines, createMenuCategory, renameMenuCategory, deleteMenuCategory, getBanquetShareLink, sendBanquetQuoteEmail, sendBanquetQuoteWhatsApp, getModifierGroups, getDishComponents, type AdminModifierGroup, type MenuImportResult, type MenuTranslateResult, type PairWinesResult, type MenuCategory } from '../services/apiService';
 import { socketClient } from '../services/socketClient';
 import { getSalaConfig, type SalaStation } from '../services/salaApiService';
 import { MenuVariantsModal } from './MenuVariantsModal';
@@ -416,6 +416,11 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const [wineAiAttivo, setWineAiAttivo] = useState<boolean | null>(null);
   const [wineAiBusy, setWineAiBusy] = useState(false);
   const [menuFlagBusy, setMenuFlagBusy] = useState(false);
+  // Quale menu della lista mostra il QR (di default Alla carta). null finché
+  // non arriva, o se il backend non ha ancora la rotta: la tendina sparisce.
+  const [qrMenuId, setQrMenuId] = useState<number | null>(null);
+  const [qrMenuBusy, setQrMenuBusy] = useState(false);
+  const [qrMenuError, setQrMenuError] = useState<string | null>(null);
   const [translating, setTranslating] = useState(false);
   const [translateEsito, setTranslateEsito] = useState<MenuTranslateResult | null>(null);
   const [translateError, setTranslateError] = useState<string | null>(null);
@@ -431,8 +436,29 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     getFeatureFlags()
       .then(f => { if (!cancelled) { setMenuAttivo(f.digital_menu_enabled === true); setWineAiAttivo(f.ai_wine_pairing_enabled === true); } })
       .catch(() => { if (!cancelled) { setMenuAttivo(null); setWineAiAttivo(null); } });
+    setQrMenuError(null);
+    getDigitalMenu()
+      .then(r => { if (!cancelled) setQrMenuId(typeof r?.menu_id === 'number' ? r.menu_id : null); })
+      .catch(() => { if (!cancelled) setQrMenuId(null); });
     return () => { cancelled = true; };
   }, [qrOpen]);
+
+  const cambiaMenuQr = async (menuId: number) => {
+    if (qrMenuBusy || menuId === qrMenuId) return;
+    const prima = qrMenuId;
+    setQrMenuBusy(true);
+    setQrMenuError(null);
+    setQrMenuId(menuId);
+    try {
+      const updated = await setDigitalMenu(menuId);
+      setQrMenuId(updated.menu_id);
+    } catch (err: any) {
+      setQrMenuId(prima);
+      setQrMenuError(err?.data?.error ?? err?.message ?? t('err.save'));
+    } finally {
+      setQrMenuBusy(false);
+    }
+  };
 
   const toggleMenuDigitale = async () => {
     if (menuFlagBusy || menuAttivo == null) return;
@@ -468,7 +494,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     try {
       setTranslateEsito(await translateMenu());
     } catch (err: any) {
-      setTranslateError(err?.data?.message ?? err?.data?.error ?? err?.message ?? t('err.translate'));
+      setTranslateError(err?.data?.error === 'ai_key_invalid' ? t('err.aiKeyInvalid')
+        : err?.data?.message ?? err?.data?.error ?? err?.message ?? t('err.translate'));
     } finally {
       setTranslating(false);
     }
@@ -485,6 +512,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       const code = err?.data?.error;
       setPairError(
         code === 'ai_disabled' ? t('err.aiDisabled')
+        : code === 'ai_key_invalid' ? t('err.aiKeyInvalid')
         : code === 'no_wines' ? t('err.noWines')
         : err?.data?.message ?? err?.data?.error ?? err?.message ?? t('err.pairing'));
     } finally {
@@ -501,8 +529,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
   const activeTab = mode;
 
-  // I due menu di sistema: ALLA_CARTA governa comande e menu digitale,
-  // BANQUETS il picker della composizione banchetti.
+  // I due menu di sistema: ALLA_CARTA governa comande e asporto (e il menu
+  // digitale finché nel QR modal non se ne sceglie un altro), BANQUETS il
+  // picker della composizione banchetti.
   const cartaMenu = useMemo(() => menus.find(m => m.system_key === 'ALLA_CARTA') ?? null, [menus]);
   const banquetsMenu = useMemo(() => menus.find(m => m.system_key === 'BANQUETS') ?? null, [menus]);
 
@@ -818,6 +847,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       const code = err?.data?.error;
       setSuggestWinesError(
         code === 'ai_disabled' ? t('err.aiDisabled')
+        : code === 'ai_key_invalid' ? t('err.aiKeyInvalid')
         : code === 'no_wines' ? t('err.noWines')
         : err?.data?.message ?? err?.message ?? t('err.suggestion'));
     } finally {
@@ -4198,108 +4228,167 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         onClose={() => setQrOpen(false)}
         title={t('digitalMenu')}
         subtitle={t('digitalMenuHint')}
+        bodyClassName="p-5 sm:p-6"
       >
         <div className="space-y-4">
-          <div className="flex items-center justify-between gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-4 py-3">
-            <span className="text-[14px] font-medium text-[var(--ds-text-primary)]">
-              {menuAttivo == null ? t('state') : t(menuAttivo ? 'menuVisible' : 'menuNotVisible')}
-            </span>
-            <button
-              type="button"
-              onClick={toggleMenuDigitale}
-              disabled={menuFlagBusy || menuAttivo == null}
-              className={`inline-flex h-9 items-center rounded-[var(--ds-radius-control)] px-4 text-[13px] font-semibold transition-colors disabled:opacity-40 ${
-                menuAttivo
-                  ? 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]'
-                  : 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
-              }`}
-            >
-              {menuFlagBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : t(menuAttivo ? 'switchOff' : 'publish')}
-            </button>
-          </div>
+          {/* Il QR e ciò che mostra: su schermo largo il codice a sinistra e i
+              controlli accanto, sul telefono in colonna. */}
+          <FormCard>
+            <div className="flex flex-col items-center gap-5 sm:flex-row sm:items-start sm:gap-6">
+              {/* Piatto bianco fisso: un QR su fondo scuro non si inquadra. */}
+              <div className="flex-shrink-0 rounded-[var(--ds-radius-sm)] bg-[#ffffff] p-3 ring-1 ring-inset ring-[var(--ds-border)]">
+                <QRCodeSVG value={menuUrl} size={152} level="M" />
+              </div>
+              <div className="w-full min-w-0 flex-1 space-y-4">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="flex min-w-0 items-center gap-2 text-[15px] font-medium text-[var(--ds-text-primary)]">
+                    {menuAttivo != null && (
+                      <span
+                        className={`h-2 w-2 flex-shrink-0 rounded-full ${menuAttivo ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-border-strong)]'}`}
+                        aria-hidden
+                      />
+                    )}
+                    <span className="truncate">
+                      {menuAttivo == null ? t('state') : t(menuAttivo ? 'menuVisible' : 'menuNotVisible')}
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={toggleMenuDigitale}
+                    disabled={menuFlagBusy || menuAttivo == null}
+                    className={`inline-flex h-9 flex-shrink-0 items-center rounded-[var(--ds-radius-control)] px-4 text-[13px] font-semibold transition-colors disabled:opacity-40 ${
+                      menuAttivo
+                        ? 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
+                        : 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)]'
+                    }`}
+                  >
+                    {menuFlagBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : t(menuAttivo ? 'switchOff' : 'publish')}
+                  </button>
+                </div>
 
-          <div className="flex flex-col items-center gap-3">
-            {/* Piatto bianco fisso: un QR su fondo scuro non si inquadra. */}
-            <div className="rounded-[var(--ds-radius)] bg-[#ffffff] p-3 shadow-[var(--ds-shadow-card)]">
-              <QRCodeSVG value={menuUrl} size={168} level="M" />
+                {/* Quale menu della lista vede l'ospite: solo i suoi piatti
+                    finiscono nella pagina del QR. Il conteggio rifà il filtro
+                    del server (accesi in cassa e nel CRM, categoria accesa). */}
+                {qrMenuId != null && (
+                  <Field
+                    label={t('qrMenu')}
+                    htmlFor="qr-menu"
+                    aside={t('qrMenuDishes', {
+                      count: dishes.filter(d =>
+                        d.is_active !== false && d.crm_enabled !== false
+                        && (d.menu_ids ?? []).includes(qrMenuId)
+                        && menuCats?.find(c => c.name === (d.category || 'Altro'))?.enabled !== false
+                      ).length,
+                    })}
+                    error={qrMenuError}
+                  >
+                    <select
+                      id="qr-menu"
+                      className={dsSelect}
+                      value={qrMenuId}
+                      disabled={!canEdit || qrMenuBusy}
+                      onChange={e => cambiaMenuQr(Number(e.target.value))}
+                    >
+                      {menus.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                    </select>
+                  </Field>
+                )}
+
+                <div className="flex flex-wrap justify-center gap-2 sm:justify-start">
+                  <button
+                    type="button"
+                    onClick={copiaLinkMenu}
+                    className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]"
+                  >
+                    {linkCopiato ? <><Check className="h-4 w-4" /> {t('copied')}</> : <><Copy className="h-4 w-4" /> {t('copyLink')}</>}
+                  </button>
+                  <a
+                    href={menuUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]"
+                  >
+                    {t('openPage')}
+                  </a>
+                </div>
+              </div>
             </div>
-            <div className="flex flex-wrap items-center justify-center gap-2">
-              <button
-                type="button"
-                onClick={copiaLinkMenu}
-                className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]"
-              >
-                {linkCopiato ? <><Check className="h-4 w-4" /> {t('copied')}</> : <><Copy className="h-4 w-4" /> {t('copyLink')}</>}
-              </button>
-              <a
-                href={menuUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]"
-              >
-                {t('openPage')}
-              </a>
-            </div>
-          </div>
+          </FormCard>
 
           {canEdit && (
-            <div className="space-y-2 border-t border-[var(--ds-border)] pt-4">
-              <button
-                type="button"
-                onClick={handleTranslate}
-                disabled={translating}
-                className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)] disabled:opacity-40"
-              >
-                {translating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Languages className="h-4 w-4" />}
-                {t('translateNew')}
-              </button>
-              <p className="text-[13px] text-[var(--ds-text-muted)]">
-                {t('translateHint')}
-              </p>
+            <FormCard>
+              {/* Ogni riga: cosa fa a sinistra, l'azione a destra (sotto, sul
+                  telefono). */}
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+                <div className="min-w-0">
+                  <p className="text-[15px] font-medium text-[var(--ds-text-primary)]">{t('translations')}</p>
+                  <p className="mt-0.5 text-[13px] text-[var(--ds-text-muted)]">{t('translateHint')}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleTranslate}
+                  disabled={translating}
+                  className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 self-start rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)] disabled:opacity-40 sm:self-center"
+                >
+                  {translating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Languages className="h-4 w-4" />}
+                  {t('translateNew')}
+                </button>
+              </div>
               {translateEsito && (
-                <p className="text-[13px] text-[var(--ds-seated-text)]">
+                <p className="mt-2 text-[13px] text-[var(--ds-seated-text)]">
                   {translateEsito.tradotte === 0 ? t('allTranslated') : t('itemsTranslated', { n: translateEsito.tradotte })}
                 </p>
               )}
-              {translateError && <p className="text-[13px] text-[var(--ds-critical-text)]">{translateError}</p>}
+              {translateError && <p className="mt-2 text-[13px] text-[var(--ds-critical-text)]">{translateError}</p>}
+
+              <div className="my-5 border-t border-[var(--ds-border)]" />
+
               {/* Il sommelier AI sulla carta intera: riempie solo i piatti
                   senza abbinamenti, ognuno resta correggibile in scheda. */}
-              <div className="flex items-center justify-between gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-4 py-3">
-                <span className="text-[14px] font-medium text-[var(--ds-text-primary)]">
-                  {wineAiAttivo == null ? t('state') : t(wineAiAttivo ? 'sommelierOn' : 'sommelierOff')}
-                </span>
-                <button
-                  type="button"
-                  onClick={toggleWineAi}
-                  disabled={wineAiBusy || wineAiAttivo == null}
-                  className={`inline-flex h-9 items-center rounded-[var(--ds-radius-control)] px-4 text-[13px] font-semibold transition-colors disabled:opacity-40 ${
-                    wineAiAttivo
-                      ? 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]'
-                      : 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
-                  }`}
-                >
-                  {wineAiBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : t(wineAiAttivo ? 'switchOff' : 'switchOn')}
-                </button>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+                <div className="min-w-0">
+                  <p className="flex items-center gap-2 text-[15px] font-medium text-[var(--ds-text-primary)]">
+                    {wineAiAttivo != null && (
+                      <span
+                        className={`h-2 w-2 flex-shrink-0 rounded-full ${wineAiAttivo ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-border-strong)]'}`}
+                        aria-hidden
+                      />
+                    )}
+                    {wineAiAttivo == null ? t('state') : t(wineAiAttivo ? 'sommelierOn' : 'sommelierOff')}
+                  </p>
+                  <p className="mt-0.5 text-[13px] text-[var(--ds-text-muted)]">{t('pairHint')}</p>
+                </div>
+                <div className="flex flex-shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handlePairWines}
+                    disabled={pairingWines || wineAiAttivo !== true}
+                    className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-tint)] px-3.5 text-[13px] font-semibold text-[var(--ds-arriving-text)] transition-opacity hover:opacity-80 disabled:opacity-40"
+                  >
+                    {pairingWines ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
+                    {t(pairingWines ? 'thinking' : 'pairWines')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={toggleWineAi}
+                    disabled={wineAiBusy || wineAiAttivo == null}
+                    className={`inline-flex h-9 items-center rounded-[var(--ds-radius-control)] px-4 text-[13px] font-semibold transition-colors disabled:opacity-40 ${
+                      wineAiAttivo
+                        ? 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
+                        : 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)]'
+                    }`}
+                  >
+                    {wineAiBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : t(wineAiAttivo ? 'switchOff' : 'switchOn')}
+                  </button>
+                </div>
               </div>
-              <button
-                type="button"
-                onClick={handlePairWines}
-                disabled={pairingWines || wineAiAttivo !== true}
-                className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-tint)] px-3.5 text-[13px] font-semibold text-[var(--ds-arriving-text)] transition-opacity hover:opacity-80 disabled:opacity-40"
-              >
-                {pairingWines ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
-                {t(pairingWines ? 'thinking' : 'pairWines')}
-              </button>
-              <p className="text-[13px] text-[var(--ds-text-muted)]">
-                {t('pairHint')}
-              </p>
               {pairEsito && (
-                <p className="text-[13px] text-[var(--ds-seated-text)]">
+                <p className="mt-2 text-[13px] text-[var(--ds-seated-text)]">
                   {pairEsito.abbinati === 0 ? t('allPaired') : t('pairedCount', { count: pairEsito.abbinati })}
                 </p>
               )}
-              {pairError && <p className="text-[13px] text-[var(--ds-critical-text)]">{pairError}</p>}
-            </div>
+              {pairError && <p className="mt-2 text-[13px] text-[var(--ds-critical-text)]">{pairError}</p>}
+            </FormCard>
           )}
         </div>
       </ModalShell>

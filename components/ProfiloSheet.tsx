@@ -3,10 +3,13 @@ import { useTranslation } from 'react-i18next';
 import { Loader2, Eye, EyeOff } from 'lucide-react';
 import { Sheet, FormCard, Field, dsInput, dsButton } from './ds';
 import { useAuth } from '../contexts/AuthContext';
+import { LeMieFerieCard } from './LeMieFerieCard';
 
 /**
- * Il proprio account, self-service: nome e telefono, cambio password, cambio
- * email. Aperto dall'area utente della sidebar (e dal menu "Altro" su mobile).
+ * Il proprio account, self-service: le proprie ferie (per chi ha l'account
+ * collegato a una scheda del personale), nome e telefono, cambio password,
+ * cambio email. Aperto dall'area utente della sidebar (e dal menu "Altro" su
+ * mobile).
  *
  * Tre card indipendenti, ognuna col suo submit: password ed email richiedono
  * la password corrente e falliscono in modi diversi — un unico "Salva" che
@@ -154,6 +157,9 @@ export const ProfiloSheet: React.FC<ProfiloSheetProps> = ({ open, onClose, roleL
       ariaLabel={t('accountTitle')}
       bodyClassName="p-4 sm:p-5 space-y-4"
     >
+      {/* Solo per chi ha l'account collegato a una scheda del personale. */}
+      <LeMieFerieCard open={open} />
+
       <FormCard title={t('profile')}>
         <form onSubmit={handleProfileSubmit} className="space-y-4">
           <Field label={t('name')} htmlFor="profilo-nome" required>

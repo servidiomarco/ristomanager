@@ -51,7 +51,9 @@ const fetchRowsFromCloud = async (wanted: WantedRows): Promise<FetchedRows> =>
 
 /** Un giro di pull dal cloud: torna true se c'era roba (e conviene
  *  rigirare subito — a valle di un outage si drena a batch pieni). */
+// rls-bypass: solo nodo, un tenant: giro di replica senza sessione, il tenant lo dà il cursore locale
 const pullOnce = async (): Promise<boolean> => runAsPlatform(async () => {
+    // rls-bypass: solo nodo (Postgres locale superuser, un tenant): il pool nudo legge il cursore 'cloud'
     const cur = await pool.query(`SELECT tenant_id, applied_seq FROM replication_cursor WHERE stream = 'cloud' LIMIT 1`);
     if (cur.rows.length === 0) return false; // bootstrap non ancora fatto
     const tenantId = Number(cur.rows[0].tenant_id);
@@ -68,10 +70,12 @@ const pullOnce = async (): Promise<boolean> => runAsPlatform(async () => {
 
 const serveNodePull = async (req: any, ack: (res: any) => void): Promise<void> => {
     try {
+        // rls-bypass: solo nodo, un tenant: RPC node:pull del cloud senza sessione, legge il suo outbox locale
         await runAsPlatform(async () => {
             const after = Number(req?.after);
             const limit = Math.min(PULL_LIMIT, Math.max(1, Number(req?.limit) || PULL_LIMIT));
             if (!Number.isFinite(after) || after < 0) return ack({ error: 'after non valido' });
+            // rls-bypass: solo nodo (superuser locale, un tenant): outbox 'local' senza filtro tenant, è tutto suo
             const rs = await pool.query(
                 `SELECT id, event_id, event, aggregate, payload, command_id, causation_id, actor, schema_ver, created_at
                  FROM outbox_events
@@ -106,8 +110,11 @@ const serveNodePull = async (req: any, ack: (res: any) => void): Promise<void> =
  *  l'autorità). */
 const serveNodeStatus = async (_req: any, ack: (res: any) => void): Promise<void> => {
     try {
+        // rls-bypass: solo nodo, un tenant: RPC node:status del cloud senza sessione, cursore e testa del log
         await runAsPlatform(async () => {
+            // rls-bypass: solo nodo (superuser locale, un tenant): il cursore 'cloud' è unico, niente filtro tenant
             const cur = await pool.query(`SELECT applied_seq FROM replication_cursor WHERE stream = 'cloud' LIMIT 1`);
+            // rls-bypass: solo nodo (superuser locale, un tenant): testa dell'outbox locale, niente filtro tenant
             const head = await pool.query(`SELECT COALESCE(MAX(id), 0)::bigint AS h FROM outbox_events WHERE origin = 'local'`);
             ack({
                 applied_cloud_seq: Number(cur.rows[0]?.applied_seq ?? 0),
@@ -121,6 +128,7 @@ const serveNodeStatus = async (_req: any, ack: (res: any) => void): Promise<void
 
 const serveNodeRows = async (req: any, ack: (res: any) => void): Promise<void> => {
     try {
+        // rls-bypass: solo nodo, un tenant: RPC node:rows del cloud senza sessione, righe per id dal DB locale
         await runAsPlatform(async () => {
             const ids = (key: string): number[] => {
                 const raw = Array.isArray(req?.[key]) ? req[key] : [];
@@ -131,6 +139,7 @@ const serveNodeRows = async (req: any, ack: (res: any) => void): Promise<void> =
             const reservationIds = ids('reservations');
             const orderIds = ids('orders');
             const takeawayIds = ids('takeaways');
+            // rls-bypass: solo nodo (superuser locale, un tenant): righe per id, il DB del nodo ha un tenant solo
             const q = (sql: string, params: any[]) => pool.query(sql, params).then(r => r.rows);
             const none: any[] = [];
             const [tables, reservations, orders, order_items, order_revisions, takeaway_orders, takeaway_order_items] = await Promise.all([

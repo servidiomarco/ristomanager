@@ -163,6 +163,27 @@ footer { text-align: center; color: var(--ds-text-subtle); font-size: 12px; padd
     };
     var LANG_LABEL = { it: 'it', en: 'en', fr: 'fr', de: 'de' };
 
+    /* Gli allergeni nel CRM sono i 14 nomi UE in italiano (COMMON_ALLERGENS in
+       types.ts): la traduzione è un dizionario fisso, nei nomi ufficiali
+       dell'allegato II del Reg. UE 1169/2011. Un valore fuori elenco resta
+       com'è — meglio in italiano che sparito. */
+    var ALLERGENI = {
+        'glutine':         { en: 'Gluten',      fr: 'Gluten',          de: 'Gluten' },
+        'crostacei':       { en: 'Crustaceans', fr: 'Crustacés',       de: 'Krebstiere' },
+        'uova':            { en: 'Eggs',        fr: 'Œufs',            de: 'Eier' },
+        'pesce':           { en: 'Fish',        fr: 'Poisson',         de: 'Fisch' },
+        'arachidi':        { en: 'Peanuts',     fr: 'Arachides',       de: 'Erdnüsse' },
+        'soia':            { en: 'Soy',         fr: 'Soja',            de: 'Soja' },
+        'latte':           { en: 'Milk',        fr: 'Lait',            de: 'Milch' },
+        'frutta a guscio': { en: 'Tree nuts',   fr: 'Fruits à coque',  de: 'Schalenfrüchte' },
+        'sedano':          { en: 'Celery',      fr: 'Céleri',          de: 'Sellerie' },
+        'senape':          { en: 'Mustard',     fr: 'Moutarde',        de: 'Senf' },
+        'sesamo':          { en: 'Sesame',      fr: 'Sésame',          de: 'Sesam' },
+        'solfiti':         { en: 'Sulphites',   fr: 'Sulfites',        de: 'Sulfite' },
+        'lupini':          { en: 'Lupin',       fr: 'Lupin',           de: 'Lupinen' },
+        'molluschi':       { en: 'Molluscs',    fr: 'Mollusques',      de: 'Weichtiere' }
+    };
+
     /* L'ordine delle portate non è alfabetico: si mangia in quest'ordine. Le
        categorie fuori elenco vanno in coda, in ordine di nome. */
     var ORDINE = ['antipast', 'primi', 'second', 'griglia', 'contorn', 'senza glutine', 'frutta', 'gelat', 'dessert', 'dolc', 'menu', 'bibite', 'vini bianchi', 'vini ross', 'vino', 'caff', 'liquor'];
@@ -198,6 +219,10 @@ footer { text-align: center; color: var(--ds-text-subtle); font-size: 12px; padd
             nome: (lang !== 'it' && tr && tr.name) ? tr.name : p.name,
             desc: (lang !== 'it' && tr && tr.description) ? tr.description : (p.description || '')
         };
+    }
+    function nomeAllergene(a) {
+        var tr = ALLERGENI[String(a).trim().toLowerCase()];
+        return (lang !== 'it' && tr && tr[lang]) || a;
     }
     function nomeCategoria(cat) {
         var tr = dati.categorie && dati.categorie[cat];
@@ -264,7 +289,7 @@ footer { text-align: center; color: var(--ds-text-subtle); font-size: 12px; padd
                     + (p.photo_url ? '<img class="piatto__foto" src="' + esc(p.photo_url) + '" alt="" loading="lazy" data-nome="' + esc(tp.nome) + '" data-prezzo="' + (p.price > 0 ? esc(euro(p.price)) : '') + '" />' : '')
                     + '<div class="piatto__testo"><div class="piatto__nome">' + esc(tp.nome) + '</div>'
                     + (tp.desc ? '<div class="piatto__desc">' + esc(tp.desc) + '</div>' : '')
-                    + (p.allergens && p.allergens.length ? '<div class="piatto__allergeni">' + esc(t('allergeni')) + ': ' + esc(p.allergens.join(', ')) + '</div>' : '')
+                    + (p.allergens && p.allergens.length ? '<div class="piatto__allergeni">' + esc(t('allergeni')) + ': ' + esc(p.allergens.map(nomeAllergene).join(', ')) + '</div>' : '')
                     + (p.abbinati && p.abbinati.length ? '<div class="piatto__abbinati">' + esc(t('abbinati')) + ': ' + esc(p.abbinati.join(', ')) + '</div>' : '')
                     + '</div>'
                     + (p.price > 0 ? '<div class="piatto__prezzo tnum">' + esc(euro(p.price)) + '</div>' : '')

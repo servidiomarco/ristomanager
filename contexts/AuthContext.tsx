@@ -44,11 +44,26 @@ const VIEW_PERMISSIONS: Record<ViewState, string> = {
   [ViewState.MONITORING]: '', // gated by account email, not by permission — see canAccessView
   [ViewState.DEVELOPMENT]: '', // gated by account email, not by permission — see canAccessView
   [ViewState.ROADMAP]: '', // gated by account email, not by permission — see canAccessView
-  [ViewState.PLATFORM]: '' // gated by role PLATFORM_ADMIN, not by permission — see canAccessView
+  [ViewState.PLATFORM]: '', // gated by role PLATFORM_ADMIN, not by permission — see canAccessView
+  [ViewState.SUPPORTO]: '' // every tenant user, no permission — see canAccessView
 };
 
 /** The dev board is a project tool tied to one specific account, not a role. */
 const DEV_BOARD_ADMIN_EMAIL = 'admin@ristomanager.com';
+
+/** «Entra» dal pannello: il token porta scopedTenantId. Si legge dal JWT (lo
+ *  stesso controllo di App.tsx) perché /auth/me non lo espone; qui a parte
+ *  e non importato dal pannello, che a sua volta importa questo contesto. */
+const isPlatformScopedSessionToken = (): boolean => {
+  const token = authApiService.getAccessToken();
+  const part = token?.split('.')[1];
+  if (!part) return false;
+  try {
+    return !!JSON.parse(atob(part.replace(/-/g, '+').replace(/_/g, '/')))?.scopedTenantId;
+  } catch {
+    return false;
+  }
+};
 
 // Entitlements commerciali (Fase C1, gating UI della nota D1): la vista di un
 // canale non compreso nel piano non compare proprio — niente bottone che
@@ -235,6 +250,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // PLATFORM_ADMIN sta sopra i tenant e la matrice permessi è per-tenant.
     if (view === ViewState.PLATFORM) {
       return user?.role === UserRole.PLATFORM_ADMIN;
+    }
+    // Aiuto: ogni utente del ristorante, a prescindere dalla matrice. Il
+    // platform admin la vede solo dentro un tenant («Entra»): dal pannello
+    // le richieste le legge nella tab Supporto.
+    if (view === ViewState.SUPPORTO) {
+      if (!user) return false;
+      return user.role !== UserRole.PLATFORM_ADMIN || isPlatformScopedSessionToken();
     }
     // Lancio ristretto: gli account in allowlist (flag dal backend) vedono la
     // Reportistica anche senza reports:view; il permesso resta la via

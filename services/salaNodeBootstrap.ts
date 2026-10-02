@@ -174,8 +174,10 @@ const syncTenantRow = async (): Promise<void> => {
     }
 };
 
+// rls-bypass: solo nodo, boot senza sessione: lo snapshot si scopa sul tenant_id dato dal cloud
 const attempt = async (): Promise<boolean> => runAsPlatform(async () => {
     if (process.env.SALA_NODE_BOOTSTRAP !== 'force') {
+        // rls-bypass: solo nodo (superuser locale, un tenant): basta sapere se il cursore 'cloud' esiste
         const cur = await pool.query(`SELECT applied_seq FROM replication_cursor WHERE stream = 'cloud' LIMIT 1`);
         if (cur.rows.length > 0) {
             console.log(`[bootstrap] cursore già presente (seq ${cur.rows[0].applied_seq}): niente da fare, il riallineamento è del replay`);

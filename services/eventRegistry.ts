@@ -131,6 +131,9 @@ export const DOMAIN_EVENTS: Record<string, DomainEventSpec> = {
     'email:new': spec('cloud'),
     'email:read': spec('cloud'),
     'inboundEmail:received': spec('cloud'),
+    // Chiamate di Sofia cambiate (nuova, richiamata, ricontattata,
+    // collegata): il client rilegge lista e contatore, il payload è vuoto.
+    'voiceCall:changed': spec('cloud'),
 
     // --- Gestione (staff, turni, spesa, todo, fornitori): tolleranza alta
     //     alla latenza, conflitti rari — master in cloud.
@@ -143,6 +146,9 @@ export const DOMAIN_EVENTS: Record<string, DomainEventSpec> = {
     'timeoff:created': spec('cloud'),
     'timeoff:updated': spec('cloud'),
     'timeoff:deleted': spec('cloud'),
+    // Piano ferie: un solo tipo, il client rilegge il piano o le proprie
+    // richieste — il payload dice solo cosa è cambiato.
+    'leave:changed': spec('cloud'),
     'supplier:created': spec('cloud'),
     'supplier:updated': spec('cloud'),
     'supplier:deleted': spec('cloud'),
@@ -155,12 +161,22 @@ export const DOMAIN_EVENTS: Record<string, DomainEventSpec> = {
     'todo:deleted': spec('cloud'),
     'staffchat:message': spec('cloud'),
     'staffchat:read': spec('cloud'),
+    'staffchat:receipt': spec('cloud'),
     'staffchat:presets': spec('cloud'),
+    // Centro notifiche: le righe nascono solo sul cloud (pushService non
+    // persiste sul nodo di sala), la lettura le segue.
+    'notification:new': spec('cloud'),
+    'notifications:read': spec('cloud'),
 
     // --- Piattaforma e strumenti interni.
     'features:updated': spec('cloud'),
     'devboard:changed': spec('cloud'),
     'roadmap:changed': spec('cloud'),
+    // Supporto clienti: le richieste vivono solo sul cloud. support:updated
+    // va a chi ha aperto la richiesta; support:admin-updated alla stanza
+    // degli admin di piattaforma, che non appartiene a nessun ristorante.
+    'support:updated': spec('cloud'),
+    'support:admin-updated': spec('cloud'),
 
     // --- Segnali realtime puri: mai nel log di replica.
     'connection:acknowledged': spec('transient'),
