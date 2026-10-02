@@ -16,6 +16,7 @@ import rateLimit from 'express-rate-limit';
 import QRCode from 'qrcode';
 import pool, { createSchema, queryWithRetry, runMigrations, tenantQuery, runWithTenantContext, runAsPlatform, withTenant } from './db.js';
 import { SocketService } from './services/socketService.js';
+import { retryOnLockContention } from './utils/lockRetry.js';
 import * as bookingTools from './services/bookingTools.js';
 import * as whatsappAgent from './services/whatsappAgent.js';
 import * as tableAssignmentAgent from './services/tableAssignmentAgent.js';
@@ -39626,7 +39627,10 @@ const startServer = async () => {
                     // createSchema), ma va in log come errore: uno schema
                     // rimasto indietro è un incidente da vedere subito.
                     try {
-                        await runMigrations();
+                        // Ogni migration è una transazione: una persa per
+                        // deadlock col container vecchio fa ROLLBACK e la run
+                        // riparte da quella (le applicate sono in pgmigrations).
+                        await retryOnLockContention('runMigrations', runMigrations);
                         console.log('✅ Database migrations up to date');
                         // Solo qui: se le migration falliscono /ready resta
                         // 503 e Railway tiene in servizio il container vecchio.
@@ -39747,7 +39751,7 @@ const startServer = async () => {
                     // appena ristretto i CHECK sui ruoli alla lista storica
                     // (vedi ensureRoleChecks per il perché).
                     try {
-                        await ensureRoleChecks();
+                        await retryOnLockContention('ensureRoleChecks', ensureRoleChecks);
                     } catch (roleErr) {
                         console.error('❌ Re-assert CHECK ruoli fallito:', roleErr);
                     }
@@ -39755,7 +39759,9 @@ const startServer = async () => {
                     // congelata ricrea policy con la formula vecchia (vedi
                     // ensureRlsPolicies per il perché).
                     try {
-                        await ensureRlsPolicies();
+                        // ALTER TABLE su ogni tabella, una dopo l'altra: è il
+                        // passo che più facilmente si incrocia col traffico.
+                        await retryOnLockContention('ensureRlsPolicies', ensureRlsPolicies);
                         console.log('✅ Policy RLS riallineate (formula strict-capable)');
                     } catch (rlsErr) {
                         console.error('❌ Re-assert policy RLS fallito:', rlsErr);

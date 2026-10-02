@@ -125,6 +125,7 @@ const sleepMs = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 // cambia il comportamento delle query SENZA contesto: il fallback permissivo
 // resta. Con contesto, la policy è già rigida oggi (era il contratto B4).
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { retryOnLockContention } from './utils/lockRetry.js';
 
 type TenantContext = { tenantId?: number; platform?: boolean };
 const tenantContext = new AsyncLocalStorage<TenantContext>();
@@ -314,7 +315,10 @@ const RETRY_DELAY_MS = 3000;
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-export const createSchema = async (retryCount = 0): Promise<void> => {
+// Il ritento qui sotto copre solo la connessione. La contesa di lock con il
+// container vecchio ancora in servizio (deadlock al deploy) la copre il
+// wrapper in fondo al file: la transazione intera fa ROLLBACK e si rifà.
+const createSchemaOnce = async (retryCount = 0): Promise<void> => {
     let client;
     try {
         client = await pool.connect();
@@ -322,7 +326,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         if (retryCount < MAX_RETRIES) {
             console.log(`Database connection failed, retrying in ${RETRY_DELAY_MS}ms... (attempt ${retryCount + 1}/${MAX_RETRIES})`);
             await sleep(RETRY_DELAY_MS);
-            return createSchema(retryCount + 1);
+            return createSchemaOnce(retryCount + 1);
         }
         throw connectionError;
     }
@@ -3114,5 +3118,11 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         client.release();
     }
 };
+
+// Deadlock al deploy (02/10/2026): vedi utils/lockRetry.ts. Senza questo un
+// solo scontro con il container vecchio lasciava /ready a 503 e Railway
+// scartava il deploy.
+export const createSchema = (): Promise<void> =>
+    retryOnLockContention('createSchema', () => createSchemaOnce());
 
 export default pool;
