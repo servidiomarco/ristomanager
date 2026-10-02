@@ -459,15 +459,34 @@ const App: React.FC = () => {
      relativo cercherebbe l'immagine su Vercel.
 
      Finche' non arriva resta null e in testa si vede Sympotia: meglio il
-     marchio del prodotto per un istante che un buco che poi si riempie. */
+     marchio del prodotto per un istante che un buco che poi si riempie.
+
+     Il pannello di piattaforma (PLATFORM_ADMIN senza «Entra») un ristorante
+     non ce l'ha: il suo tenant è quello di casa della riga utente, e
+     /settings/legal gli dava il logo del Frantoio. Lì resta Sympotia.
+     La sessione si legge dal token e non dallo user: il token c'è già al
+     montaggio, lo user solo dopo /auth/me, e il logo del ristorante
+     partirebbe in ritardo a ogni avvio. Login e logout cambiano il token e
+     ricaricano il marchio giusto. */
   const [tenantLogo, setTenantLogo] = useState<string | null>(null);
   const [tenantLogoDark, setTenantLogoDark] = useState<string | null>(null);
   const [tenantName, setTenantName] = useState<string>('');
-  useEffect(() => swrConfig('legalSettings', getLegalSettings, l => {
-    setTenantLogo(l.logo_url ? tenantLogoSrc(l.logo_url) : null);
-    setTenantLogoDark(l.logo_dark_url ? tenantLogoSrc(l.logo_dark_url) : null);
-    setTenantName(l.business_name || '');
-  }), []);
+  const sessionClaims = decodeJwtPayload(authApiService.getAccessToken());
+  const hasTenantBranding = !!sessionClaims
+    && !(sessionClaims.role === UserRole.PLATFORM_ADMIN && !sessionClaims.scopedTenantId);
+  useEffect(() => {
+    if (!hasTenantBranding) {
+      setTenantLogo(null);
+      setTenantLogoDark(null);
+      setTenantName('');
+      return;
+    }
+    return swrConfig('legalSettings', getLegalSettings, l => {
+      setTenantLogo(l.logo_url ? tenantLogoSrc(l.logo_url) : null);
+      setTenantLogoDark(l.logo_dark_url ? tenantLogoSrc(l.logo_dark_url) : null);
+      setTenantName(l.business_name || '');
+    });
+  }, [hasTenantBranding]);
   // L'URL del logo arriva subito (cache config), ma l'immagine e' un download
   // a parte: finche' non e' davvero renderizzabile in testa si mostra il NOME
   // del ristorante, non un buco — e se il download fallisce (rete, 404) il
