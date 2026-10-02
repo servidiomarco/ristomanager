@@ -21066,6 +21066,25 @@ async function supportAlertRecipients(): Promise<string[]> {
     return r.rows.map((row: any) => String(row.email)).filter(e => e.includes('@'));
 }
 
+/** Il pannello di piattaforma aperto si aggiorna da solo: lista, contatore
+ *  e, se è quella aperta, la conversazione. Gli admin hanno una stanza
+ *  socket propria (vedi socketService): senza questo una risposta del
+ *  ristorante compariva solo ricaricando. Non lancia. */
+const emitSupportToPlatform = (ticketId: number, tenantId: number): void => {
+    try {
+        socketService?.broadcastToPlatformAdmins('support:admin-updated', { id: ticketId, tenant_id: tenantId });
+    } catch { /* best-effort: la tab si riallinea comunque al focus */ }
+};
+
+/** Lato ristorante: chi ha aperto la richiesta e chi le vede tutte
+ *  (titolare e direzione) la vedono cambiare senza ricaricare. Non lancia. */
+const emitSupportToTenant = (tenantId: number, creatorId: number | null, ticketId: number): void => {
+    try {
+        if (creatorId) socketService?.broadcastToUsers(tenantId, [creatorId], 'support:updated', { id: ticketId });
+        socketService?.broadcastToRolesRoom(tenantId, SUPPORT_SEE_ALL_ROLES, 'support:updated', { id: ticketId });
+    } catch { /* best-effort: la vista si riallinea al focus */ }
+};
+
 const supportPreview = (text: string, max = 140): string => {
     const flat = text.replace(/\s+/g, ' ').trim();
     return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
@@ -21265,6 +21284,8 @@ app.post('/support/tickets', authenticate, requireTenantSession, supportCreateLi
         const ticket = await loadVisibleSupportTicket(req, ticketId);
         const messages = await loadSupportMessages(req.tenantId!, ticketId);
         void notifySupportToPlatform(ticket, 'nuovo', body, authorName);
+        emitSupportToPlatform(ticketId, req.tenantId!);
+        emitSupportToTenant(req.tenantId!, userId, ticketId);
         res.status(201).json({ ...ticket, messages });
     } catch (err) {
         console.error('POST /support/tickets error:', err);
@@ -21341,6 +21362,8 @@ app.post('/support/tickets/:id/messages', authenticate, requireTenantSession, as
         const updated = await loadVisibleSupportTicket(req, id);
         const messages = await loadSupportMessages(req.tenantId!, id);
         void notifySupportToPlatform(updated, 'risposta', body, authorName);
+        emitSupportToPlatform(id, req.tenantId!);
+        emitSupportToTenant(req.tenantId!, updated.created_by_user_id ?? null, id);
         res.status(201).json({ ...updated, messages });
     } catch (err) {
         console.error('POST /support/tickets/:id/messages error:', err);
@@ -21383,6 +21406,8 @@ app.patch('/support/tickets/:id', authenticate, requireTenantSession, async (req
         }
         // Chiusa dal ristorante: l'avviso alla piattaforma non chiede più niente.
         if (wantsResolved) void closePlatformNotifications([supportPlatformTag(id)]);
+        emitSupportToPlatform(id, req.tenantId!);
+        emitSupportToTenant(req.tenantId!, updated.created_by_user_id ?? null, id);
         res.json({ ...updated, messages });
     } catch (err) {
         console.error('PATCH /support/tickets/:id error:', err);
@@ -29964,7 +29989,6 @@ async function notifySupportReplyToTenant(ticket: any, text: string): Promise<vo
             url: `/?view=SUPPORTO&ticket=${ticket.id}`,
             tag: supportTenantTag(ticket.id),
         });
-        socketService?.broadcastToUsers(Number(ticket.tenant_id), [creator], 'support:updated', { id: ticket.id });
         if (isPlatformMailConfigured()) {
             const u = await queryWithRetry(`SELECT email FROM users WHERE id = $1 AND is_active = TRUE`, [creator]);
             const to = String(u.rows[0]?.email ?? '');
@@ -30102,6 +30126,9 @@ app.post('/admin/support/tickets/:id/messages', platformAdminAuth, async (req, r
         const messages = await loadSupportMessages(Number(ticket.tenant_id), id);
         await closePlatformNotifications([supportPlatformTag(id)]);
         void notifySupportReplyToTenant(updated, body);
+        emitSupportToTenant(Number(updated.tenant_id), updated.created_by_user_id ?? null, id);
+        // Gli altri dispositivi dell'admin (telefono e portatile) restano allineati.
+        emitSupportToPlatform(id, Number(ticket.tenant_id));
         res.status(201).json({ ...updated, messages });
     } catch (err) {
         console.error('POST /admin/support/tickets/:id/messages error:', err);
@@ -30141,9 +30168,8 @@ app.patch('/admin/support/tickets/:id', platformAdminAuth, async (req, res) => {
         const messages = await loadSupportMessages(Number(ticket.tenant_id), id);
         // Lo stato cambia sotto gli occhi del ristorante se ha la vista
         // aperta; niente push: è la risposta scritta che merita il telefono.
-        if (updated.created_by_user_id) {
-            socketService?.broadcastToUsers(Number(updated.tenant_id), [Number(updated.created_by_user_id)], 'support:updated', { id });
-        }
+        emitSupportToTenant(Number(updated.tenant_id), updated.created_by_user_id ?? null, id);
+        emitSupportToPlatform(id, Number(updated.tenant_id));
         res.json({ ...updated, messages });
     } catch (err) {
         console.error('PATCH /admin/support/tickets/:id error:', err);
