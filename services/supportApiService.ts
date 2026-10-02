@@ -73,6 +73,27 @@ const apiRequest = async <T>(url: string, options: RequestInit = {}): Promise<T>
   return response.json();
 };
 
+/** Ascolta un evento del supporto anche attraverso le riconnessioni: il
+ *  socket cambia istanza a ogni nuovo token, e un listener attaccato a
+ *  quello vecchio smette di sentire in silenzio. Restituisce lo stacco.
+ *  `support:updated` arriva al ristorante, `support:admin-updated` alla
+ *  stanza degli admin di piattaforma. */
+export const onSupportSocketEvent = (
+  event: 'support:updated' | 'support:admin-updated',
+  handler: (payload: { id?: number; tenant_id?: number }) => void,
+): (() => void) => {
+  let attached: ReturnType<typeof socketClient.getSocket> = null;
+  const attach = (s: ReturnType<typeof socketClient.getSocket>) => {
+    if (attached === s) return;
+    attached?.off(event, handler);
+    attached = s;
+    attached?.on(event, handler);
+  };
+  attach(socketClient.getSocket());
+  const unsub = socketClient.onSocketChange(s => attach(s));
+  return () => { unsub(); attach(null); };
+};
+
 /** Le foto del supporto stanno dietro login (possono mostrare dati di
  *  clienti): un <img src> non manda l'header Authorization, quindi si
  *  scaricano con il token e si mostrano da un object URL. */

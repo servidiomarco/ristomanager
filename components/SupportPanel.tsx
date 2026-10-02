@@ -9,7 +9,7 @@ import { Loader } from './Loader';
 import {
   SupportMessages, SupportStatusPill, SupportUrgentPill, supportCategoryLabel,
 } from './SupportThread';
-import { supportApiService, type SupportClientContext, type SupportUploadedAttachment } from '../services/supportApiService';
+import { supportApiService, onSupportSocketEvent, type SupportClientContext, type SupportUploadedAttachment } from '../services/supportApiService';
 import {
   SUPPORT_ATTACHMENTS_MAX, SUPPORT_BODY_MAX, SUPPORT_CATEGORIES, SUPPORT_SUBJECT_MAX,
   type SupportCategory, type SupportTicket, type SupportTicketDetail,
@@ -367,24 +367,25 @@ export const SupportPanel: React.FC<{
   }, [selectedId, loadDetail]);
 
   // La risposta della piattaforma arriva via socket: lista e conversazione
-  // aperta si rinfrescano senza ricaricare la pagina.
+  // aperta si rinfrescano senza ricaricare la pagina. La conversazione si
+  // ricarica solo a schermo visibile: aprirla vale come «letta», e con l'app
+  // in background spegnerebbe la notifica prima che qualcuno la veda — al
+  // rientro la si ricarica comunque.
   const selectedRef = useRef<number | null>(null);
   selectedRef.current = selectedId;
   useEffect(() => {
-    let attached: ReturnType<typeof socketClient.getSocket> = null;
-    const onUpdated = (payload: { id?: number }) => {
+    const visible = () => document.visibilityState === 'visible';
+    const unsub = onSupportSocketEvent('support:updated', payload => {
       loadList();
-      if (payload?.id && payload.id === selectedRef.current) loadDetail(payload.id, true);
+      if (visible() && payload?.id && payload.id === selectedRef.current) loadDetail(payload.id, true);
+    });
+    const onVisible = () => {
+      if (!visible()) return;
+      loadList();
+      if (selectedRef.current != null) loadDetail(selectedRef.current, true);
     };
-    const attach = (s: ReturnType<typeof socketClient.getSocket>) => {
-      if (attached === s) return;
-      attached?.off('support:updated', onUpdated);
-      attached = s;
-      attached?.on('support:updated', onUpdated);
-    };
-    attach(socketClient.getSocket());
-    const unsub = socketClient.onSocketChange(s => attach(s));
-    return () => { unsub(); attach(null); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { unsub(); document.removeEventListener('visibilitychange', onVisible); };
   }, [loadList, loadDetail]);
 
   useEffect(() => {

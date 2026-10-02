@@ -172,6 +172,11 @@ export const DOMAIN_EVENTS: Record<string, DomainEventSpec> = {
     'features:updated': spec('cloud'),
     'devboard:changed': spec('cloud'),
     'roadmap:changed': spec('cloud'),
+    // Supporto clienti: le richieste vivono solo sul cloud. support:updated
+    // va a chi ha aperto la richiesta; support:admin-updated alla stanza
+    // degli admin di piattaforma, che non appartiene a nessun ristorante.
+    'support:updated': spec('cloud'),
+    'support:admin-updated': spec('cloud'),
 
     // --- Segnali realtime puri: mai nel log di replica.
     'connection:acknowledged': spec('transient'),

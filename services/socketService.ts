@@ -6,6 +6,11 @@ import { isAllowedOrigin } from './corsAllowlist.js';
 import { queryWithRetry, runWithTenantContext, runAsPlatform } from '../db.js';
 import { mirrorToSalaNode } from './salaNodeBridge.js';
 
+// La stanza del pannello di piattaforma: un nome che nessuna stanza di
+// tenant (sempre `tenant:<id>…`) può avere. Senza «:» di proposito: il check
+// del registro eventi legge ogni literal `parola:parola` come un evento.
+const PLATFORM_ADMINS_ROOM = 'platform-admins';
+
 // Extended socket type with user data
 interface AuthenticatedSocket extends Socket {
   user?: TokenPayload;
@@ -108,6 +113,12 @@ export class SocketService {
         // vive nel token.
         socket.join(`tenant:${tenantId}:user:${socket.user!.userId}`);
         socket.join(`tenant:${tenantId}:role:${socket.user!.role}`);
+      } else if (!isPlatformScopedSession(socket.user!)) {
+        // Il pannello di piattaforma ha una stanza sua, fuori da ogni
+        // tenant: ci passano solo gli eventi pensati per lui (oggi il
+        // supporto), così la richiesta che arriva compare senza ricaricare.
+        // La sessione «Entra» resta fuori: lavora dentro un ristorante.
+        socket.join(PLATFORM_ADMINS_ROOM);
       }
 
       socket.emit('connection:acknowledged', socket.id);
@@ -399,6 +410,13 @@ export class SocketService {
   broadcastToUsers(tenantId: number, userIds: number[], event: string, data: any, excludeSocketId?: string) {
     const rooms = userIds.map(id => `tenant:${tenantId}:user:${id}`);
     this.emitTo(tenantId, rooms, event, data, excludeSocketId);
+  }
+
+  // Pannello piattaforma. Unico emit che NON passa da emitTo, di proposito:
+  // non è un evento di un ristorante e non deve arrivare al nodo di sala di
+  // nessuno. Solo per eventi del pannello, mai per dati di dominio.
+  broadcastToPlatformAdmins(event: string, data: any) {
+    this.io.to(PLATFORM_ADMINS_ROOM).emit(event, data);
   }
 
   // Il nome evita la collisione con pushService.sendToRoles.
