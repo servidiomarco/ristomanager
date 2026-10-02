@@ -54,8 +54,8 @@ const infoLoginXml = () => {
 
 // Nomi che nell'ecosistema WCF/gestionali indicano scrittura sul dominio
 // che ci interessa. Usati per evidenziare nel wsdl e come lista di probe.
-const WRITE_HINT = /^(Write|Set|Insert|Inserisci|Crea|Nuova?|Apri|Add|Aggiungi|Salva|Registra|Update|Modifica)/i;
-const DOMAIN_HINT = /Comand|Cont[oi]|Tavol|Rig[ah]/i;
+const WRITE_HINT = /^(Write|Put|Set|Insert|Inserisci|Crea|Nuova?|Apri|Add|Aggiungi|Salva|Registra|Update|Modifica)/i;
+const DOMAIN_HINT = /Comand|Cont[oi]|Tavol|Rig[ah]|Prenot/i;
 const PROBE_DEFAULTS = [
     'WriteComanda', 'InserisciComanda', 'CreaComanda', 'NuovaComanda', 'SetComanda',
     'ApriComanda', 'AddComanda', 'SalvaComanda', 'AggiungiComanda',
@@ -63,25 +63,34 @@ const PROBE_DEFAULTS = [
     'ApriTavolo', 'CreaConto', 'InserisciConto',
 ];
 
+// I metadati stanno sull'indirizzo BASE del servizio (http://host:porta/?wsdl),
+// non sull'endpoint /AdapterWS: provando solo l'endpoint la scoperta del 02/10
+// diceva «metadati non esposti». L'endpoint resta come ripiego.
 async function wsdl() {
-    for (const suffix of ['?singleWsdl', '?wsdl']) {
-        const url = URL_WS + suffix;
+    const origin = new URL(URL_WS).origin;
+    for (const url of [`${origin}/?singleWsdl`, `${origin}/?wsdl`, `${URL_WS}?singleWsdl`, `${URL_WS}?wsdl`]) {
         let text;
         try {
             const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
-            if (!res.ok) { console.log(`${suffix}: HTTP ${res.status}`); continue; }
+            if (!res.ok) { console.log(`${url}: HTTP ${res.status}`); continue; }
             text = await res.text();
+            // Con ?wsdl WCF può spostare portType e binding in documenti
+            // importati (?wsdl=wsdl0): si seguono, un livello basta.
+            for (const m of text.matchAll(/<wsdl:import[^>]*location="([^"]+)"/g)) {
+                const imp = await fetch(m[1], { signal: AbortSignal.timeout(15_000) });
+                if (imp.ok) text += await imp.text();
+            }
         } catch (err) {
-            console.log(`${suffix}: ${err?.message}`);
+            console.log(`${url}: ${err?.message}`);
             continue;
         }
         // Le operazioni stanno nel portType/binding: name="<Operazione>".
         const ops = [...new Set([...text.matchAll(/<wsdl:operation name="([^"]+)"/g)].map(m => m[1]))].sort();
-        if (ops.length === 0) { console.log(`${suffix}: nessuna operazione trovata (metadati spenti?)`); continue; }
+        if (ops.length === 0) { console.log(`${url}: nessuna operazione trovata (metadati spenti?)`); continue; }
 
         const { writeFileSync } = await import('node:fs');
         writeFileSync('adapterws.wsdl', text);
-        console.log(`\nContratto salvato in adapterws.wsdl (${text.length} byte) da ${suffix}`);
+        console.log(`\nContratto salvato in adapterws.wsdl (${text.length} byte) da ${url}`);
         console.log(`\nOperazioni (${ops.length}):`);
         for (const op of ops) {
             const hot = WRITE_HINT.test(op) && DOMAIN_HINT.test(op);
@@ -89,8 +98,8 @@ async function wsdl() {
         }
         const hot = ops.filter(op => WRITE_HINT.test(op) && DOMAIN_HINT.test(op));
         console.log(hot.length
-            ? `\nCandidate per la comanda specchio: ${hot.join(', ')}\nPassa adapterws.wsdl a Claude per il passo successivo.`
-            : '\nNessuna candidata di scrittura sul dominio comande: la comanda specchio via WS non è percorribile con questo contratto.');
+            ? `\nCandidate di scrittura: ${hot.join(', ')}\nPassa adapterws.wsdl a Claude per il passo successivo.`
+            : '\nNessuna candidata di scrittura su comande, conti o prenotazioni.');
         return;
     }
     console.log('\nMetadati non esposti: usa il comando "probe".');
