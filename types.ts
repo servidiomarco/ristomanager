@@ -976,7 +976,11 @@ export enum ViewState {
   ROADMAP = 'ROADMAP',
   RECENSIONI = 'RECENSIONI',
   // Pannello piattaforma (Fase D2): sopra i tenant, solo PLATFORM_ADMIN.
-  PLATFORM = 'PLATFORM'
+  PLATFORM = 'PLATFORM',
+  // Aiuto: richieste di supporto al team Sympotia, aperta a ogni ruolo del
+  // ristorante. In fondo di proposito: getAccessibleViews()[0] fa da vista
+  // di ripiego, e l'Aiuto non deve mai essere dove si atterra.
+  SUPPORTO = 'SUPPORTO'
 }
 
 // Dati di fatturazione del cliente (fase 4 fatturazione): alimentano il
