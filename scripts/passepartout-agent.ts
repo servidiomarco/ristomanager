@@ -87,23 +87,39 @@ const handlers: Record<string, Handler> = {
     // Introspezione del contratto WCF: scarica ?wsdl dall'AdapterWS e torna
     // il SOLO elenco operazioni (il contratto intero può superare il buffer
     // del socket — per quello c'è scripts/passepartout-scopri-ws.mjs in LAN).
+    //
+    // I metadati stanno sull'indirizzo BASE del servizio (http://host:porta/?wsdl,
+    // da cui era stato letto l'XSD il 25/08), non sull'endpoint /AdapterWS:
+    // provando solo l'endpoint, la scoperta del 02/10 rispondeva «metadati
+    // non esposti» con l'agente collegato. L'endpoint resta come ripiego.
     wsdl: async () => {
         const base = (process.env.PASSEPARTOUT_WS_URL || '').trim().replace(/\/$/, '');
         if (!base) throw new Error('PASSEPARTOUT_WS_URL non configurato');
-        for (const suffix of ['?singleWsdl', '?wsdl']) {
+        const origin = new URL(base).origin;
+        const urls = [`${origin}/?singleWsdl`, `${origin}/?wsdl`, `${base}?singleWsdl`, `${base}?wsdl`];
+        const tentativi: string[] = [];
+        for (const url of urls) {
             try {
-                const res = await fetch(base + suffix, { signal: AbortSignal.timeout(15_000) });
-                if (!res.ok) continue;
-                const text = await res.text();
+                const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+                if (!res.ok) { tentativi.push(`${url} HTTP ${res.status}`); continue; }
+                let text = await res.text();
+                // Con ?wsdl WCF può spostare portType e binding in documenti
+                // importati (?wsdl=wsdl0): si seguono, un livello basta.
+                for (const m of text.matchAll(/<wsdl:import[^>]*location="([^"]+)"/g)) {
+                    const imp = await fetch(m[1], { signal: AbortSignal.timeout(15_000) });
+                    if (imp.ok) text += await imp.text();
+                }
                 const operations = [...new Set([...text.matchAll(/<wsdl:operation name="([^"]+)"/g)].map(m => m[1]))].sort();
-                if (operations.length === 0) continue;
+                if (operations.length === 0) { tentativi.push(`${url} senza operazioni`); continue; }
                 const writeCandidates = operations.filter(op =>
-                    /^(Write|Set|Insert|Inserisci|Crea|Nuova?|Apri|Add|Aggiungi|Salva|Registra|Update|Modifica)/i.test(op)
-                    && /Comand|Cont[oi]|Tavol|Rig[ah]/i.test(op));
-                return { source: suffix, size: text.length, operations, write_candidates: writeCandidates };
-            } catch { /* si prova il suffisso successivo */ }
+                    /^(Write|Put|Set|Insert|Inserisci|Crea|Nuova?|Apri|Add|Aggiungi|Salva|Registra|Update|Modifica)/i.test(op)
+                    && /Comand|Cont[oi]|Tavol|Rig[ah]|Prenot/i.test(op));
+                return { source: url, size: text.length, operations, write_candidates: writeCandidates };
+            } catch (err) {
+                tentativi.push(`${url} ${(err as Error).message}`);
+            }
         }
-        throw new Error('Metadati WCF non esposti: usare scripts/passepartout-scopri-ws.mjs probe dalla LAN');
+        throw new Error(`Metadati WCF non esposti (${tentativi.join(' · ')}): usare scripts/passepartout-scopri-ws.mjs probe dalla LAN`);
     },
     // Chiusura del conto secondo la ricetta del supporto (25/08): invio
     // separato solo se servono righe mai inviate, ContoComanda sempre con
