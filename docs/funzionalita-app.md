@@ -711,7 +711,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
-| 2026-10-02 | Piattaforma SaaS | Il pannello Piattaforma non mostra più logo, Chat staff, Fiscalità e Reportistica del Vecchio Frantoio: fuori da «Entra» restano Piattaforma e il marchio Sympotia. |
+| 2026-10-02 | Piattaforma SaaS | Il pannello Piattaforma non mostra più logo, Chat staff, Fiscalità e Reportistica del Vecchio Frantoio: fuori da «Entra» restano Piattaforma e il marchio Sympotia. All'apertura non compare più «Error fetching data», e nella tab «Supporto» cambiare filtro chiude la richiesta aperta, che prima restava a destra anche fuori dalla lista. |
 | 2026-10-02 | Aiuto e supporto | Le risposte compaiono senza ricaricare: nella tab «Supporto» del pannello (lista, contatore e conversazione aperta) e nella vista «Aiuto», dove titolare e direzione vedono aggiornarsi anche le richieste dei colleghi. Con la scheda in background la conversazione si aggiorna al rientro, così la notifica non si spegne da sola. |
 | 2026-10-02 | Aiuto e supporto | Nuova voce «Aiuto»: il ristorante apre richieste di supporto al team Sympotia (categoria, foto, «Blocca il servizio» che avvisa subito) con il contesto tecnico allegato da solo, e segue la conversazione; il pannello Piattaforma ha la tab «Supporto» con la coda di tutti i ristoranti, risposta, stato e «Crea card dev». |
 | 2026-10-01 | Menu digitale pubblico; Banchetti | Gli allergeni seguono la lingua scelta dall'ospite: sul menu del QR in inglese, francese e tedesco (nomi ufficiali UE: «Gluten, Eggs, Milk, Tree nuts»…) e nel preventivo banchetto in inglese. Prima restavano in italiano in ogni lingua. |

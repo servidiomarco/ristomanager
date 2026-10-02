@@ -154,6 +154,15 @@ import { swrConfig } from './services/configCache';
 const isPlatformScopedToken = (): boolean =>
   !!decodeJwtPayload(authApiService.getAccessToken())?.scopedTenantId;
 
+// La sessione di pannello: PLATFORM_ADMIN senza scope. Anche lei dal token,
+// che c'è prima dello user: i gestori del socket si agganciano una volta
+// sola, quando lo user non è ancora noto, e una guardia su `user` lì dentro
+// non scatterebbe mai.
+const isPlatformPanelToken = (): boolean => {
+  const claims = decodeJwtPayload(authApiService.getAccessToken());
+  return claims?.role === UserRole.PLATFORM_ADMIN && !claims.scopedTenantId;
+};
+
 // ---------------------------------------------------------------------------
 // Navigation taxonomy — single source of truth for the desktop sidebar AND the
 // mobile "Altro" sheet. Both surfaces map over NAV_ITEMS; only their filters and
@@ -471,9 +480,7 @@ const App: React.FC = () => {
   const [tenantLogo, setTenantLogo] = useState<string | null>(null);
   const [tenantLogoDark, setTenantLogoDark] = useState<string | null>(null);
   const [tenantName, setTenantName] = useState<string>('');
-  const sessionClaims = decodeJwtPayload(authApiService.getAccessToken());
-  const hasTenantBranding = !!sessionClaims
-    && !(sessionClaims.role === UserRole.PLATFORM_ADMIN && !sessionClaims.scopedTenantId);
+  const hasTenantBranding = !!authApiService.getAccessToken() && !isPlatformPanelToken();
   useEffect(() => {
     if (!hasTenantBranding) {
       setTenantLogo(null);
@@ -1494,8 +1501,11 @@ const App: React.FC = () => {
     // endpoint gli risponderebbero 403 — il toast "insufficient permissions"
     // a ogni login. Atterra sulla vista Piattaforma. Con lo scope invece
     // (claim scopedTenantId: è entrato in un tenant con «Entra») la sessione
-    // è operativa e i dati vanno caricati come per chiunque altro.
-    if (user?.role === UserRole.PLATFORM_ADMIN && !isPlatformScopedToken()) {
+    // è operativa e i dati vanno caricati come per chiunque altro. Il ruolo
+    // si legge dal token: il gestore `connect` del socket chiama questa
+    // funzione da una closure in cui `user` è ancora null, e da lì il
+    // «Error fetching data» a ogni apertura del pannello.
+    if (isPlatformPanelToken()) {
       setIsInitialDataLoading(false);
       return;
     }
