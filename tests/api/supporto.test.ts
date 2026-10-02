@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import bcrypt from 'bcryptjs';
 import { Client } from 'pg';
+import { io as ioClient, type Socket } from 'socket.io-client';
 import { api, ownerToken, bearer } from './helpers';
 import { platformSessionFor, dropPlatformSession } from './platformSession';
 
@@ -27,6 +28,34 @@ const pgClient = async (): Promise<Client> => {
     const client = new Client({ connectionString: process.env.DATABASE_URL || 'postgresql://localhost/ristotest_api' });
     await client.connect();
     return client;
+};
+
+const connetti = (token: string): Promise<Socket> => new Promise((resolve, reject) => {
+    const socket = ioClient(process.env.TEST_BASE_URL as string, {
+        transports: ['websocket', 'polling'],
+        auth: { token },
+        timeout: 10_000,
+    });
+    const fallisci = (e: Error) => { clearTimeout(t); socket.close(); reject(e); };
+    const t = setTimeout(() => fallisci(new Error('socket non connesso')), 10_000);
+    socket.on('connect', () => { clearTimeout(t); resolve(socket); });
+    socket.on('connect_error', fallisci);
+});
+
+// Raccoglie gli eventi di un tipo su un socket, per controllarli dopo.
+const ascolta = (socket: Socket, event: string): Array<any> => {
+    const seen: any[] = [];
+    socket.on(event, (payload: any) => seen.push(payload));
+    return seen;
+};
+
+const finché = async (cond: () => boolean, ms = 3000): Promise<boolean> => {
+    const end = Date.now() + ms;
+    while (Date.now() < end) {
+        if (cond()) return true;
+        await new Promise(res => setTimeout(res, 50));
+    }
+    return cond();
 };
 
 // Le notifiche partono fuori dalla risposta (void): si aspetta la riga.
@@ -345,6 +374,53 @@ describe('supporto clienti (Aiuto)', () => {
             }
             const again = await api().post(`/admin/support/tickets/${urgentTicketId}/dev-card`).set(bearer(platform));
             expect(again.status).toBe(409);
+        });
+    });
+
+    describe('tempo reale', () => {
+        const sockets: Socket[] = [];
+        afterAll(() => { for (const s of sockets) s.disconnect(); });
+
+        it('il pannello riceve gli eventi del supporto, il ristorante i suoi; nessuno quelli dell\'altro', async () => {
+            const panel = await connetti(platform);
+            const waiterSock = await connetti(waiter);
+            const ownerSock = await connetti(owner);
+            sockets.push(panel, waiterSock, ownerSock);
+            const panelAdmin = ascolta(panel, 'support:admin-updated');
+            const panelTenant = ascolta(panel, 'support:updated');
+            const waiterTenant = ascolta(waiterSock, 'support:updated');
+            const waiterAdmin = ascolta(waiterSock, 'support:admin-updated');
+            const ownerTenant = ascolta(ownerSock, 'support:updated');
+
+            // Il cameriere apre: il pannello lo sa subito, e anche il titolare.
+            const created = await api().post('/support/tickets').set(bearer(waiter)).send({
+                category: 'altro', subject: 'Tempo reale', body: 'Prova socket',
+            });
+            expect(created.status).toBe(201);
+            const id = created.body.id;
+            expect(await finché(() => panelAdmin.some(p => p.id === id))).toBe(true);
+            expect(panelAdmin.find(p => p.id === id).tenant_id).toBe(1);
+            expect(await finché(() => ownerTenant.some(p => p.id === id))).toBe(true);
+
+            // La piattaforma risponde: arriva al cameriere e al titolare.
+            waiterTenant.length = 0;
+            ownerTenant.length = 0;
+            const reply = await api().post(`/admin/support/tickets/${id}/messages`).set(bearer(platform))
+                .send({ body: 'Ci sono', status: 'attesa_cliente' });
+            expect(reply.status).toBe(201);
+            expect(await finché(() => waiterTenant.some(p => p.id === id))).toBe(true);
+            expect(await finché(() => ownerTenant.some(p => p.id === id))).toBe(true);
+
+            // Il cameriere risponde: la conversazione aperta nel pannello si aggiorna.
+            panelAdmin.length = 0;
+            const back = await api().post(`/support/tickets/${id}/messages`).set(bearer(waiter)).send({ body: 'Grazie' });
+            expect(back.status).toBe(201);
+            expect(await finché(() => panelAdmin.some(p => p.id === id))).toBe(true);
+
+            // Le due stanze non si mescolano: il pannello non entra in quella
+            // del ristorante, il ristorante non sente la stanza del pannello.
+            expect(panelTenant).toEqual([]);
+            expect(waiterAdmin).toEqual([]);
         });
     });
 

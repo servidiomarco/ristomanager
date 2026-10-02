@@ -7,7 +7,7 @@ import {
   dsInput, dsButton,
 } from './ds';
 import { PlatformSupportTab } from './PlatformSupportTab';
-import { supportApiService } from '../services/supportApiService';
+import { supportApiService, onSupportSocketEvent } from '../services/supportApiService';
 import { useAuth } from '../contexts/AuthContext';
 import { authApiService } from '../services/authApiService';
 import {
@@ -862,9 +862,16 @@ export const PlatformPanel: React.FC<{
 
   useEffect(() => { load(); }, [load]);
 
+  // A tab Clienti aperta il numero sul segmento segue gli eventi del
+  // supporto; a tab Supporto aperta ci pensa la tab stessa.
   useEffect(() => {
-    supportApiService.adminList().then(r => setSupportUnread(typeof r.unread === 'number' ? r.unread : 0)).catch(() => {});
-  }, []);
+    const refresh = () => {
+      supportApiService.adminList().then(r => setSupportUnread(typeof r.unread === 'number' ? r.unread : 0)).catch(() => {});
+    };
+    refresh();
+    if (tab !== 'clienti') return;
+    return onSupportSocketEvent('support:admin-updated', refresh);
+  }, [tab]);
 
   // Una notifica toccata a pannello già aperto: si passa alla tab.
   useEffect(() => {

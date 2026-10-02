@@ -9,7 +9,7 @@ import { Loader } from './Loader';
 import {
   SupportMessages, SupportStatusPill, SupportUrgentPill, supportCategoryLabel, formatSupportDateTime,
 } from './SupportThread';
-import { supportApiService } from '../services/supportApiService';
+import { supportApiService, onSupportSocketEvent } from '../services/supportApiService';
 import {
   SUPPORT_BODY_MAX, type SupportStatus, type SupportTicket, type SupportTicketDetail,
 } from '../services/supportShared';
@@ -19,9 +19,11 @@ import type { ApiError } from '../services/apiError';
 /* ============================================
    PANNELLO PIATTAFORMA — tab Supporto
    ============================================
-   La coda delle richieste di tutti i ristoranti. Nessun socket: il token di
-   pannello non sta in nessun tenant, e la notifica push porta già qui. La
-   lista si rinfresca al rientro in primo piano e ogni minuto. */
+   La coda delle richieste di tutti i ristoranti. Tempo reale dalla stanza
+   socket degli admin (`support:admin-updated`, vedi socketService): una
+   risposta del ristorante compare nella conversazione aperta senza
+   ricaricare. Il giro al rientro in primo piano e ogni minuto resta come
+   rete di sicurezza per gli eventi persi a socket staccato. */
 
 type ShowToast = (message: string, type?: 'success' | 'error' | 'info') => void;
 type StatusFilter = 'aperte' | SupportStatus | 'tutte';
@@ -183,8 +185,23 @@ export const PlatformSupportTab: React.FC<{
 
   useEffect(() => { setListLoading(true); loadList(); }, [loadList]);
 
+  // La conversazione aperta si ricarica solo a schermo visibile: aprirla la
+  // segna letta e chiude la push, che con la scheda in background deve
+  // restare a dire che è arrivato qualcosa.
+  const selectedRef = useRef<number | null>(null);
+  selectedRef.current = selectedId;
+  useEffect(() => onSupportSocketEvent('support:admin-updated', payload => {
+    const visible = document.visibilityState === 'visible';
+    if (visible && payload?.id && payload.id === selectedRef.current) loadDetail(payload.id);
+    else loadListRef.current();
+  }), [loadDetail]);
+
   useEffect(() => {
-    const refresh = () => { if (document.visibilityState === 'visible') loadList(); };
+    const refresh = () => {
+      if (document.visibilityState !== 'visible') return;
+      loadList();
+      if (selectedRef.current != null) loadDetail(selectedRef.current);
+    };
     const timer = window.setInterval(refresh, REFRESH_MS);
     document.addEventListener('visibilitychange', refresh);
     window.addEventListener('focus', refresh);
