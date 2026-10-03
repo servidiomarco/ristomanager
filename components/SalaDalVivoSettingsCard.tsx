@@ -10,9 +10,10 @@ interface Props {
 
 /**
  * Interruttore «Sala dal vivo» (flag sala_dal_vivo_enabled, spento di
- * default). Per ora accende solo i segnaposto di sala sulla piantina di
- * Sale & Tavoli; le rotte dei segnaposto rispondono comunque, il flag
- * governa l'interfaccia. Il cambio arriva agli altri dispositivi con
+ * default). Accende la pagina Sala dal vivo (la sala in 3D, voce di menu e
+ * pagina di partenza) e i segnaposto di sala sulla piantina di Sale &
+ * Tavoli; le rotte dei segnaposto rispondono comunque, il flag governa
+ * l'interfaccia. Il cambio arriva agli altri dispositivi con
  * features:updated, come gli altri flag.
  */
 export const SalaDalVivoSettingsCard: React.FC<Props> = ({ showToast }) => {
