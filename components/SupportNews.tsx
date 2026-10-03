@@ -68,11 +68,15 @@ export const SupportNews: React.FC = () => {
   }, []);
 
   // La prima volta non c'è un «visto»: tutto il registro come «nuovo»
-  // sarebbe rumore, quindi si parte da adesso.
+  // sarebbe rumore, quindi si parte da adesso. Se la voce vista non c'è più
+  // (riga del registro riscritta, o uscita dalle ultime 40) vale la sua
+  // data: prima contava tutto come nuovo — «40 nuove» dopo una correzione.
   const newCount = useMemo(() => {
     if (entries.length === 0 || seenAtMount == null) return 0;
     const idx = entries.findIndex(e => entryKey(e) === seenAtMount);
-    return idx < 0 ? entries.length : idx;
+    if (idx >= 0) return idx;
+    const seenDate = seenAtMount.split('|')[0];
+    return entries.filter(e => e.date > seenDate).length;
   }, [entries, seenAtMount]);
 
   useEffect(() => {

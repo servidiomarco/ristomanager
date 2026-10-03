@@ -169,7 +169,9 @@
     "example2": "How do I print a table's pre-bill?",
     "example3": "How do I change the opening hours?",
     "you": "Me",
-    "transcriptHeading": "Conversation with the assistant"
+    "transcriptHeading": "Conversation with the assistant",
+    "thinking2": "Reading the instructions…",
+    "thinking3": "Writing the answer…"
   },
   "rating": {
     "question": "How did it go?",

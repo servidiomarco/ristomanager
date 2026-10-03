@@ -1125,6 +1125,75 @@ body {
   .ds-live-frame { animation: none; }
 }
 
+/* «L'AI sta lavorando» — l'attesa dell'assistente «Chiedi a Sympotia».
+   Prima era un anello che girava dentro .ds-ai-frame: quel telaio pero' vuol
+   dire «l'ha scritto la macchina, aspetta te», non «sto pensando». Qui tre
+   segnali leggeri, tutti nella famiglia `arriving` (il colore dell'AI):
+   la bacchetta che oscilla con un bagliore, tre puntini a onda, e il testo
+   attraversato da un riflesso. La risposta poi entra con una dissolvenza
+   breve nello stesso punto, cosi' l'attesa e il risultato sono un oggetto solo. */
+.ds-ai-wand {
+  animation: ds-ai-wand 2.4s ease-in-out infinite;
+  transform-origin: 30% 70%;
+}
+@keyframes ds-ai-wand {
+  0%, 100% { transform: rotate(0deg) scale(1); filter: drop-shadow(0 0 0 transparent); }
+  50% {
+    transform: rotate(-14deg) scale(1.1);
+    filter: drop-shadow(0 0 5px color-mix(in srgb, var(--ds-arriving-solid) 60%, transparent));
+  }
+}
+
+.ds-ai-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: var(--ds-arriving-solid);
+  animation: ds-ai-dot 1.2s ease-in-out infinite;
+}
+.ds-ai-dot:nth-child(2) { animation-delay: 0.15s; }
+.ds-ai-dot:nth-child(3) { animation-delay: 0.3s; }
+@keyframes ds-ai-dot {
+  0%, 70%, 100% { opacity: 0.3; transform: translateY(0) scale(0.85); }
+  35% { opacity: 1; transform: translateY(-3px) scale(1); }
+}
+
+/* Il riflesso e' un gradiente dentro il testo (background-clip): resta
+   leggibile in ogni istante, il colore di base e' quello del testo muto. */
+.ds-ai-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--ds-text-muted) 0%,
+    var(--ds-text-muted) 38%,
+    var(--ds-arriving-solid) 50%,
+    var(--ds-text-muted) 62%,
+    var(--ds-text-muted) 100%
+  );
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: ds-ai-shimmer 1.8s linear infinite;
+}
+@keyframes ds-ai-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -150% 0; }
+}
+
+.ds-ai-reveal { animation: ds-ai-reveal 220ms ease-out both; }
+@keyframes ds-ai-reveal {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Senza movimento resta tutto fermo e leggibile: il testo torna un testo
+   normale (la regola globale lascerebbe il gradiente a fine corsa). */
+@media (prefers-reduced-motion: reduce) {
+  .ds-ai-wand, .ds-ai-dot, .ds-ai-reveal { animation: none; }
+  .ds-ai-dot { opacity: 0.6; }
+  .ds-ai-shimmer { animation: none; background: none; color: var(--ds-text-muted); }
+}
+
 /* First-run swipe hint: the top row nudges open far enough to show the action
    underneath, then settles. A gesture nobody knows about is a gesture nobody
    uses, and there is no room on a row for a "swipe me" label. Plays once per

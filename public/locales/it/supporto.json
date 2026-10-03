@@ -169,7 +169,9 @@
     "example2": "Come stampo il preconto di un tavolo?",
     "example3": "Come cambio gli orari di apertura?",
     "you": "Io",
-    "transcriptHeading": "Conversazione con l'assistente"
+    "transcriptHeading": "Conversazione con l'assistente",
+    "thinking2": "Leggo le istruzioni…",
+    "thinking3": "Preparo la risposta…"
   },
   "rating": {
     "question": "Com'è andata?",

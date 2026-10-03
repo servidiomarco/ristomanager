@@ -23,6 +23,45 @@ export interface AssistantEscalation {
 
 const MAX_QUESTION = 2000;
 
+/* L'attesa: lo stesso fumetto delle risposte, così la risposta compare al
+   suo posto. La frase cambia col tempo — un'attesa che dice a che punto è
+   pesa meno di una che ripete la stessa cosa. Animazioni in index.css
+   (.ds-ai-wand, .ds-ai-dot, .ds-ai-shimmer), ferme con «riduci movimento». */
+const THINKING_STEPS_MS = [0, 2500, 6000];
+
+const AssistantThinking: React.FC = () => {
+  const { t } = useTranslation('supporto', { useSuspense: false });
+  const [step, setStep] = useState(0);
+  useEffect(() => {
+    const timers = THINKING_STEPS_MS.slice(1).map((ms, i) => setTimeout(() => setStep(i + 1), ms));
+    return () => timers.forEach(clearTimeout);
+  }, []);
+  const phrases = [
+    t('assistant.thinking', 'Cerco nei manuali…'),
+    t('assistant.thinking2', 'Leggo le istruzioni…'),
+    t('assistant.thinking3', 'Preparo la risposta…'),
+  ];
+  return (
+    <div className="flex justify-start" role="status" aria-live="polite">
+      <div className="ds-ai-reveal max-w-[88%] rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-3.5 py-2.5 shadow-[var(--ds-shadow-card)]">
+        <p className="mb-1 inline-flex items-center gap-1.5 text-[12px] font-semibold text-[var(--ds-arriving-text)]">
+          <Wand2 className="ds-ai-wand h-3.5 w-3.5" aria-hidden />
+          {t('assistant.name', 'Chiedi a Sympotia')}
+        </p>
+        <div className="flex items-center gap-2.5">
+          <span className="flex items-center gap-1" aria-hidden>
+            <span className="ds-ai-dot" />
+            <span className="ds-ai-dot" />
+            <span className="ds-ai-dot" />
+          </span>
+          {/* key: cambiando frase il riflesso riparte dall'inizio. */}
+          <span key={step} className="ds-ai-shimmer ds-ai-reveal text-[14px]">{phrases[step]}</span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 /** La richiesta precompilata: l'ultima domanda come oggetto (è quella che
  *  i manuali non hanno risolto — le prime possono parlare d'altro), e sotto
  *  la conversazione, così chi risponde sa già cosa è stato provato. */
@@ -185,7 +224,7 @@ export const SupportAssistant: React.FC<{
         )}
 
         {turns.map((turn, i) => (
-          <div key={i} className={`flex ${turn.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+          <div key={i} className={`flex ${turn.role === 'user' ? 'justify-end' : 'justify-start'} ${turn.role === 'assistant' ? 'ds-ai-reveal' : ''}`}>
             <div
               className={`max-w-[88%] rounded-[var(--ds-radius)] px-3.5 py-2 ${
                 turn.role === 'user'
@@ -204,14 +243,7 @@ export const SupportAssistant: React.FC<{
           </div>
         ))}
 
-        {asking && (
-          <div className="flex justify-start">
-            <div className="ds-ai-frame inline-flex items-center gap-2 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-3.5 py-2 text-[14px] text-[var(--ds-text-muted)] shadow-[var(--ds-shadow-card)]">
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-              {t('assistant.thinking', 'Cerco nei manuali…')}
-            </div>
-          </div>
-        )}
+        {asking && <AssistantThinking />}
 
         {error && <Callout tone="critical" icon={AlertTriangle}>{error}</Callout>}
         <div ref={endRef} />
