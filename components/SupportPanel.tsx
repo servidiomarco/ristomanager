@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, Check, ChevronDown, LifeBuoy, Loader2, Paperclip, Plus, Send } from 'lucide-react';
+import { AlertTriangle, Check, ChevronDown, LifeBuoy, Loader2, Paperclip, Plus, Send, Wand2 } from 'lucide-react';
 import {
   SplitPane, PaneHeader, PanePlaceholder, EmptyState, Callout, AttachmentRow, ModalShell, FormCard, Field,
   dsButton, dsIconButton, dsInput, dsTextarea,
@@ -18,6 +18,7 @@ import { socketClient } from '../services/socketClient';
 import { offlineQueue } from '../services/offlineQueue';
 import { isHybridActive, isNodeInUse } from '../services/apiRouting';
 import { relativeTime } from '../utils/relativeTime';
+import { SupportAssistant, type AssistantEscalation } from './SupportAssistant';
 import type { ActiveIncident } from '../services/healthShared';
 import type { ApiError } from '../services/apiError';
 
@@ -69,10 +70,12 @@ const NewRequestModal: React.FC<{
   /** Un problema già noto alla piattaforma: detto prima di scrivere, così
    *  non si apre l'ennesima richiesta sulla stessa cosa. */
   activeIncidents: ActiveIncident[];
+  /** Arriva dall'assistente: oggetto e conversazione già scritti. */
+  prefill: AssistantEscalation | null;
   onClose: () => void;
   onCreated: (ticket: SupportTicketDetail) => void;
   showToast: ShowToast;
-}> = ({ open, originView, activeIncidents, onClose, onCreated, showToast }) => {
+}> = ({ open, originView, activeIncidents, prefill, onClose, onCreated, showToast }) => {
   const { t } = useTranslation('supporto', { useSuspense: false });
   const [category, setCategory] = useState<SupportCategory | null>(null);
   const [urgent, setUrgent] = useState(false);
@@ -84,6 +87,14 @@ const NewRequestModal: React.FC<{
   const [error, setError] = useState<string | null>(null);
   const [showContext, setShowContext] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
+
+  // La richiesta che nasce dall'assistente parte con la conversazione già
+  // dentro: chi scrive aggiunge solo quello che manca.
+  useEffect(() => {
+    if (!open || !prefill) return;
+    setSubject(prefill.subject);
+    setBody(prefill.body);
+  }, [open, prefill]);
 
   const reset = () => {
     photos.forEach(p => URL.revokeObjectURL(p.previewUrl));
@@ -328,6 +339,8 @@ export const SupportPanel: React.FC<{
   const [uploading, setUploading] = useState(false);
   const [sending, setSending] = useState(false);
   const [busy, setBusy] = useState<'resolve' | 'escalate' | null>(null);
+  const [assistantOpen, setAssistantOpen] = useState(false);
+  const [prefill, setPrefill] = useState<AssistantEscalation | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
 
@@ -514,11 +527,22 @@ export const SupportPanel: React.FC<{
       <SplitPane
         detailOpen={selectedId != null}
         toolbar={
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="text-[17px] font-semibold text-[var(--ds-text-primary)]">{t('title', 'Aiuto')}</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="mr-auto text-[17px] font-semibold text-[var(--ds-text-primary)]">{t('title', 'Aiuto')}</h2>
+            {/* L'assistente prima della richiesta: la maggior parte delle
+                domande è un «come si fa» che i manuali coprono già. */}
             <button
               type="button"
-              onClick={() => setNewOpen(true)}
+              onClick={() => setAssistantOpen(true)}
+              className={dsIconButton}
+              title={t('assistant.name', 'Chiedi a Sympotia')}
+              aria-label={t('assistant.name', 'Chiedi a Sympotia')}
+            >
+              <Wand2 className="h-4 w-4 text-[var(--ds-arriving-text)]" aria-hidden />
+            </button>
+            <button
+              type="button"
+              onClick={() => { setPrefill(null); setNewOpen(true); }}
               className={dsIconButton}
               title={t('newRequest', 'Nuova richiesta')}
               aria-label={t('newRequest', 'Nuova richiesta')}
@@ -536,10 +560,16 @@ export const SupportPanel: React.FC<{
             <EmptyState
               icon={LifeBuoy}
               action={
-                <button type="button" className={dsButton.primary} onClick={() => setNewOpen(true)}>
-                  <Plus className="h-4 w-4" aria-hidden />
-                  {t('newRequest', 'Nuova richiesta')}
-                </button>
+                <div className="flex flex-wrap justify-center gap-2">
+                  <button type="button" className={dsButton.secondary} onClick={() => setAssistantOpen(true)}>
+                    <Wand2 className="h-4 w-4 text-[var(--ds-arriving-text)]" aria-hidden />
+                    {t('assistant.name', 'Chiedi a Sympotia')}
+                  </button>
+                  <button type="button" className={dsButton.primary} onClick={() => { setPrefill(null); setNewOpen(true); }}>
+                    <Plus className="h-4 w-4" aria-hidden />
+                    {t('newRequest', 'Nuova richiesta')}
+                  </button>
+                </div>
               }
             >
               {t('empty', 'Qualcosa non va? Scrivi al team Sympotia.')}
@@ -665,13 +695,25 @@ export const SupportPanel: React.FC<{
         }
       />
 
+      <SupportAssistant
+        open={assistantOpen}
+        onClose={() => setAssistantOpen(false)}
+        onEscalate={next => {
+          setAssistantOpen(false);
+          setPrefill(next);
+          setNewOpen(true);
+        }}
+      />
+
       <NewRequestModal
         open={newOpen}
         originView={originView}
         activeIncidents={activeIncidents}
-        onClose={() => setNewOpen(false)}
+        prefill={prefill}
+        onClose={() => { setNewOpen(false); setPrefill(null); }}
         onCreated={ticket => {
           setNewOpen(false);
+          setPrefill(null);
           setTickets(prev => [ticket, ...prev]);
           setSelectedId(ticket.id);
           setDetail(ticket);

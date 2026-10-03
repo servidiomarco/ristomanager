@@ -56,6 +56,10 @@ COPY public ./public
 # resta fermo alla baseline di createSchema.
 COPY migrations ./migrations
 
+# I manuali che l'assistente «Chiedi a Sympotia» tiene nel prompt (vedi
+# services/supportAssistant.ts): solo questi tre, non tutta la cartella docs.
+COPY docs/funzionalita-app.md docs/Manuale_Utente_CRM.md docs/manuale-operativo-comande-cucina-passe.md ./docs/
+
 # Expose port 8080 (Railway's default)
 EXPOSE 8080
 

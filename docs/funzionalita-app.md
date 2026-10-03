@@ -606,6 +606,7 @@ Tutte le funzioni AI girano sul server (nessuna chiave nel browser) e seguono un
 | Traduzioni menu | Traduce il menu in inglese, francese e tedesco |
 | Abbinamenti vino | Propone i vini della carta da abbinare ai piatti (in scheda o su tutta la carta); il ristoratore cura e salva |
 | Report Dashboard | Spiega in italiano l'andamento del periodo (i numeri li calcola il database, l'AI li racconta) |
+| Chiedi a Sympotia | Risponde alle domande sull'uso dell'app leggendo i manuali, nella vista Aiuto; quando serve il team propone di aprire una richiesta con la conversazione già dentro |
 
 **Consumi AI**: pagina di monitoraggio (riservata al pannello di piattaforma, come Development e Roadmap) con generazioni, token e **costi in euro** per funzione, più i crediti dell'agente vocale. Per Sofia mostra il **costo reale di ogni chiamata** (dai dati ElevenLabs) e i **minuti del mese contro i 250 inclusi nell'add-on**, con stima a fine mese, ricavo stimato e margine; il pannello Piattaforma riporta gli stessi numeri per ogni ristorante.
 
@@ -664,6 +665,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 ## Aiuto e supporto
 
 - **Voce «Aiuto» nel menu**, per ogni ruolo del ristorante (non si toglie dalla matrice permessi): da lì si apre una richiesta al team Sympotia e si segue la conversazione, su telefono e desktop.
+- **«Chiedi a Sympotia»** (la bacchetta in alto nella vista Aiuto): un assistente AI che risponde subito ai «come si fa» leggendo i manuali di Sympotia — dove si trova una funzione, quali tocchi servono, cosa dipende da un modulo non attivo. Non legge dati del ristorante e non cambia niente. Quando la domanda è un guasto o i manuali non bastano lo dice, e «Apri una richiesta con questa conversazione» porta il dialogo nel modulo di una nuova richiesta già compilato. Consumi visibili in Consumi AI («Assistente Aiuto»).
 - **Richiesta in pochi tocchi**: categoria (stampa, cassa e scontrini, Sofia, prenotazioni, menu, abbonamento, altro), oggetto, descrizione e fino a tre foto (es. lo schermo o lo scontrino).
 - **«Blocca il servizio»**: l'interruttore segna la richiesta come urgente e avvisa subito il team (notifica e email), senza promesse sui tempi di risposta. Si può segnare urgente anche una richiesta già aperta.
 - **Contesto tecnico allegato da solo**: versione dell'app e del server, schermata da cui si scrive, dispositivo e connessione, stato del nodo di sala, stampe ferme o fallite nelle ultime 24 ore, scontrini falliti (per le richieste sulla cassa). Nessun dato dei clienti; l'elenco è visibile nel modulo («Dati inviati automaticamente»).
@@ -718,6 +720,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-03 | Aiuto e supporto; Funzioni AI | Fase 3: assistente «Chiedi a Sympotia» nella vista Aiuto, per ogni ruolo, che risponde dai manuali e porta la conversazione in una richiesta precompilata quando serve il team. |
 | 2026-10-03 | Aiuto e supporto | Fase 2: errori dell'app raccolti in automatico e allegati alle richieste; avvisi alla piattaforma per stampa, scontrini, Sofia e nodo di sala (aperti e chiusi da soli); banner «problema noto» ai ristoranti; nuova tab «Salute» nel pannello Piattaforma. |
 | 2026-10-02 | Piattaforma, Development, Roadmap, Consumi AI | Development, Roadmap e Consumi AI tornano visibili: si aprono dal pannello di piattaforma, solo fuori da «Entra». Prima li apriva una sola email, cambiata il 26/09, e da allora non li vedeva nessuno. «Crea card dev» del Supporto torna a funzionare, e board e roadmap si aggiornano da sole anche nel pannello. |
 | 2026-10-02 | Piattaforma SaaS | Il pannello Piattaforma non mostra più logo, Chat staff, Fiscalità e Reportistica del Vecchio Frantoio: fuori da «Entra» restano Piattaforma e il marchio Sympotia. All'apertura non compare più «Error fetching data», e nella tab «Supporto» cambiare filtro chiude la richiesta aperta, che prima restava a destra anche fuori dalla lista. |

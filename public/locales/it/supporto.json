@@ -143,5 +143,20 @@
       "users_other": "{{count}} utenti"
     }
   },
-  "knownIssue": "Problema già noto"
+  "knownIssue": "Problema già noto",
+  "assistant": {
+    "name": "Chiedi a Sympotia",
+    "subtitle": "Risposte dai manuali di Sympotia. Per un guasto, apri una richiesta.",
+    "placeholder": "Scrivi la tua domanda…",
+    "send": "Chiedi",
+    "thinking": "Cerco nei manuali…",
+    "error": "L'assistente non ha risposto: riprova o apri una richiesta.",
+    "openTicket": "Apri una richiesta con questa conversazione",
+    "examplesLabel": "Per esempio:",
+    "example1": "Come sposto una prenotazione in un altro tavolo?",
+    "example2": "Come stampo il preconto di un tavolo?",
+    "example3": "Come cambio gli orari di apertura?",
+    "you": "Io",
+    "transcriptHeading": "Conversazione con l'assistente"
+  }
 }

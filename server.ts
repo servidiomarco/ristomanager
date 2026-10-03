@@ -77,6 +77,9 @@ import {
     type SupportAttachment, type SupportCategory, type SupportPriority, type SupportStatus,
 } from './services/supportShared.js';
 import {
+    askSupportAssistant, sanitizeAssistantTurns, isSupportAssistantConfigured, SupportAssistantError,
+} from './services/supportAssistant.js';
+import {
     sanitizeClientErrors, normalizeErrorMessage, firstStackFrame,
     INCIDENT_LEVELS, INCIDENT_MESSAGE_MAX,
     type AppErrorOrigin, type PlatformAlertKind,
@@ -21479,6 +21482,51 @@ app.patch('/support/tickets/:id', authenticate, requireTenantSession, async (req
     } catch (err) {
         console.error('PATCH /support/tickets/:id error:', err);
         res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// «Chiedi a Sympotia» (supporto, fase 3): l'assistente sui manuali, per
+// ogni utente del ristorante. Senza stato: la conversazione la tiene il
+// client e la rimanda a ogni domanda (vedi services/supportAssistant.ts).
+const supportAssistantLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    limit: 40,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    keyGenerator: (req: any) => `support-assistant:${req.user?.userId ?? 'anon'}`,
+    message: { error: 'rate_limited', message: 'Troppe domande in poco tempo: riprova fra un po\' o apri una richiesta.' },
+});
+
+app.post('/support/assistant', authenticate, requireTenantSession, supportAssistantLimiter, async (req: any, res) => {
+    const turns = sanitizeAssistantTurns(req.body?.messages);
+    if (!turns) return res.status(400).json({ error: 'invalid_messages' });
+    if (!isSupportAssistantConfigured()) {
+        return res.status(503).json({ error: 'not_configured', message: "L'assistente non è disponibile: apri una richiesta." });
+    }
+    try {
+        const [tenant, features] = await Promise.all([
+            queryWithRetry(`SELECT name FROM tenants WHERE id = $1`, [req.tenantId!]),
+            getTenantFeatures(req.tenantId!),
+        ]);
+        const result = await askSupportAssistant(turns, {
+            restaurantName: String(tenant.rows[0]?.name ?? ''),
+            userRole: String(req.user?.role ?? ''),
+            features: Object.keys(features).filter(k => (features as Record<string, boolean>)[k]),
+        }, usage => {
+            queryWithRetry(
+                `INSERT INTO ai_token_usage (provider, feature, model, prompt_tokens, output_tokens, total_tokens, user_email, tenant_id)
+                 VALUES ('anthropic', 'support_assistant', $1, $2, $3, $4, $5, $6)`,
+                [usage.model, usage.promptTokens, usage.outputTokens, usage.promptTokens + usage.outputTokens, req.user?.email ?? null, req.tenantId!]
+            ).catch(err => console.error('ai_token_usage insert (support_assistant) failed:', err));
+        });
+        res.json({ answer: result.answer, suggest_ticket: result.suggestTicket });
+    } catch (err: any) {
+        if (isAiKeyInvalid(err)) return sendAiKeyInvalid(res, 'POST /support/assistant', err);
+        if (err instanceof SupportAssistantError && err.kind !== 'upstream') {
+            return res.status(503).json({ error: err.kind, message: "L'assistente non è disponibile: apri una richiesta." });
+        }
+        console.error('POST /support/assistant error:', err);
+        res.status(502).json({ error: 'assistant_failed', message: "L'assistente non ha risposto: riprova o apri una richiesta." });
     }
 });
 

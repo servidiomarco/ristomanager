@@ -154,6 +154,15 @@ class SupportApiService {
     });
   }
 
+  /** «Chiedi a Sympotia»: la conversazione intera, l'ultima è la domanda. */
+  async ask(messages: Array<{ role: 'user' | 'assistant'; content: string }>): Promise<{ answer: string; suggest_ticket: boolean }> {
+    return apiRequest(`${API_URL}/support/assistant`, {
+      method: 'POST',
+      headers: getHeaders(true),
+      body: JSON.stringify({ messages }),
+    });
+  }
+
   /* ── Pannello piattaforma ────────────────────────────────────────────── */
 
   async adminList(filters: { status?: SupportStatus | 'aperte' | 'tutte'; priority?: SupportPriority; tenantId?: number } = {}): Promise<PlatformSupportList> {
