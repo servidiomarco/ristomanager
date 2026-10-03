@@ -1,0 +1,12 @@
+{
+  "settingsTitle": "Sala dal vivo",
+  "settingsHint": "Ingresso, pass e accoglienza sulla piantina di Sale & Tavoli.",
+  "statusOn": "Accesa",
+  "statusOff": "Spenta",
+  "turnOn": "Accendi Sala dal vivo",
+  "turnOff": "Spegni Sala dal vivo",
+  "onToast": "Sala dal vivo accesa",
+  "offToast": "Sala dal vivo spenta",
+  "saveError": "Impostazione non salvata",
+  "loadError": "Stato non disponibile"
+}

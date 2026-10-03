@@ -1,0 +1,12 @@
+{
+  "settingsTitle": "Live floor",
+  "settingsHint": "Entrance, pass and host stand on the Rooms & Tables map.",
+  "statusOn": "On",
+  "statusOff": "Off",
+  "turnOn": "Turn the live floor on",
+  "turnOff": "Turn the live floor off",
+  "onToast": "Live floor on",
+  "offToast": "Live floor off",
+  "saveError": "Setting not saved",
+  "loadError": "Status unavailable"
+}

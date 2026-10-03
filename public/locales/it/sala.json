@@ -87,5 +87,13 @@
   "roomClosedShort": "{{sala}} (chiusa)",
   "rotateHint": "Ruota +15° (Shift o clic destro per -15°)",
   "tableDetailsNamed": "Dettagli tavolo {{tavolo}}",
-  "rotateCurrent": "attuale: {{gradi}}°"
+  "rotateCurrent": "attuale: {{gradi}}°",
+  "markerEntrance": "Ingresso",
+  "markerPass": "Pass",
+  "markerHostStand": "Accoglienza",
+  "placeEntrance": "Posiziona l'ingresso",
+  "placePass": "Posiziona il pass",
+  "placeHostStand": "Posiziona l'accoglienza",
+  "removeMarker": "Rimuovi",
+  "markerSaveError": "Segnaposto non salvato"
 }

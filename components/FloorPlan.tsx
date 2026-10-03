@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { flushSync, createPortal } from 'react-dom';
-import { Table, TableShape, Room, TableStatus, Reservation, ReservationSource, Shift, TableMerge, TableHiddenOverride, RoomClosedOverride, ArrivalStatus, ReservationStatus, BanquetMenu } from '../types';
-import { Plus, Pencil, Move, RectangleHorizontal, Square, Circle, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Sunset, Loader2, Info, RotateCw, Ruler, StickyNote, Star, Eye, EyeOff, DoorClosed, DoorOpen, BookOpen, Mic, ChevronDown } from 'lucide-react';
+import { Table, TableShape, Room, TableStatus, Reservation, ReservationSource, Shift, TableMerge, TableHiddenOverride, RoomClosedOverride, ArrivalStatus, ReservationStatus, BanquetMenu, FloorMarker, FloorMarkerKind } from '../types';
+import { Plus, Pencil, Move, RectangleHorizontal, Square, Circle, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Sunset, Loader2, Info, RotateCw, Ruler, StickyNote, Star, Eye, EyeOff, DoorClosed, DoorOpen, BookOpen, Mic, ChevronDown, LogIn, HandPlatter, ConciergeBell } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
 import { useTranslation } from 'react-i18next';
 import { deriveTableDisplayStatus, isSeated, useTableStatusLabel } from './reservationState';
@@ -13,9 +14,10 @@ import { buildBanquetColorClassMap } from '../utils/banquetColors';
 import { BanquetLabel } from './ReservationCard';
 import { snapToGrid, collidesWithOthers, findOverlappingPairs, getTableFootprint, FLOOR_CLEARANCE, FLOOR_GRID } from '../utils/tableOverlap';
 import { toTitleCase, getInitials } from '../utils/text';
-import { getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getRoomClosed, createRoomClosed, deleteRoomClosed } from '../services/apiService';
+import { getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getRoomClosed, createRoomClosed, deleteRoomClosed, saveFloorMarker, deleteFloorMarker } from '../services/apiService';
 import { applyMerges } from '../utils/tableMerge';
 import { useSocket } from '../hooks/useSocket';
+import { useFloorMarkers } from '../hooks/useFloorMarkers';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { DateNavigator } from './DateNavigator';
 import { SegmentedControl, Callout, ModalShell, FormCard, Field, dsInput, dsTextarea, dsButton, dsIconButton } from './ds';
@@ -75,6 +77,32 @@ const EDIT_ACTION_QUIET =
 const EDIT_FIELD_WRAP =
   'flex h-11 flex-shrink-0 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3';
 
+// Strumenti dei segnaposto: la sagoma 44px di dsIconButton senza fondo né
+// colore del testo, che arrivano dallo stato. Sopra dsIconButton il
+// TOOL_BUTTON_ON non si vedrebbe: Tailwind emette le utility arbitrarie
+// della stessa proprietà in ordine alfabetico, non in quello della stringa,
+// e bg-[var(--ds-surface)] vince su bg-[var(--ds-arriving-solid)].
+const MARKER_TOOL_BASE =
+  'inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] transition-colors disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+
+// Segnaposto di sala, nell'ordine degli strumenti. Niente DoorOpen per
+// l'ingresso: in questa pagina vuol già dire «riapri la sala».
+const FLOOR_MARKER_KINDS: FloorMarkerKind[] = ['ENTRANCE', 'PASS', 'HOST_STAND'];
+const FLOOR_MARKER_ICONS: Record<FloorMarkerKind, LucideIcon> = {
+  ENTRANCE: LogIn,
+  PASS: HandPlatter,
+  HOST_STAND: ConciergeBell,
+};
+// Spazio a schermo fra il centro di un segnaposto e il bordo in alto a
+// sinistra della tela: mezzo chip (22px) più l'etichetta che sborda ai
+// lati. Il segnaposto è il suo centro, e la tela taglia tutto quello che
+// sta sopra o a sinistra dell'origine: un ingresso trascinato contro la
+// parete resterebbe tagliato a metà. Vale solo per il disegno, con la
+// scala di chi guarda: salvato nel punto, sarebbe giusto solo sullo
+// schermo che l'ha posato, e il tablet più piccolo lo taglierebbe.
+const MARKER_EDGE_PX = 36;
+const markerKey = (room_id: number, kind: FloorMarkerKind) => `${room_id}:${kind}`;
+
 interface FloorPlanProps {
   rooms: Room[];
   tables: Table[];
@@ -91,6 +119,10 @@ interface FloorPlanProps {
   canEdit?: boolean;
   globalDate?: Date;
   globalShiftFilter?: 'ALL' | 'LUNCH' | 'DINNER';
+  /** «Sala dal vivo» accesa: segnaposto di sala (ingresso, pass,
+   *  accoglienza) sulla piantina, e i loro strumenti per chi può modificare.
+   *  Spenta, niente fetch né listener. */
+  markersEnabled?: boolean;
 }
 
 export const FloorPlan: React.FC<FloorPlanProps> = ({
@@ -109,6 +141,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   canEdit = true,
   globalDate,
   globalShiftFilter: globalShiftFilterProp,
+  markersEnabled = false,
 }) => {
   // Legenda degli stati tavolo nella lingua dell'operatore.
   const { t: tv } = useTranslation('sala', { useSuspense: false });
@@ -305,6 +338,39 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
   const { socket } = useSocket();
 
+  // Segnaposto di sala: con «Sala dal vivo» spenta il hook non legge e non
+  // ascolta niente, e la lista resta vuota. Finché la lista non è nota gli
+  // strumenti restano spenti: «non c'è» deciso su una lista vuota per
+  // ignoranza farebbe nascere al centro un ingresso che esiste già, e
+  // l'upsert lo sposterebbe lì.
+  const {
+    markers: floorMarkers,
+    loaded: markersLoaded,
+    upsertLocal: upsertMarkerLocal,
+    removeLocal: removeMarkerLocal,
+  } = useFloorMarkers(markersEnabled);
+  // Uno alla volta, e mai insieme ai tavoli: la barra di modifica dei
+  // tavoli resterebbe aperta su una selezione che non c'è più.
+  const [selectedMarkerId, setSelectedMarkerId] = useState<number | null>(null);
+  // Trascinamento di un segnaposto, separato da quello dei tavoli: un punto
+  // non ha sagoma, quindi niente collisioni né lucchetti.
+  const markerDragRef = useRef<{
+    marker: FloorMarker;
+    el: HTMLDivElement;
+    startX: number;
+    startY: number;
+    // Il punto disegnato alla pressione, in px della sala: può stare più
+    // in qua di quello salvato, se questo è contro la parete.
+    originX: number;
+    originY: number;
+    candX: number;
+    candY: number;
+    moved: boolean;
+  } | null>(null);
+  // Un contatore di richieste per segnaposto: la risposta di un salvataggio
+  // superato da uno più recente dello stesso segnaposto non si applica.
+  const markerSeqRef = useRef<Map<string, number>>(new Map());
+
   // Listen for merge socket events filtered by current date+shift
   useEffect(() => {
     if (!socket) return;
@@ -484,13 +550,20 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     // Apply per-shift hide override unless the user toggled "show hidden".
     .filter(t => showHidden || !hiddenTableIds.has(t.id));
 
+  // Segnaposto della sala attiva. Quelli di una sala eliminata spariscono
+  // nel database senza evento: filtrare per sala basta a non mostrarli.
+  const roomMarkers = useMemo(
+    () => (markersEnabled ? floorMarkers.filter(m => m.room_id === activeRoomId) : []),
+    [markersEnabled, floorMarkers, activeRoomId]
+  );
+
   // Bounding box used to size the inner canvas: the extent of the saved x/y
   // plus the glyph footprint, so dragged tables never escape the scaled
   // wrapper. Combined with contentOffset=(0,0) below, tables render at their
   // real arrangement and only shrink if they overflow the canvas.
   const roomExtent = useMemo(() => {
     const PADDING = 60;
-    if (currentTables.length === 0) return { width: 800, height: 600 };
+    if (currentTables.length === 0 && roomMarkers.length === 0) return { width: 800, height: 600 };
     let maxRight = 0;
     let maxBottom = 0;
     for (const t of currentTables) {
@@ -498,8 +571,20 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       maxRight = Math.max(maxRight, t.x + w);
       maxBottom = Math.max(maxBottom, t.y + h);
     }
+    // Un segnaposto è il suo centro: chip ed etichetta sporgono a destra e
+    // sotto, e la sala non deve stringersi fino a tagliarli.
+    for (const m of roomMarkers) {
+      maxRight = Math.max(maxRight, m.x + 40);
+      maxBottom = Math.max(maxBottom, m.y + 60);
+    }
+    // Senza tavoli la sala resta almeno 800×600: i segnaposto la allargano
+    // e basta. Ristretta attorno al primo, la vista zoomerebbe di colpo e il
+    // segnaposto appena posato al centro scapperebbe di lato.
+    if (currentTables.length === 0) {
+      return { width: Math.max(800, maxRight + PADDING), height: Math.max(600, maxBottom + PADDING) };
+    }
     return { width: maxRight + PADDING, height: maxBottom + PADDING };
-  }, [currentTables]);
+  }, [currentTables, roomMarkers]);
 
   const scale = useMemo(() => {
     if (canvasSize.width === 0 || canvasSize.height === 0) return 1;
@@ -695,8 +780,226 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     return TableStatus.FREE;
   };
 
+  // ── Segnaposto di sala ──────────────────────────────────────────────
+  // Si trascinano quando si trascinano i tavoli (chi può modificare, con
+  // «Sposta tavoli» acceso) e si salvano al rilascio. Un punto non ha
+  // sagoma: niente controllo delle sovrapposizioni, sta anche su un tavolo.
+
+  // Chiavi letterali, non composte: il controllo dei dizionari le verifica.
+  const markerLabel = (kind: FloorMarkerKind) =>
+    kind === 'ENTRANCE' ? tv('markerEntrance') : kind === 'PASS' ? tv('markerPass') : tv('markerHostStand');
+  const markerPlaceLabel = (kind: FloorMarkerKind) =>
+    kind === 'ENTRANCE' ? tv('placeEntrance') : kind === 'PASS' ? tv('placePass') : tv('placeHostStand');
+
+  // Il punto salvato: sulla griglia e mai negativo, come i tavoli. Uguale
+  // per ogni schermo, perché la 3D e gli altri dispositivi leggono questo.
+  const clampMarkerCoord = (v: number) => Math.max(0, snapToGrid(v));
+  // Dove si disegna su QUESTO schermo: mai così vicino all'origine che la
+  // tela tagli chip o etichetta (MARKER_EDGE_PX a schermo, riportati in px
+  // della sala con la scala di chi guarda). Il punto salvato non cambia.
+  const markerDrawCoord = (v: number, s: number) => Math.max(v, MARKER_EDGE_PX / (s || 1));
+
+  const nextMarkerSeq = (key: string) => {
+    const seq = (markerSeqRef.current.get(key) ?? 0) + 1;
+    markerSeqRef.current.set(key, seq);
+    return seq;
+  };
+  const isLatestMarkerSeq = (key: string, seq: number) => markerSeqRef.current.get(key) === seq;
+
+  // Uno strumento: il segnaposto che manca nasce, quello che c'è si
+  // seleziona. In entrambi i casi si accende «Sposta tavoli» (e si spegne
+  // «Modifica tavoli», una modalità alla volta), così si trascina subito.
+  const handleMarkerTool = async (kind: FloorMarkerKind) => {
+    // Il bottone è già spento finché la lista non è nota: questa è la
+    // seconda cintura, perché qui sotto «non c'è» diventa un upsert.
+    if (!activeRoomId || !markersLoaded) return;
+    const room_id = activeRoomId;
+    setIsSelectionMode(false);
+    setIsMoving(true);
+    setSelectedTables([]);
+    const existing = roomMarkers.find(m => m.kind === kind);
+    if (existing) {
+      setSelectedMarkerId(existing.id);
+      return;
+    }
+    // Al centro di quello che si vede: la sala è fissata in alto a sinistra
+    // e scalata, quindi è il centro della tela diviso la scala.
+    const x = clampMarkerCoord(canvasSize.width / 2 / scale);
+    const y = clampMarkerCoord(canvasSize.height / 2 / scale);
+    const key = markerKey(room_id, kind);
+    const seq = nextMarkerSeq(key);
+    try {
+      // Si aspetta il server: l'id lo dà lui, e senza id non si sposta.
+      const saved = await saveFloorMarker({ room_id, kind, x, y });
+      if (!isLatestMarkerSeq(key, seq)) return;
+      upsertMarkerLocal(saved);
+      setSelectedMarkerId(saved.id);
+    } catch {
+      if (!isLatestMarkerSeq(key, seq)) return;
+      setAlertModal({ message: tv('markerSaveError'), type: 'error' });
+    }
+  };
+
+  const handleRemoveMarker = async (m: FloorMarker) => {
+    const key = markerKey(m.room_id, m.kind);
+    const seq = nextMarkerSeq(key);
+    setSelectedMarkerId(null);
+    removeMarkerLocal(m.id);
+    try {
+      await deleteFloorMarker(m.id);
+    } catch (err: any) {
+      // 404: l'ha già tolto un altro dispositivo, che è quello che si voleva.
+      if (err?.status === 404 || !isLatestMarkerSeq(key, seq)) return;
+      upsertMarkerLocal(m);
+      setAlertModal({ message: tv('actionFailed'), type: 'error' });
+    }
+  };
+
+  const persistMarkerMove = async (original: FloorMarker, moved: FloorMarker) => {
+    const key = markerKey(moved.room_id, moved.kind);
+    const seq = nextMarkerSeq(key);
+    try {
+      const saved = await saveFloorMarker(moved);
+      if (isLatestMarkerSeq(key, seq)) upsertMarkerLocal(saved);
+    } catch {
+      if (!isLatestMarkerSeq(key, seq)) return;
+      upsertMarkerLocal(original);
+      setAlertModal({ message: tv('markerSaveError'), type: 'error' });
+    }
+  };
+
+  // Chiude un trascinamento di segnaposto senza salvarlo, e l'anteprima
+  // torna al punto salvato: per un tocco che il sistema interrompe
+  // (touchcancel) e per un trascinamento rimasto armato quando si preme
+  // altro. Scegliere una posizione al posto di chi trascinava sarebbe
+  // peggio che non scrivere niente.
+  const cancelMarkerDrag = () => {
+    const drag = markerDragRef.current;
+    if (!drag) return;
+    markerDragRef.current = null;
+    drag.el.style.transform = '';
+  };
+
+  // Lo stesso per i tavoli: un tavolo rimasto armato (il suo rilascio è
+  // finito fuori dalla piantina) non deve seguire il puntatore mentre si
+  // sposta un segnaposto, né posarsi al rilascio di quello.
+  const cancelTableDrag = () => {
+    if (!dragStateRef.current.isDragging) return;
+    const el = draggedElementRef.current;
+    if (el) {
+      el.style.transform = '';
+      el.style.zIndex = '';
+    }
+    dragStateRef.current = {
+      isDragging: false,
+      tableId: null,
+      startX: 0,
+      startY: 0,
+      currentX: 0,
+      currentY: 0,
+      originalPos: null,
+      candidateX: 0,
+      candidateY: 0,
+      conflict: false
+    };
+    draggedElementRef.current = null;
+    setIsDragging(false);
+    setDragConflictId(null);
+  };
+
+  const handleMarkerPointerDown = (m: FloorMarker, clientX: number, clientY: number, el: HTMLDivElement) => {
+    if (!canEdit || !isMoving) return;
+    cancelMarkerDrag();
+    cancelTableDrag();
+    setSelectedTables([]);
+    setSelectedMarkerId(m.id);
+    // Si parte dal punto DISEGNATO: un segnaposto salvato contro la parete
+    // si vede più in qua, e partendo dal punto salvato il chip resterebbe
+    // fermo per i primi pixel del trascinamento.
+    const s = scaleRef.current || 1;
+    markerDragRef.current = {
+      marker: m,
+      el,
+      startX: clientX,
+      startY: clientY,
+      originX: markerDrawCoord(m.x, s),
+      originY: markerDrawCoord(m.y, s),
+      candX: m.x,
+      candY: m.y,
+      moved: false,
+    };
+  };
+
+  // true se c'è un segnaposto in trascinamento: chi chiama si ferma lì.
+  const moveMarkerDrag = (clientX: number, clientY: number): boolean => {
+    const drag = markerDragRef.current;
+    if (!drag) return false;
+    // Un dito che trema di qualche pixel fa ancora un tocco: seleziona e basta.
+    if (!drag.moved && Math.abs(clientX - drag.startX) < 4 && Math.abs(clientY - drag.startY) < 4) return true;
+    drag.moved = true;
+    const s = scaleRef.current || 1;
+    drag.candX = clampMarkerCoord(drag.originX + (clientX - drag.startX) / s);
+    drag.candY = clampMarkerCoord(drag.originY + (clientY - drag.startY) / s);
+    // Anteprima come per i tavoli: transform sull'ancora, in px della sala
+    // (il contenitore scalato li porta a schermo). React non la tocca. Fra
+    // punti disegnati: contro la parete il chip si ferma dove resterà.
+    const dx = markerDrawCoord(drag.candX, s) - drag.originX;
+    const dy = markerDrawCoord(drag.candY, s) - drag.originY;
+    drag.el.style.transform = `translate(${dx}px, ${dy}px)`;
+    return true;
+  };
+
+  // Ogni mouseup della pagina passa di qui: false se non c'era niente da
+  // chiudere, così il rilascio prosegue verso i tavoli.
+  const endMarkerDrag = (): boolean => {
+    const drag = markerDragRef.current;
+    if (!drag) return false;
+    markerDragRef.current = null;
+    if (!drag.moved || (drag.candX === drag.marker.x && drag.candY === drag.marker.y)) {
+      drag.el.style.transform = '';
+      return true;
+    }
+    // La copia di adesso, non quella presa alla pressione: se intanto è
+    // arrivata la risposta del rilascio prima (o la sua eco in LAN), quella
+    // copia ha un updated_at superato, l'upsert la scarterebbe e il chip
+    // tornerebbe dov'era fino alla risposta di questo. Ed è anche la
+    // versione a cui tornare se il salvataggio fallisce.
+    const base = floorMarkers.find(cur => cur.id === drag.marker.id) ?? drag.marker;
+    const moved = { ...base, x: drag.candX, y: drag.candY };
+    // Sincrono come per i tavoli: la posizione nuova è a schermo prima che
+    // si tolga l'anteprima, senza il rimbalzo al punto di partenza.
+    flushSync(() => { upsertMarkerLocal(moved); });
+    drag.el.style.transform = '';
+    void persistMarkerMove(base, moved);
+    return true;
+  };
+
+  // Un rilascio fuori dalla piantina (l'ingresso spinto contro la parete,
+  // il mouse che finisce sulla barra laterale) chiude comunque il
+  // trascinamento: senza, il segnaposto resterebbe attaccato al puntatore e
+  // il primo clic su un tavolo lo poserebbe lì. Un rilascio dentro la
+  // piantina passa prima da handleMouseUp, e qui non trova più niente. Il
+  // tocco resta all'elemento dove è partito e risale fin lì da solo: gli
+  // manca solo touchcancel, quando il sistema si prende il gesto. Le
+  // funzioni passano da un ref perché leggono lo stato del render.
+  const markerDragEndersRef = useRef({ end: endMarkerDrag, cancel: cancelMarkerDrag });
+  markerDragEndersRef.current = { end: endMarkerDrag, cancel: cancelMarkerDrag };
+  useEffect(() => {
+    if (!markersEnabled) return;
+    const onUp = () => { markerDragEndersRef.current.end(); };
+    const onCancel = () => { markerDragEndersRef.current.cancel(); };
+    window.addEventListener('mouseup', onUp);
+    window.addEventListener('touchcancel', onCancel);
+    return () => {
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('touchcancel', onCancel);
+    };
+  }, [markersEnabled]);
+
   const handleMouseDown = (e: React.MouseEvent, tableId: number, element: HTMLDivElement) => {
     e.stopPropagation();
+    setSelectedMarkerId(null);
+    cancelMarkerDrag();
 
     const table = tables.find(t => t.id === tableId);
 
@@ -788,11 +1091,18 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
+    if (moveMarkerDrag(e.clientX, e.clientY)) return;
     if (!dragStateRef.current.isDragging) return;
     applyDragMove(e.clientX, e.clientY);
   };
 
   const handleMouseUp = () => {
+    // Un segnaposto in volo si prende il rilascio; un tavolo rimasto armato
+    // insieme a lui si annulla, invece di restare attaccato al puntatore.
+    if (endMarkerDrag()) {
+      cancelTableDrag();
+      return;
+    }
     const dragState = dragStateRef.current;
 
     if (dragState.isDragging && dragState.tableId !== null && canvasRef.current) {
@@ -853,6 +1163,8 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   // Touch event handlers for mobile
   const handleTouchStart = (e: React.TouchEvent, tableId: number, element: HTMLDivElement) => {
     e.stopPropagation();
+    setSelectedMarkerId(null);
+    cancelMarkerDrag();
 
     // If not in edit mode, don't allow selection or dragging
     if (!canEdit) {
@@ -891,8 +1203,9 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    if (!dragStateRef.current.isDragging) return;
     const touch = e.touches[0];
+    if (touch && moveMarkerDrag(touch.clientX, touch.clientY)) return;
+    if (!dragStateRef.current.isDragging) return;
     applyDragMove(touch.clientX, touch.clientY);
   };
 
@@ -1176,6 +1489,9 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
   // The canvas announces «Sposta tavoli» only to those who can drag.
   const isEditingLayout = canEdit && isMoving;
+  // Un segnaposto è selezionato solo mentre si sposta, e solo nella sala
+  // attiva: fuori da «Sposta tavoli» non mostra il bottone per rimuoverlo.
+  const selectedMarker = isEditingLayout ? roomMarkers.find(m => m.id === selectedMarkerId) : undefined;
 
   // Applica la bozza coperti. Il campo mostra i coperti COMBINATI (tavolo +
   // agganciati): il numero digitato va riportato al valore grezzo del tavolo
@@ -1307,6 +1623,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
               onClick={() => {
                   setActiveRoomId(room.id);
                   setSelectedTables([]);
+                  setSelectedMarkerId(null);
               }}
               className={`${ROOM_TAB_BASE} ${
                   activeRoomId === room.id
@@ -1379,6 +1696,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             onClick={() => {
               if (!isMoving) setIsSelectionMode(false);
               setIsMoving(m => !m);
+              setSelectedMarkerId(null);
             }}
             className={`${EDIT_ACTION_BASE} ${isMoving ? TOOL_BUTTON_ON : EDIT_ACTION_QUIET}`}
             title={isMoving ? tv('moveDoneHint') : tv('moveStartHint')}
@@ -1392,6 +1710,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             onClick={() => {
               if (!isSelectionMode) setIsMoving(false);
               setIsSelectionMode(!isSelectionMode);
+              setSelectedMarkerId(null);
             }}
             className={`${EDIT_ACTION_BASE} ${isSelectionMode ? TOOL_BUTTON_ON : EDIT_ACTION_QUIET}`}
             title={isSelectionMode ? tv('editTablesDoneHint') : tv('editTablesStartHint')}
@@ -1427,6 +1746,34 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           <button onClick={() => handleAddTable(TableShape.CIRCLE)} className={`${dsIconButton} bg-[var(--ds-surface-row)] shadow-none`} title={tv('shapeRound')} aria-label={tv('shapeRound')}>
             <Circle className="h-5 w-5" />
           </button>
+
+          {/* Segnaposto di sala, con «Sala dal vivo» accesa. Pieno = già
+              sulla piantina di questa sala: il tocco lo seleziona invece di
+              crearne un secondo, perché ce n'è uno per tipo in ogni sala.
+              Spenti finché la lista non è arrivata. */}
+          {markersEnabled && (
+            <>
+              <div className="h-6 w-px bg-[var(--ds-border)] mx-1"></div>
+              {FLOOR_MARKER_KINDS.map(kind => {
+                const Icon = FLOOR_MARKER_ICONS[kind];
+                const placed = roomMarkers.some(m => m.kind === kind);
+                const label = placed ? markerLabel(kind) : markerPlaceLabel(kind);
+                return (
+                  <button
+                    key={kind}
+                    type="button"
+                    disabled={!markersLoaded}
+                    onClick={() => { void handleMarkerTool(kind); }}
+                    className={`${MARKER_TOOL_BASE} ${placed ? TOOL_BUTTON_ON : EDIT_ACTION_QUIET}`}
+                    title={label}
+                    aria-label={label}
+                  >
+                    <Icon className="h-5 w-5" />
+                  </button>
+                );
+              })}
+            </>
+          )}
 
           <div className="h-6 w-px bg-[var(--ds-border)] mx-1"></div>
 
@@ -1740,7 +2087,10 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       <div
         ref={canvasRef}
         className={`flex-1 bg-[var(--ds-canvas)] rounded-[var(--ds-radius)] border border-dashed ${isEditingLayout || (canEdit && isSelectionMode) ? 'border-[var(--ds-arriving-solid)]' : 'border-[var(--ds-border-strong)]'} transition-colors relative overflow-hidden ${isSelectionMode ? 'cursor-crosshair' : 'cursor-default'}`}
-        onClick={() => !isSelectionMode && setSelectedTables([])}
+        onClick={() => {
+          if (!isSelectionMode) setSelectedTables([]);
+          setSelectedMarkerId(null);
+        }}
         style={{
             backgroundImage: 'radial-gradient(var(--floor-dot) 1px, transparent 1px)',
             backgroundSize: '20px 20px'
@@ -1771,6 +2121,67 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
               return (
                 <div key={`blabel-${bl.banquetId}-${i}`} className="absolute pointer-events-none" style={{ left: bl.x, top: bl.y, zIndex: 15 }}>
                   <BanquetLabel width={bl.w} name={data.name} guests={data.guests} colorClass={colorClass} />
+                </div>
+              );
+            })}
+            {/* Segnaposto di sala. L'ancora è un punto 0×0 in (x, y), tenuto
+                a MARKER_EDGE_PX dal bordo in alto a sinistra; il chip ci sta
+                centrato e controscalato, così resta di 44px a ogni zoom.
+                Sopra i tavoli, sotto un tavolo selezionato (30) o trascinato
+                (100). Si toccano solo quando si possono spostare: fuori, il
+                tocco passa al tavolo che sta sotto. */}
+            {roomMarkers.map(m => {
+              const Icon = FLOOR_MARKER_ICONS[m.kind];
+              if (!Icon) return null;
+              const isSelected = selectedMarker?.id === m.id;
+              return (
+                <div
+                  key={`marker-${m.id}`}
+                  className={`absolute select-none ${isEditingLayout ? '' : 'pointer-events-none'}`}
+                  style={{ left: markerDrawCoord(m.x, scale), top: markerDrawCoord(m.y, scale), width: 0, height: 0, zIndex: 25 }}
+                  onMouseDown={(e) => {
+                    e.stopPropagation();
+                    if (e.button !== 0) return;
+                    handleMarkerPointerDown(m, e.clientX, e.clientY, e.currentTarget);
+                  }}
+                  onTouchStart={(e) => {
+                    e.stopPropagation();
+                    const touch = e.touches[0];
+                    if (touch) handleMarkerPointerDown(m, touch.clientX, touch.clientY, e.currentTarget);
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div
+                    className="absolute left-0 top-0 h-11 w-11"
+                    style={{ transform: `translate(-50%, -50%) scale(${1 / scale})` }}
+                  >
+                    <div
+                      className={`flex h-11 w-11 items-center justify-center rounded-[var(--ds-radius-control)] border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] ${isEditingLayout ? 'touch-none cursor-grab active:cursor-grabbing' : ''} ${isSelected ? 'ring-2 ring-[var(--ds-border-focus)]' : ''}`}
+                    >
+                      <Icon className="h-5 w-5" aria-hidden="true" />
+                    </div>
+                    {/* text-secondary, non muted: sulla tela muted fa 4,26:1,
+                        sotto l'AA, ed è l'unica cosa che nomina l'icona. */}
+                    <span className="pointer-events-none absolute left-1/2 top-full mt-1 -translate-x-1/2 whitespace-nowrap text-[12px] font-medium text-[var(--ds-text-secondary)]">
+                      {markerLabel(m.kind)}
+                    </span>
+                    {/* Sta sulla tela: livello 1, surface con ombra. Un
+                        surface-row qui fa 1,06:1 col fondo e si vedrebbe
+                        solo il cestino. */}
+                    {isSelected && (
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onTouchStart={(e) => e.stopPropagation()}
+                        onClick={(e) => { e.stopPropagation(); void handleRemoveMarker(m); }}
+                        className="absolute left-full top-0 ml-2 inline-flex h-11 w-11 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] text-[var(--ds-critical-text)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-critical-tint)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                        aria-label={tv('removeMarker')}
+                        title={tv('removeMarker')}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    )}
+                  </div>
                 </div>
               );
             })}
