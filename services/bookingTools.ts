@@ -50,6 +50,9 @@ export interface ToolOutcome {
     body: Record<string, any>;
     /** true solo per guasti tecnici: l'adattatore risponde 500. */
     serverError?: boolean;
+    /** Il guasto vero dietro serverError: il body porta la frase per il
+     *  cliente, questo va nei log della piattaforma (app_errors). */
+    error?: unknown;
 }
 
 /** Come il canale si presenta nei log, nelle notifiche e nell'audit. */
@@ -516,6 +519,7 @@ export async function checkAvailability(
         console.error(`${channel.logPrefix} check-availability error`, err);
         return {
             serverError: true,
+            error: err,
             body: {
                 available: false, free_tables_count: 0,
                 message: english ? 'A technical error occurred, may I call you back?' : 'Si è verificato un errore tecnico, posso richiamarla?',
@@ -990,6 +994,7 @@ export async function createReservation(
         console.error(`${channel.logPrefix} create-reservation error`, err);
         return {
             serverError: true,
+            error: err,
             body: {
                 success: false,
                 message: english
@@ -1167,6 +1172,7 @@ export async function cancelReservation(
         console.error(`${channel.logPrefix} cancel-reservation error`, err);
         return {
             serverError: true,
+            error: err,
             body: {
                 success: false,
                 message: english
@@ -1409,6 +1415,7 @@ export async function modifyReservation(
         console.error(`${channel.logPrefix} modify-reservation error`, err);
         return {
             serverError: true,
+            error: err,
             body: {
                 success: false,
                 message: english
@@ -1519,6 +1526,7 @@ export async function saveCallbackRequest(
         console.error(`${channel.logPrefix} save-callback-request error`, err);
         return {
             serverError: true,
+            error: err,
             body: {
                 success: false,
                 message: english

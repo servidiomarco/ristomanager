@@ -1,5 +1,6 @@
 import React from 'react';
 import { AlertTriangle } from 'lucide-react';
+import { reportClientError } from '../services/clientErrorReporter';
 
 interface Props {
     label: string;
@@ -19,6 +20,9 @@ export class CardErrorBoundary extends React.Component<Props, State> {
 
     componentDidCatch(error: Error, info: React.ErrorInfo) {
         console.error('[CardErrorBoundary]', this.props.label, error, info);
+        // La scheda caduta arriva alla piattaforma con lo stack dei
+        // componenti: dice in quale pezzo di pagina è successo.
+        reportClientError(error, 'boundary', this.props.label, info.componentStack ?? undefined);
     }
 
     render() {

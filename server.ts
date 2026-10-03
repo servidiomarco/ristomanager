@@ -77,6 +77,11 @@ import {
     type SupportAttachment, type SupportCategory, type SupportPriority, type SupportStatus,
 } from './services/supportShared.js';
 import {
+    sanitizeClientErrors, normalizeErrorMessage, firstStackFrame,
+    INCIDENT_LEVELS, INCIDENT_MESSAGE_MAX,
+    type AppErrorOrigin, type PlatformAlertKind,
+} from './services/healthShared.js';
+import {
     provisionSalaNodeCert, startSalaNodeCertRenewal, SalaNodeTlsError,
     syncSalaNodeDnsRecord, validateNewNodeDomain, isNodeDomainTakenByOtherTenant, isPrivateLanIp,
 } from './services/salaNodeTls.js';
@@ -1529,6 +1534,7 @@ async function handleElevenLabsInitConversation(tenantId: number, req: express.R
         });
     } catch (err) {
         console.error('[ElevenLabs] init-conversation error', err);
+        void recordAppError(tenantId, 'sofia', 'init-conversation', err);
         // Always 200 — see comment at top of handler.
         res.json({
             type: 'conversation_initiation_client_data',
@@ -1622,6 +1628,7 @@ async function handleElevenLabsLookupCustomer(tenantId: number, req: express.Req
         });
     } catch (err) {
         console.error('[ElevenLabs] lookup-customer error', err);
+        void recordAppError(tenantId, 'sofia', 'lookup-customer', err);
         res.json({
             exists: false,
             caller_id_spelled: callerIdSpelled,
@@ -1702,13 +1709,19 @@ const voiceChannelOpen = async (tenantId: number, res: express.Response, checkSu
     return true;
 };
 
-const sendToolOutcome = (res: express.Response, outcome: ToolOutcome) =>
-    res.status(outcome.serverError ? 500 : 200).json(outcome.body);
+// Un guasto tecnico di un tool è un errore di Sofia: finisce in app_errors,
+// dove il cane da guardia della piattaforma lo conta (vedi «SALUTE»).
+const sendToolOutcome = (res: express.Response, outcome: ToolOutcome, tenantId: number, tool: string) => {
+    if (outcome.serverError) {
+        void recordAppError(tenantId, 'sofia', tool, outcome.error ?? String(outcome.body?.message ?? 'errore del tool'));
+    }
+    return res.status(outcome.serverError ? 500 : 200).json(outcome.body);
+};
 
 async function handleElevenLabsCheckAvailability(tenantId: number, req: express.Request, res: express.Response): Promise<void> {
     if (!authorizeElevenLabs(req, res)) return;
     if (!(await voiceChannelOpen(tenantId, res, true))) return;
-    sendToolOutcome(res, await bookingTools.checkAvailability(tenantId, elevenLabsParams(req), VOICE_CHANNEL));
+    sendToolOutcome(res, await bookingTools.checkAvailability(tenantId, elevenLabsParams(req), VOICE_CHANNEL), tenantId, 'check-availability');
 }
 
 // Alias tenant 1 finché i provider non sono riconfigurati sui path con token.
@@ -1726,7 +1739,7 @@ app.post('/webhook/t/:tenantToken/elevenlabs/check-availability', async (req, re
 async function handleElevenLabsCreateReservation(tenantId: number, req: express.Request, res: express.Response): Promise<void> {
     if (!authorizeElevenLabs(req, res)) return;
     if (!(await voiceChannelOpen(tenantId, res, true))) return;
-    sendToolOutcome(res, await bookingTools.createReservation(tenantId, elevenLabsParams(req), VOICE_CHANNEL));
+    sendToolOutcome(res, await bookingTools.createReservation(tenantId, elevenLabsParams(req), VOICE_CHANNEL), tenantId, 'create-reservation');
 }
 
 // Alias tenant 1 finché i provider non sono riconfigurati sui path con token.
@@ -1745,7 +1758,7 @@ async function handleElevenLabsCancelReservation(tenantId: number, req: express.
     // Nessun controllo di sospensione: annullare deve restare possibile anche
     // quando le prenotazioni telefoniche sono sospese (com'era prima).
     if (!(await voiceChannelOpen(tenantId, res, false))) return;
-    sendToolOutcome(res, await bookingTools.cancelReservation(tenantId, elevenLabsParams(req), VOICE_CHANNEL));
+    sendToolOutcome(res, await bookingTools.cancelReservation(tenantId, elevenLabsParams(req), VOICE_CHANNEL), tenantId, 'cancel-reservation');
 }
 
 // Alias tenant 1 finché i provider non sono riconfigurati sui path con token.
@@ -1762,7 +1775,7 @@ app.post('/webhook/t/:tenantToken/elevenlabs/cancel-reservation', async (req, re
 async function handleElevenLabsModifyReservation(tenantId: number, req: express.Request, res: express.Response): Promise<void> {
     if (!authorizeElevenLabs(req, res)) return;
     if (!(await voiceChannelOpen(tenantId, res, false))) return;
-    sendToolOutcome(res, await bookingTools.modifyReservation(tenantId, elevenLabsParams(req), VOICE_CHANNEL));
+    sendToolOutcome(res, await bookingTools.modifyReservation(tenantId, elevenLabsParams(req), VOICE_CHANNEL), tenantId, 'modify-reservation');
 }
 
 // Alias tenant 1 finché i provider non sono riconfigurati sui path con token.
@@ -1780,7 +1793,7 @@ app.post('/webhook/t/:tenantToken/elevenlabs/modify-reservation', async (req, re
 async function handleElevenLabsSaveCallback(tenantId: number, req: express.Request, res: express.Response): Promise<void> {
     if (!authorizeElevenLabs(req, res)) return;
     if (!(await voiceChannelOpen(tenantId, res, false))) return;
-    sendToolOutcome(res, await bookingTools.saveCallbackRequest(tenantId, elevenLabsParams(req), VOICE_CHANNEL));
+    sendToolOutcome(res, await bookingTools.saveCallbackRequest(tenantId, elevenLabsParams(req), VOICE_CHANNEL), tenantId, 'save-callback-request');
 }
 
 // Alias tenant 1 finché i provider non sono riconfigurati sui path con token.
@@ -13690,6 +13703,8 @@ const SCHEDULER_LOCK_PAYMENT_LINK_EXPIRY = 761004;
 const SCHEDULER_LOCK_STAFF_CHAT_RETENTION = 761005;
 const SCHEDULER_LOCK_ELEVENLABS_QUOTA = 761006;
 const SCHEDULER_LOCK_REVIEW_REQUESTS = 761007;
+const SCHEDULER_LOCK_PLATFORM_HEALTH = 761008;
+const SCHEDULER_LOCK_HEALTH_RETENTION = 761009;
 
 // Il lock advisory è di SESSIONE: va preso su un client dedicato tenuto per
 // tutta la durata del tick (sul pool condiviso un'altra query potrebbe
@@ -21045,6 +21060,22 @@ async function buildSupportServerContext(tenantId: number, userId: number, categ
                 [tenantId]
             )
             : Promise.resolve(null),
+        // Gli errori del browser di chi scrive nelle ultime 24 ore (fase 2):
+        // spesso sono la risposta prima ancora della domanda.
+        queryWithRetry(
+            `SELECT source, message, view, app_version, created_at FROM app_errors
+              WHERE tenant_id = $1 AND user_id = $2 AND origin = 'client' AND created_at > now() - interval '24 hours'
+              ORDER BY created_at DESC LIMIT 5`,
+            [tenantId, userId]
+        ),
+        category === 'sofia'
+            ? queryWithRetry(
+                `SELECT source, message, created_at FROM app_errors
+                  WHERE tenant_id = $1 AND origin = 'sofia' AND created_at > now() - interval '24 hours'
+                  ORDER BY created_at DESC LIMIT 5`,
+                [tenantId]
+            )
+            : Promise.resolve(null),
     ]);
     const ok = <T,>(i: number): T | null => (settled[i].status === 'fulfilled' ? (settled[i] as PromiseFulfilledResult<T>).value : null);
     const tenantRow = ok<any>(0)?.rows?.[0] ?? null;
@@ -21054,6 +21085,8 @@ async function buildSupportServerContext(tenantId: number, userId: number, categ
     const jobCounts = ok<any>(4)?.rows ?? [];
     const jobErrors = ok<any>(5)?.rows ?? [];
     const fiscal = ok<any>(6);
+    const clientErrors = ok<any>(7)?.rows ?? [];
+    const sofiaErrors = ok<any>(8);
     const count = (s: string) => jobCounts.find((r: any) => r.status === s)?.n ?? 0;
     return {
         captured_at: new Date().toISOString(),
@@ -21076,6 +21109,12 @@ async function buildSupportServerContext(tenantId: number, userId: number, categ
         },
         ...(fiscal ? {
             fiscal_failed_24h: fiscal.rows.map((r: any) => ({ provider: r.provider, error: String(r.error ?? '').slice(0, 300), at: r.created_at })),
+        } : {}),
+        client_errors_24h: clientErrors.map((r: any) => ({
+            source: r.source, message: String(r.message).slice(0, 300), view: r.view, app_version: r.app_version, at: r.created_at,
+        })),
+        ...(sofiaErrors ? {
+            sofia_errors_24h: sofiaErrors.rows.map((r: any) => ({ tool: r.source, message: String(r.message).slice(0, 300), at: r.created_at })),
         } : {}),
     };
 }
@@ -21442,6 +21481,298 @@ app.patch('/support/tickets/:id', authenticate, requireTenantSession, async (req
         res.status(500).json({ error: 'Internal server error' });
     }
 });
+
+// ==================== SALUTE DEI RISTORANTI (supporto, fase 2) ====================
+// Gli errori che prima finivano solo in una console (browser di chi lavora,
+// tool di Sofia), gli avvisi proattivi alla piattaforma quando qualcosa si
+// rompe in un locale, e il banner «problema noto» per i ristoranti. Le rotte
+// di lettura e scrittura della piattaforma stanno sotto /admin/health e
+// /admin/incidents, dietro platformAdminAuth.
+
+const appErrorFingerprint = (origin: string, source: string, message: string, stack?: string | null): string =>
+    crypto.createHash('sha1')
+        .update(`${origin}|${source}|${normalizeErrorMessage(message)}|${firstStackFrame(stack)}`)
+        .digest('hex')
+        .slice(0, 16);
+
+/** Un errore che va ricordato. Dichiarazione di funzione (hoisted): la usano
+ *  i tool di Sofia, molto più in alto nel file. Non lancia mai: chi registra
+ *  un errore non deve fallire per colpa della registrazione. */
+async function recordAppError(
+    tenantId: number,
+    origin: AppErrorOrigin,
+    source: string,
+    error: unknown,
+    extra: { stack?: string | null; view?: string | null; app_version?: string | null; user_id?: number | null; user_role?: string | null; user_agent?: string | null } = {},
+): Promise<void> {
+    try {
+        const message = (error instanceof Error ? error.message : String(error ?? '')).slice(0, 500) || 'errore senza messaggio';
+        const stack = extra.stack ?? (error instanceof Error ? error.stack ?? null : null);
+        await queryWithRetry(
+            `INSERT INTO app_errors (tenant_id, origin, source, fingerprint, message, stack, view, app_version, user_id, user_role, user_agent)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+            [
+                tenantId, origin, source.slice(0, 40), appErrorFingerprint(origin, source, message, stack), message,
+                stack ? String(stack).slice(0, 4000) : null, extra.view ?? null, extra.app_version ?? null,
+                extra.user_id ?? null, extra.user_role ?? null, extra.user_agent ? String(extra.user_agent).slice(0, 300) : null,
+            ]
+        );
+    } catch (err: any) {
+        console.warn('[app-errors] registrazione fallita:', err?.message || err);
+    }
+}
+
+// Un browser in un ciclo di errori non deve riempire la tabella: il client
+// manda a lotti e smette da solo, questo è il tetto lato server.
+const clientErrorLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    limit: 60,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    keyGenerator: (req: any) => `client-errors:${req.user?.userId ?? 'anon'}`,
+    message: { error: 'rate_limited' },
+});
+
+app.post('/client-errors', authenticate, clientErrorLimiter, async (req: any, res) => {
+    const reports = sanitizeClientErrors(req.body);
+    if (!reports) return res.status(400).json({ error: 'invalid_errors' });
+    const ua = String(req.headers['user-agent'] ?? '');
+    for (const r of reports) {
+        // L'etichetta della scheda caduta fa parte del messaggio: lo stesso
+        // TypeError in Cassa e in Comande sono due problemi diversi.
+        await recordAppError(req.tenantId!, 'client', r.source, r.label ? `${r.label}: ${r.message}` : r.message, {
+            stack: r.stack ?? null,
+            view: r.view ?? null,
+            app_version: r.app_version ?? null,
+            user_id: req.user?.userId ?? null,
+            user_role: req.user?.role ?? null,
+            user_agent: ua,
+        });
+    }
+    res.status(204).end();
+});
+
+// Il banner «problema noto»: lo legge ogni utente, il WHERE sceglie quelli
+// che riguardano il suo ristorante (lista vuota = tutti).
+app.get('/incidents/active', authenticate, async (req: any, res) => {
+    try {
+        // rls-bypass: gli avvisi vivono nel tenant di chi li scrive e si leggono da ogni ristorante; il WHERE filtra per destinatario
+        const r = await runAsPlatform(() => queryWithRetry(
+            `SELECT id, message, level, created_at FROM platform_incidents
+              WHERE resolved_at IS NULL
+                AND (cardinality(target_tenant_ids) = 0 OR $1::bigint = ANY(target_tenant_ids))
+              ORDER BY (level = 'critico') DESC, created_at DESC
+              LIMIT 3`,
+            [req.tenantId!]
+        ));
+        res.json({ incidents: r.rows });
+    } catch (err) {
+        console.error('GET /incidents/active error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+/* ── Cane da guardia della piattaforma ───────────────────────────────────
+   Ogni pochi minuti guarda, ristorante per ristorante, i segnali che
+   vogliono dire «il servizio è in difficoltà adesso»: stampe che falliscono
+   o restano ferme, scontrini non emessi, tool di Sofia in errore, nodo di
+   sala muto mentre il locale lavora. Una condizione nuova apre un avviso
+   (push + email alla piattaforma, una volta sola); quando rientra, l'avviso
+   si chiude da solo. Lo stato sta in platform_alerts, non in memoria: un
+   deploy non deve far ripartire le stesse push. */
+
+const PLATFORM_HEALTH_TICK_MS = 3 * 60_000;
+// Dopo un deploy i nodi di sala impiegano qualche secondo a ripresentarsi:
+// per i primi minuti di vita del processo «muto» non vuol dire niente.
+const NODE_ALERT_GRACE_MS = 10 * 60_000;
+const NODE_SILENCE_ALERT_SECONDS = 10 * 60;
+
+type HealthCondition = { tenantId: number; kind: PlatformAlertKind; detail: Record<string, unknown> };
+
+const platformAlertTag = (kind: string, tenantId: number): string => `alert-${kind}-${tenantId}`;
+
+const platformAlertText = (kind: PlatformAlertKind, tenantName: string, d: Record<string, any>): { title: string; body: string } => {
+    const tail = (e: unknown) => (e ? ` — ${supportPreview(String(e), 90)}` : '');
+    switch (kind) {
+        case 'stampa':
+            return {
+                title: `Stampa in difficoltà · ${tenantName}`,
+                body: `${d.failed ?? 0} stampe fallite e ${d.stuck ?? 0} ferme negli ultimi 30 minuti${tail(d.last_error)}`,
+            };
+        case 'fiscale':
+            return {
+                title: `Scontrini non emessi · ${tenantName}`,
+                body: `${d.failed ?? 0} documenti fiscali falliti nell'ultima ora${tail(d.last_error)}`,
+            };
+        case 'sofia':
+            return {
+                title: `Sofia in errore · ${tenantName}`,
+                body: `${d.failures ?? 0} errori dei tool negli ultimi 30 minuti${tail(d.last_error)}`,
+            };
+        case 'nodo':
+            return {
+                title: `Nodo di sala muto · ${tenantName}`,
+                body: d.last_seen_seconds != null
+                    ? `Non si fa vivo da ${Math.round(Number(d.last_seen_seconds) / 60)} minuti mentre il locale lavora.`
+                    : 'Non si è più presentato da quando il server è ripartito, e il locale sta lavorando.',
+            };
+    }
+};
+
+async function notifyPlatformAlert(kind: PlatformAlertKind, tenantId: number, tenantName: string, detail: Record<string, any>): Promise<void> {
+    const { title, body } = platformAlertText(kind, tenantName, detail);
+    await pushSendToPlatformAdmins({
+        category: 'system',
+        title,
+        body,
+        url: '/?view=PLATFORM&salute=1',
+        tag: platformAlertTag(kind, tenantId),
+    }).catch(() => { /* best-effort */ });
+    if (isPlatformMailConfigured()) {
+        const recipients = await supportAlertRecipients().catch(() => [] as string[]);
+        for (const to of recipients) {
+            await sendPlatformMail({
+                to,
+                subject: `[Avviso] ${title}`,
+                text: `${body}\n\nApri la salute dei ristoranti: ${publicBaseUrl()}/?view=PLATFORM&salute=1`,
+            }).catch(err => console.warn('[health] email avviso fallita:', err?.message || err));
+        }
+    }
+}
+
+const emitHealthToPlatform = (): void => {
+    try { socketService?.broadcastToPlatformAdmins('health:changed', {}); } catch { /* best-effort */ }
+};
+
+/** Le condizioni accese adesso, per ristorante attivo. */
+async function collectHealthConditions(): Promise<HealthCondition[]> {
+    const out: HealthCondition[] = [];
+    const [print, fiscal, sofia] = await Promise.all([
+        queryWithRetry(
+            `SELECT p.tenant_id::int AS tenant_id,
+                    COUNT(*) FILTER (WHERE p.status = 'FAILED' AND p.created_at > now() - interval '30 minutes')::int AS failed,
+                    COUNT(*) FILTER (WHERE p.status = 'PENDING' AND p.created_at < now() - interval '5 minutes')::int AS stuck,
+                    (array_agg(p.error ORDER BY p.created_at DESC) FILTER (WHERE p.status = 'FAILED' AND p.error IS NOT NULL))[1] AS last_error
+               FROM print_jobs p JOIN tenants t ON t.id = p.tenant_id AND t.status = 'active'
+              WHERE p.created_at > now() - interval '2 hours'
+              GROUP BY p.tenant_id`
+        ),
+        queryWithRetry(
+            `SELECT f.tenant_id::int AS tenant_id, COUNT(*)::int AS failed,
+                    (array_agg(f.error ORDER BY f.created_at DESC))[1] AS last_error
+               FROM fiscal_documents f JOIN tenants t ON t.id = f.tenant_id AND t.status = 'active'
+              WHERE f.status = 'FAILED' AND f.created_at > now() - interval '60 minutes'
+              GROUP BY f.tenant_id`
+        ),
+        queryWithRetry(
+            `SELECT e.tenant_id::int AS tenant_id, COUNT(*)::int AS failures,
+                    (array_agg(e.source || ': ' || e.message ORDER BY e.created_at DESC))[1] AS last_error
+               FROM app_errors e JOIN tenants t ON t.id = e.tenant_id AND t.status = 'active'
+              WHERE e.origin = 'sofia' AND e.created_at > now() - interval '30 minutes'
+              GROUP BY e.tenant_id`
+        ),
+    ]);
+    // Due fallite in mezz'ora sono già un servizio che non stampa; le ferme
+    // (agente spento, stampante staccata) contano da tre in su.
+    for (const r of print.rows) {
+        if (r.failed >= 2 || r.stuck >= 3) out.push({ tenantId: r.tenant_id, kind: 'stampa', detail: { failed: r.failed, stuck: r.stuck, last_error: r.last_error } });
+    }
+    for (const r of fiscal.rows) {
+        out.push({ tenantId: r.tenant_id, kind: 'fiscale', detail: { failed: r.failed, last_error: r.last_error } });
+    }
+    for (const r of sofia.rows) {
+        if (r.failures >= 3) out.push({ tenantId: r.tenant_id, kind: 'sofia', detail: { failures: r.failures, last_error: r.last_error } });
+    }
+    if (process.uptime() * 1000 >= NODE_ALERT_GRACE_MS) {
+        // Il nodo muto conta solo se il locale sta lavorando (tavoli aperti
+        // o stampe recenti): di notte il PC di sala è spento, ed è giusto.
+        const nodes = await queryWithRetry(
+            `SELECT s.tenant_id::int AS tenant_id,
+                    (EXISTS (SELECT 1 FROM orders o WHERE o.tenant_id = s.tenant_id AND o.closed_at IS NULL AND o.opened_at > now() - interval '6 hours')
+                     OR EXISTS (SELECT 1 FROM print_jobs p WHERE p.tenant_id = s.tenant_id AND p.created_at > now() - interval '30 minutes')) AS working
+               FROM app_settings s
+               JOIN tenant_features f ON f.tenant_id = s.tenant_id AND f.feature = 'sala_node' AND f.enabled
+               JOIN tenants t ON t.id = s.tenant_id AND t.status = 'active'
+              WHERE s.key = 'sala_node_enabled' AND s.value = true`
+        );
+        for (const r of nodes.rows) {
+            if (!r.working) continue;
+            const status = getSalaNodeStatus(r.tenant_id);
+            const silent = !status.online && (status.last_seen_seconds == null || status.last_seen_seconds >= NODE_SILENCE_ALERT_SECONDS);
+            if (silent) out.push({ tenantId: r.tenant_id, kind: 'nodo', detail: { last_seen_seconds: status.last_seen_seconds } });
+        }
+    }
+    return out;
+}
+
+const runPlatformHealthTick = async (): Promise<void> => {
+    const conditions = await collectHealthConditions();
+    const key = (tenantId: number, kind: string) => `${tenantId}:${kind}`;
+    const live = new Map(conditions.map(c => [key(c.tenantId, c.kind), c]));
+    const open = await queryWithRetry(
+        `SELECT a.id, a.tenant_id::int AS tenant_id, a.kind FROM platform_alerts a WHERE a.resolved_at IS NULL`
+    );
+    let changed = false;
+    const openKeys = new Set<string>();
+    for (const a of open.rows) {
+        const k = key(a.tenant_id, a.kind);
+        openKeys.add(k);
+        const c = live.get(k);
+        if (c) {
+            await queryWithRetry(
+                `UPDATE platform_alerts SET last_seen_at = now(), detail = $2 WHERE id = $1`,
+                [a.id, JSON.stringify(c.detail)]
+            );
+        } else {
+            await queryWithRetry(`UPDATE platform_alerts SET resolved_at = now() WHERE id = $1`, [a.id]);
+            await closePlatformNotifications([platformAlertTag(a.kind, a.tenant_id)]);
+            console.log(`[health] avviso ${a.kind} del tenant ${a.tenant_id} rientrato`);
+            changed = true;
+        }
+    }
+    for (const c of conditions) {
+        if (openKeys.has(key(c.tenantId, c.kind))) continue;
+        // L'indice unico parziale fa da guardia se due tick si accavallano:
+        // il secondo non inserisce e non notifica.
+        const ins = await queryWithRetry(
+            `INSERT INTO platform_alerts (tenant_id, kind, detail) VALUES ($1, $2, $3)
+             ON CONFLICT (tenant_id, kind) WHERE resolved_at IS NULL DO NOTHING
+             RETURNING id`,
+            [c.tenantId, c.kind, JSON.stringify(c.detail)]
+        );
+        if (ins.rows.length === 0) continue;
+        changed = true;
+        const t = await queryWithRetry(`SELECT name FROM tenants WHERE id = $1`, [c.tenantId]);
+        console.warn(`[health] avviso ${c.kind} aperto per il tenant ${c.tenantId}`);
+        await notifyPlatformAlert(c.kind, c.tenantId, String(t.rows[0]?.name ?? `tenant ${c.tenantId}`), c.detail);
+    }
+    if (changed) emitHealthToPlatform();
+};
+
+const startPlatformHealthWatchdog = () => {
+    const lockedTick = () => runSchedulerTickWithLock(SCHEDULER_LOCK_PLATFORM_HEALTH, 'platform-health', runPlatformHealthTick)
+        .catch((err: any) => console.error('[health] tick fallito:', err?.message || err));
+    lockedTick();
+    setInterval(lockedTick, PLATFORM_HEALTH_TICK_MS);
+};
+
+// Gli errori servono finché qualcuno può ancora volerli guardare: 30 giorni.
+// Avvisi e banner chiusi restano 90 giorni come storia.
+const startHealthRetentionScheduler = () => {
+    const tick = async () => {
+        const errors = await queryWithRetry(`DELETE FROM app_errors WHERE created_at < now() - interval '30 days' RETURNING id`);
+        const alerts = await queryWithRetry(`DELETE FROM platform_alerts WHERE resolved_at < now() - interval '90 days' RETURNING id`);
+        const incidents = await queryWithRetry(`DELETE FROM platform_incidents WHERE resolved_at < now() - interval '90 days' RETURNING id`);
+        const total = errors.rows.length + alerts.rows.length + incidents.rows.length;
+        if (total > 0) {
+            console.log(`[health] retention: ${errors.rows.length} errori, ${alerts.rows.length} avvisi, ${incidents.rows.length} banner cancellati`);
+        }
+    };
+    const lockedTick = () => runSchedulerTickWithLock(SCHEDULER_LOCK_HEALTH_RETENTION, 'health-retention', tick)
+        .catch((err: any) => console.error('[health] retention fallita:', err?.message || err));
+    lockedTick();
+    setInterval(lockedTick, 6 * 60 * 60_000);
+};
 
 // ==================== CHAT STAFF ====================
 // Messaggistica interna fra le sezioni (docs/chat-staff-plan.md). Canali
@@ -30323,6 +30654,153 @@ app.get('/admin/support/attachments/:token', platformAdminAuth, async (req, res)
         res.end(row.bytes);
     } catch (err) {
         console.error('GET /admin/support/attachments error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ============================================
+// PANNELLO PIATTAFORMA — SALUTE DEI RISTORANTI (supporto, fase 2)
+// ============================================
+// Il quadro per la tab «Salute»: avvisi aperti e chiusi da poco, errori
+// raggruppati, banner ai ristoranti. Tutto in runAsPlatform via
+// platformAdminAuth; le scritture dei banner passano da withTenant.
+
+const PLATFORM_ALERT_FIELDS = `a.id, a.tenant_id::int AS tenant_id, tn.name AS tenant_name, a.kind, a.detail,
+    a.opened_at, a.last_seen_at, a.resolved_at`;
+
+app.get('/admin/health', platformAdminAuth, async (req, res) => {
+    try {
+        const hours = Math.min(Math.max(Number(req.query.hours) || 24, 1), 168);
+        const [open, recent, errors, incidents] = await Promise.all([
+            queryWithRetry(
+                `SELECT ${PLATFORM_ALERT_FIELDS} FROM platform_alerts a JOIN tenants tn ON tn.id = a.tenant_id
+                  WHERE a.resolved_at IS NULL ORDER BY a.opened_at DESC`
+            ),
+            queryWithRetry(
+                `SELECT ${PLATFORM_ALERT_FIELDS} FROM platform_alerts a JOIN tenants tn ON tn.id = a.tenant_id
+                  WHERE a.resolved_at > now() - interval '48 hours' ORDER BY a.resolved_at DESC LIMIT 30`
+            ),
+            queryWithRetry(
+                `SELECT e.fingerprint, e.origin, e.source,
+                        (array_agg(e.message ORDER BY e.created_at DESC))[1] AS message,
+                        COUNT(*)::int AS occurrences,
+                        COUNT(DISTINCT e.user_id)::int AS users,
+                        MAX(e.created_at) AS last_seen,
+                        (array_agg(e.app_version ORDER BY e.created_at DESC))[1] AS last_version,
+                        (array_agg(e.view ORDER BY e.created_at DESC))[1] AS last_view,
+                        jsonb_agg(DISTINCT jsonb_build_object('id', tn.id, 'name', tn.name)) AS tenants
+                   FROM app_errors e JOIN tenants tn ON tn.id = e.tenant_id
+                  WHERE e.created_at > now() - make_interval(hours => $1)
+                  GROUP BY e.fingerprint, e.origin, e.source
+                  ORDER BY MAX(e.created_at) DESC
+                  LIMIT 100`,
+                [hours]
+            ),
+            queryWithRetry(
+                `SELECT id, message, level, target_tenant_ids, created_at, resolved_at FROM platform_incidents
+                  WHERE resolved_at IS NULL OR resolved_at > now() - interval '7 days'
+                  ORDER BY (resolved_at IS NULL) DESC, created_at DESC LIMIT 20`
+            ),
+        ]);
+        res.json({
+            alerts_open: open.rows,
+            alerts_recent: recent.rows,
+            errors: errors.rows,
+            incidents: incidents.rows.map((r: any) => ({ ...r, target_tenant_ids: (r.target_tenant_ids ?? []).map(Number) })),
+        });
+    } catch (err) {
+        console.error('GET /admin/health error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.get('/admin/health/errors/:fingerprint', platformAdminAuth, async (req, res) => {
+    try {
+        const fp = String(req.params.fingerprint || '');
+        if (!/^[0-9a-f]{16}$/.test(fp)) return res.status(400).json({ error: 'invalid_fingerprint' });
+        const r = await queryWithRetry(
+            `SELECT e.id, tn.name AS tenant_name, e.user_role, e.view, e.app_version, e.user_agent, e.stack, e.message, e.created_at
+               FROM app_errors e JOIN tenants tn ON tn.id = e.tenant_id
+              WHERE e.fingerprint = $1 ORDER BY e.created_at DESC LIMIT 20`,
+            [fp]
+        );
+        res.json({ occurrences: r.rows });
+    } catch (err) {
+        console.error('GET /admin/health/errors/:fingerprint error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// «Controlla adesso» dalla tab Salute: lo stesso giro del cane da guardia,
+// senza aspettare il prossimo. Sotto lo stesso lock advisory: mai due giri
+// insieme, e se ne sta già girando uno questo lo salta.
+app.post('/admin/health/check', platformAdminAuth, async (_req, res) => {
+    try {
+        await runSchedulerTickWithLock(SCHEDULER_LOCK_PLATFORM_HEALTH, 'platform-health', runPlatformHealthTick);
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('POST /admin/health/check error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+/** I ristoranti che devono sapere di un banner: tutti gli attivi, o la lista. */
+const broadcastIncidentChange = async (targets: number[]): Promise<void> => {
+    try {
+        const ids = targets.length > 0
+            ? targets
+            : (await queryWithRetry(`SELECT id FROM tenants WHERE status = 'active'`)).rows.map((r: any) => Number(r.id));
+        for (const id of ids) socketService?.broadcastToAll(id, 'incident:changed', {});
+    } catch { /* best-effort: i client rileggono al rientro e ogni 5 minuti */ }
+};
+
+app.post('/admin/incidents', platformAdminAuth, async (req, res) => {
+    try {
+        // Il banner vive nel tenant di casa di chi lo scrive: serve un
+        // account vero, il token env di bootstrap non ne ha uno.
+        if (!req.user?.userId) return res.status(403).json({ error: 'jwt_required' });
+        const message = String(req.body?.message ?? '').replace(/\s+/g, ' ').trim();
+        if (!message || message.length > INCIDENT_MESSAGE_MAX) {
+            return res.status(400).json({ error: 'invalid_message', message: `Testo obbligatorio, massimo ${INCIDENT_MESSAGE_MAX} caratteri.` });
+        }
+        const level = String(req.body?.level ?? 'info');
+        if (!(INCIDENT_LEVELS as readonly string[]).includes(level)) return res.status(400).json({ error: 'invalid_level' });
+        const rawTargets = req.body?.tenant_ids;
+        if (rawTargets !== undefined && !Array.isArray(rawTargets)) return res.status(400).json({ error: 'invalid_targets' });
+        const targets = [...new Set(((rawTargets ?? []) as unknown[]).map(Number).filter(n => Number.isInteger(n) && n > 0))];
+        const home = await queryWithRetry(`SELECT tenant_id FROM users WHERE id = $1`, [req.user.userId]);
+        const homeTenant = Number(home.rows[0]?.tenant_id);
+        if (!Number.isInteger(homeTenant) || homeTenant <= 0) return res.status(403).json({ error: 'jwt_required' });
+        const created = await withTenant(homeTenant, client => client.query(
+            `INSERT INTO platform_incidents (tenant_id, message, level, target_tenant_ids, created_by_user_id)
+             VALUES ($1, $2, $3, $4, $5)
+             RETURNING id, message, level, target_tenant_ids, created_at, resolved_at`,
+            [homeTenant, message, level, targets, req.user!.userId]
+        ));
+        void broadcastIncidentChange(targets);
+        emitHealthToPlatform();
+        const row = created.rows[0];
+        res.status(201).json({ ...row, target_tenant_ids: (row.target_tenant_ids ?? []).map(Number) });
+    } catch (err) {
+        console.error('POST /admin/incidents error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/admin/incidents/:id/resolve', platformAdminAuth, async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+        const r = await queryWithRetry(`SELECT tenant_id, target_tenant_ids FROM platform_incidents WHERE id = $1`, [id]);
+        if (!r.rows[0]) return res.status(404).json({ error: 'not_found' });
+        await withTenant(Number(r.rows[0].tenant_id), client => client.query(
+            `UPDATE platform_incidents SET resolved_at = COALESCE(resolved_at, now()) WHERE id = $1`, [id]
+        ));
+        void broadcastIncidentChange((r.rows[0].target_tenant_ids ?? []).map(Number));
+        emitHealthToPlatform();
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('POST /admin/incidents/:id/resolve error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -39879,6 +40357,13 @@ const startServer = async () => {
                         console.log('✅ Staff chat retention scheduler started (6h, 90 giorni)');
                     } catch (schedErr) {
                         console.error('Staff chat retention scheduler failed to start:', schedErr);
+                    }
+                    if (!isServiceNode) try {
+                        startPlatformHealthWatchdog();
+                        startHealthRetentionScheduler();
+                        console.log('✅ Platform health watchdog started (3 min) + retention (6h)');
+                    } catch (schedErr) {
+                        console.error('Platform health watchdog failed to start:', schedErr);
                     }
                     if (!isServiceNode) try {
                         startElevenLabsQuotaWatchdog();

@@ -669,7 +669,13 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 - **Contesto tecnico allegato da solo**: versione dell'app e del server, schermata da cui si scrive, dispositivo e connessione, stato del nodo di sala, stampe ferme o fallite nelle ultime 24 ore, scontrini falliti (per le richieste sulla cassa). Nessun dato dei clienti; l'elenco è visibile nel modulo («Dati inviati automaticamente»).
 - **Chi vede cosa**: ognuno vede le proprie richieste; Proprietario e General Manager vedono tutte quelle del ristorante. Le foto si aprono solo con login e solo a chi vede la richiesta.
 - **Risposte in tempo reale**: la conversazione aperta si aggiorna da sola, su entrambi i lati; arrivano anche come notifica (campanella e push) ed email a chi ha aperto la richiesta; lo stato dice di chi è la prossima mossa (inviata, presa in carico, tocca a te, risolta). Scrivere su una richiesta risolta la riapre.
+- **Problema già noto**: se la piattaforma ha pubblicato un avviso (es. «Sofia non risponde: ci stiamo lavorando»), compare sotto la testata di ogni vista e in cima al modulo di una nuova richiesta; ognuno lo può chiudere sul proprio dispositivo.
+- **Errori dell'app raccolti da soli**: se una schermata va in errore sul telefono o sul computer di chi lavora, l'errore arriva al team Sympotia (con vista, versione e dispositivo, mai dati dei clienti) e si allega alle richieste aperte nelle 24 ore successive.
 - **Lato piattaforma** (tab «Supporto» del pannello Piattaforma): coda di tutti i ristoranti con filtri per stato e ristorante, contesto tecnico leggibile, risposta («Rispondi» / «Rispondi e chiudi»), cambio di stato, «Entra» e «Vedi come il titolare» sul ristorante della richiesta, e **«Crea card dev»** che porta la richiesta nel dev board con il contesto già dentro.
+- **Salute dei ristoranti** (tab «Salute» del pannello Piattaforma):
+  - **Avvisi automatici** quando un locale è in difficoltà durante il servizio: stampe che falliscono o restano ferme, scontrini non emessi, tool di Sofia in errore, nodo di sala muto mentre il locale lavora. Push ed email al team una volta sola; l'avviso si chiude da solo quando il problema rientra. «Controlla adesso» rifà il controllo senza aspettare i 3 minuti.
+  - **Errori raggruppati** del browser e di Sofia, nelle ultime 24 ore o 7 giorni: quante volte, in quali ristoranti, su che versione, con lo stack dell'ultimo.
+  - **Avviso ai ristoranti**: messaggio informativo o critico, per tutti o per un solo ristorante, che compare in app finché non lo si toglie.
 
 ---
 
@@ -712,6 +718,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-03 | Aiuto e supporto | Fase 2: errori dell'app raccolti in automatico e allegati alle richieste; avvisi alla piattaforma per stampa, scontrini, Sofia e nodo di sala (aperti e chiusi da soli); banner «problema noto» ai ristoranti; nuova tab «Salute» nel pannello Piattaforma. |
 | 2026-10-02 | Piattaforma, Development, Roadmap, Consumi AI | Development, Roadmap e Consumi AI tornano visibili: si aprono dal pannello di piattaforma, solo fuori da «Entra». Prima li apriva una sola email, cambiata il 26/09, e da allora non li vedeva nessuno. «Crea card dev» del Supporto torna a funzionare, e board e roadmap si aggiornano da sole anche nel pannello. |
 | 2026-10-02 | Piattaforma SaaS | Il pannello Piattaforma non mostra più logo, Chat staff, Fiscalità e Reportistica del Vecchio Frantoio: fuori da «Entra» restano Piattaforma e il marchio Sympotia. All'apertura non compare più «Error fetching data», e nella tab «Supporto» cambiare filtro chiude la richiesta aperta, che prima restava a destra anche fuori dalla lista. |
 | 2026-10-02 | Aiuto e supporto | Le risposte compaiono senza ricaricare: nella tab «Supporto» del pannello (lista, contatore e conversazione aperta) e nella vista «Aiuto», dove titolare e direzione vedono aggiornarsi anche le richieste dei colleghi. Con la scheda in background la conversazione si aggiorna al rientro, così la notifica non si spegne da sola. |

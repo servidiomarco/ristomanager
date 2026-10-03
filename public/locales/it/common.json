@@ -304,5 +304,9 @@
     "last7": "Ultimi 7 giorni",
     "allDates": "Tutte le date",
     "title": "Periodo"
+  },
+  "incident": {
+    "label": "Sympotia",
+    "close": "Chiudi avviso"
   }
 }

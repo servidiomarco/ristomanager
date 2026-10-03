@@ -179,6 +179,11 @@ export const DOMAIN_EVENTS: Record<string, DomainEventSpec> = {
     // degli admin di piattaforma, che non appartiene a nessun ristorante.
     'support:updated': spec('cloud'),
     'support:admin-updated': spec('cloud'),
+    // Supporto, fase 2: health:changed alla stanza degli admin (avvisi,
+    // errori, banner); incident:changed ai ristoranti quando un banner
+    // «problema noto» si apre o si chiude.
+    'health:changed': spec('cloud'),
+    'incident:changed': spec('cloud'),
 
     // --- Segnali realtime puri: mai nel log di replica.
     'connection:acknowledged': spec('transient'),
