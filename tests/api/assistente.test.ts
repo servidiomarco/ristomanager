@@ -47,6 +47,7 @@ describe('assistente «Chiedi a Sympotia»', () => {
 
     afterAll(async () => {
         await db.query(`DELETE FROM ai_token_usage WHERE feature = 'support_assistant'`);
+        await db.query(`DELETE FROM notifications WHERE tag = 'ai-key-invalid'`);
         await db.query('DELETE FROM activity_logs WHERE user_email = $1', [PA_EMAIL]);
         await db.query('DELETE FROM user_sessions WHERE user_id IN (SELECT id FROM users WHERE email = $1)', [PA_EMAIL]);
         await db.query('DELETE FROM users WHERE email = $1', [PA_EMAIL]);
@@ -82,13 +83,16 @@ describe('assistente «Chiedi a Sympotia»', () => {
                 req.on('data', chunk => { body += chunk; });
                 req.on('end', () => {
                     try { received.push(JSON.parse(body)); } catch { received.push(null); }
-                    res.writeHead(200, { 'content-type': 'application/json' });
-                    res.end(JSON.stringify({
+                    // `__status` fa rispondere lo stub con un errore HTTP vero,
+                    // corpo compreso, come farebbe Anthropic.
+                    const { __status, ...rest } = reply as { __status?: number };
+                    res.writeHead(__status ?? 200, { 'content-type': 'application/json' });
+                    res.end(JSON.stringify(__status ? rest : {
                         id: 'msg_stub_assistente', type: 'message', role: 'assistant', model: 'claude-haiku-4-5',
                         content: [{ type: 'text', text: 'Risposta di prova.' }],
                         stop_reason: 'end_turn', stop_sequence: null,
                         usage: { input_tokens: 100, output_tokens: 20, cache_read_input_tokens: 30000, cache_creation_input_tokens: 0 },
-                        ...reply,
+                        ...rest,
                     }));
                 });
             });
@@ -145,6 +149,29 @@ describe('assistente «Chiedi a Sympotia»', () => {
             expect(res.body.suggest_ticket).toBe(true);
             expect(res.body.answer).toBe('Sembra un guasto della stampante: apri una richiesta al team.');
             expect(received[received.length - 1].messages).toHaveLength(3);
+        });
+
+        it('chiave rifiutata: al ristoratore una frase leggibile, alla piattaforma una push', async () => {
+            // Il 03/10/2026 la vista Aiuto mostrava «ai_key_invalid» a chi
+            // aveva fatto una domanda, e la chiave era rotta dal 17/09 senza
+            // che nessuno lo sapesse.
+            reply = { __status: 401, type: 'error', error: { type: 'authentication_error', message: 'API key is invalid.' } };
+            const res = await api().post('/support/assistant').set(bearer(owner)).send(question('Come stampo il preconto?'));
+            expect(res.status).toBe(503);
+            expect(res.body.error).toBe('ai_key_invalid');
+            expect(res.body.message).toMatch(/non è disponibile/);
+            let pushed: any = null;
+            for (let i = 0; i < 40 && !pushed; i++) {
+                const r = await db.query(
+                    `SELECT n.title FROM notifications n JOIN users u ON u.id = n.recipient_user_id
+                      WHERE u.email = $1 AND n.tag = 'ai-key-invalid'`,
+                    [PA_EMAIL]
+                );
+                pushed = r.rows[0] ?? null;
+                if (!pushed) await new Promise(r2 => setTimeout(r2, 50));
+            }
+            expect(pushed?.title).toBe('Chiave AI non valida');
+            reply = {};
         });
 
         it('un rifiuto del modello diventa un invito ad aprire una richiesta', async () => {

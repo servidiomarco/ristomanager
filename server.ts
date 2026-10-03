@@ -5258,9 +5258,26 @@ app.put('/dishes/:id/enabled', authenticate, requirePermission('menu:full'), asy
 // Chiave AI rifiutata da Anthropic: 503 con un messaggio che dice cosa fare,
 // invece del 500 generico. Vale per tutte le rotte AI che rispondono a uno
 // schermo; il log resta per chi guarda Railway.
-function sendAiKeyInvalid(res: express.Response, route: string, err: any) {
+// La chiave rifiutata è un guasto della piattaforma, non del ristorante: va
+// detto a chi può cambiarla. Dal 17/09 al 03/10/2026 ogni funzione AI ha
+// risposto 401 e nessuno se n'è accorto finché un ristoratore non ha provato
+// l'assistente. Una push agli admin, al massimo ogni 6 ore per processo.
+const AI_KEY_ALERT_EVERY_MS = 6 * 60 * 60_000;
+let aiKeyAlertedAt = 0;
+
+function sendAiKeyInvalid(res: express.Response, route: string, err: any, message: string = AI_KEY_INVALID_MESSAGE) {
     console.error(`${route}: chiave Anthropic rifiutata —`, err?.message || err);
-    return res.status(503).json({ error: AI_KEY_INVALID, message: AI_KEY_INVALID_MESSAGE });
+    if (Date.now() - aiKeyAlertedAt > AI_KEY_ALERT_EVERY_MS) {
+        aiKeyAlertedAt = Date.now();
+        void pushSendToPlatformAdmins({
+            category: 'system',
+            title: 'Chiave AI non valida',
+            body: `Anthropic rifiuta ANTHROPIC_API_KEY (${route}): le funzioni AI non rispondono finché non la aggiorni su Railway.`,
+            url: '/?view=PLATFORM&salute=1',
+            tag: 'ai-key-invalid',
+        }).catch(() => { /* best-effort */ });
+    }
+    return res.status(503).json({ error: AI_KEY_INVALID, message });
 }
 
 // Traduce in batch le voci mancanti (piatti attivi + categorie) nelle lingue
@@ -21564,7 +21581,9 @@ app.post('/support/assistant', authenticate, requireTenantSession, supportAssist
         });
         res.json({ answer: result.answer, suggest_ticket: result.suggestTicket });
     } catch (err: any) {
-        if (isAiKeyInvalid(err)) return sendAiKeyInvalid(res, 'POST /support/assistant', err);
+        // A chi lavora in sala la chiave non dice niente: l'assistente non
+        // c'è, si apre una richiesta. La piattaforma lo sa dalla push.
+        if (isAiKeyInvalid(err)) return sendAiKeyInvalid(res, 'POST /support/assistant', err, "L'assistente non è disponibile in questo momento: apri una richiesta.");
         if (err instanceof SupportAssistantError && err.kind !== 'upstream') {
             return res.status(503).json({ error: err.kind, message: "L'assistente non è disponibile: apri una richiesta." });
         }

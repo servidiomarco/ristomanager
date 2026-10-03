@@ -69,7 +69,12 @@ const apiRequest = async <T>(url: string, options: RequestInit = {}): Promise<T>
   const response = await fetchWithAuth(url, { cache: 'no-store', ...options });
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({ error: 'Request failed' }));
-    throw buildApiError(response.status, errorData);
+    const err = buildApiError(response.status, errorData);
+    // Le rotte del supporto mandano accanto al codice (`error`) una frase
+    // per chi legge (`message`): è quella che va mostrata. Senza, la vista
+    // Aiuto mostrava «ai_key_invalid» o «invalid_subject» al ristoratore.
+    if (typeof errorData?.message === 'string' && errorData.message.trim()) err.message = errorData.message;
+    throw err;
   }
   return response.json();
 };
