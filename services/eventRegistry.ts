@@ -59,6 +59,10 @@ export const DOMAIN_EVENTS: Record<string, DomainEventSpec> = {
     'tableHidden:deleted': spec('service'),
     'roomClosed:created': spec('service'),
     'roomClosed:deleted': spec('service'),
+    // Segnaposto di sala (ingresso, pass, accoglienza): geometria della
+    // pianta come room:*, quindi configurazione — master in cloud.
+    'floorMarker:updated': spec('cloud'),
+    'floorMarker:deleted': spec('cloud'),
 
     // --- Comande e cucina: non esiste scrittura legittima da fuori il
     //     ristorante — il cuore dell'autorità di servizio.
