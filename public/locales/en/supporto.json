@@ -92,7 +92,56 @@
       "nodeOff": "not active",
       "print": "Prints 24 h",
       "fiscal": "Failed receipts 24 h",
-      "raw": "All data"
+      "raw": "All data",
+      "clientErrors": "App errors 24 h",
+      "sofiaErrors": "Sofia errors 24 h"
+    },
+    "health": {
+      "tab": "Health",
+      "incidentTitle": "Notice to restaurants",
+      "incidentMessage": "Message",
+      "incidentHint": "Shown under the header of every view until you remove it.",
+      "incidentPlaceholder": "E.g. Sofia is not answering: we're on it.",
+      "incidentTarget": "Recipients",
+      "incidentPublish": "Publish",
+      "incidentPublished": "Notice published",
+      "incidentResolve": "Remove",
+      "errIncident": "Notice not published",
+      "allTenants": "All restaurants",
+      "levelAria": "Severity",
+      "levelInfo": "Information",
+      "levelCritical": "Critical",
+      "alertsTitle": "Alerts",
+      "noAlerts": "No open alerts.",
+      "recentResolved": "Cleared in the last 48 hours ({{n}})",
+      "since": "opened {{when}}",
+      "resolved": "cleared {{when}}",
+      "kind": {
+        "stampa": "Printing",
+        "fiscale": "Receipts",
+        "sofia": "Sofia",
+        "nodo": "Floor node"
+      },
+      "alert": {
+        "stampa": "{{failed}} failed, {{stuck}} stuck in 30 min",
+        "fiscale": "{{failed}} fiscal documents failed in the last hour",
+        "sofia": "{{failures}} tool errors in 30 min",
+        "nodo": "silent for {{min}} min while the restaurant is working",
+        "nodoNever": "has not shown up since the server restarted"
+      },
+      "errorsTitle": "Errors",
+      "windowAria": "Period",
+      "window24": "24 hours",
+      "window7": "7 days",
+      "noErrors": "No errors in this period.",
+      "app": "App",
+      "errLoadOne": "Details not loaded",
+      "retry": "Retry",
+      "checkNow": "Check now",
+      "errCheck": "Check failed",
+      "users_one": "{{count}} user",
+      "users_other": "{{count}} users"
     }
-  }
+  },
+  "knownIssue": "Known issue"
 }

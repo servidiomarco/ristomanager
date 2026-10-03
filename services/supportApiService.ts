@@ -2,6 +2,7 @@ import { authApiService } from './authApiService';
 import { resizeImageToDataUrl } from '../utils/resizeImage';
 import { socketClient } from './socketClient';
 import { buildApiError } from './apiError';
+import { onSocketEvent } from './socketEvents';
 import type {
   SupportCategory, SupportStatus, SupportPriority, SupportTicket, SupportTicketDetail,
 } from './supportShared';
@@ -73,26 +74,12 @@ const apiRequest = async <T>(url: string, options: RequestInit = {}): Promise<T>
   return response.json();
 };
 
-/** Ascolta un evento del supporto anche attraverso le riconnessioni: il
- *  socket cambia istanza a ogni nuovo token, e un listener attaccato a
- *  quello vecchio smette di sentire in silenzio. Restituisce lo stacco.
- *  `support:updated` arriva al ristorante, `support:admin-updated` alla
- *  stanza degli admin di piattaforma. */
+/** Gli eventi del supporto (vedi onSocketEvent): `support:updated` arriva
+ *  al ristorante, `support:admin-updated` alla stanza degli admin. */
 export const onSupportSocketEvent = (
   event: 'support:updated' | 'support:admin-updated',
   handler: (payload: { id?: number; tenant_id?: number }) => void,
-): (() => void) => {
-  let attached: ReturnType<typeof socketClient.getSocket> = null;
-  const attach = (s: ReturnType<typeof socketClient.getSocket>) => {
-    if (attached === s) return;
-    attached?.off(event, handler);
-    attached = s;
-    attached?.on(event, handler);
-  };
-  attach(socketClient.getSocket());
-  const unsub = socketClient.onSocketChange(s => attach(s));
-  return () => { unsub(); attach(null); };
-};
+): (() => void) => onSocketEvent(event, handler);
 
 /** Le foto del supporto stanno dietro login (possono mostrare dati di
  *  clienti): un <img src> non manda l'header Authorization, quindi si

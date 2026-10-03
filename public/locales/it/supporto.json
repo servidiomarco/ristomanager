@@ -92,7 +92,56 @@
       "nodeOff": "non attivo",
       "print": "Stampe 24 h",
       "fiscal": "Scontrini falliti 24 h",
-      "raw": "Tutti i dati"
+      "raw": "Tutti i dati",
+      "clientErrors": "Errori app 24 h",
+      "sofiaErrors": "Errori Sofia 24 h"
+    },
+    "health": {
+      "tab": "Salute",
+      "incidentTitle": "Avviso ai ristoranti",
+      "incidentMessage": "Messaggio",
+      "incidentHint": "Compare sotto la testata di ogni vista, finché non lo togli.",
+      "incidentPlaceholder": "Es. Sofia non risponde: ci stiamo lavorando.",
+      "incidentTarget": "Destinatari",
+      "incidentPublish": "Pubblica",
+      "incidentPublished": "Avviso pubblicato",
+      "incidentResolve": "Togli",
+      "errIncident": "Avviso non pubblicato",
+      "allTenants": "Tutti i ristoranti",
+      "levelAria": "Gravità",
+      "levelInfo": "Informazione",
+      "levelCritical": "Critico",
+      "alertsTitle": "Avvisi",
+      "noAlerts": "Nessun avviso aperto.",
+      "recentResolved": "Rientrati nelle ultime 48 ore ({{n}})",
+      "since": "aperto {{when}}",
+      "resolved": "rientrato {{when}}",
+      "kind": {
+        "stampa": "Stampa",
+        "fiscale": "Scontrini",
+        "sofia": "Sofia",
+        "nodo": "Nodo di sala"
+      },
+      "alert": {
+        "stampa": "{{failed}} fallite, {{stuck}} ferme in 30 min",
+        "fiscale": "{{failed}} documenti falliti nell'ultima ora",
+        "sofia": "{{failures}} errori dei tool in 30 min",
+        "nodo": "muto da {{min}} min mentre il locale lavora",
+        "nodoNever": "non si è presentato dal riavvio del server"
+      },
+      "errorsTitle": "Errori",
+      "windowAria": "Periodo",
+      "window24": "24 ore",
+      "window7": "7 giorni",
+      "noErrors": "Nessun errore nel periodo.",
+      "app": "App",
+      "errLoadOne": "Dettaglio non caricato",
+      "retry": "Riprova",
+      "checkNow": "Controlla adesso",
+      "errCheck": "Controllo non riuscito",
+      "users_one": "{{count}} utente",
+      "users_other": "{{count}} utenti"
     }
-  }
+  },
+  "knownIssue": "Problema già noto"
 }

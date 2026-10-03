@@ -7,6 +7,9 @@ import {
   dsInput, dsButton,
 } from './ds';
 import { PlatformSupportTab } from './PlatformSupportTab';
+import { PlatformHealthTab } from './PlatformHealthTab';
+import { healthApiService } from '../services/healthApiService';
+import { onSocketEvent } from '../services/socketEvents';
 import { supportApiService, onSupportSocketEvent } from '../services/supportApiService';
 import { useAuth } from '../contexts/AuthContext';
 import { authApiService } from '../services/authApiService';
@@ -832,10 +835,16 @@ export const PlatformPanel: React.FC<{
   /** Deep link della push di supporto (?support=): apre la tab su quella richiesta. */
   initialSupportTicketId?: number | null;
   onInitialSupportTicketConsumed?: () => void;
-}> = ({ showToast, initialSupportTicketId = null, onInitialSupportTicketConsumed }) => {
+  /** Deep link degli avvisi di salute (?salute=1): apre la tab Salute. */
+  initialHealth?: boolean;
+  onInitialHealthConsumed?: () => void;
+}> = ({ showToast, initialSupportTicketId = null, onInitialSupportTicketConsumed, initialHealth = false, onInitialHealthConsumed }) => {
   const { t } = useTranslation('piattaforma', { useSuspense: false });
   const { t: ts } = useTranslation('supporto', { useSuspense: false });
-  const [tab, setTab] = useState<'clienti' | 'supporto'>(initialSupportTicketId ? 'supporto' : 'clienti');
+  const [tab, setTab] = useState<'clienti' | 'supporto' | 'salute'>(initialHealth ? 'salute' : initialSupportTicketId ? 'supporto' : 'clienti');
+  // Avvisi di salute aperti: il numero sul segmento «Salute», come i non
+  // letti su «Supporto».
+  const [healthOpen, setHealthOpen] = useState(0);
   // Le richieste da leggere, anche a tab chiusa: il numero sul segmento è
   // il motivo per aprirla. La tab, quando è aperta, lo tiene aggiornato.
   const [supportUnread, setSupportUnread] = useState(0);
@@ -862,14 +871,14 @@ export const PlatformPanel: React.FC<{
 
   useEffect(() => { load(); }, [load]);
 
-  // A tab Clienti aperta il numero sul segmento segue gli eventi del
+  // Fuori dalla tab Supporto il numero sul segmento segue gli eventi del
   // supporto; a tab Supporto aperta ci pensa la tab stessa.
   useEffect(() => {
     const refresh = () => {
       supportApiService.adminList().then(r => setSupportUnread(typeof r.unread === 'number' ? r.unread : 0)).catch(() => {});
     };
     refresh();
-    if (tab !== 'clienti') return;
+    if (tab === 'supporto') return;
     return onSupportSocketEvent('support:admin-updated', refresh);
   }, [tab]);
 
@@ -877,6 +886,22 @@ export const PlatformPanel: React.FC<{
   useEffect(() => {
     if (initialSupportTicketId) setTab('supporto');
   }, [initialSupportTicketId]);
+  useEffect(() => {
+    if (!initialHealth) return;
+    setTab('salute');
+    onInitialHealthConsumed?.();
+  }, [initialHealth, onInitialHealthConsumed]);
+
+  // Fuori dalla tab Salute il conteggio degli avvisi segue health:changed;
+  // dentro, lo tiene aggiornato la tab stessa.
+  useEffect(() => {
+    const refresh = () => {
+      healthApiService.adminHealth(24).then(h => setHealthOpen(h.alerts_open.length)).catch(() => {});
+    };
+    refresh();
+    if (tab === 'salute') return;
+    return onSocketEvent('health:changed', refresh);
+  }, [tab]);
 
   const consumeSupportDeepLink = useCallback(() => onInitialSupportTicketConsumed?.(), [onInitialSupportTicketConsumed]);
 
@@ -889,16 +914,32 @@ export const PlatformPanel: React.FC<{
       <div className="mx-auto max-w-4xl">
         <SegmentedControl
           value={tab}
-          onChange={next => setTab(next === 'supporto' ? 'supporto' : 'clienti')}
+          onChange={next => setTab(next === 'supporto' || next === 'salute' ? next : 'clienti')}
           ariaLabel={ts('platform.tabsAria', 'Sezione del pannello')}
           options={[
             { value: 'clienti', label: t('customers', 'Clienti') },
             { value: 'supporto', label: ts('platform.tab', 'Supporto'), badge: supportUnread || undefined, badgeTone: 'alert' },
+            { value: 'salute', label: ts('platform.health.tab', 'Salute'), badge: healthOpen || undefined, badgeTone: 'alert' },
           ]}
         />
       </div>
     </div>
   );
+
+  if (tab === 'salute') {
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        {tabSwitch}
+        <div className="min-h-0 flex-1">
+          <PlatformHealthTab
+            tenants={tenants.map(x => ({ id: x.id, name: x.name }))}
+            onOpenAlertsChange={setHealthOpen}
+            showToast={showToast}
+          />
+        </div>
+      </div>
+    );
+  }
 
   if (tab === 'supporto') {
     return (

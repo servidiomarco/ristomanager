@@ -83,6 +83,24 @@ const ContextCard: React.FC<{ context: Record<string, unknown> }> = ({ context }
   for (const e of lastErrors) {
     rows.push({ label: '', value: `${e.printer ?? ''} ${e.kind ?? ''}: ${e.error ?? ''}`.trim(), tone: 'critical' });
   }
+  // Errori registrati nelle 24 ore prima della richiesta (fase 2): del
+  // browser di chi ha scritto e, per Sofia, dei tool.
+  const clientErrors = Array.isArray(server.client_errors_24h) ? server.client_errors_24h as any[] : [];
+  for (const e of clientErrors.slice(0, 3)) {
+    rows.push({
+      label: rows.some(r => r.label === t('platform.ctx.clientErrors', 'Errori app 24 h')) ? '' : t('platform.ctx.clientErrors', 'Errori app 24 h'),
+      value: `${e.view ? `${e.view}: ` : ''}${e.message}`,
+      tone: 'critical',
+    });
+  }
+  const sofiaErrors = Array.isArray(server.sofia_errors_24h) ? server.sofia_errors_24h as any[] : null;
+  if (sofiaErrors) {
+    rows.push({
+      label: t('platform.ctx.sofiaErrors', 'Errori Sofia 24 h'),
+      value: sofiaErrors.length === 0 ? '0' : sofiaErrors.slice(0, 3).map(e => `${e.tool}: ${e.message}`).join(' · '),
+      tone: sofiaErrors.length > 0 ? 'critical' : undefined,
+    });
+  }
   if (fiscal) {
     rows.push({
       label: t('platform.ctx.fiscal', 'Scontrini falliti 24 h'),

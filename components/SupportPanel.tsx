@@ -18,6 +18,7 @@ import { socketClient } from '../services/socketClient';
 import { offlineQueue } from '../services/offlineQueue';
 import { isHybridActive, isNodeInUse } from '../services/apiRouting';
 import { relativeTime } from '../utils/relativeTime';
+import type { ActiveIncident } from '../services/healthShared';
 import type { ApiError } from '../services/apiError';
 
 /* ============================================
@@ -65,10 +66,13 @@ interface PendingPhoto extends SupportUploadedAttachment {
 const NewRequestModal: React.FC<{
   open: boolean;
   originView: string | null;
+  /** Un problema già noto alla piattaforma: detto prima di scrivere, così
+   *  non si apre l'ennesima richiesta sulla stessa cosa. */
+  activeIncidents: ActiveIncident[];
   onClose: () => void;
   onCreated: (ticket: SupportTicketDetail) => void;
   showToast: ShowToast;
-}> = ({ open, originView, onClose, onCreated, showToast }) => {
+}> = ({ open, originView, activeIncidents, onClose, onCreated, showToast }) => {
   const { t } = useTranslation('supporto', { useSuspense: false });
   const [category, setCategory] = useState<SupportCategory | null>(null);
   const [urgent, setUrgent] = useState(false);
@@ -152,6 +156,12 @@ const NewRequestModal: React.FC<{
     >
       <div className="space-y-4">
         {error && <Callout tone="critical" icon={AlertTriangle}>{error}</Callout>}
+
+        {activeIncidents.map(i => (
+          <Callout key={i.id} tone={i.level === 'critico' ? 'critical' : 'info'} icon={AlertTriangle} title={t('knownIssue', 'Problema già noto')}>
+            {i.message}
+          </Callout>
+        ))}
 
         <FormCard title={t('whatAbout', 'Di cosa si tratta')}>
           <div className="flex flex-wrap gap-2" role="radiogroup" aria-label={t('whatAbout', 'Di cosa si tratta')}>
@@ -292,6 +302,7 @@ const NewRequestModal: React.FC<{
 /* ── Pagina ──────────────────────────────────────────────────────────── */
 
 export const SupportPanel: React.FC<{
+  activeIncidents: ActiveIncident[];
   currentUserId: number;
   /** La vista da cui si è arrivati all'Aiuto: finisce nel contesto. */
   originView: string | null;
@@ -299,7 +310,7 @@ export const SupportPanel: React.FC<{
   initialTicketId: number | null;
   onInitialTicketConsumed: () => void;
   showToast: ShowToast;
-}> = ({ currentUserId, originView, initialTicketId, onInitialTicketConsumed, showToast }) => {
+}> = ({ activeIncidents, currentUserId, originView, initialTicketId, onInitialTicketConsumed, showToast }) => {
   const { t } = useTranslation('supporto', { useSuspense: false });
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
   const [seesAll, setSeesAll] = useState(false);
@@ -657,6 +668,7 @@ export const SupportPanel: React.FC<{
       <NewRequestModal
         open={newOpen}
         originView={originView}
+        activeIncidents={activeIncidents}
         onClose={() => setNewOpen(false)}
         onCreated={ticket => {
           setNewOpen(false);

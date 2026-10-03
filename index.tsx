@@ -10,6 +10,7 @@ import { PublicReceiptPage } from './components/PublicReceiptPage';
 import { PublicQuotePage } from './components/PublicQuotePage';
 import I18nProvider from './i18n/I18nProvider';
 import './index.css';
+import { installClientErrorReporter } from './services/clientErrorReporter';
 
 // Shell offline: il service worker (precache Workbox + push) si registra al
 // boot per TUTTI — prima lo installava solo chi attivava le notifiche push,
@@ -22,6 +23,11 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator) {
     });
   });
 }
+
+// Errori non gestiti del browser → piattaforma (supporto, fase 2). Prima di
+// montare l'app, così un crash al primo render non sfugge. Parte solo con
+// un utente loggato: le pagine pubbliche non mandano niente.
+installClientErrorReporter();
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {

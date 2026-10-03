@@ -29,6 +29,9 @@ import ConversazioniPage from './components/ConversazioniPage';
 import InboxPage from './components/InboxPage';
 import StaffChatPage from './components/StaffChatPage';
 import SupportPanel from './components/SupportPanel';
+import { IncidentBanner } from './components/IncidentBanner';
+import { useActiveIncidents } from './hooks/useActiveIncidents';
+import { setErrorReporterView } from './services/clientErrorReporter';
 import { LivePill, SegmentedControl, StatusPill, useMediaQuery, dsSelect } from './components/ds';
 import { NotificationsPanel } from './components/NotificationsPanel';
 import EmailPage from './components/EmailPage';
@@ -450,8 +453,13 @@ const App: React.FC = () => {
   // L'ultima vista di lavoro prima dell'Aiuto: la richiesta la porta nel
   // contesto («scrivo da Cassa»), che è il primo indizio per chi risponde.
   const lastWorkViewRef = useRef<string | null>(null);
+  // Banner «problema noto» della piattaforma (supporto, fase 2): sotto la
+  // testata di ogni vista e in cima al modulo di una nuova richiesta.
+  const activeIncidents = useActiveIncidents(isAuthenticated);
   useEffect(() => {
     if (view !== ViewState.SUPPORTO) lastWorkViewRef.current = view;
+    // Gli errori del browser portano la vista in cui sono successi.
+    setErrorReporterView(view);
   }, [view]);
   // La vista corrente letta dai gestori socket, che sono agganciati una volta
   // sola: metterla nelle dipendenze li staccherebbe e riattaccherebbe a ogni
@@ -680,6 +688,8 @@ const App: React.FC = () => {
   // vista Aiuto, ?support= la apre nella tab Supporto del pannello.
   const [pendingSupportTicketId, setPendingSupportTicketId] = useState<number | null>(null);
   const [pendingPlatformSupportId, setPendingPlatformSupportId] = useState<number | null>(null);
+  // ?salute=1: la push di un avviso di salute apre la tab Salute del pannello.
+  const [pendingPlatformHealth, setPendingPlatformHealth] = useState(false);
 
   // Global command palette (Cmd/Ctrl+K). Lets the operator find a
   // reservation without knowing its date — the daily list stays intact.
@@ -1236,6 +1246,7 @@ const App: React.FC = () => {
     if (Number.isInteger(requestedTicket) && requestedTicket > 0) setPendingSupportTicketId(requestedTicket);
     const requestedSupport = Number(params.get('support'));
     if (Number.isInteger(requestedSupport) && requestedSupport > 0) setPendingPlatformSupportId(requestedSupport);
+    if (params.get('salute') === '1') setPendingPlatformHealth(true);
     if (requestedView && (Object.values(ViewState) as string[]).includes(requestedView)) {
       const target = requestedView as ViewState;
       if (accessibleViews.includes(target)) {
@@ -1247,6 +1258,7 @@ const App: React.FC = () => {
       params.delete('reservationId');
       params.delete('ticket');
       params.delete('support');
+      params.delete('salute');
       const search = params.toString();
       window.history.replaceState({}, '', window.location.pathname + (search ? `?${search}` : '') + window.location.hash);
       if (accessibleViews.includes(target)) return;
@@ -1325,6 +1337,7 @@ const App: React.FC = () => {
           if (Number.isInteger(requestedTicket) && requestedTicket > 0) setPendingSupportTicketId(requestedTicket);
           const requestedSupport = Number(url.searchParams.get('support'));
           if (Number.isInteger(requestedSupport) && requestedSupport > 0) setPendingPlatformSupportId(requestedSupport);
+          if (url.searchParams.get('salute') === '1') setPendingPlatformHealth(true);
           setView(target);
         }
       } catch {
@@ -2867,6 +2880,7 @@ const App: React.FC = () => {
 
            </div>
         </header>
+        <IncidentBanner incidents={activeIncidents} />
 
         {/* View container — the single scroll region below the fixed header,
             keyed on the active view so every navigation re-mounts with a soft
@@ -3233,11 +3247,14 @@ const App: React.FC = () => {
             showToast={addToast}
             initialSupportTicketId={pendingPlatformSupportId}
             onInitialSupportTicketConsumed={() => setPendingPlatformSupportId(null)}
+            initialHealth={pendingPlatformHealth}
+            onInitialHealthConsumed={() => setPendingPlatformHealth(false)}
           />
         )}
 
         {view === ViewState.SUPPORTO && user && canAccessView(ViewState.SUPPORTO) && (
           <SupportPanel
+            activeIncidents={activeIncidents}
             currentUserId={user.id}
             originView={lastWorkViewRef.current}
             initialTicketId={pendingSupportTicketId}
