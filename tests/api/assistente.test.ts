@@ -118,10 +118,18 @@ describe('assistente «Chiedi a Sympotia»', () => {
         });
 
         it('registra il consumo a costo equivalente: la lettura dalla cache conta un decimo', async () => {
-            const r = await db.query(
-                `SELECT model, prompt_tokens, output_tokens FROM ai_token_usage WHERE feature = 'support_assistant' ORDER BY id DESC LIMIT 1`
-            );
-            expect(r.rows[0]).toEqual({ model: 'claude-haiku-4-5', prompt_tokens: 100 + 3000, output_tokens: 20 });
+            // La riga si scrive dopo la risposta, senza farla aspettare: si
+            // attende che arrivi. Letta subito, in CI una volta non c'era
+            // ancora (PR #815).
+            let row: any = null;
+            for (let i = 0; i < 40 && !row; i++) {
+                const r = await db.query(
+                    `SELECT model, prompt_tokens, output_tokens FROM ai_token_usage WHERE feature = 'support_assistant' ORDER BY id DESC LIMIT 1`
+                );
+                row = r.rows[0] ?? null;
+                if (!row) await new Promise(res => setTimeout(res, 50));
+            }
+            expect(row).toEqual({ model: 'claude-haiku-4-5', prompt_tokens: 100 + 3000, output_tokens: 20 });
         });
 
         it('quando serve una persona lo dice, e il segnale non arriva al ristoratore', async () => {
