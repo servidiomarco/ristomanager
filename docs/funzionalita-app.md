@@ -296,7 +296,7 @@ Due voci in sidebar: **Menu** (i piatti, organizzati in menu) e **Banchetti** (g
 ## Menu digitale pubblico
 
 - Menu consultabile dal cliente **inquadrando un QR al tavolo**, senza app da installare.
-- **In testa il logo del ristorante** (quello caricato in Impostazioni, «Identità e documenti legali»); senza logo, il nome con la tagline.
+- **In testa il logo del ristorante** (quello caricato in Impostazioni, «Identità e documenti legali»), in una riga bassa con la lingua accanto, così i piatti partono subito; un logo con lo sfondo bianco si fonde col fondo della pagina. Senza logo, il nome con la tagline.
 - Multilingua (usa le traduzioni del menu): la lingua si sceglie da una pillola in alto, che apre il selettore del telefono. Foto, descrizioni, prezzi e allergeni; la foto sta a destra del piatto e il tocco la apre **a tutto schermo** su fondo scuro con nome e prezzo, come sul palmare; un tocco ovunque, o la X, chiude.
 - **La barra delle categorie resta agganciata in alto** e segue la lettura: la categoria che si sta guardando è evidenziata, e un tocco su un'altra ci porta.
 - Sotto i piatti con vini abbinati una riga discreta «Si abbina con: …» (etichetta nelle quattro lingue) coi vini scelti dal ristoratore, se attivi e in carta.
@@ -725,6 +725,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-03 | Menu digitale pubblico | Sul menu del QR il logo sta in una testata bassa, a sinistra, con la lingua accanto: i piatti partono più in alto. Un logo con lo sfondo bianco non mostra più il riquadro bianco sul fondo della pagina. |
 | 2026-10-03 | Menu digitale pubblico | Il menu del QR ha un aspetto nuovo: in testa il logo del ristorante, la barra delle categorie che resta in alto ed evidenzia quella che si sta leggendo, le foto a destra dei piatti e la lingua scelta da una pillola che apre il selettore del telefono. Senza logo in anagrafica resta il nome del ristorante. |
 | 2026-10-03 | Messaggi: WhatsApp e SMS | Nella proposta dell'agente WhatsApp le date si leggono all'europea («Modifica prenotazione del 05/10/2026: data → 07/10/2026»), anche nelle proposte già in attesa. |
 | 2026-10-03 | Aiuto e supporto | Mentre «Chiedi a Sympotia» cerca la risposta, una nuova animazione dice a che punto è («Cerco nei manuali…», «Leggo le istruzioni…», «Preparo la risposta…») e la risposta compare nello stesso punto. |
