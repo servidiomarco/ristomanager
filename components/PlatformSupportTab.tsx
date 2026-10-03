@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, Check, ChevronDown, Kanban, LifeBuoy, Loader2, LogIn, RotateCcw, UserCheck } from 'lucide-react';
+import { AlertTriangle, Check, ChevronDown, Kanban, LifeBuoy, Loader2, LogIn, RotateCcw, ThumbsDown, ThumbsUp, UserCheck } from 'lucide-react';
 import {
-  SplitPane, PaneHeader, PanePlaceholder, EmptyState, Callout, SegmentedControl, FormCard,
+  SplitPane, PaneHeader, PanePlaceholder, EmptyState, Callout, SegmentedControl, FormCard, StatStrip,
   dsButton, dsSelect,
 } from './ds';
 import { Loader } from './Loader';
@@ -11,7 +11,7 @@ import {
 } from './SupportThread';
 import { supportApiService, onSupportSocketEvent } from '../services/supportApiService';
 import {
-  SUPPORT_BODY_MAX, type SupportStatus, type SupportTicket, type SupportTicketDetail,
+  SUPPORT_BODY_MAX, type SupportMetrics, type SupportStatus, type SupportTicket, type SupportTicketDetail,
 } from '../services/supportShared';
 import { relativeTime } from '../utils/relativeTime';
 import type { ApiError } from '../services/apiError';
@@ -29,6 +29,59 @@ type ShowToast = (message: string, type?: 'success' | 'error' | 'info') => void;
 type StatusFilter = 'aperte' | SupportStatus | 'tutte';
 
 const REFRESH_MS = 60_000;
+
+/* ── Metriche (fase 4) ───────────────────────────────────────────────────
+   Tre numeri sopra la coda, sugli ultimi 30 giorni: quanto si aspetta la
+   prima risposta, quanto ci vuole a chiudere, quanti sono soddisfatti. Le
+   mediane le calcola il server. «—» quando non c'è ancora niente da misurare. */
+const formatMinutes = (m: number | null): string => {
+  if (m == null) return '—';
+  if (m < 1) return '<1 min';
+  if (m < 60) return `${Math.round(m)} min`;
+  return `${(m / 60).toFixed(1).replace('.', ',').replace(/,0$/, '')} h`;
+};
+const formatHours = (h: number | null): string => {
+  if (h == null) return '—';
+  if (h < 1) return `${Math.max(1, Math.round(h * 60))} min`;
+  if (h < 48) return `${h.toFixed(1).replace('.', ',').replace(/,0$/, '')} h`;
+  return `${Math.round(h / 24)} g`;
+};
+
+const MetricsStrip: React.FC<{ metrics: SupportMetrics | null; t: (k: string, d: string, o?: Record<string, unknown>) => string }> = ({ metrics, t }) => {
+  if (!metrics || metrics.opened === 0) return null;
+  const rated = metrics.rating_up + metrics.rating_down;
+  const satisfaction = rated > 0 ? `${Math.round((metrics.rating_up / rated) * 100)}%` : '—';
+  const top = metrics.by_category.slice(0, 3);
+  return (
+    <div className="space-y-1.5">
+      <StatStrip
+        stats={[
+          // Etichette corte: la colonna della coda su telefono è stretta; il
+          // significato intero sta nel title.
+          {
+            value: formatMinutes(metrics.median_first_reply_minutes),
+            label: t('platform.metrics.firstReply', 'risposta'),
+            title: t('platform.metrics.firstReplyTitle', 'Tempo mediano della prima risposta, ultimi 30 giorni'),
+          },
+          {
+            value: formatHours(metrics.median_resolution_hours),
+            label: t('platform.metrics.resolution', 'chiusura'),
+            title: t('platform.metrics.resolutionTitle', 'Tempo mediano fino a «risolta», ultimi 30 giorni'),
+          },
+          {
+            value: satisfaction,
+            label: t('platform.metrics.satisfied', 'soddisfatti'),
+            title: t('platform.metrics.satisfiedTitle', '{{up}} bene, {{down}} non bene', { up: metrics.rating_up, down: metrics.rating_down }),
+          },
+        ]}
+      />
+      <p className="px-1 text-[12px] text-[var(--ds-text-muted)]">
+        {t('platform.metrics.window', '{{opened}} richieste in 30 giorni', { opened: metrics.opened })}
+        {top.length > 0 ? ` · ${top.map(c => `${supportCategoryLabel(c.category, t as any)} ${c.n}`).join(' · ')}` : ''}
+      </p>
+    </div>
+  );
+};
 
 /* ── Contesto tecnico ────────────────────────────────────────────────────
    Il JSON raccolto all'apertura, letto da chi deve capire cosa non va: prima
@@ -162,6 +215,7 @@ export const PlatformSupportTab: React.FC<{
   const [detailError, setDetailError] = useState<string | null>(null);
   const [reply, setReply] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
+  const [metrics, setMetrics] = useState<SupportMetrics | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
 
   const loadList = useCallback(async () => {
@@ -172,6 +226,9 @@ export const PlatformSupportTab: React.FC<{
       });
       setTickets(res.tickets);
       setCounts(res.counts);
+      // Le metriche viaggiano con la lista: stessi momenti di aggiornamento,
+      // e un errore qui non deve oscurare la coda.
+      supportApiService.adminMetrics(30).then(setMetrics).catch(() => {});
       onUnreadChange(typeof res.unread === 'number' ? res.unread : 0);
       setListError(null);
     } catch (err) {
@@ -336,6 +393,8 @@ export const PlatformSupportTab: React.FC<{
         <SupportStatusPill status={x.status} perspective="platform" />
         {x.priority === 'urgente' && x.status !== 'risolto' && <SupportUrgentPill />}
         <span className="truncate text-[13px] text-[var(--ds-text-muted)]">{supportCategoryLabel(x.category, t)}</span>
+        {x.rating === 1 && <ThumbsUp className="h-3.5 w-3.5 text-[var(--ds-seated-text)]" aria-label={t('platform.ratedGood', 'Valutata bene')} />}
+        {x.rating === -1 && <ThumbsDown className="h-3.5 w-3.5 text-[var(--ds-critical-text)]" aria-label={t('platform.ratedBad', 'Valutata non bene')} />}
       </div>
     </button>
   );
@@ -345,6 +404,7 @@ export const PlatformSupportTab: React.FC<{
       detailOpen={selectedId != null}
       toolbar={
         <div className="space-y-2">
+          <MetricsStrip metrics={metrics} t={t} />
           {/* Cambiare filtro chiude la richiesta aperta: restava a destra
               anche quando la lista nuova non la conteneva («Risolte» vuota
               accanto a una richiesta in corso). */}
@@ -440,6 +500,15 @@ export const PlatformSupportTab: React.FC<{
                         </button>
                       )}
                     </div>
+                    {detail.rating != null && (
+                      <Callout
+                        tone={detail.rating === 1 ? 'positive' : 'critical'}
+                        icon={detail.rating === 1 ? ThumbsUp : ThumbsDown}
+                        title={detail.rating === 1 ? t('platform.ratedGood', 'Valutata bene') : t('platform.ratedBad', 'Valutata non bene')}
+                      >
+                        {detail.rating_comment || t('platform.noRatingComment', 'Nessun commento.')}
+                      </Callout>
+                    )}
                     <ContextCard context={detail.context ?? {}} />
                     <SupportMessages messages={detail.messages} perspective="platform" />
                     <div ref={endRef} />

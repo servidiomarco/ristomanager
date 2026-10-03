@@ -4,7 +4,7 @@ import { socketClient } from './socketClient';
 import { buildApiError } from './apiError';
 import { onSocketEvent } from './socketEvents';
 import type {
-  SupportCategory, SupportStatus, SupportPriority, SupportTicket, SupportTicketDetail,
+  SupportCategory, SupportStatus, SupportPriority, SupportTicket, SupportTicketDetail, SupportMetrics, NewsEntry,
 } from './supportShared';
 
 /* Supporto clienti (Aiuto): le chiamate del ristorante (/support) e quelle
@@ -154,6 +154,21 @@ class SupportApiService {
     });
   }
 
+  /** Fase 4: com'è andata una richiesta risolta (1 / -1), con un commento. */
+  async rate(id: number, rating: 1 | -1, comment?: string): Promise<SupportTicketDetail> {
+    return apiRequest(`${API_URL}/support/tickets/${id}/rating`, {
+      method: 'POST',
+      headers: getHeaders(true),
+      body: JSON.stringify({ rating, comment }),
+    });
+  }
+
+  /** Le novità dal registro delle modifiche (più recenti prima). */
+  async news(limit = 30): Promise<NewsEntry[]> {
+    const res = await apiRequest<{ entries: NewsEntry[] }>(`${API_URL}/support/news?limit=${limit}`, { headers: getHeaders() });
+    return Array.isArray(res.entries) ? res.entries : [];
+  }
+
   /** «Chiedi a Sympotia»: la conversazione intera, l'ultima è la domanda. */
   async ask(messages: Array<{ role: 'user' | 'assistant'; content: string }>): Promise<{ answer: string; suggest_ticket: boolean }> {
     return apiRequest(`${API_URL}/support/assistant`, {
@@ -172,6 +187,10 @@ class SupportApiService {
     if (filters.tenantId) qs.set('tenant_id', String(filters.tenantId));
     const suffix = qs.toString() ? `?${qs}` : '';
     return apiRequest(`${API_URL}/admin/support/tickets${suffix}`, { headers: getHeaders() });
+  }
+
+  async adminMetrics(days = 30): Promise<SupportMetrics> {
+    return apiRequest(`${API_URL}/admin/support/metrics?days=${days}`, { headers: getHeaders() });
   }
 
   async adminGet(id: number): Promise<SupportTicketDetail> {

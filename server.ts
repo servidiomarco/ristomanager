@@ -72,13 +72,14 @@ import {
 } from './services/passepartoutBridge.js';
 import { setupSalaNodeBridge, getSalaNodeStatus, disconnectSalaNode, askNodeStatus } from './services/salaNodeBridge.js';
 import {
-    SUPPORT_CATEGORIES, SUPPORT_STATUSES, SUPPORT_SUBJECT_MAX, SUPPORT_BODY_MAX, SUPPORT_ATTACHMENTS_MAX,
+    SUPPORT_CATEGORIES, SUPPORT_STATUSES, SUPPORT_SUBJECT_MAX, SUPPORT_BODY_MAX, SUPPORT_ATTACHMENTS_MAX, SUPPORT_RATING_COMMENT_MAX,
     sanitizeClientContext, supportTenantTag, supportPlatformTag,
     type SupportAttachment, type SupportCategory, type SupportPriority, type SupportStatus,
 } from './services/supportShared.js';
 import {
     askSupportAssistant, sanitizeAssistantTurns, isSupportAssistantConfigured, SupportAssistantError,
 } from './services/supportAssistant.js';
+import { loadNews } from './services/supportNews.js';
 import {
     sanitizeClientErrors, normalizeErrorMessage, firstStackFrame,
     INCIDENT_LEVELS, INCIDENT_MESSAGE_MAX,
@@ -20955,7 +20956,8 @@ const SUPPORT_SEE_ALL_ROLES: string[] = [UserRole.OWNER, UserRole.GENERAL_MANAGE
 const SUPPORT_TICKET_FIELDS = `t.id, t.tenant_id::int AS tenant_id, t.category, t.priority, t.status, t.subject,
     t.created_by_user_id, COALESCE(NULLIF(u.full_name, ''), u.email) AS created_by_name,
     t.tenant_unread, t.platform_unread, t.dev_card_id,
-    t.created_at, t.updated_at, t.last_message_at, t.resolved_at`;
+    t.created_at, t.updated_at, t.last_message_at, t.resolved_at,
+    t.rating, t.rating_comment, t.rated_at`;
 
 const SUPPORT_MESSAGE_FIELDS = `id, author_type, author_name, body, attachments, created_at`;
 
@@ -21483,6 +21485,47 @@ app.patch('/support/tickets/:id', authenticate, requireTenantSession, async (req
         console.error('PATCH /support/tickets/:id error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
+});
+
+// Fase 4: com'è andata. Solo chi ha aperto la richiesta, solo a richiesta
+// risolta; si può cambiare idea (vale l'ultima). La piattaforma la vede
+// nella coda e nelle metriche.
+app.post('/support/tickets/:id/rating', authenticate, requireTenantSession, async (req: any, res) => {
+    try {
+        if (isPlatformActingInTenant(req.user)) return res.status(403).json({ error: 'platform_session' });
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+        const rating = Number(req.body?.rating);
+        if (rating !== 1 && rating !== -1) return res.status(400).json({ error: 'invalid_rating' });
+        const rawComment = req.body?.comment;
+        const comment = typeof rawComment === 'string' ? rawComment.trim().slice(0, SUPPORT_RATING_COMMENT_MAX) : '';
+        const ticket = await loadVisibleSupportTicket(req, id);
+        if (!ticket) return res.status(404).json({ error: 'not_found' });
+        if (ticket.created_by_user_id !== Number(req.user.userId)) {
+            return res.status(403).json({ error: 'not_creator', message: 'La valuta chi ha aperto la richiesta.' });
+        }
+        if (ticket.status !== 'risolto') {
+            return res.status(409).json({ error: 'not_resolved', message: 'Si valuta una richiesta risolta.' });
+        }
+        await queryWithRetry(
+            `UPDATE support_tickets SET rating = $3, rating_comment = $4, rated_at = now() WHERE id = $1 AND tenant_id = $2`,
+            [id, req.tenantId!, rating, comment || null]
+        );
+        const updated = await loadVisibleSupportTicket(req, id);
+        const messages = await loadSupportMessages(req.tenantId!, id);
+        emitSupportToPlatform(id, req.tenantId!);
+        res.json({ ...updated, messages });
+    } catch (err) {
+        console.error('POST /support/tickets/:id/rating error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// «Novità» (fase 4): dal registro delle modifiche del catalogo, senza le
+// righe interne della piattaforma (vedi services/supportNews.ts).
+app.get('/support/news', authenticate, (req: any, res) => {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 30, 1), 100);
+    res.json({ entries: loadNews().slice(0, limit) });
 });
 
 // «Chiedi a Sympotia» (supporto, fase 3): l'assistente sui manuali, per
@@ -30607,6 +30650,56 @@ app.patch('/admin/support/tickets/:id', platformAdminAuth, async (req, res) => {
         res.json({ ...updated, messages });
     } catch (err) {
         console.error('PATCH /admin/support/tickets/:id error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Fase 4: come sta andando il supporto. Mediane e non medie: una richiesta
+// rimasta aperta un weekend non deve dire che si risponde sempre tardi.
+app.get('/admin/support/metrics', platformAdminAuth, async (req, res) => {
+    try {
+        const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 365);
+        const [summary, byCategory] = await Promise.all([
+            queryWithRetry(
+                `WITH base AS (
+                    SELECT t.status, t.created_at, t.resolved_at, t.rating,
+                           (SELECT MIN(m.created_at) FROM support_messages m
+                             WHERE m.ticket_id = t.id AND m.author_type = 'piattaforma') AS first_reply_at
+                      FROM support_tickets t
+                     WHERE t.created_at > now() - make_interval(days => $1)
+                 )
+                 SELECT COUNT(*)::int AS opened,
+                        COUNT(*) FILTER (WHERE status = 'risolto')::int AS resolved,
+                        percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM first_reply_at - created_at))
+                            FILTER (WHERE first_reply_at IS NOT NULL) / 60 AS median_first_reply_minutes,
+                        percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM resolved_at - created_at))
+                            FILTER (WHERE resolved_at IS NOT NULL) / 3600 AS median_resolution_hours,
+                        COUNT(*) FILTER (WHERE rating = 1)::int AS rating_up,
+                        COUNT(*) FILTER (WHERE rating = -1)::int AS rating_down
+                   FROM base`,
+                [days]
+            ),
+            queryWithRetry(
+                `SELECT category, COUNT(*)::int AS n FROM support_tickets
+                  WHERE created_at > now() - make_interval(days => $1)
+                  GROUP BY category ORDER BY n DESC, category`,
+                [days]
+            ),
+        ]);
+        const s = summary.rows[0] ?? {};
+        const num = (v: unknown): number | null => (v == null ? null : Math.round(Number(v) * 10) / 10);
+        res.json({
+            days,
+            opened: Number(s.opened ?? 0),
+            resolved: Number(s.resolved ?? 0),
+            median_first_reply_minutes: num(s.median_first_reply_minutes),
+            median_resolution_hours: num(s.median_resolution_hours),
+            rating_up: Number(s.rating_up ?? 0),
+            rating_down: Number(s.rating_down ?? 0),
+            by_category: byCategory.rows,
+        });
+    } catch (err) {
+        console.error('GET /admin/support/metrics error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });

@@ -141,7 +141,19 @@
       "errCheck": "Check failed",
       "users_one": "{{count}} user",
       "users_other": "{{count}} users"
-    }
+    },
+    "metrics": {
+      "firstReply": "reply",
+      "resolution": "close",
+      "satisfied": "satisfied",
+      "satisfiedTitle": "{{up}} good, {{down}} not good",
+      "window": "{{opened}} requests in 30 days",
+      "firstReplyTitle": "Median time to first reply, last 30 days",
+      "resolutionTitle": "Median time to «resolved», last 30 days"
+    },
+    "ratedGood": "Rated good",
+    "ratedBad": "Rated not good",
+    "noRatingComment": "No comment."
   },
   "knownIssue": "Known issue",
   "assistant": {
@@ -158,5 +170,23 @@
     "example3": "How do I change the opening hours?",
     "you": "Me",
     "transcriptHeading": "Conversation with the assistant"
+  },
+  "rating": {
+    "question": "How did it go?",
+    "thanks": "Thanks for the rating",
+    "good": "Good",
+    "bad": "Not good",
+    "commentPlaceholder": "Anything to add? (optional)",
+    "saveComment": "Send comment",
+    "saved": "Thanks for the comment"
+  },
+  "news": {
+    "title": "What's new",
+    "subtitle": "What changed in Sympotia recently.",
+    "all": "All",
+    "newCount_one": "{{count}} new",
+    "newCount_other": "{{count}} new",
+    "today": "Today",
+    "yesterday": "Yesterday"
   }
 }
