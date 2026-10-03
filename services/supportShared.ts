@@ -46,9 +46,33 @@ export interface SupportTicket {
   updated_at: string;
   last_message_at: string;
   resolved_at: string | null;
+  /** Fase 4: com'è andata, detto da chi ha aperto la richiesta (1 / -1). */
+  rating?: 1 | -1 | null;
+  rating_comment?: string | null;
+  rated_at?: string | null;
   /** Solo nella vista di piattaforma. */
   tenant_name?: string;
   tenant_slug?: string;
+}
+
+export const SUPPORT_RATING_COMMENT_MAX = 500;
+
+export interface SupportMetrics {
+  days: number;
+  opened: number;
+  resolved: number;
+  /** Mediane: null quando nel periodo non c'è niente da misurare. */
+  median_first_reply_minutes: number | null;
+  median_resolution_hours: number | null;
+  rating_up: number;
+  rating_down: number;
+  by_category: Array<{ category: SupportCategory; n: number }>;
+}
+
+export interface NewsEntry {
+  date: string;
+  section: string;
+  text: string;
 }
 
 export interface SupportTicketDetail extends SupportTicket {

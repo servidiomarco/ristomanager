@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, Check, ChevronDown, LifeBuoy, Loader2, Paperclip, Plus, Send, Wand2 } from 'lucide-react';
+import { AlertTriangle, Check, ChevronDown, LifeBuoy, Loader2, Paperclip, Plus, Send, ThumbsDown, ThumbsUp, Wand2 } from 'lucide-react';
 import {
   SplitPane, PaneHeader, PanePlaceholder, EmptyState, Callout, AttachmentRow, ModalShell, FormCard, Field,
   dsButton, dsIconButton, dsInput, dsTextarea,
@@ -11,7 +11,7 @@ import {
 } from './SupportThread';
 import { supportApiService, onSupportSocketEvent, type SupportClientContext, type SupportUploadedAttachment } from '../services/supportApiService';
 import {
-  SUPPORT_ATTACHMENTS_MAX, SUPPORT_BODY_MAX, SUPPORT_CATEGORIES, SUPPORT_SUBJECT_MAX,
+  SUPPORT_ATTACHMENTS_MAX, SUPPORT_BODY_MAX, SUPPORT_CATEGORIES, SUPPORT_RATING_COMMENT_MAX, SUPPORT_SUBJECT_MAX,
   type SupportCategory, type SupportTicket, type SupportTicketDetail,
 } from '../services/supportShared';
 import { socketClient } from '../services/socketClient';
@@ -19,6 +19,7 @@ import { offlineQueue } from '../services/offlineQueue';
 import { isHybridActive, isNodeInUse } from '../services/apiRouting';
 import { relativeTime } from '../utils/relativeTime';
 import { SupportAssistant, type AssistantEscalation } from './SupportAssistant';
+import { SupportNews } from './SupportNews';
 import type { ActiveIncident } from '../services/healthShared';
 import type { ApiError } from '../services/apiError';
 
@@ -310,6 +311,82 @@ const NewRequestModal: React.FC<{
   );
 };
 
+/* ── Valutazione (fase 4) ────────────────────────────────────────────── */
+
+/* Chiude il giro: chi ha aperto la richiesta dice com'è andata. Un tocco
+   basta; il commento è facoltativo e arriva dopo, non prima. */
+const RatingCard: React.FC<{
+  ticket: SupportTicketDetail;
+  onRated: (d: SupportTicketDetail) => void;
+  showToast: ShowToast;
+}> = ({ ticket, onRated, showToast }) => {
+  const { t } = useTranslation('supporto', { useSuspense: false });
+  const [comment, setComment] = useState(ticket.rating_comment ?? '');
+  const [busy, setBusy] = useState(false);
+  const rating = ticket.rating ?? null;
+
+  useEffect(() => { setComment(ticket.rating_comment ?? ''); }, [ticket.id, ticket.rating_comment]);
+
+  const send = async (value: 1 | -1, withComment: boolean) => {
+    setBusy(true);
+    try {
+      onRated(await supportApiService.rate(ticket.id, value, withComment ? comment.trim() : (ticket.rating_comment ?? undefined)));
+      if (withComment) showToast(t('rating.saved', 'Grazie del commento'), 'success');
+    } catch (err) {
+      showToast((err as ApiError).message || t('errSave', 'Modifica non salvata'), 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const choice = (value: 1 | -1, label: string, Icon: typeof ThumbsUp) => (
+    <button
+      type="button"
+      onClick={() => send(value, false)}
+      disabled={busy}
+      aria-pressed={rating === value}
+      className={`inline-flex h-11 items-center gap-2 rounded-[var(--ds-radius-control)] px-4 text-[14px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60 ${
+        rating === value
+          ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+          : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
+      }`}
+    >
+      <Icon className="h-4 w-4" aria-hidden />
+      {label}
+    </button>
+  );
+
+  return (
+    <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
+      <p className="text-[15px] font-medium text-[var(--ds-text-primary)]">
+        {rating == null ? t('rating.question', "Com'è andata?") : t('rating.thanks', 'Grazie della valutazione')}
+      </p>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {choice(1, t('rating.good', 'Bene'), ThumbsUp)}
+        {choice(-1, t('rating.bad', 'Non bene'), ThumbsDown)}
+      </div>
+      {rating != null && (
+        <div className="mt-3 space-y-2">
+          <textarea
+            rows={2}
+            maxLength={SUPPORT_RATING_COMMENT_MAX}
+            className={dsTextarea}
+            value={comment}
+            onChange={e => setComment(e.target.value)}
+            placeholder={t('rating.commentPlaceholder', 'Vuoi aggiungere qualcosa? (facoltativo)')}
+          />
+          {comment.trim() !== (ticket.rating_comment ?? '').trim() && (
+            <button type="button" className={dsButton.secondary} onClick={() => send(rating, true)} disabled={busy}>
+              {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
+              {t('rating.saveComment', 'Invia il commento')}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 /* ── Pagina ──────────────────────────────────────────────────────────── */
 
 export const SupportPanel: React.FC<{
@@ -557,6 +634,7 @@ export const SupportPanel: React.FC<{
           ) : listError ? (
             <Callout tone="critical" icon={AlertTriangle}>{listError}</Callout>
           ) : tickets.length === 0 ? (
+            <div className="space-y-4">
             <EmptyState
               icon={LifeBuoy}
               action={
@@ -574,6 +652,8 @@ export const SupportPanel: React.FC<{
             >
               {t('empty', 'Qualcosa non va? Scrivi al team Sympotia.')}
             </EmptyState>
+            <SupportNews />
+            </div>
           ) : (
             <div className="space-y-4">
               {open.length > 0 && <div className="space-y-1.5">{open.map(renderRow)}</div>}
@@ -583,6 +663,7 @@ export const SupportPanel: React.FC<{
                   {closed.map(renderRow)}
                 </div>
               )}
+              <SupportNews />
             </div>
           )
         }
@@ -623,6 +704,9 @@ export const SupportPanel: React.FC<{
                         </div>
                       )}
                       <SupportMessages messages={detail.messages} perspective="tenant" />
+                      {detail.status === 'risolto' && detail.created_by_user_id === currentUserId && (
+                        <RatingCard ticket={detail} onRated={applyDetail} showToast={showToast} />
+                      )}
                       <div ref={endRef} />
                     </div>
                   ) : null}

@@ -141,7 +141,19 @@
       "errCheck": "Controllo non riuscito",
       "users_one": "{{count}} utente",
       "users_other": "{{count}} utenti"
-    }
+    },
+    "metrics": {
+      "firstReply": "risposta",
+      "resolution": "chiusura",
+      "satisfied": "soddisfatti",
+      "satisfiedTitle": "{{up}} bene, {{down}} non bene",
+      "window": "{{opened}} richieste in 30 giorni",
+      "firstReplyTitle": "Tempo mediano della prima risposta, ultimi 30 giorni",
+      "resolutionTitle": "Tempo mediano fino a «risolta», ultimi 30 giorni"
+    },
+    "ratedGood": "Valutata bene",
+    "ratedBad": "Valutata non bene",
+    "noRatingComment": "Nessun commento."
   },
   "knownIssue": "Problema già noto",
   "assistant": {
@@ -158,5 +170,23 @@
     "example3": "Come cambio gli orari di apertura?",
     "you": "Io",
     "transcriptHeading": "Conversazione con l'assistente"
+  },
+  "rating": {
+    "question": "Com'è andata?",
+    "thanks": "Grazie della valutazione",
+    "good": "Bene",
+    "bad": "Non bene",
+    "commentPlaceholder": "Vuoi aggiungere qualcosa? (facoltativo)",
+    "saveComment": "Invia il commento",
+    "saved": "Grazie del commento"
+  },
+  "news": {
+    "title": "Novità",
+    "subtitle": "Cosa è cambiato in Sympotia di recente.",
+    "all": "Tutte",
+    "newCount_one": "{{count}} nuova",
+    "newCount_other": "{{count}} nuove",
+    "today": "Oggi",
+    "yesterday": "Ieri"
   }
 }
