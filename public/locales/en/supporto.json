@@ -143,5 +143,20 @@
       "users_other": "{{count}} users"
     }
   },
-  "knownIssue": "Known issue"
+  "knownIssue": "Known issue",
+  "assistant": {
+    "name": "Ask Sympotia",
+    "subtitle": "Answers from the Sympotia manuals. For a fault, open a request.",
+    "placeholder": "Type your question…",
+    "send": "Ask",
+    "thinking": "Searching the manuals…",
+    "error": "The assistant did not answer: try again or open a request.",
+    "openTicket": "Open a request with this conversation",
+    "examplesLabel": "For example:",
+    "example1": "How do I move a booking to another table?",
+    "example2": "How do I print a table's pre-bill?",
+    "example3": "How do I change the opening hours?",
+    "you": "Me",
+    "transcriptHeading": "Conversation with the assistant"
+  }
 }

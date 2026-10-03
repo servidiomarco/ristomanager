@@ -3,7 +3,8 @@
     "dashboard_report": "Dashboard report",
     "banquet_menu": "Event menu proposal",
     "suggest_reply": "Suggested message reply",
-    "whatsapp_agent": "WhatsApp agent"
+    "whatsapp_agent": "WhatsApp agent",
+    "support_assistant": "Help assistant"
   },
   "errLoad": "Could not load the usage figures",
   "subtitle": "Sofia (ElevenLabs) and the AI analyses (Gemini) side by side.",

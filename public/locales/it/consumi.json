@@ -3,7 +3,8 @@
     "dashboard_report": "Report Dashboard",
     "banquet_menu": "Proposta menu banchetto",
     "suggest_reply": "Risposta suggerita messaggi",
-    "whatsapp_agent": "Agente WhatsApp"
+    "whatsapp_agent": "Agente WhatsApp",
+    "support_assistant": "Assistente Aiuto"
   },
   "errLoad": "Errore nel caricamento dei consumi",
   "subtitle": "Sofia (ElevenLabs) e le analisi AI (Gemini) a confronto.",
