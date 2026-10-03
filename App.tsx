@@ -481,6 +481,10 @@ const App: React.FC = () => {
   const [tenantLogoDark, setTenantLogoDark] = useState<string | null>(null);
   const [tenantName, setTenantName] = useState<string>('');
   const hasTenantBranding = !!authApiService.getAccessToken() && !isPlatformPanelToken();
+  // La sessione di pannello non ha un servizio: niente barra con data, turni,
+  // ricerca e campanella del ristorante su nessuna vista, Development, Roadmap
+  // e Consumi AI compresi. Prima la nascondeva solo la vista Piattaforma.
+  const isPanelSession = isPlatformPanelToken();
   useEffect(() => {
     if (!hasTenantBranding) {
       setTenantLogo(null);
@@ -648,8 +652,8 @@ const App: React.FC = () => {
       if (!isPaletteHotkey) return;
       // Sulla vista Piattaforma la ricerca globale pescherebbe nei dati del
       // tenant dell'admin: meglio nessuna palette che quella del ristorante
-      // sbagliato.
-      if (view === ViewState.PLATFORM) return;
+      // sbagliato. Lo stesso per tutta la sessione di pannello.
+      if (view === ViewState.PLATFORM || isPlatformPanelToken()) return;
       e.preventDefault();
       setPaletteOpen(true);
     };
@@ -2663,7 +2667,7 @@ const App: React.FC = () => {
                gradini ne tengono conto da soli. Il minimo sta nei 347px che
                il gruppo ha a 768, con 24px di margine anche su una data lunga. Le quattro serie, due turni compresi, sono in
                HEADER_FIT in cima al file. */}
-           <div className={`hidden md:flex @container items-center gap-2.5 flex-1 min-w-0 md:pl-3 lg:pl-0 ${[ViewState.SETTINGS, ViewState.USERS, ViewState.CLIENTI, ViewState.STAFF, ViewState.PLATFORM, ViewState.ASPORTO].includes(view) ? '!hidden' : ''}`}>
+           <div className={`hidden md:flex @container items-center gap-2.5 flex-1 min-w-0 md:pl-3 lg:pl-0 ${isPanelSession || [ViewState.SETTINGS, ViewState.USERS, ViewState.CLIENTI, ViewState.STAFF, ViewState.PLATFORM, ViewState.ASPORTO].includes(view) ? '!hidden' : ''}`}>
              <DateNavigator
                value={globalDateStr}
                onChange={(dateOnly) => {
@@ -2741,7 +2745,7 @@ const App: React.FC = () => {
            )}
 
            {/* Right cluster — order is deliberate: Live · Search · Bell · Plus */}
-           <div className={`ml-auto flex items-center gap-2 flex-shrink-0 pl-2 ${view === ViewState.PLATFORM ? '!hidden' : ''}`}>
+           <div className={`ml-auto flex items-center gap-2 flex-shrink-0 pl-2 ${view === ViewState.PLATFORM || isPanelSession ? '!hidden' : ''}`}>
 
               {/* Connection state + current time, merged into one pill.
                   Connected uses the `seated` family; offline uses `critical`.
