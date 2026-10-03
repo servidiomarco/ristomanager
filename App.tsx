@@ -104,22 +104,7 @@ import { useTranslation } from 'react-i18next';
 import { SUPPORTED_LANGUAGES } from './i18n/config';
 import { sortRooms } from './utils/roomOrder';
 import { toTitleCase } from './utils/text';
-import { datePart } from './utils/displayTime';
-
-// Il servizio «di adesso», come lo intende il server (resolveService in
-// server.ts): prima delle 5 siamo ancora nella cena di ieri — la data del
-// servizio non è la data dell'orologio. `anchor` è un Date DENTRO quel
-// giorno di servizio, da dare a setGlobalDate: alle 00:30 punta a ieri.
-// L'ora è quella del dispositivo, come nel resto del file: i dispositivi
-// del ristorante vivono a ora italiana.
-const currentServiceRome = (at: Date): { date: string; shift: 'LUNCH' | 'DINNER'; anchor: Date } => {
-  const hour = at.getHours();
-  if (hour < 5) {
-    const anchor = new Date(at.getTime() - 6 * 3600 * 1000);
-    return { date: datePart(anchor), shift: 'DINNER', anchor };
-  }
-  return { date: datePart(at), shift: hour < 17 ? 'LUNCH' : 'DINNER', anchor: at };
-};
+import { currentService, datePart } from './utils/displayTime';
 
 import {
   getReservations,
@@ -1086,10 +1071,19 @@ const App: React.FC = () => {
     };
   }, [isAuthenticated, canSeePayments, view]);
 
-  // Global date/shift state — drives the header control group on desktop
-  const [globalDate, setGlobalDate] = useState<Date>(() => currentServiceRome(new Date()).anchor);
+  // Global date/shift state — drives the header control group on desktop.
+  // Parte dal servizio «di adesso», come lo intende il server (resolveService
+  // in server.ts): prima delle 5 siamo ancora nella cena di ieri — la data
+  // del servizio non è la data dell'orologio. `anchor` è un Date DENTRO quel
+  // giorno di servizio, da dare a setGlobalDate: alle 00:30 punta a ieri.
+  // L'ora è quella del ristorante (il fuso della sessione, utils/displayTime),
+  // non quella del dispositivo, e l'ancora cade in quel giorno sia per chi
+  // legge globalDate coi getter del dispositivo (la testata qui sotto) sia per
+  // chi usa datePart: un portatile rimasto su un altro fuso segue comunque il
+  // servizio del locale.
+  const [globalDate, setGlobalDate] = useState<Date>(() => currentService().anchor);
   const [globalShiftFilter, setGlobalShiftFilter] = useState<'ALL' | 'LUNCH' | 'DINNER'>(
-    () => currentServiceRome(new Date()).shift
+    () => currentService().shift
   );
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
 
@@ -1099,20 +1093,33 @@ const App: React.FC = () => {
   // aperta lì e «libera» sul palmare appena acceso (Tav. 0, 14/09).
   // Avanza SOLO chi è rimasto sul servizio automatico precedente: una
   // selezione manuale — altro giorno, altro turno, «Tutti» — non si tocca.
-  const autoServiceRef = useRef(currentServiceRome(new Date()));
+  // Il giro riparte anche quando cambia il fuso della sessione, cioè al login
+  // e all'«Entra» del platform admin: dopo un login lo stato iniziale qui
+  // sopra è quello del primo render di App, fatto sulla pagina di accesso col
+  // fuso di default, e un ristorante fuori da Roma restava fino a un minuto
+  // sul servizio di Roma. Il fuso lo imposta un effetto di AuthProvider, che
+  // React esegue DOPO quelli di App (gli effetti vanno dai figli ai
+  // genitori): per questo il primo giro si rimanda di un tick.
+  const sessionTzKey = user?.tenant?.timezone;
+  const autoServiceRef = useRef(currentService());
   useEffect(() => {
     const roll = () => {
-      const next = currentServiceRome(new Date());
+      const next = currentService();
       const prev = autoServiceRef.current;
       if (next.date === prev.date && next.shift === prev.shift) return;
       autoServiceRef.current = next;
       setGlobalDate(d => (datePart(d) === prev.date ? next.anchor : d));
       setGlobalShiftFilter(s => (s === prev.shift ? next.shift : s));
     };
+    const firstRoll = window.setTimeout(roll, 0);
     const timer = window.setInterval(roll, 60_000);
     window.addEventListener('focus', roll);
-    return () => { window.clearInterval(timer); window.removeEventListener('focus', roll); };
-  }, []);
+    return () => {
+      window.clearTimeout(firstRoll);
+      window.clearInterval(timer);
+      window.removeEventListener('focus', roll);
+    };
+  }, [sessionTzKey]);
 
   useEffect(() => {
     const now = new Date();
@@ -1168,7 +1175,7 @@ const App: React.FC = () => {
   // Auto-switch from 'ALL' when navigating away from Dashboard
   useEffect(() => {
     if (view !== ViewState.DASHBOARD && globalShiftFilter === 'ALL') {
-      setGlobalShiftFilter(currentServiceRome(new Date()).shift);
+      setGlobalShiftFilter(currentService().shift);
     }
   }, [view]);
 
