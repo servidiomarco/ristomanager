@@ -723,6 +723,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-03 | Messaggi: WhatsApp e SMS | Nella proposta dell'agente WhatsApp le date si leggono all'europea («Modifica prenotazione del 05/10/2026: data → 07/10/2026»), anche nelle proposte già in attesa. |
 | 2026-10-03 | Aiuto e supporto | Mentre «Chiedi a Sympotia» cerca la risposta, una nuova animazione dice a che punto è («Cerco nei manuali…», «Leggo le istruzioni…», «Preparo la risposta…») e la risposta compare nello stesso punto. |
 | 2026-10-03 | Aiuto e supporto | In fondo alla vista Aiuto ci sono le «Novità» dell'app, con quelle nuove segnate. Le richieste risolte si possono valutare (bene / non bene) con un commento. |
 | 2026-10-03 | Aiuto e supporto; Funzioni AI | Nella vista Aiuto arriva «Chiedi a Sympotia»: un assistente che risponde subito alle domande sull'uso dell'app leggendo i manuali, e se non basta porta la conversazione in una richiesta al team. |

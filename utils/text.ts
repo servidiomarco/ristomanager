@@ -159,3 +159,15 @@ export function phoneLast10Variants(input: string | null | undefined): string[] 
   if (!key) return [];
   return [...new Set([key.slice(-10), `39${key}`.slice(-10)])];
 }
+
+/** Le date ISO (2026-10-05) dentro un testo, riscritte all'europea
+ *  (05/10/2026). Serve alle righe che il server compone con le date grezze
+ *  del modello — la proposta dell'agente WhatsApp — e a quelle già salvate
+ *  così, che la scheda riformatta in lettura. Tocca solo date complete e
+ *  valide nel formato: un numero qualsiasi resta com'è. */
+export const isoDatesToEuropean = (text: string | null | undefined): string =>
+  String(text ?? '').replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, (whole, y, m, d) => {
+    const mm = Number(m);
+    const dd = Number(d);
+    return mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31 ? `${d}/${m}/${y}` : whole;
+  });

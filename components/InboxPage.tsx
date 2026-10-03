@@ -24,7 +24,7 @@ import { socketClient } from '../services/socketClient';
 import { runAgent, confirmProposal, discardProposal, extractBooking, type AgentProposal, type ExtractedBooking } from '../services/aiMessagesApiService';
 import { listMedia, attachFromLibrary, type MediaFile } from '../services/mediaApiService';
 import { getFeatureFlags } from '../services/apiService';
-import { toTitleCase, phoneMatchKey } from '../utils/text';
+import { toTitleCase, phoneMatchKey, isoDatesToEuropean } from '../utils/text';
 import { Shift, type Reservation } from '../types';
 import {
   SearchField, StatusPill, Callout, SegmentedControl, SplitPane, SectionHeader,
@@ -1005,7 +1005,9 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                         <p className="text-[13px] font-semibold text-[var(--ds-text-primary)]">
                           {tv('agentProposal')}
                         </p>
-                        <p className="mt-0.5 text-[14px] text-[var(--ds-text-primary)]">{proposal.summary}</p>
+                        {/* Riformattata anche qui: le proposte salvate prima
+                            della correzione hanno ancora le date ISO. */}
+                        <p className="mt-0.5 text-[14px] text-[var(--ds-text-primary)]">{isoDatesToEuropean(proposal.summary)}</p>
                         <p className="mt-1 text-[12px] text-[var(--ds-text-muted)]">
                           {tv('nothingChangedYet')}
                         </p>

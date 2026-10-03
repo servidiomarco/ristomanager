@@ -23,6 +23,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { describeDepositPolicy, type DepositPolicy } from './depositPolicy.js';
 import * as bookingTools from './bookingTools.js';
 import { WHATSAPP_CHANNEL } from './bookingTools.js';
+import { isoDatesToEuropean } from '../utils/text.js';
 
 const MODEL = 'claude-opus-5';
 const MAX_GIRI = 4;
@@ -251,8 +252,13 @@ COME SCRIVERE:
 - Non confermare MAI che una prenotazione è stata creata, modificata o annullata: quelle azioni le esegue una persona dopo di te. Di' che stai verificando o che confermi a breve.`;
 }
 
-/** Riga leggibile per lo staff. */
+/** Riga leggibile per lo staff, con le date all'europea (05/10/2026): il
+ *  modello le passa ISO agli strumenti, ma chi legge la scheda no. */
 function riassumi(tool: string, args: Record<string, any>, ctx: AgentContext): string {
+    return isoDatesToEuropean(riassumiGrezzo(tool, args, ctx));
+}
+
+function riassumiGrezzo(tool: string, args: Record<string, any>, ctx: AgentContext): string {
     const p = (k: string) => args[k];
     if (tool === 'cancel_reservation') {
         return `Annulla la prenotazione del ${p('date')}${p('time') ? ` alle ${p('time')}` : ''}`;
