@@ -120,6 +120,11 @@ describe('menu: visibilità e ordinamento CRM', () => {
         const pub = await api().get('/public/menu');
         expect(pub.status).toBe(200);
         expect(pub.body.categorie_ordine[0]).toBe(CAT);
+        // Il marchio per la testata viaggia col menu: la chiave c'è sempre,
+        // i campi sono null finché l'anagrafica non li ha.
+        expect(pub.body.branding).toBeTypeOf('object');
+        expect(pub.body.branding).toHaveProperty('logo_url');
+        expect(pub.body.branding).toHaveProperty('tagline');
 
         const after = (await api().get('/menu/categories').set(bearer(token))).body.categories;
         expect(after[0].name).toBe(CAT);
