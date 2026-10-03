@@ -13,6 +13,7 @@
       "reception": "Reception",
       "takeaway": "Takeaway",
       "rooms": "Rooms & Tables",
+      "liveFloor": "Live floor",
       "menu": "Menu",
       "banquets": "Events",
       "orders": "Orders",
@@ -50,6 +51,9 @@
   "actions": {
     "close": "Close",
     "reload": "Reload"
+  },
+  "lazy": {
+    "chunkError": "The page didn't load."
   },
   "profile": {
     "languageLabel": "Interface language",

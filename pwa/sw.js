@@ -13,6 +13,10 @@
 //   sull'index.html precachato.
 // - font Google → cache runtime, così anche il primo avvio offline ha la
 //   grafia giusta.
+// - dizionari (/locales/) → NetworkFirst senza timeout: online sempre
+//   quelli del deploy, a rete giù l'ultima copia letta, così l'app riparte
+//   con le parole e non con le chiavi grezze.
+// - Sala dal vivo (assets/sala3d/) → CacheFirst, solo su chi la apre.
 // - NIENTE cache sulle API: sono su un altro dominio (cloud o nodo di
 //   sala) e il SW same-origin non le tocca per costruzione — la staleness
 //   dei dati la governa già il nodo con X-Sala-Node, non il browser.
@@ -64,6 +68,58 @@ registerRoute(
   new CacheFirst({
     cacheName: 'google-fonts-woff',
     plugins: [new ExpirationPlugin({ maxEntries: 8, maxAgeSeconds: 365 * 24 * 60 * 60 })],
+  }),
+);
+
+// Sala dal vivo (3D): fuori dal precache (vite.config.ts la manda in
+// assets/sala3d/, dove il glob non arriva), così la scaricano solo i
+// dispositivi che aprono la pagina e non ogni palmare e schermo di cucina.
+// Nomi con hash = immutabili: CacheFirst, e la scadenza pulisce le versioni
+// vecchie. Dopo la prima apertura il tablet all'ingresso la riapre anche a
+// linea caduta: il codice da qui, i testi dalla rotta dei dizionari sotto.
+registerRoute(
+  ({ url }) => url.origin === self.location.origin && url.pathname.startsWith('/assets/sala3d/'),
+  new CacheFirst({
+    cacheName: 'sala-3d',
+    plugins: [
+      // Vercel riscrive ogni file mancante su index.html con 200
+      // (vercel.json): un chunk vecchio chiesto dopo un deploy tornerebbe
+      // HTML, e in cache resterebbe per sempre al posto del JavaScript.
+      {
+        cacheWillUpdate: async ({ response }) =>
+          response && response.ok && (response.headers.get('content-type') || '').includes('javascript')
+            ? response
+            : null,
+      },
+      new ExpirationPlugin({ maxEntries: 8, maxAgeSeconds: 60 * 24 * 60 * 60 }),
+    ],
+  }),
+);
+
+// Dizionari dell'interfaccia (/locales/{lingua}/{namespace}.json, i18n/config.ts):
+// la shell riparte a linea caduta, ma i testi no. i18next prende una lettura
+// fallita per un dizionario vuoto e la pagina mostra le chiavi grezze
+// («title», «summary») invece delle parole. Prima la rete, sempre: online
+// ogni avvio legge il dizionario del deploy in corso, come prima, e la copia
+// serve solo quando la rete non risponde. Niente timeout: una copia
+// vecchia servita a rete lenta, dopo un deploy con chiavi nuove, mostrerebbe
+// proprio le chiavi grezze. In cache vanno solo le namespace che il
+// dispositivo ha già aperto.
+registerRoute(
+  ({ url }) => url.origin === self.location.origin && url.pathname.startsWith('/locales/') && url.pathname.endsWith('.json'),
+  new NetworkFirst({
+    cacheName: 'locales',
+    plugins: [
+      // Un dizionario che non c'è torna index.html con 200 (vercel.json):
+      // in cache solo JSON vero.
+      {
+        cacheWillUpdate: async ({ response }) =>
+          response && response.ok && (response.headers.get('content-type') || '').includes('json')
+            ? response
+            : null,
+      },
+      new ExpirationPlugin({ maxEntries: 100, maxAgeSeconds: 60 * 24 * 60 * 60 }),
+    ],
   }),
 );
 

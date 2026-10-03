@@ -13,6 +13,7 @@
       "reception": "Reception",
       "takeaway": "Asporto",
       "rooms": "Sale & Tavoli",
+      "liveFloor": "Sala dal vivo",
       "menu": "Menu",
       "banquets": "Banchetti",
       "orders": "Comande",
@@ -50,6 +51,9 @@
   "actions": {
     "close": "Chiudi",
     "reload": "Ricarica"
+  },
+  "lazy": {
+    "chunkError": "La pagina non si è caricata."
   },
   "profile": {
     "languageLabel": "Lingua dell'interfaccia",

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChevronUp, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, AlertTriangle, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator, BarChart3, Star, ShoppingBag, LifeBuoy } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChevronUp, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, AlertTriangle, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator, BarChart3, Star, ShoppingBag, LifeBuoy, Cuboid } from 'lucide-react';
 import { ViewState, Room, Table, Dish, RestaurantMenu, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Shift, UserRole, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -135,6 +135,19 @@ import {
   tenantLogoSrc,
 } from './services/apiService';
 import { swrConfig } from './services/configCache';
+import type { FloorPlanFocus, SalaVivoPageProps } from './components/salaVivo/types';
+import { LazyChunkError } from './components/LazyChunkError';
+
+// Sala dal vivo, la prima vista caricata a richiesta: three e la scena non
+// entrano nel bundle che ogni palmare e ogni schermo di cucina scarica (e
+// precacha). Il .catch trasforma un chunk mancante (offline al primo
+// accesso, hash sparito dopo un deploy) in una pagina con «Ricarica»: un
+// lazy rifiutato resterebbe rifiutato per sempre, anche rientrando nella vista.
+const SalaVivoPage = React.lazy<React.ComponentType<SalaVivoPageProps>>(() =>
+  import('./components/salaVivo/SalaVivoPage').catch((err) => {
+    console.error('[sala-dal-vivo] chunk non caricato', err);
+    return { default: () => <LazyChunkError /> };
+  }));
 
 // Sessione di piattaforma scopata su un tenant («Entra» dal pannello): il
 // claim scopedTenantId nel token la distingue da quella di pannello. Si
@@ -193,6 +206,8 @@ const NAV_ITEMS: NavItem[] = [
   { kind: 'link', label: 'Reception', labelKey: 'nav.items.reception', Icon: ConciergeBell, group: 'servizio', isTab: false, view: ViewState.RECEPTION, sidebarCollapse: true },
   { kind: 'link', label: 'Asporto', labelKey: 'nav.items.takeaway', Icon: ShoppingBag, group: 'servizio', isTab: false, view: ViewState.ASPORTO, sidebarCollapse: true },
   { kind: 'link', label: 'Sale & Tavoli', labelKey: 'nav.items.rooms', Icon: Grid, group: 'servizio', isTab: false, view: ViewState.FLOOR_PLAN, sidebarCollapse: true },
+  // Solo con l'interruttore «Sala dal vivo» acceso (canSeeNavItem).
+  { kind: 'link', label: 'Sala dal vivo', labelKey: 'nav.items.liveFloor', Icon: Cuboid, group: 'servizio', isTab: false, view: ViewState.SALA_DAL_VIVO, sidebarCollapse: true },
   { kind: 'link', label: 'Menu', labelKey: 'nav.items.menu', Icon: UtensilsCrossed, group: 'servizio', isTab: false, view: ViewState.MENU, sidebarCollapse: false },
   { kind: 'link', label: 'Banchetti', labelKey: 'nav.items.banquets', Icon: PartyPopper, group: 'servizio', isTab: false, view: ViewState.BANCHETTI, sidebarCollapse: false },
   { kind: 'link', label: 'Comande', labelKey: 'nav.items.orders', Icon: ClipboardList, group: 'servizio', isTab: false, view: ViewState.COMANDE, sidebarCollapse: true },
@@ -614,7 +629,42 @@ const App: React.FC = () => {
     // Passe spento mentre lo si sta guardando: si finisce in Comande, dove i
     // suoi verbi sono appena migrati.
     if (!passeEnabled && view === ViewState.PASSE) setView(ViewState.COMANDE);
-  }, [tableOrdersEnabled, passeEnabled, view]);
+    // Sala dal vivo spenta: anche qui solo a flag noto, o lo schermo fissato
+    // all'ingresso e il link diretto rimbalzerebbero al boot.
+    if (salaDalVivoEnabled === false) {
+      // Lo schermo fissato lo sblocca solo la pagina, che a interruttore
+      // spento non si apre più: il pin si toglie qui, o quel dispositivo
+      // aprirebbe la Sala dal vivo a ogni avvio (a schermo pieno, finché il
+      // flag non risponde) per poi rimbalzare, senza più arrivare alla sua
+      // pagina di partenza. Si legge prima di toglierlo: decide dove andare.
+      let wasPinned = false;
+      try {
+        wasPinned = localStorage.getItem('salaVivo.pinned') === '1';
+        if (wasPinned) localStorage.removeItem('salaVivo.pinned');
+      } catch { /* modalità privata */ }
+      if (view === ViewState.SALA_DAL_VIVO) {
+        // Il dispositivo fissato va dove sarebbe atterrato senza il pin: la
+        // pagina di partenza dell'account, se la può aprire; se no Dashboard,
+        // come per gli altri moduli spenti.
+        const preferred = user?.preferred_landing_view as ViewState | null | undefined;
+        const toPreferred = !!preferred
+          && wasPinned
+          && preferred !== ViewState.SALA_DAL_VIVO
+          && (Object.values(ViewState) as string[]).includes(preferred)
+          && canAccessView(preferred);
+        if (toPreferred && preferred) {
+          setView(preferred);
+          // Come l'atterraggio: la vista di partenza porta il suo stato della
+          // barra laterale (il pin l'aveva chiusa).
+          const navItem = NAV_ITEMS.find(n => n.view === preferred);
+          if (navItem?.sidebarCollapse === true) setSidebarCollapsed(true);
+          else if (navItem?.sidebarCollapse === false) setSidebarCollapsed(false);
+        } else {
+          setView(ViewState.DASHBOARD);
+        }
+      }
+    }
+  }, [tableOrdersEnabled, passeEnabled, salaDalVivoEnabled, view, user, canAccessView]);
   const [autoOpenNewReservation, setAutoOpenNewReservation] = useState(false);
   const [newReservationKind, setNewReservationKind] = useState<'standard' | 'walkin'>('standard');
   // Prefill applied when opening the new-reservation modal — used when
@@ -935,6 +985,9 @@ const App: React.FC = () => {
 
   // Cassa · «Apri in Comande»: il tavolo da aprire appena la vista monta.
   const [pendingComandeTableId, setPendingComandeTableId] = useState<number | null>(null);
+  // Sala dal vivo · «Posizionali» / «Disponi i tavoli»: la sala su cui
+  // aprire Sale & Tavoli; FloorPlan la seleziona e la consuma.
+  const [floorPlanFocus, setFloorPlanFocus] = useState<FloorPlanFocus | null>(null);
 
   // Email and Notifiche unread badges — refreshed on view change and on
   // focus; the email one also live, on the server's email:new / email:read.
@@ -1146,6 +1199,11 @@ const App: React.FC = () => {
   // Sotto lg la sidebar non c'è comunque (c'è la barra in basso), quindi la
   // bandiera non deve spegnere niente lì.
   const comandeNavStubbed = view === ViewState.COMANDE && comandeNavHidden;
+  // Lo schermo fissato della Sala dal vivo (chiosco): la sidebar si ritira
+  // come in Comande, la barra in basso sparisce con `immersive`. Lo chiede la
+  // pagina, e lo rilascia quando si smonta, anche per un crash: uno schermo
+  // fissato non resta mai senza navigazione.
+  const salaVivoKiosk = view === ViewState.SALA_DAL_VIVO && immersive;
   // Il marchio col chevron che richiama il menu. Sta nella barra della pagina
   // di Comande, al posto esatto dove stava la sidebar: il bersaglio non si
   // sposta, si assottiglia.
@@ -1280,6 +1338,22 @@ const App: React.FC = () => {
       const search = params.toString();
       window.history.replaceState({}, '', window.location.pathname + (search ? `?${search}` : '') + window.location.hash);
       if (accessibleViews.includes(target)) return;
+    }
+
+    // Lo schermo fissato della Sala dal vivo («Fissa su questo schermo»):
+    // una scelta del DISPOSITIVO, quindi vince sulla preferita dell'account,
+    // che vale su ogni dispositivo; un ?view= esplicito vince comunque. Il
+    // flag qui non è ancora noto, e si segue il pin lo stesso: uno schermo
+    // fissato riparte anche se la lettura dei flag fallisce. Se l'interruttore
+    // risulta spento, l'effetto dei moduli spenti toglie il pin e porta il
+    // dispositivo alla pagina di partenza dell'account (o in Dashboard).
+    let pinnedSalaVivo = false;
+    try { pinnedSalaVivo = localStorage.getItem('salaVivo.pinned') === '1'; } catch { /* modalità privata */ }
+    if (!appliedPreferredLandingRef.current && pinnedSalaVivo && accessibleViews.includes(ViewState.SALA_DAL_VIVO)) {
+      setView(ViewState.SALA_DAL_VIVO);
+      setSidebarCollapsed(true);
+      appliedPreferredLandingRef.current = true;
+      return;
     }
 
     // Apply preferred landing view once per session (after login or initial load).
@@ -1642,14 +1716,21 @@ const App: React.FC = () => {
         }
         return [...prev, reservation];
       });
-      addToast(t('toast.newBookingNamed', { nome: toTitleCase(reservation.customer_name) }), 'info');
+      // Sulla Sala dal vivo (il tablet all'ingresso, la TV) i nomi degli
+      // ospiti non vanno a video: i tre toast delle prenotazioni tacciono.
+      // La campanella no, quella la legge chi è al lavoro.
+      if (viewRef.current !== ViewState.SALA_DAL_VIVO) {
+        addToast(t('toast.newBookingNamed', { nome: toTitleCase(reservation.customer_name) }), 'info');
+      }
     });
 
     socket.on('reservation:updated', (reservation: Reservation) => {
       setReservations(prev =>
         prev.map(r => r.id === reservation.id ? reservation : r)
       );
-      addToast(t('toast.bookingUpdatedNamed', { nome: toTitleCase(reservation.customer_name) }), 'info');
+      if (viewRef.current !== ViewState.SALA_DAL_VIVO) {
+        addToast(t('toast.bookingUpdatedNamed', { nome: toTitleCase(reservation.customer_name) }), 'info');
+      }
     });
 
     socket.on('reservation:deleted', (id: number) => {
@@ -1658,7 +1739,9 @@ const App: React.FC = () => {
       // Unica voce per l'eliminazione: le prenotazioni broadcastano anche al
       // mittente (riga autoritativa lato server), quindi questo toast arriva
       // pure a chi ha eliminato — niente doppione nel handler locale.
-      addToast(deleted ? t('toast.bookingDeletedNamed', { nome: toTitleCase(deleted.customer_name) }) : t('toast.bookingDeleted'), 'info');
+      if (viewRef.current !== ViewState.SALA_DAL_VIVO) {
+        addToast(deleted ? t('toast.bookingDeletedNamed', { nome: toTitleCase(deleted.customer_name) }) : t('toast.bookingDeleted'), 'info');
+      }
     });
 
     // Silent patch — a denormalized field (e.g. customer_name/phone from a
@@ -2224,6 +2307,8 @@ const App: React.FC = () => {
     if (item.requiresUserManagement) return canManageUsers();
     if (item.view !== undefined && SALA_VIEWS.includes(item.view) && tableOrdersEnabled !== true) return false;
     if (item.view === ViewState.PASSE && !passeEnabled) return false;
+    // Sala dal vivo: spenta di default, e nascosta anche finché il flag non è noto.
+    if (item.view === ViewState.SALA_DAL_VIVO && salaDalVivoEnabled !== true) return false;
     return item.view !== undefined && canAccessView(item.view);
   };
 
@@ -2350,14 +2435,15 @@ const App: React.FC = () => {
           compresi, o i 16px del margine terrebbero il posto di una colonna
           che non c'è — e torna scorrendo insieme ai tavoli che si stringono.
           `invisible` toglie il focus ai link mentre è via: una tabulazione
-          non deve finire dentro un menu che nessuno vede. */}
+          non deve finire dentro un menu che nessuno vede. Si ritira allo
+          stesso modo per lo schermo fissato della Sala dal vivo. */}
       <aside
         className={`hidden lg:flex ${
-          comandeNavStubbed
+          comandeNavStubbed || salaVivoKiosk
             ? 'w-0 m-0 opacity-0 invisible pointer-events-none'
             : `${sidebarCollapsed ? 'w-[76px]' : 'w-[250px]'} m-4 mr-0 opacity-100`
         } overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] flex-col transition-[width,margin,opacity] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none z-20 relative`}
-        aria-hidden={comandeNavStubbed}
+        aria-hidden={comandeNavStubbed || salaVivoKiosk}
         aria-label={t('aria.mainNav')}
       >
         {/* Intestazione — logo e comando apri/chiudi sulla stessa riga, come
@@ -2639,9 +2725,11 @@ const App: React.FC = () => {
             tavolo, e in cima ci va la sua scheda con la freccia indietro.
             In Cucina sparisce del tutto: data-picker, turno, ricerca globale
             e «+» lì non servono, e lo spazio è delle comande — la topbar del
-            monitor porta da sola data, orologio e i suoi controlli. */}
+            monitor porta da sola data, orologio e i suoi controlli. Lo stesso
+            nella Sala dal vivo: segue il servizio in corso e non la data della
+            testata, e la sua LivePill ce l'ha nella pagina. */}
         <header className={`flex-shrink-0 h-16 md:h-[72px] m-4 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] z-10 md:z-30 items-center justify-between px-3 md:px-4 ${
-          view === ViewState.CUCINA ? 'hidden'
+          view === ViewState.CUCINA || view === ViewState.SALA_DAL_VIVO ? 'hidden'
           // Comande sullo schermo largo si prende la pagina: la sua testata è
           // dentro la pagina (ricerca, imbuto, Live) e questa sopra sarebbe
           // una seconda barra che dice le stesse cose. Giorno e turno vivono
@@ -3061,7 +3149,35 @@ const App: React.FC = () => {
             globalDate={globalDate}
             globalShiftFilter={globalShiftFilter}
             markersEnabled={salaDalVivoEnabled === true}
+            focus={floorPlanFocus}
+            onFocusConsumed={() => setFloorPlanFocus(null)}
           />
+        )}
+
+        {/* La Sala dal vivo segue sempre il servizio in corso (currentTime),
+            mai la data o il turno della testata, che qui è nascosta: è la
+            sala di adesso, per il tablet all'ingresso o la TV. */}
+        {view === ViewState.SALA_DAL_VIVO && (
+          <CardErrorBoundary label={t('nav.items.liveFloor')}>
+            <React.Suspense fallback={<Loader label={t('loading')} className="h-full" />}>
+              <SalaVivoPage
+                rooms={rooms}
+                tables={tables}
+                reservations={reservations}
+                banquetMenus={banquetMenus}
+                isInitialLoading={isInitialDataLoading}
+                isConnected={isConnected}
+                currentTime={currentTime}
+                canEditFloor={hasPermission('floorplan:full')}
+                onImmersive={setImmersive}
+                onOpenFloorPlan={(focus) => {
+                  setFloorPlanFocus(focus ?? null);
+                  setSidebarCollapsed(true);
+                  setView(ViewState.FLOOR_PLAN);
+                }}
+              />
+            </React.Suspense>
+          </CardErrorBoundary>
         )}
 
         {/* Menu e Banchetti sono due voci di sidebar ma un componente solo:
@@ -3379,7 +3495,11 @@ const App: React.FC = () => {
                       traduzione: ripeterli qui erano due elenchi da tenere allineati a mano,
                       e infatti divergevano già («Lista della Spesa» nel menu, «Lista della
                       spesa» qui). */}
-                  {getAccessibleViews().map(v => {
+                  {/* La Sala dal vivo si offre solo a interruttore acceso, come
+                      la sua voce di menu; resta se è già la scelta salvata, o
+                      la select senza la sua opzione mostrerebbe «Predefinita»
+                      mentre l'account atterra lì (e rimbalza). */}
+                  {getAccessibleViews().filter(v => v !== ViewState.SALA_DAL_VIVO || salaDalVivoEnabled === true || user?.preferred_landing_view === v).map(v => {
                     const voce = NAV_ITEMS.find(n => n.view === v);
                     return (
                       <option key={v} value={v}>{voce ? t(voce.labelKey, voce.label) : v}</option>
