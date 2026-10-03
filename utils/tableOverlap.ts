@@ -1,5 +1,5 @@
 import { Table } from '../types';
-import { getGlyphDimensions } from '../components/TableGlyph';
+import { getGlyphDimensions } from './tableGeometry';
 
 // Floor-editor grid. Tables snap to this on drag, and the overlap clearance is
 // half a cell — enough to keep adjacent tables from visually touching.
