@@ -123,6 +123,12 @@ interface FloorPlanProps {
    *  accoglienza) sulla piantina, e i loro strumenti per chi può modificare.
    *  Spenta, niente fetch né listener. */
   markersEnabled?: boolean;
+  /** La sala su cui aprirsi, chiesta dalla Sala dal vivo («Posizionali»,
+   *  «Disponi i tavoli»): si seleziona una volta e si consuma con
+   *  onFocusConsumed, come initialTableId di OrderPad. Tipo scritto qui e non
+   *  importato, così la piantina non dipende dalla cartella della 3D. */
+  focus?: { roomId: number } | null;
+  onFocusConsumed?: () => void;
 }
 
 export const FloorPlan: React.FC<FloorPlanProps> = ({
@@ -142,6 +148,8 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   globalDate,
   globalShiftFilter: globalShiftFilterProp,
   markersEnabled = false,
+  focus = null,
+  onFocusConsumed,
 }) => {
   // Legenda degli stati tavolo nella lingua dell'operatore.
   const { t: tv } = useTranslation('sala', { useSuspense: false });
@@ -635,6 +643,16 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           setActiveRoomId(rooms[0].id);
       }
   }, [rooms, activeRoomId]);
+
+  // Arrivo dalla Sala dal vivo: si apre sulla sala che l'avviso nominava.
+  // Una sala sparita nel frattempo lascia quella di sempre. Si consuma in
+  // ogni caso: il focus vale per un ingresso, non per i successivi.
+  useEffect(() => {
+      if (focus == null) return;
+      if (rooms.some(r => r.id === focus.roomId)) setActiveRoomId(focus.roomId);
+      onFocusConsumed?.();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focus]);
 
   // Auto-select NEW room when added
   const prevRoomsLength = useRef(rooms.length);

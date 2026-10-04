@@ -312,6 +312,10 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
 const VIEW_PERMISSIONS: Record<ViewState, Permission[]> = {
   [ViewState.DASHBOARD]: ['dashboard:view'],
   [ViewState.FLOOR_PLAN]: ['floorplan:view'],
+  // Sala dal vivo: gli stessi dati della piantina, in sola lettura. Va
+  // cambiata insieme alla mappa di contexts/AuthContext.tsx: tutte e due sono
+  // esaustive, e questa la compila anche il server.
+  [ViewState.SALA_DAL_VIVO]: ['floorplan:view'],
   [ViewState.MENU]: ['menu:view'],
   // Stessi permessi di Menu: la pagina Banchetti è la vecchia metà eventi
   // della pagina Menu & Banchetti, separata in sidebar.

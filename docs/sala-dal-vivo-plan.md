@@ -13,8 +13,9 @@ nell'ordine in cui servono: i punti fermi della sala (da dove si entra, da dove 
 piatti, dove si accoglie), una pagina che carichi three.js solo su chi la apre, e un
 regista che trasformi un cambio di stato in un movimento.
 
-**Perimetro di questa tranche: solo PR1,** cioè segnaposto di sala e interruttore per
-ristorante, spento di default; niente codice 3D. Il documento è la specifica del piano
+**Dove siamo:** PR1 (segnaposto di sala e interruttore per ristorante, spento di default)
+e PR2a (fondamenta, niente di visibile) sono fatte; PR2b, la pagina con la sala in 3D, è
+in corso. Lo stato di ogni fase è in §3. Il documento è la specifica del piano
 approvato, revisione avversaria compresa, scritta su un clone del 20 settembre (`78336bf`)
 e riallineata a `main` del 3 ottobre (`1f7c511`), 153 PR dopo (§2). Ne tiene tutto quello
 che non dipende dalle righe (formule, soglie, tempi, codice di configurazione, seed e
@@ -82,9 +83,9 @@ oggi lo spingerebbe anche sugli schermi di cucina. **E su main, dopo il piano:**
 
 | PR | Branch | Contenuto | Deploy | Stato |
 |---|---|---|---|---|
-| PR1 | `claude/segnaposto-di-sala` | Segnaposto: tabella, route, eventi, strumenti 2D. Interruttore e card in Impostazioni | Railway prima | **in corso** |
-| PR2a | `claude/sala-dal-vivo-fondamenta` | Geometria del glifo condivisa, servizio in corso, test unitari. Niente di visibile | solo frontend | da fare |
-| PR2b | `claude/sala-dal-vivo-pagina` | Vista, chiosco, caricamento a richiesta e PWA; sala, tavoli e segnaposto in 3D. **Collaudo sull'hardware dopo il merge** | Railway prima (enum `ViewState`) | da fare |
+| PR1 | `claude/segnaposto-di-sala` | Segnaposto: tabella, route, eventi, strumenti 2D. Interruttore e card in Impostazioni | Railway prima | fatta |
+| PR2a | `claude/sala-dal-vivo-fondamenta` | Geometria del glifo condivisa, servizio in corso, test unitari. Niente di visibile | solo frontend | fatta |
+| PR2b | `claude/sala-dal-vivo-pagina` | Vista, chiosco, caricamento a richiesta e PWA; sala, tavoli e segnaposto in 3D. **Collaudo sull'hardware dopo il merge** | Railway prima (enum `ViewState`) | **in corso** |
 | PR2c | `claude/sala-dal-vivo-ospiti` | Ospiti statici con bambini e cane, cartelli, nomi spenti di default | solo frontend | da fare |
 | PR3 | `claude/sala-dal-vivo-animazioni` | Regista, accompagnamenti, camminata, camerieri d'ambiente, striscia, «Segui il servizio»; `/staff/presence` come Personale | Railway prima | da fare |
 
@@ -123,7 +124,7 @@ finirebbe su ogni palmare; il modello è TypeScript puro; niente stato React per
 
 ---
 
-## 5. PR1 — Segnaposto di sala e interruttore (in corso)
+## 5. PR1 — Segnaposto di sala e interruttore (fatta)
 
 ### 5.1 Cosa si vede
 
@@ -342,7 +343,7 @@ sala».
 
 ---
 
-## 6. PR2a — Fondamenta (da fare)
+## 6. PR2a — Fondamenta (fatta)
 
 Niente di visibile, nessuna riga nel Registro. **`utils/tableGeometry.ts`** (solo
 frontend) prende le costanti `GLYPH`, `getGlyphDimensions` spostata identica,
@@ -359,17 +360,20 @@ identico** e riesporta `getGlyphDimensions`: gli altri renderer non si toccano, 
 //   litTop = min(sopra, ⌈accese/2⌉), litBot = accese − litTop; confronti esatti sulla forma
 ```
 
-**`utils/reservationTime.ts`** prende da App.tsx `currentServiceRome(at)`, che legge l'ora
-del ristorante con `Intl` e non quella del dispositivo, più `serviceDayOf(iso)` (un
-walk-in delle 00:30 è della cena di ieri). Il file resta **senza import**, perché lo
-compila anche il server; la pagina converte in `Shift`. Il fuso va riallineato (§13).
+**Il servizio di adesso**, com'è uscito, sta in due file. **`utils/reservationTime.ts`**,
+che resta **senza import** perché lo compila anche il server, ha `currentServiceInTz(at, tz)`
+(data del servizio, turno e `anchor`) e `serviceDayInTz(iso, tz)` (un walk-in delle 00:30 è
+della cena di ieri), col fuso esplicito come `getDatePartInTz`. **`utils/displayTime.ts`**,
+solo frontend, ha `currentService(at?)` e `serviceDayOf(iso)`, che passano il fuso della
+sessione, cioè quello del ristorante (§13). L'ora si legge sempre lì, mai sul dispositivo;
+App cancella la sua copia e usa `currentService`, e la pagina converte il turno in `Shift`.
 
 | File | Cosa cambia |
 |---|---|
 | `utils/tableGeometry.ts` (nuovo, solo frontend) | le costanti `GLYPH`, `getGlyphDimensions` copiata identica, `getChairSlots`, `litChairIndices` |
 | `components/TableGlyph.tsx` | disegna da queste funzioni con SVG identico e riesporta `getGlyphDimensions`: FloorPlan, ReservationList, ReceptionPage e la Piantina di Cassa non si toccano |
 | `utils/tableOverlap.ts`, `utils/tableLayout.ts`, `utils/labelPlacement.ts` | importano `getGlyphDimensions` da `./tableGeometry`, così restano senza React |
-| `utils/reservationTime.ts` · `App.tsx` | `currentServiceRome` e `serviceDayOf`, senza import · App cancella la sua copia e la importa da utils |
+| `utils/reservationTime.ts` · `utils/displayTime.ts` · `App.tsx` | `currentServiceInTz` e `serviceDayInTz`, senza import e col fuso esplicito · `currentService` e `serviceDayOf` sul fuso della sessione · App cancella la sua copia e usa `currentService` |
 | `vitest.unit.config.ts` (nuovo) · `package.json` | `defineConfig({ test: { include: ['tests/unit/**/*.test.ts'], environment: 'node' } })`, con un commento: niente Postgres, separato dalla suite API che droppa il database · `"test:unit": "vitest run --config vitest.unit.config.ts"` |
 | `.github/workflows/ci.yml` | nel job «Typecheck e build», dopo «Bypass RLS motivati»: `- name: Test unitari` / `run: npm run test:unit` |
 | `tests/unit/tableGeometry.test.ts`, `tests/unit/currentService.test.ts` | i test qui sotto |
@@ -382,29 +386,23 @@ export function getChairSlots(shape: TableShape, seats: number): ChairSlot[];
 export function litChairIndices(shape: TableShape, seats: number, party: number): number[];
 ```
 
-L'helper del servizio, come approvato (il fuso diventerà un parametro, §13; la pagina
-mappa il letterale su `Shift` in `model/service.ts`, così nessun cast arriva a
-`getTableMerges(date, shift: Shift)`):
+L'helper del servizio com'è uscito (la pagina mappa il letterale su `Shift` in
+`model/service.ts`, così nessun cast arriva a `getTableMerges(date, shift: Shift)`):
 
 ```ts
-// Il servizio «di adesso» come lo intende il server (resolveService): il giorno di
-// servizio comincia alle 05:00 di Roma, la cena alle 17:00. Ora di ROMA, non del
-// dispositivo. `anchor` è un Date dentro quel giorno di servizio (per setGlobalDate):
-// alle 00:30 punta a ieri. Niente import qui: questo file lo compila anche il server.
-const romeHourFmt = new Intl.DateTimeFormat('en-GB', { timeZone: ROME, hour: '2-digit', hourCycle: 'h23' });
-export const SERVICE_DAY_START_HOUR = 5;
-export const DINNER_START_HOUR = 17;
-export const currentServiceRome = (at: Date = new Date()): { date: string; shift: 'LUNCH' | 'DINNER'; anchor: Date } => {
-    const hour = Number(romeHourFmt.format(at));
-    if (hour < SERVICE_DAY_START_HOUR) {
-        const anchor = new Date(at.getTime() - 6 * 3600 * 1000);
-        return { date: getRomeDatePart(anchor), shift: 'DINNER', anchor };
-    }
-    return { date: getRomeDatePart(at), shift: hour < DINNER_START_HOUR ? 'LUNCH' : 'DINNER', anchor: at };
-};
-// Il giorno di servizio di un istante: un walk-in delle 00:30 è della cena di ieri.
-export const serviceDayOf = (iso: string | Date): string =>
-    currentServiceRome(iso instanceof Date ? iso : new Date(iso)).date;
+// utils/reservationTime.ts — niente import: lo compila anche il server, dove ogni
+// richiesta è di un tenant diverso e il fuso si passa esplicito.
+export const SERVICE_DAY_START_HOUR = 5;   // il giorno di servizio comincia alle 05:00 del ristorante
+export const DINNER_START_HOUR = 17;       // la cena alle 17:00, come resolveService sul server
+export const currentServiceInTz = (at: Date, tz: string): { date: string; shift: 'LUNCH' | 'DINNER'; anchor: Date };
+//   ora < 5 → { date: il giorno prima sul calendario, shift: 'DINNER', anchor: at − 6 h }
+//   altrimenti → { date: getDatePartInTz(at, tz), shift: ora < 17 ? 'LUNCH' : 'DINNER', anchor: at }
+export const serviceDayInTz = (iso: string | Date | null | undefined, tz: string): string;  // '' se illeggibile
+
+// utils/displayTime.ts — solo frontend, sul fuso della sessione (setSessionTimeZone)
+export const currentService = (at?: Date) => /* currentServiceInTz(at, fuso della sessione) */;
+//   l'ancora passa a mezzogiorno locale quando il dispositivo sta in un altro fuso
+export const serviceDayOf = (iso: string | Date | null | undefined): string;
 ```
 
 **Test unitari:** `vitest.unit.config.ts` su `tests/unit/**`, ambiente node, **senza** il
@@ -422,19 +420,20 @@ tre forme (dimensioni, centri, `rotDeg`, sedie accese per comitive da 0 a n+2);
 | `serviceDayOf('2026-10-04T22:30:00Z')` | 00:30 del 5 | `'2026-10-04'` |
 
 Commit: «Geometria del glyph tavolo in un modulo condiviso» · «Il servizio di adesso
-in utils, come lo intende il server» · «Test unitari della logica pura, con il loro
-passo in CI».
+nel fuso del ristorante, come lo intende il server» · «Test unitari della logica pura,
+con il loro passo in CI».
 
 ---
 
-## 7. PR2b — La pagina, con sala e tavoli in 3D (da fare)
+## 7. PR2b — La pagina, con sala e tavoli in 3D (in corso)
 
 ### 7.1 Build, vista, App e pagina
 
 - **Chunk:** `manualChunks` mette in `three` il solo `node_modules/three`, che non importa
   niente dal bundle principale e cambia hash solo con la libreria (R3F importa React dal
-  chunk d'ingresso e viaggia con la scena); `chunkFileNames` manda `three` e `SalaVivo*`
-  in `assets/sala3d/`. In `pwa/sw.js` una CacheFirst `sala-3d` (8 voci, 60 giorni) tiene
+  chunk d'ingresso e viaggia con la scena); `chunkFileNames` manda `three`, `SalaVivo*` e
+  un eventuale chunk comune fatto solo di moduli di `components/salaVivo/` in
+  `assets/sala3d/`. In `pwa/sw.js` una CacheFirst `sala-3d` (8 voci, 60 giorni) tiene
   **solo risposte JavaScript**: Vercel risponde ai file mancanti con `index.html` e 200.
 - **Vista:** `ViewState.SALA_DAL_VIVO` → `floorplan:view` nelle due mappe dei permessi;
   voce dopo «Sale & Tavoli» (`Cuboid`, `servizio`, `sidebarCollapse`), nascosta a
@@ -448,15 +447,22 @@ passo in CI».
 - **Pagina:** `components/salaVivo/SalaVivoPage.tsx`, export di default, **mai** un import
   di `three` o `./scene`. Testata con riassunto («12 a tavola · 3 in arrivo»), «Centra»,
   fissa, «Schermo intero» e LivePill; linguette delle sale aperte e delle chiuse con
-  presenti, coi coperti («Veranda · 38»); al massimo due callout, con «Posizionali» e
-  «Disponi i tavoli» solo per `floorplan:full` a schermo non fissato.
+  presenti, con le persone a tavola adesso in quella sala («Veranda · 14»: decisione di
+  Tina, 4 ottobre — la capienza non cambia mai durante il servizio); al massimo due
+  callout. Quelli sulla sala
+  (sala da disporre, sovrapposizioni, segnaposto mancanti) li vede solo chi ha
+  `floorplan:full`, e mai a schermo fissato, come l'avviso delle sovrapposizioni della
+  piantina; portano «Disponi i tavoli» e «Posizionali». Quelli del dispositivo (niente
+  WebGL2, vista semplificata) li vedono tutti. Le varianti del servizio si tengono fino
+  all'arrivo di quelle nuove: al cambio di servizio la sala resta disegnata, e il canvas
+  non si rismonta.
 
 | Dato | Da dove · come si aggiorna |
 |---|---|
 | Sale, tavoli, prenotazioni, banchetti · servizio `{date, shift}` | prop e gestori socket di App · helper di PR2a sull'orologio al minuto di App, lo stesso che muove la LivePill |
 | Unioni, nascosti, sale chiuse | `useServiceOverrides(date, shift)` · `getTableMerges`, `getTableHidden` e `getRoomClosed` in parallelo al cambio di servizio e al ritorno della connessione; gestori con nome filtrati per data e turno, con l'upsert copiato da FloorPlan; restituisce `{ merges, hiddenTableIds, closedRoomIds, ready }` |
 | Segnaposto · modello | `useFloorMarkers(true)` · `useMemo(deriveSceneModel(…))` ai commit e al minuto, **mai per frame** |
-| Preferenze del dispositivo | localStorage `salaVivo.room`, `.pinned`, `.names` (PR2c), `.follow` (PR3), `.debug` |
+| Preferenze del dispositivo | localStorage `salaVivo.room`, `.pinned`, `.reloadedFor` (la versione per cui lo schermo fissato si è già ricaricato), `.names` (PR2c), `.follow` (PR3), `.debug` |
 
 | File | Cosa cambia |
 |---|---|
@@ -507,20 +513,21 @@ const SalaVivoPage = React.lazy<React.ComponentType<SalaVivoPageProps>>(() =>
     <React.Suspense fallback={<Loader label={t('loading')} className="h-full" />}>
       <SalaVivoPage rooms={rooms} tables={tables} reservations={reservations} banquetMenus={banquetMenus}
         isInitialLoading={isInitialDataLoading} isConnected={isConnected} currentTime={currentTime}
-        onImmersive={setImmersive}
-        onOpenFloorPlan={(focus) => { setFloorPlanFocus(focus ?? null); setView(ViewState.FLOOR_PLAN); }} />
+        canEditFloor={hasPermission('floorplan:full')} onImmersive={setImmersive}
+        onOpenFloorPlan={(focus) => { setFloorPlanFocus(focus ?? null); setSidebarCollapsed(true); setView(ViewState.FLOOR_PLAN); }} />
     </React.Suspense>
   </CardErrorBoundary>
 )}
 ```
 
 ```ts
+// components/salaVivo/types.ts (reservationsEpoch arriva con PR3)
 export interface SalaVivoPageProps {
   rooms: Room[]; tables: Table[]; reservations: Reservation[]; banquetMenus: BanquetMenu[];
   isInitialLoading: boolean; isConnected: boolean; currentTime: Date;
+  canEditFloor: boolean;                                // hasPermission('floorplan:full')
   onImmersive: (on: boolean) => void;
-  onOpenFloorPlan: (focus?: { roomId: number }) => void;
-  reservationsEpoch?: number; // PR3
+  onOpenFloorPlan: (focus?: FloorPlanFocus) => void;    // FloorPlanFocus = { roomId: number }
 }
 ```
 
@@ -535,8 +542,11 @@ build: { rollupOptions: { output: {
   // La Sala dal vivo in assets/sala3d/: il glob del precache ('assets/*.{js,css}')
   // non scende nelle sottocartelle, così palmari e schermi di cucina non la
   // scaricano mai. La serve la rotta CacheFirst di pwa/sw.js a chi apre la pagina.
+  // Anche un chunk comune fatto solo di moduli della Sala dal vivo: col nome di un
+  // modulo qualsiasi finirebbe nel precache di tutti.
   chunkFileNames: (chunk) =>
     chunk.name === 'three' || chunk.name.startsWith('SalaVivo')
+      || (chunk.moduleIds.length > 0 && chunk.moduleIds.every(id => /[\\/]components[\\/]salaVivo[\\/]/.test(id)))
       ? 'assets/sala3d/[name]-[hash].js' : 'assets/[name]-[hash].js',
 } } },
 ```
@@ -571,23 +581,34 @@ letterali da FloorPlan (Tailwind vuole letterali); `onImmersive` segue l'effetto
 - **Geometria.** X = x·M, Z = y·M, `rotation.y = −θ` (il verso orario del CSS con la y in
   basso). Corpi da `width_cm` (profondità) e `length_cm` (lato lungo); altrimenti cerchio
   `Dc = max(0.80, 0.16n + 0.30)`, rettangolo `L = max(0.70, (⌈n/2⌉−1)·0.52 + 0.60)` per
-  `D = 0.80`, quadrato `D = clamp(L, 0.80, 1.10)`, dentro il box del glifo meno 0,40 m di
-  sedie. Piano 0,75 m, seduta 0,45, schienale 0,90. Sedie **esattamente** sugli slot 2D,
-  spinte fuori fino a 0,30 m dal bordo; punto d'approccio 0,55 m dietro la sedia.
-- **Disposizione.** Tavoli non nascosti, come in 2D; un'unione con un membro a più di
-  25 px dagli altri si disegna come in 2D (il primario, per la somma dei coperti). Audit
-  `overlaps` su box orientati, così due vicini ruotati non sono un falso allarme, e
-  `unset` (almeno 3 tavoli, metà sulla stessa posizione).
-- **Il ripiego per una sala da disporre è da rivalutare in PR2b.** Il piano usava
+  `D = 0.80`, quadrato `D = clamp(L, 0.80, 1.10)` e lato lungo uguale finché le sedie di
+  un lato ci stanno (da 5 posti cresce come `L`: il glifo mette le sedie solo sopra e
+  sotto), dentro il box del glifo meno 0,40 m di sedie. Piano 0,75 m, seduta 0,45,
+  schienale 0,90. Sedie **esattamente** sugli slot 2D, spinte fuori fino a 0,30 m dal
+  bordo; punto d'approccio 0,55 m dietro la sedia.
+- **Disposizione.** Tavoli non nascosti, come in 2D. Un'unione si disegna **sempre come
+  in 2D** (decisione di Tina, 4 ottobre): il primario al suo posto, col nome unito e la
+  somma dei coperti, col corpo dai posti (le misure in cm sono del primario da solo); i
+  secondari non si disegnano. Disegnarli ciascuno al suo posto non reggeva: l'editor non
+  lascia posare due tavoli a contatto, e anche accostati quanto si può restavano a 1,3 m
+  (affiancati) o 3,2 m (uno sopra l'altro), con una tavolata seduta di qua e di là da un
+  corridoio che non c'è. Audit `overlaps` sui tavoli disegnati, su box orientati (così due
+  vicini ruotati non sono un falso allarme), e `unset` (almeno 3 tavoli, metà sulla
+  stessa posizione).
+- **Nessun ripiego per una sala da disporre (deciso in PR2b).** Il piano usava
   `computeAutoLayout`, che oggi resta solo come misura di una sala vuota in Prenotazioni:
-  la 2D quella vista non ce l'ha più, e una griglia solo in 3D romperebbe l'accordo. Coi
-  tavoli nuovi nel primo posto libero è un'eredità dei dati vecchi, già nell'avviso.
+  la 2D quella vista non ce l'ha più, e una griglia solo in 3D romperebbe l'accordo fra
+  le due. La 3D disegna sempre le x/y salvate, come la piantina; `unset` resta solo
+  l'avviso «Tavoli di questa sala ancora da disporre.», con «Disponi i tavoli». Coi tavoli
+  nuovi nel primo posto libero è un'eredità dei dati vecchi.
 - **Segnaposto mancanti** (`missingMarkers[]`): ingresso a `(W/2, H − 20)`, il bordo
   verso la camera; accoglienza 60 px dentro e 40 di lato; pass a `(W − 60, 60)`.
 - **Stato del tavolo:** `deriveTableDisplayStatus` sulla seduta più recente del gruppo,
-  altrimenti sulla prossima WAITING del turno fra t−30 e t+120 minuti, come in 2D.
-  Divergenze dichiarate: «oggi» è il giorno di servizio; un secondario accende tutta
-  l'unione; con due sedute vince la più recente, dove la 2D prende la prima.
+  altrimenti sulla prossima WAITING del turno fra t−30 e t+120 minuti, come in 2D; fra
+  due prossime la più vicina all'istante (alle 19:00 quella delle 19:15, non una delle
+  17:30 mai arrivata), un no-show dopo le altre. Divergenze dichiarate: «oggi» è il giorno
+  di servizio; un secondario accende tutta l'unione; con due sedute vince la più recente,
+  dove la 2D prende la prima.
 
 Il dettaglio, per chi implementa:
 
@@ -604,7 +625,10 @@ layout.ts     overlaps: separazione degli assi sui rettangoli del glifo, cerchi 
               dei tavoli · estensione W = max(room.width, maxRight + 60), H = max(room.height, maxBottom + 60)
               su glifi e segnaposto; la camera inquadra il contenuto
               «verso l'interno» dei ripieghi = il versore dal segnaposto al baricentro della sala,
-              agganciato alla normale del bordo se il segnaposto sta entro 1 m da un bordo
+              agganciato alla normale del bordo se il segnaposto sta entro 1 m da un bordo; in
+              basso e a destra il bordo si misura da dove finisce il pavimento allargato dal
+              segnaposto stesso (chip, etichetta e margine: 120 px sotto, 100 a destra), quindi
+              l'aggancio arriva a 3,4 m dal bordo basso e 3 m da quello destro
 tableStatus.ts opzioni { banquet: banchetto del servizio sul tavolo, tempLocked: temp_lock_expires_at > now, now };
               le comitive vive sono quelle del giorno di servizio di §8
 ```
@@ -1055,11 +1079,18 @@ npx vite build --manifest     # poi i controlli del bundle (da PR2b), e rm -rf d
 **Bundle, da PR2b:** dal manifest, partendo da `index.html`, nessun chunk `sala3d/`
 raggiungibile staticamente e nessun three importato dalla pagina; in `dist/sw.js` almeno
 un URL `assets/index-` e nessun `assets/sala3d/` (si leggono gli URL: il codice della
-rotta contiene già «sala3d»); gzip three ≈ 180 KB, canvas 70–90, pagina 15–25, bundle
-principale meno di 10 KB in più; dopo una modifica alla sola app `three-*.js` non cambia.
+rotta contiene già «sala3d»); gzip three ≈ 197 KB (MapControls compreso), canvas ≈ 67,
+pagina ≈ 11, bundle principale meno di 10 KB in più (PR2b: +1,2 KB); dopo una modifica
+alla sola app `three-*.js` non cambia.
+
+Il controllo del manifest regge una build giusta: dal punto d'ingresso può partire un
+chunk solo (tutto il resto è a richiesta), e la pagina non ha una chiave col suo
+sorgente (`_SalaVivoPage-<hash>.js`, senza facciata), quindi si cerca per `name` e si
+segue la sua chiusura statica, non solo gli import diretti. Provato anche al contrario:
+una pagina che importa il canvas, o un `index.html` che importa three, escono con 1.
 
 ```bash
-node -e 'const m=require("./dist/.vite/manifest.json");const s=new Set();const w=k=>{if(s.has(k))return;s.add(k);(m[k].imports||[]).forEach(w)};w("index.html");const f=[...s].map(k=>m[k].file);if(f.length<2)throw new Error("walk vuoto");const bad=f.filter(x=>x.includes("sala3d/"));const p=m["components/salaVivo/SalaVivoPage.tsx"];const pt=(p&&p.imports||[]).map(k=>m[k].file).filter(x=>x.includes("three"));console.log({static:f.length,bad,pageThree:pt});process.exit(bad.length||pt.length?1:0)'
+node -e 'const m=require("./dist/.vite/manifest.json");if(!m["index.html"])throw new Error("manifest senza index.html");const chiusura=k0=>{const s=new Set();const w=k=>{if(s.has(k)||!m[k])return;s.add(k);(m[k].imports||[]).forEach(w)};w(k0);return [...s].map(k=>m[k].file)};const f=chiusura("index.html");const bad=f.filter(x=>x.includes("sala3d/"));const pk=Object.keys(m).filter(k=>m[k].name==="SalaVivoPage");if(pk.length!==1)throw new Error("chunk della pagina: "+pk.length);const pt=chiusura(pk[0]).filter(x=>/three|SalaVivoCanvas/.test(x));console.log({static:f.length,bad,page:m[pk[0]].file,pageThree:pt});process.exit(bad.length||pt.length?1:0)'
 grep -oE '"?url"?:"assets/[^"]+"' dist/sw.js | grep -c 'assets/index-'    # ≥ 1: il filtro morde
 grep -oE '"?url"?:"assets/[^"]+"' dist/sw.js | grep -c 'assets/sala3d/'   # 0
 for f in dist/assets/sala3d/*.js; do echo "$f $(gzip -c "$f" | wc -c)"; done
@@ -1170,7 +1201,7 @@ draw call e triangoli si leggono lì.
 | G6 | Presenze del server diverse da Personale | Allineate in PR3 |
 | G7 | Hardware sconosciuto; rendering continuo in servizio (calore, risparmio energetico di iOS) | Collaudo dopo PR2b; modalità lenta; 20 fps d'ambiente; pause più lunghe a schermo fissato; modalità leggera |
 | G8 | Limite di contesti WebGL di Safari; StrictMode | R3F ≥ 9.8.1; un canvas solo; sonde rilasciate; prova dei rimontaggi |
-| G9 | Prima apertura di una TV durante un'interruzione | `LazyChunkError` con «Ricarica»; aprire la pagina una volta all'installazione |
+| G9 | Prima apertura di una TV durante un'interruzione | `LazyChunkError` con «Ricarica»; aprire la pagina una volta all'installazione: poi il codice 3D (cache `sala-3d`) e i testi (cache `locales`, la rotta dei dizionari del service worker, per tutta l'app) ripartono anche a linea caduta. A schermo fissato una vista 3D interrotta riparte da sola, al più una volta al minuto e tre per caricamento |
 | G10 | Il confine fra pranzo e cena non è lo stesso su ogni schermo | La 3D segue il server; FloorPlan, Reception, Cassa e Prenotazioni potranno adottare l'helper più avanti |
 | G11 | Un ingresso per sala; sale senza posizione fra loro | `UNIQUE (room_id, kind)`; dissolvenza fra sale. Più ingressi: via il vincolo, più un'etichetta |
 | G12 | Falsi positivi del cane («senza cane»); numero ignoto | Parola intera; al massimo due cani |
@@ -1180,7 +1211,7 @@ draw call e triangoli si leggono lì.
 | G16 | `three` in devDependencies rompe un futuro build della SPA con `--omit=dev` | Vercel e CI installano le devDependencies; va scritto nella descrizione di PR2b |
 | G17 | I tavoli nascosti sono mobili veri | Omessi, come in 2D |
 | G18 | I banchetti non hanno orario né ciclo d'arrivo | Figure solo dalle prenotazioni collegate e sedute, altrimenti il cartello |
-| G19 | Tavoli uniti salvati lontani | Disegnati come in 2D: un primario per la somma dei coperti |
+| G19 | Tavoli uniti | Sempre come in 2D, vicini o lontani: un primario per la somma dei coperti, col corpo dai posti (decisione di Tina, 4 ottobre) |
 | G20 | Chiosco in trappola dopo un crash | Il chrome lo chiede la pagina con `onImmersive`: smontata lei, torna la navigazione |
 | G21 | Interruttore o entitlement, se Sympotia vende la vista 3D | Interruttore operativo ora; un entitlement seguirebbe il modello delle recensioni, chiuso in caso d'errore |
 | G22 | Clone vecchio | `git fetch` prima di tutto, poi migration e ancore: è già successo (§2) |
@@ -1206,13 +1237,14 @@ sala in FloorPlan (`${dsIconButton} bg-[var(--ds-action-bg)]`), disegnato bianco
 `salacucina.json` scrive «Sala &amp; Cucina», che esce così a video: tutti e due fuori
 perimetro. `dist/` è condiviso fra `vite build` e i test API: mai in parallelo.
 
-**Da decidere con Tina: il pieno dei segnaposto posati.** Uno strumento col segnaposto
+**Il pieno dei segnaposto posati: deciso il 3 ottobre.** Uno strumento col segnaposto
 già sulla piantina usa `TOOL_BUTTON_ON`, come chiedeva la specifica; ma quel pieno vuol
 dire «modalità accesa» per «Sposta tavoli» e «Modifica tavoli», e a segnaposto posati
 (lo stato normale) chi modifica vede tre bottoni pieni accanto ai due delle modalità,
 anche a modalità spente. L'alternativa è lasciarli su `EDIT_ACTION_QUIET` e segnare il
 posato con un indizio più piccolo (un segno di spunta, o l'etichetta che cambia, come già
-fa). Resta com'è finché Tina non sceglie.
+fa). Tina, il 3 ottobre, ha scelto di tenere il pieno: lo strumento di un segnaposto già
+posato resta su `TOOL_BUTTON_ON`.
 
 **«Pass» o «Passe».** Nel resto dell'app la postazione si chiama «Passe»
 (`passe_enabled`, Impostazioni → Sala e cucina → Passe). «Pass» è il testo approvato per
@@ -1222,7 +1254,10 @@ il segnaposto e resta finché Tina non dice altrimenti: è una riga per lingua.
 tenant ha un fuso suo (`tenant.timezone`), che il frontend tiene come fuso di sessione
 (`sessionTimeZone()` in `utils/displayTime.ts`), e il server ha `resolveService(at, tz)`
 con Roma di default. La strada coerente è un helper col fuso come parametro esplicito, a
-cui il frontend passa quello di sessione; per Vecchio Frantoio non cambia niente.
+cui il frontend passa quello di sessione; per Vecchio Frantoio non cambia niente. Fatto
+così in PR2a: `currentServiceInTz` e `serviceDayInTz` in `utils/reservationTime.ts` col fuso
+esplicito, `currentService` e `serviceDayOf` in `utils/displayTime.ts` sul fuso di sessione
+(§6).
 
 **La revisione avversaria.** Accolti: M1, con lo schermo intero su `documentElement`
 (modali e toast restano visibili) e il chrome via `onImmersive` (un crash rende la

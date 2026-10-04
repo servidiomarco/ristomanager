@@ -39,6 +39,11 @@ export interface Room {
   width: number;
   height: number;
   is_closed?: boolean;
+  /** 'INDOOR' / 'OUTDOOR', o null per una sala mai classificata (rooms.location:
+   *  dentro o fuori, la zona che l'agente vocale usa per le preferenze). GET
+   *  /rooms la manda da sempre, ma il tipo non l'aveva: si legge col confronto
+   *  esatto, mai come stringa certa. */
+  location?: string | null;
 }
 
 export interface Dish {
@@ -961,6 +966,11 @@ export interface Toast {
 export enum ViewState {
   DASHBOARD = 'DASHBOARD',
   FLOOR_PLAN = 'FLOOR_PLAN',
+  // Sala dal vivo: la sala in 3D, stesso permesso di Sale & Tavoli. Subito
+  // dopo FLOOR_PLAN perché l'ordine dell'enum è quello di getAccessibleViews()
+  // e della scelta della pagina di partenza; non è mai il ripiego [0], perché
+  // chi la vede vede anche Sale & Tavoli, che viene prima.
+  SALA_DAL_VIVO = 'SALA_DAL_VIVO',
   MENU = 'MENU',
   BANCHETTI = 'BANCHETTI',
   COMANDE = 'COMANDE',

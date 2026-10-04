@@ -15,6 +15,9 @@ type Permission = string;
 const VIEW_PERMISSIONS: Record<ViewState, string> = {
   [ViewState.DASHBOARD]: 'dashboard:view',
   [ViewState.FLOOR_PLAN]: 'floorplan:view',
+  // Chi vede la piantina vede la sala in 3D; l'interruttore del ristorante
+  // (sala_dal_vivo_enabled) la nasconde in App, non qui.
+  [ViewState.SALA_DAL_VIVO]: 'floorplan:view',
   [ViewState.MENU]: 'menu:view',
   [ViewState.BANCHETTI]: 'menu:view',
   [ViewState.COMANDE]: 'orders:take',

@@ -36,8 +36,11 @@ export default defineConfig(({ mode }) => {
         manifest: false,
         injectManifest: {
           // La shell e basta: bundle con hash, index.html, icone e manifest.
-          // Fuori le pagine del backend (menu/prenota/ordina.html) e i
-          // locales: vivono sul dominio API, qui sono solo di passaggio.
+          // Fuori le pagine del backend (menu/prenota/ordina.html): vivono
+          // sul dominio API, qui sono solo di passaggio. Fuori anche i
+          // locales: la SPA li legge da qui (/locales/…), ma tutte le
+          // namespace su ogni dispositivo sarebbero un peso; quelle che un
+          // dispositivo apre le tiene la rotta dei dizionari di pwa/sw.js.
           globPatterns: [
             'assets/*.{js,css}',
             'index.html',
@@ -78,6 +81,32 @@ export default defineConfig(({ mode }) => {
         alias: {
           '@': path.resolve(__dirname, '.'),
         }
-      }
+      },
+      build: {
+        rollupOptions: {
+          output: {
+            // Solo three in un chunk suo: non importa niente dal bundle
+            // principale, quindi il suo hash cambia solo quando si aggiorna la
+            // libreria, e la cache dei dispositivi lo tiene fra un deploy e
+            // l'altro. Anche three/addons (MapControls) finisce qui. R3F no:
+            // importa React dal chunk d'ingresso, e col suo hash cambierebbe a
+            // ogni deploy; viaggia col chunk della scena.
+            manualChunks: (id) => (/[\\/]node_modules[\\/]three[\\/]/.test(id) ? 'three' : undefined),
+            // La Sala dal vivo in assets/sala3d/: il glob del precache
+            // ('assets/*.{js,css}', qui sopra) non scende nelle sottocartelle,
+            // così palmari e schermi di cucina non la scaricano mai; la serve
+            // a chi apre la pagina la rotta CacheFirst di pwa/sw.js. Oltre a
+            // three e ai chunk SalaVivo*, anche un eventuale chunk comune fatto
+            // solo di moduli della Sala dal vivo: col nome di un modulo
+            // qualsiasi, finirebbe nel precache di tutti.
+            chunkFileNames: (chunk) =>
+              chunk.name === 'three'
+                || chunk.name.startsWith('SalaVivo')
+                || (chunk.moduleIds.length > 0 && chunk.moduleIds.every(id => /[\\/]components[\\/]salaVivo[\\/]/.test(id)))
+                ? 'assets/sala3d/[name]-[hash].js'
+                : 'assets/[name]-[hash].js',
+          },
+        },
+      },
     };
 });
