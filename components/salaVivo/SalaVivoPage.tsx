@@ -531,17 +531,17 @@ const SalaVivoPage: React.FC<SalaVivoPageProps> = ({
 
   return (
     <div className={pinned ? ROOT_PINNED : ROOT}>
-      {/* Il riassunto sta sotto il titolo; sul telefono su una riga sua, a
-          tutta larghezza: accanto ai quattro bottoni gli resterebbero 120 px,
-          e «in arrivo» e «all'ingresso» sparirebbero nei puntini. Due copie
-          e mai visibili insieme: lo screen reader ne legge una. */}
+      {/* Sul telefono due righe: titolo e riassunto sopra, a tutta
+          larghezza, i bottoni sotto (decisione di Tina, 4 ottobre). Accanto
+          ai bottoni il titolo finiva in «Sala dal v…» e il riassunto perdeva
+          «in arrivo» e «all'ingresso». Da sm in su una riga sola. */}
       <div className="flex-shrink-0">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
           <div className="min-w-0">
             <h1 className="truncate text-[22px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)] sm:text-[26px]">
               {t('title')}
             </h1>
-            <p className="mt-0.5 truncate text-[15px] tabular-nums text-[var(--ds-text-secondary)] max-sm:hidden">
+            <p className="mt-0.5 truncate text-[15px] tabular-nums text-[var(--ds-text-secondary)]">
               {summaryText}
             </p>
           </div>
@@ -561,10 +561,12 @@ const SalaVivoPage: React.FC<SalaVivoPageProps> = ({
               {/* «Nomi degli ospiti», un interruttore come la puntina: il nome
                   resta quello e lo stato lo dice aria-pressed; acceso, il title
                   dice come spegnerlo. Solo con la sala in 3D, come «Centra»: i
-                  nomi stanno sulle etichette dei tavoli. C'è anche a schermo
-                  fissato, dove svanisce con gli altri bottoni e torna al primo
-                  tocco. */}
-              {canvasOn && (
+                  nomi stanno sulle etichette dei tavoli. A schermo fissato non
+                  c'è (decisione di Tina, 4 ottobre): chi passa davanti allo
+                  schermo dell'ingresso non deve poter accendere i nomi. Resta
+                  quello che era impostato prima di fissare; per cambiarlo si
+                  sblocca. */}
+              {canvasOn && !pinned && (
                 <button
                   type="button"
                   onClick={toggleNames}
@@ -607,9 +609,6 @@ const SalaVivoPage: React.FC<SalaVivoPageProps> = ({
             <LivePill connected={isConnected} time={currentTime} variant="dot" className="mx-1 md:hidden" />
           </div>
         </div>
-        <p className="mt-0.5 truncate text-[15px] tabular-nums text-[var(--ds-text-secondary)] sm:hidden">
-          {summaryText}
-        </p>
       </div>
 
       {loading ? (

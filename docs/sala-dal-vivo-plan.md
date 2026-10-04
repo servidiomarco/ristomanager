@@ -804,7 +804,7 @@ I tipi sono in `components/salaVivo/types.ts`: `FigureSlot`, `PartyModel`,
   pastiglia «+N» dice quanti non sono disegnati. Il piano mandava
   all'ingresso chi ha un tavolo inutilizzabile: un seduto su un tavolo nascosto ora sta
   lì, e il test dei tavoli nascosti cambia di conseguenza.
-- **Un banchetto che trabocca** (da confermare, §13): una tavolata collegata a un
+- **Un banchetto che trabocca** (confermato da Tina il 4 ottobre): una tavolata collegata a un
   banchetto che non entra nel suo tavolo prende gli altri tavoli disegnati del banchetto,
   nella stessa sala e senza prenotazioni loro in tutto il turno (anche quelle che la piantina
   non colora ancora: un tavolo prenotato per le 20:30 è preso anche alle 19:59, e chi
@@ -821,10 +821,10 @@ I tipi sono in `components/salaVivo/types.ts`: `FigureSlot`, `PartyModel`,
 - **«Nomi degli ospiti»** (`localStorage['salaVivo.names'] === '1'`), spenti di default.
   Spenti, nel modello non entra nessun nome di persona: `PartyModel.name` e
   `TableModel.caption` ne restano liberi. Il bottone (`Tag`, 44 px, `aria-pressed`, pieno
-  da acceso come la puntina) sta prima della puntina, insieme alla sala in 3D; c'è anche a
-  schermo fissato, dove svanisce con gli altri (da confermare, §13).
-- **Le sedie accese** di un tavolo dove siede qualcuno sono quelle occupate (da
-  confermare, §13). Coincidono con la 2D tranne in tre casi: la sedia che il bambino del
+  da acceso come la puntina) sta prima della puntina, insieme alla sala in 3D; a schermo
+  fissato non c'è (decisione di Tina, 4 ottobre): chi passa davanti non può accendere i nomi,
+  e resta la scelta fatta prima di fissare.
+- **Le sedie accese** di un tavolo dove siede qualcuno sono quelle occupate. Coincidono con la 2D tranne in tre casi: la sedia che il bambino del
   seggiolone lascia per la testa del tavolo (vuota, resta spenta), i tavoli dove trabocca
   un banchetto (si accendono quelle usate) e il tondo ridistribuito. Dove non siede
   nessuno, come in 2D.
@@ -985,8 +985,9 @@ Il verde acqua `--ds-cat-1` resta fuori, troppo vicino a `uscita`.
 chiave di ReservationList, riletti a ogni cambio di servizio: uno schermo fissato non si
 rismonta mai. Una risposta che non è un array vale `[]`, e restano «Cane» e «Seggiolone»,
 che valgono sempre. Il riassunto aggiunge « · 2 all'ingresso» solo se qualcuno aspetta, e
-così l'etichetta del palco per lo screen reader; sul telefono il riassunto ha una riga sua a
-tutta larghezza (accanto ai quattro bottoni gli restavano 120 px). Fra le linguette c'è
+così l'etichetta del palco per lo screen reader. Sul telefono la testata va su due righe
+(decisione di Tina, 4 ottobre): titolo e riassunto sopra a tutta larghezza, i bottoni sotto;
+da sm in su una riga sola. Fra le linguette c'è
 anche una sala chiusa con qualcuno a tavola, all'ingresso o in arrivo (`roomsToShow`): la
 testata somma tutte le sale, e ogni persona che conta deve stare in una sala che si apre.
 
@@ -1423,32 +1424,20 @@ così in PR2a: `currentServiceInTz` e `serviceDayInTz` in `utils/reservationTime
 esplicito, `currentService` e `serviceDayOf` in `utils/displayTime.ts` sul fuso di sessione
 (§6).
 
-**Cinque scelte di PR2c da confermare con Tina** (§8).
-- *Il banchetto che trabocca.* Col gruppo unico del piano, di più famiglie prenotate sullo
-  stesso banchetto ne restava seduta una sola; qui ognuna siede al suo tavolo, e solo chi
-  non ci entra prende i tavoli del banchetto senza prenotazioni sue nel turno. È una
-  tavolata sparsa su più tavoli disegnati: §1.3 lo esclude per le unioni, e se Tina lo
-  vuole escluso anche per i banchetti, chi non entra resta al suo tavolo (teste, in piedi).
-  Tornare indietro è una riga: `spillTableIds` restituisce `[]`.
-- *Il bottone dei nomi a schermo fissato.* C'è, e svanisce con gli altri: chi sta
-  all'accoglienza accende i nomi senza sbloccare lo schermo. L'alternativa è nasconderlo da
-  fissato, come gli avvisi della sala e le scorciatoie di modifica, perché chi passa davanti
-  a uno schermo pubblico non li possa accendere; la scelta salvata varrebbe comunque. Ma la
-  puntina resta a un tocco e sblocca l'app intera (G3): nasconderlo aggiunge un passo, non
-  una protezione. Cambiarlo è una condizione nella pagina.
+**Cinque scelte di PR2c, decise con Tina il 4 ottobre** (§8).
+- *Il banchetto che trabocca:* sì. Ognuna delle famiglie di un banchetto siede al suo
+  tavolo, e solo chi non ci entra prende i tavoli del banchetto senza prenotazioni sue nel
+  turno. Tornare indietro è una riga: `spillTableIds` restituisce `[]`.
+- *Il bottone dei nomi a schermo fissato:* nascosto. Chi passa davanti a uno schermo
+  pubblico non accende i nomi; vale la scelta fatta prima di fissare, e per cambiarla si
+  sblocca.
 - *Le sedie accese dove siede qualcuno* sono quelle occupate. Tenere la 2D esatta vorrebbe
   dire una sedia accesa e vuota accanto al bambino seduto in testa sul seggiolone, e sedie
   spente sotto chi siede ai tavoli di un banchetto che trabocca.
-- *Il seggiolone dall'icona.* Ogni nota rapida con l'icona che il selettore chiama «Bambino
-  / Seggiolone» dà il seggiolone, e con 0 bambini segnati fa di un adulto il bambino: una
-  nota «Menu bambini» con quell'icona disegnerebbe un seggiolone che non c'è. L'alternativa
-  è il seggiolone solo dalle etichette con «seggiolon», e l'icona da sola vuol dire «c'è un
-  bambino».
-- *La testata sul telefono.* Con quattro bottoni, a 390 px «Sala dal vivo» resta tagliata
-  («Sala dal v…»); il riassunto ora ha una riga sua e si legge intero. Per il titolo serve
-  un bottone in meno sul telefono (lo schermo intero, che l'iPhone già non ha; con `max-sm:`
-  sparirebbe anche da un tablet Android da 8" in verticale, largo 600 px) o una testata su
-  due righe.
+- *Il seggiolone dall'icona:* resta così. Ogni nota rapida con l'icona «Bambino /
+  Seggiolone» dà il seggiolone; oggi l'unica nota con quell'icona è «Seggiolone».
+- *La testata sul telefono:* due righe sotto sm, titolo e riassunto sopra, i bottoni sotto.
+  Nessun bottone tolto.
 
 **La revisione avversaria.** Accolti: M1, con lo schermo intero su `documentElement`
 (modali e toast restano visibili) e il chrome via `onImmersive` (un crash rende la
