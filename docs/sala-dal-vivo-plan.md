@@ -13,9 +13,9 @@ nell'ordine in cui servono: i punti fermi della sala (da dove si entra, da dove 
 piatti, dove si accoglie), una pagina che carichi three.js solo su chi la apre, e un
 regista che trasformi un cambio di stato in un movimento.
 
-**Dove siamo:** PR1 (segnaposto di sala e interruttore per ristorante, spento di default)
-e PR2a (fondamenta, niente di visibile) sono fatte; PR2b, la pagina con la sala in 3D, è
-in corso. Lo stato di ogni fase è in §3. Il documento è la specifica del piano
+**Dove siamo:** PR1 (segnaposto di sala e interruttore per ristorante, spento di default),
+PR2a (fondamenta, niente di visibile) e PR2b (la pagina con la sala in 3D) sono fatte;
+PR2c, gli ospiti a tavola, è in corso. Lo stato di ogni fase è in §3. Il documento è la specifica del piano
 approvato, revisione avversaria compresa, scritta su un clone del 20 settembre (`78336bf`)
 e riallineata a `main` del 3 ottobre (`1f7c511`), 153 PR dopo (§2). Ne tiene tutto quello
 che non dipende dalle righe (formule, soglie, tempi, codice di configurazione, seed e
@@ -55,6 +55,21 @@ nome. Ogni PR ricontrolla le ancore prima di scrivere.
 | Stack e test | `three ~0.186.1`, `@react-three/fiber ^9.8.1`, `@types/three ~0.186.0`, in **devDependencies**: l'immagine dell'API installa con `npm ci --only=production` e resta leggera. Niente drei: `MapControls` da `three/addons`. Test API in `tests/api/`, logica pura in `tests/unit/` con config e passo CI suoi |
 | Caricamento | Due `React.lazy` annidati: App → pagina, pagina → canvas dopo una sonda WebGL2. I chunk 3D in `assets/sala3d/`, dove il glob del precache (`assets/*.{js,css}`) non arriva, serviti da una rotta CacheFirst |
 
+### 1.3 Di Tina, il 4 ottobre (dopo la revisione di PR2b)
+
+1. **Un'unione si disegna sempre come in 2D:** un tavolo solo, il primario al suo posto
+   col nome unito e i posti sommati; i secondari non si disegnano. L'editor non lascia
+   posare due tavoli a contatto, e ognuno al suo posto lasciava una tavolata divisa da un
+   corridoio che in sala non c'è. Da PR2c una tavolata siede al tavolo unito e non si
+   sparge mai sui tavoli fisici del gruppo (§7.2, §8).
+2. **Sulle linguette, le persone a tavola adesso** in quella sala, non i coperti: la
+   capienza non cambia durante il servizio, e uno schermo all'ingresso deve dire chi c'è.
+   Da PR2c il numero viene dalla stessa regola di presenza delle figure: una linguetta non
+   può dire 4 con 6 figure sedute (§8).
+3. **La rotta dei dizionari resta in PR2b:** la `NetworkFirst` di `pwa/sw.js` sulla cache
+   `locales`, per tutte le viste. A linea caduta l'app riparte con le parole e non con le
+   chiavi grezze, e un tablet all'ingresso apre la sala anche dopo un'interruzione (G9).
+
 ---
 
 ## 2. Da dove si parte
@@ -85,8 +100,8 @@ oggi lo spingerebbe anche sugli schermi di cucina. **E su main, dopo il piano:**
 |---|---|---|---|---|
 | PR1 | `claude/segnaposto-di-sala` | Segnaposto: tabella, route, eventi, strumenti 2D. Interruttore e card in Impostazioni | Railway prima | fatta |
 | PR2a | `claude/sala-dal-vivo-fondamenta` | Geometria del glifo condivisa, servizio in corso, test unitari. Niente di visibile | solo frontend | fatta |
-| PR2b | `claude/sala-dal-vivo-pagina` | Vista, chiosco, caricamento a richiesta e PWA; sala, tavoli e segnaposto in 3D. **Collaudo sull'hardware dopo il merge** | Railway prima (enum `ViewState`) | **in corso** |
-| PR2c | `claude/sala-dal-vivo-ospiti` | Ospiti statici con bambini e cane, cartelli, nomi spenti di default | solo frontend | da fare |
+| PR2b | `claude/sala-dal-vivo-pagina` | Vista, chiosco, caricamento a richiesta e PWA; sala, tavoli e segnaposto in 3D. **Collaudo sull'hardware dopo il merge** | Railway prima (enum `ViewState`) | fatta |
+| PR2c | `claude/sala-dal-vivo-ospiti` | Ospiti statici con bambini e cane, cartelli, nomi spenti di default | solo frontend | **in corso** |
 | PR3 | `claude/sala-dal-vivo-animazioni` | Regista, accompagnamenti, camminata, camerieri d'ambiente, striscia, «Segui il servizio»; `/staff/presence` come Personale | Railway prima | da fare |
 
 Ogni PR parte da `origin/main` dopo `git fetch origin`, ricontrollando ancore e ultima
@@ -425,7 +440,7 @@ con il loro passo in CI».
 
 ---
 
-## 7. PR2b — La pagina, con sala e tavoli in 3D (in corso)
+## 7. PR2b — La pagina, con sala e tavoli in 3D (fatta)
 
 ### 7.1 Build, vista, App e pagina
 
@@ -714,7 +729,7 @@ Il dettaglio, per chi implementa:
 |---|---|---|
 | `nav.items.liveFloor` / `title` · `lazy.chunkError` | Sala dal vivo · La pagina non si è caricata. | Live floor · The page didn't load. |
 | `summary` | {{seated}} a tavola · {{arriving}} in arrivo | {{seated}} seated · {{arriving}} arriving |
-| `summaryLobby` / `stageLabel` | {{count}} all'ingresso / {{room}}: {{seated}} a tavola, {{arriving}} in arrivo | {{count}} at the entrance / {{room}}: {{seated}} seated, {{arriving}} arriving |
+| `stageLabel` (`summaryLobby` arriva con PR2c, §8) | {{room}}: {{seated}} a tavola, {{arriving}} in arrivo | {{room}}: {{seated}} seated, {{arriving}} arriving |
 | `recenter` / `loading3d` / `noTables` | Centra la sala / Preparo la vista 3D… / Nessun tavolo in questa sala. | Recenter / Preparing the 3D view… / No tables in this room. |
 | `fullscreen` / `exitFullscreen` | Schermo intero / Esci da schermo intero | Full screen / Exit full screen |
 | `pin` / `unpin` / `pinnedToast` | Fissa su questo schermo / Sblocca questo schermo / All'avvio questo schermo apre la Sala dal vivo | Pin to this screen / Unpin this screen / On start this screen opens the live floor |
@@ -757,98 +772,248 @@ PR2c. Se la TV non tiene 30 fps, PR2c parte con la modalità leggera lì.
 
 ---
 
-## 8. PR2c — Ospiti a tavola, statici (da fare)
+## 8. PR2c — Ospiti a tavola, statici (in corso)
+
+Gli ospiti seduti dove sono davvero, ancora fermi: la camminata è PR3. Chi è a tavola si
+vede seduto, una figura per persona: adulti e bambini (più piccoli) alternati sulle sedie
+che la piantina accende, il cane sdraiato accanto al padrone, il seggiolone per il più
+piccolo. Chi è segnato arrivato senza un tavolo aspetta in piedi all'ingresso, l'hostess
+sta all'accoglienza, i tavoli liberi hanno i cartellini «Riservato · 20:30» ed «Evento».
+I nomi degli ospiti restano spenti finché non li si accende su quel dispositivo.
+
+I tipi sono in `components/salaVivo/types.ts`: `FigureSlot`, `PartyModel`,
+`ChairModel.high`, `TableModel.extraChairs` / `sign` / `caption`, `ServiceSummary.lobby`,
+`RoomModel.parties` / `figures`, `SceneModel.mainRoomId`, e fra gli ingressi del modello
+`notePresets`, `showNames` e `copy`. Le regole che reggono il resto:
+
+- **Un'unione è un tavolo solo** (§1.3): la tavolata siede al primario disegnato, sulle sue
+  sedie sommate, e non si sparge mai sui tavoli fisici del gruppo.
+- **Una regola di presenza sola** (`model/presence.ts`) fa le figure e tutti i numeri:
+  `seated`, `arriving` e `lobby` di sale e testata vengono solo da `derivePresence`. Un
+  test lo inchioda: in ogni sala `summary.seated` è il numero delle figure di persona ai
+  tavoli, e quelle all'ingresso sono `min(6, summary.lobby)`.
+- **La presenza è per tavolo disegnato**, come il colore: c'è la seduta più recente del
+  tavolo (per orario, poi id), finché non passano 45 minuti dalla fine prevista. Una seduta
+  più vecchia sullo stesso tavolo, o la più recente oltre la grazia, non ha figure, non si
+  conta e non va all'ingresso: il tavolo resta `uscita`.
+- **L'ingresso** è di chi è vivo e seduto senza un tavolo da disegnare (nessuno, uno
+  nascosto per il turno, uno sotto un primario nascosto), fino a 60 minuti dall'ora
+  prenotata. Aspetta nella sala di quel tavolo se c'è, altrimenti nella **sala
+  principale**: la prima di `sortRooms` aperta e con l'ingresso posato, se no la prima
+  aperta, se no la prima. Se ne disegnano al più 6, si contano tutti, e sopra l'ultimo una
+  pastiglia «+N» dice quanti non sono disegnati. Il piano mandava
+  all'ingresso chi ha un tavolo inutilizzabile: un seduto su un tavolo nascosto ora sta
+  lì, e il test dei tavoli nascosti cambia di conseguenza.
+- **Un banchetto che trabocca** (confermato da Tina il 4 ottobre): una tavolata collegata a un
+  banchetto che non entra nel suo tavolo prende gli altri tavoli disegnati del banchetto,
+  nella stessa sala e senza prenotazioni loro in tutto il turno (anche quelle che la piantina
+  non colora ancora: un tavolo prenotato per le 20:30 è preso anche alle 19:59, e chi
+  trabocca non si sposta allo scoccare del minuto), nell'ordine del banchetto. Il piano faceva
+  un gruppo solo di tutto il banchetto (`group(T) ∪ table_ids`): con più famiglie
+  prenotate sullo stesso banchetto ne restava seduta una sola.
+- **Cartellini.** «Evento» batte «Riservato», come il colore del tavolo fa già vincere il
+  banchetto. «Riservato · HH:MM» segue la prenotazione dell'anello o del colore `attesa`
+  se è nella finestra, se no la più vicina all'istante fra adesso − 120 e adesso + 90
+  minuti. Nessun cartellino dove siede qualcuno.
+- **La seconda riga dell'etichetta:** il testo del cartellino, oppure, a nomi accesi, il
+  nome della tavolata seduta o del banchetto; al più 24 caratteri, «…» compreso. I testi
+  tradotti li dà la pagina (`SceneCopy`): il modello non conosce i18n.
+- **«Nomi degli ospiti»** (`localStorage['salaVivo.names'] === '1'`), spenti di default.
+  Spenti, nel modello non entra nessun nome di persona: `PartyModel.name` e
+  `TableModel.caption` ne restano liberi. Il bottone (`Tag`, 44 px, `aria-pressed`, pieno
+  da acceso come la puntina) sta prima della puntina, insieme alla sala in 3D; a schermo
+  fissato non c'è (decisione di Tina, 4 ottobre): chi passa davanti non può accendere i nomi,
+  e resta la scelta fatta prima di fissare.
+- **Le sedie accese** di un tavolo dove siede qualcuno sono quelle occupate. Coincidono con la 2D tranne in tre casi: la sedia che il bambino del
+  seggiolone lascia per la testa del tavolo (vuota, resta spenta), i tavoli dove trabocca
+  un banchetto (si accendono quelle usate) e il tondo ridistribuito. Dove non siede
+  nessuno, come in 2D.
+
+Il dettaglio, per chi implementa. Il modello è TypeScript puro: niente DOM, three, rete né
+`Date.now()`, e ogni campo si legge in difesa.
 
 ```
-inService(r) = |r.reservation_time − adesso| < 30 h  e  serviceDayOf(r.reservation_time) = servizio
-live(r)      = inService(r) · stato ∉ {CANCELLED, DECLINED, NO_SHOW} · arrival_status ≠ DEPARTED
-group(T)     = l'unione del turno che contiene T, altrimenti [T]; più i tavoli del banchetto di r
-present(r)   = isSeated(r) · tavolo utilizzabile (esiste, non nascosto, sala esistente)
-               · la live seduta più recente del gruppo (reservation_time, poi id)
-               · adesso < inizio + durata effettiva + 45 min      // DEPARTED spesso mai impostato
-lobby(r)     = isSeated(r) · tavolo assente o inutilizzabile · adesso < inizio + 60 min (max 6)
-sign(T)      = nessun presente: prossima WAITING del turno fra adesso − 120 e + 90 minuti
-               → «Riservato · HH:MM»; banchetto del servizio (QUOTE o CONFIRMED) → «Evento»
-conta(r, etichetta del preset 'dog' o 'baby'), vince la prima regola che trova:
-  1. note_selections con quell'etichetta (trim, maiuscole indifferenti): Σ max(1, quantity)
-  2. nelle note «2× Cane»: /(\d+)\s*[×x]\s*LABEL(?=[^\p{L}\p{N}]|$)/iu → N
-  3. la parola intera: /(^|[^\p{L}\p{N}])LABEL([^\p{L}\p{N}]|$)/iu → 1  // «canederli» ≠ «cane»
-ospiti = max(1, ⌊guests⌋); bambini = clamp(⌊children⌋, 0, ospiti); adulti = ospiti − bambini
-cani = min(2, conta(cane)); seggiolone senza bambini e con ≥ 2 adulti → 1 bambino
-sedie = litChairIndices(forma, coperti, min(rimasti, coperti)) per tavolo, da r.table_id in poi
+party.ts       etichette: dog = le label dei preset con icon 'dog' (NFC, trim, non vuote, senza doppioni
+               a maiuscole indifferenti, nell'ordine dei preset), poi 'Cane'; baby = icon 'baby', poi
+               'Seggiolone'. Etichette e non id: gli id cambiano a ogni salvataggio. «Cane» e
+               «Seggiolone» valgono sempre: note e scelte portano l'etichetta di quando la
+               prenotazione è stata salvata, e un preset rinominato dopo non toglie il cane a quelle
+               conta(r, etichette), vince la prima regola che dà più di zero (le note riportano anche
+               le scelte strutturate come «2× X»: se la 1 non vincesse, una scelta conterebbe due volte)
+                 1. note_selections, se è un array: Σ max(1, ⌊quantity⌋) delle voci con quella label
+                    (trim, minuscole); quantity non finita = 1
+                 2. notes: /(\d+)\s*[×x]\s*(?:ALT)(?=[^\p{L}\p{M}\p{N}]|$)/giu → Σ dei numeri
+                 3. notes: /(?:^|[^\p{L}\p{M}\p{N}])(?:ALT)(?=[^\p{L}\p{M}\p{N}]|$)/iu → 1   // «canederli» ≠ «cane»
+               ALT = le etichette escapate, gli spazi interni come \s+, la più lunga per prima (così
+               «2× Cane piccolo» non è anche «Cane»); niente lookbehind (iPadOS < 16.4). Note ed
+               etichette in NFC, e un segno staccato (\p{M}, l'accento di una «è» in NFD) non fa da
+               confine: «Canè» non è «Cane»
+               ospiti = max(1, ⌊guests⌋); bambini = clamp(⌊children⌋, 0, ospiti); adulti = ospiti − bambini
+               cani = min(2, conta(dog)); seggiolone = conta(baby) > 0; col seggiolone, 0 bambini e
+               almeno 2 adulti, un adulto diventa bambino
+presence.ts    presenti = per tavolo disegnato, status.present && status.active
+               in arrivo = per tavolo disegnato, status.pulse && status.active
+               ingresso = isLiveParty && isSeated, tavolo nullo o in nessun groupIds disegnato,
+                          adesso < inizio + 60 min; sala = quella del tavolo, se no la principale
+               summaryFor(sala) = Σ persone (max(1, ⌊guests⌋), al più 150) di presenti, in arrivo e
+               ingresso. Il tetto vale per figure e numeri insieme: una prenotazione vera così grande
+               è un banchetto su più tavoli, e un numero sbagliato (500) metterebbe 344k triangoli
+               attorno a un tavolo; a 150 sono ~104k, il budget di una sala
+               tableStatus esporta withinGrace(r, adesso) e ci calcola present, senza cambiare
+               comportamento; presence importa da tableStatus, mai il contrario
+placement.ts   sedie: per tavolo, il proprio e poi quelli del banchetto, take = min(rimasti, posti);
+               litChairIndices(forma, posti, take), i membri in ordine d'anello (orario come sulla
+               piantina, dalla sedia d'indice più basso); adulti e bambini alternati:
+               2A2K → a0 k0 a1 k1, 2A1K → a0 k0 a1, 0A3K → k0 k1 k2, 3A1K → a0 k0 a1 a2
+               oltre, solo al tavolo proprio: tondo → l'anello ridistribuito allo stesso raggio R,
+               N = min(posti + rimasti, max(posti, ⌊2πR / 0,48⌋)), sedia 0 a ore 12 e poi in senso
+               orario, tutte occupate; rettangolo → le teste a (±(L/2 + 0,30), 0), prima la destra,
+               tranne una che finirebbe nel muro (a meno di 0,3 m dal bordo del pavimento)
+               ancora oltre: in piedi 0,55 m dietro le teste, poi dietro le sedie a giro attorno al
+               tavolo (dalla sedia d'indice più basso), 0,5 m più fuori a ogni giro: ai capi chi sta
+               in piedi non copre nessuno, dietro una fila di sedute sembrava una seconda fila di
+               busti. Un posto nel muro si salta; dopo un giro intero nel muro chi resta (solo una
+               comitiva enorme) sta sul bordo del pavimento
+               seggiolone: rettangolo → il bambino più piccolo su una sedia alta alla testa dal lato
+               del primo adulto (l'altra se quella è nel muro; nessuna testa libera → niente
+               seggiolone, siede su una sedia); tondo → la sua sedia diventa alta. Seduta a 0,58 m
+               (HIGH_CHAIR_SEAT_HEIGHT in geometry.ts): il bambino ha i polsi a 0,80 come gli
+               adulti e le cosce sotto il piano; a 0,75 sedeva sul tavolo. Solo al tavolo proprio,
+               mai all'ingresso
+               cane k accanto all'adulto k (se no al primo adulto, dall'altro lato; se no alla prima
+               persona): 0,45 m in fuori e 0,25 di lato verso l'esterno del tavolo, parallelo al
+               bordo col muso lontano dal padrone; dietro una sedia contro il muro, sul bordo
+               ingresso: griglia 2×3 dal lato della porta opposto all'accoglienza, file a 1,2 e 1,8 m
+               dentro, colonne a 0,9, 1,5 e 2,1 m dall'asse della porta, a 0,3 m dai bordi del
+               pavimento; in piedi, rivolti verso la sala; niente cani né seggioloni
+               hostess: una per sala, senza nome (il nome arriva con PR3, nella sala principale),
+               dietro il leggio per chi entra: 0,5 m oltre il leggio sulla linea porta → leggio
+               (presa lungo l'asse della sala più vicino), rivolta alla porta col leggio davanti, e
+               il piano del leggio girato verso di lei. Se porta e leggio coincidono, o quel posto
+               finisce nel muro, 0,5 m dal leggio verso la sala (inward). Dal muro più vicino al
+               leggio, come prima, un leggio a pari distanza da due muri la girava di spalle alla
+               porta per due pixel
+               tinta degli ospiti, per tavolata: j = ((imul(id, 2654435761) >>> 0) / 2³²) · 0,20;
+               i bambini j + 0,15
+               chiavi stabili r12:a0, r12:k1, r12:d0, host:3: PR3 fa camminare la stessa figura
+               dall'ingresso al tavolo
+signs.ts       «Riservato»: viva, non seduta, del turno, adesso − 120 ≤ t ≤ adesso + 90 min; vince
+               status.active se è nella finestra, se no la più vicina all'istante, poi la prima, poi
+               l'id più basso; HH:MM nel fuso del ristorante (timePart)
+               seconda riga: tavolo occupato → a nomi accesi il nome della tavolata, se no niente;
+               «Evento» → a nomi accesi il nome del banchetto, se no copy.event; «Riservato» →
+               copy.reserved(ora); taglio a 24 caratteri, «…» compreso
+sceneModel.ts  primo giro: sale, tavoli, stati e sedie della 2D; poi sala principale e presenza;
+               secondo giro: sedie e figure delle tavolate presenti, ingresso, hostess, cartellini e
+               seconde righe. L'inquadratura comprende sempre le sei caselle dell'ingresso e il posto
+               dell'hostess, anche vuoti: la camera non salta quando arriva qualcuno. Un tavolo è
+               libero per chi trabocca se nel turno non ha prenotazioni sue (del turno e non
+               annullate né rifiutate, anche no-show o andate via; o sedute e vive di un altro
+               turno), a qualunque ora: non il colore, che c'è solo da 30 minuti prima
+               roomsToShow(sale): le linguette, cioè le aperte e le chiuse con qualcuno a tavola,
+               all'ingresso o in arrivo; la somma delle sale mostrate è sempre la testata
 ```
 
-Una seduta più vecchia su un gruppo preso da una più recente non ha figure: senza
-`DEPARTED` resterebbe seduta sotto la nuova; dopo la grazia il tavolo resta `uscita` ma
-vuoto, e un banchetto senza sedute collegate ha solo il cartello. Etichette e non id,
-perché gli id dei preset cambiano a ogni salvataggio; niente lookbehind (iPadOS < 16.4).
-Chi non entra nelle sedie accese va sulle teste libere o sull'anello ridistribuito, poi
-in piedi; adulti e bambini alternati; il seggiolone porta il più piccolo su una testa
-accanto a un adulto; il cane sdraiato fuori dalla sedia del primo adulto; lobby a griglia
-2×3 all'ingresso. Un'hostess per sala con l'accoglienza, col nome nella sala principale.
+**Figure** (`scene/figures.ts`). Parti rigide condivise, composte per posa: busto
+`LatheGeometry` a 8 segmenti, dritto (il piano lo inclinava di 5°); testa icosaedro r 0,13;
+coscia, stinco, braccio e avambraccio a capsula, divisi a ginocchio e gomito, perché la gamba
+unica da 0,62 m del piano non si piega; chignon per l'hostess; il cane sdraiato in un pezzo
+solo (`mergeGeometries`, come la sedia; PR3 lo può dividere per farlo camminare), col muso
+lungo e le orecchie che pendono ai lati della testa (con un muso corto visto di punta e le
+orecchie dritte in cima sembrava un orsetto). I bambini
+sono le stesse parti a scala 0,62 attorno al bacino: siedono sulla seduta coi piedi che
+penzolano. Circa 690 triangoli a persona (150 persone ≈ 104k, sotto i 150k), circa 390 a
+cane. Bacino: seduto a (x; seduta + 0,07·s; z) più 0,02·s in avanti, in piedi a 0,92·s. Su
+una sedia da 0,45 m le cosce stanno orizzontali, gli stinchi a terra, gli avambracci a
+0,79–0,80 m sul bordo del piano (0,75), raccolti davanti al petto con le mani che si
+toccano, e la testa a ≈ 1,34 m; in piedi ≈ 1,74 m. Il piano voleva gli
+avambracci dritti in avanti (polso a (±0,18; 0,28; 0,42)): chi siede di schiena alla camera,
+vista dall'alto a 52°, sembrava a mani alzate, perché un braccio che va avanti sul tavolo
+sullo schermo sale. I gomiti seduti a ±0,19 (il piano ±0,22): col braccio arrivano a 0,24
+dall'asse, e due vicini sulle sedie a 52 cm restano a 4 cm invece di toccarsi. Le lunghezze
+dei pezzi non cambiano fra le pose: una geometria rigida per parte basta.
 
-**Figure.** Parti in codice (gambe e braccia a capsula, busto a `LatheGeometry`, testa a
-icosaedro, un cane a pezzi), bambini a scala 0,62, circa 550 triangoli a persona. **Una
-`InstancedMesh` per tipo di parte,** con tre trappole: `frustumCulled = false`, perché la
-bounding sphere non segue le matrici; `instanceColor` allocato prima del primo render, o
-il materiale ignora `setColorAt`; capacità Σ coperti × 1,25, rifatta al doppio se manca.
+| Giunto (sinistra/destra = ±x), dal bacino, a scala 1 | Seduto | In piedi |
+|---|---|---|
+| anca | (±0,09; 0; 0) | (±0,09; 0; 0) |
+| ginocchio | (±0,09; 0; 0,40) | (±0,09; −0,40; 0) |
+| caviglia | (±0,09; −0,45; 0,40) | (±0,09; −0,85; 0) |
+| spalla | (±0,21; 0,48; 0) | (±0,21; 0,48; 0) |
+| gomito | (±0,19; 0,27; 0,15) | (±0,23; 0,22; 0,02) |
+| polso | (±0,02; 0,28; 0,33) | (±0,23; −0,05; 0,05) |
+| base del busto · centro della testa · chignon | (0; −0,06; 0) · (0; 0,69; 0) · testa + (0; 0,07; −0,10) | uguali |
+
+**Istanze** (`scene/People.tsx`, `Signs.tsx`). Una `InstancedMesh` per tipo di parte (busto,
+testa, coscia, stinco, braccio, avambraccio, chignon, cane) più le ombre a macchia di chi sta
+in piedi e dei cani; un `MeshLambertMaterial` bianco per tutte, il colore per istanza. Su ogni
+mesh `frustumCulled = false` (la bounding sphere non segue le matrici) e `instanceColor`
+allocato nel costruttore, prima del primo render (o il materiale ignora `setColorAt`).
+Capacità dalla sala: persone ⌈Σ posti × 1,25⌉ + 7 (sei all'ingresso e l'hostess), cani
+max(4, quelli in scena); quando non basta si rifà a max(2 × capacità, ⌈count × 1,25⌉).
+Matrici e colori si riscrivono solo quando cambia la firma delle figure (tipo, posa, x, z,
+yaw, seduta e tinta, al millimetro) o il tema, poi `invalidate()`: niente `useFrame` in PR2c
+e niente allocazioni nei cicli. In `TablesLayer` le sedie in più e il seggiolone, una parte
+sua (seduta a 0,58 m, schienale a 0,90, quattro gambe e il poggiapiedi a 0,30, dove
+arrivano i piedi). Il cartellino è una tenda triangolare sul piano, 30 × 16 cm (12 di base),
+con le falde in `--tg-attesa-name` e la costa in `--tg-attesa-bg`, 1,3 volte più grande per
+«Evento» e senza scritte: le parole stanno nella seconda riga dell'etichetta, che si legge
+dalla porta. Al contrario (falde in `--tg-attesa-bg`) spariva sul piano, chiaro come lei per
+un tavolo libero, in attesa o in arrivo, e restava una lineetta.
+
+**Etichette** (`scene/TableLabels.tsx`). Sopra un tavolo vuoto a 1,2 m dal piano, sopra il
+cartellino; sopra un tavolo dove siede o sta qualcuno sul piano (+0,1 m), al centro, come il
+nome dentro il glifo della 2D: a 1,2 m la pastiglia copriva le teste di chi siede dall'altra
+parte, che dalla camera a 52° stanno nella stessa fascia dello schermo. Le etichette si
+disegnano sopra tutto (`depthTest` spento). Con la seconda riga il canvas è 464 × 128, il
+nome a 52 px, la seconda riga a 42 (40 prima dei puntini) e l'altezza minima a schermo 42 px:
+la seconda riga arriva a 13–14 px, come un testo dell'app (a 34 px su 40 stava a 10–11, un
+nome lungo a 7–8). La crescita massima vale in proporzione all'altezza minima, così la
+seconda riga resta leggibile fin dove si legge il nome a una riga. Quando all'ingresso
+aspettano più dei sei disegnati, sopra l'ultimo una pastiglia «+N» neutra (`--ds-surface`,
+`--ds-border-strong`, `--ds-text-secondary`): la testata li conta tutti, e alla porta si vede
+che ne mancano.
 
 | Ruolo (mai un colore di stato) | Token |
 |---|---|
-| Ospiti | `--ds-text-muted`, schiarito fino al 20 % verso `--ds-surface` per tavolata, bambini +15 %, teste al 35 %: pedine monocrome |
-| Hostess · camerieri (PR3) · cane · cartelli | `--ds-cat-6-solid`, argilla: una categoria, l'unica tinta fuori dalle famiglie di stato · `--ds-action-bg` col grembiule `--ds-surface` · `--ds-cat-6-text` · `--tg-attesa-bg` / `-name` |
+| Ospiti | il corpo da `--ds-text-muted` verso il chiaro della tinta della tavolata (0–20 %, bambini +15 %), la testa al 35 % verso il chiaro: pedine monocrome, niente incarnato. Il chiaro è `--ds-surface` col tema chiaro e `--ds-text-primary` con lo scuro: verso il pavimento scuro teste e bambini diventavano più scuri dei corpi e degli adulti |
+| Hostess · cane · cartellini | `--ds-cat-6-solid` (argilla) per corpo e chignon, la testa neutra degli ospiti (l'argilla schiarita diventerebbe un incarnato) · `--ds-cat-6-text` · falde `--tg-attesa-name`, costa `--tg-attesa-bg` |
+| Camerieri (PR3) | `--ds-action-bg` col grembiule `--ds-surface` |
 
-Il verde acqua `--ds-cat-1` resta fuori, troppo vicino a `uscita`. **«Nomi degli
-ospiti»** (`showNames`), per dispositivo e spento di default, mostra `toTitleCase` del
-nome tagliato a 24 caratteri. Testi: `reserved` «Riservato · {{time}}» («Reserved ·
-{{time}}»), `event` «Evento» («Event»). Test: `party` (4 ospiti, 2 bambini e «Cane» →
-2 + 2 + cane; «canederli» niente; «2× Cane» due; `note_selections` vince sul testo;
-seggiolone), `placement` (6 posti e 4 ospiti → sopra 0–1, sotto 0–1; alternanza; teste
-e anello; gruppi), `presence` (doppia seduta, grazia, pranzo vecchio a cena, lobby che
-scade), `signs`. Commit: «Sala dal vivo: gli ospiti a tavola, con bambini e cane dalle
-note» · «Sala dal vivo: cartelli riservato ed evento, nomi spenti di default».
+Il verde acqua `--ds-cat-1` resta fuori, troppo vicino a `uscita`.
 
-Il dettaglio, per chi implementa. File: `components/salaVivo/model/{party,presence,
-placement,signs}.ts`, `scene/{figures.ts,People.tsx,Signs.tsx}`, l'interruttore dei nomi
-e il conteggio della lobby nella pagina, le chiavi nuove di `salavivo.json`,
-`tests/unit/{party,presence,signs,placement}.test.ts`, catalogo e Registro.
+**Pagina.** I preset delle note con `swrConfig('reservationNotePresets', …)`, la stessa
+chiave di ReservationList, riletti a ogni cambio di servizio: uno schermo fissato non si
+rismonta mai. Una risposta che non è un array vale `[]`, e restano «Cane» e «Seggiolone»,
+che valgono sempre. Il riassunto aggiunge « · 2 all'ingresso» solo se qualcuno aspetta, e
+così l'etichetta del palco per lo screen reader. Sul telefono la testata va su due righe
+(decisione di Tina, 4 ottobre): titolo e riassunto sopra a tutta larghezza, i bottoni sotto;
+da sm in su una riga sola. Fra le linguette c'è
+anche una sala chiusa con qualcuno a tavola, all'ingresso o in arrivo (`roomsToShow`): la
+testata somma tutte le sale, e ogni persona che conta deve stare in una sala che si apre.
 
-```
-gruppi       group(T) = buildMergeGroups(merges).get(`${service.shift}:${T}`) ?? [T]
-             ∪ (r.banquet_menu_id → i table_ids di quel banchetto nel servizio)
-cartelli     «Evento» col nome del banchetto solo a nomi accesi
-etichette    dai preset delle note via swrConfig('reservationNotePresets', …), la stessa chiave
-             di ReservationList: dog = le etichette dei preset con icona 'dog' (ripiego ['Cane']),
-             baby = quelle con icona 'baby' (ripiego ['Seggiolone']). Le note riportano anche le
-             scelte strutturate come «2× X»: per questo la regola 1 vince sulle altre
-ordine       r.table_id, poi il resto del gruppo nell'ordine [primario, ...merged_ids] o i
-             table_ids del banchetto; per tavolo take = min(rimasti, seats_t)
-oltre        RECT/SQUARE: teste libere a (±(L/2 + 0,30), 0); CIRCLE: anello ridistribuito
-             (sedia 0 a ore 12); oltre ancora, in piedi ai punti d'approccio
-alternanza   anello attorno al baricentro; 2A2K → A K A K, 2A1K → A K A, 0A → tutti K
-seggiolone   il bambino più piccolo su una testa libera accanto a un adulto (RECT), seduta alta
-             0,75 m; CIRCLE: la stessa sedia
-cane         sdraiato fuori dalla sedia del primo adulto (+0,45 m in fuori, +0,25 m di lato),
-             parallelo al bordo
-lobby        griglia 2×3 accanto a entranceInside, passo 0,6 m: al massimo 6, il resto si conta
-accoglienza  hostSpot = segnaposto HOST_STAND (o il ripiego) + 0,5 m verso l'interno; un'hostess per
-             sala, col nome solo nella principale (la prima di sortRooms con un ENTRANCE), da PR3
-figure       gambe a capsula r 0,07 lunghe 0,62; busto LatheGeometry a 8 segmenti; braccia a
-             capsula r 0,055; testa icosaedro r 0,13, dettaglio 1; chignon dell'hostess,
-             grembiule e vassoio dei camerieri, pezzi del cane; bambini con le stesse parti a 0,62
-             ~550 triangoli a persona: 150 persone ≈ 85k
-             composePerson(pose, transform, out: Matrix4[]); seduti: bacino a 0,45 m, cosce in
-             avanti, busto inclinato di 5°
-istanze      capacità Σ coperti della sala × 1,25, più lobby e personale; si rifà al doppio, perché
-             count non supera la capacità. Il set si ricostruisce solo quando cambia la chiave
-             di disposizione del modello, senza allocare nel ciclo (vettori e matrici riusati)
-```
+| `salavivo.json` | it | en |
+|---|---|---|
+| `showNames` / `hideNames` | Nomi degli ospiti / Nascondi i nomi degli ospiti | Guest names / Hide guest names |
+| `reserved` / `event` | Riservato · {{time}} / Evento | Reserved · {{time}} / Event |
+| `summaryLobby` | {{count}} all'ingresso | {{count}} at the entrance |
+| `stageLabelLobby` | {{room}}: {{seated}} a tavola, {{arriving}} in arrivo, {{lobby}} all'ingresso | {{room}}: {{seated}} seated, {{arriving}} arriving, {{lobby}} at the entrance |
 
-Il punto del catalogo cresce così, con una riga nel Registro:
+**Test** (`tests/unit/`, ambiente node, fuso `Europe/Rome` dove conta l'ora):
 
-> Gli ospiti seduti ai tavoli: adulti, bambini più piccoli, il cane se è segnato nelle
-> note; cartelli «Riservato» e «Evento». I nomi degli ospiti restano nascosti finché non
-> li si accende su quel dispositivo.
+| Test | Cosa prova |
+|---|---|
+| `party` | 4 ospiti, 2 bambini e «Cane» → 2 + 2 e un cane; «canederli» niente; «2× Cane» due, «3x cane» due (il tetto); una `note_selections` («cane », 2) vince sulla nota specchiata «1× Cane» senza contare due volte; «Seggiolone» con 0 bambini e 3 ospiti → 2 adulti e un bambino, con 1 ospite → 1 adulto; bambini oltre gli ospiti tagliati, 0 ospiti → 1 adulto; etichette dai preset («Cani» con l'icona del cane conta, e «Cane» resta valido; un preset rinominato non toglie cane e seggiolone alle prenotazioni di prima); lettere accentate composte o con l'accento staccato («Canè» non è «Cane», «Bebè» combacia in NFC e NFD); metacaratteri presi alla lettera; «2× Cane piccolo» due, non quattro |
+| `presence` | doppia seduta (solo la più recente; l'altra né presente, né all'ingresso, né contata); la grazia (fine + 44 sì, + 46 no, colore sempre `uscita`); un pranzo delle 12:30 letto alle 19:00 no; ieri nemmeno vivo; ingresso (arrivato senza tavolo → sala principale, sparisce a inizio + 60; tavolo nascosto, o unito sotto un capofila nascosto → l'ingresso della sua sala; sala che non c'è → la principale); in arrivo; `summaryFor` conta persone; `mainRoomOf`; `roomsToShow` (una sala chiusa con qualcuno a tavola, all'ingresso o in arrivo ha la linguetta, e le sale mostrate sommano la testata) |
+| `placement` | 6 posti e 4 ospiti → sedie 0, 1, 3, 4, accese solo quelle; alternanza in ordine d'anello; gli stessi indici col tavolo ruotato; teste (6 su un 4 → due teste a ±(L/2 + 0,30); 7 → anche uno in piedi 0,55 m dietro la testa destra; 13 → dietro le teste, poi dietro le sedie, poi il secondo giro); contro i muri (la testa nel muro non c'è, i posti in piedi nel muro si saltano, il cane resta sul pavimento, una comitiva enorme sta sul bordo); l'anello del tondo (6 su un tondo da 4, oltre il passo in piedi); seggiolone (rettangolo e tondo, l'altra testa se quella è nel muro, nessuno senza teste); cani; unione; banchetto che trabocca (mai su un tavolo con prenotazioni sue, nemmeno se arrivano dopo l'inizio del colore: alle 19:59 e alle 20:00 la stessa sala; mai in un'altra sala); 500 ospiti → 150 figure e 150 a tavola, tutte nella sala; caselle dell'ingresso; hostess (dietro il leggio per chi entra, o verso la sala); tinte; chiavi |
+| `signs` | «Riservato · 20:30» dall'ora del ristorante; i bordi della finestra (+90 sì, +91 no, −120 sì); la prenotazione del colore vince su una più vicina; NO_SHOW, CANCELLED, seduti, altro turno mai; niente dove siede qualcuno; «Evento», anche sopra «Riservato»; seconde righe coi nomi solo a nomi accesi; 24 caratteri con «…» |
+| `tableStatus` (aggiornato) | i nuovi ingressi di `scena()`, `lobby` in ogni riassunto, il seduto sul tavolo nascosto all'ingresso della Veranda; e l'invariante: figure di persona ai tavoli = `seated`, un'hostess per sala, ogni figura seduta su una sedia accesa o in più, nella stessa x/z |
+
+Il catalogo cresce con «Gli ospiti», «Cartelli» e «Nomi degli ospiti», più una riga nel
+Registro. Commit: «Sala dal vivo: gli ospiti a tavola, con bambini e cane dalle note» · «Sala
+dal vivo: cartelli riservato ed evento, nomi spenti di default». Restano a PR3 la camminata,
+gli accompagnamenti, alzarsi e sedersi per `DEPARTING` (in PR2c chi è in uscita resta seduto),
+il nome dell'hostess, i camerieri, la striscia delle attività, «Segui il servizio» e
+`reservationsEpoch`.
 
 ---
 
@@ -1258,6 +1423,21 @@ cui il frontend passa quello di sessione; per Vecchio Frantoio non cambia niente
 così in PR2a: `currentServiceInTz` e `serviceDayInTz` in `utils/reservationTime.ts` col fuso
 esplicito, `currentService` e `serviceDayOf` in `utils/displayTime.ts` sul fuso di sessione
 (§6).
+
+**Cinque scelte di PR2c, decise con Tina il 4 ottobre** (§8).
+- *Il banchetto che trabocca:* sì. Ognuna delle famiglie di un banchetto siede al suo
+  tavolo, e solo chi non ci entra prende i tavoli del banchetto senza prenotazioni sue nel
+  turno. Tornare indietro è una riga: `spillTableIds` restituisce `[]`.
+- *Il bottone dei nomi a schermo fissato:* nascosto. Chi passa davanti a uno schermo
+  pubblico non accende i nomi; vale la scelta fatta prima di fissare, e per cambiarla si
+  sblocca.
+- *Le sedie accese dove siede qualcuno* sono quelle occupate. Tenere la 2D esatta vorrebbe
+  dire una sedia accesa e vuota accanto al bambino seduto in testa sul seggiolone, e sedie
+  spente sotto chi siede ai tavoli di un banchetto che trabocca.
+- *Il seggiolone dall'icona:* resta così. Ogni nota rapida con l'icona «Bambino /
+  Seggiolone» dà il seggiolone; oggi l'unica nota con quell'icona è «Seggiolone».
+- *La testata sul telefono:* due righe sotto sm, titolo e riassunto sopra, i bottoni sotto.
+  Nessun bottone tolto.
 
 **La revisione avversaria.** Accolti: M1, con lo schermo intero su `documentElement`
 (modali e toast restano visibili) e il chrome via `onImmersive` (un crash rende la

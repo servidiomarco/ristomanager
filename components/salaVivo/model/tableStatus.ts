@@ -48,6 +48,18 @@ export const tableIdOf = (r: Reservation): number | null => {
   return Number.isInteger(n) ? n : null;
 };
 
+/** La comitiva è ancora entro la fine prevista più SEATED_GRACE_MIN. È la
+ *  scadenza dei presenti, una sola: decide GroupStatus.present, e da lì
+ *  presence.ts prende chi è a tavola, così le figure e i numeri non si
+ *  separano mai. La durata passa da finiteOr perché un duration_minutes
+ *  arrivato come stringa («90») farebbe «90» + 45 = «9045» minuti, mentre il
+ *  colore (isOverdue) lo legge giusto. */
+export function withinGrace(r: Reservation, nowMs: number): boolean {
+  const start = reservationMs(r);
+  return Number.isFinite(start)
+    && nowMs < start + (finiteOr(getEffectiveDurationMin(r), 0) + SEATED_GRACE_MIN) * MIN;
+}
+
 // Le persone di una comitiva come intero non negativo.
 const guestsOf = (v: unknown): number => Math.max(0, Math.floor(finiteOr(v, 0)));
 
@@ -185,11 +197,7 @@ export function groupStatusFor(args: {
   const party = active
     ? (active.reservation_status === ReservationStatus.NO_SHOW ? 0 : guestsOf(active.guests))
     : banquet ? guestsOf(banquet.guests) : 0;
-  const start = active ? reservationMs(active) : NaN;
-  const present = !!active
-    && isSeated(active)
-    && Number.isFinite(start)
-    && nowMs < start + (getEffectiveDurationMin(active) + SEATED_GRACE_MIN) * MIN;
+  const present = !!active && isSeated(active) && withinGrace(active, nowMs);
 
   return { status, active, banquet, party, present, pulse: status === 'inarrivo' };
 }

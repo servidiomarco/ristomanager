@@ -10,20 +10,54 @@ import { statusColors, type ScenePalette } from './theme';
  * testo in --tg-{stato}-name con il font dell'app. Senza nomi la sala 3D non
  * si confronta con la piantina, ed è il primo controllo che si fa.
  *
- * 1,2 m sopra il piano: più in alto delle teste degli ospiti seduti (PR2c),
- * così un'etichetta non finisce mai dentro una persona.
+ * Con una didascalia (TableModel.caption: «Riservato · 20:30», «Evento», o a
+ * nomi accesi la comitiva seduta) la pastiglia ha due righe: il nome sopra,
+ * un po' più piccolo, e la didascalia sotto, nello stesso colore. Il canvas
+ * si allarga perché ci stiano i caratteri; lo sprite resta alto uguale e si
+ * allarga con lui. Senza didascalia l'etichetta è quella di sempre.
  *
- * Si ridisegna solo l'etichetta che cambia (nome, stato), e tutte al cambio
- * di tema o quando il font dell'app arriva dopo il ripiego: il modello si
- * ricalcola ogni minuto, le etichette no. */
+ * Dove: sopra un tavolo vuoto 1,2 m sopra il piano, sopra il cartellino.
+ * Sopra un tavolo dove siede qualcuno, sul piano, al centro, come il nome
+ * dentro il glifo della 2D: a 1,2 m la pastiglia copriva le teste di chi
+ * siede dall'altra parte (dalla camera a 52° stanno nella stessa fascia dello
+ * schermo), sul piano sta fra le teste di chi siede davanti e i polsi di chi
+ * siede dietro. Le etichette si disegnano sopra tutto (depthTest spento):
+ * sono la scritta della mappa, e una sul piano non deve sparire dentro il
+ * piano stesso né, con la camera bassa, dietro chi siede davanti.
+ *
+ * Lo stesso disegno fa la pastiglia «+N» sopra chi aspetta all'ingresso,
+ * quando sono più dei sei posti disegnati: la testata li conta tutti, e chi
+ * conta le teste alla porta deve vedere che ne mancano.
+ *
+ * Si ridisegna solo l'etichetta che cambia (nome, didascalia, stato), e tutte
+ * al cambio di tema o quando il font dell'app arriva dopo il ripiego: il
+ * modello si ricalcola ogni minuto, le etichette no. */
 
 const TEX_W = 256;
+/** Con la didascalia: «Riservato · 20:30» (317 px a 42 col font dell'app)
+ *  e un evento come «Compleanno di Marta» (398 a 41) ci stanno col margine
+ *  della pastiglia; un nome più lungo scende a 40 px e poi si taglia coi
+ *  puntini, senza rimpicciolire sotto la misura che si legge. La pastiglia
+ *  segue il testo: è larga così solo con un nome lungo. */
+const TEX_W_CAPTION = 464;
 const TEX_H = 128;
+/** Sopra un tavolo vuoto: sopra il cartellino e le sedie. */
 const LABEL_LIFT = 1.2;
+/** Sopra un tavolo dove siede qualcuno: appena sopra il piano. */
+const LABEL_LIFT_SEATED = 0.1;
+/** La pastiglia «+N» sopra chi aspetta all'ingresso: sopra le teste (1,74 m). */
+const BADGE_Y = 2.15;
 const LABEL_HEIGHT = 0.45;
-const LABEL_WIDTH = LABEL_HEIGHT * (TEX_W / TEX_H);
 const FONT_PX = 72;
 const FONT_MIN_PX = 38;
+/** Le due righe: il nome fino a 52 px (a schermo grande quanto quello di
+ *  un'etichetta a una riga), la didascalia a 42 (fino a 40 prima dei
+ *  puntini), peso 400 perché si legga come una nota sotto il numero. */
+const NAME_CAPTIONED_PX = 52;
+const CAPTION_PX = 42;
+const CAPTION_MIN_PX = 40;
+const CAPTION_WEIGHT = 400;
+const LINE_GAP = 8;
 // La pastiglia occupa quasi tutta l'altezza dello sprite (0,45 m): più
 // grande il testo, più lontano si legge da un tablet all'ingresso.
 const PILL_H = 110;
@@ -42,7 +76,14 @@ const LABEL_RENDER_ORDER = 2;
  *  da qualche metro non si leggeva. Da lontano l'etichetta cresce quanto
  *  basta per restare leggibile; da vicino resta la sua misura vera. */
 const LABEL_MIN_SCREEN_PX = 30;
-/** Fino a dove cresce: oltre, in una sala piena si coprirebbero a vicenda. */
+/** Con la didascalia, almeno 42 px: la didascalia (42 dei 128 px del
+ *  canvas) arriva così a 13-14 px, la misura minima di un testo dell'app, e
+ *  il nome (52) resta grande quanto quello di un'etichetta a una riga (17 px).
+ *  A 40 px con la didascalia a 34 stava a 10-11 px, e un nome lungo a 7-8. */
+const LABEL_MIN_SCREEN_PX_CAPTION = 42;
+/** Fino a dove cresce, in proporzione alla sua altezza minima: oltre, in una
+ *  sala piena si coprirebbero a vicenda. In proporzione, così la didascalia
+ *  resta leggibile fin dove resta leggibile il nome a una riga. */
 const LABEL_MAX_GROWTH = 2.5;
 
 interface Label {
@@ -51,15 +92,16 @@ interface Label {
   texture: THREE.CanvasTexture;
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D | null;
-  /** Quello che c'è disegnato: nome, stato, tema. '' = niente ancora. */
+  /** Larghezza su altezza del canvas: 2 senza didascalia, 3 con. Lo sprite
+   *  la segue, alto sempre uguale. */
+  aspect: number;
+  /** L'altezza minima a schermo: più alta con la didascalia. */
+  minScreenPx: number;
+  /** Quello che c'è disegnato: nome, didascalia, stato, tema. '' = niente ancora. */
   drawn: string;
 }
 
-function createLabel(): Label {
-  const canvas = document.createElement('canvas');
-  canvas.width = TEX_W;
-  canvas.height = TEX_H;
-  const ctx = canvas.getContext('2d');
+function createTexture(canvas: HTMLCanvasElement): THREE.CanvasTexture {
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   // Alfa premoltiplicata dal canvas (che la tiene già così) e fusione ONE /
@@ -67,10 +109,22 @@ function createLabel(): Label {
   // pastiglia sono neri, e mipmap e filtro bilineare li mescolano al bordo,
   // un alone scuro attorno a ogni etichetta vista da lontano.
   texture.premultiplyAlpha = true;
+  return texture;
+}
+
+function createLabel(): Label {
+  const canvas = document.createElement('canvas');
+  canvas.width = TEX_W;
+  canvas.height = TEX_H;
+  const ctx = canvas.getContext('2d');
+  const texture = createTexture(canvas);
   const material = new THREE.SpriteMaterial({
     map: texture,
     transparent: true,
     depthWrite: false,
+    // Sopra tutto, come la scritta di una mappa: una sul piano di un tavolo
+    // occupato non sparisce dentro il piano né dietro chi siede davanti.
+    depthTest: false,
     toneMapped: false,
     blending: THREE.CustomBlending,
     blendEquation: THREE.AddEquation,
@@ -78,10 +132,26 @@ function createLabel(): Label {
     blendDst: THREE.OneMinusSrcAlphaFactor,
   });
   const sprite = new THREE.Sprite(material);
-  sprite.scale.set(LABEL_WIDTH, LABEL_HEIGHT, 1);
+  const aspect = TEX_W / TEX_H;
+  sprite.scale.set(LABEL_HEIGHT * aspect, LABEL_HEIGHT, 1);
   sprite.renderOrder = LABEL_RENDER_ORDER;
   sprite.visible = false;
-  return { sprite, material, texture, canvas, ctx, drawn: '' };
+  return { sprite, material, texture, canvas, ctx, aspect, minScreenPx: LABEL_MIN_SCREEN_PX, drawn: '' };
+}
+
+/** Porta il canvas alla larghezza voluta (256 o 384). La texture si rifà:
+ *  con WebGL2 three la alloca immutabile alla prima salita, e un canvas più
+ *  largo non ci entrerebbe più (l'etichetta resterebbe quella vecchia). */
+function fitCanvas(label: Label, width: number): void {
+  if (label.canvas.width === width) return;
+  label.canvas.width = width;
+  label.canvas.height = TEX_H;
+  label.texture.dispose();
+  label.texture = createTexture(label.canvas);
+  label.material.map = label.texture;
+  label.aspect = width / TEX_H;
+  label.minScreenPx = width > TEX_W ? LABEL_MIN_SCREEN_PX_CAPTION : LABEL_MIN_SCREEN_PX;
+  label.sprite.scale.x = label.sprite.scale.y * label.aspect;
 }
 
 function disposeLabel(label: Label): void {
@@ -112,10 +182,96 @@ interface LabelLook {
   controlRadiusPx: number;
 }
 
-function drawLabel(label: Label, name: string, look: LabelLook): void {
+function drawPill(ctx: CanvasRenderingContext2D, texW: number, pillW: number, look: LabelLook): void {
+  const x = (texW - pillW) / 2;
+  const y = (TEX_H - PILL_H) / 2;
+  const radius = look.controlRadiusPx >= PILL_H ? PILL_H / 2 : (look.controlRadiusPx * PILL_H) / NOMINAL_CHIP_PX;
+  roundRectPath(ctx, x, y, pillW, PILL_H, radius);
+  ctx.fillStyle = look.surface;
+  ctx.fill();
+  ctx.lineWidth = BORDER_PX;
+  ctx.strokeStyle = look.stroke;
+  ctx.stroke();
+}
+
+interface FittedLine {
+  text: string;
+  font: string;
+  width: number;
+}
+
+/** Una riga nella larghezza data: a `maxPx`, poi più piccola fino a `minPx`,
+ *  e solo oltre tagliata coi puntini (per caratteri interi, non a metà di
+ *  una lettera composta). */
+function fitLine(ctx: CanvasRenderingContext2D, text: string, weight: number, maxPx: number, minPx: number, family: string, maxWidth: number): FittedLine {
+  let size = maxPx;
+  let font = `${weight} ${size}px ${family}`;
+  ctx.font = font;
+  let width = ctx.measureText(text).width;
+  while (width > maxWidth && size > minPx) {
+    size = Math.max(minPx, Math.min(size - 1, Math.floor((size * maxWidth) / width)));
+    font = `${weight} ${size}px ${family}`;
+    ctx.font = font;
+    width = ctx.measureText(text).width;
+  }
+  if (width <= maxWidth) return { text, font, width };
+  const chars = Array.from(text);
+  let cut = `${chars.join('').trimEnd()}…`;
+  while (chars.length > 1 && ctx.measureText(cut).width > maxWidth) {
+    chars.pop();
+    cut = `${chars.join('').trimEnd()}…`;
+  }
+  return { text: cut, font, width: ctx.measureText(cut).width };
+}
+
+/** Nome e didascalia su due righe, centrate insieme nella pastiglia. Il
+ *  nome si centra sul suo inchiostro come nell'etichetta a una riga; la
+ *  didascalia sull'altezza delle maiuscole del suo font, non sulle sue
+ *  lettere: così «Riservato · 20:30» e un nome con le discendenti stanno
+ *  alla stessa altezza. */
+function drawTwoLines(label: Label, ctx: CanvasRenderingContext2D, name: string, caption: string, look: LabelLook): void {
+  const texW = label.canvas.width;
+  const maxText = texW - 2 * PAD_X - 2 * BORDER_PX;
+  const top = fitLine(ctx, name, 500, NAME_CAPTIONED_PX, FONT_MIN_PX, look.fontFamily, maxText);
+  const bottom = fitLine(ctx, caption, CAPTION_WEIGHT, CAPTION_PX, CAPTION_MIN_PX, look.fontFamily, maxText);
+  const pillW = Math.min(texW - BORDER_PX, Math.max(PILL_H, Math.max(top.width, bottom.width) + 2 * PAD_X));
+  drawPill(ctx, texW, pillW, look);
+
+  ctx.font = top.font;
+  const m = ctx.measureText(top.text);
+  const nameAscent = m.actualBoundingBoxAscent;
+  const nameDescent = m.actualBoundingBoxDescent;
+  ctx.font = bottom.font;
+  const capAscent = ctx.measureText('H').actualBoundingBoxAscent;
+  // Senza metriche (un browser vecchio): le due righe a un'altezza fissa.
+  let nameBase = 68;
+  let captionBase = 102;
+  if ([nameAscent, nameDescent, capAscent].every(Number.isFinite) && nameAscent + nameDescent > 0 && capAscent > 0) {
+    const block = nameAscent + nameDescent + LINE_GAP + capAscent;
+    nameBase = TEX_H / 2 - block / 2 + nameAscent;
+    captionBase = nameBase + nameDescent + LINE_GAP + capAscent;
+  }
+
+  ctx.fillStyle = look.text;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  ctx.font = top.font;
+  ctx.fillText(top.text, texW / 2, nameBase);
+  ctx.font = bottom.font;
+  ctx.fillText(bottom.text, texW / 2, captionBase);
+}
+
+function drawLabel(label: Label, name: string, caption: string, look: LabelLook): void {
+  // La larghezza prima del contesto: ridimensionare il canvas ne azzera lo stato.
+  fitCanvas(label, caption ? TEX_W_CAPTION : TEX_W);
   const ctx = label.ctx;
   if (!ctx) return;
-  ctx.clearRect(0, 0, TEX_W, TEX_H);
+  ctx.clearRect(0, 0, label.canvas.width, TEX_H);
+  if (caption) {
+    drawTwoLines(label, ctx, name, caption, look);
+    label.texture.needsUpdate = true;
+    return;
+  }
 
   // Il nome intero a 72 px; se non ci sta si rimpicciolisce fino a 38 px, e
   // solo oltre si taglia coi puntini («11+12+13+14» resta leggibile).
@@ -139,15 +295,7 @@ function drawLabel(label: Label, name: string, look: LabelLook): void {
   }
 
   const pillW = Math.min(TEX_W - BORDER_PX, Math.max(PILL_H, width + 2 * PAD_X));
-  const x = (TEX_W - pillW) / 2;
-  const y = (TEX_H - PILL_H) / 2;
-  const radius = look.controlRadiusPx >= PILL_H ? PILL_H / 2 : (look.controlRadiusPx * PILL_H) / NOMINAL_CHIP_PX;
-  roundRectPath(ctx, x, y, pillW, PILL_H, radius);
-  ctx.fillStyle = look.surface;
-  ctx.fill();
-  ctx.lineWidth = BORDER_PX;
-  ctx.strokeStyle = look.stroke;
-  ctx.stroke();
+  drawPill(ctx, TEX_W, pillW, look);
 
   // Centrato sull'inchiostro vero (cifre e maiuscole iniziali), non sulla
   // scatola dell'em: con 'middle' i numeri cadono un filo in alto.
@@ -185,11 +333,13 @@ function useFontEpoch(fontFamily: string): number {
     // Le etichette sono già state disegnate, e col ripiego.
     let drawn = false;
     let onFallback = false;
-    const spec = `500 ${FONT_PX}px ${fontFamily}`;
+    // Il nome a 500 e la didascalia a 400: due facce del font, da aspettare
+    // tutte e due, o la didascalia resterebbe nel ripiego.
+    const specs = [`500 ${FONT_PX}px ${fontFamily}`, `${CAPTION_WEIGHT} ${CAPTION_PX}px ${fontFamily}`];
     const fonts = typeof document !== 'undefined' ? document.fonts : undefined;
     const hasFont = (): boolean => {
       try {
-        return !!fonts && typeof fonts.check === 'function' && fonts.check(spec);
+        return !!fonts && typeof fonts.check === 'function' && specs.every((spec) => fonts.check(spec));
       } catch {
         return false;
       }
@@ -218,7 +368,7 @@ function useFontEpoch(fontFamily: string): number {
       setEpoch((e) => e + 1);
     };
     try {
-      if (fonts && typeof fonts.load === 'function') fonts.load(spec).then(arrived, draw);
+      if (fonts && typeof fonts.load === 'function') Promise.all(specs.map((spec) => fonts.load(spec))).then(arrived, draw);
       else draw();
       fonts?.addEventListener?.('loadingdone', arrived);
     } catch {
@@ -240,62 +390,98 @@ function useFontEpoch(fontFamily: string): number {
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const mm = (v: unknown): string => (finite(v) ? String(Math.round(v * 1000)) : 'x');
 const EMPTY: readonly TableModel[] = [];
+const NO_IDS: ReadonlySet<number> = new Set<number>();
+/** La chiave della pastiglia dell'ingresso fra quelle dei tavoli (id > 0). */
+const BADGE_ID = -1;
 
-function labelsKey(tables: readonly TableModel[]): string {
+/** La pastiglia «+N» sopra chi aspetta all'ingresso oltre i sei disegnati. */
+export interface LabelBadge {
+  /** Il punto del pavimento sopra cui sta, in metri. */
+  x: number;
+  z: number;
+  /** «+1», «+3». */
+  text: string;
+}
+
+function labelsKey(tables: readonly TableModel[], seated: ReadonlySet<number>, badge: LabelBadge | null | undefined): string {
   let key = '';
   for (const t of tables) {
     if (!t) continue;
-    key += `${t.id}|${t.name}|${t.status}|${mm(t.center?.x)}|${mm(t.center?.z)}\n`;
+    key += `${t.id}|${t.name}|${t.caption ?? ''}|${t.status}|${mm(t.center?.x)}|${mm(t.center?.z)}|${seated.has(t.id) ? 1 : 0}\n`;
   }
+  if (badge) key += `badge|${badge.text}|${mm(badge.x)}|${mm(badge.z)}`;
   return key;
 }
 
 interface TableLabelsProps {
   tables: readonly TableModel[] | null | undefined;
+  /** I tavoli dove siede o sta qualcuno: l'etichetta scende sul piano. */
+  seated?: ReadonlySet<number> | null;
+  /** «+N» sopra l'ingresso, o null. */
+  badge?: LabelBadge | null;
   palette: ScenePalette;
   themeVersion: number;
 }
 
-export function TableLabels({ tables: tablesProp, palette, themeVersion }: TableLabelsProps) {
+export function TableLabels({ tables: tablesProp, seated: seatedProp, badge, palette, themeVersion }: TableLabelsProps) {
   const invalidate = useThree((s) => s.invalidate);
   const [group] = useState(() => new THREE.Group());
   const [labels] = useState(() => new Map<number, Label>());
   const tables = Array.isArray(tablesProp) ? tablesProp : EMPTY;
-  const key = useMemo(() => labelsKey(tables), [tables]);
-  const tablesRef = useRef(tables);
+  const seated = seatedProp instanceof Set ? seatedProp : NO_IDS;
+  const key = useMemo(() => labelsKey(tables, seated, badge), [tables, seated, badge]);
+  const latest = useRef({ tables, seated, badge });
   const fontEpoch = useFontEpoch(palette.fontFamily);
 
   useLayoutEffect(() => {
-    tablesRef.current = tables;
+    latest.current = { tables, seated, badge };
   });
 
   useLayoutEffect(() => {
     const seen = new Set<number>();
-    for (const t of tablesRef.current) {
-      if (!t || !finite(t.center?.x) || !finite(t.center?.z)) continue;
-      const name = String(t.name ?? '').trim();
-      if (!name || seen.has(t.id)) continue;
-      seen.add(t.id);
-      let label = labels.get(t.id);
+    const { tables: current, seated: occupied, badge: lobby } = latest.current;
+    // Un'etichetta per chiave, creata la prima volta e ridisegnata solo
+    // quando cambia quello che mostra.
+    const place = (id: number, x: number, y: number, z: number, name: string, caption: string, signature: string, look: LabelLook) => {
+      seen.add(id);
+      let label = labels.get(id);
       if (!label) {
         label = createLabel();
-        labels.set(t.id, label);
+        labels.set(id, label);
         group.add(label.sprite);
       }
-      label.sprite.position.set(t.center.x, TABLE_TOP_HEIGHT + LABEL_LIFT, t.center.z);
-      const colors = statusColors(palette, t.status);
-      const drawn = `${name}|${t.status}|${themeVersion}|${fontEpoch}`;
+      label.sprite.position.set(x, y, z);
+      const drawn = `${signature}|${themeVersion}|${fontEpoch}`;
       if (fontEpoch > 0 && label.drawn !== drawn) {
-        drawLabel(label, name, {
-          surface: palette.surfaceCss,
-          stroke: colors.strokeCss,
-          text: colors.nameCss,
-          fontFamily: palette.fontFamily,
-          controlRadiusPx: palette.controlRadiusPx,
-        });
+        drawLabel(label, name, caption, look);
         label.drawn = drawn;
       }
       label.sprite.visible = label.drawn !== '';
+    };
+    for (const t of current) {
+      if (!t || !finite(t.center?.x) || !finite(t.center?.z)) continue;
+      const name = String(t.name ?? '').trim();
+      if (!name || seen.has(t.id)) continue;
+      const colors = statusColors(palette, t.status);
+      const caption = typeof t.caption === 'string' ? t.caption.trim() : '';
+      const lift = occupied.has(t.id) ? LABEL_LIFT_SEATED : LABEL_LIFT;
+      place(t.id, t.center.x, TABLE_TOP_HEIGHT + lift, t.center.z, name, caption, `${name}|${caption}|${t.status}`, {
+        surface: palette.surfaceCss,
+        stroke: colors.strokeCss,
+        text: colors.nameCss,
+        fontFamily: palette.fontFamily,
+        controlRadiusPx: palette.controlRadiusPx,
+      });
+    }
+    if (lobby && finite(lobby.x) && finite(lobby.z) && lobby.text) {
+      // Neutra, come un contatore dell'app: non è lo stato di un tavolo.
+      place(BADGE_ID, lobby.x, BADGE_Y, lobby.z, lobby.text, '', `badge|${lobby.text}`, {
+        surface: palette.surfaceCss,
+        stroke: palette.borderStrongCss,
+        text: palette.textSecondaryCss,
+        fontFamily: palette.fontFamily,
+        controlRadiusPx: palette.controlRadiusPx,
+      });
     }
     for (const [id, label] of labels) {
       if (seen.has(id)) continue;
@@ -315,12 +501,13 @@ export function TableLabels({ tables: tablesProp, palette, themeVersion }: Table
     if (!cam.isPerspectiveCamera || !(viewH > 0)) return;
     // Metri per px CSS a distanza 1 dalla camera.
     const perPx = (2 * Math.tan((cam.fov * Math.PI) / 360)) / viewH;
-    const maxH = LABEL_HEIGHT * LABEL_MAX_GROWTH;
     for (const label of labels.values()) {
       if (!label.sprite.visible) continue;
       const d = cam.position.distanceTo(label.sprite.position);
-      const h = Math.min(maxH, Math.max(LABEL_HEIGHT, LABEL_MIN_SCREEN_PX * perPx * d));
-      if (Math.abs(label.sprite.scale.y - h) > 1e-4) label.sprite.scale.set(h * (TEX_W / TEX_H), h, 1);
+      const maxH = (LABEL_HEIGHT * LABEL_MAX_GROWTH * label.minScreenPx) / LABEL_MIN_SCREEN_PX;
+      const h = Math.min(maxH, Math.max(LABEL_HEIGHT, label.minScreenPx * perPx * d));
+      const w = h * label.aspect;
+      if (Math.abs(label.sprite.scale.y - h) > 1e-4 || Math.abs(label.sprite.scale.x - w) > 1e-4) label.sprite.scale.set(w, h, 1);
     }
   });
 

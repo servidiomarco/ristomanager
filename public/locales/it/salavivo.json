@@ -11,12 +11,16 @@
   "loadError": "Stato non disponibile",
   "title": "Sala dal vivo",
   "summary": "{{seated}} a tavola · {{arriving}} in arrivo",
+  "summaryLobby": "{{count}} all'ingresso",
   "stageLabel": "{{room}}: {{seated}} a tavola, {{arriving}} in arrivo",
+  "stageLabelLobby": "{{room}}: {{seated}} a tavola, {{arriving}} in arrivo, {{lobby}} all'ingresso",
   "roomClosed": "{{room}} (chiusa per questo turno)",
   "roomClosedIndefinitely": "{{room}} (chiusa)",
   "roomTab_one": "{{room}}, {{count}} ospite a tavola",
   "roomTab_other": "{{room}}, {{count}} ospiti a tavola",
   "recenter": "Centra la sala",
+  "showNames": "Nomi degli ospiti",
+  "hideNames": "Nascondi i nomi degli ospiti",
   "fullscreen": "Schermo intero",
   "exitFullscreen": "Esci da schermo intero",
   "pin": "Fissa su questo schermo",
@@ -36,5 +40,7 @@
   "contextLost": "La vista 3D si è interrotta.",
   "restart3d": "Riavvia la vista",
   "noTables": "Nessun tavolo in questa sala.",
-  "noRooms": "Nessuna sala aperta in questo turno."
+  "noRooms": "Nessuna sala aperta in questo turno.",
+  "reserved": "Riservato · {{time}}",
+  "event": "Evento"
 }

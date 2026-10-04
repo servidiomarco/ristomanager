@@ -82,7 +82,8 @@ export interface Vec2 {
 }
 
 /** Una sedia, nel mondo. `chairs[i]` è la sedia `i` di getChairSlots, lo
- *  stesso ordine del glifo 2D: PR2c ci fa sedere gli ospiti per indice. */
+ *  stesso ordine del glifo 2D: gli ospiti si siedono per indice. L'unica
+ *  eccezione è il tondo che trabocca (vedi TableModel.chairs). */
 export interface ChairModel {
   /** Il centro della sedia sul pavimento, in metri. */
   x: number;
@@ -91,11 +92,19 @@ export interface ChairModel {
    *  schienale verso −Z: atan2(dx, dz) della direzione sedia → tavolo. Chi ci
    *  si siede guarda il tavolo. */
   yaw: number;
-  /** Disegnata piena: le stesse sedie che la piantina accende
-   *  (litChairIndices). Spenta = posto vuoto di un tavolo occupato, che la
-   *  scena schiarisce come l'opacità 0,25 della 2D. Un tavolo libero le ha
-   *  tutte piene, come in 2D. */
+  /** Disegnata piena. A un tavolo dove non siede nessuno: le sedie che la
+   *  piantina accende (litChairIndices), tutte per un tavolo libero, come in
+   *  2D. A un tavolo con qualcuno seduto: esattamente le sedie occupate. Di
+   *  norma le due regole danno le stesse sedie; cambiano quando il bambino
+   *  del seggiolone lascia il suo posto per la testa del tavolo (quella
+   *  sedia, vuota, resta spenta) e sui tavoli di un banchetto dove la
+   *  comitiva trabocca (si accendono quelle usate). Spenta = più chiara,
+   *  come l'opacità 0,25 della 2D. */
   lit: boolean;
+  /** Un seggiolone: la seduta a HIGH_CHAIR_SEAT_HEIGHT (model/geometry.ts)
+   *  invece di SEAT_HEIGHT, e il disegno della sedia alta. Solo per il
+   *  bambino più piccolo di una comitiva con «Seggiolone» nelle note. */
+  high: boolean;
 }
 
 /** La forma del piano in 3D. Il quadrato è un rettangolo, come nel glifo; la
@@ -125,9 +134,95 @@ export interface TableModel {
   /** Lo stato del gruppo di unione (deriveTableDisplayStatus): una
    *  prenotazione su un tavolo secondario colora il tavolo unito. */
   status: TableDisplayStatus;
+  /** Le sedie del tavolo: i posti della piantina, nell'ordine di
+   *  getChairSlots. Un tondo con più persone sedute che posti ha invece
+   *  l'anello ridistribuito per tutta la comitiva (quante sedie ci stanno a
+   *  48 cm l'una, allo stesso raggio), sedia 0 a ore 12 e poi in senso
+   *  orario, tutte occupate. */
   chairs: ChairModel[];
+  /** Le sedie che la piantina non ha: alle teste libere di un rettangolo per
+   *  chi non entra nei posti, e il seggiolone. Sempre occupate (lit) e
+   *  rivolte al tavolo. Quasi sempre vuoto. */
+  extraChairs: ChairModel[];
   /** L'anello che pulsa: status === 'inarrivo'. */
   pulse: boolean;
+  /** Il cartellino sul piano (scene/Signs.tsx), solo a un tavolo dove non
+   *  siede nessuno: 'event' per un banchetto del servizio, se no 'reserved'
+   *  per la prossima prenotazione del turno, fra 120 minuti fa e 90 minuti da
+   *  adesso. null: niente cartellino. */
+  sign: TableSignKind | null;
+  /** La seconda riga dell'etichetta, già tradotta e lunga al più 24
+   *  caratteri, «…» compreso. Il testo del cartellino («Riservato · 20:30»,
+   *  «Evento», o a nomi accesi il nome del banchetto), oppure, a nomi
+   *  accesi, il nome della comitiva seduta. null: solo il nome del tavolo. A
+   *  nomi spenti nessun nome di persona arriva fin qui. */
+  caption: string | null;
+}
+
+/** Il cartellino su un tavolo libero: prenotato fra poco, o un banchetto. */
+export type TableSignKind = 'reserved' | 'event';
+
+/** Chi è una figura: un ospite adulto, un bambino (le stesse parti a scala
+ *  ridotta), un cane, l'hostess. Mai un colore di stato: la tinta è del
+ *  ruolo (vedi FigureSlot.tint). */
+export type FigureKind = 'adult' | 'kid' | 'dog' | 'hostess';
+
+/** Come sta una figura: seduta su una sedia, in piedi, sdraiata (il cane). */
+export type FigurePose = 'seated' | 'standing' | 'lying';
+
+/** Una figura da disegnare: dove sta, dove guarda, con che tinta. La scena ne
+ *  compone le parti (scene/figures.ts); il modello non sa niente di gambe e
+ *  braccia, e la scena niente di comitive e tavoli. */
+export interface FigureSlot {
+  /** Stabile da un ricalcolo all'altro: `r${id}:a${n}` per l'n-esimo adulto
+   *  della prenotazione `id`, `r${id}:k${n}` per i bambini, `r${id}:d${n}`
+   *  per i cani, `host:${roomId}` per l'hostess. La stessa persona ha la
+   *  stessa chiave all'ingresso e al tavolo: PR3 la fa camminare dall'uno
+   *  all'altro. */
+  key: string;
+  kind: FigureKind;
+  pose: FigurePose;
+  /** Seduta: il centro della sedia. In piedi: il punto del pavimento sotto il
+   *  bacino. Il cane: il centro del corpo, a terra. In metri. */
+  x: number;
+  z: number;
+  /** rotation.y di una figura modellata col davanti verso +Z locale: dove
+   *  guarda. Seduta, lo yaw della sedia (guarda il tavolo); in piedi accanto
+   *  a un tavolo, lo yaw della sedia dietro cui sta; all'ingresso, verso la
+   *  sala; l'hostess, verso il leggio; il cane ha il muso lungo il bordo. */
+  yaw: number;
+  /** Seduta: l'altezza della seduta, SEAT_HEIGHT o HIGH_CHAIR_SEAT_HEIGHT
+   *  (model/geometry.ts). 0 in piedi e sdraiata. */
+  seatHeight: number;
+  /** La prenotazione della comitiva; null per l'hostess. */
+  partyId: number | null;
+  /** Il tavolo disegnato a cui sta, seduta o in piedi accanto; null
+   *  all'ingresso e per l'hostess. */
+  tableId: number | null;
+  /** Ospiti: quanto il corpo va da --ds-text-muted verso --ds-surface, fra 0
+   *  e 1. Uguale per gli adulti di una comitiva (0–0,20, dall'id, sempre lo
+   *  stesso), +0,15 per i bambini. La testa la schiarisce la scena, 35 %
+   *  verso --ds-surface. Hostess e cane: 0, il colore è quello del ruolo. */
+  tint: number;
+}
+
+/** Una comitiva in sala adesso: seduta a un tavolo, o all'ingresso perché
+ *  è segnata arrivata senza un tavolo da disegnare. */
+export interface PartyModel {
+  /** reservations.id */
+  id: number;
+  /** Il tavolo disegnato (per un'unione, il capofila); null = all'ingresso. */
+  tableId: number | null;
+  /** Adulti + bambini = gli ospiti della prenotazione (almeno 1). */
+  adults: number;
+  kids: number;
+  /** 0–2, dalle note («Cane», «2× Cane»). */
+  dogs: number;
+  /** Le note chiedono il seggiolone. Si disegna solo se c'è un bambino. */
+  highChair: boolean;
+  /** toTitleCase del nome, al più 24 caratteri: solo a nomi accesi, se no
+   *  null. */
+  name: string | null;
 }
 
 /** Un segnaposto di sala. C'è sempre, anche quando nessuno l'ha posato: lì
@@ -173,14 +268,21 @@ export interface RoomAudit {
   missingMarkers: FloorMarkerKind[];
 }
 
-/** Quante persone, per il riassunto in testata. Persone, non comitive. */
+/** Quante persone, per il riassunto in testata e le linguette. Persone, non
+ *  comitive, e tutte dalla stessa regola di presenza (model/presence.ts) da
+ *  cui nascono le figure: una linguetta non può dire 4 con 6 figure sedute. */
 export interface ServiceSummary {
-  /** Ospiti a tavola adesso: la comitiva seduta che colora ogni gruppo di
-   *  tavoli, finché non passano 45 minuti dalla sua fine prevista (la stessa
-   *  grazia con cui PR2c smette di disegnarli). */
+  /** Ospiti a tavola adesso: le comitive presenti, cioè la seduta più
+   *  recente di ogni tavolo disegnato finché non passano 45 minuti dalla sua
+   *  fine prevista, comprese le persone in piedi accanto a un tavolo pieno.
+   *  È il numero delle figure di persona ai tavoli, una per una. */
   seated: number;
   /** Ospiti in arrivo: quelli dietro gli anelli che pulsano. */
   arriving: number;
+  /** Ospiti all'ingresso: segnati arrivati senza un tavolo da disegnare, da
+   *  meno di un'ora dall'ora prenotata. Tutti, anche oltre le 6 figure che
+   *  l'ingresso disegna. */
+  lobby: number;
 }
 
 export interface RoomSummary extends ServiceSummary {
@@ -200,13 +302,22 @@ export interface RoomModel {
   outdoor: boolean;
   /** Il pavimento, da (0, 0) a (width, depth), in metri. */
   floor: { width: number; depth: number };
-  /** Il contenuto (tavoli e segnaposto), in metri: è quello che la camera
-   *  inquadra, non il pavimento intero. */
+  /** Il contenuto, in metri: tavoli, segnaposto, i posti dell'ingresso e
+   *  quello dell'hostess (anche vuoti, così la camera non salta quando
+   *  arriva qualcuno). È quello che la camera inquadra, non il pavimento
+   *  intero. */
   bounds: { minX: number; minZ: number; maxX: number; maxZ: number };
   tables: TableModel[];
   markers: Record<FloorMarkerKind, MarkerModel>;
   audit: RoomAudit;
   summary: RoomSummary;
+  /** Le comitive della sala: prima quelle ai tavoli, nell'ordine dei tavoli,
+   *  poi quelle all'ingresso, per ora prenotata e poi id. */
+  parties: PartyModel[];
+  /** Le figure della sala, in ordine stabile: le comitive ai tavoli (le
+   *  persone, poi i cani), quelle all'ingresso (al più 6 persone, niente
+   *  cani), l'hostess all'accoglienza. */
+  figures: FigureSlot[];
 }
 
 /** La sala dal vivo di un istante: si ricalcola sui dati e al minuto, mai a
@@ -218,6 +329,28 @@ export interface SceneModel {
   rooms: RoomModel[];
   /** La somma delle sale: il riassunto in testata. */
   summary: ServiceSummary;
+  /** La sala principale: la prima di sortRooms aperta e con l'ingresso
+   *  posato, se no la prima aperta, se no la prima. Lì aspetta chi è
+   *  arrivato senza tavolo; da PR3 lì l'hostess ha un nome. null senza
+   *  sale. */
+  mainRoomId: number | null;
+}
+
+/** Di un preset delle note servono solo etichetta e icona: un sottoinsieme
+ *  di ReservationNotePreset (services/apiService), che si passa com'è. */
+export interface NotePresetRef {
+  label: string;
+  icon?: string | null;
+}
+
+/** I testi dei cartellini, già tradotti dalla pagina: il modello non
+ *  conosce i18n, e i test li fissano. */
+export interface SceneCopy {
+  /** «Riservato · 20:30» per l'ora data (HH:MM nel fuso del ristorante):
+   *  t('reserved', { time }). */
+  reserved: (time: string) => string;
+  /** «Evento»: t('event'). */
+  event: string;
 }
 
 /** Tutto quello che serve a deriveSceneModel. Il modello non legge mai
@@ -238,6 +371,15 @@ export interface SceneInputs {
   service: LiveService;
   /** L'istante del calcolo, in ms: il currentTime di App. */
   nowMs: number;
+  /** I preset delle note (Impostazioni → Opzioni prenotazioni): le etichette
+   *  con icona 'dog' dicono il cane, quelle con icona 'baby' il seggiolone.
+   *  Vuoto finché non arrivano: valgono «Cane» e «Seggiolone». */
+  notePresets: readonly NotePresetRef[];
+  /** «Nomi degli ospiti», per dispositivo e spento di default. Spento,
+   *  nessun nome di persona entra nel modello. */
+  showNames: boolean;
+  /** I testi dei cartellini. */
+  copy: SceneCopy;
 }
 
 /** Quello che useServiceOverrides restituisce: le varianti della sala che

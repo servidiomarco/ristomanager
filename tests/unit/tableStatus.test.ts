@@ -26,6 +26,7 @@ import {
   groupStatusFor,
   litByTable,
 } from '../../components/salaVivo/model/tableStatus';
+import { HIGH_CHAIR_SEAT_HEIGHT, SEAT_HEIGHT } from '../../components/salaVivo/model/geometry';
 import { deriveSceneModel } from '../../components/salaVivo/model/sceneModel';
 
 /* Lo stato dei tavoli della Sala dal vivo: lo stesso colore della piantina,
@@ -111,6 +112,9 @@ const scena = (over: Partial<SceneInputs> = {}): SceneInputs => ({
   markers: [],
   service: SERVIZIO,
   nowMs: NOW,
+  notePresets: [],
+  showNames: false,
+  copy: { reserved: (t: string) => `Riservato · ${t}`, event: 'Evento' },
   ...over,
 });
 
@@ -416,9 +420,12 @@ describe('il modello della sala', () => {
     expect(veranda.tables.map(t => t.status)).toEqual(['arrivato', 'inarrivo', 'uscita', 'inarrivo']);
     // 3 a tavola (i 5 delle 16:00 sono oltre la grazia); in arrivo 2 + 1 (una
     // prenotazione senza ospiti è comunque qualcuno). I coperti sono i posti.
-    expect(veranda.summary).toEqual({ seated: 3, arriving: 3, covers: 16 });
-    expect(fiume.summary).toEqual({ seated: 4, arriving: 0, covers: 4 });
-    expect(model.summary).toEqual({ seated: 7, arriving: 3 });
+    // Nessuno all'ingresso: ogni seduto ha il suo tavolo disegnato.
+    expect(veranda.summary).toEqual({ seated: 3, arriving: 3, lobby: 0, covers: 16 });
+    expect(fiume.summary).toEqual({ seated: 4, arriving: 0, lobby: 0, covers: 4 });
+    expect(model.summary).toEqual({ seated: 7, arriving: 3, lobby: 0 });
+    // La sala principale: Veranda è aperta e ha l'ingresso posato.
+    expect(model.mainRoomId).toBe(1);
   });
 
   it('pavimento, segnaposto e inquadratura in metri', () => {
@@ -432,12 +439,23 @@ describe('il modello della sala', () => {
     expect(veranda.markers.ENTRANCE.inward).toEqual({ x: 0, z: -1 });
     expect(veranda.markers.PASS.placed).toBe(false);
     expect(veranda.audit.missingMarkers).toEqual(['PASS', 'HOST_STAND']);
-    // Dal segnaposto più a sinistra (l'ingresso, 2 − 0,6) al pass di ripiego
-    // (1140 px → 22,8 + 0,6); dal bordo dei tavoli a 0 all'ingresso (11 + 0,6).
-    expect(veranda.bounds.minX).toBeCloseTo(1.4, 9);
+    // L'inquadratura prende anche i posti dell'ingresso, vuoti compresi (così
+    // non salta quando arriva qualcuno). L'accoglienza di ripiego sta a destra
+    // della porta, quindi i posti a sinistra: a 0,9, 1,5 e 2,1 m dall'asse
+    // (x = 2) finirebbero a −0,1; la griglia scivola tutta dentro il
+    // pavimento, la colonna più esterna a 0,3 m dal muro, e il suo margine di
+    // 0,35 si ferma al bordo: 0. A destra il pass di ripiego (1140 px → 22,8
+    // + 0,6); dal bordo dei tavoli a 0 all'ingresso (11 + 0,6).
+    expect(veranda.bounds.minX).toBeCloseTo(0, 9);
     expect(veranda.bounds.minZ).toBeCloseTo(0, 9);
     expect(veranda.bounds.maxX).toBeCloseTo(23.4, 9);
     expect(veranda.bounds.maxZ).toBeCloseTo(11.6, 9);
+    // E il posto dell'hostess, mezzo metro dentro dal leggio.
+    const hostess = veranda.figures.find(f => f.kind === 'hostess')!;
+    expect(hostess.x).toBeGreaterThan(veranda.bounds.minX);
+    expect(hostess.x).toBeLessThan(veranda.bounds.maxX);
+    expect(hostess.z).toBeGreaterThan(veranda.bounds.minZ);
+    expect(hostess.z).toBeLessThan(veranda.bounds.maxZ);
     for (const t of veranda.tables) {
       expect(t.center.x).toBeGreaterThan(veranda.bounds.minX);
       expect(t.center.x).toBeLessThan(veranda.bounds.maxX);
@@ -460,15 +478,29 @@ describe('il modello della sala', () => {
   it('una sala vuota ha pavimento e segnaposto, nessun tavolo', () => {
     const vuota = deriveSceneModel(scena()).rooms[0];
     expect(vuota.tables).toEqual([]);
-    expect(vuota.summary).toEqual({ seated: 0, arriving: 0, covers: 0 });
+    expect(vuota.summary).toEqual({ seated: 0, arriving: 0, lobby: 0, covers: 0 });
+    // Nessun ospite, ma l'hostess al leggio di ripiego c'è sempre.
+    expect(vuota.parties).toEqual([]);
+    expect(vuota.figures.map(f => f.key)).toEqual(['host:1']);
     expect(vuota.audit).toEqual({ overlaps: [], unset: false, missingMarkers: ['ENTRANCE', 'PASS', 'HOST_STAND'] });
     expect(vuota.bounds.maxX).toBeGreaterThan(vuota.bounds.minX);
   });
 
-  it('i tavoli nascosti per il servizio non si disegnano e non contano', () => {
+  it('i tavoli nascosti per il servizio non si disegnano; chi ci siede aspetta all\'ingresso', () => {
     const nascosti = deriveSceneModel({ ...inputs, hiddenTableIds: new Set([1]) });
-    expect(nascosti.rooms[0].tables.map(t => t.id)).toEqual([2, 3, 4]);
-    expect(nascosti.rooms[0].summary).toEqual({ seated: 0, arriving: 3, covers: 12 });
+    const sala = nascosti.rooms[0];
+    expect(sala.tables.map(t => t.id)).toEqual([2, 3, 4]);
+    // Prima di PR2c i 3 seduti sul tavolo 1 nascosto sparivano dal conto. Ma
+    // sono in sala (segnati arrivati, da mezz'ora): senza un tavolo da
+    // disegnare stanno all'ingresso della LORO sala, e lì si contano. È la
+    // regola di presence.ts, la stessa per figure e numeri.
+    expect(sala.summary).toEqual({ seated: 0, arriving: 3, lobby: 3, covers: 12 });
+    expect(sala.parties).toEqual([
+      { id: seduti.id, tableId: null, adults: 3, kids: 0, dogs: 0, highChair: false, name: null },
+    ]);
+    const inPiedi = sala.figures.filter(f => f.partyId === seduti.id);
+    expect(inPiedi.map(f => [f.pose, f.tableId])).toEqual([['standing', null], ['standing', null], ['standing', null]]);
+    expect(nascosti.summary).toEqual({ seated: 4, arriving: 3, lobby: 3 });
   });
 
   it('dati monchi non fanno cadere il modello', () => {
@@ -480,5 +512,150 @@ describe('il modello della sala', () => {
       markers: undefined as unknown as FloorMarker[],
     }));
     expect(rotto.rooms[0].tables.map(t => t.status)).toEqual(['libera']);
+  });
+});
+
+describe('una regola sola per figure e numeri', () => {
+  // Una sera piena, in due sale: il cane della famiglia Esposito, un
+  // seggiolone, un'unione, un banchetto che trabocca su un tavolo libero, un
+  // tavolo pieno con gente alle teste e in piedi, un tondo ridistribuito, un
+  // tavolo seduto due volte, un tavolo nascosto, un ingresso troppo pieno.
+  const FIUME: Room = { id: 2, name: 'Fiume', width: 800, height: 600 };
+  const seduto = (over: Partial<Reservation>) =>
+    prenotazione({ arrival_status: ArrivalStatus.ARRIVED, reservation_time: ora('18:30'), ...over });
+  const festa = banchetto({ id: 7, table_ids: [9, 8], guests: 10 });
+  // Create una volta sola: gli id (e con loro chiavi e tinte) restano gli
+  // stessi da una sera all'altra.
+  const PRENOTAZIONI = [
+    seduto({ table_id: 1, guests: 4, children: 2, notes: 'Cane', customer_name: 'famiglia esposito' }),
+    seduto({ table_id: 2, guests: 7, reservation_time: ora('18:15') }),
+    seduto({ table_id: 3, guests: 6, reservation_time: ora('18:40') }),
+    seduto({ table_id: 4, guests: 3, notes: 'Seggiolone', reservation_time: ora('18:20') }),
+    seduto({ table_id: 6, guests: 6, reservation_time: ora('18:00') }),
+    seduto({ table_id: 7, guests: 2, reservation_time: ora('18:00') }),
+    seduto({ table_id: 7, guests: 3, reservation_time: ora('18:50') }),
+    seduto({ table_id: 9, guests: 6, banquet_menu_id: 7 }),
+    prenotazione({ table_id: 10, reservation_time: ora('20:00') }),
+    seduto({ table_id: 11, guests: 1, notes: '2× Cane' }),
+    seduto({ table_id: undefined, guests: 3, reservation_time: ora('18:40') }),
+    seduto({ table_id: undefined, guests: 4, children: 1, reservation_time: ora('18:45') }),
+    seduto({ table_id: undefined, guests: 2, reservation_time: ora('18:50') }),
+    seduto({
+      table_id: 20,
+      guests: 2,
+      note_selections: [{ preset_id: 3, label: 'Cane', quantity: 2 }],
+      notes: '2× Cane',
+    }),
+    seduto({ table_id: 21, guests: 2, reservation_time: ora('18:55') }),
+  ];
+  const sera = (nowMs: number, showNames = false) => scena({
+    rooms: [SALA, FIUME],
+    tables: [
+      tavolo(1), tavolo(2, { x: 250 }), tavolo(3, { x: 400, shape: TableShape.CIRCLE }), tavolo(4, { x: 550 }),
+      tavolo(5, { x: 700 }), tavolo(6, { x: 850 }), tavolo(7, { x: 1000 }),
+      tavolo(8, { x: 100, y: 300 }), tavolo(9, { x: 250, y: 300 }), tavolo(10, { x: 400, y: 300 }),
+      tavolo(11, { x: 550, y: 300, seats: 2 }),
+      tavolo(20, { x: 100, room_id: 2, seats: 6 }), tavolo(21, { x: 300, room_id: 2 }),
+    ],
+    merges: [unione(5, [6])],
+    hiddenTableIds: new Set([21]),
+    banquetMenus: [festa],
+    markers: [{ id: 1, room_id: 1, kind: 'ENTRANCE', x: 100, y: 550 } as FloorMarker],
+    reservations: PRENOTAZIONI,
+    nowMs,
+    showNames,
+  });
+
+  const isPerson = (k: string) => k === 'adult' || k === 'kid';
+
+  const controlla = (nowMs: number) => {
+    const model = deriveSceneModel(sera(nowMs));
+    const chiavi = new Set<string>();
+    for (const room of model.rooms) {
+      const quando = `${room.name} alle ${new Date(nowMs).toISOString()}`;
+      const persone = room.figures.filter(f => isPerson(f.kind));
+      // Le persone ai tavoli sono esattamente quelle che la linguetta conta…
+      expect(persone.filter(f => f.tableId !== null).length, quando).toBe(room.summary.seated);
+      // …e all'ingresso se ne disegnano al più sei, contandole tutte.
+      expect(persone.filter(f => f.tableId === null).length, quando).toBe(Math.min(6, room.summary.lobby));
+      // Le comitive dicono la stessa cosa.
+      const sum = (tavolo: boolean) => room.parties
+        .filter(p => (p.tableId !== null) === tavolo)
+        .reduce((n, p) => n + p.adults + p.kids, 0);
+      expect(sum(true), quando).toBe(room.summary.seated);
+      expect(sum(false), quando).toBe(room.summary.lobby);
+      // Un'hostess per sala.
+      expect(room.figures.filter(f => f.kind === 'hostess').map(f => f.key), quando).toEqual([`host:${room.id}`]);
+      // Ognuno seduto su una sedia accesa del suo tavolo, una a testa; a un
+      // tavolo dove siede qualcuno sono accese esattamente le sedie occupate.
+      for (const t of room.tables) {
+        const sedie = [...t.chairs, ...t.extraChairs];
+        const qui = room.figures.filter(f => f.tableId === t.id && f.pose === 'seated');
+        for (const f of qui) {
+          const sedia = sedie.find(c => Math.abs(c.x - f.x) < 1e-9 && Math.abs(c.z - f.z) < 1e-9);
+          expect(sedia, `${quando}: ${f.key}`).toBeDefined();
+          expect(sedia!.lit).toBe(true);
+          expect(f.seatHeight).toBe(sedia!.high ? HIGH_CHAIR_SEAT_HEIGHT : SEAT_HEIGHT);
+        }
+        if (room.figures.some(f => f.tableId === t.id)) {
+          expect(sedie.filter(c => c.lit).length, `${quando}: tavolo ${t.name}`).toBe(qui.length);
+          expect(t.sign).toBeNull();
+        }
+        expect(t.extraChairs.every(c => c.lit)).toBe(true);
+      }
+      // I cani stanno a un tavolo, sdraiati; mai all'ingresso.
+      for (const d of room.figures.filter(f => f.kind === 'dog')) {
+        expect([d.pose, d.tableId !== null]).toEqual(['lying', true]);
+      }
+      for (const f of room.figures) {
+        expect(chiavi.has(f.key), f.key).toBe(false);
+        chiavi.add(f.key);
+      }
+    }
+    // Il riassunto è la somma delle sale.
+    const somma = (k: 'seated' | 'arriving' | 'lobby') => model.rooms.reduce((n, r) => n + r.summary[k], 0);
+    expect(model.summary).toEqual({ seated: somma('seated'), arriving: somma('arriving'), lobby: somma('lobby') });
+    return model;
+  };
+
+  it('alle 19:00: le persone a tavola, all\'ingresso e i numeri vanno d\'accordo', () => {
+    const model = controlla(NOW);
+    const [veranda, fiume] = model.rooms;
+    // Veranda: 4 + 7 + 6 + 3 + 6 + 3 (il tavolo 7: solo i più recenti) + 6
+    // (il banchetto: 4 al 9, 2 sull'8) + 1 = 36 a tavola; 9 all'ingresso, 6
+    // disegnati. Fiume: 2 a tavola, e i 2 del tavolo nascosto all'ingresso.
+    expect(veranda.summary).toEqual({ seated: 36, arriving: 0, lobby: 9, covers: 42 });
+    expect(fiume.summary).toEqual({ seated: 2, arriving: 0, lobby: 2, covers: 6 });
+    // Tre cani: quello degli Esposito, due al tavolo 11 (un adulto solo, uno
+    // per parte); due a Fiume, dalla scelta strutturata e non anche dalle note.
+    expect(veranda.figures.filter(f => f.kind === 'dog').map(f => f.tableId)).toEqual([1, 11, 11]);
+    expect(fiume.figures.filter(f => f.kind === 'dog')).toHaveLength(2);
+    // Il seggiolone al tavolo 4, il cartellino sul 10.
+    const t4 = veranda.tables.find(t => t.id === 4)!;
+    expect(t4.extraChairs.map(c => c.high)).toEqual([true]);
+    expect(veranda.tables.find(t => t.id === 10)!.sign).toBe('reserved');
+    // Il banchetto trabocca sull'8, che resta un tavolo del banchetto.
+    expect(veranda.figures.filter(f => f.tableId === 8 && isPerson(f.kind))).toHaveLength(2);
+  });
+
+  it('da prima di cena a notte fonda non si separano mai', () => {
+    for (const hhmm of ['17:30', '18:35', '19:20', '19:45', '20:10', '21:00', '22:30', '23:59']) {
+      controlla(Date.parse(ora(hhmm)));
+    }
+    controlla(Date.parse(ora('00:40', '2026-10-05')));
+  });
+
+  it('a nomi accesi cambiano solo i nomi', () => {
+    const spenti = deriveSceneModel(sera(NOW));
+    const accesi = deriveSceneModel(sera(NOW, true));
+    const senzaNomi = (m: typeof spenti) => m.rooms.map(r => ({
+      figures: r.figures,
+      summary: r.summary,
+      parties: r.parties.map(p => ({ ...p, name: null })),
+    }));
+    expect(senzaNomi(accesi)).toEqual(senzaNomi(spenti));
+    expect(accesi.rooms[0].parties[0].name).toBe('Famiglia Esposito');
+    expect(accesi.rooms[0].tables[0].caption).toBe('Famiglia Esposito');
+    expect(spenti.rooms[0].tables[0].caption).toBeNull();
   });
 });

@@ -17,8 +17,8 @@ import type { ChairModel, TableShape3D, Vec2 } from '../types';
  * dai posti, e lo si tiene dentro il box del glifo lasciando la fascia delle
  * sedie: un corpo che sconfina finirebbe sotto le sedie dei vicini.
  *
- * Questo file lo importa anche la scena per le quattro altezze: niente React,
- * niente three, niente rete. */
+ * Questo file lo importa anche la scena per le altezze: niente React, niente
+ * three, niente rete. */
 
 /** Metri per px della tela della sala. */
 export const M_PER_PX = 0.02;
@@ -26,6 +26,11 @@ export const M_PER_PX = 0.02;
 export const TABLE_TOP_HEIGHT = 0.75;
 /** L'altezza della seduta. */
 export const SEAT_HEIGHT = 0.45;
+/** L'altezza della seduta di un seggiolone: il bambino (a scala 0,62) ha i
+ *  polsi a 0,80 m come gli adulti accanto, e le cosce passano sotto il piano
+ *  (il fondo della lastra è a 0,705). Alla pari del piano (0,75) sedeva sul
+ *  tavolo, con le ginocchia sul bordo. */
+export const HIGH_CHAIR_SEAT_HEIGHT = 0.58;
 /** L'altezza della cima dello schienale. */
 export const CHAIR_BACK_HEIGHT = 0.9;
 /** Il centro di una sedia sta almeno a questa distanza dal bordo del piano:
@@ -227,6 +232,9 @@ export function placeTable(table: Table, seats: number, lit: readonly number[]):
       // +Z su (sin ψ, cos ψ), e lo vogliamo sul verso del tavolo.
       yaw: Math.atan2(facing.x, facing.z),
       lit: litSet.has(s.index),
+      // Il seggiolone lo decide la comitiva seduta (placement.ts), non il
+      // tavolo: una sedia della piantina nasce sempre normale.
+      high: false,
     };
   });
 

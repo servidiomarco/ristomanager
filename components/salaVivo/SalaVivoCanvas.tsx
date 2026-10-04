@@ -1,15 +1,17 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
 import type * as THREE from 'three';
-import type { RoomModel, SalaVivoCanvasProps } from './types';
+import type { FigureSlot, RoomModel, SalaVivoCanvasProps, TableModel } from './types';
 import { CameraRig } from './scene/CameraRig';
 import { DebugStats } from './scene/DebugStats';
 import { Fixtures } from './scene/Fixtures';
 import { createFrameDemand, type FrameDemand } from './scene/frameDemand';
 import { FrameThrottle } from './scene/FrameThrottle';
+import { People } from './scene/People';
 import { PulseRings } from './scene/PulseRings';
 import { RoomShell } from './scene/RoomShell';
-import { TableLabels } from './scene/TableLabels';
+import { Signs } from './scene/Signs';
+import { TableLabels, type LabelBadge } from './scene/TableLabels';
 import { TablesLayer } from './scene/TablesLayer';
 import {
   AMBIENT_INTENSITY,
@@ -102,6 +104,9 @@ function Scene({ room, reducedMotion, slowMode, debug, recenterSignal, onContext
   const shadow = useBlobShadowMaterial(palette, version);
   useSceneBackground(palette);
   useContextLoss(onContextLost);
+  const seats = useMemo(() => seatsOf(room.tables), [room.tables]);
+  const seated = useMemo(() => tablesWithPeople(room.figures), [room.figures]);
+  const badge = useMemo(() => lobbyBadgeOf(room.figures, room.summary?.lobby), [room.figures, room.summary?.lobby]);
 
   return (
     <>
@@ -110,13 +115,50 @@ function Scene({ room, reducedMotion, slowMode, debug, recenterSignal, onContext
       <RoomShell room={room} palette={palette} />
       <Fixtures room={room} palette={palette} shadow={shadow} />
       <TablesLayer tables={room.tables} palette={palette} themeVersion={version} shadow={shadow} />
-      <TableLabels tables={room.tables} palette={palette} themeVersion={version} />
+      <Signs tables={room.tables} palette={palette} themeVersion={version} />
+      <People figures={room.figures} seats={seats} palette={palette} themeVersion={version} shadow={shadow} />
+      <TableLabels tables={room.tables} seated={seated} badge={badge} palette={palette} themeVersion={version} />
       <PulseRings tables={room.tables} palette={palette} reducedMotion={reducedMotion} demand={demand} />
       <CameraRig room={room} reducedMotion={reducedMotion} recenterSignal={recenterSignal} demand={demand} />
       <FrameThrottle demand={demand} slowMode={slowMode} onSlowFrames={onSlowFrames} />
       {debug && <DebugStats targetRef={overlayRef} slowMode={slowMode} />}
     </>
   );
+}
+
+/** I posti della sala, Σ chairs.length: la capienza di partenza delle
+ *  persone (People), che non si rifà a ogni minuto. */
+function seatsOf(tables: readonly TableModel[] | null | undefined): number {
+  if (!Array.isArray(tables)) return 0;
+  let n = 0;
+  for (const t of tables) n += Array.isArray(t?.chairs) ? t.chairs.length : 0;
+  return n;
+}
+
+/** I tavoli dove siede o sta qualcuno (anche il cane): lì l'etichetta scende
+ *  sul piano, per non coprire le teste di chi siede dall'altra parte. */
+function tablesWithPeople(figures: readonly FigureSlot[] | null | undefined): ReadonlySet<number> {
+  const ids = new Set<number>();
+  if (!Array.isArray(figures)) return ids;
+  for (const f of figures) {
+    if (f && typeof f.tableId === 'number') ids.add(f.tableId);
+  }
+  return ids;
+}
+
+/** «+N» sopra l'ultimo di chi aspetta all'ingresso, quando la testata ne
+ *  conta più di quanti l'ingresso ne disegna (sei). null altrimenti. */
+function lobbyBadgeOf(figures: readonly FigureSlot[] | null | undefined, lobby: number | null | undefined): LabelBadge | null {
+  if (!Array.isArray(figures) || typeof lobby !== 'number' || !Number.isFinite(lobby)) return null;
+  let drawn = 0;
+  let last: FigureSlot | null = null;
+  for (const f of figures) {
+    if (!f || f.tableId !== null || (f.kind !== 'adult' && f.kind !== 'kid')) continue;
+    drawn++;
+    last = f;
+  }
+  const extra = Math.floor(lobby) - drawn;
+  return last && extra > 0 ? { x: last.x, z: last.z, text: `+${extra}` } : null;
 }
 
 /** Lo sfondo della scena è --ds-canvas, lo stesso colore del palco della

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  Cuboid, DoorClosed, Grid, Info, LocateFixed, MapPin, Maximize2, Minimize2, MonitorOff, Pin, PinOff, RotateCcw,
+  Cuboid, DoorClosed, Grid, Info, LocateFixed, MapPin, Maximize2, Minimize2, MonitorOff, Pin, PinOff, RotateCcw, Tag,
 } from 'lucide-react';
 import { Callout, EmptyState, LivePill, dsButton, dsIconButton } from '../ds';
 import type { CalloutTone } from '../ds';
@@ -13,12 +13,16 @@ import { useLinkRoutes } from '../../hooks/useLinkRoutes';
 import { usePrefersReducedMotion } from '../../hooks/usePrefersReducedMotion';
 import { useServiceOverrides } from '../../hooks/useServiceOverrides';
 import { useWakeLock } from '../../hooks/useWakeLock';
+import { getReservationNotePresets, type ReservationNotePreset } from '../../services/apiService';
 import { reportClientError } from '../../services/clientErrorReporter';
+import { swrConfig } from '../../services/configCache';
 import { liveService } from './model/service';
-import { deriveSceneModel } from './model/sceneModel';
+import { deriveSceneModel, roomsToShow } from './model/sceneModel';
 import { nextSettled, type SettledOverrides } from './model/overrides';
 import { cachedWebglSupport, probeWebgl2, type WebglSupport } from './webglProbe';
-import type { RoomModel, SalaVivoCanvasProps, SalaVivoPageProps, ServiceOverrides } from './types';
+import type {
+  NotePresetRef, RoomModel, SalaVivoCanvasProps, SalaVivoPageProps, SceneCopy, ServiceOverrides,
+} from './types';
 
 /* ── Sala dal vivo ────────────────────────────────────────────────────────
    La sala del servizio in corso in 3D, per il tablet all'ingresso o la TV.
@@ -35,6 +39,7 @@ import type { RoomModel, SalaVivoCanvasProps, SalaVivoPageProps, ServiceOverride
 // Lette anche altrove: 'salaVivo.pinned' da App all'avvio (atterraggio).
 const PINNED_KEY = 'salaVivo.pinned';
 const ROOM_KEY = 'salaVivo.room';
+const NAMES_KEY = 'salaVivo.names';
 const DEBUG_KEY = 'salaVivo.debug';
 const RELOADED_FOR_KEY = 'salaVivo.reloadedFor';
 
@@ -77,11 +82,11 @@ const ROOM_TAB_IDLE =
 const ROOM_TAB_IDLE_CLOSED =
   'bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] hover:bg-[var(--ds-border)] line-through';
 
-// Lo schermo fissato è una modalità che resta accesa: si legge «acceso» a
-// colpo d'occhio col pieno, come «Sposta tavoli» in Sale & Tavoli. È la
-// classe di dsIconButton per intero col fondo cambiato, non dsIconButton più
-// un secondo bg-[…]: due utility arbitrarie sulla stessa proprietà escono in
-// ordine alfabetico, e il fondo bianco vincerebbe.
+// Lo schermo fissato e i nomi degli ospiti sono modalità che restano accese:
+// si leggono «accese» a colpo d'occhio col pieno, come «Sposta tavoli» in
+// Sale & Tavoli. È la classe di dsIconButton per intero col fondo cambiato,
+// non dsIconButton più un secondo bg-[…]: due utility arbitrarie sulla
+// stessa proprietà escono in ordine alfabetico, e il fondo bianco vincerebbe.
 const ICON_BUTTON_ON =
   'inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-solid)] text-[var(--ds-arriving-fg)] shadow-[var(--ds-shadow-card)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
@@ -109,6 +114,29 @@ const readStoredRoomId = (): number | null => {
   const id = Number(readStorage(ROOM_KEY));
   return Number.isInteger(id) && id > 0 ? id : null;
 };
+
+// ── I preset delle note (Impostazioni → Opzioni prenotazioni) ─────────────
+// Al modello bastano etichetta e icona: le etichette con l'icona 'dog'
+// dicono il cane, quelle con 'baby' il seggiolone. Finché non arrivano, o se
+// non arrivano proprio (un server vecchio, un errore), la lista resta vuota e
+// il modello ripiega su «Cane» e «Seggiolone».
+const NO_PRESETS: readonly NotePresetRef[] = [];
+const toPresetRefs = (rows: unknown): readonly NotePresetRef[] =>
+  Array.isArray(rows)
+    ? rows.map((row: Partial<ReservationNotePreset> | null | undefined) => ({
+        label: String(row?.label ?? ''),
+        icon: typeof row?.icon === 'string' ? row.icon : null,
+      }))
+    : NO_PRESETS;
+// La cache risponde subito con l'ultima lista, il fetch poco dopo di solito
+// con la stessa: uguale, si tiene quella che c'è e la sala non si ricalcola.
+const samePresets = (a: readonly NotePresetRef[], b: readonly NotePresetRef[]): boolean =>
+  a.length === b.length && a.every((p, i) => p.label === b[i].label && (p.icon ?? null) === (b[i].icon ?? null));
+
+// I testi dei cartellini prima che il dizionario della pagina arrivi. Intanto
+// la pagina mostra il caricamento e la scena non c'è, ma il modello si
+// calcola lo stesso: t() chiamata così presto darebbe le chiavi grezze.
+const FALLBACK_COPY: SceneCopy = { reserved: time => time, event: '' };
 
 // ── Schermo intero, con le varianti webkit (iPad). Si chiede su
 //    documentElement e non sulla pagina: toast, avvisi e finestre dell'app
@@ -245,6 +273,34 @@ const SalaVivoPage: React.FC<SalaVivoPageProps> = ({
   const settledOverrides = useSettledOverrides(service.key, overrides);
   const { markers, loaded: markersLoaded } = useFloorMarkers(true);
   const nowMs = currentTime.getTime();
+
+  // ── Gli ospiti: preset delle note, nomi, testi dei cartellini ───────────
+  // La stessa chiave di cache di ReservationList, così le due viste si
+  // dividono il fetch. Si rilegge a ogni servizio: uno schermo fissato non
+  // si rismonta mai, e un'etichetta cambiata in Impostazioni arriva lo stesso.
+  const [notePresets, setNotePresets] = useState<readonly NotePresetRef[]>(NO_PRESETS);
+  useEffect(() => swrConfig('reservationNotePresets', getReservationNotePresets, rows => {
+    const next = toPresetRefs(rows);
+    setNotePresets(prev => (samePresets(prev, next) ? prev : next));
+  }), [service.key]);
+  // «Nomi degli ospiti»: per dispositivo e spenti di default, perché uno
+  // schermo all'ingresso lo legge anche chi aspetta. Spenti, nel modello non
+  // entra nessun nome di persona.
+  const [showNames, setShowNames] = useState(() => readStorage(NAMES_KEY) === '1');
+  const toggleNames = () => {
+    const next = !showNames;
+    // Senza salvataggio (modalità privata) la scelta vale finché la pagina
+    // resta aperta.
+    writeStorage(NAMES_KEY, next ? '1' : null);
+    setShowNames(next);
+  };
+  // Il modello non conosce i18n: i testi dei cartellini glieli dà la pagina,
+  // già tradotti, e cambiano con la lingua (t cambia con lei).
+  const copy = useMemo<SceneCopy>(
+    () => (i18nReady ? { reserved: time => t('reserved', { time }), event: t('event') } : FALLBACK_COPY),
+    [t, i18nReady],
+  );
+
   const model = useMemo(() => (settledOverrides === null ? null : deriveSceneModel({
     rooms,
     tables,
@@ -256,14 +312,14 @@ const SalaVivoPage: React.FC<SalaVivoPageProps> = ({
     markers,
     service,
     nowMs,
-  })), [rooms, tables, reservations, banquetMenus, settledOverrides, markers, service, nowMs]);
+    notePresets,
+    showNames,
+    copy,
+  })), [rooms, tables, reservations, banquetMenus, settledOverrides, markers, service, nowMs, notePresets, showNames, copy]);
 
-  // Le sale aperte, più una sala chiusa che ha ancora gente a tavola: chi è
-  // seduto lì va visto comunque.
-  const visibleRooms = useMemo<RoomModel[]>(
-    () => (model ? model.rooms.filter(r => !r.closed || r.summary.seated > 0) : []),
-    [model],
-  );
+  // Le sale aperte, più una sala chiusa dove c'è ancora qualcuno, a tavola,
+  // all'ingresso o in arrivo: chi la testata conta va visto comunque.
+  const visibleRooms = useMemo<RoomModel[]>(() => (model ? roomsToShow(model.rooms) : []), [model]);
   // La scelta resta sul dispositivo. Una sala sparita o chiusa per questo
   // turno ripiega sulla prima, senza cancellare la scelta: al turno dopo si
   // torna lì.
@@ -462,61 +518,96 @@ const SalaVivoPage: React.FC<SalaVivoPageProps> = ({
   // Il dizionario della pagina arriva a richiesta: prima, le chiavi grezze.
   if (!i18nReady) return <Loader label={null} className="h-full" />;
 
+  // La riga c'è anche prima dei numeri (uno spazio unificatore): quando
+  // arrivano la testata non cresce e la sala sotto non salta. Chi aspetta
+  // all'ingresso entra nel riassunto solo se c'è: «0 all'ingresso» per tutto
+  // il servizio sarebbe rumore.
+  let summaryText = '\u00A0';
+  if (model && !loading) {
+    const { seated, arriving, lobby } = model.summary;
+    summaryText = t('summary', { seated, arriving });
+    if (lobby > 0) summaryText += ` · ${t('summaryLobby', { count: lobby })}`;
+  }
+
   return (
     <div className={pinned ? ROOT_PINNED : ROOT}>
-      <div className="flex flex-shrink-0 items-center justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="truncate text-[22px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)] sm:text-[26px]">
-            {t('title')}
-          </h1>
-          {/* La riga c'è anche prima dei numeri: quando arrivano la testata
-              non cresce e la sala sotto non salta. */}
-          <p className="mt-0.5 truncate text-[15px] tabular-nums text-[var(--ds-text-secondary)]">
-            {model && !loading ? t('summary', { seated: model.summary.seated, arriving: model.summary.arriving }) : ' '}
-          </p>
-        </div>
-        <div className="flex flex-shrink-0 items-center gap-2">
-          <div className={pinned && controlsIdle ? CONTROLS_IDLE : CONTROLS_AWAKE}>
-            {canvasOn && (
-              <button
-                type="button"
-                onClick={() => setRecenterSignal(n => n + 1)}
-                className={dsIconButton}
-                title={t('recenter')}
-                aria-label={t('recenter')}
-              >
-                <LocateFixed className="h-5 w-5" aria-hidden />
-              </button>
-            )}
-            {/* Un interruttore: il nome resta quello e lo stato lo dice
-                aria-pressed; il title dice cosa fa il prossimo tocco. */}
-            <button
-              type="button"
-              onClick={togglePin}
-              aria-pressed={pinned}
-              className={pinned ? ICON_BUTTON_ON : dsIconButton}
-              title={pinned ? t('unpin') : t('pin')}
-              aria-label={t('pin')}
-            >
-              {pinned ? <PinOff className="h-5 w-5" aria-hidden /> : <Pin className="h-5 w-5" aria-hidden />}
-            </button>
-            {canFullscreen && (
-              <button
-                type="button"
-                onClick={toggleFullscreen}
-                className={dsIconButton}
-                title={isFullscreen ? t('exitFullscreen') : t('fullscreen')}
-                aria-label={isFullscreen ? t('exitFullscreen') : t('fullscreen')}
-              >
-                {isFullscreen ? <Minimize2 className="h-5 w-5" aria-hidden /> : <Maximize2 className="h-5 w-5" aria-hidden />}
-              </button>
-            )}
+      {/* Sul telefono due righe: titolo e riassunto sopra, a tutta
+          larghezza, i bottoni sotto (decisione di Tina, 4 ottobre). Accanto
+          ai bottoni il titolo finiva in «Sala dal v…» e il riassunto perdeva
+          «in arrivo» e «all'ingresso». Da sm in su una riga sola. */}
+      <div className="flex-shrink-0">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+          <div className="min-w-0">
+            <h1 className="truncate text-[22px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)] sm:text-[26px]">
+              {t('title')}
+            </h1>
+            <p className="mt-0.5 truncate text-[15px] tabular-nums text-[var(--ds-text-secondary)]">
+              {summaryText}
+            </p>
           </div>
-          {/* L'orologio non svanisce con i bottoni: su una TV è quello che
-              dice che la sala è viva. Pastiglia da md, pallino sotto; la
-              pastiglia porta inline-flex, quindi si nasconde con max-md:. */}
-          <LivePill connected={isConnected} time={currentTime} routes={linkRoutes} routesClassName="max-lg:hidden" className="max-md:hidden" />
-          <LivePill connected={isConnected} time={currentTime} variant="dot" className="mx-1 md:hidden" />
+          <div className="flex flex-shrink-0 items-center gap-2">
+            <div className={pinned && controlsIdle ? CONTROLS_IDLE : CONTROLS_AWAKE}>
+              {canvasOn && (
+                <button
+                  type="button"
+                  onClick={() => setRecenterSignal(n => n + 1)}
+                  className={dsIconButton}
+                  title={t('recenter')}
+                  aria-label={t('recenter')}
+                >
+                  <LocateFixed className="h-5 w-5" aria-hidden />
+                </button>
+              )}
+              {/* «Nomi degli ospiti», un interruttore come la puntina: il nome
+                  resta quello e lo stato lo dice aria-pressed; acceso, il title
+                  dice come spegnerlo. Solo con la sala in 3D, come «Centra»: i
+                  nomi stanno sulle etichette dei tavoli. A schermo fissato non
+                  c'è (decisione di Tina, 4 ottobre): chi passa davanti allo
+                  schermo dell'ingresso non deve poter accendere i nomi. Resta
+                  quello che era impostato prima di fissare; per cambiarlo si
+                  sblocca. */}
+              {canvasOn && !pinned && (
+                <button
+                  type="button"
+                  onClick={toggleNames}
+                  aria-pressed={showNames}
+                  className={showNames ? ICON_BUTTON_ON : dsIconButton}
+                  title={showNames ? t('hideNames') : t('showNames')}
+                  aria-label={t('showNames')}
+                >
+                  <Tag className="h-5 w-5" aria-hidden />
+                </button>
+              )}
+              {/* Un interruttore: il nome resta quello e lo stato lo dice
+                  aria-pressed; il title dice cosa fa il prossimo tocco. */}
+              <button
+                type="button"
+                onClick={togglePin}
+                aria-pressed={pinned}
+                className={pinned ? ICON_BUTTON_ON : dsIconButton}
+                title={pinned ? t('unpin') : t('pin')}
+                aria-label={t('pin')}
+              >
+                {pinned ? <PinOff className="h-5 w-5" aria-hidden /> : <Pin className="h-5 w-5" aria-hidden />}
+              </button>
+              {canFullscreen && (
+                <button
+                  type="button"
+                  onClick={toggleFullscreen}
+                  className={dsIconButton}
+                  title={isFullscreen ? t('exitFullscreen') : t('fullscreen')}
+                  aria-label={isFullscreen ? t('exitFullscreen') : t('fullscreen')}
+                >
+                  {isFullscreen ? <Minimize2 className="h-5 w-5" aria-hidden /> : <Maximize2 className="h-5 w-5" aria-hidden />}
+                </button>
+              )}
+            </div>
+            {/* L'orologio non svanisce con i bottoni: su una TV è quello che
+                dice che la sala è viva. Pastiglia da md, pallino sotto; la
+                pastiglia porta inline-flex, quindi si nasconde con max-md:. */}
+            <LivePill connected={isConnected} time={currentTime} routes={linkRoutes} routesClassName="max-lg:hidden" className="max-md:hidden" />
+            <LivePill connected={isConnected} time={currentTime} variant="dot" className="mx-1 md:hidden" />
+          </div>
         </div>
       </div>
 
@@ -593,10 +684,18 @@ const SalaVivoPage: React.FC<SalaVivoPageProps> = ({
                 un'immagine vuota ACCANTO al canvas. Un role="img" toglie allo
                 screen reader tutto quello che contiene: il «Preparo la vista
                 3D…» del caricamento, il velo e i loro bottoni stanno fuori. Il
-                canvas, che non ha niente da leggere, è aria-hidden. */}
+                canvas, che non ha niente da leggere, è aria-hidden. Chi
+                aspetta all'ingresso, come nel riassunto, solo se c'è. */}
             <div
               role="img"
-              aria-label={t('stageLabel', { room: activeRoom.name, seated: activeRoom.summary.seated, arriving: activeRoom.summary.arriving })}
+              aria-label={activeRoom.summary.lobby > 0
+                ? t('stageLabelLobby', {
+                    room: activeRoom.name,
+                    seated: activeRoom.summary.seated,
+                    arriving: activeRoom.summary.arriving,
+                    lobby: activeRoom.summary.lobby,
+                  })
+                : t('stageLabel', { room: activeRoom.name, seated: activeRoom.summary.seated, arriving: activeRoom.summary.arriving })}
               className="sr-only"
             />
             {canvasOn && (

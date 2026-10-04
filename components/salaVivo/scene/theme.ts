@@ -13,8 +13,9 @@ import type { TableDisplayStatus } from '../types';
  * Una tavolozza sola, di THREE.Color creati una volta. I materiali a colore
  * fisso tengono il colore PER RIFERIMENTO (material.color = palette.x): al
  * cambio di tema li aggiorna il .set() sul posto, senza ricreare materiali né
- * rimontare la scena. Quello che è COPIATO altrove (i colori per istanza dei
- * tavoli, le etichette disegnate su canvas) si rifà quando cresce `version`.
+ * rimontare la scena. Quello che è COPIATO altrove (i colori per istanza di
+ * tavoli, figure e cartellini, le etichette disegnate su canvas) si rifà
+ * quando cresce `version`.
  */
 
 /** Gli stati del glifo, nell'ordine della piantina. */
@@ -55,12 +56,40 @@ export interface ScenePalette {
   outdoorFloor: THREE.Color;
   /** --tg-inarrivo-accent: l'anello che pulsa. */
   ringAccent: THREE.Color;
+  /* I colori dei ruoli: mai un colore di stato (una figura in --tg-* si
+   * leggerebbe come lo stato del tavolo), e mai il verde acqua di
+   * --ds-cat-1, che in sala vuol dire «uscita». */
+  /** --ds-text-muted: gli ospiti, pedine neutre schiarite per comitiva
+   *  (guestBodyColor). */
+  guest: THREE.Color;
+  /** Il chiaro verso cui vanno la tinta degli ospiti e le teste: --ds-surface
+   *  col tema chiaro (il pavimento), --ds-text-primary con lo scuro. Verso il
+   *  pavimento scuro teste e bambini diventerebbero più scuri dei corpi e
+   *  degli adulti, e una testa di bambino sul pavimento della veranda
+   *  scenderebbe a 2,5:1. */
+  light: THREE.Color;
+  /** --ds-cat-6-solid, argilla: l'hostess, l'unica tinta di una figura fuori
+   *  dalle famiglie di stato. */
+  hostess: THREE.Color;
+  /** --ds-cat-6-text: il cane. */
+  dog: THREE.Color;
+  /** Il cartellino «Riservato» o «Evento» sul piano: le falde in
+   *  --tg-attesa-name (il blu scuro dell'attesa col tema chiaro, chiaro con lo
+   *  scuro), la costa in --tg-attesa-bg. Al contrario, in --tg-attesa-bg,
+   *  sparirebbe sul piano di un tavolo libero, in attesa o in arrivo, che
+   *  sono tutti dello stesso chiaro. */
+  signCard: THREE.Color;
+  signRidge: THREE.Color;
   /** Le ombre a macchia: nero a 0,12 col tema chiaro, 0,30 con lo scuro, dove
    *  un'ombra leggera sparirebbe. */
   shadowOpacity: number;
   status: Record<TableDisplayStatus, StatusColors>;
   /** --ds-surface in CSS: la pastiglia delle etichette. */
   surfaceCss: string;
+  /** --ds-border-strong e --ds-text-secondary in CSS: la pastiglia «+N»
+   *  dell'ingresso, neutra come un contatore dell'app. */
+  borderStrongCss: string;
+  textSecondaryCss: string;
   /** --font-sans per intero, pila di ripiego compresa. */
   fontFamily: string;
   /** --ds-radius-control in px: pillola piena col «classico», 8 px con lo
@@ -125,8 +154,16 @@ export function readPalette(palette: ScenePalette): void {
   palette.borderStrong.set(readColor(style, '--ds-border-strong'));
   palette.outdoorFloor.set(readColor(style, '--ds-cat-5-tint'));
   palette.ringAccent.set(readColor(style, '--tg-inarrivo-accent'));
+  palette.guest.set(readColor(style, '--ds-text-muted'));
+  palette.light.set(readColor(style, palette.dark ? '--ds-text-primary' : '--ds-surface'));
+  palette.hostess.set(readColor(style, '--ds-cat-6-solid'));
+  palette.dog.set(readColor(style, '--ds-cat-6-text'));
+  palette.signCard.set(readColor(style, '--tg-attesa-name'));
+  palette.signRidge.set(readColor(style, '--tg-attesa-bg'));
   palette.shadowOpacity = palette.dark ? 0.3 : 0.12;
   palette.surfaceCss = readColor(style, '--ds-surface');
+  palette.borderStrongCss = readColor(style, '--ds-border-strong');
+  palette.textSecondaryCss = readColor(style, '--ds-text-secondary');
   // La pila di --font-sans va a capo in index.css: su una riga sola, o la
   // proprietà font del canvas la rifiuta e ripiega sul serif.
   palette.fontFamily = readRaw(style, '--font-sans').replace(/\s+/g, ' ') || 'sans-serif';
@@ -155,9 +192,17 @@ function createPalette(): ScenePalette {
     borderStrong: new THREE.Color(FALLBACK_COLOR),
     outdoorFloor: new THREE.Color(FALLBACK_COLOR),
     ringAccent: new THREE.Color(FALLBACK_COLOR),
+    guest: new THREE.Color(FALLBACK_COLOR),
+    light: new THREE.Color(FALLBACK_COLOR),
+    hostess: new THREE.Color(FALLBACK_COLOR),
+    dog: new THREE.Color(FALLBACK_COLOR),
+    signCard: new THREE.Color(FALLBACK_COLOR),
+    signRidge: new THREE.Color(FALLBACK_COLOR),
     shadowOpacity: 0.12,
     status,
     surfaceCss: FALLBACK_COLOR,
+    borderStrongCss: FALLBACK_COLOR,
+    textSecondaryCss: FALLBACK_COLOR,
     fontFamily: 'sans-serif',
     controlRadiusPx: 9999,
   };
@@ -170,6 +215,31 @@ function createPalette(): ScenePalette {
  *  tavolo che fa cadere la scena. */
 export function statusColors(palette: ScenePalette, status: TableDisplayStatus): StatusColors {
   return palette.status[status] ?? palette.status.libera;
+}
+
+/** Quanto la testa di una figura va dal corpo verso il chiaro: una pedina
+ *  monocroma, con la testa che si stacca dal busto senza un colore pelle. */
+const HEAD_TOWARD_LIGHT = 0.35;
+
+/** Il corpo di un ospite: --ds-text-muted spostato di `tint` verso il chiaro
+ *  (palette.light: --ds-surface col tema chiaro, --ds-text-primary con lo
+ *  scuro; FigureSlot.tint: 0–0,20 per comitiva, +0,15 i bambini). Così i
+ *  bambini sono più chiari degli adulti con tutti e due i temi. Nello spazio
+ *  sRGB come le sedie spente: un passo di tinta schiarisce quanto l'occhio si
+ *  aspetta, non di più verso il chiaro come un mix lineare. Scrive in `out`,
+ *  niente allocazioni. */
+export function guestBodyColor(palette: ScenePalette, tint: number, out: THREE.Color): THREE.Color {
+  const t = typeof tint === 'number' && Number.isFinite(tint) ? Math.min(1, Math.max(0, tint)) : 0;
+  mixSrgb(out, palette.guest, palette.light, t);
+  return out;
+}
+
+/** La testa: il colore del corpo al 35 % verso il chiaro, più chiara del
+ *  busto con tutti e due i temi. `out` può essere lo stesso colore di
+ *  `body`. */
+export function headColor(palette: ScenePalette, body: THREE.Color, out: THREE.Color): THREE.Color {
+  mixSrgb(out, body, palette.light, HEAD_TOWARD_LIGHT);
+  return out;
 }
 
 /** La tavolozza della scena e la sua versione.

@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from 'react';
 import * as THREE from 'three';
-import type { MarkerModel, RoomModel, Vec2 } from '../types';
+import type { FigureSlot, MarkerModel, RoomModel, Vec2 } from '../types';
 import { doorOnWall, floorSize } from './RoomShell';
 import type { ScenePalette } from './theme';
 
@@ -35,6 +35,17 @@ function yawOf(inward: Vec2 | null | undefined): number {
   if (typeof x !== 'number' || typeof z !== 'number' || !Number.isFinite(x) || !Number.isFinite(z)) return Math.PI;
   if (x === 0 && z === 0) return Math.PI;
   return Math.atan2(x, z);
+}
+
+/** Il verso del leggio: il piano inclinato guarda l'hostess, che il modello
+ *  mette dietro il leggio per chi entra dalla porta (model/placement.ts,
+ *  hostSpot). Senza l'hostess, o sopra il leggio, il verso del segnaposto. */
+function lecternYaw(host: MarkerModel, figures: readonly FigureSlot[] | null | undefined): number {
+  const hostess = Array.isArray(figures) ? figures.find((f) => f?.kind === 'hostess') : undefined;
+  const dx = (hostess?.x ?? Number.NaN) - host.pos.x;
+  const dz = (hostess?.z ?? Number.NaN) - host.pos.z;
+  if (Number.isFinite(dx) && Number.isFinite(dz) && Math.hypot(dx, dz) > 1e-6) return Math.atan2(dx, dz);
+  return yawOf(host.inward);
 }
 
 function usable(marker: MarkerModel | null | undefined): marker is MarkerModel {
@@ -116,9 +127,9 @@ export function Fixtures({ room, palette, shadow }: { room: RoomModel; palette: 
         </group>
       )}
       {usable(host) && (
-        <group position={[host.pos.x, 0, host.pos.z]} rotation={[0, yawOf(host.inward), 0]}>
+        <group position={[host.pos.x, 0, host.pos.z]} rotation={[0, lecternYaw(host, room.figures), 0]}>
           {/* Il leggio: 0,5 × 0,4 m, alto 1,1 m col piano inclinato verso
-              l'hostess, che PR2c mette mezzo metro verso la sala. */}
+              l'hostess, mezzo metro dietro di lui per chi entra. */}
           <Part geometry={res.box} material={lookOf(host).body} position={[0, 0.5, 0]} scale={[0.5, 1, 0.4]} />
           <Part
             geometry={res.box}
