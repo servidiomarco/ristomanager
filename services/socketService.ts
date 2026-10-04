@@ -1,6 +1,6 @@
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import { Server as HTTPServer } from 'http';
-import type { Reservation, Table, Room, Dish, BanquetMenu, UserRole, TableMerge, TableHiddenOverride, RoomClosedOverride } from '../types.js';
+import type { Reservation, Table, Room, Dish, BanquetMenu, UserRole, TableMerge, TableHiddenOverride, RoomClosedOverride, FloorMarker } from '../types.js';
 import { AuthService, TokenPayload, isPlatformScopedSession } from '../auth/authService.js';
 import { isAllowedOrigin } from './corsAllowlist.js';
 import { queryWithRetry, runWithTenantContext, runAsPlatform } from '../db.js';
@@ -359,6 +359,24 @@ export class SocketService {
   broadcastRoomDeleted(tenantId: number, id: number) {
     this.emitTo(tenantId, [this.tenantRoom(tenantId)],'room:deleted', id);
     console.log(`Broadcasting room:deleted for ID ${id} (tenant ${tenantId})`);
+  }
+
+  // Segnaposto di sala (ingresso, pass, accoglienza): geometria della pianta
+  // come sale e tavoli. Mittente escluso come per la creazione dei tavoli: il
+  // dispositivo che trascina ha già la riga dalla risposta HTTP, e l'eco gli
+  // riporterebbe indietro il segnaposto fra due trascinamenti rapidi. In
+  // ibrido un client in LAN l'eco la riceve comunque (l'esclusione vale solo
+  // sui socket del cloud): i listener client devono restare idempotenti.
+  broadcastFloorMarkerUpdated(tenantId: number, marker: FloorMarker, excludeSocketId?: string) {
+    this.emitTo(tenantId, [this.tenantRoom(tenantId)], 'floorMarker:updated', marker, excludeSocketId);
+    console.log(`Broadcasting floorMarker:updated ${marker.kind} room=${marker.room_id} (tenant ${tenantId})`);
+  }
+
+  // La cancellazione di una SALA non passa di qui: i segnaposto spariscono in
+  // cascata nel database e i client li scartano filtrando per sala.
+  broadcastFloorMarkerDeleted(tenantId: number, marker: Pick<FloorMarker, 'id' | 'room_id' | 'kind'>, excludeSocketId?: string) {
+    this.emitTo(tenantId, [this.tenantRoom(tenantId)], 'floorMarker:deleted', marker, excludeSocketId);
+    console.log(`Broadcasting floorMarker:deleted ${marker.kind} room=${marker.room_id} (tenant ${tenantId})`);
   }
 
   // Dish broadcast methods

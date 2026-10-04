@@ -1,4 +1,4 @@
-import { Reservation, Table, Room, Dish, DishComponent, Modifier, ModifierGroup, RestaurantMenu, BanquetMenu, BanquetPayment, BanquetStatus, TableMerge, TableHiddenOverride, RoomClosedOverride, Shift, Customer, InventoryArea, InventoryLocation, InventoryProduct, InventoryStockRow, InventoryMovement, InventoryMovementReason, InventoryCategory, PaymentRequest, TableAssignmentSuggestion } from '../types';
+import { Reservation, Table, Room, Dish, DishComponent, Modifier, ModifierGroup, RestaurantMenu, BanquetMenu, BanquetPayment, BanquetStatus, TableMerge, TableHiddenOverride, RoomClosedOverride, FloorMarker, FloorMarkerKind, Shift, Customer, InventoryArea, InventoryLocation, InventoryProduct, InventoryStockRow, InventoryMovement, InventoryMovementReason, InventoryCategory, PaymentRequest, TableAssignmentSuggestion } from '../types';
 import { socketClient } from './socketClient';
 import { authApiService } from './authApiService';
 import { buildApiError } from './apiError';
@@ -360,6 +360,40 @@ export const deleteRoomClosed = async (
     method: 'DELETE',
     headers: getHeaders(),
     body: JSON.stringify({ date, shift, room_id }),
+  }, false);
+};
+
+// ============================================
+// SEGNAPOSTO DI SALA (ingresso, pass, accoglienza)
+// ============================================
+
+export const getFloorMarkers = async (): Promise<FloorMarker[]> => {
+  return apiRequest<FloorMarker[]>(`${API_URL}/floor-markers`, {
+    headers: getHeaders(false),
+  });
+};
+
+// Niente `offline`, a differenza di updateTable: è configurazione fatta a
+// schermo, meglio un errore subito che una posizione vecchia rigiocata dopo,
+// magari sopra un trascinamento più recente. Il body si ricompone campo per
+// campo: chi chiama può passare il segnaposto intero (id, updated_at…).
+export const saveFloorMarker = async (marker: {
+  room_id: number;
+  kind: FloorMarkerKind;
+  x: number;
+  y: number;
+}): Promise<FloorMarker> => {
+  return apiRequest<FloorMarker>(`${API_URL}/floor-markers`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify({ room_id: marker.room_id, kind: marker.kind, x: marker.x, y: marker.y }),
+  });
+};
+
+export const deleteFloorMarker = async (id: number): Promise<void> => {
+  return apiRequest<void>(`${API_URL}/floor-markers/${id}`, {
+    method: 'DELETE',
+    headers: getHeaders(false),
   }, false);
 };
 
@@ -1257,6 +1291,9 @@ export interface FeatureFlags {
   review_requests_enabled: boolean;
   /** Modalità ibrida: comande/cucina servite dal nodo di sala sulla LAN. */
   sala_node_enabled: boolean;
+  /** Sala dal vivo: ingresso, pass e accoglienza sulla piantina di Sale &
+   *  Tavoli. Opzionale perché un server più vecchio non lo manda. */
+  sala_dal_vivo_enabled?: boolean;
 }
 
 export const getFeatureFlags = async (): Promise<FeatureFlags> => {

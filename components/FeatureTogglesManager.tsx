@@ -209,6 +209,8 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
         review_requests_enabled: { title: 'Richiesta recensione', on: 'attiva', off: 'disattivata' },
         // Idem: gestito dalla card Nodo di sala (Sala & Cucina).
         sala_node_enabled: { title: 'Modalità ibrida', on: 'attiva', off: 'disattivata' },
+        // Idem: gestito dalla card Sala dal vivo (Impostazioni → Ristorante).
+        sala_dal_vivo_enabled: { title: 'Sala dal vivo', on: 'accesa', off: 'spenta' },
     };
 
     const toggle = async (key: FlagKey) => {

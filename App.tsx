@@ -62,6 +62,7 @@ import { BlacklistPolicyManager } from './components/BlacklistPolicyManager';
 import { PayAtTableSettingsManager } from './components/PayAtTableSettingsManager';
 import { FiscalSettingsManager } from './components/FiscalSettingsManager';
 import { SalaCucinaSettingsManager } from './components/SalaCucinaSettingsManager';
+import { SalaDalVivoSettingsCard } from './components/SalaDalVivoSettingsCard';
 import { AiMessagesSettingsManager } from './components/AiMessagesSettingsManager';
 import { ReviewSettingsCard } from './components/ReviewSettingsCard';
 import { RecensioniPage } from './components/RecensioniPage';
@@ -564,15 +565,20 @@ const App: React.FC = () => {
   // Passe attivo (default true): spento, la pagina Passe sparisce dal menu e
   // i verbi chiama/servito passano alla comanda del cameriere.
   const [passeEnabled, setPasseEnabled] = useState<boolean>(true);
+  // Sala dal vivo (spenta di default): accende i segnaposto di sala
+  // (ingresso, pass, accoglienza) sulla piantina. null finché il flag non è
+  // noto, come Comande: niente strumenti né fetch in base a un'ipotesi.
+  const [salaDalVivoEnabled, setSalaDalVivoEnabled] = useState<boolean | null>(null);
 
   useEffect(() => {
-    if (!isAuthenticated) { setTableOrdersEnabled(null); return; }
+    if (!isAuthenticated) { setTableOrdersEnabled(null); setSalaDalVivoEnabled(null); return; }
     let cancelled = false;
     getFeatureFlags()
       .then(f => {
         if (cancelled) return;
         setTableOrdersEnabled(f.table_orders_enabled === true);
         setPasseEnabled(f.passe_enabled !== false);
+        setSalaDalVivoEnabled(f.sala_dal_vivo_enabled === true);
       })
       .catch(() => { /* flag non leggibile: le voci restano nascoste */ });
     // Modalità ibrida: la config del nodo di sala si rilegge insieme ai flag,
@@ -586,6 +592,11 @@ const App: React.FC = () => {
       }
       if (flags && typeof flags.passe_enabled === 'boolean') {
         setPasseEnabled(flags.passe_enabled);
+      }
+      // Con typeof: l'altro mittente di features:updated manda solo
+      // sala_node_authority_enabled, e un undefined spegnerebbe la sala.
+      if (flags && typeof flags.sala_dal_vivo_enabled === 'boolean') {
+        setSalaDalVivoEnabled(flags.sala_dal_vivo_enabled);
       }
       // Il flip dell'interruttore ibrido arriva da qui (features:updated):
       // si rilegge la config — se il routing cambia, onRoutingChange sopra
@@ -3042,6 +3053,7 @@ const App: React.FC = () => {
             canEdit={hasPermission('floorplan:full')}
             globalDate={globalDate}
             globalShiftFilter={globalShiftFilter}
+            markersEnabled={salaDalVivoEnabled === true}
           />
         )}
 
@@ -3484,6 +3496,9 @@ const App: React.FC = () => {
                 <RemindersManager showToast={addToast} />
                 <CardErrorBoundary label={t('settings.floorAndKitchen')}>
                   <SalaCucinaSettingsManager showToast={addToast} />
+                </CardErrorBoundary>
+                <CardErrorBoundary label={t('settings.liveFloor')}>
+                  <SalaDalVivoSettingsCard showToast={addToast} />
                 </CardErrorBoundary>
                 {/* Identità del tenant + documenti legali generati. */}
                 <LegalSettingsCard showToast={addToast} />

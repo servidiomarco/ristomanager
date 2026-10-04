@@ -87,5 +87,13 @@
   "roomClosedShort": "{{sala}} (closed)",
   "rotateHint": "Rotate +15° (Shift or right-click for -15°)",
   "tableDetailsNamed": "Table {{tavolo}} details",
-  "rotateCurrent": "now: {{gradi}}°"
+  "rotateCurrent": "now: {{gradi}}°",
+  "markerEntrance": "Entrance",
+  "markerPass": "Pass",
+  "markerHostStand": "Host stand",
+  "placeEntrance": "Place the entrance",
+  "placePass": "Place the pass",
+  "placeHostStand": "Place the host stand",
+  "removeMarker": "Remove",
+  "markerSaveError": "Marker not saved"
 }

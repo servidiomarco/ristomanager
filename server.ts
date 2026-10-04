@@ -94,6 +94,7 @@ import type { PassepartoutComanda, EsitoChiusuraComanda, PassepartoutArticolo } 
 import { MENU_LANGS, isMenuTranslationConfigured, translateMenuEntries } from './services/menuTranslationService.js';
 import { isWinePairingConfigured, suggestWinePairings } from './services/aiWinePairingService.js';
 import { Shift, PaymentStatus, UserRole } from './types.js';
+import type { FloorMarker, FloorMarkerKind } from './types.js';
 import authRoutes from './auth/authRoutes.js';
 import logRoutes from './activityLogs/logRoutes.js';
 import { authenticate, authorize, requirePermission, requireAnyPermission, requireStepUp } from './auth/authMiddleware.js';
@@ -12687,6 +12688,180 @@ app.delete('/room-closed', authenticate, requirePermission('floorplan:full'), as
         res.json(deleted);
     } catch (err) {
         console.error('Error reopening room:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+
+// ============================================
+// SEGNAPOSTO DI SALA (ingresso, pass, accoglienza)
+// ============================================
+// Configurazione della pianta come sale e tavoli: scrive solo chi ha
+// floorplan:full, legge chiunque sia autenticato — la Sala dal vivo gira sui
+// tablet di RECEPTION e WAITER, che floorplan:full non ce l'hanno. Il flag
+// sala_dal_vivo_enabled decide solo la UI: queste route rispondono comunque.
+//
+// Broadcast diretto e niente outbox: sul nodo di sala nessuno legge i
+// segnaposto (/floor-markers va sempre al cloud). Mittente escluso via
+// X-Socket-ID come per la creazione dei tavoli: il dispositivo che trascina
+// ha già la riga dalla risposta HTTP, e l'eco gli farebbe rimbalzare
+// indietro il segnaposto su due trascinamenti rapidi.
+//
+// Ogni query porta il suo filtro tenant_id anche con la RLS accesa: la RLS è
+// la rete di sicurezza, non lo scoping.
+const FLOOR_MARKER_KINDS: readonly FloorMarkerKind[] = ['ENTRANCE', 'PASS', 'HOST_STAND'];
+// Il nome nel registro attività: chi lo legge non deve decifrare HOST_STAND.
+const FLOOR_MARKER_LABELS: Record<FloorMarkerKind, string> = {
+    ENTRANCE: 'ingresso',
+    PASS: 'pass',
+    HOST_STAND: 'accoglienza',
+};
+// Tetto delle coordinate: largo per qualunque sala vera, stretto abbastanza
+// da tenere fuori i numeri assurdi di un client rotto. Lo stesso numero sta
+// nel CHECK della migration segnaposto-sala: cambiano insieme, o il
+// database risponde 23514 (un 500) a una posizione che qui è valida.
+const FLOOR_MARKER_MAX_PX = 20000;
+// rooms.id e floor_markers.id sono INTEGER: oltre 2^31-1 Postgres risponde
+// 22003 (fuori intervallo), cioè un 500 al posto del 400/404 dovuto.
+const FLOOR_MARKER_PG_INT_MAX = 2147483647;
+
+// Una coordinata: solo un numero finito (la stringa '120' è un client che
+// manda il tipo sbagliato, non una posizione), arrotondato al px intero e
+// dentro la tela. `|| 0` normalizza il -0 di Math.round(-0.4).
+const floorMarkerCoord = (v: unknown): number | null => {
+    if (typeof v !== 'number' || !Number.isFinite(v)) return null;
+    const r = Math.round(v) || 0;
+    return r >= 0 && r <= FLOOR_MARKER_MAX_PX ? r : null;
+};
+
+const isFloorMarkerKind = (v: unknown): v is FloorMarkerKind =>
+    typeof v === 'string' && (FLOOR_MARKER_KINDS as readonly string[]).includes(v);
+
+app.get('/floor-markers', authenticate, async (req, res) => {
+    try {
+        const result = await queryWithRetry(
+            'SELECT id, room_id, kind, x, y, updated_at FROM floor_markers WHERE tenant_id = $1 ORDER BY room_id, kind',
+            [req.tenantId!]
+        );
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Error fetching floor markers:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// PUT /floor-markers body: { room_id, kind, x, y } — upsert: un segnaposto
+// per tipo e per sala, il secondo PUT lo sposta invece di duplicarlo.
+app.put('/floor-markers', authenticate, requirePermission('floorplan:full'), async (req, res) => {
+    try {
+        const { room_id, kind, x, y } = req.body ?? {};
+        if (typeof room_id !== 'number' || !Number.isInteger(room_id) || room_id < 1 || room_id > FLOOR_MARKER_PG_INT_MAX) {
+            return res.status(400).json({ error: 'Sala non valida' });
+        }
+        if (!isFloorMarkerKind(kind)) {
+            return res.status(400).json({ error: 'Tipo di segnaposto non valido' });
+        }
+        const px = floorMarkerCoord(x);
+        const py = floorMarkerCoord(y);
+        if (px === null || py === null) {
+            return res.status(400).json({ error: 'Posizione non valida' });
+        }
+
+        // La sala dev'essere del tenant PRIMA dell'upsert: il vincolo è
+        // (room_id, kind) senza tenant, quindi un room_id altrui farebbe
+        // DO UPDATE sul segnaposto di un altro ristorante. Il WHERE sul
+        // DO UPDATE è la seconda cintura, se mai le due cose divergessero.
+        const room = await queryWithRetry('SELECT id, name FROM rooms WHERE id = $1 AND tenant_id = $2', [room_id, req.tenantId!]);
+        if (room.rowCount === 0) return res.status(404).json({ error: 'Sala non trovata' });
+
+        let result;
+        try {
+            result = await queryWithRetry(
+                `INSERT INTO floor_markers (tenant_id, room_id, kind, x, y)
+                 VALUES ($1, $2, $3, $4, $5)
+                 ON CONFLICT (room_id, kind)
+                 DO UPDATE SET x = EXCLUDED.x, y = EXCLUDED.y, updated_at = CURRENT_TIMESTAMP
+                 WHERE floor_markers.tenant_id = EXCLUDED.tenant_id
+                 RETURNING id, room_id, kind, x, y, updated_at`,
+                [req.tenantId!, room_id, kind, px, py]
+            );
+        } catch (err: any) {
+            // 23503: la sala è stata eliminata fra il controllo e la
+            // scrittura — per chi trascina è la stessa cosa di «non c'è».
+            if (err?.code === '23503') return res.status(404).json({ error: 'Sala non trovata' });
+            throw err;
+        }
+        const marker = result.rows[0] as FloorMarker | undefined;
+        if (!marker) return res.status(404).json({ error: 'Sala non trovata' });
+
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!,
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.UPDATE,
+                ResourceType.ROOM,
+                room_id,
+                `Segnaposto ${FLOOR_MARKER_LABELS[kind]} · ${room.rows[0].name}`,
+                // Il tipo sta già nel nome: nei dettagli, che il registro
+                // mostra così come sono, uscirebbe il codice HOST_STAND.
+                { x: px, y: py }
+            );
+        }
+
+        const socketId = typeof req.headers['x-socket-id'] === 'string' ? req.headers['x-socket-id'] : undefined;
+        if (socketService) socketService.broadcastFloorMarkerUpdated(req.tenantId!, marker, socketId);
+
+        res.json(marker);
+    } catch (err) {
+        console.error('Error saving floor marker:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.delete('/floor-markers/:id', authenticate, requirePermission('floorplan:full'), async (req, res) => {
+    try {
+        // Un id che non è un intero positivo nel range di INTEGER non può
+        // esistere: 404 subito, senza far rispondere 22P02/22003 a Postgres.
+        const raw = String(req.params.id ?? '');
+        const id = /^\d{1,10}$/.test(raw) ? Number(raw) : NaN;
+        if (!Number.isInteger(id) || id < 1 || id > FLOOR_MARKER_PG_INT_MAX) {
+            return res.status(404).json({ error: 'Segnaposto non trovato' });
+        }
+        // Il nome della sala serve solo al registro attività: esce nella
+        // stessa query e non finisce nella risposta né nel broadcast.
+        const result = await queryWithRetry(
+            `DELETE FROM floor_markers
+              WHERE id = $1 AND tenant_id = $2
+             RETURNING id, room_id, kind,
+                       (SELECT name FROM rooms WHERE rooms.id = floor_markers.room_id AND rooms.tenant_id = $2) AS room_name`,
+            [id, req.tenantId!]
+        );
+        const row = result.rows[0];
+        if (!row) return res.status(404).json({ error: 'Segnaposto non trovato' });
+        const deleted: Pick<FloorMarker, 'id' | 'room_id' | 'kind'> = { id: row.id, room_id: row.room_id, kind: row.kind };
+
+        if (req.user) {
+            const label = FLOOR_MARKER_LABELS[deleted.kind] ?? 'di sala';
+            LogService.logActivity(
+                req.tenantId!,
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.DELETE,
+                ResourceType.ROOM,
+                deleted.room_id,
+                row.room_name ? `Segnaposto ${label} · ${row.room_name}` : `Segnaposto ${label}`
+            );
+        }
+
+        const socketId = typeof req.headers['x-socket-id'] === 'string' ? req.headers['x-socket-id'] : undefined;
+        if (socketService) socketService.broadcastFloorMarkerDeleted(req.tenantId!, deleted, socketId);
+
+        res.json(deleted);
+    } catch (err) {
+        console.error('Error deleting floor marker:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -26460,8 +26635,8 @@ app.post('/voice-calls/sync', authenticate, requireFeature('voice'), voiceCallsA
 // non è un interruttore qualunque — si muove solo da POST /sala-node/
 // authority, che verifica i cancelli (nodo online, allineato, drenato).
 // Fuori dalla lista, il PUT generico non può fliparlo per sbaglio.
-type FeatureFlagKey = 'public_bookings_enabled' | 'voice_agent_enabled' | 'voice_bookings_suspended' | 'voice_double_seating_enabled' | 'pay_at_table_enabled' | 'table_orders_enabled' | 'ai_messages_enabled' | 'ai_wine_pairing_enabled' | 'digital_menu_enabled' | 'passe_enabled' | 'review_requests_enabled' | 'takeaway_online_enabled' | 'takeaway_voice_enabled' | 'sala_node_enabled' | 'sala_node_authority_enabled';
-const FEATURE_FLAG_KEYS: FeatureFlagKey[] = ['public_bookings_enabled', 'voice_agent_enabled', 'voice_bookings_suspended', 'voice_double_seating_enabled', 'pay_at_table_enabled', 'table_orders_enabled', 'ai_messages_enabled', 'ai_wine_pairing_enabled', 'digital_menu_enabled', 'passe_enabled', 'review_requests_enabled', 'takeaway_online_enabled', 'takeaway_voice_enabled', 'sala_node_enabled'];
+type FeatureFlagKey = 'public_bookings_enabled' | 'voice_agent_enabled' | 'voice_bookings_suspended' | 'voice_double_seating_enabled' | 'pay_at_table_enabled' | 'table_orders_enabled' | 'ai_messages_enabled' | 'ai_wine_pairing_enabled' | 'digital_menu_enabled' | 'passe_enabled' | 'review_requests_enabled' | 'takeaway_online_enabled' | 'takeaway_voice_enabled' | 'sala_node_enabled' | 'sala_node_authority_enabled' | 'sala_dal_vivo_enabled';
+const FEATURE_FLAG_KEYS: FeatureFlagKey[] = ['public_bookings_enabled', 'voice_agent_enabled', 'voice_bookings_suspended', 'voice_double_seating_enabled', 'pay_at_table_enabled', 'table_orders_enabled', 'ai_messages_enabled', 'ai_wine_pairing_enabled', 'digital_menu_enabled', 'passe_enabled', 'review_requests_enabled', 'takeaway_online_enabled', 'takeaway_voice_enabled', 'sala_node_enabled', 'sala_dal_vivo_enabled'];
 
 async function getFeatureFlag(tenantId: number, key: FeatureFlagKey, fallback: boolean): Promise<boolean> {
     try {
@@ -26524,6 +26699,10 @@ const FEATURE_FLAG_DEFAULTS: Record<Exclude<FeatureFlagKey, 'sala_node_authority
     // quando il nodo è installato e raggiungibile; accesa senza nodo i client
     // farebbero probe a vuoto a ogni avvio.
     sala_node_enabled: false,
+    // Spento di default: la Sala dal vivo è nuova e la accende il titolare
+    // dalla sua card in Impostazioni; finché è spenta nessuna schermata
+    // cambia. È solo UI: le route /floor-markers rispondono comunque.
+    sala_dal_vivo_enabled: false,
 };
 
 app.get('/settings/features', authenticate, async (req, res) => {

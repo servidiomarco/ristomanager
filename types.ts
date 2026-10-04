@@ -229,6 +229,21 @@ export interface RoomClosedOverride {
   room_id: number;
 }
 
+// Segnaposto di sala (Sala dal vivo): ingresso, pass e accoglienza, uno per
+// tipo in ogni sala. x/y è il CENTRO del segnaposto, nello stesso spazio in
+// px di tables.x/y (tela della sala, origine in alto a sinistra, y verso il
+// basso) — non l'angolo come per i tavoli: un segnaposto è un punto.
+export type FloorMarkerKind = 'ENTRANCE' | 'PASS' | 'HOST_STAND';
+
+export interface FloorMarker {
+  id: number;
+  room_id: number;
+  kind: FloorMarkerKind;
+  x: number;
+  y: number;
+  updated_at?: string;
+}
+
 export enum ArrivalStatus {
   WAITING = 'WAITING',      // In attesa — booking is live, party not yet here
   ARRIVED = 'ARRIVED',      // Arrivato — party seated, table occupied
