@@ -58,6 +58,7 @@ import {
     isAiConfigured,
     AiReplyError,
 } from './services/aiReplyService.js';
+import type { AiCustomerProfile } from './services/aiCustomerContext.js';
 import {
     extractBookingFromEmail,
     EmailBookingExtractionError,
@@ -10044,6 +10045,28 @@ app.get('/public/media/:token', async (req, res) => runAsPlatform(async () => {
     }
 }));
 
+// La scheda in rubrica del numero che scrive, per le due AI qui sotto. Senza,
+// il 03/10/2026 un cliente col tavolo preferito segnato ha chiesto «posso
+// mangiare al mio tavolo preferito?» e l'AI gli ha chiesto quale fosse.
+// Doppioni dello stesso numero: stesso ordine della scheda sulle prenotazioni
+// (VIP, poi chi ha un tavolo preferito, poi la più vecchia). Le note
+// alimentari restano fuori: vedi services/aiCustomerContext.ts.
+async function loadCustomerProfileForAi(tenantId: number, key: string): Promise<AiCustomerProfile | null> {
+    const r = await queryWithRetry(
+        `SELECT c.name, c.is_vip, c.preferences_notes,
+                pt.name AS preferred_table_name, pr.name AS preferred_room_name
+           FROM customers c
+           LEFT JOIN tables pt ON pt.id = c.preferred_table_id AND pt.tenant_id = c.tenant_id
+           LEFT JOIN rooms pr ON pr.id = pt.room_id AND pr.tenant_id = pt.tenant_id
+          WHERE c.tenant_id = $2
+            AND regexp_replace(COALESCE(c.phone, ''), '\\D', '', 'g') = ANY($1::text[])
+          ORDER BY c.is_vip DESC NULLS LAST, (c.preferred_table_id IS NULL), c.id ASC
+          LIMIT 1`,
+        [phoneDigitsVariants(key), tenantId]
+    );
+    return r.rows[0] ?? null;
+}
+
 // Risposta suggerita per una conversazione. Non invia nulla: restituisce il
 // testo che il cameriere trova nel campo di scrittura, da leggere e mandare
 // (o cestinare). Vedi services/aiReplyService.ts per il perche'.
@@ -10084,7 +10107,7 @@ app.post('/messages/suggest-reply', authenticate, requirePermission('reservation
         // di cui il cliente sta quasi sempre parlando.
         const resv = await queryWithRetry(
             `SELECT r.customer_name, r.reservation_time, r.guests, r.notes, r.reservation_status AS status,
-                    ro.name AS room_name
+                    ro.name AS room_name, t.name AS table_name
                FROM reservations r
                LEFT JOIN tables t ON t.id = r.table_id AND t.tenant_id = r.tenant_id
                LEFT JOIN rooms ro ON ro.id = t.room_id AND ro.tenant_id = t.tenant_id
@@ -10099,6 +10122,7 @@ app.post('/messages/suggest-reply', authenticate, requirePermission('reservation
         const suggestion = await generateSuggestedReply({
             messages: messages as any,
             reservation: resv.rows[0] ?? null,
+            customer: await loadCustomerProfileForAi(req.tenantId!, key),
             knowledge: kb.rows as any,
             restaurantName: businessIdentity().name,
             depositPolicy: await getAutoDepositPolicy(req.tenantId!),
@@ -10181,7 +10205,7 @@ app.post('/messages/agent/run', authenticate, requirePermission('reservations:fu
         // prenotazione omonima di un altro ristorante.
         const resv = await queryWithRetry(
             `SELECT r.id, r.customer_name, r.reservation_time, r.guests, r.notes,
-                    r.reservation_status AS status, ro.name AS room_name
+                    r.reservation_status AS status, ro.name AS room_name, t.name AS table_name
                FROM reservations r
                LEFT JOIN tables t ON t.id = r.table_id AND t.tenant_id = r.tenant_id
                LEFT JOIN rooms ro ON ro.id = t.room_id AND ro.tenant_id = t.tenant_id
@@ -10200,6 +10224,7 @@ app.post('/messages/agent/run', authenticate, requirePermission('reservations:fu
             phoneDigits: key,
             messages: messages as any,
             reservation: resv.rows[0] ?? null,
+            customer: await loadCustomerProfileForAi(req.tenantId!, key),
             phone,
             knowledge: kb.rows as any,
             largeGroupThreshold: soglia,

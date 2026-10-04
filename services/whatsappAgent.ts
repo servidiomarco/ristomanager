@@ -24,6 +24,7 @@ import { describeDepositPolicy, type DepositPolicy } from './depositPolicy.js';
 import * as bookingTools from './bookingTools.js';
 import { WHATSAPP_CHANNEL } from './bookingTools.js';
 import { isoDatesToEuropean } from '../utils/text.js';
+import { describeCustomerForAi, CUSTOMER_PREFERENCE_RULES, type AiCustomerProfile } from './aiCustomerContext.js';
 
 const MODEL = 'claude-opus-5';
 const MAX_GIRI = 4;
@@ -55,9 +56,12 @@ export interface AgentContext {
         reservation_time?: Date | string | null;
         guests?: number | null;
         room_name?: string | null;
+        table_name?: string | null;
         notes?: string | null;
         status?: string | null;
     } | null;
+    /** La scheda in rubrica di questo numero (null se non c'è). */
+    customer?: AiCustomerProfile | null;
     /** Numero di telefono in formato leggibile, per i parametri degli strumenti. */
     phone: string;
     knowledge: Array<{ title: string; content: string }>;
@@ -220,6 +224,7 @@ function buildSystem(ctx: AgentContext): string {
             `- Quando: ${fmtDate(ctx.reservation.reservation_time, tz) || 'n/d'}`,
             `- Persone: ${ctx.reservation.guests ?? 'n/d'}`,
             ctx.reservation.room_name ? `- Sala: ${ctx.reservation.room_name}` : '',
+            ctx.reservation.table_name ? `- Tavolo: ${ctx.reservation.table_name}` : '',
             ctx.reservation.status ? `- Stato: ${ctx.reservation.status}` : '',
             ctx.reservation.notes ? `- Note: ${ctx.reservation.notes}` : '',
         ].filter(Boolean).join('\n')
@@ -238,6 +243,12 @@ ${caparra}
 
 PRENOTAZIONE COLLEGATA A QUESTO NUMERO:
 ${pren}
+
+SCHEDA IN RUBRICA DI QUESTO NUMERO:
+${describeCustomerForAi(ctx.customer)}
+
+TAVOLO PREFERITO:
+${CUSTOMER_PREFERENCE_RULES}
 
 QUANDO NON DEVI USARE GLI STRUMENTI — in questi casi rispondi al cliente che passi la richiesta a una persona:
 - Gruppi di ${ctx.largeGroupThreshold + 1} persone o più (comprese le modifiche che portano il totale a ${ctx.largeGroupThreshold + 1} o più).
