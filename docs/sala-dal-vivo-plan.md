@@ -14,8 +14,8 @@ piatti, dove si accoglie), una pagina che carichi three.js solo su chi la apre, 
 regista che trasformi un cambio di stato in un movimento.
 
 **Dove siamo:** PR1 (segnaposto di sala e interruttore per ristorante, spento di default),
-PR2a (fondamenta, niente di visibile) e PR2b (la pagina con la sala in 3D) sono fatte;
-PR2c, gli ospiti a tavola, è in corso. Lo stato di ogni fase è in §3. Il documento è la specifica del piano
+PR2a (fondamenta, niente di visibile), PR2b (la pagina con la sala in 3D) e PR2c (gli ospiti
+a tavola, fermi) sono fatte; PR3, le animazioni, è in corso. Lo stato di ogni fase è in §3. Il documento è la specifica del piano
 approvato, revisione avversaria compresa, scritta su un clone del 20 settembre (`78336bf`)
 e riallineata a `main` del 3 ottobre (`1f7c511`), 153 PR dopo (§2). Ne tiene tutto quello
 che non dipende dalle righe (formule, soglie, tempi, codice di configurazione, seed e
@@ -101,8 +101,8 @@ oggi lo spingerebbe anche sugli schermi di cucina. **E su main, dopo il piano:**
 | PR1 | `claude/segnaposto-di-sala` | Segnaposto: tabella, route, eventi, strumenti 2D. Interruttore e card in Impostazioni | Railway prima | fatta |
 | PR2a | `claude/sala-dal-vivo-fondamenta` | Geometria del glifo condivisa, servizio in corso, test unitari. Niente di visibile | solo frontend | fatta |
 | PR2b | `claude/sala-dal-vivo-pagina` | Vista, chiosco, caricamento a richiesta e PWA; sala, tavoli e segnaposto in 3D. **Collaudo sull'hardware dopo il merge** | Railway prima (enum `ViewState`) | fatta |
-| PR2c | `claude/sala-dal-vivo-ospiti` | Ospiti statici con bambini e cane, cartelli, nomi spenti di default | solo frontend | **in corso** |
-| PR3 | `claude/sala-dal-vivo-animazioni` | Regista, accompagnamenti, camminata, camerieri d'ambiente, striscia, «Segui il servizio»; `/staff/presence` come Personale | Railway prima | da fare |
+| PR2c | `claude/sala-dal-vivo-ospiti` | Ospiti statici con bambini e cane, cartelli, nomi spenti di default | solo frontend | fatta |
+| PR3 | `claude/sala-dal-vivo-animazioni` | Regista, accompagnamenti, camminata, camerieri d'ambiente, striscia, «Segui il servizio»; `/staff/presence` come Personale | Railway prima | **in corso** |
 
 Ogni PR parte da `origin/main` dopo `git fetch origin`, ricontrollando ancore e ultima
 migration (§2 è quello che succede a non farlo). Il push lo fa Tina, con l'URL di confronto
@@ -126,7 +126,7 @@ App.tsx (rooms, tables, reservations, banquetMenus, interruttore, reservationsEp
  └─ SALA_DAL_VIVO → React.lazy(SalaVivoPage)                              assets/sala3d/
       hook: useFloorMarkers · useServiceOverrides(date, shift) · useStaffOnShift · useWakeLock
       model/ (TS puro): service → tableStatus → layout → party/presence → placement ⇒ SceneModel
-      SceneDirector [PR3] (puro, orologio e seme iniettati): diff(model.parties) → compiti → pose
+      SceneDirector [PR3] (puro, orologio e seme iniettati): diff(partyStates) → copioni → attori
       └─ sonda WebGL2 ok → React.lazy(SalaVivoCanvas) + chunk three       assets/sala3d/
            <Canvas frameloop="demand" flat dpr={[1,1.5]}>  RoomShell · Fixtures · TablesLayer
              · TableLabels · People (InstancedMesh per parte) · Signs · CameraRig · FrameThrottle
@@ -772,7 +772,7 @@ PR2c. Se la TV non tiene 30 fps, PR2c parte con la modalità leggera lì.
 
 ---
 
-## 8. PR2c — Ospiti a tavola, statici (in corso)
+## 8. PR2c — Ospiti a tavola, statici (fatta)
 
 Gli ospiti seduti dove sono davvero, ancora fermi: la camminata è PR3. Chi è a tavola si
 vede seduto, una figura per persona: adulti e bambini (più piccoli) alternati sulle sedie
@@ -1017,196 +1017,366 @@ il nome dell'hostess, i camerieri, la striscia delle attività, «Segui il servi
 
 ---
 
-## 9. PR3 — Animazioni (da fare)
+## 9. PR3 — Animazioni (in corso)
 
-**L'epoca.** App incrementa `reservationsEpoch` subito dopo `setReservations` in
-`fetchData`, nello stesso batch: i ricaricamenti in blocco (connessione,
-`visibilitychange`, `pageshow`) non si animano, un arrivo dopo un buco del Wi-Fi sì.
-**Il server:** `/staff/presence` prende la regola di Personale (`slotState`): turno
-esplicito, poi assenza, riposo settimanale e presenza implicita di FISSO **e
-STAGIONALE** nel contratto. Test: STAGIONALE senza turni presente; FISSO in ferie con un
-pranzo esplicito, solo pranzo; a riposo con una cena esplicita, solo cena; EXTRA assente.
+Il modello statico di PR2c resta l'unica verità su **dove** sta ognuno (figure con chiavi
+stabili, regola di presenza, posti, hostess, ingresso); PR3 mette in scena soltanto il
+passaggio fra due modelli. Quando Reception segna «Arrivato», l'hostess va dal leggio
+all'ingresso, accoglie la tavolata (adulti, bambini più piccoli, il cane), la porta in fila al
+tavolo e lo presenta; ognuno va alla sua sedia e si siede, il cane si sdraia, e lei torna. «In
+uscita» fa alzare la tavolata, l'uscita la porta fuori dalla porta, un cambio di tavolo la fa
+camminare, un «Arrivato» annullato la fa svanire. I camerieri di turno (quelli di Personale)
+girano fra il pass e i tavoli occupati, prima quelli appena seduti; un'etichetta segue la
+tavolata accompagnata, una striscia racconta le ultime cose successe, e «Segui il servizio»
+porta lo schermo dove succede qualcosa.
 
-**Il regista** (`model/director.ts`), puro e deterministico: `new SceneDirector({ now,
-seed, tuning })`, `update(model, reason)`, `step(dtMs)`, `actorsIn(roomId)`,
-`isAnimating()`, `fastForward()`, `onEvent(cb)`. Confronta `model.parties` al commit di
-React, una volta sola, qualunque arrivi prima fra eco e risposta. **Scatto** (lo stato
-finale, senza animazione) al primo caricamento, a epoca cambiata, a scheda nascosta, col
-movimento ridotto e con più di 4 passaggi in 2 s (i rigiochi offline, «3 tavoli
-aggiornati»). Un cambio di servizio azzera; tornando visibile, `fastForward()`.
+Valgono su tutto, sopra la specifica: un'unione è un tavolo solo (accompagnamenti, cambi di
+tavolo e visite vanno al tavolo disegnato, il capofila); i numeri vengono dalla regola di
+presenza e il regista non ne cambia mai uno; nomi spenti di default e bottone dei nomi
+nascosto a schermo fissato (spenti, `PartyModel.name` è `null`, e né la striscia né
+l'etichetta portano un nome); posizioni = x/y salvate; ora = fuso del ristorante.
 
-| Da → a | Azione |
-|---|---|
-| nessuno o in attesa → seduto | **ESCORT**; oltre 12 persone, o legati a un banchetto, compaiono già seduti (80 ms a persona) |
-| nessuno o in attesa → lobby | **LOBBY**: fuori dall'ingresso della sala principale, poi a un posto |
-| lobby → seduto | **ESCORT** dalla lobby; in un'altra sala, dissolvenza e via dall'ingresso di quella |
-| seduto A → seduto B | **RESEAT** in colonna; altra sala, dissolvenza; uno scambio di tavoli sono due reseat |
-| seduto ↔ in piedi | **STAND** dietro le sedie con `DEPARTING`, **SIT** al ritorno |
-| seduto o in piedi → andato (DEPARTED, CANCELLED, NO_SHOW, eliminata, fuori finestra, oltre la grazia) | **LEAVE** verso l'ingresso e fuori; spodestati da una più recente, escono mentre lei entra |
-| qualsiasi → in attesa | **FADE** sul posto (annullato «Arrivato»): l'accompagnamento si annulla, l'hostess torna |
-| in accompagnamento → altro tavolo | **RETARGET** da dov'è l'hostess; altra sala, dissolvenza e coda là |
-| tavolo inutilizzabile · in attesa → NO_SHOW | **LOBBY**, e una sala chiusa con presenti resta una linguetta · niente: sparisce il cartello |
+**L'epoca.** App tiene `reservationsEpoch` e la incrementa subito dopo `setReservations` in
+`fetchData`, senza await di mezzo: stesso batch di React, quindi la pagina non vede mai la
+lista nuova con l'epoca vecchia. `fetchData` gira alla connessione e riconnessione del socket,
+al ritorno in primo piano (`visibilitychange`, `pageshow`) e dopo lo svuotamento della coda
+offline: quei cambi sono un riallineamento e vanno in scena già conclusi. Un arrivo vero dopo
+un buco del Wi-Fi arriva da un evento socket, senza epoca nuova, e si anima.
+`loadReservationsArchive` (i giorni vecchi) non la tocca.
+
+**Il server.** `/staff/presence` legge il giorno come Personale (`slotState` in
+`StaffManagement.tsx`), con la stessa funzione dell'avviso «Il tuo turno è cambiato»:
+`isOnDuty` in `utils/staffShiftChange.ts`, estratta da `shiftDayLabel` senza cambiarne
+l'uscita. Tre letture diventano una.
 
 ```
-hostess: AT_STAND ─coda≠∅→ TO_ENTRANCE → GREET 800 ms → ESCORT (testa del tavolo, 1,0 m/s)
-         → PRESENT 1200 ms (ognuno alla sua sedia, il cane si sdraia) → coda≠∅ ? TO_ENTRANCE
-         : AT_STAND · coda > 3 → velocità ×2 · coda > 6 → i più vecchi oltre il sesto scattano
-colonna: briciole ogni 0,1 m, distanza d'arco 0,8 m l'adulto, 0,7 il bambino, cane a 0,45 m;
-         il tavolo resta `inarrivo` con l'anello finché tutti siedono
-griglia: celle 0,20 m, raggio 0,22; tavoli esatti, sedie, banco e leggio; rifatta se cambia
-A*: 8 vicini, octile, niente tagli d'angolo, array tipizzati, tetto 40k celle → retta; filo teso
-passo: velocità costante, imbardata ≤ 7 rad/s, gambe ±28°, dondolio 2,5 cm; precedenza ≤ 1,5 s
-tempi: ospiti 1,1 m/s, hostess e camerieri 1,3 · seduta 600 ms, alzata 500, dissolvenza 400
-seme: mulberry32(hash(servizio + id)); nel modello niente Math.random né Date.now
+isOnDuty(scheda, data, turno, righe, assenze)
+  riga esplicita di (data, turno)                       → la riga decide, presente o assente
+  assenza sulla data, intera o di quel turno            → no
+  riposo settimanale (il giorno della data, in UTC)     → no
+  FISSO o STAGIONALE in [assunzione, fine contratto]    → sì (una data che manca: aperto)
+  altrimenti                                            → no
+/staff/presence  solo schede attive; date lette come testo (to_char); una data non vera → 400;
+                 la forma di sempre: { sala, cucina } × { lunch, dinner } di
+                 { id, name, surname, category, staffType, role }
 ```
 
-**I camerieri** (`waiters.ts`, `useStaffOnShift`) sono quelli di turno, letti in modo
-difensivo: chi ha un ruolo da hostess dà il nome all'hostess, gli altri il solo nome di
-battesimo, senza nomi uno o due anonimi. Divisi fra le sale coi coperti presenti a resto
-maggiore, al massimo 8 in cammino per sala, girano: fermi al pass 2–6 s (8–20 a schermo
-fissato), poi la tavolata mai visitata più recente, o una pesata sul tempo dall'ultima
-visita, 3–8 s col vassoio, e poi al pass. Fermi col movimento ridotto o in modalità lenta.
+Prima contava solo i FISSO e l'assenza batteva il turno scritto (il `continue` sull'assenza di
+tutto il giorno): uno stagionale di turno non c'era, e chi era richiamato dalle ferie per una
+sera risultava a casa. Il commento di `makeDutyIndex` in `utils/leavePlan.ts` diceva «stessa
+semantica di GET /staff/presence» e non è più vero: si corregge il commento, non la regola.
+**Restano due letture di «di turno»**: Personale e Sala dal vivo da una parte, la copertura
+del piano ferie dall'altra, dove l'assenza batte il turno scritto e solo il FISSO è implicito.
+Allinearle è una scelta da chiedere a Tina (G23). Test API `presenza-personale`, nei due job
+(`npm test`, `TEST_STRICT_RLS=1`): STAGIONALE senza turni a pranzo e a cena; un contratto di
+un giorno solo, quel giorno (confini compresi); FISSO in ferie tutto il giorno con un pranzo
+scritto, solo pranzo; FISSO nel riposo settimanale assente, e con una cena scritta solo cena;
+EXTRA senza turni assente, con una cena scritta solo cena; FISSO col permesso della sola cena,
+solo pranzo; un «assente» scritto a pranzo batte il contratto; contratto finito e assunzione
+futura, assenti; inattivo, mai in lista; la cucina nelle liste della cucina; la forma della
+risposta; date sbagliate, 400.
 
-**Frame e livelli.** 30 fps con accompagnamenti o controlli, 20 coi soli camerieri, 12
-coi soli anelli, 0 da fermi; oltre 50 ms di frame medio per 10 s i camerieri si
-spengono. Un'etichetta sola segue il gruppo accompagnato, mossa via ref senza render di
-React: «Tavolo 40 · 4 (2 bambini) + cane», o il nome a nomi accesi. La striscia
-(`role="log"`) tiene gli ultimi 4 eventi per 90 s. **«Segui il servizio»**, acceso di
-default a schermo fissato, va dove parte un accompagnamento e gira le sale con presenti.
+**Le fasi** (`SceneModel.partyStates`, dalla stessa `derivePresence` di figure e numeri). Una
+riga per comitiva del servizio, che il regista confronta con quella dell'aggiornamento
+prima; chi manca è andato (via, annullato, no-show, eliminato, fuori servizio). Non si chiama
+`parties`: `RoomModel.parties` c'è già e vuol dire altro.
+
+| Fase | Quando | Sala · tavolo |
+|---|---|---|
+| `seated` | presente a un tavolo disegnato | la sala · il tavolo disegnato |
+| `standing` | presente, `DEPARTING` («In uscita») | la sala · il tavolo disegnato |
+| `lobby` | seduta senza un tavolo da disegnare, entro un'ora dall'ora prenotata | la sala del suo ingresso |
+| `hidden` | seduta e viva ma senza figure: spodestata da una più recente sullo stesso tavolo, oltre la grazia di 45 minuti, all'ingresso da più di un'ora | — |
+| `waiting` | viva e non seduta | — |
+
+Con la fase, `people` (al più 150) e `banquet` (legata a un banchetto). Ordine stabile: le
+presenti nell'ordine dei tavoli, poi l'ingresso, poi nascoste e in attesa per ora e id.
+**`DEPARTING` sta in piedi nel modello statico** (`placement.standUp`): le persone 0,55 m dietro
+la loro sedia (`approachPoint`), rivolte al tavolo, i cani in piedi dove sono; i conti non
+cambiano. PR2c le disegnava sedute; in piedi nel modello, il movimento ridotto, uno scatto e
+la fine dell'alzata arrivano alla stessa figura.
+
+**Il regista** (`model/director.ts`), puro e deterministico: orologio e seme da fuori
+(`mulberry32`, una comitiva da `hash(serviceKey + ':' + id)`, un cameriere da
+`seed ^ hash(chiave)`), mai `Math.random` né `Date.now`, costruttore senza effetti
+(StrictMode lo crea due volte). La pagina lo crea con lo stesso seme su ogni schermo (la porta
+e la TV girano uguali) e lo aggiorna; il canvas lo riceve come `SceneDirectorApi`, un tipo (il
+codice resta nel chunk della pagina, e `boundaries` lo controlla), e lo fa avanzare.
+
+```
+update(model, motivo)  al commit di React, una volta, chiunque arrivi prima fra eco e risposta:
+                       confronta partyStates e mette in scena, o con un motivo va dritto allo
+                       stato finale; gli eventi escono da qui
+step(dtMs)             una volta per fotogramma, nel useFrame a priorità −1 del canvas; dt
+                       fermato a 100 ms quando qualcosa si muove, intero da fermi
+fastForward()          tutto quello che è a metà arriva in fondo adesso
+configure(patch)       reducedMotion · slowMode · lightMode · pinned · activeRoomId · staff
+in lettura             actorsIn · movingKeys · tagIn · escortTargets · frameNeed · wakeInMs ·
+                       isAnimating · revision; onEvent e subscribe restituiscono lo stacco
+```
+
+| Motivo | Quando (lo calcola la pagina) | Effetto |
+|---|---|---|
+| `'initial'` | il primo update dopo il caricamento di App | scatto, nessun evento |
+| `'refetch'` | `reservationsEpoch` è cambiata dall'ultimo update, o è arrivata una rilettura delle varianti del servizio (`reads`, alla riconnessione) | scatto, un `bulk` |
+| `'hidden'` | scheda nascosta, o niente vista 3D (senza fotogrammi non finirebbe mai) | scatto, un `bulk` |
+| `'reduced-motion'` | `prefers-reduced-motion: reduce` | scatto, gli eventi di ogni comitiva come se si animasse |
+| cambio di servizio | `model.service.key` diverso | si riparte da zero, nessun evento |
+| in blocco | più di 4 passaggi in un update, o entro 2 s | scatto di quelli dell'update, un `bulk` |
+
+Tornando visibile la scheda, e quando la vista 3D sparisce, la pagina chiama `fastForward()`.
+Alle 17:00 (e alle 05:00) il servizio cambia prima che arrivino le sue unioni, e per un attimo
+la sala si disegna con quelle di prima: quel modello al regista non arriva (azzererebbe su una
+sala sbagliata, e poi animerebbe come cose successe le unioni giuste). Lo riceve il primo
+modello con le varianti del servizio nuovo (`useSettledOverrides` dà anche la chiave su cui si
+è assestato; varianti vuote in tutti e due i servizi: la chiave passa subito), e quello
+azzera.
+
+| Da → a | Copione | Evento |
+|---|---|---|
+| assente o in attesa → seduta o in piedi | ESCORT dall'ingresso della sala del tavolo; oltre 12 persone o banchetto: compaiono sedute, una ogni 80 ms | `escort-start` · `snapped` |
+| assente o in attesa → ingresso | LOBBY: entrano dalla porta una ogni 250 ms e vanno alle caselle | `lobby` |
+| nascosta → seduta, in piedi o ingresso | FADE_IN sul posto: dalla sala non era mai uscita | — |
+| ingresso → seduta, stessa sala · altra sala | ESCORT dall'ingresso · svaniscono, ESCORT dall'ingresso dell'altra | `escort-start` |
+| ingresso → ingresso | caselle nuove: ci camminano; altra sala: svaniscono ed entrano là | — |
+| ingresso → in attesa, assente o nascosta | FADE sul posto | — |
+| seduta ↔ in piedi, stesso tavolo | STAND (si alzano, un passo indietro) · SIT | — |
+| tavolo A → tavolo B, stessa sala · altra sala | RESEAT a piedi, uno ogni 150 ms · svaniscono, entrano dalla porta dell'altra | `moved` |
+| seduta o in piedi → assente o nascosta | LEAVE: in piedi, verso l'ingresso e fuori, in fila: parte prima chi ha meno strada, e ognuno arriva alla porta una distanza di fila (0,8 m, 0,7 il bambino) dopo chi lo precede; chi la spodesta aspetta in coda, col tavolo «in arrivo», che sia uscita (porta a senso unico) | `leaving` |
+| seduta o in piedi → in attesa («Arrivato» annullato) | FADE sul posto | — |
+| seduta o in piedi → ingresso | alle caselle a piedi; altra sala: svaniscono ed entrano là | `lobby` |
+| il resto, anche in attesa → no-show | niente: cambia solo il cartello, dal modello | — |
+
+**A metà strada** il nuovo stato finale sostituisce il vecchio e si riparte da dove sono gli
+attori, mai un salto (una dissolvenza riparte dall'opacità che ha). Un accompagnamento in coda
+verso un altro tavolo della sala cambia meta (`moved`); verso un'altra sala si chiude qui
+(`escort-end` non seduto) e si riapre là (`escort-start`). In corso nella stessa sala è un
+RETARGET: l'hostess rifà il percorso da dov'è e la fila continua sul suo binario. Annullato, o
+finito all'ingresso: i membri svaniscono o vanno alle caselle, l'hostess torna o prende il
+prossimo. Annullata un'uscita («Tavolo liberato» tolto), la tavolata torna alle sedie a
+piedi; se era già uscita, rientra con l'hostess.
+
+```
+hostess    una per sala (ogni sala ha un leggio, almeno quello di ripiego)
+           AT_STAND ─coda≠∅→ TO_ENTRANCE (percorso dal suo posto al punto d'accoglienza,
+           sulla strada della fila 0,6 m oltre «dentro», 1,3 m/s · f) o TO_LOBBY (verso il
+           gruppo all'ingresso)
+           → GREET 800 ms / f (prima rivolta al primo, il braccio giù; poi verso la strada,
+             il braccio che sale: «prego, da questa parte», mai sulla testa di chi arriva)
+           → ESCORT 1,0 m/s · f, la fila dietro sul suo binario
+           → PRESENT 1200 ms / f (rivolta al tavolo, braccio teso; i membri lasciano la fila
+             uno ogni 150 ms; l'etichetta svanisce in 400 ms mentre torna il suo nome), poi
+             ferma finché i suoi non sono ai posti, al più 5 s (voltandosi subito ripassava
+             in mezzo a loro) → un altro in coda ? TO_ENTRANCE : RETURN 1,3 m/s → AT_STAND
+           f = 2 con 4 o più fra la coda e l'accompagnamento in corso (spec: «coda > 3»);
+           oltre 6 fra tutti, i più vecchi della coda si siedono subito (snapped 'queue')
+testa      il capo del rettangolo più vicino all'ingresso a ±(L/2 + 0,45), o il varco del tondo
+           più vicino all'ingresso a Dc/2 + 0,5
+binario    [fuori − 12 m, fuori, dentro, …percorso fino alla testa]: una polilinea con le
+           lunghezze d'arco, nota in anticipo (un RETARGET la allunga). L'accoglienza ci sta
+           sopra: prima la fila andava fino a un punto accanto alla porta e tornava indietro
+           verso un tavolo dall'altra parte (un tornante sulla soglia). Il membro k sta a
+           s_hostess − Σ distanze (0,8 m l'adulto, 0,7 il bambino), raggiunge il suo posto a
+           1,5 m/s e non lo supera; chi aspetta oltre la porta è sul prolungamento,
+           invisibile
+cane       a 0,45 m di lato al suo adulto, sempre dallo stesso lato (quello dove compare, la
+           destra se c'è posto): se lì c'è un mobile o qualcuno (l'hostess, un cameriere,
+           un'altra comitiva) scivola dietro in diagonale sullo stesso lato, e ci torna
+           quando si libera; il lato gira al più a 2,5 rad/s alle svolte secche. Rincorre il
+           suo posto in linea retta ma non entra nello spazio di nessuno (0,45 m, 0,32 dai
+           suoi): ci scivola attorno. Prima, cambiando lato, passava attraverso il padrone
+porta      i 0,8 m fuori dalla griglia fra «fuori» e la porta: chi ci passa sfuma con la
+           posizione (invisibile oltre «fuori»), non col tempo; così sfuma anche chi esce
+senso      la porta a senso unico, prima chi esce: finché una tavolata in LEAVE è in scena
+unico      l'hostess non va a prendere nessuno (la coda aspetta, i tavoli restano «in
+           arrivo»), e chi entra da solo (all'ingresso, da un'altra sala) aspetta invisibile
+           dietro la porta; chi si alza per uscire mentre l'hostess accompagna aspetta in
+           piedi al suo tavolo che lei presenti. Senza, la fila (che segue il binario e non si
+           scansa) e chi esce si attraversavano nell'ingresso
+sedersi    percorso fino al punto d'approccio della sedia, un passo fuori griglia (0,55 m,
+           500 ms), si gira (250 ms), si siede (600 ms); il cane si sdraia (600 ms); un posto in
+           piedi: ci cammina e si gira
+fine       escort-end quando si siede l'ultimo: lì il tavolo smette di essere «in arrivo»
+precedenza chi cammina su un percorso si ferma se un altro, non della sua fila, è entro 0,45 m
+           davanti (cono di ±45°), al più 1,5 s; verso la porta anche dietro i suoi, fermi o
+           no. L'hostess ferma (al leggio, accogliendo, presentando) è un ostacolo per chi
+           cerca un percorso: le sue celle si chiudono per quella ricerca (se così chiude
+           l'unico passaggio, le si passa accanto invece di tagliare per i mobili)
+sicurezza  un copione oltre 90 s di simulazione, o un accompagnamento oltre 90 s da quando
+           l'hostess lo prende (in coda dall'arrivo), va in fondo da solo: isAnimating() non
+           resta mai acceso. Il ritocco della geometria, che passa a ogni update (almeno uno
+           al minuto), non rimette l'orologio
+```
+
+**Gli eventi** nascono in `update` (tranne `escort-end`), quindi arrivano anche col movimento
+ridotto, a scheda nascosta e senza vista 3D: `escort-start` già all'accodamento, `escort-end`
+(seduti o no) quando l'accompagnamento esce di scena, `lobby`, `moved`, `leaving`, `bulk` col
+numero dei tavoli toccati (chi lascia un tavolo e chi ci arriva al suo posto sono uno; senza
+tavoli, chi aspetta all'ingresso, nessun `bulk`), `snapped` con le comitive (`'large'` o
+`'queue'`). Ogni cambio degli
+obiettivi di accompagnamento arriva con un evento: la pagina ridisegna i tavoli «in arrivo»
+(`withEscortTargets`: stato `inarrivo` e anello finché l'ultimo non si siede, anche se
+Reception ha già premuto «Arrivato») a ogni evento, mai per fotogramma. Chi è in coda non si
+vede, né alla porta né al tavolo, e il suo tavolo pulsa «in arrivo».
+
+**Chi disegna chi.** People disegna `room.figures` meno `movingKeys(room.id)`, Walkers
+disegna `actorsIn(room.id)`: il regista cambia i due insiemi nello stesso `step` e alza
+`revision`, e People si riscrive nello stesso fotogramma (priorità 0, dopo lo step a −1). Un
+attore torna a People solo quando posa, punto, imbardata e seduta sono esattamente quelli della
+figura statica: il passaggio non si vede. L'hostess la disegna sempre il regista, così il suo
+nome la segue. `movingKeys` comprende anche chi il regista tiene in quella sala e nel modello
+non c'è più (chi esce, chi svanisce, chi passa a un'altra sala): il canvas fa il commit dopo la
+pagina, e un People con la lista vecchia lo ridisegnerebbe fermo al suo posto. La pagina aggiorna il regista in un effetto di layout: con uno passivo una
+comitiva appena arrivata comparirebbe seduta per un fotogramma, prima di entrare dalla porta.
+
+```
+griglia      celle da 0,20 m per sala, rifatta quando cambia la geometria (navKey): bordo
+             bloccato tranne il varco della porta; tavoli (rettangolo orientato o disco)
+             gonfiati di 0,22 m; sedie dischi da 0,25 + 0,22; banco del pass 1,6 × 0,5
+             gonfiato; leggio disco da 0,3 gonfiato come gli altri, tranne la tasca di
+             0,15 m attorno al posto dell'hostess (a 0,5 m: non gonfiato, lei ci entrava di
+             10 cm partendo e tornando);
+             chi sta fermo in piedi (all'ingresso, accanto al tavolo) e i cani dischi da
+             0,2 + 0,22, con la loro posizione nella navKey: chi aspetta all'ingresso sta sulla
+             strada della porta, e senza la fila gli passava in mezzo
+nearestFree  BFS entro 1,0 m, poi entro 2,0 m
+A*           8 vicini, costi 1 e √2, octile, niente tagli d'angolo, heap binario su array
+             tipizzati riusati, tetto di 40k espansioni → linea retta; poi filo teso con
+             linea di vista supercover. 30k celle in meno di 20 ms
+passo        velocità costante sul binario, imbardata ≤ 7 rad/s, fase += distanza / falcata
+             (un ciclo, due passi: 1,4 m adulti, hostess e camerieri; 0,9 bambini; 0,4 il
+             cane; con 0,7 e 0,45 della spec i piedi scivolavano del doppio); gambe ±28°,
+             braccia in controfase ×0,8, dondolio 2,5 cm; il cane a coppie diagonali
+velocità     ospiti 1,1 m/s (±5 % per comitiva), hostess 1,3 libera e 1,0 accompagnando,
+             chi recupera e il cane 1,5, camerieri 1,3
+```
+
+**I camerieri** (`model/waiters.ts`, `hooks/useStaffOnShift.ts`). La lista di sala del turno
+da `/staff/presence`, letta in difesa (`{ id, name, role }`, righe senza id o nome scartate):
+finché non arriva niente camerieri e hostess senza nome; un errore senza una lista buona di
+questo servizio dà due camerieri senza nome se c'è qualcuno a tavola, se no uno. Si rilegge
+al cambio di servizio, a ogni epoca e 1,5 s dopo l'ultimo `staff:*`, `shift:*`, `timeoff:*`,
+`leave:changed` (il salvataggio in blocco della griglia non manda eventi: lo recupera l'epoca
+dopo). Il nome è `staff_members.name`, già il nome di battesimo. Chi ha un ruolo da
+accoglienza (`/host|accoglien|ma[iî]tre/i`) dà il nome all'hostess della sala principale; gli
+altri girano, divisi fra le sale con qualcuno a tavola (uno a testa finché bastano, poi a
+resto maggiore sulle persone; a ristorante vuoto uno al pass della sala a video), al più 8 in
+cammino per sala.
+
+```
+AT_PASS   al suo posto (file da 3 a 0,6 m davanti al banco, solo su celle libere: un tavolo
+          accanto al banco toglie un posto e si va al prossimo; rivolto al banco), fermo
+          2–6 s, 8–20 a schermo fissato; la pausa dopo il giro e l'attesa si sommano senza
+          perdere il tempo in più (da fermi il canvas dorme fino alla partenza)
+→ tavolo  prima il mai visitato più recente non preso da altri, se no un'estrazione pesata sul
+          tempo dall'ultima visita
+→ TO_TABLE il lato del tavolo verso il pass, a 0,5 m, col vassoio
+→ SERVE 3–8 s → TO_PASS → posa 1 s → AT_PASS
+riassegnazione solo fra un compito e l'altro (svanisce al pass vecchio, compare al nuovo);
+movimento ridotto o modalità lenta: fermi al pass; modalità leggera: niente camerieri
+```
+
+Le comitive già presenti a uno scatto contano come visitate (una visita, l'ultima da 0 a 120 s
+prima): «prima i tavoli appena seduti» vale per chi si è visto arrivare.
+
+**Fotogrammi.** `frameNeed()` è `'active'` (30 fps) se un ospite o un'hostess si muovono in
+qualunque sala, o c'è un accompagnamento in coda; `'ambient'` (20 fps) se si muovono solo i
+camerieri della sala a video; `'none'` (0 fps) da fermi, e allora `wakeInMs()` dice quando il
+prossimo cameriere riparte: il canvas si risveglia da solo invece di girare a vuoto. Gli
+anelli 12 fps, i controlli 30, la modalità lenta al più 15. La modalità leggera (niente
+camerieri) scatta quando, in 10 s di movimento continuo, l'intervallo medio supera
+`max(50, 1,5 × il fotogramma atteso)`: 50 ms a 30 fps, 75 a 20, dove 50 sarebbe il ritmo
+stesso. Resta finché il canvas non si rimonta. Da fermi `step` fa passare il tempo vero, ma
+solo fino alla prossima partenza più un passo: dopo la scheda nascosta il primo fotogramma
+porta tutto il tempo passato, e le pause di tutti scadevano insieme.
+
+**La pagina.** L'etichetta della tavolata accompagnata è un elemento DOM solo, mosso via ref:
+«Tavolo 40 · 4 (2 bambini) + cane», col nome della tavolata a nomi accesi, già tradotta dalla
+pagina. La striscia (`ActivityStrip`, `role="log"` e `aria-live="polite"`, sempre montata con
+la vista 3D; i conti puri in `model/activity.ts`) tiene le 4 righe più recenti per 90 s,
+composte a ogni render così spegnendo i nomi spariscono anche da quelle già a video: «4 (2
+bambini) + cane → tavolo 40», «2 all'ingresso», «… · tavolo 40 → 41», «… · tavolo 40 →
+uscita», «Tavolo 12 · 30 a tavola», «3 tavoli aggiornati». Ogni riga ha due parti: chi (si
+accorcia coi puntini) e dove (mai: su un telefono i puntini tagliavano proprio «→ 41»); e una
+frase per lo screen reader, senza frecce né «più» («4 persone, 2 bambini, un cane, al tavolo
+40»), con la pastiglia nascosta. Un riallineamento subito dopo un altro si somma a quello, e
+a scheda nascosta i 90 s non partono: tornando, una riga sola dice quanti tavoli sono cambiati.
+Le righe che il modello smentisce se ne vanno: l'arrivo, l'ingresso e il cambio di tavolo di
+una comitiva tornata in attesa o sparita, l'uscita di una comitiva di nuovo al suo tavolo (un
+annullamento non sempre manda un evento), e l'arrivo di un accompagnamento finito senza
+sedersi, per comitiva e non per tavolo (cambiato tavolo a metà strada, la fine dice il tavolo
+nuovo). **«Segui il servizio»** (`salaVivo.follow` per dispositivo; senza una scelta vale lo
+schermo fissato), un bottone da 44 px con le impronte, anche a schermo fissato: non mostra
+niente di privato; solo con la vista 3D (senza, non c'è niente da seguire, e il giro delle
+sale non avrebbe un bottone per fermarlo). Un `escort-start` in un'altra sala porta lì lo
+schermo con un calo d'opacità di 150 ms (secco col movimento ridotto), senza toccare la sala
+scelta; se nella sala a video un accompagnamento è ancora in corso si aspetta che finisca, e
+si va solo se l'altro è ancora in corso (prima ogni partenza tagliava via quello che si stava
+guardando); dopo 20 s di calma e niente in corso si torna a casa; fissato e fermo da 45 s, la
+sala dopo fra quelle con qualcuno a tavola; un tocco su una linguetta (che sceglie la casa) o
+un trascinamento lo mettono in pausa per 2 minuti. Linguette, numeri del palco e avvisi
+parlano della sala a video, e la linguetta della sala a video si porta in vista nella barra.
+La ricarica automatica dello schermo fissato aspetta che `isAnimating()` torni falso.
+L'orologio Live della pagina è all'ora del ristorante (`timeZone` di `LivePill`, solo qui),
+come i cartelli.
 
 | `salavivo.json` | it | en |
 |---|---|---|
-| `follow` · `strip.seatedLarge` | Segui il servizio · {{name}} · {{count}} a tavola | Follow the service · {{name}} · {{count}} seated |
-| `strip.party` / `strip.anonymous` | {{name}} · {{count}} / Tavolo {{table}} | {{name}} · {{count}} / Table {{table}} |
+| `follow` / `unfollow` | Segui il servizio / Smetti di seguire il servizio | Follow the service / Stop following the service |
+| `strip.title` · `strip.party` · `strip.anonymous` | Attività della sala · {{name}} · {{people}} · Tavolo {{table}} | Floor activity · {{name}} · {{people}} · Table {{table}} |
 | `strip.kids_one` / `_other` · `strip.dog_one` / `_other` | ({{count}} bambino) / ({{count}} bambini) · + cane / + {{count}} cani | ({{count}} child) / ({{count}} children) · + dog / + {{count}} dogs |
-| `strip.toTable` / `strip.atEntrance` · `strip.moved` / `strip.leaving` | → tavolo {{table}} / all'ingresso · tavolo {{from}} → {{to}} / lascia il tavolo {{table}} | → table {{table}} / at the entrance · table {{from}} → {{to}} / leaving table {{table}} |
-| `strip.updatedMany_one` / `_other` | {{count}} tavolo aggiornato / {{count}} tavoli aggiornati | {{count}} table updated / {{count}} tables updated |
+| `strip.toTable` · `strip.atEntrance` | → tavolo {{table}} · all'ingresso | → table {{table}} · at the entrance |
+| `strip.moved` · `strip.leaving` | tavolo {{from}} → {{to}} · tavolo {{table}} → uscita | table {{from}} → {{to}} · table {{table}} → exit |
+| `strip.seatedCount` · `strip.updatedMany_one` / `_other` | {{count}} a tavola · {{count}} tavolo aggiornato / {{count}} tavoli aggiornati | {{count}} seated · {{count}} table updated / {{count}} tables updated |
+| `strip.sr.people_one` / `_other` · `strip.sr.kids_one` / `_other` · `strip.sr.dog_one` / `_other` | {{count}} persona / {{count}} persone · {{count}} bambino / {{count}} bambini · un cane / {{count}} cani | {{count}} person / {{count}} people · {{count}} child / {{count}} children · a dog / {{count}} dogs |
+| `strip.sr.toTable` · `strip.sr.moved` · `strip.sr.leaving` | al tavolo {{table}} · dal tavolo {{from}} al tavolo {{to}} · lascia il tavolo {{table}} | to table {{table}} · from table {{from}} to table {{to}} · leaving table {{table}} |
 
-Test: `navGrid` (aggira un tavolo, niente tagli d'angolo, 30k celle sotto i 20 ms),
-`motion`, `director` con orologio finto e seme fisso (ogni passaggio e ogni scatto,
-l'epoca, la coda, stesso seme stesse posizioni), `waiters`. Commit: «Presenze del
-personale: stessa regola della pagina Personale» · «Sala dal vivo: griglia di cammino e
-percorsi» · «Sala dal vivo: il regista della scena» · «Sala dal vivo: l'accoglienza
-accompagna gli ospiti al tavolo» · «Sala dal vivo: i camerieri di turno girano fra pass e
-tavoli».
+`strip.party` usa `{{people}}` e non `{{count}}`: i18next legge `count` come selettore del
+plurale, e il testo composto («4 (2 bambini) + cane») lo manderebbe a cercare
+`strip.party_other`. `unfollow` e `strip.title` non erano nella specifica: il title del
+bottone premuto, come «Nascondi i nomi degli ospiti», e il nome della regione della striscia.
+Dalla revisione: `strip.leaving` era «lascia il tavolo {{table}}» («4 · lascia il tavolo 40»,
+un conto soggetto di un verbo, e con i nomi due punti di fila), ora la freccia come le altre
+righe; `strip.seatedLarge` diventa `strip.seatedCount`, la sola parte «dove»; le chiavi
+`strip.sr.*` sono le frasi per lo screen reader.
 
-Il dettaglio, per chi implementa. File: in App `const [reservationsEpoch,
-setReservationsEpoch] = useState(0)` e `setReservationsEpoch(e => e + 1)` subito dopo
-`setReservations(…)` in `fetchData`, passato alla pagina; `/staff/presence` in
-`server.ts`; `components/salaVivo/model/{rng,navGrid,motion,director,waiters}.ts`; il set
-dinamico in `scene/People.tsx`; `NameTagLayer.tsx`, `ActivityStrip.tsx`,
-`useStaffOnShift.ts`; nella pagina i motivi di scatto, «Segui il servizio» e la guardia
-della ricarica su `director.isAnimating()`; `tests/unit/{navGrid,motion,director,
-waiters}.test.ts` e `tests/api/presenza-personale.test.ts`.
+**Le scelte rispetto alla specifica**, le prime cinque da confermare (§13): la lista
+`partyStates` con la fase `hidden` (nascosta → seduta ricompare sul posto: annullare un arrivo
+più recente sbagliato non fa rifare l'ingresso alla tavolata di prima); `DEPARTING` in piedi
+nel modello statico; l'hostess sempre disegnata dal regista; in fila solo l'accompagnamento
+(cambi di tavolo e uscite su percorsi propri, sfalsati), e le tavolate grandi o dei banchetti
+mai a piedi; la porta che sfuma con la posizione. Poi: `escort-start` già all'accodamento;
+`'hidden'` anche senza vista 3D; il fabbisogno di fotogrammi per schermo, coi camerieri fermi a
+0 fps; la soglia della modalità leggera in proporzione al ritmo; il leggio gonfiato meno la
+tasca dell'hostess (era non gonfiato); il
+personale non ancora letto (niente camerieri) distinto dall'errore (camerieri senza nome); le
+comitive viste a uno scatto già visitate; la pagina che aggiorna il regista in un effetto di
+layout. Dal collaudo visivo dell'integrazione: chi sta in piedi e i cani fanno ostacolo nella
+griglia; la porta a senso unico (chi la spodesta entra dopo l'uscita della tavolata di prima,
+non insieme); la falcata come ciclo intero (1,4 m e 0,9); il lato del cane smorzato. Dalla
+revisione (§13): l'accoglienza sulla strada della fila; il cane sempre dallo stesso lato e
+fuori dallo spazio altrui; chi esce in fila per strada; i posti al pass sulle celle libere;
+l'hostess che aspetta i suoi ai posti e che fa da ostacolo da ferma; il ×2 della coda col
+conto dello spec; i 90 s di un accompagnamento da quando parte; il `bulk` in tavoli; la
+pagina che non dà al regista il modello delle 17:00 con le unioni del pranzo, e che mette in
+scena già conclusa una rilettura delle varianti.
 
-**Il server.** Oggi `/staff/presence` conta solo i FISSO e fa vincere l'assenza su un
-turno esplicito; la rotta ha un solo client, `staffApiService.getStaffPresence`, che oggi
-nessuno chiama. Sparisce il `continue` anticipato sull'assenza di tutto il giorno, e:
-
-```ts
-// Stessa lettura della pagina Personale (slotState, StaffManagement.tsx): il
-// turno esplicito vince sull'assenza; poi assenza, riposo settimanale, presenza
-// implicita di FISSO e STAGIONALE nel periodo di contratto.
-const autoShifts = row.staff_type === 'FISSO' || row.staff_type === 'STAGIONALE';
-const inContract = (!row.hire_date || row.hire_date <= dateStr) && (!row.contract_end_date || row.contract_end_date >= dateStr);
-for (const shift of ['LUNCH', 'DINNER'] as const) {
-    const explicit = explicitShifts.get(`${row.id}-${shift}`);
-    const present = explicit !== undefined ? explicit
-        : (onTimeOffFullDay.has(row.id) || onTimeOffShift.has(`${row.id}-${shift}`)) ? false
-        : isWeeklyRest ? false
-        : autoShifts && inContract;
-    if (present) staffByShift[categoryKey][shift === 'LUNCH' ? 'lunch' : 'dinner'].push(staff);
-}
-```
-
-Il test API usa una data futura e cancella il suo personale alla fine.
-
-**Il regista.** Nella pagina `useState(() => new SceneDirector(…))[0]`; `update(model,
-reason)` con `reason` fra `'initial' | 'refetch' | 'hidden' | 'reduced-motion' | null`,
-calcolato in un effetto su `[model, reservationsEpoch, reducedMotion]`:
-
-| Motivo | Quando |
-|---|---|
-| `initial` | non c'è ancora una base |
-| `refetch` | `reservationsEpoch` è cambiata dall'ultimo `update`: connessione, `visibilitychange`, `pageshow` e il ricaricamento dopo lo svuotamento della coda offline |
-| `hidden` · `reduced-motion` | `document.visibilityState === 'hidden'` · l'utente preferisce meno movimento |
-| cambio di servizio | cambia `model.serviceKey`: il regista si azzera |
-
-Più di 4 passaggi che toccano attori in un `update`, o in 2 s, scattano anche loro ed
-emettono `{ kind: 'bulk', count }`. Il confronto è su `model.parties` (`{ id, state:
-'waiting'|'lobby'|'seated'|'standing'|'gone', roomId, groupKey, present }`). Lobby →
-andato e qualsiasi → in attesa sono **FADE** sul posto; un accompagnamento verso un'altra
-sala fa svanire i membri e li rimette in coda all'ingresso di quella, uno verso «andato»
-li fa svanire e l'hostess torna. Per un tavolo inutilizzabile (mancante, nascosto, sala
-eliminata) si va in **LOBBY**; in attesa → NO_SHOW o CANCELLED non fa niente, sparisce
-solo il cartello.
-
-```
-testa        tableHead(gruppo) = il capo del rettangolo più vicino all'ingresso a ±(L/2 + 0,45),
-             o per un cerchio il varco più vicino all'ingresso a raggio Dc/2 + 0,5
-hostess      AT_STAND ─coda≠∅→ TO_ENTRANCE(hostSpot→entranceInside) → GREET 800 ms
-             → ESCORT(→ tableHead, 1,0 m/s, membri in colonna) → PRESENT 1200 ms (braccio verso
-             il tavolo; ognuno seat(chair); cane sdraiato) → emit('escort-end')
-             → coda≠∅ ? TO_ENTRANCE : RETURN → AT_STAND; coda > 6 → emit('snapped')
-colonna      il membro k segue alla distanza d'arco s_leader − Σgap; il cane cammina a 0,45 m
-             accanto al suo adulto
-riconcilia   comitive senza attori nascono già al loro posto; se cambia la geometria i seduti
-             scattano sulle sedie nuove e chi cammina rifà il percorso
-semi         mulberry32(hashString(serviceKey + ':' + id)); i camerieri seed ^ hash(name)
-tuning       adulti e bambini 1,1 m/s · hostess libera 1,3, accompagnando 1,0 · camerieri 1,3
-             seduta 600 ms · alzata 500 · dissolvenza 400 · BULK_K 4, BULK_WINDOW_MS 2000
-             coda: ×2 oltre 3, scatto oltre 6 · ESCORT_MAX_PARTY 12
-griglia      CELL 0,20 m · AGENT_R 0,22 m · una per sala, rifatta quando cambiano tavoli, unioni,
-             nascosti o segnaposto. Bloccati: il bordo (una cella, tranne la porta); i tavoli con
-             l'AABB di getTableFootprint(t, x, y, AGENT_R/M, 0) e dentro il test esatto (OBB del
-             piano o disco Dc gonfiati di AGENT_R; sedie: distanza < 0,25 + AGENT_R); il PASS
-             1,6×0,5 m; l'HOST_STAND disco da 0,3 m
-nearestFree  BFS entro 1,0 m, poi 2,0 m; se niente, retta (compenetrazione accettata)
-A*           8-connesso, costi 1 e √2, euristica octile, niente tagli d'angolo, heap binario,
-             Float32Array/Int32Array, tetto 40k celle → retta
-lisciatura   filo teso con linea di vista supercover; inseguimento su lunghezze cumulative
-seat(chair)  A* fino all'approach, poi l'ultimo passo fuori griglia approach → sedia (0,55 m,
-             0,5 s), rotazione (0,25 s), seduta (0,6 s)
-camminata    phase += v·dt/passo (0,7 m; bambini 0,45); gambe sin(2πφ)·28°; braccia −0,8×;
-             dondolio |sin 2πφ|·0,025 m; il cane a coppie diagonali
-precedenza   chi cammina si ferma se un altro (non leader né follower) è entro 0,45 m davanti,
-             al massimo 1,5 s
-```
-
-**I camerieri.** Da `staffApiService.getStaffPresence(service.date).sala[lunch|dinner]`,
-letti come `{ id, name, role }`; si rileggono con 1,5 s di debounce sugli eventi
-`staff:*`, `shift:*` e `timeoff:*` e al cambio d'epoca; un errore dà `null`. Il ruolo
-`/host|accoglien|ma[iî]tre/i` dà il nome all'hostess principale. Senza nomi: 2 se c'è
-qualcuno seduto, altrimenti 1. A ristorante vuoto, uno al pass della sala attiva. I nomi
-girano in ordine `sortRooms`; quelli oltre gli 8 in cammino stanno al pass; si
-riassegnano solo fra un compito e l'altro (il vecchio svanisce al pass, il nuovo
-compare). Il giro:
-
-```
-AT_PASS fermo U(2,6) s (fissato: U(8,20) s) → bersaglio:
-  p1 = gruppi presenti mai visitati, i più recenti prima, non già presi; p2 = estrazione pesata su (now − lastVisitAt)
-→ WALK(passFront → servicePoint: testa libera o varco più vicino al pass, raggio +0,5 m) → SERVE U(3,8) s (vassoio)
-→ WALK(→ passFront) → AT_PASS (posa 1 s)
-```
-
-**Livelli.** Il set dinamico ha le stesse parti, capacità 48, `frustumCulled = false` e
-`DynamicDrawUsage`; tiene chi cammina e chi è a metà passaggio, riscritto a ogni frame
-disegnato con temporanei riusati. `dt` si ferma a 100 ms. L'etichetta del gruppo è **un**
-elemento DOM, messo con `head.project(camera)` e un transform via ref. La striscia sta in
-basso a sinistra, `role="log" aria-live="polite"`, con `animate-view-in`. **«Segui il
-servizio»**, per dispositivo: a un `escort-start` in un'altra sala cambia linguetta con
-un calo d'opacità di 150 ms; 20 s dopo l'`escort-end`, senza altro, torna alla sala di
-casa; fissato e fermo, gira le sale con presenti ogni 45 s; un tocco su una linguetta o
-un trascinamento lo mettono in pausa per 120 s. Un iPad all'ingresso, in servizio,
-disegna di continuo a 20 fps: si misura in §10.
-
-| Test | Cosa prova |
-|---|---|
-| `navGrid` | il percorso aggira un tavolo; niente tagli d'angolo; la lisciatura toglie i nodi allineati; un bersaglio bloccato va alla cella libera più vicina; 30k celle sotto i 20 ms |
-| `motion` | velocità costante lungo il percorso; il limite d'imbardata regge |
-| `director` (orologio finto, seme fisso) | il primo `update` scatta; WAITING → ARRIVED con tavolo: un accompagnamento che parte dall'accoglienza; lobby → tavolo, e in un'altra sala dissolvenza e ricomparsa; RESEAT, STAND, SIT, LEAVE, FADE; annullare durante l'accompagnamento fa svanire i membri; RETARGET nella stessa sala; una comitiva più recente fa uscire la vecchia; un'epoca nuova scatta e un arrivo dopo si anima (il Wi-Fi ballerino); più di 4 passaggi scattano; coda ≥ 4 a ×2, oltre 6 scattano i più vecchi; un cambio di servizio azzera; stesso seme e stessi ingressi, stesse posizioni dopo N passi |
-| `waiters` | divisione a resto maggiore; prima la comitiva più recente mai visitata; tetto per sala; numero di ripiego senza nomi |
-| API `presenza-personale` | STAGIONALE senza turni: presente a pranzo e a cena; FISSO in ferie tutto il giorno con un pranzo esplicito: solo pranzo; FISSO nel riposo settimanale: assente, e con una cena esplicita solo cena; EXTRA senza turno: assente |
+**Test** (`tests/unit/`): `navGrid` (aggira un tavolo, niente tagli d'angolo, la lisciatura,
+il bersaglio bloccato, il varco della porta, le ancore, 30k celle sotto i 20 ms, stesso
+ingresso stesso percorso); `motion` (velocità costante, imbardata, fase, oltre i capi, binario
+allungato); `rng`; `partyStates` (fasi, ordine, `DEPARTING` in piedi, conti invariati);
+`director` (orologio finto e seme fisso: ogni riga della tabella, ogni scatto, l'epoca e il
+Wi-Fi ballerino, la coda ×2 e lo scatto oltre 6, il servizio nuovo, il movimento ridotto,
+`fastForward`, stesse posizioni con lo stesso seme, e a ogni passo ogni figura disegnata da uno
+strato solo); `waiters` (ruoli e ripiego, divisione, prossima visita, tetto per sala, modi);
+`frameDemand` (fps, risveglio, soglia leggera); `boundaries` (striscia e hook del personale fra
+i file puri, e il canvas che non importa il codice del regista); `activity` (le righe degli
+eventi, le smentite, la somma dei riallineamenti, chi e dove, la frase detta); `overrides`
+(la chiave assestata alle 17:00, le letture contate). Più l'API `presenza-personale` (anche
+un'assenza di più giorni, e le schede di un altro ristorante mai in lista). Commit: «Presenze del personale: stessa regola della pagina Personale» ·
+«Sala dal vivo: griglia di cammino e percorsi» · «Sala dal vivo: il regista della scena» ·
+«Sala dal vivo: l'accoglienza accompagna gli ospiti al tavolo» · «Sala dal vivo: i camerieri
+di turno girano fra pass e tavoli».
 
 La riga del Registro:
 
@@ -1380,16 +1550,19 @@ draw call e triangoli si leggono lì.
 | G20 | Chiosco in trappola dopo un crash | Il chrome lo chiede la pagina con `onImmersive`: smontata lei, torna la navigazione |
 | G21 | Interruttore o entitlement, se Sympotia vende la vista 3D | Interruttore operativo ora; un entitlement seguirebbe il modello delle recensioni, chiuso in caso d'errore |
 | G22 | Clone vecchio | `git fetch` prima di tutto, poi migration e ancore: è già successo (§2) |
+| G23 | Due letture di «di turno»: Personale, l'avviso del cambio turno e la Sala dal vivo (`isOnDuty`) da una parte, la copertura del piano ferie (`makeDutyIndex`: l'assenza batte il turno scritto, solo il FISSO è implicito) dall'altra | PR3 allinea `/staff/presence` a Personale e corregge solo il commento del piano ferie; la regola della copertura la decide Tina |
 
 ---
 
 ## 12. Deliberatamente fuori
 
 Camerieri guidati dalle Comande (§9), un ruolo di sola visione per gli schermi fissati,
-più ingressi per sala e una posizione delle sale fra loro. L'arredo vero (bancone,
-pareti): `docs/cassa-plan.md` §12 metteva «Arredo della piantina (bancone, ingresso)» fra
-le cose senza modello, e l'ingresso ora ce l'ha, ma i segnaposto sono punti, non mobili.
-Figure dei banchetti per tutto il turno (§13), forme del seed, altri schermi sull'helper.
+più ingressi per sala e una posizione delle sale fra loro, il nome del cameriere sui tavoli
+che serve, la copertura del piano ferie letta come Personale (G23, da chiedere a Tina).
+L'arredo vero (bancone, pareti): `docs/cassa-plan.md` §12 metteva «Arredo della piantina
+(bancone, ingresso)» fra le cose senza modello, e l'ingresso ora ce l'ha, ma i segnaposto
+sono punti, non mobili. Figure dei banchetti per tutto il turno (§13), forme del seed, altri
+schermi sull'helper.
 
 ---
 
@@ -1438,6 +1611,60 @@ esplicito, `currentService` e `serviceDayOf` in `utils/displayTime.ts` sul fuso 
   Seggiolone» dà il seggiolone; oggi l'unica nota con quell'icona è «Seggiolone».
 - *La testata sul telefono:* due righe sotto sm, titolo e riassunto sopra, i bottoni sotto.
   Nessun bottone tolto.
+
+**Cinque scelte di PR3 da confermare** (§9).
+- *La lista delle fasi e la fase nascosta:* `partyStates` e non `parties` (il nome è già di
+  `RoomModel`), con `hidden` per chi è seduto ma senza figure. Uscire di lì è un'uscita a piedi;
+  tornarci (l'arrivo più recente annullato) fa ricomparire la tavolata sul posto, senza un
+  secondo ingresso dalla porta.
+- *«In uscita» in piedi nel modello statico:* dietro le sedie, i cani in piedi. PR2c li
+  disegnava seduti; così movimento ridotto, scatti e fine dell'alzata danno la stessa figura.
+- *L'hostess sempre del regista:* cammina, e il suo nome la deve seguire.
+- *In fila solo l'accompagnamento:* i cambi di tavolo e le uscite vanno su percorsi propri,
+  sfalsati; le tavolate oltre 12 persone o di un banchetto non camminano mai, compaiono e
+  svaniscono sedute.
+- *La porta sfuma con la posizione:* chi aspetta oltre la porta non si vede, compare passandola.
+
+**Quattro ritocchi del collaudo visivo di PR3** (§9), su fotogrammi della pagina vera.
+- *Chi aspetta all'ingresso è un ostacolo.* La fila dell'hostess passava in mezzo a chi
+  aspetta accanto alla porta, e così chi esce: ora chi sta fermo in piedi e i cani sono
+  dischi nella griglia (il cameriere non serve più in piedi sul cane).
+- *La porta a senso unico.* Una tavolata più recente sullo stesso tavolo entrava mentre la
+  vecchia usciva, e le due si attraversavano nell'ingresso (la fila segue il suo binario e
+  non si scansa). Prima esce chi lascia il tavolo, poi l'hostess va a prendere chi arriva; chi
+  si alza per uscire mentre lei accompagna aspetta in piedi che presenti il tavolo. La
+  specifica le voleva insieme; da confermare.
+- *La falcata è un ciclo intero.* Con 0,7 m (adulti) e 0,45 (bambini) le gambe facevano tre
+  passi al secondo e i piedi scivolavano del doppio; 1,4 e 0,9.
+- *Il cane accanto al padrone* gira con calma alle svolte secche invece di trottare di
+  traverso davanti alla porta.
+
+**La revisione di PR3** (§9). Corretti nel regista: alle 17:00 la pagina aspetta le varianti
+del servizio nuovo prima di dare il modello al regista, e una rilettura delle varianti alla
+riconnessione va in scena già conclusa; la pausa del cameriere al pass non si conta due volte
+quando il canvas dorme, e dopo la scheda nascosta i camerieri non partono tutti insieme; la
+rete dei 90 s scatta anche con l'aggiornamento al minuto, e un accompagnamento rimasto in coda
+non viene tagliato a metà strada; il ×2 della coda con quattro comitive, come la specifica;
+`movingKeys` con chi esce dal modello. Nella scena: l'accoglienza sulla strada della fila (il
+tornante), il braccio che indica la strada, l'etichetta che svanisce, l'hostess che aspetta
+i suoi ai posti e fa da ostacolo da ferma, il cane sempre dallo stesso lato e mai addosso a
+nessuno, chi esce in fila per strada, i posti al pass sulle celle libere, il leggio gonfiato.
+Nella pagina: la striscia (chi e dove, la frase detta, le smentite, i riallineamenti sommati,
+«→ uscita»), «Segui il servizio» che aspetta la fine dell'accompagnamento a video e che senza
+vista 3D è spento, la linguetta in vista, l'orologio all'ora del ristorante.
+
+Restano aperti, per Tina:
+- *Il tavolo di un cambio di tavolo «in arrivo»?* Durante un RESEAT il tavolo nuovo è già
+  «arrivato» mentre la tavolata ci cammina; gli accompagnamenti lo tengono «in arrivo» fino
+  all'ultimo seduto. Farlo anche qui vuole un evento in più del regista (la fine del cambio).
+- *Chi si siede passa attraverso lo schienale* (si vede solo da vicino). Il rimedio vero è la
+  sedia che si scosta e torna, cioè uno spostamento per sedia esposto dal regista alla scena:
+  un'aggiunta al contratto dei tipi.
+- *L'orologio Live di tutta l'app all'ora del ristorante?* Qui sì; la testata di App e le
+  Comande leggono ancora l'ora del dispositivo, e su un portatile in un altro fuso differiscono
+  dai cartelli.
+- *Le due letture di «di turno»* (Personale e Sala dal vivo, contro la copertura del piano
+  ferie), come sopra.
 
 **La revisione avversaria.** Accolti: M1, con lo schermo intero su `documentElement`
 (modali e toast restano visibili) e il chrome via `onImmersive` (un crash rende la
