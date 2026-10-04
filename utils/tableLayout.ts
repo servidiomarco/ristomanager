@@ -1,5 +1,5 @@
 import { Table } from '../types';
-import { getGlyphDimensions } from '../components/TableGlyph';
+import { getGlyphDimensions } from './tableGeometry';
 
 export interface AutoLayout {
   positions: Map<number, { x: number; y: number }>;

@@ -1,4 +1,4 @@
-import { getDatePartInTz, getTimePartInTz } from './reservationTime';
+import { currentServiceInTz, getDatePartInTz, getTimePartInTz, serviceDayInTz } from './reservationTime';
 
 /* Data e ora come le vede il ristorante che sta guardando — SOLO FRONTEND.
  *
@@ -36,3 +36,39 @@ export const datePart = (iso: string | Date | null | undefined): string =>
 /** HH:MM (24h) nel fuso del ristorante. */
 export const timePart = (iso: string | Date | null | undefined): string =>
     getTimePartInTz(iso, sessionTz);
+
+// La data di un Date letta coi getter del dispositivo, come la leggono la
+// testata di App e le viste che usano formatLocalDate.
+const deviceDatePart = (d: Date): string =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+/** Il servizio di adesso all'ora del ristorante, non del dispositivo: data,
+ *  turno e `anchor`, un Date dentro quel giorno di servizio da dare a
+ *  setGlobalDate (vedi currentServiceInTz).
+ *
+ *  L'ancora deve cadere in quel giorno in TUTTE e due le letture che App fa
+ *  di globalDate: coi getter del dispositivo (testata, piantina,
+ *  prenotazioni, accoglienza, dashboard) e con datePart nel fuso del
+ *  ristorante (cassa, cucina, pagamenti, comande). Sul dispositivo del locale
+ *  coincidono, e l'ancora resta quella di currentServiceInTz. Su un portatile
+ *  rimasto in un altro fuso no: alle 22:30 di Roma un Mac a Dubai è già a
+ *  domani, e con l'istante come ancora la testata salterebbe alla cena di
+ *  domani mentre la cassa resta su stasera. Lì l'ancora diventa il
+ *  mezzogiorno locale della data del servizio, che cade nel giorno giusto in
+ *  tutte e due le letture finché i fusi distano meno di 12 ore; oltre, resta
+ *  quella del ristorante.
+ *
+ *  App la chiama anche prima del login, per lo stato iniziale: lì vale il
+ *  fuso di default, e App rifà il conto quando arriva quello del ristorante. */
+export const currentService = (at: Date = new Date()): ReturnType<typeof currentServiceInTz> => {
+    const s = currentServiceInTz(at, sessionTz);
+    if (deviceDatePart(s.anchor) === s.date) return s;
+    const [y, m, d] = s.date.split('-').map(Number);
+    const mezzogiorno = new Date(y, m - 1, d, 12);
+    return getDatePartInTz(mezzogiorno, sessionTz) === s.date ? { ...s, anchor: mezzogiorno } : s;
+};
+
+/** Il giorno di servizio di un istante: un walk-in delle 00:30 è della cena
+ *  di ieri. */
+export const serviceDayOf = (iso: string | Date | null | undefined): string =>
+    serviceDayInTz(iso, sessionTz);

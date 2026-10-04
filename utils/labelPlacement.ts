@@ -4,7 +4,7 @@
 // result inside the scaled transform wrapper, so this module is scale-agnostic.
 
 import { TableShape } from '../types';
-import { getGlyphDimensions } from '../components/TableGlyph';
+import { getGlyphDimensions } from './tableGeometry';
 
 export interface Box { x: number; y: number; w: number; h: number; }
 

@@ -1,5 +1,5 @@
-# CI del repo: typecheck + build di entrambi i lati, poi i test API contro
-# un Postgres di servizio. Gira su ogni PR e su main.
+# CI del repo: typecheck, test unitari e build di entrambi i lati, poi i test
+# API contro un Postgres di servizio. Gira su ogni PR e su main.
 name: CI
 
 on:
@@ -35,6 +35,10 @@ jobs:
       # 21/08, gate del nodo 16/09, cursore upstream 24/09).
       - name: Bypass RLS motivati
         run: npm run check:rls-bypass
+      # Logica pura, senza Postgres né server: gira qui e non nei job API,
+      # che droppano il database e compilano il server prima di partire.
+      - name: Test unitari
+        run: npm run test:unit
       - name: Build frontend
         run: npm run build
       - name: Build server
