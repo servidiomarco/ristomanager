@@ -12,17 +12,22 @@ import { fileURLToPath } from 'node:url';
  * build non se ne accorge: compila benissimo. Se ne accorge questo test,
  * leggendo i sorgenti.
  *
- * - Pagina, contratto dei tipi, modello e i tre hook della pagina: mai three,
- *   @react-three/* o la scena, nemmeno come tipi (il contratto lo promette).
+ * - Pagina, contratto dei tipi, modello (regista compreso), la striscia delle
+ *   attività e gli hook della pagina: mai three, @react-three/* o la scena,
+ *   nemmeno come tipi (il contratto lo promette). Il regista arriva al canvas
+ *   come istanza, e il suo codice resta nel chunk della pagina.
  * - La pagina raggiunge il canvas solo con import('./SalaVivoCanvas').
  * - App raggiunge la pagina solo con import('./components/salaVivo/SalaVivoPage'),
  *   e non tocca three, la scena o il canvas.
+ * - Il canvas e la scena, del modello, importano solo le misure e la porta
+ *   (model/geometry): il regista lo ricevono come istanza.
  * Un `import type` verso la pagina o il canvas è ammesso: sparisce dalla
  * build e non tira dietro niente. */
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const at = (p: string) => join(ROOT, p);
 const PAGE = 'components/salaVivo/SalaVivoPage.tsx';
+const CANVAS = 'components/salaVivo/SalaVivoCanvas.tsx';
 const MODEL_DIR = 'components/salaVivo/model';
 const SCENE_DIR = 'components/salaVivo/scene';
 
@@ -103,9 +108,11 @@ const pullsIn3d = (e: { spec: string; file: string | null }) =>
 const PURE_FILES = (): string[] => [
   'components/salaVivo/types.ts',
   ...filesUnder(MODEL_DIR),
+  'components/salaVivo/ActivityStrip.tsx',
   'hooks/useServiceOverrides.ts',
   'hooks/usePrefersReducedMotion.ts',
   'hooks/useWakeLock.ts',
+  'hooks/useStaffOnShift.ts',
   ...(existsSync(at(PAGE)) ? [PAGE] : []),
 ];
 
@@ -213,6 +220,15 @@ describe('i confini del 3D, seguendo gli import a catena', () => {
   it.skipIf(!existsSync(at(PAGE)))('il chunk della pagina non arriva mai a three, alla scena o al canvas', () => {
     const { edges } = staticClosure(PAGE);
     expect(edges.filter(pullsIn3d).map(e => `${e.from} → ${e.spec}`)).toEqual([]);
+  });
+
+  it.skipIf(!existsSync(at(CANVAS)))('il regista resta nel chunk della pagina: il canvas non ne importa il codice', () => {
+    // Il canvas riceve il regista già costruito (SceneDirectorApi è un tipo).
+    // Un import del suo codice, o di un altro pezzo del modello, lo
+    // copierebbe nel chunk 3D: due regole di chi cammina dove, una per parte.
+    const { files } = staticClosure(CANVAS);
+    const model = [...files].filter(f => f.startsWith(`${MODEL_DIR}/`) && f !== `${MODEL_DIR}/geometry.ts`);
+    expect(model).toEqual([]);
   });
 
   it('il bundle principale non arriva mai alla pagina né al 3D', () => {

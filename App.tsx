@@ -1448,6 +1448,12 @@ const App: React.FC = () => {
   const [menus, setMenus] = useState<RestaurantMenu[]>([]);
   const [banquetMenus, setBanquetMenus] = useState<BanquetMenu[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
+  // Cresce di uno a ogni ricarica completa delle prenotazioni (fetchData),
+  // nello stesso commit della lista: dice alla Sala dal vivo che quei cambi
+  // sono un riallineamento (riconnessione, ritorno in primo piano, coda
+  // offline svuotata) e non qualcosa successo adesso. Lì si mettono in scena
+  // già conclusi; un evento socket non la tocca, e un arrivo vero si anima.
+  const [reservationsEpoch, setReservationsEpoch] = useState(0);
   // Flips to false the first time fetchData() completes. Consumers (list
   // pages) render skeleton placeholders while this is true and their data
   // array is empty. Stays false thereafter so refetches (visibilitychange,
@@ -1662,6 +1668,10 @@ const App: React.FC = () => {
       setMenus(menusData);
       setBanquetMenus(banquetMenusData);
       setReservations(mergeReservationsById(reservationsData, reservationsArchiveRef.current));
+      // Subito dopo la lista e senza await di mezzo: stesso batch di React,
+      // quindi la Sala dal vivo non vede mai la lista nuova con l'epoca
+      // vecchia (sarebbero tre comitive che entrano dalla porta insieme).
+      setReservationsEpoch(e => e + 1);
       // Solo un giro ANDATO A BUON FINE vale come «dati freschi»: se è
       // fallito, il rientro successivo deve poter riprovare subito.
       lastFetchDataAtRef.current = Date.now();
@@ -3166,6 +3176,7 @@ const App: React.FC = () => {
                 reservations={reservations}
                 banquetMenus={banquetMenus}
                 isInitialLoading={isInitialDataLoading}
+                reservationsEpoch={reservationsEpoch}
                 isConnected={isConnected}
                 currentTime={currentTime}
                 canEditFloor={hasPermission('floorplan:full')}

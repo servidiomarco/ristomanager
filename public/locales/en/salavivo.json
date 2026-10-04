@@ -42,5 +42,34 @@
   "noTables": "No tables in this room.",
   "noRooms": "No room open this service.",
   "reserved": "Reserved · {{time}}",
-  "event": "Event"
+  "event": "Event",
+  "follow": "Follow the service",
+  "unfollow": "Stop following the service",
+  "strip": {
+    "title": "Floor activity",
+    "party": "{{name}} · {{people}}",
+    "anonymous": "Table {{table}}",
+    "kids_one": "({{count}} child)",
+    "kids_other": "({{count}} children)",
+    "dog_one": "+ dog",
+    "dog_other": "+ {{count}} dogs",
+    "toTable": "→ table {{table}}",
+    "atEntrance": "at the entrance",
+    "moved": "table {{from}} → {{to}}",
+    "leaving": "table {{table}} → exit",
+    "seatedCount": "{{count}} seated",
+    "updatedMany_one": "{{count}} table updated",
+    "updatedMany_other": "{{count}} tables updated",
+    "sr": {
+      "people_one": "{{count}} person",
+      "people_other": "{{count}} people",
+      "kids_one": "{{count}} child",
+      "kids_other": "{{count}} children",
+      "dog_one": "a dog",
+      "dog_other": "{{count}} dogs",
+      "toTable": "to table {{table}}",
+      "moved": "from table {{from}} to table {{to}}",
+      "leaving": "leaving table {{table}}"
+    }
+  }
 }
