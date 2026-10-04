@@ -29,7 +29,7 @@
   "publicWhatsapp": "WhatsApp shown to guests",
   "publicAddress": "Venue address",
   "mapsUrl": "Google Maps link (getting here)",
-  "logoLabel": "Logo (online booking page and app header)",
+  "logoLabel": "Logo (online booking, QR menu and app header)",
   "logoAlt": "Restaurant logo",
   "noLogo": "No logo",
   "uploadLogo": "Upload logo",

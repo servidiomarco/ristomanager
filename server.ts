@@ -5571,8 +5571,20 @@ const handlePublicMenu = async (tenantId: number, _req: express.Request, res: ex
     // la pagina lo usa per prime e tiene la sua euristica per le altre.
     const present = [...new Set(rows.map((d: any) => String(d.category || 'Altro')))] as string[];
     const categorieOrdine = sortCategoriesByPrefs(present, prefs).filter(name => prefs[name] != null);
+    // publicBusinessIdentity come /prenota: il fallback del Frantoio vale solo
+    // per il tenant 1 — con businessIdentity un tenant senza ragione sociale
+    // mostrava «Il Vecchio Frantoio» in testa al SUO menu.
+    const identity = await publicBusinessIdentity(tenantId);
     res.json({
-        restaurant: businessIdentity(tenantId).name,
+        restaurant: identity.name,
+        // Il marchio in testata. Il logo è la variante per fondo chiaro: la
+        // testata del menu è chiara apposta, perché il logo che c'è sempre è
+        // quello (quello del Frantoio è inchiostro nero su trasparente). Path
+        // del backend (/public/media/…), stessa origine della pagina.
+        branding: {
+            tagline: identity.tagline || null,
+            logo_url: identity.logoUrl || null,
+        },
         lingue: ['it', ...MENU_LANGS],
         categorie: await getMenuCategoryTranslations(tenantId),
         categorie_ordine: categorieOrdine,
