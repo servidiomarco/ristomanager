@@ -459,10 +459,12 @@ export interface SalaVivoCanvasProps {
   /** La sala sullo schermo. È un oggetto nuovo a ogni ricalcolo del modello:
    *  la scena reinquadra solo quando cambia `room.id` o arriva «Centra».
    *  Da PR3 è la sala che la pagina mostra (quella scelta, o quella dove
-   *  «Segui il servizio» l'ha portata), coi tavoli verso cui l'hostess sta
-   *  accompagnando qualcuno ancora «in arrivo» con l'anello
-   *  (withEscortTargets, model/director.ts): il tavolo diventa «arrivato»
-   *  quando l'ultimo si siede, non quando Reception preme il bottone. */
+   *  «Segui il servizio» l'ha portata), coi tavoli verso cui qualcuno sta
+   *  arrivando ancora «in arrivo» con l'anello (withArrivalTargets,
+   *  model/director.ts): quello dove l'hostess accompagna una comitiva, e
+   *  quello nuovo di una comitiva che cambia tavolo a piedi. Il tavolo
+   *  diventa «arrivato» quando l'ultimo si siede, non quando Reception preme
+   *  il bottone. */
   room: RoomModel;
   /** Il regista della scena, creato e aggiornato dalla pagina. Il canvas lo
    *  fa avanzare (step, in un solo useFrame) e ne disegna gli attori; non lo
@@ -643,12 +645,18 @@ export interface TableRef {
 /** Quello che il regista racconta, per la striscia delle attività e per
  *  «Segui il servizio». `at` è il suo orologio (DirectorOptions.now).
  *
- * Tutti tranne 'escort-end' nascono in update(), al confronto dei modelli:
- * non dipendono dai frame, quindi arrivano anche col movimento ridotto, a
- * scheda nascosta e senza vista 3D. 'escort-end' arriva quando
- * l'accompagnamento finisce davvero (da step, fastForward o update). Ogni
- * cambio di escortTargets arriva insieme a un evento: la pagina ridisegna i
- * tavoli «in arrivo» a ogni evento e mai per frame. */
+ * Tutti tranne 'escort-end' e 'moved-end' nascono in update(), al confronto
+ * dei modelli: non dipendono dai frame, quindi arrivano anche col movimento
+ * ridotto, a scheda nascosta e senza vista 3D. 'escort-end' e 'moved-end'
+ * arrivano quando l'accompagnamento o il cambio di tavolo finisce davvero
+ * (da step, fastForward, configure o update). Ogni cambio di arrivalTargets
+ * (e quindi di escortTargets) arriva insieme a un evento: la pagina
+ * ridisegna i tavoli «in arrivo» a ogni evento e mai per frame. Fa
+ * eccezione solo l'azzeramento (il primo modello, un cambio di servizio),
+ * che svuota tutto senza raccontare niente: lì è la pagina, che sa di aver
+ * dato un servizio nuovo, a ridisegnarli dopo l'update. Il render che
+ * precede l'update li ha calcolati col regista di prima, e da solo
+ * terrebbe un anello acceso fino al modello dopo. */
 export type DirectorEvent =
   /** Una comitiva da accompagnare: dalla porta, o dall'ingresso se aspettava
    *  già lì. roomId è la sala del tavolo. Col movimento ridotto arriva
@@ -661,8 +669,23 @@ export type DirectorEvent =
   /** Arrivata senza un tavolo da disegnare: aspetta all'ingresso. */
   | { kind: 'lobby'; at: number; roomId: number; party: PartyRef }
   /** Cambio di tavolo (anche mentre l'hostess la sta accompagnando). roomId
-   *  è la sala del tavolo nuovo. */
+   *  è la sala del tavolo nuovo. Quando la comitiva ci va a piedi (RESEAT)
+   *  il tavolo nuovo entra in arrivalTargets in questo stesso istante e ci
+   *  resta fino a 'moved-end': da un altro tavolo, o tornando indietro mentre
+   *  ne usciva (spodestata, «Tavolo liberato» o «Arrivato» tolti) verso un
+   *  tavolo diverso da quello che lasciava, che è `from`. Senza anello
+   *  quando nessuno ci cammina: un cambio scattato, o di una comitiva oltre
+   *  12 persone o di un banchetto (compare seduta al tavolo nuovo); e
+   *  durante un accompagnamento, il cui tavolo è già fra gli obiettivi. */
   | { kind: 'moved'; at: number; roomId: number; party: PartyRef; from: TableRef; to: TableRef }
+  /** Il cambio di tavolo a piedi è uscito di scena, e il suo tavolo nuovo
+   *  esce da arrivalTargets: seated true quando l'ultimo della comitiva è
+   *  arrivato al suo posto (o ce l'ha messo uno scatto), false quando un
+   *  altro passaggio l'ha sostituito (un altro tavolo, «Arrivato» annullato,
+   *  un'uscita). Solo dopo un 'moved' che ha acceso l'anello, una volta.
+   *  Non è la fine di un accompagnamento: «Segui il servizio» non ci aspetta
+   *  sopra e la striscia non ne fa una riga. */
+  | { kind: 'moved-end'; at: number; roomId: number; partyId: number; tableId: number; seated: boolean }
   /** Lascia il tavolo ed esce dalla porta: andata via, annullata, oltre la
    *  grazia, o spodestata da una comitiva più recente. */
   | { kind: 'leaving'; at: number; roomId: number; party: PartyRef; table: TableRef }
@@ -815,8 +838,10 @@ export interface SceneDirectorApi {
    *  fra l'eco del socket e la risposta HTTP). Confronta model.partyStates
    *  con quelli dell'ultimo update e mette in scena i passaggi, o li porta
    *  dritti allo stato finale con `reason` (o col limite dei cambi in
-   *  blocco). Un model.service.key diverso azzera tutto. Emette gli eventi
-   *  qui dentro, prima di tornare. */
+   *  blocco). Il primo modello e un model.service.key diverso azzerano
+   *  tutto, senza eventi: accompagnamenti, cambi di tavolo e i loro tavoli
+   *  «in arrivo» spariscono, e chi li disegna li rilegge dopo l'update.
+   *  Emette gli eventi qui dentro, prima di tornare. */
   update(model: SceneModel, reason: SnapReason | null): void;
   /** Avanza di `dtMs` (il delta del frame, in ms). Lo chiama il canvas, una
    *  volta per frame, prima di ogni altro useFrame. */
@@ -847,9 +872,17 @@ export interface SceneDirectorApi {
    *  oggetto del regista, riusato. */
   tagIn(roomId: number): ActorTag | null;
   /** I tavoli disegnati della sala verso cui un accompagnamento è in coda o
-   *  in corso: restano «in arrivo» con l'anello finché l'ultimo non si
-   *  siede. Un Set del regista, riusato. */
+   *  in corso, finché l'ultimo non si siede. Li legge «Segui il servizio»,
+   *  per non tagliare via un accompagnamento a metà; l'anello lo decide
+   *  arrivalTargets, che li comprende. Un Set del regista, riusato. */
   escortTargets(roomId: number): ReadonlySet<number>;
+  /** I tavoli della sala da disegnare «in arrivo» con l'anello
+   *  (withArrivalTargets): quelli di escortTargets, più il tavolo nuovo di
+   *  una comitiva che ci sta andando a piedi da un altro tavolo (un cambio di
+   *  tavolo, vedi 'moved'; anche da un'altra sala: il tavolo pulsa nella
+   *  sua). Ognuno resta finché l'ultimo della comitiva non si siede, anche se
+   *  Reception l'ha già segnata lì. Un Set del regista, riusato. */
+  arrivalTargets(roomId: number): ReadonlySet<number>;
   /** Quanti frame servono adesso (vedi FrameNeed). */
   frameNeed(): FrameNeed;
   /** Con frameNeed() 'none': fra quanti ms qualcuno della sala sullo
@@ -862,9 +895,9 @@ export interface SceneDirectorApi {
    *  torni false. */
   isAnimating(): boolean;
   /** Cresce quando cambia chi disegna chi: un attore entra o esce, una
-   *  chiave entra o esce da movingKeys, cambiano escortTargets o le
-   *  etichette. People lo confronta a ogni frame (un numero) e si riscrive
-   *  solo allora. */
+   *  chiave entra o esce da movingKeys, cambiano escortTargets,
+   *  arrivalTargets o le etichette. People lo confronta a ogni frame (un
+   *  numero) e si riscrive solo allora. */
   readonly revision: number;
   /** Gli eventi, per la striscia e «Segui il servizio». Restituisce lo
    *  stacco. */

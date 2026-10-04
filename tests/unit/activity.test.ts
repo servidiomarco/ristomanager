@@ -59,13 +59,17 @@ describe('le righe degli eventi', () => {
       { kind: 'escort-end', at: 0, roomId: 2, partyId: 301, tableId: 40, seated: true },
       { kind: 'lobby', at: 0, roomId: 2, party: coppia },
       { kind: 'moved', at: 0, roomId: 2, party: famiglia, from: t40, to: t41 },
+      // La fine del cambio di tavolo (l'anello del 41 si spegne): la riga è
+      // quella del cambio, arrivato o no.
+      { kind: 'moved-end', at: 0, roomId: 2, partyId: 301, tableId: 41, seated: true },
+      { kind: 'moved-end', at: 0, roomId: 2, partyId: 301, tableId: 41, seated: false },
       { kind: 'leaving', at: 0, roomId: 2, party: famiglia, table: t41 },
       { kind: 'bulk', at: 0, count: 3 },
       { kind: 'bulk', at: 0, count: 0 },
       { kind: 'snapped', at: 0, roomId: 2, reason: 'queue', parties: [{ party: famiglia, table: t40 }, { party: coppia, table: t41 }] },
     ];
     const kinds = ev.map(e => stripItemsOf(e, nuovo, 5).map(i => i.kind));
-    expect(kinds).toEqual([['escort'], [], ['lobby'], ['moved'], ['leaving'], ['bulk'], [], ['large', 'large']]);
+    expect(kinds).toEqual([['escort'], [], ['lobby'], ['moved'], [], [], ['leaving'], ['bulk'], [], ['large', 'large']]);
   });
 
   it('le nuove in cima, al più 4; un riallineamento dopo un altro si somma, e il tempo riparte', () => {

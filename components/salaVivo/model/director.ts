@@ -174,13 +174,17 @@ export interface DirectorRoomInspection {
   /** comitiva → passaggio in corso, per le comitive con attori o un
    *  accompagnamento in questa sala. */
   scripts: ReadonlyMap<number, PartyScript>;
+  /** comitiva → tavolo nuovo, per i cambi di tavolo a piedi verso questa
+   *  sala: il tavolo che arrivalTargets tiene «in arrivo». */
+  moves: ReadonlyMap<number, number>;
   waiters: ReadonlyArray<{ key: string; state: WaiterState; partyId: number | null; label: string | null; x: number; z: number }>;
 }
 
-/** La sala da disegnare: i tavoli verso cui c'è un accompagnamento restano
- *  «in arrivo» con l'anello. La stessa sala (stesso oggetto) quando nessun
- *  suo tavolo è in `targets`: il canvas non rifà niente. */
-export function withEscortTargets(room: RoomModel, targets: ReadonlySet<number>): RoomModel {
+/** La sala da disegnare: i tavoli verso cui qualcuno sta arrivando
+ *  (arrivalTargets: un accompagnamento, o una comitiva che cambia tavolo a
+ *  piedi) restano «in arrivo» con l'anello. La stessa sala (stesso oggetto)
+ *  quando nessun suo tavolo è in `targets`: il canvas non rifà niente. */
+export function withArrivalTargets(room: RoomModel, targets: ReadonlySet<number>): RoomModel {
   if (!room || !targets || targets.size === 0 || !Array.isArray(room.tables)) return room;
   if (!room.tables.some(t => !!t && targets.has(t.id))) return room;
   return {
@@ -405,6 +409,21 @@ interface PartyRt {
   /** I suoi attori vivi e morti di questo passo, nell'ordine delle figure. */
   actors: Actor[];
   job: Job | null;
+  /** Il tavolo nuovo (e la sua sala) di un cambio di tavolo a piedi: resta
+   *  «in arrivo» con l'anello (arrivalTargets) finché l'ultimo non si siede,
+   *  come il tavolo di un accompagnamento. Reception l'ha già spostata, ma in
+   *  sala la famiglia si sta appena alzando dal tavolo vecchio: senza, il
+   *  tavolo nuovo diventava «arrivato» prima che ci arrivasse nessuno. Vale
+   *  finché la comitiva va a quel tavolo, seduta o in piedi; null senza un
+   *  cambio in corso, e mai insieme a `job`. */
+  moveTo: { roomId: number; tableId: number } | null;
+  /** Il tavolo che la comitiva sta lasciando, a piedi verso la porta (un
+   *  'leaving') o svanendo sul posto («Arrivato» annullato), col nome per la
+   *  striscia. Lo legge solo il passaggio dopo: se Reception intanto la
+   *  rimette a un altro tavolo mentre qualcuno è ancora in sala, ci torna a
+   *  piedi da qui, ed è un cambio di tavolo come gli altri (righe 1 e 3).
+   *  null in ogni altro momento. */
+  leftTable: { roomId: number; table: TableRef } | null;
   /** Per i camerieri: quante visite, quando si è seduta, l'ultima visita. */
   visits: number;
   seatedAt: number;
@@ -505,6 +524,8 @@ interface RoomRt {
   movingRev: number;
   targets: Set<number>;
   targetsRev: number;
+  arrivals: Set<number>;
+  arrivalsRev: number;
   tag: ActorTag;
   candCount: number;
 }
@@ -762,6 +783,25 @@ export class SceneDirector implements SceneDirectorApi {
     return room.targets;
   }
 
+  // Gli accompagnamenti più i cambi di tavolo a piedi. Un insieme a sé, e
+  // non dentro escortTargets: «Segui il servizio» aspetta la fine di un
+  // accompagnamento sulla sala a video, e solo un 'escort-end' lo libera; un
+  // cambio di tavolo che tenesse occupata la sala lo lascerebbe ad aspettare
+  // per sempre. Le comitive dalla mappa e non da partyOrder, che update
+  // rifà solo alla fine: un ascoltatore che chiede a metà vede già tutte.
+  arrivalTargets(roomId: number): ReadonlySet<number> {
+    const room = this.rooms.get(roomId);
+    if (!room) return NO_TABLES;
+    if (room.arrivalsRev !== this.rev) {
+      room.arrivalsRev = this.rev;
+      const set = room.arrivals;
+      set.clear();
+      for (const t of this.escortTargets(roomId)) set.add(t);
+      for (const p of this.parties.values()) if (p.moveTo !== null && p.moveTo.roomId === roomId) set.add(p.moveTo.tableId);
+    }
+    return room.arrivals;
+  }
+
   isAnimating(): boolean {
     for (let i = 0; i < this.roomList.length; i++) {
       const room = this.roomList[i];
@@ -834,6 +874,8 @@ export class SceneDirector implements SceneDirectorApi {
       const here = p.actors.some(a => !a.dead && a.roomId === roomId) || (p.job !== null && p.job.roomId === roomId);
       if (here && p.script) scripts.set(p.id, p.script);
     }
+    const moves = new Map<number, number>();
+    for (const p of this.parties.values()) if (p.moveTo !== null && p.moveTo.roomId === roomId) moves.set(p.id, p.moveTo.tableId);
     return {
       hostess: {
         state: h.state,
@@ -847,6 +889,7 @@ export class SceneDirector implements SceneDirectorApi {
       queue: room.queue.map(j => j.party.id),
       current: h.job ? h.job.party.id : null,
       scripts,
+      moves,
       waiters: this.waiters
         .filter(w => !w.actor.dead && w.actor.roomId === roomId)
         .map(w => ({
@@ -879,6 +922,11 @@ export class SceneDirector implements SceneDirectorApi {
       this.diff(next, r);
     }
     for (const room of vanished) this.dropRoom(room);
+    // Prima di prune, che dimentica chi non ha più attori: un cambio di
+    // tavolo rimasto senza nessuno in scena (una sala sparita, nessuno da far
+    // camminare) finisce qui, col suo evento, non al prossimo fotogramma, che
+    // a scheda nascosta non arriva.
+    this.finishMoves();
     this.refreshLabels();
     this.syncWaiters(false);
     this.candDirty = true;
@@ -919,6 +967,9 @@ export class SceneDirector implements SceneDirectorApi {
     }
     this.finishJobs();
     this.safetyNet();
+    // Dopo la rete di sicurezza: un cambio di tavolo che lei porta in fondo
+    // finisce nello stesso passo.
+    this.finishMoves();
     this.stepWaiters(dt, dtMove);
     this.compact();
   }
@@ -1065,6 +1116,8 @@ export class SceneDirector implements SceneDirectorApi {
       movingRev: -1,
       targets: new Set(),
       targetsRev: -1,
+      arrivals: new Set(),
+      arrivalsRev: -1,
       tag: { partyId: 0, x: 0, y: 0, z: 0, alpha: 0 },
       candCount: 0,
     };
@@ -1223,6 +1276,16 @@ export class SceneDirector implements SceneDirectorApi {
   private animate(tr: Transition): void {
     const p = this.ensureParty(tr.id, (tr.next ?? tr.prev)?.ref);
     const { prev, next, row } = tr;
+    // Un cambio di tavolo a piedi resta in corso finché la comitiva va a quel
+    // tavolo, anche se intanto lì si alza («In uscita») o si risiede: ci sta
+    // ancora arrivando. Qualunque altro passaggio lo chiude, e prima del suo
+    // evento: la striscia e «Segui il servizio» leggono gli eventi in ordine.
+    if (p.moveTo !== null && !this.movingTo(p, next)) this.endMove(p, false);
+    // Il tavolo che stava lasciando vale per questo passaggio soltanto: lo
+    // legge il ritorno qui sotto (righe 1 e 3), e lo rimettono solo
+    // un'uscita o una dissolvenza al tavolo (righe 13 e 14).
+    const left = p.leftTable;
+    p.leftTable = null;
     if (p.job) {
       this.jobInFlight(p, tr);
       return;
@@ -1235,8 +1298,9 @@ export class SceneDirector implements SceneDirectorApi {
         if (live || row === 3) {
           // Un'uscita o una dissolvenza annullate (o una comitiva spodestata
           // che torna): chi è ancora in sala torna al suo posto, chi era già
-          // uscito rientra dalla porta. Nessun accompagnamento, nessun
-          // evento: è la stessa comitiva che non se n'era mai andata.
+          // uscito rientra dalla porta. Nessun accompagnamento, e allo stesso
+          // tavolo nessun evento: è la stessa comitiva che non se n'era mai
+          // andata.
           this.retarget(p, prev, next, {
             arrive: live ? 'door' : 'fade',
             depart: 'fade',
@@ -1244,6 +1308,26 @@ export class SceneDirector implements SceneDirectorApi {
             large: false,
             script: live ? 'RESEAT' : 'FADE_IN',
           });
+          // Rimessa a un ALTRO tavolo mentre usciva (spodestata da una
+          // comitiva più recente, «Tavolo liberato» o «Arrivato» tolti con un
+          // tavolo nuovo): chi è ancora in sala ci va a piedi da quello che
+          // lasciava, gli altri rientrano dalla porta. È un cambio di tavolo
+          // come gli altri: il tavolo nuovo pulsa «in arrivo» finché l'ultimo
+          // non si siede, e la striscia lo racconta. Senza, ci camminavano
+          // verso un tavolo già «arrivato», e la striscia diceva solo
+          // l'uscita. Già usciti (FADE_IN) compaiono seduti: nessuno cammina,
+          // nessun anello.
+          if (live && left !== null && (left.roomId !== next!.state.roomId || left.table.id !== next!.state.tableId)) {
+            this.startMove(p, next!);
+            this.emit({
+              kind: 'moved',
+              at: this.now(),
+              roomId: next!.state.roomId!,
+              party: next!.ref,
+              from: left.table,
+              to: next!.table ?? { id: next!.state.tableId ?? 0, name: '' },
+            });
+          }
           return;
         }
         if (next!.large) {
@@ -1283,6 +1367,9 @@ export class SceneDirector implements SceneDirectorApi {
       case 8:
       case 14:
         this.retarget(p, prev, next, { arrive: 'fade', depart: 'fade', stagger: 0, large: false, script: 'FADE' });
+        // «Arrivato» annullato: svaniscono al tavolo, che stanno lasciando.
+        // Dall'ingresso (riga 8) non lasciano nessun tavolo.
+        if (row === 14) p.leftTable = tableLeft(prev!);
         return;
       case 9:
       case 10:
@@ -1298,6 +1385,11 @@ export class SceneDirector implements SceneDirectorApi {
           large,
           script: large ? 'LARGE' : 'RESEAT',
         });
+        // A piedi il tavolo nuovo pulsa «in arrivo» finché l'ultimo non si
+        // siede, come quello di un accompagnamento; in un'altra sala, nella
+        // sua. Le comitive grandi e i banchetti no: non camminano, compaiono
+        // già sedute, come quando arrivano.
+        if (!large) this.startMove(p, next!);
         this.emit({
           kind: 'moved',
           at: this.now(),
@@ -1317,6 +1409,9 @@ export class SceneDirector implements SceneDirectorApi {
           large,
           script: large ? 'LARGE' : 'LEAVE',
         });
+        // Il tavolo che lasciano: se Reception li rimette altrove mentre
+        // escono, ci vanno da qui (righe 1 e 3).
+        p.leftTable = tableLeft(prev!);
         this.emit({
           kind: 'leaving',
           at: this.now(),
@@ -1406,6 +1501,13 @@ export class SceneDirector implements SceneDirectorApi {
     }
     for (const a of p.actors) this.kill(a);
     p.script = null;
+    // Nessuno in sala che torni indietro da un tavolo lasciato.
+    p.leftTable = null;
+    // Un cambio di tavolo a piedi a metà finisce qui, senza anelli rimasti:
+    // arrivato se lo scatto mette la comitiva proprio a quel tavolo. Uno
+    // nuovo, scattato, l'anello non lo accende mai (non c'è nessuno che
+    // cammini).
+    if (p.moveTo !== null) this.endMove(p, this.movingTo(p, next));
     if (mode === 'reduced-motion') this.emitAsAnimated(tr);
     const arrival = row === 1 || row === 5 || row === 6;
     if (arrival) {
@@ -2022,6 +2124,48 @@ export class SceneDirector implements SceneDirectorApi {
     if (job.party.job === job) job.party.job = null;
     this.candDirty = true;
     this.dirty();
+  }
+
+  /* ── Il cambio di tavolo a piedi: il tavolo nuovo «in arrivo» ──────── */
+
+  private startMove(p: PartyRt, next: PartyMemo): void {
+    const { roomId, tableId } = next.state;
+    if (roomId === null || tableId === null || !this.rooms.has(roomId)) return;
+    p.moveTo = { roomId, tableId };
+    this.dirty();
+  }
+
+  // La comitiva va ancora al tavolo del suo cambio: lì, seduta o in piedi.
+  private movingTo(p: PartyRt, next: PartyMemo | undefined): boolean {
+    const to = p.moveTo;
+    return to !== null && !!next && atTable(next.state.phase) && next.state.roomId === to.roomId && next.state.tableId === to.tableId;
+  }
+
+  // Il tavolo nuovo smette di essere «in arrivo». Sempre con l'evento: la
+  // pagina ridisegna i tavoli solo a un evento, mai per fotogramma, e senza
+  // l'anello resterebbe acceso.
+  private endMove(p: PartyRt, seated: boolean): void {
+    const to = p.moveTo;
+    if (to === null) return;
+    p.moveTo = null;
+    this.dirty();
+    this.emit({ kind: 'moved-end', at: this.now(), roomId: to.roomId, partyId: p.id, tableId: to.tableId, seated });
+  }
+
+  // I cambi di tavolo arrivati in fondo: nessuno della comitiva è più in
+  // scena. L'ultimo si è seduto (o è arrivato al suo posto in piedi), oppure
+  // lo hanno messo lì la rete di sicurezza o fastForward: in tutti i casi
+  // People lo disegna al tavolo nuovo, e il tavolo prende il colore del
+  // modello. Si chiama a ogni passo: niente allocazioni.
+  private finishMoves(): void {
+    const list = this.partyOrder;
+    for (let i = 0; i < list.length; i++) {
+      const p = list[i];
+      if (p.moveTo === null) continue;
+      let live = false;
+      for (let j = 0; j < p.actors.length && !live; j++) live = !p.actors[j].dead;
+      if (!live) this.endMove(p, true);
+    }
   }
 
   private emitEscortStart(next: PartyMemo, from: 'entrance' | 'lobby'): void {
@@ -3563,7 +3707,11 @@ export class SceneDirector implements SceneDirectorApi {
     for (const p of this.parties.values()) {
       p.script = null;
       p.job = null;
+      p.leftTable = null;
     }
+    // Chi cambiava tavolo è già seduto a quello nuovo: l'anello si spegne,
+    // con l'evento (da fastForward, e da configure col movimento ridotto).
+    this.finishMoves();
     for (const w of this.waiters) {
       if (w.actor.dead) continue;
       if (w.leaving) {
@@ -3597,6 +3745,8 @@ export class SceneDirector implements SceneDirectorApi {
         since: this.simT,
         actors: [],
         job: null,
+        moveTo: null,
+        leftTable: null,
         visits: 0,
         seatedAt: this.simT,
         lastVisitAt: this.simT,
@@ -3778,6 +3928,11 @@ export class SceneDirector implements SceneDirectorApi {
       this.cancelJob(job, true);
       this.emitEscortEnd(job, false);
     }
+    // Un tavolo nuovo in una sala che non c'è più non aspetta nessuno. Di
+    // solito il confronto l'ha già chiuso (la comitiva va all'ingresso):
+    // resta aperto solo con un modello che la lascia seduta in una sala che
+    // non dà più, e l'anello deve spegnersi lo stesso, col suo evento.
+    for (const p of this.parties.values()) if (p.moveTo !== null && p.moveTo.roomId === room.id) this.endMove(p, false);
     for (const a of this.actors) if (a.roomId === room.id) this.kill(a);
     this.rooms.delete(room.id);
   }
@@ -3891,6 +4046,14 @@ function pathLength(path: readonly Vec2[]): number {
 // `yaw`: u −1 a destra, 0 dietro, +1 a sinistra, passando sempre da dietro.
 function dogAngle(yaw: number, u: number): number {
   return yaw - (Math.PI / 2) * (u + 2);
+}
+
+// Il tavolo che la comitiva lascia (PartyRt.leftTable): quello del memo di
+// prima, col nome che la striscia mette nel 'moved' se ci torna da un altro.
+function tableLeft(prev: PartyMemo): { roomId: number; table: TableRef } | null {
+  const { roomId, tableId } = prev.state;
+  if (roomId === null || tableId === null) return null;
+  return { roomId, table: prev.table ?? { id: tableId, name: '' } };
 }
 
 // I tavoli disegnati toccati dai passaggi che contano: quello che si lascia

@@ -29,7 +29,7 @@ import {
   DIRECTOR_SEED,
   DIRECTOR_TUNING,
   SceneDirector,
-  withEscortTargets,
+  withArrivalTargets,
 } from '../../components/salaVivo/model/director';
 
 /* Il regista della Sala dal vivo: dal confronto di due modelli al passaggio
@@ -127,12 +127,21 @@ interface Regia {
   clock: { t: number };
   events: DirectorEvent[];
   model: SceneModel | null;
+  /** I cambi di tavolo a piedi all'ultimo controllo (comitiva → `sala:tavolo`
+   *  nuovo) e quanti eventi c'erano allora: ogni anello che si accende o si
+   *  spegne deve avere il suo evento. */
+  cambi: Map<number, string>;
+  visti: number;
+  /** L'update appena fatto azzera (il primo, un cambio di servizio): non
+   *  racconta niente, e i tavoli «in arrivo» li ridisegna la pagina dopo
+   *  l'update, perché sa di aver dato un servizio nuovo (SalaVivoPage). */
+  azzera: boolean;
 }
 
 const regista = (tuning?: Partial<DirectorTuning>): Regia => {
   const clock = { t: 10_000 };
   const d = new SceneDirector({ now: () => clock.t, seed: DIRECTOR_SEED, tuning });
-  const r: Regia = { d, clock, events: [], model: null };
+  const r: Regia = { d, clock, events: [], model: null, cambi: new Map(), visti: 0, azzera: false };
   d.onEvent(e => r.events.push(e));
   return r;
 };
@@ -140,9 +149,11 @@ const regista = (tuning?: Partial<DirectorTuning>): Regia => {
 // Un update come lo fa la pagina, col tempo dell'orologio che avanza.
 const aggiorna = (r: Regia, model: SceneModel, reason: Parameters<SceneDirector['update']>[1] = null, dopoMs = 3000) => {
   r.clock.t += dopoMs;
+  r.azzera = reason === 'initial' || r.model === null || r.model.service.key !== model.service.key;
   r.model = model;
   r.d.update(model, reason);
   controlla(r);
+  r.azzera = false;
 };
 
 const tipi = (events: DirectorEvent[]) => events.map(e => e.kind);
@@ -193,6 +204,52 @@ function controlla(r: Regia): void {
       expect(scripted.has(pid), `${key} nascosto senza un passaggio`).toBe(true);
     }
   }
+  controllaAnelli(r);
+}
+
+/* Gli anelli «in arrivo»: gli accompagnamenti più i tavoli nuovi dei cambi a
+ * piedi, e nessuno a regista fermo. La pagina ridisegna i tavoli solo a un
+ * evento, quindi ogni anello di un cambio si accende con il suo 'moved' e si
+ * spegne con un 'moved-end', uno solo, nello stesso update o passo; un
+ * 'moved-end' senza un cambio aperto è un evento falso. Si rigiocano gli
+ * eventi arrivati dall'ultimo controllo: un 'moved' apre un cambio solo se
+ * poi qualcosa lo chiude o il regista lo tiene (le comitive grandi, gli
+ * scatti e i cambi di tavolo di un accompagnamento non accendono niente). */
+function controllaAnelli(r: Regia): void {
+  const model = r.model!;
+  const fermoOra = !r.d.isAnimating();
+  const cambi = new Map<number, string>();
+  for (const room of model.rooms) {
+    const moves = r.d.inspect(room.id)!.moves;
+    for (const [pid, t] of moves) cambi.set(pid, `${room.id}:${t}`);
+    const want = new Set([...r.d.escortTargets(room.id), ...moves.values()]);
+    const got = r.d.arrivalTargets(room.id);
+    if (got.size !== want.size || [...want].some(t => !got.has(t))) {
+      expect.fail(`sala ${room.id}: anelli ${[...got]} invece di ${[...want]}`);
+    }
+    if (fermoOra && got.size > 0) expect.fail(`sala ${room.id}: anello acceso a regista fermo (${[...got]})`);
+  }
+  const aperti = new Map(r.cambi);
+  const appena = new Map<number, string>();
+  for (const e of r.events.slice(r.visti)) {
+    if (e.kind === 'moved') {
+      appena.set(e.party.id, `${e.roomId}:${e.to.id}`);
+    } else if (e.kind === 'moved-end') {
+      const dove = `${e.roomId}:${e.tableId}`;
+      if (aperti.get(e.partyId) === dove) aperti.delete(e.partyId);
+      else if (appena.get(e.partyId) === dove) appena.delete(e.partyId);
+      else expect.fail(`'moved-end' di ${e.partyId} verso ${dove} senza un cambio aperto`);
+    }
+  }
+  // Un azzeramento dimentica i cambi senza raccontarli.
+  for (const [pid, dove] of aperti) {
+    if (!r.azzera && cambi.get(pid) !== dove) expect.fail(`il cambio di ${pid} verso ${dove} finisce senza 'moved-end'`);
+  }
+  for (const [pid, dove] of cambi) {
+    if (aperti.get(pid) !== dove && appena.get(pid) !== dove) expect.fail(`il cambio di ${pid} verso ${dove} comincia senza 'moved'`);
+  }
+  r.cambi = cambi;
+  r.visti = r.events.length;
 }
 
 /* Chi torna a People ci torna ESATTAMENTE sulla sua figura statica: si
@@ -276,6 +333,9 @@ const fermo = (r: Regia) => {
     expect([...r.d.movingKeys(room.id)]).toEqual([`host:${room.id}`]);
     expect(r.d.inspect(room.id)!.hostess.state).toBe('AT_STAND');
     expect(r.d.escortTargets(room.id).size).toBe(0);
+    // Nessun anello rimasto acceso, nemmeno quello di un cambio di tavolo.
+    expect(r.d.arrivalTargets(room.id).size).toBe(0);
+    expect(r.d.inspect(room.id)!.moves.size).toBe(0);
   }
   expect(r.d.isAnimating()).toBe(false);
 };
@@ -303,12 +363,12 @@ describe('le costanti', () => {
     expect(DIRECTOR_SEED).toBe(0x53414c41);
   });
 
-  it('withEscortTargets: la stessa sala senza bersagli, «in arrivo» con l\'anello sui bersagli', () => {
+  it('withArrivalTargets: la stessa sala senza bersagli, «in arrivo» con l\'anello sui bersagli', () => {
     const model = scena([]);
     const room = stanza(model, 1);
-    expect(withEscortTargets(room, new Set())).toBe(room);
-    expect(withEscortTargets(room, new Set([99]))).toBe(room);
-    const out = withEscortTargets(room, new Set([2]));
+    expect(withArrivalTargets(room, new Set())).toBe(room);
+    expect(withArrivalTargets(room, new Set([99]))).toBe(room);
+    const out = withArrivalTargets(room, new Set([2]));
     expect(out).not.toBe(room);
     expect(out.tables.find(t => t.id === 2)).toMatchObject({ status: 'inarrivo', pulse: true });
     expect(out.tables.find(t => t.id === 1)).toBe(room.tables.find(t => t.id === 1));
@@ -551,7 +611,8 @@ describe('cambi di posto', () => {
       expect(r.d.inspect(1)!.hostess.state).toBe('AT_STAND');
     });
     expect(o.released.sort()).toEqual(figure(model, 1, fam.id).map(f => f.key).sort());
-    expect(tipi(r.events)).toEqual(['moved']);
+    // La fine del cambio: il tavolo nuovo smette di essere «in arrivo».
+    expect(tipi(r.events)).toEqual(['moved', 'moved-end']);
     fermo(r);
   });
 
@@ -648,6 +709,477 @@ describe('cambi di posto', () => {
       expect(v.fade).toBeLessThan(1);
     }
     expect(finoAFermo(r)).toBeLessThan(DIRECTOR_TUNING.fadeMs);
+    fermo(r);
+  });
+});
+
+describe('il tavolo nuovo di un cambio di tavolo resta «in arrivo»', () => {
+  /* Reception sposta una tavolata già seduta: in sala la famiglia si alza dal
+   * tavolo vecchio e cammina al nuovo, e il nuovo pulsa «in arrivo» finché
+   * l'ultimo non si siede, come quello di un accompagnamento; poi prende il
+   * colore del modello. Prima diventava «arrivato» subito, mentre la famiglia
+   * si alzava ancora dall'altro. Che ogni anello si accenda e si spenga con
+   * il suo evento, una volta, lo controlla controllaAnelli a ogni passo. */
+  const seduti = (table: number, over: Partial<Reservation> = {}) =>
+    prenotazione({ arrival_status: ArrivalStatus.ARRIVED, table_id: table, reservation_time: ora('18:30'), ...over });
+  // Quanti della comitiva il regista tiene ancora (in cammino, mentre
+  // svaniscono, dietro la porta): zero quando l'ultimo è tornato a People.
+  const inScena = (r: Regia, roomId: number, keys: readonly string[]) => keys.filter(k => r.d.movingKeys(roomId).has(k)).length;
+
+  it('stessa sala: pulsa dal cambio finché l\'ultimo (il cane compreso) non si siede, poi torna «arrivato»; il vecchio mai', () => {
+    const r = regista();
+    const fam = seduti(1, { guests: 3, notes: 'Cane' });
+    aggiorna(r, scena([fam]), 'initial');
+    const model = scena([con(fam, { table_id: 7 })]);
+    aggiorna(r, model);
+    // Nello stesso update del 'moved', prima di ogni passo: la pagina
+    // ridisegna i tavoli a quell'evento.
+    expect(tipi(r.events)).toEqual(['moved']);
+    expect([...r.d.arrivalTargets(1)]).toEqual([7]);
+    expect(r.d.inspect(1)!.moves).toEqual(new Map([[fam.id, 7]]));
+    // Non è un accompagnamento: «Segui il servizio» non ci aspetta sopra.
+    expect(r.d.escortTargets(1).size).toBe(0);
+    // Il modello lo dà già «arrivato»; la sala disegnata lo tiene «in
+    // arrivo» con l'anello, il resto com'è.
+    const room = stanza(model, 1);
+    expect(room.tables.find(t => t.id === 7)!.status).toBe('arrivato');
+    const shown = withArrivalTargets(room, r.d.arrivalTargets(1));
+    expect(shown.tables.find(t => t.id === 7)).toMatchObject({ status: 'inarrivo', pulse: true });
+    expect(shown.tables.find(t => t.id === 1)).toBe(room.tables.find(t => t.id === 1));
+    const keys = figure(model, 1, fam.id).map(f => f.key);
+    expect(keys.length).toBe(4);
+    let acceso = 0;
+    let unoSolo = 0;
+    finoAFermo(r, () => {
+      const n = inScena(r, 1, keys);
+      const on = r.d.arrivalTargets(1).has(7);
+      // Acceso finché ne resta anche uno, spento nel passo in cui l'ultimo
+      // torna a People: lì People lo disegna seduto, e il tavolo «arrivato».
+      if (on !== n > 0) expect.fail(`anello ${on ? 'acceso' : 'spento'} con ${n} ancora in scena`);
+      if (on) acceso++;
+      if (n === 1) unoSolo++;
+      expect(r.d.arrivalTargets(1).has(1)).toBe(false);
+      expect(r.d.inspect(1)!.hostess.state).toBe('AT_STAND');
+    });
+    expect(acceso).toBeGreaterThan(50);
+    // Anche con uno solo ancora da sedere, l'anello c'era: l'ultimo, non il
+    // primo.
+    expect(unoSolo).toBeGreaterThan(0);
+    expect(tipi(r.events)).toEqual(['moved', 'moved-end']);
+    expect(r.events[1]).toMatchObject({ kind: 'moved-end', roomId: 1, partyId: fam.id, tableId: 7, seated: true });
+    // Finito, la sala disegnata è quella del modello, lo stesso oggetto.
+    expect(withArrivalTargets(room, r.d.arrivalTargets(1))).toBe(room);
+    fermo(r);
+  });
+
+  it('in un\'altra sala pulsa nella sua: mentre svaniscono qui, entrano dalla porta di là e si siedono', () => {
+    const r = regista();
+    const fam = seduti(2, { guests: 2, notes: 'Cane' });
+    aggiorna(r, scena([fam]), 'initial');
+    const model = scena([con(fam, { table_id: 4 })]);
+    aggiorna(r, model);
+    expect(r.events).toMatchObject([{ kind: 'moved', roomId: 2, from: { id: 2 }, to: { id: 4 } }]);
+    expect([...r.d.arrivalTargets(2)]).toEqual([4]);
+    expect(r.d.arrivalTargets(1).size).toBe(0);
+    const keys = figure(model, 2, fam.id).map(f => f.key);
+    let svaniscono = 0;
+    let entrano = 0;
+    finoAFermo(r, () => {
+      const n = inScena(r, 2, keys);
+      const on = r.d.arrivalTargets(2).has(4);
+      if (on !== n > 0) expect.fail(`anello ${on ? 'acceso' : 'spento'} con ${n} ancora in scena`);
+      expect(r.d.arrivalTargets(1).size).toBe(0);
+      if (on && r.d.actorsIn(1).some(v => v.partyId === fam.id)) svaniscono++;
+      if (on && r.d.actorsIn(2).some(v => v.partyId === fam.id)) entrano++;
+    });
+    expect(svaniscono).toBeGreaterThan(0);
+    expect(entrano).toBeGreaterThan(0);
+    expect(tipi(r.events)).toEqual(['moved', 'moved-end']);
+    expect(r.events[1]).toMatchObject({ kind: 'moved-end', roomId: 2, partyId: fam.id, tableId: 4, seated: true });
+    fermo(r);
+  });
+
+  it('annullato a metà strada («Arrivato» tolto): l\'anello si spegne subito, non arrivato, e svaniscono dove sono', () => {
+    const r = regista();
+    const fam = seduti(1, { guests: 3 });
+    aggiorna(r, scena([fam]), 'initial');
+    aggiorna(r, scena([con(fam, { table_id: 7 })]));
+    avanza(r, 2500);
+    expect([...r.d.arrivalTargets(1)]).toEqual([7]);
+    aggiorna(r, scena([con(fam, { table_id: 7, arrival_status: ArrivalStatus.WAITING })]), null, 500);
+    expect(tipi(r.events)).toEqual(['moved', 'moved-end']);
+    expect(r.events[1]).toMatchObject({ kind: 'moved-end', roomId: 1, partyId: fam.id, tableId: 7, seated: false });
+    expect(r.d.arrivalTargets(1).size).toBe(0);
+    expect(r.d.inspect(1)!.scripts.get(fam.id)).toBe('FADE');
+    finoAFermo(r);
+    expect(tipi(r.events)).toEqual(['moved', 'moved-end']);
+    fermo(r);
+  });
+
+  it('rimandata al tavolo di prima a metà strada: il nuovo si spegne, pulsa il vecchio finché non si risiedono', () => {
+    const r = regista();
+    const fam = seduti(1, { guests: 2 });
+    const m0 = scena([fam]);
+    aggiorna(r, m0, 'initial');
+    aggiorna(r, scena([con(fam, { table_id: 7 })]));
+    avanza(r, 2000);
+    aggiorna(r, scena([fam]), null, 500);
+    expect(tipi(r.events)).toEqual(['moved', 'moved-end', 'moved']);
+    expect(r.events[1]).toMatchObject({ tableId: 7, seated: false });
+    expect(r.events[2]).toMatchObject({ kind: 'moved', from: { id: 7 }, to: { id: 1 } });
+    expect([...r.d.arrivalTargets(1)]).toEqual([1]);
+    const o = osserva(r);
+    finoAFermo(r, () => {
+      o.sample();
+      expect(r.d.arrivalTargets(1).has(7)).toBe(false);
+    });
+    expect(o.released.sort()).toEqual(figure(m0, 1, fam.id).map(f => f.key).sort());
+    expect(tipi(r.events)).toEqual(['moved', 'moved-end', 'moved', 'moved-end']);
+    expect(r.events[3]).toMatchObject({ tableId: 1, seated: true });
+    fermo(r);
+  });
+
+  it('spostata ancora a metà strada: l\'anello passa al terzo tavolo, il secondo si spegne subito', () => {
+    const r = regista();
+    const fam = seduti(1, { guests: 3, notes: 'Cane' });
+    aggiorna(r, scena([fam]), 'initial');
+    aggiorna(r, scena([con(fam, { table_id: 7 })]));
+    avanza(r, 2500);
+    const model = scena([con(fam, { table_id: 9 })]);
+    aggiorna(r, model, null, 500);
+    expect(tipi(r.events)).toEqual(['moved', 'moved-end', 'moved']);
+    expect(r.events[1]).toMatchObject({ tableId: 7, seated: false });
+    expect([...r.d.arrivalTargets(1)]).toEqual([9]);
+    const o = osserva(r);
+    finoAFermo(r, () => {
+      o.sample();
+      expect(r.d.arrivalTargets(1).has(7)).toBe(false);
+    });
+    expect(o.released.sort()).toEqual(figure(model, 1, fam.id).map(f => f.key).sort());
+    expect(tipi(r.events)).toEqual(['moved', 'moved-end', 'moved', 'moved-end']);
+    expect(r.events[3]).toMatchObject({ tableId: 9, seated: true });
+    fermo(r);
+  });
+
+  it('«In uscita» mentre ci cammina: ci sta ancora arrivando, l\'anello resta finché non sono ai posti in piedi', () => {
+    const r = regista();
+    const fam = seduti(1, { guests: 2 });
+    aggiorna(r, scena([fam]), 'initial');
+    aggiorna(r, scena([con(fam, { table_id: 7 })]));
+    avanza(r, 1500);
+    const model = scena([con(fam, { table_id: 7, arrival_status: ArrivalStatus.DEPARTING })]);
+    aggiorna(r, model, null, 500);
+    expect(tipi(r.events)).toEqual(['moved']);
+    expect([...r.d.arrivalTargets(1)]).toEqual([7]);
+    const o = osserva(r);
+    finoAFermo(r, o.sample);
+    expect(o.released.sort()).toEqual(figure(model, 1, fam.id).map(f => f.key).sort());
+    for (const f of figure(model, 1, fam.id)) expect(f.pose).toBe('standing');
+    expect(tipi(r.events)).toEqual(['moved', 'moved-end']);
+    expect(r.events[1]).toMatchObject({ tableId: 7, seated: true });
+    fermo(r);
+  });
+
+  it('scattato (epoca nuova, scheda nascosta, movimento ridotto, cambi in blocco): l\'anello non si accende mai', () => {
+    for (const reason of ['refetch', 'hidden', 'reduced-motion'] as const) {
+      const r = regista();
+      if (reason === 'reduced-motion') r.d.configure({ reducedMotion: true });
+      const fam = seduti(1, { guests: 2 });
+      aggiorna(r, scena([fam]), 'initial');
+      aggiorna(r, scena([con(fam, { table_id: 7 })]), reason);
+      // Col movimento ridotto il cambio si racconta lo stesso; gli altri
+      // scatti lo contano fra i tavoli aggiornati. Nessun 'moved-end':
+      // nessun anello da spegnere.
+      expect(tipi(r.events), reason).toEqual(reason === 'reduced-motion' ? ['moved'] : ['bulk']);
+      fermo(r);
+    }
+    // Più di 4 passaggi in un update: tutti già conclusi.
+    const r = regista();
+    const quattro = [1, 2, 3, 5].map(t => seduti(t, { guests: 2 }));
+    const via = seduti(6, { guests: 2 });
+    aggiorna(r, scena([...quattro, via]), 'initial');
+    const altrove = [7, 8, 9, 4];
+    aggiorna(r, scena([...quattro.map((x, i) => con(x, { table_id: altrove[i] })), con(via, { arrival_status: ArrivalStatus.DEPARTED })]));
+    expect(tipi(r.events)).toEqual(['bulk']);
+    fermo(r);
+  });
+
+  it('a metà strada: uno scatto, fastForward o il movimento ridotto spengono l\'anello col loro \'moved-end\'', () => {
+    const prova = (fine: (r: Regia, fam: Reservation) => void) => {
+      const r = regista();
+      const fam = seduti(1, { guests: 3, notes: 'Cane' });
+      aggiorna(r, scena([fam]), 'initial');
+      aggiorna(r, scena([con(fam, { table_id: 7 })]));
+      avanza(r, 2000);
+      expect([...r.d.arrivalTargets(1)]).toEqual([7]);
+      fine(r, fam);
+      fermo(r);
+      return r.events.slice(1);
+    };
+    // A scheda nascosta un altro tavolo: il cambio a metà non arriva, il
+    // nuovo è già concluso.
+    expect(prova((r, fam) => aggiorna(r, scena([con(fam, { table_id: 9 })]), 'hidden', 500)))
+      .toMatchObject([{ kind: 'moved-end', tableId: 7, seated: false }, { kind: 'bulk', count: 2 }]);
+    // Un'epoca nuova che la trova «In uscita» proprio lì: ci è arrivata.
+    expect(prova((r, fam) => aggiorna(r, scena([con(fam, { table_id: 7, arrival_status: ArrivalStatus.DEPARTING })]), 'refetch', 500)))
+      .toMatchObject([{ kind: 'moved-end', tableId: 7, seated: true }, { kind: 'bulk', count: 1 }]);
+    // La scheda di nuovo visibile, o la vista 3D che sparisce: fastForward.
+    expect(prova(r => {
+      r.d.fastForward();
+      controlla(r);
+    })).toMatchObject([{ kind: 'moved-end', roomId: 1, tableId: 7, seated: true }]);
+    // Il movimento ridotto acceso a metà: tutto in fondo, nessun anello.
+    expect(prova(r => {
+      r.d.configure({ reducedMotion: true });
+      controlla(r);
+    })).toMatchObject([{ kind: 'moved-end', roomId: 1, tableId: 7, seated: true }]);
+  });
+
+  it('oltre 12 persone o di un banchetto: compaiono già sedute al tavolo nuovo, e nessun anello', () => {
+    const r = regista();
+    const grande = seduti(6, { guests: 14 });
+    const evento = seduti(8, { guests: 3, banquet_menu_id: 7 });
+    aggiorna(r, scena([grande, evento]), 'initial');
+    aggiorna(r, scena([con(grande, { table_id: 7 }), con(evento, { table_id: 9 })]));
+    expect(tipi(r.events)).toEqual(['moved', 'moved']);
+    expect(r.d.inspect(1)!.scripts.get(grande.id)).toBe('LARGE');
+    expect(r.d.inspect(1)!.scripts.get(evento.id)).toBe('LARGE');
+    expect(r.d.arrivalTargets(1).size).toBe(0);
+    finoAFermo(r, () => expect(r.d.arrivalTargets(1).size).toBe(0));
+    expect(tipi(r.events)).toEqual(['moved', 'moved']);
+    fermo(r);
+    // A metà di un cambio a piedi la comitiva cresce oltre 12 e cambia ancora
+    // tavolo: quello a metà si spegne, il nuovo non si accende.
+    const r2 = regista();
+    const fam = seduti(1, { guests: 3 });
+    aggiorna(r2, scena([fam]), 'initial');
+    aggiorna(r2, scena([con(fam, { table_id: 7 })]));
+    avanza(r2, 1500);
+    aggiorna(r2, scena([con(fam, { table_id: 9, guests: 14 })]), null, 500);
+    expect(tipi(r2.events)).toEqual(['moved', 'moved-end', 'moved']);
+    expect(r2.events[1]).toMatchObject({ tableId: 7, seated: false });
+    expect(r2.d.inspect(1)!.scripts.get(fam.id)).toBe('LARGE');
+    expect(r2.d.arrivalTargets(1).size).toBe(0);
+    finoAFermo(r2, () => expect(r2.d.arrivalTargets(1).size).toBe(0));
+    expect(tipi(r2.events)).toEqual(['moved', 'moved-end', 'moved']);
+    fermo(r2);
+  });
+
+  // Fino a fermo: il tavolo nuovo acceso finché ne resta in scena anche uno,
+  // spento nel passo in cui l'ultimo torna a People. Restituisce i passi con
+  // l'anello acceso.
+  const anelloFinoAllUltimo = (r: Regia, roomId: number, tableId: number, keys: readonly string[], onStep?: () => void) => {
+    let acceso = 0;
+    finoAFermo(r, () => {
+      onStep?.();
+      const n = inScena(r, roomId, keys);
+      const on = r.d.arrivalTargets(roomId).has(tableId);
+      if (on !== n > 0) expect.fail(`anello ${on ? 'acceso' : 'spento'} con ${n} ancora in scena`);
+      if (on) acceso++;
+    });
+    return acceso;
+  };
+
+  it('spodestata, e rimessa da Reception a un altro tavolo mentre esce: ci torna a piedi, e il tavolo nuovo pulsa finché non si siede', () => {
+    /* Una coppia più recente arriva al 7 dove la famiglia è seduta: la
+     * famiglia esce (è spodestata, Reception l'ha ancora al 7). Reception se
+     * ne accorge e la sposta al 9 mentre cammina verso la porta: in sala si
+     * gira e va al 9 a piedi. È un cambio di tavolo come gli altri: prima ci
+     * camminava senza anello, verso un tavolo già «arrivato», e la striscia
+     * diceva solo l'uscita. */
+    const r = regista();
+    const fam = seduti(7, { guests: 2, notes: 'Cane' });
+    const coppia = prenotazione({ table_id: 7, guests: 2, reservation_time: ora('18:50') });
+    aggiorna(r, scena([fam, coppia]), 'initial');
+    aggiorna(r, scena([fam, arrivata(coppia)]));
+    expect(tipi(r.events)).toEqual(['leaving', 'escort-start']);
+    avanza(r, 1300);
+    expect(r.d.actorsIn(1).some(v => v.partyId === fam.id)).toBe(true);
+    const model = scena([con(fam, { table_id: 9 }), arrivata(coppia)]);
+    aggiorna(r, model, null, 500);
+    expect(r.events.slice(2)).toMatchObject([{ kind: 'moved', roomId: 1, party: { id: fam.id }, from: { id: 7 }, to: { id: 9 } }]);
+    expect(r.d.inspect(1)!.scripts.get(fam.id)).toBe('RESEAT');
+    expect(r.d.inspect(1)!.moves).toEqual(new Map([[fam.id, 9]]));
+    // Il 7 resta «in arrivo» per la coppia (l'accompagnamento), il 9 per la
+    // famiglia; «Segui il servizio» guarda solo il 7.
+    expect([...r.d.arrivalTargets(1)].sort()).toEqual([7, 9]);
+    expect([...r.d.escortTargets(1)]).toEqual([7]);
+    const keys = figure(model, 1, fam.id).map(f => f.key);
+    const o = osserva(r);
+    expect(anelloFinoAllUltimo(r, 1, 9, keys, o.sample)).toBeGreaterThan(50);
+    // Tornati a People esatti, al 9.
+    expect(o.released.filter(k => keys.includes(k)).sort()).toEqual([...keys].sort());
+    expect(r.events.filter(e => e.kind === 'moved-end')).toMatchObject([{ roomId: 1, partyId: fam.id, tableId: 9, seated: true }]);
+    expect(r.events.filter(e => e.kind === 'escort-end')).toMatchObject([{ partyId: coppia.id, tableId: 7, seated: true }]);
+    fermo(r);
+  });
+
+  it('«Tavolo liberato» tolto a metà uscita, ma su un altro tavolo: ci tornano a piedi ed è un cambio di tavolo; allo stesso tavolo no', () => {
+    const r = regista();
+    const fam = seduti(1, { guests: 3 });
+    aggiorna(r, scena([fam]), 'initial');
+    aggiorna(r, scena([con(fam, { arrival_status: ArrivalStatus.DEPARTED })]));
+    avanza(r, 1200);
+    const model = scena([con(fam, { table_id: 9 })]);
+    aggiorna(r, model, null, 500);
+    expect(tipi(r.events)).toEqual(['leaving', 'moved']);
+    expect(r.events[1]).toMatchObject({ from: { id: 1 }, to: { id: 9 } });
+    expect([...r.d.arrivalTargets(1)]).toEqual([9]);
+    expect(anelloFinoAllUltimo(r, 1, 9, figure(model, 1, fam.id).map(f => f.key))).toBeGreaterThan(50);
+    expect(tipi(r.events)).toEqual(['leaving', 'moved', 'moved-end']);
+    expect(r.events[2]).toMatchObject({ tableId: 9, seated: true });
+    fermo(r);
+    // Rimessa al tavolo che lasciava: torna al suo posto, senza evento né
+    // anello (il caso di sempre, vedi più giù).
+    const r2 = regista();
+    const fam2 = seduti(1, { guests: 3 });
+    aggiorna(r2, scena([fam2]), 'initial');
+    aggiorna(r2, scena([con(fam2, { arrival_status: ArrivalStatus.DEPARTED })]));
+    avanza(r2, 1200);
+    aggiorna(r2, scena([fam2]), null, 500);
+    expect(r2.d.inspect(1)!.scripts.get(fam2.id)).toBe('RESEAT');
+    expect(r2.d.arrivalTargets(1).size).toBe(0);
+    finoAFermo(r2, () => expect(r2.d.arrivalTargets(1).size).toBe(0));
+    expect(tipi(r2.events)).toEqual(['leaving']);
+    fermo(r2);
+  });
+
+  it('«Arrivato» tolto e rimesso su un altro tavolo mentre svaniscono: ci vanno a piedi dal tavolo dov\'erano', () => {
+    const r = regista();
+    const fam = seduti(2, { guests: 2 });
+    aggiorna(r, scena([fam]), 'initial');
+    aggiorna(r, scena([con(fam, { arrival_status: ArrivalStatus.WAITING })]));
+    expect(r.d.inspect(1)!.scripts.get(fam.id)).toBe('FADE');
+    avanza(r, 100);
+    const model = scena([con(fam, { table_id: 8 })]);
+    aggiorna(r, model, null, 100);
+    expect(tipi(r.events)).toEqual(['moved']);
+    expect(r.events[0]).toMatchObject({ roomId: 1, from: { id: 2 }, to: { id: 8 } });
+    expect(anelloFinoAllUltimo(r, 1, 8, figure(model, 1, fam.id).map(f => f.key))).toBeGreaterThan(20);
+    expect(tipi(r.events)).toEqual(['moved', 'moved-end']);
+    fermo(r);
+    // Già svaniti del tutto: compaiono con l'hostess, come un arrivo. Il
+    // tavolo lasciato non vale più (nessuno torna indietro da lì).
+    const r2 = regista();
+    const fam2 = seduti(2, { guests: 2 });
+    aggiorna(r2, scena([fam2]), 'initial');
+    aggiorna(r2, scena([con(fam2, { arrival_status: ArrivalStatus.WAITING })]));
+    finoAFermo(r2);
+    aggiorna(r2, scena([con(fam2, { table_id: 8 })]));
+    expect(tipi(r2.events)).toEqual(['escort-start']);
+    finoAFermo(r2);
+    expect(tipi(r2.events)).toEqual(['escort-start', 'escort-end']);
+    fermo(r2);
+  });
+
+  it('il tavolo lasciato vale solo per il passaggio dopo: chi torna dall\'ingresso non fa un cambio di tavolo', () => {
+    /* Un'uscita annullata allo stesso tavolo, poi il tavolo nascosto per il
+     * servizio (all'ingresso), poi «Arrivato» tolto e rimesso col 9 mentre
+     * svaniscono all'ingresso: vengono dall'ingresso, non dal 6 che avevano
+     * lasciato tre passaggi prima. Nessun 'moved', nessun anello: il caso di
+     * sempre. */
+    const r = regista();
+    const fam = seduti(6, { guests: 2 });
+    aggiorna(r, scena([fam]), 'initial');
+    aggiorna(r, scena([con(fam, { arrival_status: ArrivalStatus.DEPARTED })]));
+    avanza(r, 1000);
+    aggiorna(r, scena([fam]), null, 500);
+    finoAFermo(r);
+    const nascosto = { hiddenTableIds: new Set([6]) };
+    aggiorna(r, scena([fam], nascosto));
+    finoAFermo(r);
+    aggiorna(r, scena([con(fam, { arrival_status: ArrivalStatus.WAITING })], nascosto));
+    avanza(r, 100);
+    aggiorna(r, scena([con(fam, { table_id: 9 })], nascosto), null, 100);
+    expect(r.d.inspect(1)!.scripts.get(fam.id)).toBe('RESEAT');
+    expect(r.d.arrivalTargets(1).size).toBe(0);
+    finoAFermo(r);
+    expect(tipi(r.events)).toEqual(['leaving', 'lobby']);
+    fermo(r);
+  });
+
+  it('la sala di partenza sparisce a metà dissolvenza: il cambio finisce nello stesso update, arrivato, e nessun anello resta', () => {
+    /* La famiglia passa dal 4 (Fiume) al 7 (Veranda) e svanisce nel Fiume;
+     * il Fiume esce dalla piantina prima che entri dalla porta della Veranda.
+     * Nessuno è più in scena, e People la disegna già al 7: il cambio finisce
+     * nell'update stesso, che a scheda nascosta non ha fotogrammi dopo. */
+    const r = regista();
+    const fam = seduti(4, { guests: 2 });
+    aggiorna(r, scena([fam]), 'initial');
+    aggiorna(r, scena([con(fam, { table_id: 7 })]));
+    expect([...r.d.arrivalTargets(1)]).toEqual([7]);
+    avanza(r, 100);
+    expect(r.d.actorsIn(2).filter(v => v.partyId === fam.id).length).toBe(2);
+    const soloVeranda = { rooms: [VERANDA], tables: TAVOLI.filter(t => t.room_id === 1), markers: SEGNAPOSTO.filter(m => m.room_id === 1) };
+    aggiorna(r, scena([con(fam, { table_id: 7 })], soloVeranda), null, 500);
+    expect(tipi(r.events)).toEqual(['moved', 'moved-end']);
+    expect(r.events[1]).toMatchObject({ kind: 'moved-end', roomId: 1, partyId: fam.id, tableId: 7, seated: true });
+    expect(r.d.arrivalTargets(1).size).toBe(0);
+    fermo(r);
+  });
+
+  it('la sala del tavolo nuovo sparisce a metà: il cambio finisce non arrivato, poi l\'ingresso; e nessun anello resta', () => {
+    const r = regista();
+    const fam = seduti(2, { guests: 2 });
+    aggiorna(r, scena([fam]), 'initial');
+    aggiorna(r, scena([con(fam, { table_id: 4 })]));
+    expect([...r.d.arrivalTargets(2)]).toEqual([4]);
+    avanza(r, 300);
+    const soloVeranda = { rooms: [VERANDA], tables: TAVOLI.filter(t => t.room_id === 1), markers: SEGNAPOSTO.filter(m => m.room_id === 1) };
+    // Il suo tavolo non si disegna più: aspetta all'ingresso della Veranda.
+    aggiorna(r, scena([con(fam, { table_id: 4 })], soloVeranda), null, 500);
+    expect(tipi(r.events)).toEqual(['moved', 'moved-end', 'lobby']);
+    expect(r.events[1]).toMatchObject({ roomId: 2, tableId: 4, seated: false });
+    expect(r.d.arrivalTargets(1).size).toBe(0);
+    expect(r.d.arrivalTargets(2).size).toBe(0);
+    finoAFermo(r);
+    fermo(r);
+    // Un modello che toglie la sala ma la lascia seduta là (la pagina non
+    // lo dà: deriveSceneModel la manda all'ingresso, come sopra). Il regista
+    // non ci conta: la sala che se ne va si porta via il suo anello, con
+    // l'evento, e chi ci stava entrando dalla porta.
+    const r2 = regista();
+    const fam2 = seduti(2, { guests: 2 });
+    aggiorna(r2, scena([fam2]), 'initial');
+    const verso4 = scena([con(fam2, { table_id: 4 })]);
+    aggiorna(r2, verso4);
+    avanza(r2, 1500);
+    expect(r2.d.inspect(2)!.scripts.get(fam2.id)).toBe('RESEAT');
+    aggiorna(r2, { ...verso4, rooms: verso4.rooms.filter(rm => rm.id !== 2) }, null, 500);
+    expect(tipi(r2.events)).toEqual(['moved', 'moved-end']);
+    expect(r2.events[1]).toMatchObject({ roomId: 2, tableId: 4, seated: false });
+    expect(r2.d.arrivalTargets(1).size).toBe(0);
+    finoAFermo(r2);
+    fermo(r2);
+  });
+
+  it('un cambio di servizio a metà strada azzera senza eventi: nessun anello resta, e la cena riparte pulita', () => {
+    /* Alle 17:00 una famiglia del pranzo sta ancora andando al tavolo nuovo.
+     * Il regista azzera senza raccontare niente (nessun 'moved-end': non è
+     * finito, è un altro servizio); i tavoli «in arrivo» li ridisegna la
+     * pagina dopo l'update (SalaVivoPage). */
+    const r = regista();
+    const pranzo = { service: liveService(new Date(Date.parse(ora('16:59')))), nowMs: Date.parse(ora('16:59')) };
+    const tardi = seduti(1, { guests: 3, shift: Shift.LUNCH, reservation_time: ora('15:45') });
+    aggiorna(r, scena([tardi], pranzo), 'initial');
+    aggiorna(r, scena([con(tardi, { table_id: 7 })], pranzo));
+    avanza(r, 1500);
+    expect([...r.d.arrivalTargets(1)]).toEqual([7]);
+    const cena = { service: liveService(new Date(Date.parse(ora('17:00')))), nowMs: Date.parse(ora('17:00')) };
+    const fam = prenotazione({ table_id: 3, guests: 2, reservation_time: ora('19:30'), arrival_status: ArrivalStatus.ARRIVED });
+    aggiorna(r, scena([con(tardi, { table_id: 7 }), fam], cena), null, 500);
+    expect(tipi(r.events)).toEqual(['moved']);
+    expect(r.d.arrivalTargets(1).size).toBe(0);
+    expect(r.d.inspect(1)!.moves.size).toBe(0);
+    fermo(r);
+    // Un cambio di tavolo della cena si accende e si spegne col suo evento.
+    const model = scena([con(tardi, { table_id: 7 }), con(fam, { table_id: 5 })], cena);
+    aggiorna(r, model);
+    expect(tipi(r.events)).toEqual(['moved', 'moved']);
+    expect([...r.d.arrivalTargets(1)]).toEqual([5]);
+    finoAFermo(r);
+    expect(tipi(r.events)).toEqual(['moved', 'moved', 'moved-end']);
+    expect(r.events[2]).toMatchObject({ partyId: fam.id, tableId: 5, seated: true });
     fermo(r);
   });
 });
@@ -1379,6 +1911,9 @@ describe('le reti di sicurezza', () => {
     expect(r.d.isAnimating()).toBe(false);
     expect(t).toBeGreaterThan(90_000);
     expect(t).toBeLessThan(95_000);
+    // Portati al tavolo nuovo dalla rete: l'anello si spegne con loro.
+    expect(r.events.filter(e => e.kind === 'moved-end')).toMatchObject([{ tableId: 9, seated: true }]);
+    fermo(r);
   });
 
   it('un accompagnamento rimasto a lungo in coda non viene tagliato a metà: i 90 s contano da quando parte', () => {
@@ -1449,7 +1984,8 @@ describe('un servizio a caso', () => {
    * comitive che crescono, tavoli nascosti, riallineamenti, interruttori:
    * a caso ma ripetibili (mulberry32). A ogni passo gli strati restano
    * giusti, chi torna a People ci torna esatto, nessuno visibile salta più
-   * di quanto cammina in un passo, e alla fine tutto si ferma. */
+   * di quanto cammina in un passo, ogni anello «in arrivo» si accende e si
+   * spegne col suo evento, e alla fine tutto si ferma, anelli compresi. */
   const TONDI = TAVOLI.map(t => (t.id === 2 ? { ...t, shape: TableShape.CIRCLE, seats: 6 } : t.id === 5 ? { ...t, rotation: 30 } : t));
   const ids = [1, 2, 3, 5, 6, 7, 8, 9, 4];
 
@@ -1531,18 +2067,27 @@ describe('un servizio a caso', () => {
     fermo(r);
     const starts = r.events.filter(e => e.kind === 'escort-start').length;
     expect(r.events.filter(e => e.kind === 'escort-end').length).toBe(starts);
-    return { events: r.events.length, released: o.released.length };
+    return {
+      events: r.events.length,
+      released: o.released.length,
+      moves: r.events.filter(e => e.kind === 'moved-end').length,
+    };
   };
 
   it('non rompe mai gli strati e si ferma sempre', () => {
     let events = 0;
     let released = 0;
+    let moves = 0;
     for (let seme = 1; seme <= 6; seme++) {
       const out = giro(seme);
       events += out.events;
       released += out.released;
+      moves += out.moves;
     }
     expect(events).toBeGreaterThan(50);
     expect(released).toBeGreaterThan(100);
+    // Qualche cambio di tavolo a piedi c'è stato, e ognuno ha spento il suo
+    // anello (controllaAnelli, a ogni passo).
+    expect(moves).toBeGreaterThan(0);
   }, 20_000);
 });

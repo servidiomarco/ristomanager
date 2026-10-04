@@ -1111,8 +1111,9 @@ step(dtMs)             una volta per fotogramma, nel useFrame a priorità −1 d
                        fermato a 100 ms quando qualcosa si muove, intero da fermi
 fastForward()          tutto quello che è a metà arriva in fondo adesso
 configure(patch)       reducedMotion · slowMode · lightMode · pinned · activeRoomId · staff
-in lettura             actorsIn · movingKeys · tagIn · escortTargets · frameNeed · wakeInMs ·
-                       isAnimating · revision; onEvent e subscribe restituiscono lo stacco
+in lettura             actorsIn · movingKeys · tagIn · escortTargets · arrivalTargets ·
+                       frameNeed · wakeInMs · isAnimating · revision; onEvent e subscribe
+                       restituiscono lo stacco
 ```
 
 | Motivo | Quando (lo calcola la pagina) | Effetto |
@@ -1141,7 +1142,7 @@ azzera.
 | ingresso → ingresso | caselle nuove: ci camminano; altra sala: svaniscono ed entrano là | — |
 | ingresso → in attesa, assente o nascosta | FADE sul posto | — |
 | seduta ↔ in piedi, stesso tavolo | STAND (si alzano, un passo indietro) · SIT | — |
-| tavolo A → tavolo B, stessa sala · altra sala | RESEAT a piedi, uno ogni 150 ms · svaniscono, entrano dalla porta dell'altra | `moved` |
+| tavolo A → tavolo B, stessa sala · altra sala | RESEAT a piedi, uno ogni 150 ms · svaniscono, entrano dalla porta dell'altra; B pulsa «in arrivo» (nella sua sala) finché l'ultimo non si siede; oltre 12 persone o banchetto: compaiono sedute a B, senza anello | `moved` · `moved-end` |
 | seduta o in piedi → assente o nascosta | LEAVE: in piedi, verso l'ingresso e fuori, in fila: parte prima chi ha meno strada, e ognuno arriva alla porta una distanza di fila (0,8 m, 0,7 il bambino) dopo chi lo precede; chi la spodesta aspetta in coda, col tavolo «in arrivo», che sia uscita (porta a senso unico) | `leaving` |
 | seduta o in piedi → in attesa («Arrivato» annullato) | FADE sul posto | — |
 | seduta o in piedi → ingresso | alle caselle a piedi; altra sala: svaniscono ed entrano là | `lobby` |
@@ -1154,7 +1155,10 @@ verso un altro tavolo della sala cambia meta (`moved`); verso un'altra sala si c
 RETARGET: l'hostess rifà il percorso da dov'è e la fila continua sul suo binario. Annullato, o
 finito all'ingresso: i membri svaniscono o vanno alle caselle, l'hostess torna o prende il
 prossimo. Annullata un'uscita («Tavolo liberato» tolto), la tavolata torna alle sedie a
-piedi; se era già uscita, rientra con l'hostess.
+piedi; se era già uscita, rientra con l'hostess. Rimessa invece a un altro tavolo mentre è
+ancora in sala (un'uscita o un «Arrivato» tolti con un tavolo nuovo, o spodestata e spostata
+da Reception), ci va a piedi da quello che lasciava: è un cambio di tavolo, `moved` col
+tavolo lasciato come `from`, e il tavolo nuovo pulsa fino a `moved-end`.
 
 ```
 hostess    una per sala (ogni sala ha un leggio, almeno quello di ripiego)
@@ -1196,7 +1200,8 @@ unico      l'hostess non va a prendere nessuno (la coda aspetta, i tavoli restan
 sedersi    percorso fino al punto d'approccio della sedia, un passo fuori griglia (0,55 m,
            500 ms), si gira (250 ms), si siede (600 ms); il cane si sdraia (600 ms); un posto in
            piedi: ci cammina e si gira
-fine       escort-end quando si siede l'ultimo: lì il tavolo smette di essere «in arrivo»
+fine       escort-end quando si siede l'ultimo: lì il tavolo smette di essere «in arrivo»;
+           moved-end lo stesso per il tavolo nuovo di un cambio di tavolo a piedi
 precedenza chi cammina su un percorso si ferma se un altro, non della sua fila, è entro 0,45 m
            davanti (cono di ±45°), al più 1,5 s; verso la porta anche dietro i suoi, fermi o
            no. L'hostess ferma (al leggio, accogliendo, presentando) è un ostacolo per chi
@@ -1208,16 +1213,24 @@ sicurezza  un copione oltre 90 s di simulazione, o un accompagnamento oltre 90 s
            al minuto), non rimette l'orologio
 ```
 
-**Gli eventi** nascono in `update` (tranne `escort-end`), quindi arrivano anche col movimento
-ridotto, a scheda nascosta e senza vista 3D: `escort-start` già all'accodamento, `escort-end`
-(seduti o no) quando l'accompagnamento esce di scena, `lobby`, `moved`, `leaving`, `bulk` col
-numero dei tavoli toccati (chi lascia un tavolo e chi ci arriva al suo posto sono uno; senza
-tavoli, chi aspetta all'ingresso, nessun `bulk`), `snapped` con le comitive (`'large'` o
-`'queue'`). Ogni cambio degli
-obiettivi di accompagnamento arriva con un evento: la pagina ridisegna i tavoli «in arrivo»
-(`withEscortTargets`: stato `inarrivo` e anello finché l'ultimo non si siede, anche se
-Reception ha già premuto «Arrivato») a ogni evento, mai per fotogramma. Chi è in coda non si
-vede, né alla porta né al tavolo, e il suo tavolo pulsa «in arrivo».
+**Gli eventi** nascono in `update` (tranne `escort-end` e `moved-end`), quindi arrivano anche
+col movimento ridotto, a scheda nascosta e senza vista 3D: `escort-start` già all'accodamento,
+`escort-end` (seduti o no) quando l'accompagnamento esce di scena, `lobby`, `moved`,
+`moved-end` (arrivati o no) quando un cambio di tavolo a piedi esce di scena, `leaving`, `bulk`
+col numero dei tavoli toccati (chi lascia un tavolo e chi ci arriva al suo posto sono uno;
+senza tavoli, chi aspetta all'ingresso, nessun `bulk`), `snapped` con le comitive (`'large'` o
+`'queue'`). Ogni cambio dei tavoli «in arrivo» (`arrivalTargets`: quelli degli
+accompagnamenti, `escortTargets`, più il tavolo nuovo di un cambio a piedi) arriva con un
+evento: la pagina li ridisegna (`withArrivalTargets`: stato `inarrivo` e anello finché
+l'ultimo non si siede, anche se Reception ha già premuto «Arrivato» o spostato la tavolata) a
+ogni evento, mai per fotogramma. Solo l'azzeramento (il primo modello, un cambio di servizio)
+li svuota senza raccontare niente: lì li ridisegna la pagina, dopo l'update, perché il render
+che lo precede li ha calcolati col regista di prima (senza, un anello del pranzo restava
+acceso fino al minuto dopo). Chi è in coda non si vede, né alla porta né al tavolo, e
+il suo tavolo pulsa «in arrivo». Un cambio di tavolo scattato (scheda nascosta, epoca nuova,
+cambi in blocco, movimento ridotto) l'anello non lo accende: nessuno ci cammina. «Segui il
+servizio» guarda solo `escortTargets`: aspetta la fine di un accompagnamento, non di un
+cambio di tavolo (`moved-end` non libera chi aspetta).
 
 **Chi disegna chi.** People disegna `room.figures` meno `movingKeys(room.id)`, Walkers
 disegna `actorsIn(room.id)`: il regista cambia i due insiemi nello stesso `step` e alza
@@ -1653,10 +1666,13 @@ Nella pagina: la striscia (chi e dove, la frase detta, le smentite, i riallineam
 «→ uscita»), «Segui il servizio» che aspetta la fine dell'accompagnamento a video e che senza
 vista 3D è spento, la linguetta in vista, l'orologio all'ora del ristorante.
 
+Deciso da Tina il 4 ottobre: durante un cambio di tavolo a piedi il tavolo nuovo resta «in
+arrivo» con l'anello finché l'ultimo non si siede, come quello di un accompagnamento (prima
+era già «arrivato» mentre la tavolata ci camminava). Il regista lo tiene in `arrivalTargets` e
+lo spegne con `moved-end`. Vale anche per chi, mentre esce, viene rimesso a un altro tavolo
+(spodestato, un'uscita o un «Arrivato» tolti): ci torna a piedi, ed è un cambio di tavolo.
+
 Restano aperti, per Tina:
-- *Il tavolo di un cambio di tavolo «in arrivo»?* Durante un RESEAT il tavolo nuovo è già
-  «arrivato» mentre la tavolata ci cammina; gli accompagnamenti lo tengono «in arrivo» fino
-  all'ultimo seduto. Farlo anche qui vuole un evento in più del regista (la fine del cambio).
 - *Chi si siede passa attraverso lo schienale* (si vede solo da vicino). Il rimedio vero è la
   sedia che si scosta e torna, cioè uno spostamento per sedia esposto dal regista alla scena:
   un'aggiunta al contratto dei tipi.

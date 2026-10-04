@@ -41,13 +41,19 @@ export interface ActivityLine {
   spoken: string;
 }
 
-/** Le righe di un evento. La fine di un accompagnamento non ne fa: basta
- *  quella dell'inizio. Chi compare già seduto (comitiva grande, banchetto,
- *  coda troppo lunga) fa una riga per comitiva. */
+/** Le righe di un evento. La fine di un accompagnamento o di un cambio di
+ *  tavolo non ne fa: basta quella dell'inizio («→ tavolo 40», «· tavolo 40 →
+ *  41»), e una seconda riga per lo stesso tavolo, quando l'ultimo si siede,
+ *  spingerebbe fuori dalle quattro una cosa successa davvero. Chi compare già
+ *  seduto (comitiva grande, banchetto, coda troppo lunga) fa una riga per
+ *  comitiva. */
 export function stripItemsOf(event: DirectorEvent, nextId: () => number, until: number): StripItem[] {
   switch (event.kind) {
     case 'escort-start':
       return [{ id: nextId(), until, kind: 'escort', party: event.party, table: event.table }];
+    case 'escort-end':
+    case 'moved-end':
+      return [];
     case 'lobby':
       return [{ id: nextId(), until, kind: 'lobby', party: event.party }];
     case 'moved':

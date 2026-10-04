@@ -21,7 +21,7 @@ import { sessionTimeZone } from '../../utils/displayTime';
 import { liveService } from './model/service';
 import { deriveSceneModel, roomsToShow } from './model/sceneModel';
 import { nextSettled, type ReadOverrides, type SettledOverrides } from './model/overrides';
-import { DIRECTOR_SEED, SceneDirector, withEscortTargets } from './model/director';
+import { DIRECTOR_SEED, SceneDirector, withArrivalTargets } from './model/director';
 import { ActivityStrip } from './ActivityStrip';
 import {
   STRIP_TTL_MS, addStripItems, peopleText, revealStripItems, stillTrue, stripItemsOf, stripLine, withoutEscort,
@@ -420,7 +420,12 @@ const createFollowController = (
     armCycle(FOLLOW_CYCLE_MS);
   }
 
-  // La sala a video ha un accompagnamento in coda o in corso.
+  // La sala a video ha un accompagnamento in coda o in corso. Solo quelli
+  // (escortTargets), non i cambi di tavolo a piedi che pure tengono un
+  // tavolo «in arrivo» (arrivalTargets): chi aspetta in `pending` lo libera
+  // soltanto un 'escort-end', e la fine di un cambio ('moved-end') non lo è.
+  // Contando anche i cambi, una partenza in un'altra sala arrivata durante
+  // un cambio di tavolo resterebbe in attesa per sempre.
   const busy = (id: number | null): boolean => id !== null && director.escortTargets(id).size > 0;
 
   return {
@@ -812,9 +817,9 @@ const SalaVivoPage: React.FC<SalaVivoPageProps> = ({
 
   // ── Il regista: eventi, condizioni, modello ─────────────────────────────
 
-  // Cresce a ogni evento: i tavoli «in arrivo» degli accompagnamenti si
-  // ridisegnano allora (ogni loro cambio arriva con un evento), mai per
-  // fotogramma.
+  // Cresce a ogni evento: i tavoli «in arrivo» degli accompagnamenti e dei
+  // cambi di tavolo si ridisegnano allora (ogni loro cambio arriva con un
+  // evento, anche la fine: 'escort-end', 'moved-end'), mai per fotogramma.
   const [directorRev, setDirectorRev] = useState(0);
   const [stripItems, setStripItems] = useState<StripItem[]>([]);
   const stripIdRef = useRef(0);
@@ -870,6 +875,9 @@ const SalaVivoPage: React.FC<SalaVivoPageProps> = ({
   // nuova, e si anima.
   const lastEpochRef = useRef<number | null>(null);
   const lastReadsRef = useRef<number | null>(null);
+  // Il servizio dell'ultimo modello dato al regista: con uno diverso (e col
+  // primo) il regista azzera.
+  const lastServiceRef = useRef<string | null>(null);
   const settledKey = settled?.key ?? null;
   const settledReads = settled?.reads ?? 0;
   useLayoutEffect(() => {
@@ -893,6 +901,17 @@ const SalaVivoPage: React.FC<SalaVivoPageProps> = ({
     lastEpochRef.current = reservationsEpoch;
     lastReadsRef.current = settledReads;
     director.update(model, reason);
+    // Un azzeramento (il primo modello, il cambio di servizio delle 17:00 e
+    // delle 05:00) dimentica accompagnamenti e cambi di tavolo senza
+    // raccontarlo: nessun evento, e directorRev non cresce. Ma displayRoom
+    // questo render l'ha calcolata prima dell'update, coi tavoli «in arrivo»
+    // del servizio di prima: senza un giro in più un anello resterebbe
+    // acceso, con nessuno che ci cammina, fino al minuto dopo (il prossimo
+    // modello) o al prossimo evento.
+    if (model.service.key !== lastServiceRef.current) {
+      lastServiceRef.current = model.service.key;
+      setDirectorRev(n => n + 1);
+    }
   }, [director, model, loading, reservationsEpoch, reducedMotion, canvasOn, settledKey, settledReads, service.key]);
 
   // A scheda nascosta i fotogrammi si fermano: l'hostess resterebbe a metà
@@ -925,10 +944,14 @@ const SalaVivoPage: React.FC<SalaVivoPageProps> = ({
 
   // La sala data al canvas: i tavoli verso cui l'hostess sta accompagnando
   // qualcuno restano «in arrivo» con l'anello finché l'ultimo non si siede,
-  // anche se Reception ha già premuto «Arrivato». directorRev fra le
-  // dipendenze: gli obiettivi del regista cambiano solo con un evento.
+  // anche se Reception ha già premuto «Arrivato»; e così il tavolo nuovo di
+  // una comitiva che cambia tavolo, finché l'ultimo non ci si siede (prima
+  // diventava «arrivato» mentre la famiglia si alzava ancora dal vecchio).
+  // directorRev fra le dipendenze: gli obiettivi del regista cambiano solo
+  // con un evento, o con un azzeramento (che lo fa crescere l'update qui
+  // sopra).
   const displayRoom = useMemo(
-    () => (shownRoom ? withEscortTargets(shownRoom, director.escortTargets(shownRoom.id)) : null),
+    () => (shownRoom ? withArrivalTargets(shownRoom, director.arrivalTargets(shownRoom.id)) : null),
     [shownRoom, director, directorRev],
   );
 
