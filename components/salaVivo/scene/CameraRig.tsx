@@ -210,9 +210,13 @@ interface CameraRigProps {
   reducedMotion: boolean;
   recenterSignal: number;
   demand: FrameDemand;
+  /** Qualcuno ha cominciato a trascinare, pizzicare o girare la rotella:
+   *  la pagina mette in pausa «Segui il servizio», così la camera non
+   *  cambia sala sotto le dita di chi la sta muovendo. */
+  onUserCamera?: () => void;
 }
 
-export function CameraRig({ room, reducedMotion, recenterSignal, demand }: CameraRigProps) {
+export function CameraRig({ room, reducedMotion, recenterSignal, demand, onUserCamera }: CameraRigProps) {
   const defaultCamera = useThree((s) => s.camera);
   const gl = useThree((s) => s.gl);
   const size = useThree((s) => s.size);
@@ -225,11 +229,13 @@ export function CameraRig({ room, reducedMotion, recenterSignal, demand }: Camer
   const rig = useRef<RigState>({ fit: null, roomId: null, userMoved: false, floorW: 1, floorD: 1, anim: null });
   const roomRef = useRef(room);
   const reducedMotionRef = useRef(reducedMotion);
+  const onUserCameraRef = useRef(onUserCamera);
   const lastSignal = useRef(recenterSignal);
 
   useLayoutEffect(() => {
     roomRef.current = room;
     reducedMotionRef.current = reducedMotion;
+    onUserCameraRef.current = onUserCamera;
   });
 
   // I controlli nascono e muoiono con l'effetto: si attaccano al canvas nel
@@ -254,6 +260,8 @@ export function CameraRig({ room, reducedMotion, recenterSignal, demand }: Camer
       demand.animatingUntil = 0;
       demand.interacting = true;
       demand.wake();
+      // Per ultimo: la pagina può cambiare stato, e la camera è già a posto.
+      onUserCameraRef.current?.();
     };
     const onEnd = () => {
       demand.interacting = false;

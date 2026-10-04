@@ -39,9 +39,14 @@ interface LivePillProps {
    *  come per la pastiglia intera. */
   routesClassName?: string;
   className?: string;
+  /** Il fuso dell'ora (IANA, «Europe/Rome»). Assente = quello del
+   *  dispositivo, come la testata di App. La Sala dal vivo passa quello del
+   *  ristorante: i suoi cartelli («Riservato · 20:40») sono all'ora del
+   *  locale, e un portatile in un altro fuso mostrava «Live» due ore avanti. */
+  timeZone?: string;
 }
 
-export const LivePill: React.FC<LivePillProps> = ({ connected, time, variant = 'pill', routes = null, routesClassName = '', className = '' }) => {
+export const LivePill: React.FC<LivePillProps> = ({ connected, time, variant = 'pill', routes = null, routesClassName = '', className = '', timeZone }) => {
   const { t } = useTranslation(undefined, { useSuspense: false });
   const label = connected ? t('live.connected', 'Connesso') : t('live.disconnected', 'Non connesso');
   // Tutti e due spenti vuol dire socket giù: lo dice già «Offline».
@@ -91,7 +96,7 @@ export const LivePill: React.FC<LivePillProps> = ({ connected, time, variant = '
       </span>
       <span className="whitespace-nowrap tabular-nums">
         {connected
-          ? t('live.at', 'Live {{ora}}', { ora: time.toLocaleTimeString(displayLocale(), { hour: '2-digit', minute: '2-digit' }) })
+          ? t('live.at', 'Live {{ora}}', { ora: time.toLocaleTimeString(displayLocale(), { hour: '2-digit', minute: '2-digit', ...(timeZone ? { timeZone } : {}) }) })
           : t('live.offline', 'Offline')}
       </span>
       {routes && (

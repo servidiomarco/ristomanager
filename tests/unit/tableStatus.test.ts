@@ -548,7 +548,12 @@ describe('una regola sola per figure e numeri', () => {
     }),
     seduto({ table_id: 21, guests: 2, reservation_time: ora('18:55') }),
   ];
-  const sera = (nowMs: number, showNames = false) => scena({
+  // «In uscita»: la comitiva del tavolo 2 (7 su 4 posti: le teste e uno in
+  // piedi) segnata DEPARTING. Gli stessi presenti, gli stessi numeri; le
+  // persone in piedi dietro le sedie (PR3).
+  const IN_USCITA = PRENOTAZIONI.map(r =>
+    (r.table_id === 2 ? { ...r, arrival_status: ArrivalStatus.DEPARTING } : r));
+  const sera = (nowMs: number, showNames = false, inUscita = false) => scena({
     rooms: [SALA, FIUME],
     tables: [
       tavolo(1), tavolo(2, { x: 250 }), tavolo(3, { x: 400, shape: TableShape.CIRCLE }), tavolo(4, { x: 550 }),
@@ -561,15 +566,20 @@ describe('una regola sola per figure e numeri', () => {
     hiddenTableIds: new Set([21]),
     banquetMenus: [festa],
     markers: [{ id: 1, room_id: 1, kind: 'ENTRANCE', x: 100, y: 550 } as FloorMarker],
-    reservations: PRENOTAZIONI,
+    reservations: inUscita ? IN_USCITA : PRENOTAZIONI,
     nowMs,
     showNames,
   });
 
   const isPerson = (k: string) => k === 'adult' || k === 'kid';
 
-  const controlla = (nowMs: number) => {
-    const model = deriveSceneModel(sera(nowMs));
+  const controlla = (nowMs: number, inUscita = false) => {
+    const model = deriveSceneModel(sera(nowMs, false, inUscita));
+    // La stessa sera con tutti seduti: chi è «In uscita» si è alzato, ma le
+    // sedie accese sono ancora le sue.
+    const seduta = inUscita ? deriveSceneModel(sera(nowMs)) : model;
+    const alzati = new Set((inUscita ? IN_USCITA : PRENOTAZIONI)
+      .filter(r => r.arrival_status === ArrivalStatus.DEPARTING).map(r => r.id));
     const chiavi = new Set<string>();
     for (const room of model.rooms) {
       const quando = `${room.name} alle ${new Date(nowMs).toISOString()}`;
@@ -587,7 +597,9 @@ describe('una regola sola per figure e numeri', () => {
       // Un'hostess per sala.
       expect(room.figures.filter(f => f.kind === 'hostess').map(f => f.key), quando).toEqual([`host:${room.id}`]);
       // Ognuno seduto su una sedia accesa del suo tavolo, una a testa; a un
-      // tavolo dove siede qualcuno sono accese esattamente le sedie occupate.
+      // tavolo dove siede qualcuno sono accese esattamente le sedie occupate
+      // (anche da chi se n'è appena alzato «In uscita»: restano sue).
+      const prima = seduta.rooms.find(r => r.id === room.id)!;
       for (const t of room.tables) {
         const sedie = [...t.chairs, ...t.extraChairs];
         const qui = room.figures.filter(f => f.tableId === t.id && f.pose === 'seated');
@@ -598,15 +610,30 @@ describe('una regola sola per figure e numeri', () => {
           expect(f.seatHeight).toBe(sedia!.high ? HIGH_CHAIR_SEAT_HEIGHT : SEAT_HEIGHT);
         }
         if (room.figures.some(f => f.tableId === t.id)) {
-          expect(sedie.filter(c => c.lit).length, `${quando}: tavolo ${t.name}`).toBe(qui.length);
+          const occupate = prima.figures.filter(f => f.tableId === t.id && f.pose === 'seated').length;
+          expect(sedie.filter(c => c.lit).length, `${quando}: tavolo ${t.name}`).toBe(occupate);
           expect(t.sign).toBeNull();
         }
+        // Chi è «In uscita» non siede.
+        expect(qui.filter(f => alzati.has(f.partyId ?? -1))).toEqual([]);
         expect(t.extraChairs.every(c => c.lit)).toBe(true);
       }
-      // I cani stanno a un tavolo, sdraiati; mai all'ingresso.
+      // I cani stanno a un tavolo, sdraiati (in piedi «In uscita»); mai
+      // all'ingresso.
       for (const d of room.figures.filter(f => f.kind === 'dog')) {
-        expect([d.pose, d.tableId !== null]).toEqual(['lying', true]);
+        expect([d.pose, d.tableId !== null]).toEqual([alzati.has(d.partyId ?? -1) ? 'standing' : 'lying', true]);
       }
+      // Le fasi per il regista dicono le stesse cose: chi è a tavola o
+      // all'ingresso, dove, quanti.
+      for (const p of room.parties) {
+        const st = model.partyStates.find(x => x.id === p.id);
+        expect(st, `${quando}: comitiva ${p.id}`).toBeDefined();
+        const fase = p.tableId === null ? 'lobby' : alzati.has(p.id) ? 'standing' : 'seated';
+        expect([st!.phase, st!.roomId, st!.tableId, st!.people]).toEqual([fase, room.id, p.tableId, p.adults + p.kids]);
+      }
+      const fasi = model.partyStates.filter(x => x.roomId === room.id);
+      expect(fasi.filter(x => x.phase !== 'lobby').reduce((n, x) => n + x.people, 0), quando).toBe(room.summary.seated);
+      expect(fasi.filter(x => x.phase === 'lobby').reduce((n, x) => n + x.people, 0), quando).toBe(room.summary.lobby);
       for (const f of room.figures) {
         expect(chiavi.has(f.key), f.key).toBe(false);
         chiavi.add(f.key);
@@ -643,6 +670,25 @@ describe('una regola sola per figure e numeri', () => {
       controlla(Date.parse(ora(hhmm)));
     }
     controlla(Date.parse(ora('00:40', '2026-10-05')));
+  });
+
+  it('«In uscita» cambia solo le pose: in piedi dietro le sedie, gli stessi numeri a ogni ora', () => {
+    for (const hhmm of ['18:35', '19:00', '19:45', '20:10', '21:00']) {
+      const nowMs = Date.parse(ora(hhmm));
+      const uscita = controlla(nowMs, true);
+      const seduta = deriveSceneModel(sera(nowMs));
+      expect(uscita.summary).toEqual(seduta.summary);
+      expect(uscita.rooms.map(r => r.summary)).toEqual(seduta.rooms.map(r => r.summary));
+      expect(uscita.rooms.map(r => r.figures.map(f => f.key))).toEqual(seduta.rooms.map(r => r.figures.map(f => f.key)));
+      const alTavolo2 = uscita.rooms[0].figures.filter(f => f.tableId === 2);
+      expect(alTavolo2.every(f => f.pose === 'standing'), hhmm).toBe(true);
+      // Nessuno in piedi sopra un altro.
+      for (let a = 0; a < alTavolo2.length; a++) {
+        for (let b = a + 1; b < alTavolo2.length; b++) {
+          expect(Math.hypot(alTavolo2[a].x - alTavolo2[b].x, alTavolo2[a].z - alTavolo2[b].z)).toBeGreaterThanOrEqual(0.3);
+        }
+      }
+    }
   });
 
   it('a nomi accesi cambiano solo i nomi', () => {

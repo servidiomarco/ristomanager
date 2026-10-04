@@ -55,6 +55,7 @@ describe('le letture del servizio', () => {
       hiddenTableIds: new Set(),
       closedRoomIds: new Set(),
       ready: false,
+      reads: 0,
     });
     // E la lettura della cena non parte dalle unioni del pranzo.
     const cena = applyFetch(pranzo, K_CENA, letture({ hidden: ok([{ table_id: 7 }]) }));
@@ -165,8 +166,8 @@ describe('con quali varianti disegna la pagina', () => {
 
   it('al primo caricamento si aspetta che siano pronte', () => {
     expect(nextSettled(null, K_PRANZO, { ...vuote, ready: false })).toBeNull();
-    const primo = nextSettled(null, K_PRANZO, { ...vuote, ready: true });
-    expect(primo).toEqual({ key: K_PRANZO, value: vuote });
+    const primo = nextSettled(null, K_PRANZO, { ...vuote, ready: true, reads: 1 });
+    expect(primo).toEqual({ key: K_PRANZO, value: vuote, reads: 1 });
   });
 
   it('al cambio di servizio le stesse istanze di prima vogliono dire «ancora il servizio di prima»', () => {
@@ -178,12 +179,52 @@ describe('con quali varianti disegna la pagina', () => {
     expect(nextSettled(disegnate, K_CENA, { ...vuote, ready: false })).toBeNull();
     // Arrivate quelle della cena, si passa.
     const cena = { merges: [] as TableMerge[], hiddenTableIds: new Set([9]), closedRoomIds: new Set<number>() };
-    expect(nextSettled(disegnate, K_CENA, { ...cena, ready: true })).toEqual({ key: K_CENA, value: cena });
+    expect(nextSettled(disegnate, K_CENA, { ...cena, ready: true, reads: 1 })).toEqual({ key: K_CENA, value: cena, reads: 1 });
   });
 
   it('nello stesso servizio ogni cambiamento passa subito', () => {
     const prima = nextSettled(null, K_CENA, { ...vuote, ready: true })!;
     const unite = { ...vuote, merges: [unione(CENA, 1, [2])] };
-    expect(nextSettled(prima, K_CENA, { ...unite, ready: true })).toEqual({ key: K_CENA, value: unite });
+    expect(nextSettled(prima, K_CENA, { ...unite, ready: true })).toEqual({ key: K_CENA, value: unite, reads: 0 });
+  });
+
+  it('le 17:00: finché non arrivano le varianti della cena la chiave resta il pranzo (la pagina non aggiorna il regista)', () => {
+    // Il pranzo letto, con un'unione.
+    const lettoPranzo = applyFetch(emptyOverrides(K_PRANZO), K_PRANZO, letture({ merges: ok([unione(PRANZO, 1, [2])]) }));
+    const pranzo = nextSettled(null, K_PRANZO, overridesFor(lettoPranzo, K_PRANZO))!;
+    expect(pranzo).toMatchObject({ key: K_PRANZO, reads: 1 });
+    // 17:00: l'hook ha ancora la foto del pranzo, la cena non è pronta.
+    expect(nextSettled(pranzo, K_CENA, overridesFor(lettoPranzo, K_CENA))).toBeNull();
+    // Arrivate quelle della cena (nessuna unione): la chiave è la cena.
+    const lettaCena = applyFetch(lettoPranzo, K_CENA, letture());
+    const cena = nextSettled(pranzo, K_CENA, overridesFor(lettaCena, K_CENA))!;
+    expect(cena.key).toBe(K_CENA);
+    expect(cena.value.merges).toEqual([]);
+  });
+
+  it('le varianti vuote di sempre: la chiave passa al servizio nuovo con lo stesso valore, senza aspettare per sempre', () => {
+    const lettoPranzo = applyFetch(emptyOverrides(K_PRANZO), K_PRANZO, letture());
+    const pranzo = nextSettled(null, K_PRANZO, overridesFor(lettoPranzo, K_PRANZO))!;
+    expect(nextSettled(pranzo, K_CENA, overridesFor(lettoPranzo, K_CENA))).toBeNull();
+    const lettaCena = applyFetch(lettoPranzo, K_CENA, letture());
+    // Le stesse istanze vuote del pranzo: niente da aspettare.
+    expect(lettaCena.merges).toBe(lettoPranzo.merges);
+    const cena = nextSettled(pranzo, K_CENA, overridesFor(lettaCena, K_CENA))!;
+    expect(cena.key).toBe(K_CENA);
+    // Lo stesso valore: il modello non si ricalcola.
+    expect(cena.value).toBe(pranzo.value);
+  });
+
+  it('una rilettura conta (reads), un evento no: alla riconnessione la pagina la mette in scena già conclusa', () => {
+    const prima = applyFetch(emptyOverrides(K_CENA), K_CENA, letture());
+    expect(prima.reads).toBe(1);
+    const nascondi = overridesEvent('tableHidden:created', { date: CENA.date, shift: CENA.shift, table_id: 7 }, CENA.date, CENA.shift)!;
+    const dopoEvento = applyEvent(prima, K_CENA, nascondi);
+    expect(dopoEvento.reads).toBe(1);
+    const riletta = applyFetch(dopoEvento, K_CENA, letture({ hidden: ok([{ table_id: 7 }, { table_id: 8 }]) }));
+    expect(riletta.reads).toBe(2);
+    const a = nextSettled(null, K_CENA, overridesFor(dopoEvento, K_CENA))!;
+    const b = nextSettled(a, K_CENA, overridesFor(riletta, K_CENA))!;
+    expect([a.reads, b.reads]).toEqual([1, 2]);
   });
 });

@@ -42,5 +42,34 @@
   "noTables": "Nessun tavolo in questa sala.",
   "noRooms": "Nessuna sala aperta in questo turno.",
   "reserved": "Riservato · {{time}}",
-  "event": "Evento"
+  "event": "Evento",
+  "follow": "Segui il servizio",
+  "unfollow": "Smetti di seguire il servizio",
+  "strip": {
+    "title": "Attività della sala",
+    "party": "{{name}} · {{people}}",
+    "anonymous": "Tavolo {{table}}",
+    "kids_one": "({{count}} bambino)",
+    "kids_other": "({{count}} bambini)",
+    "dog_one": "+ cane",
+    "dog_other": "+ {{count}} cani",
+    "toTable": "→ tavolo {{table}}",
+    "atEntrance": "all'ingresso",
+    "moved": "tavolo {{from}} → {{to}}",
+    "leaving": "tavolo {{table}} → uscita",
+    "seatedCount": "{{count}} a tavola",
+    "updatedMany_one": "{{count}} tavolo aggiornato",
+    "updatedMany_other": "{{count}} tavoli aggiornati",
+    "sr": {
+      "people_one": "{{count}} persona",
+      "people_other": "{{count}} persone",
+      "kids_one": "{{count}} bambino",
+      "kids_other": "{{count}} bambini",
+      "dog_one": "un cane",
+      "dog_other": "{{count}} cani",
+      "toTable": "al tavolo {{table}}",
+      "moved": "dal tavolo {{from}} al tavolo {{to}}",
+      "leaving": "lascia il tavolo {{table}}"
+    }
+  }
 }

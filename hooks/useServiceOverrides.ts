@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Shift } from '../types';
-import type { ServiceOverrides } from '../components/salaVivo/types';
 import {
   OVERRIDES_EVENTS,
   applyEvent,
@@ -11,6 +10,7 @@ import {
   overridesFor,
   serviceKeyOf,
   type OverridesSnapshot,
+  type ReadOverrides,
 } from '../components/salaVivo/model/overrides';
 import { getRoomClosed, getTableHidden, getTableMerges } from '../services/apiService';
 import { onSocketEvent } from '../services/socketEvents';
@@ -40,8 +40,10 @@ import { socketClient } from '../services/socketClient';
  * letta farebbe saltare i tavoli da separati a uniti sotto gli occhi. Le tre
  * letture vanno in parallelo, e vale quello che arriva: una che fallisce
  * lascia vuoto (o, in una rilettura, quello che c'era). `ready` diventa vero
- * quando hanno risposto tutte, riuscite o no. */
-export function useServiceOverrides(date: string, shift: Shift): ServiceOverrides {
+ * quando hanno risposto tutte, riuscite o no. `reads` conta le letture
+ * complete arrivate (non gli eventi): la pagina mette in scena già concluso
+ * quello che una rilettura porta, come per l'epoca delle prenotazioni. */
+export function useServiceOverrides(date: string, shift: Shift): ReadOverrides {
   const key = serviceKeyOf(date, shift);
   const [snap, setSnap] = useState<OverridesSnapshot>(() => emptyOverrides(key));
   const [reloadKey, setReloadKey] = useState(0);

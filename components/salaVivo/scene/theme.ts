@@ -73,6 +73,13 @@ export interface ScenePalette {
   hostess: THREE.Color;
   /** --ds-cat-6-text: il cane. */
   dog: THREE.Color;
+  /** --ds-action-bg: i camerieri, col grembiule in --ds-surface. Il colore
+   *  dei bottoni pieni dell'app, quasi nero col tema chiaro e quasi bianco
+   *  con lo scuro: la divisa, che non è né uno stato né una categoria. */
+  waiter: THREE.Color;
+  /** --ds-border-strong: il vassoio. In --ds-surface-row sparirebbe sul
+   *  pavimento chiaro, visto dall'alto. */
+  tray: THREE.Color;
   /** Il cartellino «Riservato» o «Evento» sul piano: le falde in
    *  --tg-attesa-name (il blu scuro dell'attesa col tema chiaro, chiaro con lo
    *  scuro), la costa in --tg-attesa-bg. Al contrario, in --tg-attesa-bg,
@@ -158,6 +165,8 @@ export function readPalette(palette: ScenePalette): void {
   palette.light.set(readColor(style, palette.dark ? '--ds-text-primary' : '--ds-surface'));
   palette.hostess.set(readColor(style, '--ds-cat-6-solid'));
   palette.dog.set(readColor(style, '--ds-cat-6-text'));
+  palette.waiter.set(readColor(style, '--ds-action-bg'));
+  palette.tray.set(readColor(style, '--ds-border-strong'));
   palette.signCard.set(readColor(style, '--tg-attesa-name'));
   palette.signRidge.set(readColor(style, '--tg-attesa-bg'));
   palette.shadowOpacity = palette.dark ? 0.3 : 0.12;
@@ -196,6 +205,8 @@ function createPalette(): ScenePalette {
     light: new THREE.Color(FALLBACK_COLOR),
     hostess: new THREE.Color(FALLBACK_COLOR),
     dog: new THREE.Color(FALLBACK_COLOR),
+    waiter: new THREE.Color(FALLBACK_COLOR),
+    tray: new THREE.Color(FALLBACK_COLOR),
     signCard: new THREE.Color(FALLBACK_COLOR),
     signRidge: new THREE.Color(FALLBACK_COLOR),
     shadowOpacity: 0.12,

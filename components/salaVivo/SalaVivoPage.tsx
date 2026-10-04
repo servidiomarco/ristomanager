@@ -1,7 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  Cuboid, DoorClosed, Grid, Info, LocateFixed, MapPin, Maximize2, Minimize2, MonitorOff, Pin, PinOff, RotateCcw, Tag,
+  Cuboid, DoorClosed, Footprints, Grid, Info, LocateFixed, MapPin, Maximize2, Minimize2, MonitorOff, Pin, PinOff, RotateCcw, Tag,
 } from 'lucide-react';
 import { Callout, EmptyState, LivePill, dsButton, dsIconButton } from '../ds';
 import type { CalloutTone } from '../ds';
@@ -12,16 +12,25 @@ import { useFloorMarkers } from '../../hooks/useFloorMarkers';
 import { useLinkRoutes } from '../../hooks/useLinkRoutes';
 import { usePrefersReducedMotion } from '../../hooks/usePrefersReducedMotion';
 import { useServiceOverrides } from '../../hooks/useServiceOverrides';
+import { useStaffOnShift } from '../../hooks/useStaffOnShift';
 import { useWakeLock } from '../../hooks/useWakeLock';
 import { getReservationNotePresets, type ReservationNotePreset } from '../../services/apiService';
 import { reportClientError } from '../../services/clientErrorReporter';
 import { swrConfig } from '../../services/configCache';
+import { sessionTimeZone } from '../../utils/displayTime';
 import { liveService } from './model/service';
 import { deriveSceneModel, roomsToShow } from './model/sceneModel';
-import { nextSettled, type SettledOverrides } from './model/overrides';
+import { nextSettled, type ReadOverrides, type SettledOverrides } from './model/overrides';
+import { DIRECTOR_SEED, SceneDirector, withArrivalTargets } from './model/director';
+import { ActivityStrip } from './ActivityStrip';
+import {
+  STRIP_TTL_MS, addStripItems, peopleText, revealStripItems, stillTrue, stripItemsOf, stripLine, withoutEscort,
+  type ActivityLine, type StripItem,
+} from './model/activity';
 import { cachedWebglSupport, probeWebgl2, type WebglSupport } from './webglProbe';
 import type {
-  NotePresetRef, RoomModel, SalaVivoCanvasProps, SalaVivoPageProps, SceneCopy, ServiceOverrides,
+  DirectorEvent, NotePresetRef, RoomModel, SalaVivoCanvasProps, SalaVivoPageProps, SceneCopy,
+  SceneDirectorApi, SnapReason,
 } from './types';
 
 /* ── Sala dal vivo ────────────────────────────────────────────────────────
@@ -34,7 +43,13 @@ import type {
 
    Il modello della sala (model/) si ricalcola sui dati e al minuto
    dell'orologio di App, mai a ogni fotogramma: alla scena arriva una sala
-   già pronta, in metri. */
+   già pronta, in metri.
+
+   Il regista (model/director.ts) mette in scena il passaggio fra due
+   modelli: l'hostess che accompagna chi arriva, chi si alza, chi esce. Lo
+   crea e lo aggiorna questa pagina, al commit dei dati; il canvas lo fa
+   avanzare a ogni fotogramma. Il modello resta l'unica verità su DOVE sta
+   ognuno: il regista decide solo come ci arriva. */
 
 // Lette anche altrove: 'salaVivo.pinned' da App all'avvio (atterraggio).
 const PINNED_KEY = 'salaVivo.pinned';
@@ -42,6 +57,23 @@ const ROOM_KEY = 'salaVivo.room';
 const NAMES_KEY = 'salaVivo.names';
 const DEBUG_KEY = 'salaVivo.debug';
 const RELOADED_FOR_KEY = 'salaVivo.reloadedFor';
+// «Segui il servizio», per dispositivo: '1' acceso, '0' spento. Senza una
+// scelta vale lo schermo fissato: una TV segue il servizio da sola, un
+// tablet in mano resta sulla sala dove lo si mette.
+const FOLLOW_KEY = 'salaVivo.follow';
+
+// «Segui il servizio». Il calo d'opacità (150 ms) copre il salto
+// dell'inquadratura al cambio di sala; dopo un accompagnamento in un'altra
+// sala, 20 s di calma riportano alla sala di casa; a schermo fissato e
+// fermo, ogni 45 s la sala dopo fra quelle con qualcuno a tavola. Un tocco
+// su una linguetta o un trascinamento della sala fermano i cambi per due
+// minuti: la sala non scappa di mano a chi la sta usando.
+const FOLLOW_DIP_MS = 150;
+const FOLLOW_HOME_MS = 20_000;
+const FOLLOW_HOME_POLL_MS = 2_000;
+const FOLLOW_CYCLE_MS = 45_000;
+const FOLLOW_CYCLE_POLL_MS = 5_000;
+const FOLLOW_PAUSE_MS = 120_000;
 
 // A schermo fissato i bottoni spariscono dopo 6 s senza tocchi né mouse, e
 // tornano al primo gesto: su una TV restano solo la sala e l'orologio.
@@ -95,6 +127,12 @@ const ICON_BUTTON_ON =
 // primo tocco li fa tornare invece di premerne uno alla cieca.
 const CONTROLS_AWAKE = 'flex items-center gap-2 opacity-100 transition-opacity duration-150 motion-reduce:transition-none';
 const CONTROLS_IDLE = 'pointer-events-none flex items-center gap-2 opacity-0 transition-opacity duration-150 motion-reduce:transition-none';
+
+// La sala durante un cambio di «Segui il servizio»: svanisce, cambia,
+// ricompare. Col movimento ridotto il cambio è secco: la pagina non mette il
+// calo, e motion-reduce toglie comunque la transizione.
+const STAGE_SHOWN = 'absolute inset-0 opacity-100 transition-opacity duration-150 motion-reduce:transition-none';
+const STAGE_DIPPED = 'absolute inset-0 opacity-0 transition-opacity duration-150 motion-reduce:transition-none';
 
 // ── localStorage, sempre in try/catch: modalità privata e quota piena
 //    non devono rompere la pagina, solo dimenticare le preferenze. ─────────
@@ -222,22 +260,281 @@ class SceneBoundary extends React.Component<{ onCrash: () => void; children: Rea
 }
 
 /** Le varianti del servizio (unioni, tavoli nascosti, sale chiuse) con cui si
- *  disegna. Al primo caricamento si aspetta che ci siano; al cambio di
- *  servizio (le 17:00, le 05:00) si tengono le ultime buone finché quelle del
- *  servizio nuovo non arrivano: la sala resta disegnata invece di tornare al
- *  caricamento, e il canvas non si rismonta. La regola è nextSettled
- *  (model/overrides.ts), provata dai test. */
-function useSettledOverrides(serviceKey: string, overrides: ServiceOverrides): SettledOverrides['value'] | null {
-  const [settled, setSettled] = useState<SettledOverrides['value'] | null>(null);
+ *  disegna, il servizio a cui appartengono e la lettura da cui vengono. Al
+ *  primo caricamento si aspetta che ci siano; al cambio di servizio (le
+ *  17:00, le 05:00) si tengono le ultime buone finché quelle del servizio
+ *  nuovo non arrivano: la sala resta disegnata invece di tornare al
+ *  caricamento, e il canvas non si rismonta. Intanto la chiave resta quella
+ *  vecchia, e la pagina non dà quei modelli al regista. La regola è
+ *  nextSettled (model/overrides.ts), provata dai test. */
+function useSettledOverrides(serviceKey: string, overrides: ReadOverrides): SettledOverrides | null {
+  const [settled, setSettled] = useState<SettledOverrides | null>(null);
   const lastRef = useRef<SettledOverrides | null>(null);
-  const { ready, merges, hiddenTableIds, closedRoomIds } = overrides;
+  const { ready, merges, hiddenTableIds, closedRoomIds, reads } = overrides;
   useEffect(() => {
-    const next = nextSettled(lastRef.current, serviceKey, { ready, merges, hiddenTableIds, closedRoomIds });
+    const next = nextSettled(lastRef.current, serviceKey, { ready, merges, hiddenTableIds, closedRoomIds, reads });
     if (next === null) return;
     lastRef.current = next;
-    setSettled(next.value);
-  }, [serviceKey, ready, merges, hiddenTableIds, closedRoomIds]);
+    setSettled(next);
+  }, [serviceKey, ready, merges, hiddenTableIds, closedRoomIds, reads]);
   return settled;
+}
+
+// ── «Segui il servizio» ─────────────────────────────────────────────────
+// Lo schermo va dove succede qualcosa: un accompagnamento che parte in
+// un'altra sala la porta lì; 20 s di calma dopo, torna alla sala di casa
+// (quella scelta con le linguette, che il cambio non tocca mai); a schermo
+// fissato e fermo gira le sale con qualcuno a tavola. Timer ed eventi del
+// regista arrivano fuori dal render: la logica sta in un oggetto creato una
+// volta, che legge l'ultimo render da un ref.
+
+interface FollowInputs {
+  enabled: boolean;
+  pinned: boolean;
+  /** La sala di casa: quella scelta, o la prima. */
+  homeRoomId: number | null;
+  /** Le sale delle linguette. */
+  rooms: readonly RoomModel[];
+  reducedMotion: boolean;
+}
+
+interface FollowController {
+  onEvent: (event: DirectorEvent) => void;
+  pause: () => void;
+  chooseHome: () => void;
+  stop: () => void;
+  startCycle: () => void;
+  stopCycle: () => void;
+  dispose: () => void;
+}
+
+const createFollowController = (
+  live: { readonly current: FollowInputs },
+  director: SceneDirectorApi,
+  setRoomId: (id: number | null) => void,
+  setDipped: (dipped: boolean) => void,
+): FollowController => {
+  // La sala dove il cambio ha portato lo schermo (null: casa), e quella
+  // verso cui sta andando durante il calo d'opacità.
+  let roomId: number | null = null;
+  let heading: number | null = null;
+  // Perché lo schermo è lontano da casa: un accompagnamento (torna dopo la
+  // calma) o il giro delle sale (cambia ogni 45 s).
+  let away: 'escort' | 'cycle' | null = null;
+  // Un accompagnamento partito in un'altra sala mentre quello a video era
+  // ancora in corso: ci si va quando questo finisce (se là è ancora in
+  // corso). Prima ogni partenza tagliava via quello che si stava guardando, e
+  // con due o tre arrivi di fila non se ne vedeva nessuno.
+  let pending: number | null = null;
+  let pausedUntil = 0;
+  let lastEventAt = 0;
+  let dipTimer: number | null = null;
+  let homeTimer: number | null = null;
+  let cycleTimer: number | null = null;
+
+  const now = () => performance.now();
+  const clearTimer = (id: number | null) => {
+    if (id !== null) window.clearTimeout(id);
+  };
+  // La sala a video adesso: una sala sparita dalle linguette (chiusa e
+  // vuota) vale casa.
+  const shownId = (): number | null => {
+    const s = live.current;
+    return s.enabled && roomId !== null && s.rooms.some(r => r.id === roomId) ? roomId : s.homeRoomId;
+  };
+  const setRoom = (id: number | null) => {
+    roomId = id;
+    heading = id;
+    setRoomId(id);
+  };
+
+  /** Lo schermo su `target` (null o la sala di casa: casa), col calo
+   *  d'opacità quando la sala a video cambia davvero. */
+  const goTo = (target: number | null, why: 'escort' | 'cycle') => {
+    const s = live.current;
+    const id = target === s.homeRoomId ? null : target;
+    away = id === null ? null : why;
+    if (id === heading) return;
+    heading = id;
+    clearTimer(dipTimer);
+    dipTimer = null;
+    if (shownId() === (id ?? s.homeRoomId) || s.reducedMotion) {
+      setRoom(id);
+      setDipped(false);
+      return;
+    }
+    setDipped(true);
+    dipTimer = window.setTimeout(() => {
+      dipTimer = null;
+      setRoom(heading);
+      setDipped(false);
+    }, FOLLOW_DIP_MS);
+  };
+
+  const armHome = (ms: number) => {
+    clearTimer(homeTimer);
+    homeTimer = window.setTimeout(checkHome, Math.max(0, ms));
+  };
+  function checkHome() {
+    homeTimer = null;
+    if (away !== 'escort' || !live.current.enabled) return;
+    const t = now();
+    if (t < pausedUntil) {
+      armHome(pausedUntil - t);
+      return;
+    }
+    // Qualcuno ancora in cammino, o un accompagnamento in coda: si resta, e
+    // si riguarda fra poco. Il regista non resta acceso per sempre: oltre
+    // 90 s chiude da sé qualunque passaggio.
+    if (director.isAnimating()) {
+      armHome(FOLLOW_HOME_POLL_MS);
+      return;
+    }
+    goTo(null, 'escort');
+  }
+
+  const armCycle = (ms: number) => {
+    clearTimer(cycleTimer);
+    cycleTimer = window.setTimeout(checkCycle, Math.max(0, ms));
+  };
+  function checkCycle() {
+    cycleTimer = null;
+    const s = live.current;
+    if (!s.enabled || !s.pinned) return;
+    const t = now();
+    const wait = Math.max(pausedUntil - t, lastEventAt + FOLLOW_CYCLE_MS - t);
+    if (wait > 0) {
+      armCycle(wait);
+      return;
+    }
+    if (away === 'escort' || director.isAnimating()) {
+      armCycle(FOLLOW_CYCLE_POLL_MS);
+      return;
+    }
+    // La prossima sala con qualcuno a tavola dopo quella a video, nell'ordine
+    // delle linguette; nessuna: casa.
+    const at = s.rooms.findIndex(r => r.id === shownId());
+    const order = at < 0 ? s.rooms : [...s.rooms.slice(at + 1), ...s.rooms.slice(0, at + 1)];
+    const next = order.find(r => r.summary.seated > 0);
+    goTo(next ? next.id : null, 'cycle');
+    armCycle(FOLLOW_CYCLE_MS);
+  }
+
+  // La sala a video ha un accompagnamento in coda o in corso. Solo quelli
+  // (escortTargets), non i cambi di tavolo a piedi che pure tengono un
+  // tavolo «in arrivo» (arrivalTargets): chi aspetta in `pending` lo libera
+  // soltanto un 'escort-end', e la fine di un cambio ('moved-end') non lo è.
+  // Contando anche i cambi, una partenza in un'altra sala arrivata durante
+  // un cambio di tavolo resterebbe in attesa per sempre.
+  const busy = (id: number | null): boolean => id !== null && director.escortTargets(id).size > 0;
+
+  return {
+    onEvent(event) {
+      lastEventAt = now();
+      const s = live.current;
+      if (!s.enabled) return;
+      if (event.kind === 'escort-start' && now() >= pausedUntil
+        && event.roomId !== shownId() && s.rooms.some(r => r.id === event.roomId)) {
+        if (busy(shownId())) {
+          pending = event.roomId;
+        } else {
+          pending = null;
+          goTo(event.roomId, 'escort');
+        }
+        armHome(FOLLOW_HOME_MS);
+        return;
+      }
+      // Finito l'ultimo accompagnamento della sala a video: tocca a quello
+      // rimasto in attesa, se è ancora in corso.
+      if (event.kind === 'escort-end' && pending !== null && event.roomId === shownId() && !busy(event.roomId)) {
+        const target = pending;
+        pending = null;
+        if (now() >= pausedUntil && target !== shownId() && s.rooms.some(r => r.id === target) && busy(target)) {
+          goTo(target, 'escort');
+          armHome(FOLLOW_HOME_MS);
+          return;
+        }
+      }
+      // Lontano da casa per un accompagnamento: ogni cosa che succede fa
+      // ripartire i 20 s di calma.
+      if (away === 'escort') armHome(FOLLOW_HOME_MS);
+    },
+    pause() {
+      pausedUntil = now() + FOLLOW_PAUSE_MS;
+      pending = null;
+    },
+    chooseHome() {
+      pausedUntil = now() + FOLLOW_PAUSE_MS;
+      pending = null;
+      clearTimer(dipTimer);
+      clearTimer(homeTimer);
+      dipTimer = null;
+      homeTimer = null;
+      away = null;
+      setRoom(null);
+      setDipped(false);
+    },
+    stop() {
+      clearTimer(dipTimer);
+      clearTimer(homeTimer);
+      clearTimer(cycleTimer);
+      dipTimer = null;
+      homeTimer = null;
+      cycleTimer = null;
+      away = null;
+      pending = null;
+      setRoom(null);
+      setDipped(false);
+    },
+    startCycle() {
+      armCycle(FOLLOW_CYCLE_MS);
+    },
+    stopCycle() {
+      clearTimer(cycleTimer);
+      cycleTimer = null;
+      // Finito il giro (lo schermo non è più fissato), una sala del giro non
+      // resta a video senza un perché: si torna a casa.
+      if (away === 'cycle') goTo(null, 'cycle');
+    },
+    dispose() {
+      clearTimer(dipTimer);
+      clearTimer(homeTimer);
+      clearTimer(cycleTimer);
+      dipTimer = null;
+      homeTimer = null;
+      cycleTimer = null;
+    },
+  };
+};
+
+/** «Segui il servizio»: la sala dove lo schermo è stato portato (null =
+ *  casa), il calo d'opacità in corso, e chi riceve gli eventi del regista,
+ *  i trascinamenti e i tocchi sulle linguette. */
+function useFollowService(inputs: FollowInputs, director: SceneDirectorApi) {
+  const [roomId, setRoomId] = useState<number | null>(null);
+  const [dipped, setDipped] = useState(false);
+  const live = useRef(inputs);
+  // Prima degli effetti della pagina che aggiornano il regista: un evento
+  // emesso dentro quell'update deve già leggere le sale di questo render.
+  useLayoutEffect(() => {
+    live.current = inputs;
+  });
+  const [controller] = useState(() => createFollowController(live, director, setRoomId, setDipped));
+  const { enabled, pinned } = inputs;
+
+  // Spento: subito a casa, niente timer.
+  useEffect(() => {
+    if (!enabled) controller.stop();
+  }, [enabled, controller]);
+  // Il giro delle sale solo a schermo fissato.
+  useEffect(() => {
+    if (!enabled || !pinned) return;
+    controller.startCycle();
+    return () => controller.stopCycle();
+  }, [enabled, pinned, controller]);
+  useEffect(() => () => controller.dispose(), [controller]);
+
+  return { roomId: enabled ? roomId : null, dipped, controller };
 }
 
 interface PageCallout {
@@ -254,6 +551,7 @@ const SalaVivoPage: React.FC<SalaVivoPageProps> = ({
   reservations,
   banquetMenus,
   isInitialLoading,
+  reservationsEpoch,
   isConnected,
   currentTime,
   canEditFloor,
@@ -270,9 +568,26 @@ const SalaVivoPage: React.FC<SalaVivoPageProps> = ({
   // testata: alle 17:00 si passa alla cena insieme al resto dell'app.
   const service = useMemo(() => liveService(currentTime), [currentTime]);
   const overrides = useServiceOverrides(service.date, service.shift);
-  const settledOverrides = useSettledOverrides(service.key, overrides);
+  const settled = useSettledOverrides(service.key, overrides);
+  const settledOverrides = settled?.value ?? null;
   const { markers, loaded: markersLoaded } = useFloorMarkers(true);
   const nowMs = currentTime.getTime();
+
+  // ── Il regista della scena ──────────────────────────────────────────────
+  // Uno per pagina, creato una volta (il costruttore non ha effetti: in
+  // StrictMode può nascere due volte). Il suo orologio timbra gli eventi e
+  // misura i cambi in blocco; il seme è lo stesso su ogni schermo del
+  // ristorante, così la porta e la TV mettono in scena la stessa cosa.
+  const [director] = useState<SceneDirectorApi>(
+    () => new SceneDirector({ now: () => performance.now(), seed: DIRECTOR_SEED }),
+  );
+  // Il personale di sala di turno (le stesse persone di Personale): i
+  // camerieri che girano e il nome dell'hostess. Finché la lista non arriva
+  // il regista non mette camerieri, invece di farli comparire senza nome.
+  const staff = useStaffOnShift(service, reservationsEpoch);
+  useEffect(() => {
+    director.configure({ staff });
+  }, [director, staff]);
 
   // ── Gli ospiti: preset delle note, nomi, testi dei cartellini ───────────
   // La stessa chiave di cache di ReservationList, così le due viste si
@@ -324,11 +639,9 @@ const SalaVivoPage: React.FC<SalaVivoPageProps> = ({
   // turno ripiega sulla prima, senza cancellare la scelta: al turno dopo si
   // torna lì.
   const [storedRoomId, setStoredRoomId] = useState<number | null>(readStoredRoomId);
+  // La sala di casa. «Segui il servizio» può mostrarne un'altra per un po'
+  // (shownRoom, più sotto), ma non tocca mai questa scelta.
   const activeRoom = visibleRooms.find(r => r.id === storedRoomId) ?? visibleRooms[0] ?? null;
-  const selectRoom = (id: number) => {
-    setStoredRoomId(id);
-    writeStorage(ROOM_KEY, String(id));
-  };
 
   // ── La vista 3D ─────────────────────────────────────────────────────────
   // La sonda gira una volta per caricamento (in cache nel modulo): al primo
@@ -449,6 +762,222 @@ const SalaVivoPage: React.FC<SalaVivoPageProps> = ({
   // Lo schermo acceso finché la sala è fissata o a schermo intero.
   useWakeLock(pinned || isFullscreen);
 
+  // Durante il primo caricamento di App il modello c'è già, ma calcolato su
+  // liste ancora vuote: niente numeri né «Centra» finché i dati non arrivano,
+  // o la testata direbbe «0 a tavola» per un attimo e il bottone non
+  // avrebbe una scena da centrare.
+  const loading = isInitialLoading || model === null;
+  const canvasOn = !loading && (webgl === 'ok' || webgl === 'slow') && !contextLost && activeRoom !== null;
+
+  // ── «Segui il servizio» ─────────────────────────────────────────────────
+  const [followPref, setFollowPref] = useState<boolean | null>(() => {
+    const stored = readStorage(FOLLOW_KEY);
+    return stored === '1' ? true : stored === '0' ? false : null;
+  });
+  const followOn = followPref ?? pinned;
+  const toggleFollow = () => {
+    const next = !followOn;
+    // Senza salvataggio la scelta vale finché la pagina resta aperta.
+    writeStorage(FOLLOW_KEY, next ? '1' : '0');
+    setFollowPref(next);
+  };
+  // Solo con la vista 3D: senza (niente WebGL, la vista interrotta) non c'è
+  // nessun accompagnamento da seguire, e uno schermo fissato girerebbe le
+  // sale ogni 45 s senza il bottone per fermarlo.
+  const follow = useFollowService(
+    { enabled: followOn && canvasOn, pinned, homeRoomId: activeRoom?.id ?? null, rooms: visibleRooms, reducedMotion },
+    director,
+  );
+  const followController = follow.controller;
+  // La sala a video: quella dove «Segui il servizio» ha portato lo schermo,
+  // finché è fra le linguette, altrimenti quella di casa. Le linguette, i
+  // numeri del palco e gli avvisi parlano di questa.
+  const shownRoom = (follow.roomId !== null ? visibleRooms.find(r => r.id === follow.roomId) : undefined) ?? activeRoom;
+  const shownRoomId = shownRoom?.id ?? null;
+  const selectRoom = (id: number) => {
+    setStoredRoomId(id);
+    writeStorage(ROOM_KEY, String(id));
+    // Un tocco su una linguetta è una scelta: lo schermo va lì e ci resta,
+    // e per due minuti «Segui il servizio» non lo sposta.
+    followController.chooseHome();
+  };
+
+  // Lo schermo portato su un'altra sala (o tornato a casa) da «Segui il
+  // servizio»: la sua linguetta può stare fuori dalla barra (tante sale, un
+  // telefono), e niente a video direbbe quale sala si guarda. La si porta in
+  // vista; un tocco su una linguetta la porta tutta in vista, che non guasta.
+  const tabRefs = useRef(new Map<number, HTMLButtonElement>());
+  useEffect(() => {
+    if (shownRoomId === null) return;
+    const el = tabRefs.current.get(shownRoomId);
+    if (el && typeof el.scrollIntoView === 'function') {
+      el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: reducedMotion ? 'auto' : 'smooth' });
+    }
+  }, [shownRoomId, reducedMotion]);
+
+  // ── Il regista: eventi, condizioni, modello ─────────────────────────────
+
+  // Cresce a ogni evento: i tavoli «in arrivo» degli accompagnamenti e dei
+  // cambi di tavolo si ridisegnano allora (ogni loro cambio arriva con un
+  // evento, anche la fine: 'escort-end', 'moved-end'), mai per fotogramma.
+  const [directorRev, setDirectorRev] = useState(0);
+  const [stripItems, setStripItems] = useState<StripItem[]>([]);
+  const stripIdRef = useRef(0);
+
+  // Gli effetti del regista sono di layout, in quest'ordine: chi ascolta gli
+  // eventi, le condizioni, il modello. Il canvas disegna al fotogramma dopo,
+  // e un effetto passivo non è garantito prima di lui: una comitiva appena
+  // arrivata comparirebbe seduta al tavolo per un fotogramma, prima di
+  // entrare dalla porta.
+  useLayoutEffect(() => director.onEvent(event => {
+    setDirectorRev(n => n + 1);
+    // A scheda nascosta (gli aggiornamenti arrivano lo stesso, già conclusi)
+    // i 90 s della riga non partono: partono quando la si può leggere.
+    const until = document.visibilityState === 'hidden' ? Infinity : performance.now() + STRIP_TTL_MS;
+    const items = stripItemsOf(event, () => ++stripIdRef.current, until);
+    if (items.length > 0) setStripItems(prev => addStripItems(prev, items));
+    if (event.kind === 'escort-end' && !event.seated) {
+      const { partyId } = event;
+      setStripItems(prev => withoutEscort(prev, partyId));
+    }
+    followController.onEvent(event);
+  }), [director, followController]);
+
+  // Le righe che il modello nuovo smentisce se ne vanno: un annullamento non
+  // sempre manda un evento («Arrivato» tolto dopo che si erano seduti, «Tavolo
+  // liberato» tolto mentre uscivano).
+  const partyStates = model?.partyStates;
+  useEffect(() => {
+    if (partyStates) setStripItems(prev => stillTrue(prev, partyStates));
+  }, [partyStates]);
+
+  useLayoutEffect(() => {
+    director.configure({ reducedMotion, slowMode: webgl === 'slow', pinned, activeRoomId: shownRoomId });
+  }, [director, reducedMotion, webgl, pinned, shownRoomId]);
+
+  // Senza vista 3D non girano fotogrammi: quello che era a metà arriva in
+  // fondo subito, o non finirebbe mai (e la ricarica automatica di uno
+  // schermo fissato lo aspetterebbe per sempre).
+  const canvasWasOnRef = useRef(canvasOn);
+  useLayoutEffect(() => {
+    if (canvasWasOnRef.current && !canvasOn) director.fastForward();
+    canvasWasOnRef.current = canvasOn;
+  }, [director, canvasOn]);
+
+  // Il modello nuovo al regista, una volta per commit: qualunque arrivi
+  // prima fra l'eco del socket e la risposta HTTP, il confronto è uno. Va
+  // dritto allo stato finale, senza camminare, quando non c'è ancora una
+  // base (il primo caricamento: chi è seduto è già seduto), quando App ha
+  // appena ricaricato tutto (l'epoca: tre arrivi segnati mentre il tablet era
+  // senza rete non entrano insieme dalla porta), quando nessuno lo vede
+  // (scheda nascosta, niente vista 3D) e col movimento ridotto. Un arrivo
+  // vero dopo un buco del Wi-Fi arriva da un evento socket, senza epoca
+  // nuova, e si anima.
+  const lastEpochRef = useRef<number | null>(null);
+  const lastReadsRef = useRef<number | null>(null);
+  // Il servizio dell'ultimo modello dato al regista: con uno diverso (e col
+  // primo) il regista azzera.
+  const lastServiceRef = useRef<string | null>(null);
+  const settledKey = settled?.key ?? null;
+  const settledReads = settled?.reads ?? 0;
+  useLayoutEffect(() => {
+    if (!model || loading) return;
+    // Alle 17:00 (e alle 05:00) il servizio cambia prima che arrivino le sue
+    // unioni, e per un attimo la sala si disegna con quelle di prima. Il
+    // regista quel modello non lo vede: azzererebbe su una sala sbagliata, e
+    // poi metterebbe in scena come cose successe (un cambio di tavolo, un
+    // accompagnamento) le unioni giuste quando arrivano. Aspetta il primo
+    // modello con le varianti del servizio nuovo, e quello azzera.
+    if (settledKey !== service.key) return;
+    const hiddenNow = document.visibilityState === 'hidden' || !canvasOn;
+    const reason: SnapReason | null =
+      lastEpochRef.current === null ? 'initial'
+      // Una ricarica di App (l'epoca) o una rilettura delle varianti (alla
+      // riconnessione): cambi successi mentre lo schermo non li vedeva.
+      : reservationsEpoch !== lastEpochRef.current || settledReads !== lastReadsRef.current ? 'refetch'
+      : hiddenNow ? 'hidden'
+      : reducedMotion ? 'reduced-motion'
+      : null;
+    lastEpochRef.current = reservationsEpoch;
+    lastReadsRef.current = settledReads;
+    director.update(model, reason);
+    // Un azzeramento (il primo modello, il cambio di servizio delle 17:00 e
+    // delle 05:00) dimentica accompagnamenti e cambi di tavolo senza
+    // raccontarlo: nessun evento, e directorRev non cresce. Ma displayRoom
+    // questo render l'ha calcolata prima dell'update, coi tavoli «in arrivo»
+    // del servizio di prima: senza un giro in più un anello resterebbe
+    // acceso, con nessuno che ci cammina, fino al minuto dopo (il prossimo
+    // modello) o al prossimo evento.
+    if (model.service.key !== lastServiceRef.current) {
+      lastServiceRef.current = model.service.key;
+      setDirectorRev(n => n + 1);
+    }
+  }, [director, model, loading, reservationsEpoch, reducedMotion, canvasOn, settledKey, settledReads, service.key]);
+
+  // A scheda nascosta i fotogrammi si fermano: l'hostess resterebbe a metà
+  // strada. Tornando visibile tutto quello che era in corso arriva in fondo,
+  // e le righe arrivate intanto cominciano i loro 90 s.
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState !== 'visible') return;
+      director.fastForward();
+      const until = performance.now() + STRIP_TTL_MS;
+      setStripItems(prev => revealStripItems(prev, until));
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, [director]);
+
+  // Ogni riga della striscia resta 90 s: un timer solo, sulla prima che
+  // scade. Quelle ancora da leggere (scheda nascosta) non scadono.
+  useEffect(() => {
+    const first = Math.min(...stripItems.map(item => item.until));
+    if (!Number.isFinite(first)) return;
+    const timer = window.setTimeout(() => {
+      // Un decimo di secondo di margine: un timer che scatta un attimo prima
+      // non deve lasciare la riga a video per un altro giro.
+      const cutoff = performance.now() + 100;
+      setStripItems(prev => prev.filter(item => item.until > cutoff));
+    }, Math.max(0, first - performance.now()));
+    return () => window.clearTimeout(timer);
+  }, [stripItems]);
+
+  // La sala data al canvas: i tavoli verso cui l'hostess sta accompagnando
+  // qualcuno restano «in arrivo» con l'anello finché l'ultimo non si siede,
+  // anche se Reception ha già premuto «Arrivato»; e così il tavolo nuovo di
+  // una comitiva che cambia tavolo, finché l'ultimo non ci si siede (prima
+  // diventava «arrivato» mentre la famiglia si alzava ancora dal vecchio).
+  // directorRev fra le dipendenze: gli obiettivi del regista cambiano solo
+  // con un evento, o con un azzeramento (che lo fa crescere l'update qui
+  // sopra).
+  const displayRoom = useMemo(
+    () => (shownRoom ? withArrivalTargets(shownRoom, director.arrivalTargets(shownRoom.id)) : null),
+    [shownRoom, director, directorRev],
+  );
+
+  // L'etichetta che segue la comitiva accompagnata, per prenotazione:
+  // «Tavolo 40 · 4 (2 bambini) + cane», o col nome della comitiva, che il
+  // modello dà solo a nomi accesi. Il canvas la riceve già tradotta.
+  const partyTags = useMemo(() => {
+    const tags = new Map<number, string>();
+    if (!shownRoom || !i18nReady) return tags;
+    const tableNames = new Map(shownRoom.tables.map(table => [table.id, table.name]));
+    for (const party of shownRoom.parties) {
+      const tableName = party.tableId === null ? undefined : tableNames.get(party.tableId);
+      if (tableName === undefined) continue;
+      tags.set(party.id, t('strip.party', {
+        name: party.name ?? t('strip.anonymous', { table: tableName }),
+        people: peopleText(t, party),
+      }));
+    }
+    return tags;
+  }, [shownRoom, t, i18nReady]);
+
+  const stripLines = useMemo<ActivityLine[]>(
+    () => (i18nReady ? stripItems.map(item => stripLine(item, showNames, t)) : []),
+    [stripItems, showNames, t, i18nReady],
+  );
+
   // A schermo fissato nessuno preme «Ricarica» sul banner della versione: a
   // ogni minuto, se il sito pubblicato è più nuovo, la pagina si ricarica da
   // sola. Una volta per versione (salaVivo.reloadedFor): se il deploy viene
@@ -458,11 +987,14 @@ const SalaVivoPage: React.FC<SalaVivoPageProps> = ({
     if (!pinned || !remoteVersion || remoteVersion === currentVersion) return;
     if (remoteVersion === 'dev' || currentVersion === 'dev') return;
     if (readStorage(RELOADED_FOR_KEY) === remoteVersion) return;
+    // Mai a metà di un accompagnamento: la ricarica lo taglierebbe sotto gli
+    // occhi di chi entra. Si riguarda al minuto dopo (nowMs).
+    if (director.isAnimating()) return;
     // Senza la traccia salvata un ritiro del deploy farebbe ricaricare in
     // loop: meglio restare sulla versione vecchia.
     if (!writeStorage(RELOADED_FOR_KEY, remoteVersion)) return;
     reload();
-  }, [pinned, remoteVersion, currentVersion, reload, nowMs]);
+  }, [pinned, remoteVersion, currentVersion, reload, nowMs, director]);
 
   // ── Avvisi ──────────────────────────────────────────────────────────────
   const canEditHere = canEditFloor && !pinned;
@@ -472,10 +1004,12 @@ const SalaVivoPage: React.FC<SalaVivoPageProps> = ({
   if (webgl === 'none') callouts.push({ id: 'noWebgl', tone: 'critical', icon: MonitorOff, text: t('noWebgl') });
   // Gli avvisi sulla sala solo a chi la può sistemare, come quello delle
   // sovrapposizioni in Sale & Tavoli, e mai a schermo fissato: lo legge chi
-  // aspetta all'ingresso.
-  if (canEditHere && activeRoom) {
-    const { audit } = activeRoom;
-    const openRoom = () => onOpenFloorPlan({ roomId: activeRoom.id });
+  // aspetta all'ingresso. Della sala a video, anche quando l'ha portata lì
+  // «Segui il servizio».
+  if (canEditHere && shownRoom) {
+    const { audit } = shownRoom;
+    const roomId = shownRoom.id;
+    const openRoom = () => onOpenFloorPlan({ roomId });
     if (audit.unset) {
       callouts.push({ id: 'layoutUnset', tone: 'pending', icon: Grid, text: t('layoutUnset'), action: { label: t('arrangeTables'), onClick: openRoom } });
     } else if (audit.overlaps.length > 0) {
@@ -507,13 +1041,6 @@ const SalaVivoPage: React.FC<SalaVivoPageProps> = ({
     () => new Set((Array.isArray(rooms) ? rooms : []).filter(r => r?.is_closed === true).map(r => r.id)),
     [rooms],
   );
-
-  // Durante il primo caricamento di App il modello c'è già, ma calcolato su
-  // liste ancora vuote: niente numeri né «Centra» finché i dati non arrivano,
-  // o la testata direbbe «0 a tavola» per un attimo e il bottone non
-  // avrebbe una scena da centrare.
-  const loading = isInitialLoading || model === null;
-  const canvasOn = !loading && (webgl === 'ok' || webgl === 'slow') && !contextLost && activeRoom !== null;
 
   // Il dizionario della pagina arriva a richiesta: prima, le chiavi grezze.
   if (!i18nReady) return <Loader label={null} className="h-full" />;
@@ -556,6 +1083,23 @@ const SalaVivoPage: React.FC<SalaVivoPageProps> = ({
                   aria-label={t('recenter')}
                 >
                   <LocateFixed className="h-5 w-5" aria-hidden />
+                </button>
+              )}
+              {/* «Segui il servizio», un interruttore come i nomi, accanto a
+                  «Centra» perché anche lui decide che cosa si inquadra. Resta
+                  a schermo fissato, dove è acceso di default: non mostra
+                  niente di privato, ed è il modo di fermare il giro delle
+                  sale su una TV. */}
+              {canvasOn && (
+                <button
+                  type="button"
+                  onClick={toggleFollow}
+                  aria-pressed={followOn}
+                  className={followOn ? ICON_BUTTON_ON : dsIconButton}
+                  title={followOn ? t('unfollow') : t('follow')}
+                  aria-label={t('follow')}
+                >
+                  <Footprints className="h-5 w-5" aria-hidden />
                 </button>
               )}
               {/* «Nomi degli ospiti», un interruttore come la puntina: il nome
@@ -605,7 +1149,7 @@ const SalaVivoPage: React.FC<SalaVivoPageProps> = ({
             {/* L'orologio non svanisce con i bottoni: su una TV è quello che
                 dice che la sala è viva. Pastiglia da md, pallino sotto; la
                 pastiglia porta inline-flex, quindi si nasconde con max-md:. */}
-            <LivePill connected={isConnected} time={currentTime} routes={linkRoutes} routesClassName="max-lg:hidden" className="max-md:hidden" />
+            <LivePill connected={isConnected} time={currentTime} timeZone={sessionTimeZone()} routes={linkRoutes} routesClassName="max-lg:hidden" className="max-md:hidden" />
             <LivePill connected={isConnected} time={currentTime} variant="dot" className="mx-1 md:hidden" />
           </div>
         </div>
@@ -613,7 +1157,7 @@ const SalaVivoPage: React.FC<SalaVivoPageProps> = ({
 
       {loading ? (
         <Loader className="min-h-0 flex-1" />
-      ) : visibleRooms.length === 0 || activeRoom === null ? (
+      ) : visibleRooms.length === 0 || shownRoom === null ? (
         <EmptyState
           icon={Cuboid}
           action={canEditHere ? (
@@ -631,7 +1175,9 @@ const SalaVivoPage: React.FC<SalaVivoPageProps> = ({
           <div className="flex-shrink-0 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)]">
             <div className="-m-1 flex items-center gap-2 overflow-x-auto p-1 scrollbar-hide">
               {visibleRooms.map(room => {
-                const active = room.id === activeRoom.id;
+                // Premuta la sala a video: quella scelta, o quella dove
+                // «Segui il servizio» ha portato lo schermo.
+                const active = room.id === shownRoom.id;
                 const closedLabel = !room.closed
                   ? null
                   : closedIndefinitely.has(room.id)
@@ -640,6 +1186,10 @@ const SalaVivoPage: React.FC<SalaVivoPageProps> = ({
                 return (
                   <button
                     key={room.id}
+                    ref={el => {
+                      if (el) tabRefs.current.set(room.id, el);
+                      else tabRefs.current.delete(room.id);
+                    }}
                     type="button"
                     onClick={() => selectRoom(room.id)}
                     aria-pressed={active}
@@ -680,7 +1230,7 @@ const SalaVivoPage: React.FC<SalaVivoPageProps> = ({
           ))}
 
           <div className="relative min-h-0 flex-1 overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-canvas)]">
-            {/* La sala per chi non la vede: i numeri della sala scelta, in
+            {/* La sala per chi non la vede: i numeri della sala a video, in
                 un'immagine vuota ACCANTO al canvas. Un role="img" toglie allo
                 screen reader tutto quello che contiene: il «Preparo la vista
                 3D…» del caricamento, il velo e i loro bottoni stanno fuori. Il
@@ -688,22 +1238,25 @@ const SalaVivoPage: React.FC<SalaVivoPageProps> = ({
                 aspetta all'ingresso, come nel riassunto, solo se c'è. */}
             <div
               role="img"
-              aria-label={activeRoom.summary.lobby > 0
+              aria-label={shownRoom.summary.lobby > 0
                 ? t('stageLabelLobby', {
-                    room: activeRoom.name,
-                    seated: activeRoom.summary.seated,
-                    arriving: activeRoom.summary.arriving,
-                    lobby: activeRoom.summary.lobby,
+                    room: shownRoom.name,
+                    seated: shownRoom.summary.seated,
+                    arriving: shownRoom.summary.arriving,
+                    lobby: shownRoom.summary.lobby,
                   })
-                : t('stageLabel', { room: activeRoom.name, seated: activeRoom.summary.seated, arriving: activeRoom.summary.arriving })}
+                : t('stageLabel', { room: shownRoom.name, seated: shownRoom.summary.seated, arriving: shownRoom.summary.arriving })}
               className="sr-only"
             />
             {canvasOn && (
-              <div className="absolute inset-0">
+              <div className={follow.dipped ? STAGE_DIPPED : STAGE_SHOWN}>
                 <SceneBoundary key={canvasKey} onCrash={handleContextLost}>
                   <React.Suspense fallback={<Loader label={t('loading3d')} className="h-full" />}>
                     <SalaVivoCanvas
-                      room={activeRoom}
+                      room={displayRoom ?? shownRoom}
+                      director={director}
+                      partyTags={partyTags}
+                      onUserCamera={followController.pause}
                       reducedMotion={reducedMotion}
                       slowMode={webgl === 'slow'}
                       debug={debug}
@@ -736,18 +1289,24 @@ const SalaVivoPage: React.FC<SalaVivoPageProps> = ({
 
             {/* Pavimento e segnaposto si disegnano lo stesso: l'avviso sta
                 in alto e lascia vedere la sala vuota. */}
-            {activeRoom.tables.length === 0 && !contextLost && (
+            {shownRoom.tables.length === 0 && !contextLost && (
               <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-center p-3">
                 <div className="pointer-events-auto flex items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-4 py-3 shadow-[var(--ds-shadow-card)]">
                   <p className="text-[14px] text-[var(--ds-text-muted)]">{t('noTables')}</p>
                   {canEditHere && (
-                    <button type="button" onClick={() => onOpenFloorPlan({ roomId: activeRoom.id })} className={dsButton.quiet}>
+                    <button type="button" onClick={() => onOpenFloorPlan({ roomId: shownRoom.id })} className={dsButton.quiet}>
                       {t('openFloorPlan')}
                     </button>
                   )}
                 </div>
               </div>
             )}
+
+            {/* Le ultime cose successe, in basso a sinistra sopra la sala:
+                solo con la vista 3D, che è dove si vedono succedere. Senza,
+                ogni cambio arriva già concluso e la striscia direbbe soltanto
+                «1 tavolo aggiornato». */}
+            {canvasOn && <ActivityStrip lines={stripLines} label={t('strip.title')} />}
           </div>
         </>
       )}
