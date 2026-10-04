@@ -1,18 +1,20 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
 import type * as THREE from 'three';
-import type { FigureSlot, RoomModel, SalaVivoCanvasProps, TableModel } from './types';
+import type { FigureSlot, RoomModel, SalaVivoCanvasProps, SceneDirectorApi, TableModel } from './types';
 import { CameraRig } from './scene/CameraRig';
 import { DebugStats } from './scene/DebugStats';
 import { Fixtures } from './scene/Fixtures';
-import { createFrameDemand, type FrameDemand } from './scene/frameDemand';
+import { createFrameDemand, motionWakeAtFrom, type FrameDemand } from './scene/frameDemand';
 import { FrameThrottle } from './scene/FrameThrottle';
+import { NameTag } from './scene/NameTag';
 import { People } from './scene/People';
 import { PulseRings } from './scene/PulseRings';
 import { RoomShell } from './scene/RoomShell';
 import { Signs } from './scene/Signs';
 import { TableLabels, type LabelBadge } from './scene/TableLabels';
 import { TablesLayer } from './scene/TablesLayer';
+import { Walkers } from './scene/Walkers';
 import {
   AMBIENT_INTENSITY,
   createBlobShadow,
@@ -40,6 +42,14 @@ import {
  *   e dopo il declassamento automatico.
  * - Mai failIfMajorPerformanceCaveat qui: un dispositivo lento deve
  *   disegnare lo stesso, piano.
+ *
+ * Da PR3 il canvas fa anche andare avanti il regista della scena
+ * (props.director, creato e aggiornato dalla pagina): Walkers ne chiama il
+ * passo all'inizio di ogni frame e ne disegna gli attori, People salta chi è
+ * in mano a lui, NameTag sposta l'etichetta della comitiva accompagnata. Il
+ * regista dice quanti frame servono (frameNeed, wakeInMs): dopo ogni suo
+ * update il canvas lo rilegge e si risveglia, e quando i frame non tengono il
+ * passo gli chiede la modalità leggera, senza camerieri.
  */
 
 const DPR_RANGE: [number, number] = [1, 1.5];
@@ -51,13 +61,32 @@ const CAMERA = { fov: 35, near: 0.1, far: 500, position: [0, 12, 10] as [number,
 const GL_DEFAULT = { antialias: true };
 const GL_SLOW = { antialias: false };
 
-export default function SalaVivoCanvas({ room, reducedMotion, slowMode, debug, recenterSignal, onContextLost }: SalaVivoCanvasProps) {
+export default function SalaVivoCanvas({
+  room,
+  director,
+  partyTags,
+  onUserCamera,
+  reducedMotion,
+  slowMode,
+  debug,
+  recenterSignal,
+  onContextLost,
+}: SalaVivoCanvasProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
+  const tagRef = useRef<HTMLDivElement>(null);
   const [demand] = useState(createFrameDemand);
   // Il declassamento passa dalla prop `dpr`: R3F la riapplica a ogni render
   // del Canvas, e un setDpr(1) da solo tornerebbe a 1,5 al minuto dopo.
   const [dprCapped, setDprCapped] = useState(false);
   const onSlowFrames = useCallback(() => setDprCapped(true), []);
+
+  // La modalità leggera vale finché il canvas resta montato: uno nuovo («Riavvia
+  // la vista», il ritorno sulla pagina) riparte coi camerieri, e se il
+  // dispositivo arranca ancora la richiede di nuovo dopo 10 s.
+  useEffect(() => {
+    director?.configure({ lightMode: false });
+  }, [director]);
+  const onLightMode = useCallback(() => director?.configure({ lightMode: true }), [director]);
 
   // aria-hidden: per lo screen reader la sala è l'immagine con i numeri che
   // la pagina mette accanto; qui non c'è niente da leggere né da raggiungere.
@@ -66,6 +95,9 @@ export default function SalaVivoCanvas({ room, reducedMotion, slowMode, debug, r
       <Canvas frameloop="demand" flat dpr={slowMode || dprCapped ? 1 : DPR_RANGE} camera={CAMERA} gl={slowMode ? GL_SLOW : GL_DEFAULT}>
         <Scene
           room={room}
+          director={director}
+          partyTags={partyTags}
+          onUserCamera={onUserCamera}
           reducedMotion={reducedMotion}
           slowMode={slowMode}
           debug={debug}
@@ -73,9 +105,18 @@ export default function SalaVivoCanvas({ room, reducedMotion, slowMode, debug, r
           onContextLost={onContextLost}
           demand={demand}
           overlayRef={overlayRef}
+          tagRef={tagRef}
           onSlowFrames={onSlowFrames}
+          onLightMode={onLightMode}
         />
       </Canvas>
+      {/* L'etichetta della comitiva accompagnata: la sposta NameTag, via ref,
+          a ogni frame; nasce nascosta. */}
+      <div
+        ref={tagRef}
+        aria-hidden="true"
+        className="pointer-events-none absolute left-0 top-0 max-w-[18rem] truncate rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-2.5 py-1 text-[13px] font-medium text-[var(--ds-text-primary)] opacity-0 shadow-[var(--ds-shadow-card)]"
+      />
       {debug && (
         <div
           ref={overlayRef}
@@ -89,6 +130,9 @@ export default function SalaVivoCanvas({ room, reducedMotion, slowMode, debug, r
 
 interface SceneProps {
   room: RoomModel;
+  director: SceneDirectorApi;
+  partyTags: ReadonlyMap<number, string>;
+  onUserCamera: () => void;
   reducedMotion: boolean;
   slowMode: boolean;
   debug: boolean;
@@ -96,18 +140,39 @@ interface SceneProps {
   onContextLost: () => void;
   demand: FrameDemand;
   overlayRef: RefObject<HTMLDivElement | null>;
+  tagRef: RefObject<HTMLDivElement | null>;
   onSlowFrames: () => void;
+  onLightMode: () => void;
 }
 
-function Scene({ room, reducedMotion, slowMode, debug, recenterSignal, onContextLost, demand, overlayRef, onSlowFrames }: SceneProps) {
+function Scene({
+  room,
+  director,
+  partyTags,
+  onUserCamera,
+  reducedMotion,
+  slowMode,
+  debug,
+  recenterSignal,
+  onContextLost,
+  demand,
+  overlayRef,
+  tagRef,
+  onSlowFrames,
+  onLightMode,
+}: SceneProps) {
   const { palette, version } = useScenePalette();
   const shadow = useBlobShadowMaterial(palette, version);
   useSceneBackground(palette);
   useContextLoss(onContextLost);
+  useDirectorDemand(director, demand);
   const seats = useMemo(() => seatsOf(room.tables), [room.tables]);
   const seated = useMemo(() => tablesWithPeople(room.figures), [room.figures]);
   const badge = useMemo(() => lobbyBadgeOf(room.figures, room.summary?.lobby), [room.figures, room.summary?.lobby]);
 
+  // L'ordine conta per i useFrame a pari priorità: girano nell'ordine in cui
+  // si montano. Walkers ha la sua (−1, il passo del regista prima di tutto);
+  // NameTag sta dopo CameraRig, così proietta con la camera di questo frame.
   return (
     <>
       <ambientLight intensity={AMBIENT_INTENSITY} />
@@ -116,14 +181,41 @@ function Scene({ room, reducedMotion, slowMode, debug, recenterSignal, onContext
       <Fixtures room={room} palette={palette} shadow={shadow} />
       <TablesLayer tables={room.tables} palette={palette} themeVersion={version} shadow={shadow} />
       <Signs tables={room.tables} palette={palette} themeVersion={version} />
-      <People figures={room.figures} seats={seats} palette={palette} themeVersion={version} shadow={shadow} />
+      <People figures={room.figures} seats={seats} palette={palette} themeVersion={version} shadow={shadow} director={director} roomId={room.id} />
+      <Walkers director={director} roomId={room.id} palette={palette} themeVersion={version} shadow={shadow} demand={demand} />
       <TableLabels tables={room.tables} seated={seated} badge={badge} palette={palette} themeVersion={version} />
       <PulseRings tables={room.tables} palette={palette} reducedMotion={reducedMotion} demand={demand} />
-      <CameraRig room={room} reducedMotion={reducedMotion} recenterSignal={recenterSignal} demand={demand} />
-      <FrameThrottle demand={demand} slowMode={slowMode} onSlowFrames={onSlowFrames} />
+      <CameraRig room={room} reducedMotion={reducedMotion} recenterSignal={recenterSignal} demand={demand} onUserCamera={onUserCamera} />
+      <NameTag director={director} roomId={room.id} partyTags={partyTags} targetRef={tagRef} reducedMotion={reducedMotion} />
+      <FrameThrottle demand={demand} slowMode={slowMode} onSlowFrames={onSlowFrames} onLightMode={onLightMode} />
       {debug && <DebugStats targetRef={overlayRef} slowMode={slowMode} />}
     </>
   );
+}
+
+/** Quanti frame chiede il regista, riletto dopo ogni suo update, fastForward
+ *  e configure (subscribe: durante il passo non avvisa, lì lo rilegge
+ *  Walkers), e una volta subito: la pagina può averlo aggiornato prima che il
+ *  canvas arrivasse. Poi un frame, che fa il passo e disegna il cambio: un
+ *  arrivo che parte, un'uscita, un tavolo che torna «arrivato». */
+function useDirectorDemand(director: SceneDirectorApi | null | undefined, demand: FrameDemand): void {
+  const invalidate = useThree((s) => s.invalidate);
+  useEffect(() => {
+    if (!director) return;
+    const refresh = () => {
+      try {
+        demand.motion = director.frameNeed();
+        demand.motionWakeAt = motionWakeAtFrom(director.wakeInMs(), performance.now());
+      } catch {
+        demand.motion = 'none';
+        demand.motionWakeAt = Infinity;
+      }
+      demand.wake();
+      invalidate();
+    };
+    refresh();
+    return director.subscribe(refresh);
+  }, [director, demand, invalidate]);
 }
 
 /** I posti della sala, Σ chairs.length: la capienza di partenza delle
