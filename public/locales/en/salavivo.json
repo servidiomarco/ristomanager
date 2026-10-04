@@ -11,12 +11,16 @@
   "loadError": "Status unavailable",
   "title": "Live floor",
   "summary": "{{seated}} seated · {{arriving}} arriving",
+  "summaryLobby": "{{count}} at the entrance",
   "stageLabel": "{{room}}: {{seated}} seated, {{arriving}} arriving",
+  "stageLabelLobby": "{{room}}: {{seated}} seated, {{arriving}} arriving, {{lobby}} at the entrance",
   "roomClosed": "{{room}} (closed for this service)",
   "roomClosedIndefinitely": "{{room}} (closed)",
   "roomTab_one": "{{room}}, {{count}} guest seated",
   "roomTab_other": "{{room}}, {{count}} guests seated",
   "recenter": "Recenter",
+  "showNames": "Guest names",
+  "hideNames": "Hide guest names",
   "fullscreen": "Full screen",
   "exitFullscreen": "Exit full screen",
   "pin": "Pin to this screen",
@@ -36,5 +40,7 @@
   "contextLost": "The 3D view stopped.",
   "restart3d": "Restart the view",
   "noTables": "No tables in this room.",
-  "noRooms": "No room open this service."
+  "noRooms": "No room open this service.",
+  "reserved": "Reserved · {{time}}",
+  "event": "Event"
 }
