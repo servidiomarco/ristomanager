@@ -457,6 +457,7 @@ Per i ristoranti con cassa **Passepartout Menù** (modulo dedicato):
 **Inbox unificata**
 - Conversazioni WhatsApp e SMS in un'unica vista a due pannelli, raggruppate per numero — **lo stesso thread qualunque sia la forma del numero** (con o senza +39, anche per i cellulari storici a 9 cifre): la risposta del cliente finisce nella sua chat, mai in una conversazione nuova; filtri Tutti / Da rispondere / Prenotazioni; allegati (foto, documenti); letto/non letto.
 - **Risposta manuale o suggerita dall'AI**: il suggerimento si legge, si corregge e si invia con un tocco — l'AI non invia mai nulla da sola, e sa dire "non lo so" invece di inventare.
+- **L'AI conosce la scheda del cliente in rubrica**: nome, tavolo preferito con la sua sala e preferenze annotate. A chi chiede «il mio solito tavolo» risponde nominandolo, senza chiedergli quale sia e senza garantirlo. Le note alimentari restano fuori: su allergie e intolleranze l'AI passa sempre a una persona.
 - **Crea prenotazione dalla conversazione** (con collegamento bidirezionale conversazione↔prenotazione) e badge dello stato prenotazione nel thread.
 - **Gli invii automatici non entrano in Messaggi**: la richiesta di recensione post-visita non compare né in lista né in chat, perché non è uno scambio e riempirebbe l'inbox ogni sera. Resta però tracciata dove serve — nello storico messaggi della prenotazione e nello stato della richiesta. Le conferme, invece, restano visibili: sono la traccia di «al cliente è arrivata la conferma?».
 
@@ -601,7 +602,7 @@ Tutte le funzioni AI girano sul server (nessuna chiave nel browser) e seguono un
 |---|---|
 | Agente vocale Sofia | Risponde al telefono e prenota (unica AI che scrive, sempre con revisione dello staff) |
 | Agente WhatsApp | Interpreta i messaggi dei clienti e propone crea/modifica/cancella prenotazione da confermare con un tocco |
-| Risposte suggerite | Propone la risposta a un messaggio, basandosi sulla conversazione, sulla prenotazione collegata e sulle **regole della casa** scritte dal ristoratore (base di conoscenza) |
+| Risposte suggerite | Propone la risposta a un messaggio, basandosi sulla conversazione, sulla prenotazione collegata, sulla scheda del cliente in rubrica e sulle **regole della casa** scritte dal ristoratore (base di conoscenza) |
 | Suggerimento tavoli | Propone l'assegnazione o l'unione tavoli per le prenotazioni senza tavolo, secondo un prompt scritto dal ristoratore |
 | Traduzioni menu | Traduce il menu in inglese, francese e tedesco |
 | Abbinamenti vino | Propone i vini della carta da abbinare ai piatti (in scheda o su tutta la carta); il ristoratore cura e salva |
@@ -723,6 +724,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-03 | Messaggi: WhatsApp e SMS | L'AI dei Messaggi conosce la scheda del cliente in rubrica: a chi chiede il suo tavolo preferito risponde nominandolo, invece di chiedergli quale sia. |
 | 2026-10-03 | Messaggi: WhatsApp e SMS | Nella proposta dell'agente WhatsApp le date si leggono all'europea («Modifica prenotazione del 05/10/2026: data → 07/10/2026»), anche nelle proposte già in attesa. |
 | 2026-10-03 | Aiuto e supporto | Mentre «Chiedi a Sympotia» cerca la risposta, una nuova animazione dice a che punto è («Cerco nei manuali…», «Leggo le istruzioni…», «Preparo la risposta…») e la risposta compare nello stesso punto. |
 | 2026-10-03 | Aiuto e supporto | In fondo alla vista Aiuto ci sono le «Novità» dell'app, con quelle nuove segnate. Le richieste risolte si possono valutare (bene / non bene) con un commento. |

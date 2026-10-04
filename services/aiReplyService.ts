@@ -17,6 +17,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { describeDepositPolicy, type DepositPolicy } from './depositPolicy.js';
+import { describeCustomerForAi, CUSTOMER_PREFERENCE_RULES, type AiCustomerProfile } from './aiCustomerContext.js';
 
 
 const MODEL = 'claude-opus-5';
@@ -39,9 +40,12 @@ export interface AiReplyContext {
         reservation_time?: Date | string | null;
         guests?: number | null;
         room_name?: string | null;
+        table_name?: string | null;
         notes?: string | null;
         status?: string | null;
     } | null;
+    /** La scheda in rubrica di questo numero (null se non c'è). */
+    customer?: AiCustomerProfile | null;
     /** Regole della casa attive, in ordine. */
     knowledge: Array<{ title: string; content: string }>;
     /** Nome del ristorante per la firma. */
@@ -89,6 +93,7 @@ function buildSystem(ctx: AiReplyContext): string {
             `- Quando: ${fmtDate(ctx.reservation.reservation_time, tz) || 'n/d'}`,
             `- Persone: ${ctx.reservation.guests ?? 'n/d'}`,
             ctx.reservation.room_name ? `- Sala: ${ctx.reservation.room_name}` : '',
+            ctx.reservation.table_name ? `- Tavolo: ${ctx.reservation.table_name}` : '',
             ctx.reservation.status ? `- Stato: ${ctx.reservation.status}` : '',
             ctx.reservation.notes ? `- Note: ${ctx.reservation.notes}` : '',
         ].filter(Boolean).join('\n')
@@ -108,6 +113,12 @@ ${caparra}
 PRENOTAZIONE COLLEGATA A QUESTO NUMERO:
 ${pren}
 
+SCHEDA IN RUBRICA DI QUESTO NUMERO:
+${describeCustomerForAi(ctx.customer)}
+
+TAVOLO PREFERITO:
+${CUSTOMER_PREFERENCE_RULES}
+
 COMPITO: ti verrà data la conversazione; scrivi la prossima risposta del RISTORANTE all'ultimo messaggio del cliente.
 
 COME SCRIVERE:
@@ -116,7 +127,7 @@ COME SCRIVERE:
 - Vai dritto al punto: il cliente sta guardando il telefono, non legge paragrafi.
 
 COSA NON FARE MAI:
-- Non inventare orari, prezzi, disponibilità di tavoli o regole che non siano nelle REGOLE DELLA CASA o nella PRENOTAZIONE qui sopra.
+- Non inventare orari, prezzi, disponibilità di tavoli o regole che non siano nelle REGOLE DELLA CASA, nella PRENOTAZIONE o nella SCHEDA IN RUBRICA qui sopra.
 - Non confermare la disponibilità di un tavolo, di una data o di un orario: quella la verifica una persona.
 - Non dare informazioni su allergeni, ingredienti o idoneità di un piatto per allergie o intolleranze.
 - Non promettere nulla che non sia già scritto sopra.
