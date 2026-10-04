@@ -14,6 +14,16 @@ import type { ServiceOverrides } from '../types';
 export interface OverridesSnapshot extends ServiceOverrides {
   /** `${date}:${shift}`. */
   key: string;
+  /** Quante letture complete del servizio sono arrivate (applyFetch; gli
+   *  eventi socket no). Una rilettura è un riallineamento, come l'epoca
+   *  delle prenotazioni: alla riconnessione la pagina la mette in scena già
+   *  conclusa invece di animare le unioni fatte mentre era senza rete. */
+  reads: number;
+}
+
+/** Quello che l'hook restituisce: le varianti, e quante letture complete. */
+export interface ReadOverrides extends ServiceOverrides {
+  reads: number;
 }
 
 const EMPTY_MERGES: TableMerge[] = [];
@@ -29,18 +39,20 @@ export const emptyOverrides = (key: string): OverridesSnapshot => ({
   hiddenTableIds: EMPTY_IDS,
   closedRoomIds: EMPTY_IDS,
   ready: false,
+  reads: 0,
 });
 
 /** Quello che l'hook restituisce per il servizio `key`: la foto solo se è di
  *  quel servizio. Nel render in cui il servizio cambia la foto è ancora del
  *  precedente, e le sue unioni non devono comparire nemmeno per un attimo. */
-export function overridesFor(snap: OverridesSnapshot, key: string): ServiceOverrides {
+export function overridesFor(snap: OverridesSnapshot, key: string): ReadOverrides {
   const current = snap.key === key ? snap : emptyOverrides(key);
   return {
     merges: current.merges,
     hiddenTableIds: current.hiddenTableIds,
     closedRoomIds: current.closedRoomIds,
     ready: current.ready,
+    reads: current.reads,
   };
 }
 
@@ -129,6 +141,7 @@ export function applyFetch(prev: OverridesSnapshot, key: string, fetched: Overri
     hiddenTableIds: sameIds(nextHidden, base.hiddenTableIds) ? base.hiddenTableIds : nextHidden,
     closedRoomIds: sameIds(nextClosed, base.closedRoomIds) ? base.closedRoomIds : nextClosed,
     ready: true,
+    reads: base.reads + 1,
   };
 }
 
@@ -208,10 +221,12 @@ export function applyEvent(prev: OverridesSnapshot, key: string, update: Overrid
   return prev.key === key ? update(prev) : prev;
 }
 
-/** Le varianti con cui la pagina disegna, e il servizio a cui appartengono. */
+/** Le varianti con cui la pagina disegna, il servizio a cui appartengono, e
+ *  la lettura completa da cui vengono. */
 export interface SettledOverrides {
   key: string;
   value: Omit<ServiceOverrides, 'ready'>;
+  reads: number;
 }
 
 /** Il prossimo valore con cui la pagina disegna, o null per tenere quello che
@@ -223,16 +238,27 @@ export interface SettledOverrides {
  * servizio nuovo non arrivano: la sala resta disegnata invece di tornare al
  * caricamento. Le stesse istanze già disegnate sotto una chiave nuova vogliono
  * dire «ancora le varianti di prima» (l'hook le azzera subito dopo), e si
- * aspetta: se sono le istanze vuote di sempre, le due sale si disegnano
- * uguali e aspettare non cambia niente. */
-export function nextSettled(last: SettledOverrides | null, key: string, overrides: ServiceOverrides): SettledOverrides | null {
+ * aspetta. Tranne le istanze vuote di sempre: un servizio letto senza
+ * varianti, uguale a quello di prima. Lì non c'è niente da aspettare, e la
+ * chiave passa a quella nuova con lo stesso valore (il modello non si
+ * ricalcola): la pagina dà il modello al regista solo quando la chiave è
+ * quella del servizio, e senza questo aspetterebbe per sempre. */
+export function nextSettled(
+  last: SettledOverrides | null,
+  key: string,
+  overrides: ServiceOverrides & { reads?: number },
+): SettledOverrides | null {
   if (!overrides.ready) return null;
   const { merges, hiddenTableIds, closedRoomIds } = overrides;
+  const reads = typeof overrides.reads === 'number' && Number.isFinite(overrides.reads) ? overrides.reads : 0;
   if (
     last !== null && last.key !== key
     && last.value.merges === merges
     && last.value.hiddenTableIds === hiddenTableIds
     && last.value.closedRoomIds === closedRoomIds
-  ) return null;
-  return { key, value: { merges, hiddenTableIds, closedRoomIds } };
+  ) {
+    const empty = merges === EMPTY_MERGES && hiddenTableIds === EMPTY_IDS && closedRoomIds === EMPTY_IDS;
+    return empty ? { key, value: last.value, reads } : null;
+  }
+  return { key, value: { merges, hiddenTableIds, closedRoomIds }, reads };
 }

@@ -1,6 +1,6 @@
 import { TableShape, type Table } from '../../../types';
 import { GLYPH, getChairSlots, getGlyphDimensions } from '../../../utils/tableGeometry';
-import type { ChairModel, TableShape3D, Vec2 } from '../types';
+import type { ChairModel, MarkerModel, TableShape3D, Vec2 } from '../types';
 
 /* Dalla piantina al mondo 3D: px della tela della sala → metri.
  *
@@ -247,4 +247,76 @@ export function placeTable(table: Table, seats: number, lit: readonly number[]):
     depth: body.depth,
     chairs,
   };
+}
+
+/* ── La porta nel muro ─────────────────────────────────────────────────────
+ * Stava in scene/RoomShell.tsx, che la disegna; da PR3 sta qui, uguale,
+ * perché la porta che la scena disegna e il varco da cui gli ospiti entrano
+ * ed escono camminando (model/navGrid.ts) devono essere un calcolo solo: due
+ * copie prima o poi si separano, e la gente uscirebbe attraverso lo zoccolo.
+ * RoomShell la importa da qui e la riesporta, così Fixtures non cambia. */
+
+/** Lo spessore dello zoccolo, 5 cm, tutto dentro il pavimento: la porta sul
+ *  muro sta sulla sua mezzeria. */
+export const SKIRT_THICKNESS = 0.05;
+/** Un ingresso entro un metro dal bordo VERO del pavimento è una porta in
+ *  quel muro. Il metro è quello con cui il modello aggancia `inward`, ma il
+ *  modello misura i bordi basso e destro togliendo il pavimento che la sala
+ *  aggiunge oltre un segnaposto (chip, etichetta e margine: 2,4 m sotto, 2 m
+ *  a destra), e qui no, di proposito: un ingresso posato in fondo alla
+ *  piantina guarda dritto dentro ma resta al suo posto. Spostato nel muro
+ *  finirebbe 2,4 m più in là, fuori dall'inquadratura, che prende il
+ *  contenuto attorno ai segnaposto e non il pavimento intero (provato:
+ *  la porta spariva sotto il bordo del palco). */
+export const DOOR_SNAP = 1;
+/** Il varco nello zoccolo, poco più largo del telaio (1,16 m). */
+export const DOOR_GAP = 1.2;
+
+export type WallEdge = 'far' | 'near' | 'left' | 'right';
+
+export interface DoorOnWall {
+  /** Il centro della porta, sulla mezzeria dello zoccolo. */
+  x: number;
+  z: number;
+  /** rotation.y del telaio: +Z locale verso la sala. */
+  yaw: number;
+  edge: WallEdge;
+  /** La coordinata lungo il bordo (x per far/near, z per left/right). */
+  along: number;
+}
+
+/** L'ingresso, se sta sul muro: il bordo più vicino entro DOOR_SNAP. Lì la
+ *  porta si disegna NEL muro (sul filo dello zoccolo, che lì si apre), così
+ *  si legge come una porta e non come un telaio in mezzo alla stanza. Più
+ *  lontano dai bordi (un ingresso disegnato al centro, o posato in fondo
+ *  alla piantina: vedi DOOR_SNAP) resta dov'è, girato verso la sala. */
+export function doorOnWall(marker: MarkerModel | null | undefined, floor: { width: number; depth: number }): DoorOnWall | null {
+  const x = marker?.pos?.x;
+  const z = marker?.pos?.z;
+  if (typeof x !== 'number' || typeof z !== 'number' || !Number.isFinite(x) || !Number.isFinite(z)) return null;
+  const { width: W, depth: D } = floor;
+  const candidates: Array<{ edge: WallEdge; dist: number }> = [
+    { edge: 'near', dist: D - z },
+    { edge: 'far', dist: z },
+    { edge: 'left', dist: x },
+    { edge: 'right', dist: W - x },
+  ];
+  let best = candidates[0];
+  for (const c of candidates) if (c.dist < best.dist) best = c;
+  if (!(best.dist <= DOOR_SNAP)) return null;
+
+  const half = DOOR_GAP / 2;
+  const alongX = Math.min(Math.max(x, half), Math.max(half, W - half));
+  const alongZ = Math.min(Math.max(z, half), Math.max(half, D - half));
+  const mid = SKIRT_THICKNESS / 2;
+  switch (best.edge) {
+    case 'near':
+      return { x: alongX, z: D - mid, yaw: Math.PI, edge: 'near', along: alongX };
+    case 'far':
+      return { x: alongX, z: mid, yaw: 0, edge: 'far', along: alongX };
+    case 'left':
+      return { x: mid, z: alongZ, yaw: Math.PI / 2, edge: 'left', along: alongZ };
+    default:
+      return { x: W - mid, z: alongZ, yaw: -Math.PI / 2, edge: 'right', along: alongZ };
+  }
 }

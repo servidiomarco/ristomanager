@@ -27,6 +27,7 @@ import {
   PARTY_TINT_MAX,
   STAND_GAP,
   STAND_PITCH,
+  approachPoint,
   figureKey,
   hostSpot,
   hostessFigure,
@@ -37,6 +38,7 @@ import {
   ringOrder,
   seatParty,
   spillTableIds,
+  standUp,
   toLocal,
   toWorld,
 } from '../../components/salaVivo/model/placement';
@@ -431,6 +433,95 @@ describe('il cane', () => {
     const cani = plan.figures.filter(f => f.kind === 'dog');
     expect(cani.map(c => c.key)).toEqual(['r12:d0', 'r12:d1']);
     expect(cani.map(c => locale(t, c))).toEqual([[-0.51, -1.3], [-0.01, -1.3]]);
+  });
+});
+
+describe('in piedi per uscire («In uscita»)', () => {
+  it('approachPoint: STAND_GAP dietro la sedia, sulla sua direzione', () => {
+    // Una sedia rivolta verso +z: il punto è verso −z.
+    expect(approachPoint({ x: 2, z: 3, yaw: 0 })).toEqual({ x: 2, z: 3 - STAND_GAP });
+    const q = approachPoint({ x: 2, z: 3, yaw: Math.PI / 2 }, 1);
+    expect(q.x).toBeCloseTo(1, 12);
+    expect(q.z).toBeCloseTo(3, 12);
+    // Ogni sedia, a ogni rotazione: sulla retta centro → sedia, più in fuori.
+    for (const rotation of [0, 30, 90, -37]) {
+      const t = modello({ seats: 6, rotation });
+      for (const c of t.chairs) {
+        const p = approachPoint(c);
+        const fuori = Math.hypot(p.x - t.center.x, p.z - t.center.z) - Math.hypot(c.x - t.center.x, c.z - t.center.z);
+        expect(fuori).toBeGreaterThan(0.3);
+        const { lx: cl } = toLocal(t, c.x, c.z);
+        const { lx: pl } = toLocal(t, p.x, p.z);
+        expect(pl).toBeCloseTo(cl, 9);
+      }
+    }
+  });
+
+  it('chi siede si alza dietro la sua sedia rivolto al tavolo; il cane si alza dov\'è; chiavi e tinte restano', () => {
+    const t = modello({ seats: 6 });
+    const plan = siedi([t], comitiva(2, 2, { dogs: 2 }));
+    const up = standUp(plan.figures);
+    expect(up.map(f => f.key)).toEqual(plan.figures.map(f => f.key));
+    plan.figures.forEach((f, i) => {
+      const g = up[i];
+      expect([g.kind, g.tint, g.tableId, g.partyId]).toEqual([f.kind, f.tint, f.tableId, f.partyId]);
+      if (f.kind === 'dog') {
+        expect(g).toEqual({ ...f, pose: 'standing' });
+        return;
+      }
+      expect([g.pose, g.seatHeight, g.yaw]).toEqual(['standing', 0, f.yaw]);
+      expect([g.x, g.z]).toEqual([approachPoint(f).x, approachPoint(f).z]);
+      expect(locale(t, g)[1]).toBeCloseTo(locale(t, f)[1] < 0 ? -1.4 : 1.4, 3);
+    });
+    // Già in piedi: restano. Le figure passate non cambiano.
+    expect(standUp(up)).toEqual(up);
+    const prima = JSON.stringify(plan.figures);
+    standUp(plan.figures);
+    expect(JSON.stringify(plan.figures)).toBe(prima);
+  });
+
+  it('il seggiolone: il bambino si alza dietro la testa, da terra', () => {
+    const t = modello();
+    const plan = siedi([t], comitiva(2, 1, { highChair: true }));
+    const bimbo = plan.figures.find(f => f.kind === 'kid')!;
+    expect(bimbo.seatHeight).toBe(HIGH_CHAIR_SEAT_HEIGHT);
+    const su = standUp(plan.figures).find(f => f.key === bimbo.key)!;
+    expect([su.pose, su.seatHeight]).toEqual(['standing', 0]);
+    // La testa è a L/2 + 0,30 dal centro: in piedi 0,55 più in fuori.
+    expect(Math.abs(locale(t, su)[0])).toBeCloseTo(t.length / 2 + HEAD_GAP + STAND_GAP, 3);
+  });
+
+  it('contro il muro si resta sul pavimento, a 30 cm', () => {
+    // Il lato sopra del tavolo contro il muro in alto: 0,55 m dietro quelle
+    // sedie è oltre il muro.
+    const t = modello({ x: 0, y: 0 });
+    const floor = { width: 10, depth: 8 };
+    const plan = seatParty({ partyId: 12, composition: comitiva(4, 0, { dogs: 1 }), tables: [t], floor });
+    const nudo = standUp(plan.figures);
+    expect(nudo.some(f => f.z < FLOOR_MARGIN)).toBe(true);
+    for (const f of standUp(plan.figures, floor)) {
+      expect(f.x, f.key).toBeGreaterThanOrEqual(FLOOR_MARGIN - 1e-9);
+      expect(f.z, f.key).toBeGreaterThanOrEqual(FLOOR_MARGIN - 1e-9);
+      expect(f.x, f.key).toBeLessThanOrEqual(floor.width - FLOOR_MARGIN + 1e-9);
+      expect(f.z, f.key).toBeLessThanOrEqual(floor.depth - FLOOR_MARGIN + 1e-9);
+    }
+  });
+
+  it('chi si alza davanti a uno già in piedi arretra di un giro; dati monchi', () => {
+    // 7 su 4 posti: 4 sulle sedie, 2 alle teste, 1 in piedi dietro la testa
+    // destra, dove si alzerebbe chi ci siede.
+    const t = modello();
+    const plan = siedi([t], comitiva(7, 0));
+    const up = standUp(plan.figures);
+    const testa = up.find(f => f.key === 'r12:a4')!;
+    // 0,86 + 0,55 + 0,50: un giro (STAND_PITCH) più in fuori.
+    expect(STAND_PITCH).toBe(0.5);
+    expect(locale(t, testa)).toEqual([1.91, 0]);
+    expect(locale(t, up.find(f => f.key === 'r12:a6')!)).toEqual([1.41, 0]);
+    // L'altra testa è libera: 0,55 dietro.
+    expect(locale(t, up.find(f => f.key === 'r12:a5')!)).toEqual([-1.41, 0]);
+    expect(standUp(null as unknown as FigureSlot[])).toEqual([]);
+    expect(standUp([null as unknown as FigureSlot])).toEqual([]);
   });
 });
 

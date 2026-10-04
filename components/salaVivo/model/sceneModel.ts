@@ -1,4 +1,4 @@
-import { ReservationStatus, type BanquetMenu, type FloorMarkerKind, type Reservation, type Room, type Table } from '../../../types';
+import { ArrivalStatus, ReservationStatus, type BanquetMenu, type FloorMarkerKind, type Reservation, type Room, type Table } from '../../../types';
 import { isSeated } from '../../reservationState';
 import { getTableFootprint } from '../../../utils/tableOverlap';
 import { sortRooms } from '../../../utils/roomOrder';
@@ -6,6 +6,7 @@ import type {
   FigureSlot,
   MarkerModel,
   PartyModel,
+  PartyState,
   RoomModel,
   SceneInputs,
   SceneModel,
@@ -15,9 +16,9 @@ import type {
 import { M_PER_PX, placeTable, pxToWorld } from './geometry';
 import { MARKER_KINDS, buildRoomLayout, type LayoutUnit } from './layout';
 import { composeParty, partyLabels } from './party';
-import { hostSpot, hostessFigure, lobbyCells, lobbyFigures, seatParty, spillTableIds } from './placement';
-import { derivePresence, mainRoomOf, summaryFor, type DrawnTable } from './presence';
-import { inService, isLiveParty } from './service';
+import { hostSpot, hostessFigure, lobbyCells, lobbyFigures, seatParty, spillTableIds, standUp } from './placement';
+import { derivePresence, mainRoomOf, peopleOf, summaryFor, type DrawnTable, type Presence } from './presence';
+import { inService, isLiveParty, reservationMs } from './service';
 import { captionFor, guestName, signFor } from './signs';
 import { groupStatusFor, litByTable, tableIdOf, type GroupStatus } from './tableStatus';
 
@@ -284,7 +285,10 @@ export function deriveSceneModel(inputs: SceneInputs): SceneModel {
         available.delete(id);
         sittingAt.set(id, r);
       }
-      figures.push(...plan.figures);
+      // «In uscita»: in piedi dietro le sedie, che restano accese (PR3). È la
+      // verità statica da cui partono e a cui arrivano le animazioni: col
+      // movimento ridotto o dopo una ricarica si vede direttamente questa.
+      figures.push(...(r.arrival_status === ArrivalStatus.DEPARTING ? standUp(plan.figures, model.floor) : plan.figures));
       parties.push({ id: r.id, tableId: own.id, ...composition, name: showNames ? guestName(r) : null });
     }
 
@@ -347,7 +351,76 @@ export function deriveSceneModel(inputs: SceneInputs): SceneModel {
     }),
     { seated: 0, arriving: 0, lobby: 0 },
   );
-  return { service, rooms, summary, mainRoomId };
+  const partyStates = partyStatesFor({ presence, reservations, service, nowMs });
+  return { service, rooms, summary, mainRoomId, partyStates };
+}
+
+// Legata a un banchetto: banquet_menu_id è un numero (o la sua stringa). Una
+// tale comitiva compare già seduta, senza la fila dietro l'hostess.
+const banquetLinked = (r: Reservation): boolean => {
+  const raw: unknown = r.banquet_menu_id;
+  return raw != null && raw !== '' && Number.isFinite(Number(raw));
+};
+
+/** Le comitive del servizio con la loro fase, per il regista (PR3): la stessa
+ *  presenza delle figure e dei numeri, così il regista non decide mai DOVE
+ *  sta qualcuno, solo come ci arriva.
+ *
+ *  Prima chi è a tavola (nell'ordine dei tavoli disegnati), 'standing' se è
+ *  «In uscita»; poi chi aspetta all'ingresso (nell'ordine di presence); poi,
+ *  per ora prenotata e id, le comitive vive del servizio senza figure:
+ *  'hidden' le sedute (spodestate da una più recente, oltre la grazia,
+ *  all'ingresso da più di un'ora), 'waiting' le altre. Andate via, annullate,
+ *  rifiutate e no-show mancano: per il regista sono uscite. La prima riga per
+ *  id, come App. */
+function partyStatesFor(args: {
+  presence: Presence;
+  reservations: readonly Reservation[];
+  service: SceneInputs['service'];
+  nowMs: number;
+}): PartyState[] {
+  const { presence, service, nowMs } = args;
+  const out: PartyState[] = [];
+  const stated = new Set<number>();
+  for (const p of presence.present) {
+    const r = p.reservation;
+    if (stated.has(r.id)) continue;
+    stated.add(r.id);
+    out.push({
+      id: r.id,
+      phase: r.arrival_status === ArrivalStatus.DEPARTING ? 'standing' : 'seated',
+      roomId: p.roomId,
+      tableId: p.tableId,
+      people: peopleOf(r),
+      banquet: banquetLinked(r),
+    });
+  }
+  for (const l of presence.lobby) {
+    const r = l.reservation;
+    if (stated.has(r.id)) continue;
+    stated.add(r.id);
+    out.push({ id: r.id, phase: 'lobby', roomId: l.roomId, tableId: null, people: peopleOf(r), banquet: banquetLinked(r) });
+  }
+  const rest: Reservation[] = [];
+  const seen = new Set<number>();
+  for (const r of asArray(args.reservations)) {
+    if (!r || seen.has(r.id)) continue;
+    seen.add(r.id);
+    if (stated.has(r.id) || !isLiveParty(r, service, nowMs)) continue;
+    rest.push(r);
+  }
+  rest.sort((a, b) => reservationMs(a) - reservationMs(b) || a.id - b.id);
+  for (const r of rest) {
+    out.push({
+      id: r.id,
+      phase: isSeated(r) ? 'hidden' : 'waiting',
+      roomId: null,
+      tableId: null,
+      people: peopleOf(r),
+      banquet: banquetLinked(r),
+    });
+  }
+  return out;
 }
 
 /** Le sale con la loro linguetta: le aperte, e una chiusa finché c'è ancora

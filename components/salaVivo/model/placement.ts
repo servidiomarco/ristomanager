@@ -606,6 +606,59 @@ export function hostSpot(
   };
 }
 
+/** Il punto da cui ci si avvicina a una sedia (o un posto in piedi): `gap`
+ *  dietro, sulla sua direzione, cioè seat − (sin yaw, cos yaw)·gap. È dove
+ *  chi arriva al tavolo lascia il percorso per l'ultimo passo verso la sedia,
+ *  e dove chi si alza si mette in piedi: STAND_GAP, la stessa distanza dei
+ *  posti in piedi dietro una sedia. */
+export function approachPoint(p: { x: number; z: number; yaw: number }, gap: number = STAND_GAP): Vec2 {
+  const yaw = finiteOr(p?.yaw, 0);
+  const back = finiteOr(gap, STAND_GAP);
+  return { x: finiteOr(p?.x, 0) - Math.sin(yaw) * back, z: finiteOr(p?.z, 0) - Math.cos(yaw) * back };
+}
+
+// Due persone in piedi più vicine di così stanno nello stesso posto.
+const SAME_SPOT = 0.3;
+
+/** Una comitiva «In uscita»: chi siede si alza dietro la sua sedia; il cane si
+ *  alza dov'è.
+ *
+ *  Chi siede finisce in piedi al punto d'approccio della sua sedia (STAND_GAP
+ *  dietro), rivolto al tavolo come seduto, dentro il pavimento come ogni
+ *  posto in piedi; chi era già in piedi resta dov'è. Ma i posti in piedi di
+ *  chi non entrava sulle sedie (seatParty, passo 3) partono proprio da lì,
+ *  0,55 m dietro le teste e le sedie: chi si alza davanti a uno di loro
+ *  arretra di un altro giro (STAND_PITCH, come i posti in piedi), finché il
+ *  posto è libero, invece di finirgli dentro. Il cane passa da sdraiato a in
+ *  piedi, stesso punto e stesso verso. Chiavi, tinte e tavoli non cambiano, e
+ *  le sedie restano accese: sono ancora loro.
+ *
+ *  È la verità statica di «In uscita» (PR3): il movimento ridotto, uno scatto
+ *  dopo una ricarica e la fine dell'animazione di chi si alza arrivano tutti
+ *  qui, nello stesso punto. */
+export function standUp(figures: readonly FigureSlot[], floor?: RoomModel['floor'] | null): FigureSlot[] {
+  const list = (Array.isArray(figures) ? figures : []).filter((f): f is FigureSlot => !!f);
+  const room = floorBox(floor);
+  const taken: Vec2[] = list
+    .filter(f => f.pose === 'standing' && (f.kind === 'adult' || f.kind === 'kid'))
+    .map(f => ({ x: f.x, z: f.z }));
+  const free = (p: Vec2) => taken.every(t => Math.hypot(t.x - p.x, t.z - p.z) >= SAME_SPOT);
+  return list.map((f): FigureSlot => {
+    if (f.kind === 'dog') return f.pose === 'lying' ? { ...f, pose: 'standing' } : f;
+    if (f.pose !== 'seated') return f;
+    const back = approachPoint(f);
+    let spot = room.clamp(back.x, back.z);
+    // Un giro più in fuori a ogni posto preso; il pavimento è finito, quindi
+    // al più tanti giri quante sono le persone.
+    for (let ring = 1; !free(spot) && ring <= list.length; ring++) {
+      const p = approachPoint(f, STAND_GAP + ring * STAND_PITCH);
+      spot = room.clamp(p.x, p.z);
+    }
+    taken.push(spot);
+    return { ...f, pose: 'standing', x: spot.x, z: spot.z, yaw: f.yaw, seatHeight: 0 };
+  });
+}
+
 /** L'hostess di una sala, all'accoglienza (posata o di ripiego). Senza nome:
  *  il nome arriva con PR3, dal personale in turno. */
 export function hostessFigure(
