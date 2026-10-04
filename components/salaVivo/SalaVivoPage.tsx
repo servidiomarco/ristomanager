@@ -553,9 +553,11 @@ const SalaVivoPage: React.FC<SalaVivoPageProps> = ({
                     onClick={() => selectRoom(room.id)}
                     aria-pressed={active}
                     title={closedLabel ?? undefined}
-                    // Il numero a video non dice cosa conta: per lo screen
-                    // reader «Veranda · 38» sarebbero 38 persone. Qui i posti.
-                    aria-label={t('roomTab', { room: closedLabel ?? room.name, count: room.summary.covers })}
+                    // Il numero a video sono le persone a tavola adesso in
+                    // quella sala (decisione di Tina, 4 ottobre): cambia
+                    // durante il servizio, ed è quello che uno schermo
+                    // all'ingresso deve dire. Per lo screen reader lo si dice.
+                    aria-label={t('roomTab', { room: closedLabel ?? room.name, count: room.summary.seated })}
                     className={`${ROOM_TAB_BASE} ${
                       active
                         ? room.closed ? ROOM_TAB_ACTIVE_CLOSED : ROOM_TAB_ACTIVE
@@ -563,7 +565,7 @@ const SalaVivoPage: React.FC<SalaVivoPageProps> = ({
                     }`}
                   >
                     {room.closed && <DoorClosed size={14} aria-hidden />}
-                    <span className="tabular-nums">{room.name} · {room.summary.covers}</span>
+                    <span className="tabular-nums">{room.name} · {room.summary.seated}</span>
                   </button>
                 );
               })}

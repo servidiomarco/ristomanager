@@ -447,7 +447,9 @@ con il loro passo in CI».
 - **Pagina:** `components/salaVivo/SalaVivoPage.tsx`, export di default, **mai** un import
   di `three` o `./scene`. Testata con riassunto («12 a tavola · 3 in arrivo»), «Centra»,
   fissa, «Schermo intero» e LivePill; linguette delle sale aperte e delle chiuse con
-  presenti, coi coperti («Veranda · 38»); al massimo due callout. Quelli sulla sala
+  presenti, con le persone a tavola adesso in quella sala («Veranda · 14»: decisione di
+  Tina, 4 ottobre — la capienza non cambia mai durante il servizio); al massimo due
+  callout. Quelli sulla sala
   (sala da disporre, sovrapposizioni, segnaposto mancanti) li vede solo chi ha
   `floorplan:full`, e mai a schermo fissato, come l'avviso delle sovrapposizioni della
   piantina; portano «Disponi i tavoli» e «Posizionali». Quelli del dispositivo (niente
@@ -584,15 +586,15 @@ letterali da FloorPlan (Tailwind vuole letterali); `onImmersive` segue l'effetto
   sotto), dentro il box del glifo meno 0,40 m di sedie. Piano 0,75 m, seduta 0,45,
   schienale 0,90. Sedie **esattamente** sugli slot 2D, spinte fuori fino a 0,30 m dal
   bordo; punto d'approccio 0,55 m dietro la sedia.
-- **Disposizione.** Tavoli non nascosti, come in 2D. Un'unione si disegna coi tavoli al
-  loro posto quando sono accostati come li accosta l'editor: gli ingombri della piantina
-  (`getTableFootprint`, col margine e la fascia delle etichette) a meno di un passo di
-  griglia (20 px), cioè due da 4 affiancati a x = 0 e 120 o uno sopra l'altro a y = 0 e
-  200. La soglia di 25 px sui box del glifo del primo piano l'editor non la faceva quasi
-  mai raggiungere. Un membro più lontano: l'unione si disegna come in 2D, il primario per
-  la somma dei coperti, col corpo dai posti (le misure in cm sono del primario da solo).
-  Audit `overlaps` su box orientati, così due vicini ruotati non sono un falso allarme, e
-  `unset` (almeno 3 tavoli, metà sulla stessa posizione).
+- **Disposizione.** Tavoli non nascosti, come in 2D. Un'unione si disegna **sempre come
+  in 2D** (decisione di Tina, 4 ottobre): il primario al suo posto, col nome unito e la
+  somma dei coperti, col corpo dai posti (le misure in cm sono del primario da solo); i
+  secondari non si disegnano. Disegnarli ciascuno al suo posto non reggeva: l'editor non
+  lascia posare due tavoli a contatto, e anche accostati quanto si può restavano a 1,3 m
+  (affiancati) o 3,2 m (uno sopra l'altro), con una tavolata seduta di qua e di là da un
+  corridoio che non c'è. Audit `overlaps` sui tavoli disegnati, su box orientati (così due
+  vicini ruotati non sono un falso allarme), e `unset` (almeno 3 tavoli, metà sulla
+  stessa posizione).
 - **Nessun ripiego per una sala da disporre (deciso in PR2b).** Il piano usava
   `computeAutoLayout`, che oggi resta solo come misura di una sala vuota in Prenotazioni:
   la 2D quella vista non ce l'ha più, e una griglia solo in 3D romperebbe l'accordo fra
@@ -1209,7 +1211,7 @@ draw call e triangoli si leggono lì.
 | G16 | `three` in devDependencies rompe un futuro build della SPA con `--omit=dev` | Vercel e CI installano le devDependencies; va scritto nella descrizione di PR2b |
 | G17 | I tavoli nascosti sono mobili veri | Omessi, come in 2D |
 | G18 | I banchetti non hanno orario né ciclo d'arrivo | Figure solo dalle prenotazioni collegate e sedute, altrimenti il cartello |
-| G19 | Tavoli uniti salvati lontani | Disegnati come in 2D: un primario per la somma dei coperti, col corpo dai posti. «Vicini» vuol dire accostati quanto l'editor permette (ingombri a meno di un passo di griglia): allora ognuno al suo posto, anche se in 3D restano a 1,3 m (affiancati) o 3,2 m (uno sopra l'altro) |
+| G19 | Tavoli uniti | Sempre come in 2D, vicini o lontani: un primario per la somma dei coperti, col corpo dai posti (decisione di Tina, 4 ottobre) |
 | G20 | Chiosco in trappola dopo un crash | Il chrome lo chiede la pagina con `onImmersive`: smontata lei, torna la navigazione |
 | G21 | Interruttore o entitlement, se Sympotia vende la vista 3D | Interruttore operativo ora; un entitlement seguirebbe il modello delle recensioni, chiuso in caso d'errore |
 | G22 | Clone vecchio | `git fetch` prima di tutto, poi migration e ancore: è già successo (§2) |

@@ -103,8 +103,8 @@ export interface ChairModel {
  *  'circle' ereditato dal seed esce rettangolare anche qui. */
 export type TableShape3D = 'rect' | 'circle';
 
-/** Un tavolo da disegnare: un tavolo vero, oppure il capofila di un'unione
- *  disegnata alla maniera della 2D (vedi `mergePrimaryId`). */
+/** Un tavolo da disegnare: un tavolo vero, oppure il capofila di un'unione,
+ *  che si disegna sempre alla maniera della 2D: un tavolo solo. */
 export interface TableModel {
   id: number;
   /** Il nome sull'etichetta. Un'unione disegnata alla maniera della 2D porta
@@ -122,16 +122,12 @@ export interface TableModel {
   length: number;
   /** La profondità, sull'asse Z locale, in metri (tondo: il diametro). */
   depth: number;
-  /** Lo stato del gruppo di unione (deriveTableDisplayStatus): i tavoli di
-   *  un'unione hanno tutti lo stesso colore. */
+  /** Lo stato del gruppo di unione (deriveTableDisplayStatus): una
+   *  prenotazione su un tavolo secondario colora il tavolo unito. */
   status: TableDisplayStatus;
   chairs: ChairModel[];
   /** L'anello che pulsa: status === 'inarrivo'. */
   pulse: boolean;
-  /** Tavolo di un'unione disegnato al suo posto: l'id del capofila (anche sul
-   *  capofila stesso). Null per un tavolo da solo e per un'unione disegnata
-   *  alla maniera della 2D, che è un tavolo solo. */
-  mergePrimaryId: number | null;
 }
 
 /** Un segnaposto di sala. C'è sempre, anche quando nessuno l'ha posato: lì

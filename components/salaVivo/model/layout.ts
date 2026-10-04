@@ -1,7 +1,6 @@
 import { TableShape, type FloorMarker, type FloorMarkerKind, type Room, type Table, type TableMerge } from '../../../types';
 import { buildMergeGroups } from '../../comande/tablesView';
 import { getGlyphDimensions } from '../../../utils/tableGeometry';
-import { FLOOR_GRID, getTableFootprint, type Box } from '../../../utils/tableOverlap';
 import { applyMerges } from '../../../utils/tableMerge';
 import type { RoomAudit, Vec2 } from '../types';
 import { finiteOr, seatCount } from './geometry';
@@ -15,19 +14,13 @@ import { finiteOr, seatCount } from './geometry';
  * (tavoli impilati dove sono nati) resta impilata anche qui, con un avviso
  * per chi la può sistemare: una griglia solo in 3D romperebbe l'accordo. */
 
-/** I membri di un'unione sono accostati quando gli ingombri dell'editor
- *  (glifo ruotato, margine e fascia delle etichette sotto: getTableFootprint
- *  coi suoi valori) restano a meno di un passo di griglia l'uno dall'altro.
- *
- *  È la misura dell'editor perché è l'unica che chi disegna la sala può
- *  ottenere: la piantina aggancia ogni tavolo alla griglia da 20 px e rifiuta
- *  gli ingombri che si sovrappongono, quindi due tavoli vicini quanto si può
- *  stanno a 0–19 px di ingombro (due da 4 affiancati a x = 0 e 120, uno sopra
- *  l'altro a y = 0 e 200). Una soglia sui box del glifo (prima 25 px) non la
- *  raggiungeva quasi mai, e solo per certe larghezze di glifo. Un membro più
- *  lontano di un passo: i tavoli non sono accostati, e l'unione si disegna
- *  come in 2D, un tavolo solo. */
-export const MERGE_ADJACENT_PX = FLOOR_GRID;
+/* Le unioni si disegnano come in 2D: un tavolo solo, al posto del capofila,
+ * col nome unito e i posti sommati (decisione di Tina, 4 ottobre). I tavoli
+ * uniti in sala sono spinti l'uno contro l'altro, ma l'editor non li lascia
+ * posare a contatto: anche accostati quanto si può, ognuno al suo posto
+ * restavano a 1,3 m (affiancati) o 3,2 m (uno sopra l'altro), e una tavolata
+ * da dieci si vedeva seduta di qua e di là da un corridoio che non c'è. */
+
 /** Il margine oltre l'ultimo tavolo o segnaposto, come la piantina. */
 export const EXTENT_PAD_PX = 60;
 
@@ -57,11 +50,8 @@ export interface LayoutUnit {
    *  sommati) per un'unione disegnata alla maniera della 2D. Coi campi
    *  numerici già letti con prudenza. */
   table: Table;
-  /** [capofila, ...uniti] per un tavolo di un'unione, se no [table.id]. */
+  /** [capofila, ...uniti] per un'unione, se no [table.id]. */
   groupIds: number[];
-  /** Tavolo di un'unione disegnato al suo posto: l'id del capofila (anche sul
-   *  capofila). Null per un tavolo da solo e per un'unione alla 2D. */
-  mergePrimaryId: number | null;
 }
 
 export interface MarkerPx {
@@ -103,29 +93,6 @@ const normalizeMerges = (merges: readonly TableMerge[]): TableMerge[] => {
     out.push({ ...m, primary_id: primary, merged_ids: merged });
   }
   return out;
-};
-
-// La distanza fra due box allineati agli assi, alla Čebyšëv: 0 se si toccano
-// o si sovrappongono, se no la separazione maggiore fra quella in x e in y.
-const chebyshevGap = (a: Box, b: Box): number =>
-  Math.max(0, b.x - (a.x + a.w), a.x - (b.x + b.w), b.y - (a.y + a.h), a.y - (b.y + b.h));
-
-// L'ingombro di un tavolo per l'editor della piantina: quello che non lascia
-// sovrapporre quando si trascina (collidesWithOthers).
-const editorFootprint = (t: Table): Box => getTableFootprint(t, t.x, t.y);
-
-// I membri visibili di un'unione sono accostati se ognuno ha un altro membro
-// a meno di MERGE_ADJACENT_PX di ingombro.
-const isSplit = (members: readonly Table[]): boolean => {
-  if (members.length < 2) return false;
-  const boxes = members.map(editorFootprint);
-  return boxes.some((a, i) => {
-    let nearest = Infinity;
-    boxes.forEach((b, j) => {
-      if (j !== i) nearest = Math.min(nearest, chebyshevGap(a, b));
-    });
-    return nearest >= MERGE_ADJACENT_PX;
-  });
 };
 
 /* ── Sovrapposizioni su sagome orientate ──────────────────────────────────
@@ -187,14 +154,14 @@ const shapesOverlap = (a: Shape2D, b: Shape2D): boolean => {
   return a.kind === 'rect' ? rectDiscOverlap(a, b as Disc2D) : rectDiscOverlap(b as Rect2D, a);
 };
 
-/** Le coppie di unità che si sovrappongono, per nome, nell'ordine dei
- *  tavoli. Le unità di una stessa unione si toccano apposta: non contano. */
+/** Le coppie di tavoli disegnati che si sovrappongono, per nome, nell'ordine
+ *  dei tavoli. Un'unione è un tavolo solo, col suo ingombro intero: come
+ *  l'avviso della piantina, che confronta i tavoli dopo applyMerges. */
 export function overlappingPairs(units: readonly LayoutUnit[]): Array<[string, string]> {
   const shapes = units.map(u => shapeOf(u.table));
   const pairs: Array<[string, string]> = [];
   for (let i = 0; i < units.length; i++) {
     for (let j = i + 1; j < units.length; j++) {
-      if (units[i].groupIds[0] === units[j].groupIds[0]) continue;
       if (shapesOverlap(shapes[i], shapes[j])) pairs.push([units[i].table.name, units[j].table.name]);
     }
   }
@@ -281,26 +248,13 @@ export function buildRoomLayout(args: {
   // - 'none': il capofila è nascosto o in un'altra sala. In 2D l'unione
   //   sparisce col suo capofila (i secondari sono nascosti perché uniti),
   //   qui lo stesso;
-  // - 'asOne': un membro sta in un'altra sala, o non è accostato agli altri:
-  //   il capofila solo, come la 2D, col nome unito e i posti sommati;
-  // - 'inPlace': ogni membro visibile al suo posto.
-  type MergeMode = 'alone' | 'none' | 'asOne' | 'inPlace';
-  const modeByPrimary = new Map<number, MergeMode>();
+  // - 'asOne': il capofila solo, come la 2D, col nome unito e i posti
+  //   sommati; i secondari non si disegnano.
+  type MergeMode = 'alone' | 'none' | 'asOne';
   const modeOf = (group: number[]): MergeMode => {
     const primaryId = group[0];
-    let mode = modeByPrimary.get(primaryId);
-    if (mode) return mode;
-    if (!byId.has(primaryId)) {
-      mode = 'alone';
-    } else if (!shownHere(byId.get(primaryId))) {
-      mode = 'none';
-    } else {
-      const members = group.map(id => byId.get(id)).filter((t): t is Table => !!t);
-      const elsewhere = members.some(t => t.room_id !== room.id);
-      mode = elsewhere || isSplit(members.filter(shownHere)) ? 'asOne' : 'inPlace';
-    }
-    modeByPrimary.set(primaryId, mode);
-    return mode;
+    if (!byId.has(primaryId)) return 'alone';
+    return shownHere(byId.get(primaryId)) ? 'asOne' : 'none';
   };
 
   // Le unità, nell'ordine dei tavoli: lo stesso ordine a ogni ricalcolo.
@@ -310,9 +264,7 @@ export function buildRoomLayout(args: {
     const group = groupOf.get(t.id);
     const mode = group ? modeOf(group) : 'alone';
     if (!group || mode === 'alone') {
-      units.push({ table: t, groupIds: [t.id], mergePrimaryId: null });
-    } else if (mode === 'inPlace') {
-      units.push({ table: t, groupIds: group, mergePrimaryId: group[0] });
+      units.push({ table: t, groupIds: [t.id] });
     } else if (mode === 'asOne' && t.id === group[0]) {
       const merge = mergeByPrimary.get(t.id);
       const members = group.map(id => byId.get(id)).filter((m): m is Table => !!m);
@@ -323,7 +275,6 @@ export function buildRoomLayout(args: {
         // due, con quelle in più oltre i capi. Così il corpo si fa dai posti.
         table: primary ? { ...primary, seats: seatCount(primary.seats), width_cm: null, length_cm: null } : t,
         groupIds: group,
-        mergePrimaryId: null,
       });
     }
   }

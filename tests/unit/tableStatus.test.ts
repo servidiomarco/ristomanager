@@ -57,7 +57,7 @@ const prenotazione = (over: Partial<Reservation> = {}): Reservation => ({
   ...over,
 });
 
-// Rettangoli da 4 a 100 px l'uno dall'altro: 8 px fra i box, accostati.
+// Rettangoli da 4 a 100 px l'uno dall'altro.
 const tavolo = (id: number, over: Partial<Table> = {}): Table => ({
   id,
   name: String(id),
@@ -298,18 +298,17 @@ describe('le unioni sono un tavolo solo', () => {
     expect(activeReservationFor([1, 2], [r], SERVIZIO, NOW)).toBe(r);
     expect(activeReservationFor([1], [r], SERVIZIO, NOW)).toBeNull();
 
+    // Un tavolo solo, «1+2» da 8, come in 2D: la comitiva del secondario lo
+    // colora e ne accende sei sedie.
     const model = deriveSceneModel(scena({ tables: [tavolo(1), tavolo(2)], merges: [unione(1, [2])], reservations: [r] }));
-    const [uno, due] = model.rooms[0].tables;
-    expect([uno.status, due.status]).toEqual(['arrivato', 'arrivato']);
-    expect([uno.mergePrimaryId, due.mergePrimaryId]).toEqual([1, 1]);
-    // Sei persone: quattro al loro tavolo (il 2), due al capofila.
-    expect(accese(due)).toEqual([0, 1, 2, 3]);
-    expect(accese(uno)).toEqual(litChairIndices(TableShape.RECTANGLE, 4, 2));
+    const tavoli = model.rooms[0].tables;
+    expect(tavoli.map(t => [t.id, t.name, t.status])).toEqual([[1, '1+2', 'arrivato']]);
+    expect(accese(tavoli[0])).toEqual(litChairIndices(TableShape.RECTANGLE, 8, 6));
   });
 
   it('un\'unione disegnata come in 2D è un tavolo con le sedie della 2D', () => {
     const r = prenotazione({ table_id: 2, reservation_time: ora('18:30'), arrival_status: ArrivalStatus.ARRIVED, guests: 6 });
-    // Il secondario lontano: un tavolo solo, «1+2» da 8.
+    // Anche col secondario lontano: un tavolo solo, «1+2» da 8.
     const model = deriveSceneModel(scena({
       tables: [tavolo(1), tavolo(2, { x: 600 })],
       merges: [unione(1, [2])],
@@ -317,7 +316,7 @@ describe('le unioni sono un tavolo solo', () => {
     }));
     const [unito] = model.rooms[0].tables;
     expect(model.rooms[0].tables).toHaveLength(1);
-    expect([unito.id, unito.name, unito.status, unito.mergePrimaryId]).toEqual([1, '1+2', 'arrivato', null]);
+    expect([unito.id, unito.name, unito.status]).toEqual([1, '1+2', 'arrivato']);
     expect(unito.chairs).toHaveLength(8);
     expect(accese(unito)).toEqual(litChairIndices(TableShape.RECTANGLE, 8, 6));
   });
@@ -447,7 +446,7 @@ describe('il modello della sala', () => {
 
   it('ogni tavolo porta il suo id, nome, sala e corpo', () => {
     const t = veranda.tables[0];
-    expect([t.id, t.name, t.roomId, t.shape, t.mergePrimaryId]).toEqual([1, '1', 1, 'rect', null]);
+    expect([t.id, t.name, t.roomId, t.shape]).toEqual([1, '1', 1, 'rect']);
     expect(t.length).toBeCloseTo(1.12, 9);
     expect(t.depth).toBeCloseTo(0.8, 9);
     expect(t.chairs).toHaveLength(4);

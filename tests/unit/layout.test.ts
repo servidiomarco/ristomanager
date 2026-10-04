@@ -1,9 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { Shift, TableShape, TableStatus, type FloorMarker, type Room, type Table, type TableMerge } from '../../types';
-import { FLOOR_GRID, boxesOverlap, collidesWithOthers, getTableFootprint } from '../../utils/tableOverlap';
+import { boxesOverlap, getTableFootprint } from '../../utils/tableOverlap';
 import {
   EXTENT_PAD_PX,
-  MERGE_ADJACENT_PX,
   buildRoomLayout,
   inwardAt,
   isLayoutUnset,
@@ -104,10 +103,12 @@ describe('sovrapposizioni sulle sagome orientate', () => {
       .toEqual([['1', '2']]);
   });
 
-  it('i tavoli di una stessa unione si toccano apposta e non contano', () => {
+  it('un\'unione conta come il tavolo unito che si disegna, come nella piantina', () => {
+    // «1+2» da 8 è largo 144 px dal posto del capofila: arriva sul 3. Il 2,
+    // che non si disegna, non conta da solo.
     const tables = [tavolo(1, 0, 0), tavolo(2, 50, 0), tavolo(3, 80, 0)];
     const l = layout({ tables, merges: [unione(1, [2])] });
-    expect(l.audit.overlaps).toEqual([['1', '3'], ['2', '3']]);
+    expect(l.audit.overlaps).toEqual([['1+2', '3']]);
   });
 
   it('nessun margine né fascia delle etichette: tavoli a 10 px non sono un avviso', () => {
@@ -238,80 +239,23 @@ describe('i segnaposto', () => {
   });
 });
 
-describe('le unioni: al loro posto o come in 2D', () => {
-  // L'editor aggancia alla griglia da 20 px e rifiuta gli ingombri (margine e
-  // fascia delle etichette) che si sovrappongono: «accostati» è quello che
-  // l'editor lascia fare, non un numero sui box del glifo.
-  const posabile = (t: Table, altri: Table[]) => collidesWithOthers(t, t.x, t.y, altri).length === 0;
-  const unità = (l: ReturnType<typeof layout>) => l.units.map(u => [u.table.id, u.table.name, u.table.seats, u.mergePrimaryId]);
+describe('le unioni: sempre un tavolo solo, come in 2D', () => {
+  // Decisione di Tina (4 ottobre): accostati o no, i tavoli uniti si
+  // disegnano come li disegna la piantina — il capofila al suo posto, col
+  // nome unito e i posti sommati — e i secondari non si disegnano.
+  const unità = (l: ReturnType<typeof layout>) => l.units.map(u => [u.table.id, u.table.name, u.table.seats]);
 
-  it('la soglia è un passo della griglia dell\'editor', () => {
-    expect(MERGE_ADJACENT_PX).toBe(FLOOR_GRID);
+  it('due da 4 affiancati quanto l\'editor permette: un tavolo solo da 8, al posto del capofila', () => {
+    const l = layout({ tables: [tavolo(1, 0, 0), tavolo(2, 120, 0)], merges: [unione(1, [2])] });
+    expect(unità(l)).toEqual([[1, '1+2', 8]]);
+    expect(l.units[0].groupIds).toEqual([1, 2]);
+    expect([l.units[0].table.x, l.units[0].table.y]).toEqual([0, 0]);
   });
 
-  it('due da 4 affiancati più vicini che l\'editor permetta: ognuno al suo posto, col capofila', () => {
-    // A x = 120 l'editor li lascia posare, a x = 100 no: più vicini di così
-    // due da 4 sulla piantina non stanno.
-    const uno = tavolo(1, 0, 0);
-    expect(posabile(tavolo(2, 120, 0), [uno])).toBe(true);
-    expect(posabile(tavolo(2, 100, 0), [uno])).toBe(false);
-    const l = layout({ tables: [uno, tavolo(2, 120, 0)], merges: [unione(1, [2])] });
-    expect(unità(l)).toEqual([
-      [1, '1', 4, 1],
-      [2, '2', 4, 1],
-    ]);
-    expect(l.units.every(u => u.groupIds.join() === '1,2')).toBe(true);
-  });
-
-  it('uno sopra l\'altro più vicini che l\'editor permetta: anche loro al loro posto', () => {
-    // Sotto ogni tavolo la fascia delle etichette: a y = 200 si posa, a 180 no.
-    const uno = tavolo(1, 0, 0);
-    expect(posabile(tavolo(2, 0, 200), [uno])).toBe(true);
-    expect(posabile(tavolo(2, 0, 180), [uno])).toBe(false);
-    const l = layout({ tables: [uno, tavolo(2, 0, 200)], merges: [unione(1, [2])] });
-    expect(l.units.map(u => u.mergePrimaryId)).toEqual([1, 1]);
-  });
-
-  it('vale per ogni larghezza di glifo, tondi e ruotati compresi', () => {
-    // Il primo posto che l'editor lascia, cercato come lo cerca chi trascina:
-    // a passi di griglia verso destra finché l'ingombro non tocca più.
-    const accanto = (primo: Table, secondo: Partial<Table>) => {
-      for (let x = FLOOR_GRID; ; x += FLOOR_GRID) {
-        const t = tavolo(2, x, 0, secondo);
-        if (posabile(t, [primo])) return t;
-      }
-    };
-    const casi: Array<[Partial<Table>, Partial<Table>]> = [
-      [{ seats: 2 }, { seats: 2 }],
-      [{ seats: 5 }, { seats: 6 }],
-      [{ seats: 8 }, { seats: 8 }],
-      [{ seats: 12 }, { seats: 4 }],
-      [{ shape: TableShape.CIRCLE }, { shape: TableShape.CIRCLE }],
-      [{ shape: TableShape.CIRCLE, seats: 8 }, { seats: 4 }],
-      [{ rotation: 90 }, { rotation: 90 }],
-      [{ rotation: 45, seats: 6 }, {}],
-    ];
-    for (const [a, b] of casi) {
-      const primo = tavolo(1, 0, 0, a);
-      const secondo = accanto(primo, b);
-      const vicini = layout({ tables: [primo, secondo], merges: [unione(1, [2])] });
-      expect(vicini.units.map(u => u.mergePrimaryId), JSON.stringify([a, b, secondo.x])).toEqual([1, 1]);
-      // Un passo di griglia più in là non sono più accostati.
-      const lontani = layout({ tables: [primo, { ...secondo, x: secondo.x + FLOOR_GRID }], merges: [unione(1, [2])] });
-      expect(lontani.units.map(u => u.mergePrimaryId), JSON.stringify([a, b, secondo.x])).toEqual([null]);
-    }
-  });
-
-  it('un membro più lontano: un tavolo solo, il capofila col nome unito e i posti sommati', () => {
-    // Un passo di griglia oltre il più vicino possibile, di lato e sotto.
-    for (const [x, y] of [[140, 0], [0, 220]]) {
-      const l = layout({ tables: [tavolo(1, 0, 0), tavolo(2, x, y), tavolo(3, 600, 300)], merges: [unione(1, [2])] });
-      expect(unità(l)).toEqual([
-        [1, '1+2', 8, null],
-        [3, '3', 4, null],
-      ]);
-      expect(l.units[0].groupIds).toEqual([1, 2]);
-      expect([l.units[0].table.x, l.units[0].table.y]).toEqual([0, 0]);
+  it('vicini o lontani, di lato o uno sopra l\'altro: sempre lo stesso tavolo unito', () => {
+    for (const [x, y] of [[120, 0], [140, 0], [0, 200], [0, 220], [600, 400]]) {
+      const l = layout({ tables: [tavolo(1, 0, 0), tavolo(2, x, y), tavolo(3, 700, 0)], merges: [unione(1, [2])] });
+      expect(unità(l), JSON.stringify([x, y])).toEqual([[1, '1+2', 8], [3, '3', 4]]);
     }
   });
 
@@ -335,12 +279,12 @@ describe('le unioni: al loro posto o come in 2D', () => {
     expect([solo.units[0].table.width_cm, solo.units[0].table.length_cm]).toEqual([80, 120]);
   });
 
-  it('una fila accostata due a due resta al suo posto', () => {
+  it('una fila di tre: un tavolo solo coi posti di tutti', () => {
     const l = layout({
       tables: [tavolo(1, 0, 0), tavolo(2, 100, 0), tavolo(3, 200, 0)],
       merges: [unione(1, [2, 3])],
     });
-    expect(l.units.map(u => u.mergePrimaryId)).toEqual([1, 1, 1]);
+    expect(l.units.map(u => [u.table.id, u.table.seats, u.groupIds])).toEqual([[1, 12, [1, 2, 3]]]);
   });
 
   it('capofila nascosto: l\'unione sparisce, come in 2D', () => {
@@ -348,29 +292,29 @@ describe('le unioni: al loro posto o come in 2D', () => {
     expect(l.units.map(u => u.table.id)).toEqual([3]);
   });
 
-  it('un secondario nascosto non si disegna; il resto resta al suo posto', () => {
+  it('un secondario nascosto: il capofila resta il tavolo unito, coi posti di tutti come in 2D', () => {
     const l = layout({ tables: [tavolo(1, 0, 0), tavolo(2, 100, 0)], merges: [unione(1, [2])], hidden: [2] });
-    expect(l.units.map(u => [u.table.id, u.mergePrimaryId])).toEqual([[1, 1]]);
+    expect(unità(l)).toEqual([[1, '1+2', 8]]);
     expect(l.units[0].groupIds).toEqual([1, 2]);
   });
 
   it('membri in due sale: nella sala del capofila come in 2D, nell\'altra niente', () => {
     const tables = [tavolo(1, 0, 0), tavolo(2, 100, 0, { room_id: 2 })];
     const qui = layout({ tables, merges: [unione(1, [2])] });
-    expect(qui.units.map(u => [u.table.id, u.table.name, u.table.seats, u.mergePrimaryId])).toEqual([[1, '1+2', 8, null]]);
+    expect(unità(qui)).toEqual([[1, '1+2', 8]]);
     const altra = layout({ room: { ...SALA, id: 2, name: 'Fiume' }, tables, merges: [unione(1, [2])] });
     expect(altra.units).toEqual([]);
   });
 
   it('un capofila che non esiste più: i secondari tornano tavoli qualunque, come in 2D', () => {
     const l = layout({ tables: [tavolo(2, 0, 0), tavolo(3, 100, 0)], merges: [unione(1, [2, 3])] });
-    expect(l.units.map(u => [u.table.id, u.groupIds, u.mergePrimaryId])).toEqual([[2, [2], null], [3, [3], null]]);
+    expect(l.units.map(u => [u.table.id, u.groupIds])).toEqual([[2, [2]], [3, [3]]]);
   });
 
   it('i tavoli nell\'ordine in cui arrivano, a ogni ricalcolo', () => {
     const tables = [tavolo(9, 400, 0), tavolo(2, 117, 0), tavolo(1, 0, 0)];
     const l = layout({ tables, merges: [unione(1, [2])] });
-    expect(l.units.map(u => u.table.id)).toEqual([9, 2, 1]);
+    expect(l.units.map(u => u.table.id)).toEqual([9, 1]);
     expect(layout({ tables, merges: [unione(1, [2])] })).toEqual(l);
   });
 
@@ -381,7 +325,7 @@ describe('le unioni: al loro posto o come in 2D', () => {
       null,
     ] as unknown as TableMerge[];
     const l = layout({ tables: [tavolo(1, 0, 0), tavolo(2, 300, 0)], merges: rotte });
-    expect(l.units.map(u => [u.table.id, u.mergePrimaryId])).toEqual([[1, null], [2, null]]);
+    expect(l.units.map(u => [u.table.id, u.groupIds])).toEqual([[1, [1]], [2, [2]]]);
   });
 });
 

@@ -117,7 +117,6 @@ export function deriveSceneModel(inputs: SceneInputs): SceneModel {
         status: gs.status,
         chairs: placed.chairs,
         pulse: gs.pulse,
-        mergePrimaryId: u.mergePrimaryId,
       });
     }
 
