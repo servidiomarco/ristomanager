@@ -254,7 +254,10 @@ import {
 import { formatMoneyMinor } from './utils/money.js';
 import { HACCP_TEMPERATURE_LOCATIONS, haccpMissingTag, haccpTemperatureTag } from './utils/haccp.js';
 import { shoppingReminderBody } from './utils/shoppingReminder.js';
-import { describeShiftChanges, shiftDayLabel, type ShiftDayChange } from './utils/staffShiftChange.js';
+import {
+    describeShiftChanges, isOnDuty, shiftDayLabel,
+    type ShiftDayChange, type ShiftDayRow, type ShiftDayTimeOff,
+} from './utils/staffShiftChange.js';
 import { buildEReceiptPayload, buildFatturaPaXml, getFiscalDriver, type FiscalSeller, type InvoiceBuyer } from './services/fiscalService.js';
 import {
     getAvailableSlots,
@@ -19239,40 +19242,64 @@ app.delete('/staff/time-off/:id', authenticate, requirePermission('staff:full'),
     }
 });
 
-// Get staff presence for a specific date.
-// FISSO staff are implicitly present on both shifts during their hire period
-// unless covered by a time-off entry or an explicit shift with present=false.
+// Chi è di turno in una data, per reparto e servizio: le schede attive,
+// ognuna nelle liste dei servizi in cui lavora. La legge la Sala dal vivo
+// (useStaffOnShift): i camerieri che girano in sala e il nome dell'hostess.
+//
+// Stessa lettura della pagina Personale (slotState) e dell'avviso del cambio
+// turno (isOnDuty): la riga esplicita vince; poi l'assenza; poi il riposo
+// settimanale; poi la presenza implicita di FISSO e STAGIONALE nel periodo di
+// contratto. Prima contava solo i FISSO e un'assenza batteva anche il turno
+// scritto in griglia: uno stagionale di turno spariva, e chi era richiamato
+// dalle ferie per una sera risultava a casa.
 app.get('/staff/presence', authenticate, async (req, res) => {
     try {
-        const { date } = req.query;
-
-        if (!date) {
-            return res.status(400).json({ error: 'date is required' });
+        const dateStr = req.query.date;
+        // Una data vera, non solo la forma: «2026-02-30» al cast di Postgres
+        // sarebbe un 500 invece di un 400.
+        if (!isIsoDay(dateStr)) {
+            return res.status(400).json({ error: 'date (YYYY-MM-DD) is required' });
         }
 
-        const dateStr = String(date);
-
+        // Date come testo (to_char): il confronto col giorno chiesto è fra
+        // stringhe, e il fuso del processo non le sposta.
         const [staffResult, shiftsResult, timeOffResult] = await Promise.all([
-            queryWithRetry('SELECT * FROM staff_members WHERE tenant_id = $1 AND is_active = true ORDER BY category, surname, name', [req.tenantId!]),
-            queryWithRetry('SELECT staff_id, shift, present FROM staff_shifts WHERE tenant_id = $2 AND date = $1', [dateStr, req.tenantId!]),
-            queryWithRetry('SELECT staff_id, shift FROM staff_time_off WHERE tenant_id = $2 AND start_date <= $1 AND end_date >= $1', [dateStr, req.tenantId!])
+            queryWithRetry(
+                `SELECT id, name, surname, category, staff_type, role, weekly_rest_day,
+                        to_char(hire_date, 'YYYY-MM-DD') AS hire_date,
+                        to_char(contract_end_date, 'YYYY-MM-DD') AS contract_end_date
+                   FROM staff_members
+                  WHERE tenant_id = $1 AND is_active = true
+                  ORDER BY category, surname, name`,
+                [req.tenantId!]
+            ),
+            queryWithRetry(
+                `SELECT staff_id, to_char(date, 'YYYY-MM-DD') AS date, shift, present
+                   FROM staff_shifts WHERE tenant_id = $2 AND date = $1::date`,
+                [dateStr, req.tenantId!]
+            ),
+            queryWithRetry(
+                `SELECT staff_id, shift, type,
+                        to_char(start_date, 'YYYY-MM-DD') AS start_date,
+                        to_char(end_date, 'YYYY-MM-DD') AS end_date
+                   FROM staff_time_off
+                  WHERE tenant_id = $2 AND start_date <= $1::date AND end_date >= $1::date`,
+                [dateStr, req.tenantId!]
+            ),
         ]);
 
-        // A NULL shift in time_off means the whole day is off; otherwise only the
-        // specific shift is off, leaving the other one available as usual.
-        const onTimeOffFullDay = new Set<string>();
-        const onTimeOffShift = new Set<string>(); // key: `${staffId}-${shift}`
-        for (const r of timeOffResult.rows) {
-            if (r.shift) {
-                onTimeOffShift.add(`${r.staff_id}-${r.shift}`);
-            } else {
-                onTimeOffFullDay.add(r.staff_id);
-            }
+        const shiftsByStaff = new Map<string, ShiftDayRow[]>();
+        for (const r of shiftsResult.rows) {
+            const list = shiftsByStaff.get(r.staff_id) ?? [];
+            // Come la griglia: una riga conta come presenza solo con un sì.
+            list.push({ date: r.date, shift: r.shift, present: r.present === true });
+            shiftsByStaff.set(r.staff_id, list);
         }
-
-        const explicitShifts = new Map<string, boolean>();
-        for (const row of shiftsResult.rows) {
-            explicitShifts.set(`${row.staff_id}-${row.shift}`, row.present);
+        const offsByStaff = new Map<string, ShiftDayTimeOff[]>();
+        for (const r of timeOffResult.rows) {
+            const list = offsByStaff.get(r.staff_id) ?? [];
+            list.push({ startDate: r.start_date, endDate: r.end_date, shift: r.shift ?? null, type: r.type });
+            offsByStaff.set(r.staff_id, list);
         }
 
         const staffByShift = {
@@ -19280,23 +19307,7 @@ app.get('/staff/presence', authenticate, async (req, res) => {
             cucina: { lunch: [] as any[], dinner: [] as any[] }
         };
 
-        // Day of week for the requested date (0=Sunday … 6=Saturday)
-        const dayOfWeek = new Date(`${dateStr}T00:00:00`).getDay();
-
         for (const row of staffResult.rows) {
-            if (onTimeOffFullDay.has(row.id)) continue;
-            // Weekly rest day overrides implicit presence (explicit shifts can still override below)
-            const isWeeklyRest = row.weekly_rest_day !== null && row.weekly_rest_day === dayOfWeek;
-
-            const isFisso = row.staff_type === 'FISSO';
-            // Open boundaries: no hire_date means "always active until contract end",
-            // no contract_end_date means "no end". Without this, a FISSO added without
-            // explicit dates would never appear in the presence list.
-            const inHirePeriod = isFisso
-                && !isWeeklyRest
-                && (!row.hire_date || row.hire_date <= dateStr)
-                && (!row.contract_end_date || row.contract_end_date >= dateStr);
-
             const staff = {
                 id: row.id,
                 name: row.name,
@@ -19305,17 +19316,18 @@ app.get('/staff/presence', authenticate, async (req, res) => {
                 staffType: row.staff_type,
                 role: row.role
             };
-
+            const duty = {
+                staffType: String(row.staff_type),
+                weeklyRestDay: row.weekly_rest_day === null || row.weekly_rest_day === undefined ? null : Number(row.weekly_rest_day),
+                hireDate: row.hire_date ?? null,
+                contractEndDate: row.contract_end_date ?? null,
+            };
             const categoryKey = row.category === 'SALA' ? 'sala' : 'cucina';
-
+            const shifts = shiftsByStaff.get(row.id) ?? [];
+            const offs = offsByStaff.get(row.id) ?? [];
             for (const shift of ['LUNCH', 'DINNER'] as const) {
-                if (onTimeOffShift.has(`${row.id}-${shift}`)) continue;
-                const explicit = explicitShifts.get(`${row.id}-${shift}`);
-                const present = explicit !== undefined ? explicit : inHirePeriod;
-                if (present) {
-                    const shiftKey = shift === 'LUNCH' ? 'lunch' : 'dinner';
-                    staffByShift[categoryKey][shiftKey].push(staff);
-                }
+                if (!isOnDuty(duty, dateStr, shift, shifts, offs)) continue;
+                staffByShift[categoryKey][shift === 'LUNCH' ? 'lunch' : 'dinner'].push(staff);
             }
         }
 

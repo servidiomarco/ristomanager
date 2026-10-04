@@ -209,11 +209,16 @@ export const leaveDaysByYear = (
 
 // ── Chi è in servizio ───────────────────────────────────────────────────
 
-/** Stessa semantica di GET /staff/presence: un'assenza toglie dal turno,
+/** La lettura della copertura del piano ferie: un'assenza toglie dal turno,
  *  un turno esplicito decide, altrimenti il FISSO è in servizio nel periodo
  *  di contratto tranne il giorno di riposo; STAGIONALE ed EXTRA solo coi
  *  turni inseriti. Sul futuro lontano quindi la copertura conta i fissi
- *  più i turni già messi in calendario — è l'informazione che esiste. */
+ *  più i turni già messi in calendario — è l'informazione che esiste.
+ *
+ *  Non è più la lettura di GET /staff/presence: quella segue la pagina
+ *  Personale (isOnDuty in utils/staffShiftChange.ts), dove la riga esplicita
+ *  vince sull'assenza e anche lo STAGIONALE è in servizio da contratto.
+ *  Allinearle è una scelta del piano ferie, ancora da fare. */
 export const makeDutyIndex = (shifts: LeaveShiftRow[], absences: LeaveAbsence[]) => {
     const explicit = new Map<string, boolean>();
     for (const s of shifts) explicit.set(`${s.staffId}|${s.date}|${s.shift}`, s.present);
