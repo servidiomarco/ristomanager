@@ -437,8 +437,8 @@ un miliardo in su.
   aperto della prenotazione.
 - **Restano al cloud**: fattura elettronica e nota di credito (SDI), rimborso
   di una quota o di una caparra accreditata (a servizio chiuso: con
-  l'interruttore acceso rispondono 409 `refund_needs_cloud_authority`), la
-  chiusura su Passepartout (fase B5).
+  l'interruttore acceso rispondono 409 `refund_needs_cloud_authority`). La
+  chiusura su Passepartout dal nodo è arrivata con la fase B5 (sotto).
 
 
 ## L'app dal nodo e la coda dei palmari (fase B4)
@@ -474,3 +474,41 @@ subito.
   già serviti (o rifarebbe scontrini). Contro quel guasto: UPS, memoria
   dell'RT, e la riga «Sincronizzazione» della card che dice quante
   battiture il cloud non ha ancora.
+
+## Passepartout dal nodo e chiusura in cassa durevole (fase B5)
+
+L'agente Passepartout si collega al cloud E al nodo (`PP_AGENT_NODE_URL`),
+come l'agente di stampa con le sue due fonti. Ogni server chiama l'agente per
+i conti che possiede: con «Servizio completo sul nodo» acceso import della
+comanda (`POST /tables/:id/bill` con `source=passepartout`) e chiusura in
+cassa avvengono sul nodo, anche a linea caduta.
+
+- **Il token dell'agente sul nodo** lo passa il supervisore
+  (`passepartout_agent.env.PP_AGENT_TOKEN` → `PASSEPARTOUT_AGENT_TOKEN` del
+  nodo). Dal cloud NON arriva: il token del nodo non deve valere anche come
+  agente. Senza supervisore (vecchi `.cmd`): aggiungere
+  `set PASSEPARTOUT_AGENT_TOKEN=…` al nodo e `set PP_AGENT_NODE_URL=https://sala.<slug>.sympotia.com:8443`
+  all'agente. Il supervisore usa di default l'indirizzo dell'agente di
+  stampa (`passepartout_agent.node_url` per cambiarlo).
+- **Tipo pagamento e documento** (`PASSEPARTOUT_TIPO_PAGAMENTO`,
+  `PASSEPARTOUT_TIPO_DOCUMENTO`) arrivano al nodo con le credenziali, una
+  sola fonte (Railway). Sul disco del nodo (`sala-node-agenti.json`, insieme
+  al token legacy dell'agente di stampa): un nodo riavviato a linea giù li
+  ha ancora. Prima il token legacy viveva solo in memoria, e un riavvio a
+  linea giù lasciava l'agente di stampa a 401.
+- **Chiusura durevole**: la chiusura del conto scrive nella stessa
+  transazione una riga `fiscal_documents` PENDING (provider `passepartout`).
+  - Riuscita → CONFIRMED col numero dell'RT.
+  - Agente spento → resta PENDING, lo spazzino (ogni minuto) riparte
+    appena l'agente si ricollega.
+  - Errore dopo che la richiesta è arrivata all'agente → con un agente
+    che dichiara `chiudi-riprendi` resta PENDING e si riprova con attese
+    di 1, 2, 4, 8, 15 minuti (massimo 6 tentativi, 12 ore); il nuovo
+    tentativo porta `riprendi` e l'agente guarda prima in
+    `GetContiGiorno`: se il conto della comanda c'è già, niente nuovo
+    `ContoComanda` (niente secondo scontrino), solo il saldo del sospeso.
+  - Con un agente vecchio (senza `chiudi-riprendi`) → FAILED subito: la
+    card mostra l'errore e «Chiudi in cassa». È il comportamento di prima.
+  - L'agente fa una chiusura alla volta per comanda.
+- **Aggiornare l'agente insieme al nodo**: finché l'agente sul PC è quello
+  vecchio, le chiusure fallite tornano a mano come prima.

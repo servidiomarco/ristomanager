@@ -6,6 +6,7 @@ import path from 'node:path';
 import { existsSync, mkdtempSync } from 'node:fs';
 import { Client } from 'pg';
 import { createHmac } from 'node:crypto';
+import { io as ioClient } from 'socket.io-client';
 import { api, bearer, ownerToken } from './helpers';
 
 // Fase 4a della tappa 4, end-to-end: lo STREAM INVERSO. Si scrive SUL NODO
@@ -88,6 +89,14 @@ describe('stream inverso nodo→cloud', () => {
                 // Stringa vuota e non assente, così nemmeno la shell lo passa.
                 JWT_SECRET: '',
                 JWT_REFRESH_SECRET: '',
+                // L'agente Passepartout (fase B5): il token glielo dà il
+                // supervisore; tipo pagamento e documento arrivano invece
+                // dalle credenziali del cloud — qui apposta assenti.
+                PASSEPARTOUT_AGENT_TOKEN: 'test-pp-agent-token',
+                PASSEPARTOUT_TIPO_PAGAMENTO: '',
+                PASSEPARTOUT_TIPO_DOCUMENTO: '',
+                PASSEPARTOUT_CLOSE_SWEEP_MS: '300',
+                PASSEPARTOUT_CLOSE_RETRY_UNIT_MS: '300',
                 // Log e cache (chiavi, certificato) fuori dal checkout.
                 SALA_NODE_STATE_DIR: mkdtempSync(path.join(os.tmpdir(), 'nodo-di-prova-')),
             },
@@ -426,6 +435,89 @@ describe('stream inverso nodo→cloud', () => {
             await api().put('/settings/features').set(bearer(token)).send({ sala_node_enabled: hybridPrima });
         }
     }, 120_000);
+
+    it('col servizio in sala il conto Passepartout si apre e si chiude in cassa dal nodo (fase B5)', async () => {
+        const nodeFetch = (p: string, method: string, body?: any) => fetch(`${nodeBase}${p}`, {
+            method,
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: body === undefined ? undefined : JSON.stringify(body),
+        });
+        // La configurazione di chiusura il nodo l'ha presa dalle credenziali.
+        expect(nodeLog).toContain('tipo pagamento Passepartout ereditato dal cloud');
+
+        const flags = await api().get('/settings/features').set(bearer(token));
+        const hybridPrima = flags.body.sala_node_enabled === true;
+        await api().put('/settings/features').set(bearer(token)).send({ sala_node_enabled: true });
+        await api().put('/settings/fiscal').set(bearer(token)).send({ provider: 'none' });
+        // Il tavolo nasce nel cloud (pianta) e scende con la configurazione.
+        const room = await api().post('/rooms').set(bearer(token)).send({ name: 'Sala Cassa', width: 400, height: 300 });
+        const table = await api().post('/tables').set(bearer(token)).send({
+            name: 'PPN1', shape: 'SQUARE', seats: 4, x: 40, y: 40, room_id: room.body.id, status: 'FREE',
+        });
+        await finoA(async () => (await nodeDb!.query('SELECT 1 FROM tables WHERE id = $1', [table.body.id])).rows.length === 1,
+            'tavolo sul nodo');
+
+        // L'agente del PC, collegato al NODO.
+        const chiusure: any[] = [];
+        const agente = ioClient(`${nodeBase}/pp-agent`, { auth: { token: 'test-pp-agent-token' }, transports: ['websocket'], reconnection: false });
+        agente.on('pp:call', (payload: any, ack: (r: unknown) => void) => {
+            if (payload?.op === 'comandaTavolo') {
+                return ack({ ok: true, result: payload.params?.tavolo === 'PPN1' ? {
+                    idGestionale: 9201, tavolo: 'PPN1', sala: 'Sala', coperti: 2, sconto: null, stato: '1',
+                    righe: [{ idGestionale: 92010, descrizione: 'Grigliata', articolo: 'GRIG', prezzo: 18, pezzi: 1, totale: 18, stato: '1' }],
+                } : null });
+            }
+            if (payload?.op === 'chiudi') {
+                chiusure.push(payload.params);
+                return ack({ ok: true, result: {
+                    chiuso: true, importoSospeso: 0, stato: 'Pagato', numeroScontrino: '0077-0001',
+                    totalePagato: 18, totaleDaPagare: 18, avviso: null,
+                } });
+            }
+            ack({ ok: false, error: 'op non prevista', kind: 'agent' });
+        });
+        await new Promise<void>((resolve, reject) => { agente.on('connect', () => resolve()); agente.on('connect_error', reject); });
+        agente.emit('agent:hello', { hostname: 'pc-di-sala', capabilities: ['chiudi-riprendi'] });
+        try {
+            await finoA(async () => {
+                const o = await api().get('/sala-node/authority').set(bearer(token));
+                return o.body.node_online === true && o.body.aligned === true;
+            }, 'repliche allineate');
+            await cloudDb!.query(`UPDATE table_bill_splits SET status = 'RELEASED', released_at = CURRENT_TIMESTAMP WHERE status = 'CLAIMED'`);
+            const on = await api().post('/sala-node/authority').set(bearer(token)).send({ enabled: true });
+            expect(on.status).toBe(200);
+
+            const opened = await nodeFetch(`/tables/${table.body.id}/bill`, 'POST', { source: 'passepartout', pp_tavolo: 'PPN1' });
+            expect(opened.status).toBe(201);
+            const bill = (await opened.json()).bill;
+            expect(bill.external_ref).toBe('pp:comanda:9201');
+            const close = await nodeFetch(`/bills/${bill.id}/close`, 'POST', { payments: [{ method: 'CONTANTI', amount_cents: bill.total_cents }] });
+            expect(close.status).toBe(200);
+
+            // La cassa la chiude l'agente collegato al nodo, col tipo
+            // pagamento arrivato dal cloud; il documento risale.
+            await finoA(async () => {
+                const r = await cloudDb!.query(
+                    `SELECT status, provider, provider_ref FROM fiscal_documents WHERE table_bill_id = $1`, [bill.id]
+                );
+                return r.rows[0]?.status === 'CONFIRMED' && r.rows[0]?.provider === 'passepartout' && r.rows[0]?.provider_ref === '0077-0001';
+            }, 'chiusura in cassa risalita al cloud', 30_000);
+            expect(chiusure).toHaveLength(1);
+            expect(chiusure[0]).toMatchObject({ idComanda: 9201, tipoPagamento: 'ESTERNO', riprendi: false });
+
+            // La ripresa a mano passa dal nodo: nel cloud c'è il recinto.
+            const sulCloud = await api().post(`/bills/${bill.id}/passepartout-close`).set(bearer(token)).send({});
+            expect(sulCloud.status).toBe(409);
+            expect(sulCloud.body.error).toBe('authority_on_node');
+
+            const off = await api().post('/sala-node/authority').set(bearer(token)).send({ enabled: false });
+            expect(off.status).toBe(200);
+        } finally {
+            agente.close();
+            await api().post('/sala-node/authority').set(bearer(token)).send({ enabled: false, force: true });
+            await api().put('/settings/features').set(bearer(token)).send({ sala_node_enabled: hybridPrima });
+        }
+    }, 90_000);
 
     it("niente eco: l'evento importato dal nodo non riscende al nodo come nuovo", async () => {
         // Lo stream in discesa manda solo origin='local': l'evento del

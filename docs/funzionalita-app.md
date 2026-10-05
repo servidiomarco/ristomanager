@@ -427,8 +427,8 @@ Per i ristoranti con cassa **Passepartout Menù** (modulo dedicato):
 - **Import del menu** dal catalogo articoli della cassa, varianti comprese. Le voci disattivate in cassa (articoli e categorie "muti", tenuti lì solo per lo storico) non entrano nel menu del CRM; se erano già state importate, il sync le rimuove.
 - **Categoria bloccata**: la cassa possiede la categoria dei piatti importati e il sync la riallinea a ogni giro — ma cambiare categoria **a mano** dalla scheda di un piatto della cassa alza un lucchetto: da quel momento il sync lascia la categoria del CRM (nome, prezzo, IVA e attivo restano della cassa). È ciò che permette la carta dei vini divisa per colore (Vini bianchi / Vini rosé) mentre la cassa conosce solo «Vini bianchi-rosé».
 - Anteprima della comanda attiva su un tavolo della cassa e **importazione del conto** nel CRM.
-- **Chiusura del conto in cassa dal CRM**: scontrino e saldo partono verso il gestionale; ritentabile se la cassa era irraggiungibile.
-- Collegamento sicuro cloud↔ristorante tramite un piccolo agente installato sulla LAN (nessuna porta aperta verso l'esterno), con stato di connessione visibile.
+- **Chiusura del conto in cassa dal CRM**: scontrino e saldo partono verso il gestionale. Se la cassa o il suo agente non rispondono, la chiusura resta «In emissione» e riparte da sola appena tornano (per qualche ora, con attese crescenti): prima di ritentare l'agente guarda se il conto c'è già in cassa, così non esce un secondo scontrino. Se serve una mano la card lo dice, con l'errore, e «Chiudi in cassa» la rifà.
+- Collegamento sicuro cloud↔ristorante tramite un piccolo agente installato sulla LAN (nessuna porta aperta verso l'esterno), con stato di connessione visibile. Col nodo di sala l'agente si collega anche al nodo: con «Servizio completo sul nodo» acceso, import e chiusura dei conti Passepartout funzionano anche a linea caduta.
 
 ---
 
@@ -781,6 +781,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-06 | Integrazione cassa Passepartout | La chiusura in cassa di un conto Passepartout non si perde più: se la cassa non risponde resta «In emissione» e riparte da sola, senza rischiare un secondo scontrino; se serve una mano la card mostra l'errore e «Chiudi in cassa». Col «Servizio completo sul nodo» import e chiusura dei conti Passepartout funzionano anche a linea caduta. |
 | 2026-10-06 | Nodo di sala (modalità ibrida) | Col «Servizio completo sul nodo» l'app si riapre dal nodo anche a linea caduta: pianta, menu, prenotazioni dei giorni vicini e asporto non spariscono più al ricaricamento. Se il palmare non raggiunge il nodo l'errore dice che niente è stato registrato, e lo stato dei tavoli resta in coda fino al ritorno del nodo. |
 | 2026-10-05 | Nodo di sala (modalità ibrida) | Col «Servizio completo sul nodo» anche il conto vive in sala: incassi, chiusura, preconto, scontrino sul registratore e cassa funzionano a linea caduta e risalgono al cloud da soli. Il pagamento col QR passa dal nodo (a linea caduta l'ospite paga in cassa), e l'interruttore si accende solo col registratore collegato al CRM. |
 | 2026-10-05 | Pagamenti, conto al tavolo e cassa | Un conto pagato tutto col QR si chiude da solo e lo scontrino parte da solo, se lo scontrino è automatico (registratore collegato al CRM o scontrino elettronico): non resta più «pagato» ma aperto. Un incasso ripetuto per un doppio tocco o una rete che balla non si raddoppia. |

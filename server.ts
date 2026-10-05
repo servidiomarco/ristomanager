@@ -72,6 +72,7 @@ import {
     setupPassepartoutBridge,
     isPassepartoutAgentConfigured,
     getPassepartoutAgentStatus,
+    passepartoutAgentSupports,
     callPassepartout,
     comandaToBillPayload,
     PassepartoutBridgeError,
@@ -3856,6 +3857,86 @@ function getPassepartoutChiusuraConfig(): { tipoPagamento: string; tipoDocumento
     };
 }
 
+// --- Chiusura in cassa durevole (fase B5) ------------------------------------
+// Prima la chiusura era un colpo solo, fuori dalla risposta: agente spento,
+// rete che balla o processo riavviato fra il saldo e la chiamata, e il
+// tavolo restava aperto in cassa senza che nessuno lo sapesse. Ora la
+// chiusura è una riga di fiscal_documents (provider 'passepartout'):
+// PENDING nella STESSA transazione che chiude il conto, CONFIRMED con
+// l'esito della cassa, FAILED quando serve una mano (il bottone «Chiudi in
+// cassa» della card compare solo lì). Uno spazzino riprova i PENDING.
+//
+// Il tentativo è un'azione FISCALE: rifarlo dopo una risposta persa
+// rifarebbe lo scontrino. Per questo dal secondo tentativo si passa
+// `riprendi` e l'agente guarda prima nell'archivio del giorno; un agente
+// che non dichiara 'chiudi-riprendi' non riceve tentativi automatici dopo
+// che uno è arrivato fino a lui.
+const PP_CLOSE_MAX_ATTEMPTS = 6;
+const PP_CLOSE_WINDOW_MS = 12 * 60 * 60 * 1000;
+const PP_CLOSE_SWEEP_MS = Math.max(200, Number(process.env.PASSEPARTOUT_CLOSE_SWEEP_MS) || 60_000);
+// Unità dell'attesa fra i tentativi (1, 2, 4, 8, 15 unità): un minuto; i
+// test la accorciano.
+const PP_CLOSE_RETRY_UNIT_MS = Math.max(100, Number(process.env.PASSEPARTOUT_CLOSE_RETRY_UNIT_MS) || 60_000);
+const ppCloseInFlight = new Set<number>();
+
+/** La riga PENDING della chiusura in cassa, dentro la transazione del
+ *  chiamante. L'indice «un documento vivo per conto» assorbe i doppioni. */
+async function insertPendingPassepartoutClose(client: any, tenantId: number, billId: number, documento?: 'Scontrino' | 'Proforma'): Promise<number | null> {
+    const ins = await client.query(
+        `INSERT INTO fiscal_documents (tenant_id, table_bill_id, doc_type, provider, status, total_cents)
+         SELECT $1, $2, $3, 'passepartout', 'PENDING', total_cents FROM table_bills WHERE id = $2 AND tenant_id = $1
+         ON CONFLICT (table_bill_id) WHERE status IN ('PENDING', 'CONFIRMED') AND table_bill_split_id IS NULL AND doc_type <> 'CREDIT_NOTE' DO NOTHING
+         RETURNING id`,
+        [tenantId, billId, documento === 'Proforma' ? 'PROFORMA' : 'RECEIPT']
+    );
+    const id = ins.rows[0]?.id ?? null;
+    if (id != null) await logFiscalDocChanged(client, tenantId, id);
+    return id;
+}
+
+async function notifyPassepartoutDoc(tenantId: number, docId: number): Promise<void> {
+    await logFiscalDocChanged(null, tenantId, docId);
+    outboxKick();
+    const rs = await queryWithRetry(`SELECT ${FISCAL_DOC_COLUMNS} FROM fiscal_documents WHERE id = $1 AND tenant_id = $2`, [docId, tenantId]);
+    const doc = rs.rows[0];
+    if (doc) {
+        try { socketService?.broadcastToAll(tenantId, 'fiscal:updated', { bill_id: doc.table_bill_id, doc }); } catch (_) {}
+    }
+}
+
+/** Un tentativo fallito: resta PENDING (lo riprova lo spazzino) finché ha
+ *  senso, poi FAILED con una frase per chi è in cassa. */
+async function notePassepartoutCloseFailure(tenantId: number, docId: number, err: unknown): Promise<void> {
+    const kind = err instanceof PassepartoutBridgeError ? err.kind : 'agent';
+    const message = (err as any)?.message ? String((err as any).message).slice(0, 500) : 'errore sconosciuto';
+    const rs = await queryWithRetry(
+        `SELECT attempts, created_at, COALESCE(response, '{}'::jsonb) AS response FROM fiscal_documents WHERE id = $1 AND tenant_id = $2`,
+        [docId, tenantId]
+    );
+    const row = rs.rows[0];
+    if (!row) return;
+    const offline = Number(row.response?.offline_attempts ?? 0) + (kind === 'agent_offline' ? 1 : 0);
+    const reached = Number(row.attempts) > offline;
+    const expired = Date.now() - new Date(row.created_at).getTime() > PP_CLOSE_WINDOW_MS;
+    let failReason: string | null = null;
+    if (Number(row.attempts) >= PP_CLOSE_MAX_ATTEMPTS || expired) {
+        failReason = `Chiusura in cassa non riuscita dopo ${row.attempts} tentativi: ${message}`;
+    } else if (reached && !passepartoutAgentSupports('chiudi-riprendi')) {
+        failReason = `Chiusura in cassa non riuscita: ${message}. Controlla in cassa se il conto c'è già prima di riprovare.`;
+    }
+    // Attesa crescente: 1, 2, 4, 8, 15 minuti.
+    const waitMs = Math.min(15, 2 ** Math.max(0, Number(row.attempts) - 1)) * PP_CLOSE_RETRY_UNIT_MS;
+    await queryWithRetry(
+        `UPDATE fiscal_documents
+            SET status = CASE WHEN $3::text IS NULL THEN status ELSE 'FAILED' END,
+                error = COALESCE($3, $4),
+                response = COALESCE(response, '{}'::jsonb) || jsonb_build_object('offline_attempts', $5::int, 'next_at', $6::text)
+          WHERE id = $1 AND tenant_id = $2 AND status = 'PENDING'`,
+        [docId, tenantId, failReason, message, offline, new Date(Date.now() + waitMs).toISOString()]
+    );
+    await notifyPassepartoutDoc(tenantId, docId);
+}
+
 async function chiudiComandaPassepartoutPerBill(
     tenantId: number,
     billId: number,
@@ -3866,51 +3947,142 @@ async function chiudiComandaPassepartoutPerBill(
      *  Scelta del cameriere nel dialog di chiusura, non un'euristica. */
     documento?: 'Scontrino' | 'Proforma',
 ): Promise<EsitoChiusuraComanda> {
-    const proforma = documento === 'Proforma';
-    // Timeout largo: la sequenza sull'agente può includere invio in
-    // produzione, attesa e saldo del sospeso (vedi chiudiComandaCompleta).
-    const esito = await callPassepartout<EsitoChiusuraComanda>('chiudi', {
-        idComanda,
-        tipoPagamento: config.tipoPagamento,
-        tipoDocumento: proforma ? 'Proforma' : config.tipoDocumento,
-        proforma,
-    }, 60_000);
-    try { socketService?.broadcastToAll(tenantId, 'passepartout:chiusura', { bill_id: billId, id_comanda: idComanda, esito }); } catch (_) {}
-    if (esito.avviso) console.warn('[passepartout] chiusura comanda', idComanda, 'con avviso:', esito.avviso);
-    // Il documento l'ha emesso la cassa: registrarlo in fiscal_documents dà
-    // alla card Scontrino lo stesso ciclo di vita dei documenti Openapi
-    // (badge, numero, niente bottone Emetti). Per lo scontrino provider_ref
-    // è il numero fiscale dell'RT; la proforma non ne ha (doc_type PROFORMA,
-    // provider_ref NULL). L'indice one-live-per-bill assorbe i replay del
-    // retry. La registrazione non deve mai far fallire la chiusura.
-    if (esito.numeroScontrino || proforma) {
-        try {
-            const billRs = await queryWithRetry(
-                `SELECT total_cents FROM table_bills WHERE id = $1 AND tenant_id = $2`,
+    if (ppCloseInFlight.has(billId)) {
+        throw new PassepartoutBridgeError('Chiusura in cassa già in corso per questo conto', 'busy');
+    }
+    ppCloseInFlight.add(billId);
+    try {
+        // La riga viva: quella nata con la chiusura del conto, o una nuova
+        // (conto chiuso prima della fase B5, o dopo un FAILED).
+        let live = await queryWithRetry(
+            `SELECT id, status, provider, doc_type, attempts, response FROM fiscal_documents
+              WHERE table_bill_id = $1 AND tenant_id = $2 AND status IN ('PENDING', 'CONFIRMED')
+                AND table_bill_split_id IS NULL AND doc_type <> 'CREDIT_NOTE'
+              LIMIT 1`,
+            [billId, tenantId]
+        );
+        if (!live.rows[0]) {
+            await runWithOutboxTx(client => insertPendingPassepartoutClose(client, tenantId, billId, documento));
+            live = await queryWithRetry(
+                `SELECT id, status, provider, doc_type, attempts, response FROM fiscal_documents
+                  WHERE table_bill_id = $1 AND tenant_id = $2 AND status IN ('PENDING', 'CONFIRMED')
+                    AND table_bill_split_id IS NULL AND doc_type <> 'CREDIT_NOTE'
+                  LIMIT 1`,
                 [billId, tenantId]
             );
-            if (billRs.rows[0]) {
-                const ins = await queryWithRetry(
-                    // Arbitro sull'indice a livello conto (predicato con
-                    // split IS NULL dalla migration fattura-elettronica).
-                    `INSERT INTO fiscal_documents
-                        (tenant_id, table_bill_id, doc_type, provider, status, provider_ref, response, total_cents, confirmed_at)
-                     VALUES ($1, $2, $6, 'passepartout', 'CONFIRMED', $3, $4::jsonb, $5, CURRENT_TIMESTAMP)
-                     ON CONFLICT (table_bill_id) WHERE status IN ('PENDING', 'CONFIRMED') AND table_bill_split_id IS NULL AND doc_type <> 'CREDIT_NOTE' DO NOTHING
-                     RETURNING ${FISCAL_DOC_COLUMNS}`,
-                    [tenantId, billId, esito.numeroScontrino || null, JSON.stringify(esito),
-                     billRs.rows[0].total_cents, proforma ? 'PROFORMA' : 'RECEIPT']
-                );
-                if (ins.rows[0]) {
-                    await logFiscalDocChanged(null, tenantId, ins.rows[0].id);
-                    try { socketService?.broadcastToAll(tenantId, 'fiscal:updated', { bill_id: billId, doc: ins.rows[0] }); } catch (_) {}
-                }
-            }
-        } catch (err: any) {
-            console.error('[passepartout] registrazione documento fallita per conto', billId, err?.message);
         }
+        const doc = live.rows[0];
+        if (!doc) throw new PassepartoutBridgeError('Documento della chiusura non creato', 'agent');
+        if (doc.status === 'CONFIRMED') {
+            // Già chiuso in cassa: nessuna seconda chiamata fiscale.
+            return doc.response as EsitoChiusuraComanda;
+        }
+        if (doc.provider !== 'passepartout') {
+            throw new PassepartoutBridgeError('Il conto ha già un documento fiscale in emissione', 'busy');
+        }
+        const proforma = doc.doc_type === 'PROFORMA';
+        // Claim atomico come per gli scontrini cloud: vince chi incrementa
+        // attempts per primo. Un tentativo già fatto (anche da un processo
+        // morto a metà) o un FAILED precedente = si riprende, non si rifà.
+        const claim = await queryWithRetry(
+            `UPDATE fiscal_documents SET attempts = attempts + 1
+              WHERE id = $1 AND status = 'PENDING' AND attempts = $2
+              RETURNING attempts`,
+            [doc.id, doc.attempts]
+        );
+        if ((claim.rowCount ?? 0) === 0) {
+            throw new PassepartoutBridgeError('Chiusura in cassa già in corso per questo conto', 'busy');
+        }
+        const failedBefore = await queryWithRetry(
+            `SELECT 1 FROM fiscal_documents WHERE table_bill_id = $1 AND tenant_id = $2 AND provider = 'passepartout' AND status = 'FAILED' LIMIT 1`,
+            [billId, tenantId]
+        );
+        const riprendi = Number(doc.attempts) > 0 || failedBefore.rows.length > 0;
+
+        let esito: EsitoChiusuraComanda;
+        try {
+            // Timeout largo: la sequenza sull'agente può includere invio in
+            // produzione, attesa e saldo del sospeso (vedi chiudiComandaCompleta).
+            esito = await callPassepartout<EsitoChiusuraComanda>('chiudi', {
+                idComanda,
+                tipoPagamento: config.tipoPagamento,
+                tipoDocumento: proforma ? 'Proforma' : config.tipoDocumento,
+                proforma,
+                riprendi,
+            }, 60_000);
+        } catch (err) {
+            await notePassepartoutCloseFailure(tenantId, doc.id, err)
+                .catch(e => console.error('[passepartout] esito del tentativo non registrato per conto', billId, e?.message));
+            throw err;
+        }
+        try { socketService?.broadcastToAll(tenantId, 'passepartout:chiusura', { bill_id: billId, id_comanda: idComanda, esito }); } catch (_) {}
+        if (esito.avviso) console.warn('[passepartout] chiusura comanda', idComanda, 'con avviso:', esito.avviso);
+        // Il documento l'ha emesso la cassa: la card Scontrino lo mostra
+        // come gli altri (badge, numero, niente bottone Emetti). Per lo
+        // scontrino provider_ref è il numero fiscale dell'RT; la proforma
+        // non ne ha.
+        await queryWithRetry(
+            `UPDATE fiscal_documents
+                SET status = 'CONFIRMED', provider_ref = $3, response = $4::jsonb, error = NULL, confirmed_at = CURRENT_TIMESTAMP
+              WHERE id = $1 AND tenant_id = $2`,
+            [doc.id, tenantId, esito.numeroScontrino || null, JSON.stringify(esito)]
+        );
+        await notifyPassepartoutDoc(tenantId, doc.id);
+        return esito;
+    } finally {
+        ppCloseInFlight.delete(billId);
     }
-    return esito;
+}
+
+/** Lo spazzino delle chiusure in cassa rimaste PENDING: gira dove gira il
+ *  ponte, sui soli conti di cui questo processo è il padrone (con
+ *  l'autorità in sala, il nodo). */
+function startPassepartoutCloseSweeper(): void {
+    const sweep = async (): Promise<void> => {
+        if (!getPassepartoutAgentStatus().connected) return;
+        const config = getPassepartoutChiusuraConfig();
+        if (!config) return;
+        // rls-bypass: spazzino senza sessione; ogni riga si lavora nel contesto del suo tenant_id
+        const rs = await runAsPlatform(() => pool.query(
+            `SELECT fd.id, fd.tenant_id, fd.table_bill_id, fd.doc_type, fd.attempts, fd.created_at,
+                    COALESCE(fd.response, '{}'::jsonb) AS response, b.external_ref
+               FROM fiscal_documents fd JOIN table_bills b ON b.id = fd.table_bill_id
+              WHERE fd.provider = 'passepartout' AND fd.status = 'PENDING' AND b.status = 'CLOSED'
+              ORDER BY fd.id LIMIT 20`
+        ));
+        for (const row of rs.rows) {
+            const tenantId = Number(row.tenant_id);
+            const billId = Number(row.table_bill_id);
+            const idComanda = passepartoutComandaIdFromRef(row.external_ref);
+            if (idComanda == null || ppCloseInFlight.has(billId)) continue;
+            if (!isServiceNode && await nodeOwnsBills(tenantId)) continue;
+            const nextAt = Date.parse(String(row.response?.next_at ?? ''));
+            if (Number.isFinite(nextAt) && nextAt > Date.now()) continue;
+            await runWithTenantContext(tenantId, async () => {
+                const offline = Number(row.response?.offline_attempts ?? 0);
+                const reached = Number(row.attempts) > offline;
+                const expired = Date.now() - new Date(row.created_at).getTime() > PP_CLOSE_WINDOW_MS;
+                if (expired || Number(row.attempts) >= PP_CLOSE_MAX_ATTEMPTS || (reached && !passepartoutAgentSupports('chiudi-riprendi'))) {
+                    await queryWithRetry(
+                        `UPDATE fiscal_documents SET status = 'FAILED',
+                                error = COALESCE(error, 'Chiusura in cassa non riuscita: controlla in cassa e chiudi a mano')
+                          WHERE id = $1 AND tenant_id = $2 AND status = 'PENDING'`,
+                        [row.id, tenantId]
+                    );
+                    await notifyPassepartoutDoc(tenantId, Number(row.id));
+                    return;
+                }
+                await chiudiComandaPassepartoutPerBill(tenantId, billId, idComanda, config,
+                    row.doc_type === 'PROFORMA' ? 'Proforma' : undefined)
+                    .then(() => console.log(`[passepartout] chiusura in cassa ripresa per conto ${billId}`))
+                    .catch(err => console.warn(`[passepartout] chiusura in cassa ancora in sospeso per conto ${billId}:`, err?.message));
+            });
+        }
+    };
+    const timer = setInterval(() => {
+        sweep().catch(err => console.error('[passepartout] spazzino chiusure:', err?.message || err));
+    }, PP_CLOSE_SWEEP_MS);
+    if (typeof timer.unref === 'function') timer.unref();
 }
 
 // Ritenta la chiusura in cassa di un conto Passepartout già CLOSED (agente
@@ -3941,6 +4113,9 @@ app.post('/bills/:id/passepartout-close', authenticate, requirePermission('payme
         const esito = await chiudiComandaPassepartoutPerBill(req.tenantId!, id, idComanda, config, documento);
         res.json({ id_comanda: idComanda, esito });
     } catch (err: any) {
+        if (err instanceof PassepartoutBridgeError && err.kind === 'busy') {
+            return res.status(409).json({ error: 'passepartout_busy', message: err.message });
+        }
         if (sendPassepartoutError(res, err)) return;
         console.error('POST /bills/:id/passepartout-close error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
@@ -6319,6 +6494,15 @@ app.post('/bills/:id/close', authenticate, requirePermission('payments:full'), a
                 [id, finalStatus, req.user?.userId ?? null, Math.round(tipCents), notesForDb, req.tenantId!, lotteryCode, tipMethod]
             );
             updatedRow = upd.rows[0];
+            // Fase B5: la chiusura in cassa di un conto Passepartout nasce
+            // qui, nella transazione del conto — un processo che muore dopo
+            // il COMMIT la lascia PENDING e la riprende lo spazzino, invece
+            // di perderla.
+            if (finalStatus === 'CLOSED' && passepartoutComandaIdFromRef(updatedRow?.external_ref) != null
+                && getPassepartoutChiusuraConfig()) {
+                await insertPendingPassepartoutClose(client, req.tenantId!, id,
+                    req.body?.passepartout_documento === 'Proforma' ? 'Proforma' : undefined);
+            }
             await logBillChanged(client, req.tenantId!, id);
             await client.query('COMMIT');
         } catch (txErr) {
@@ -39117,6 +39301,15 @@ app.get('/sala-node/credentials', salaNodeAuth, async (req: any, res) => {
             // il tenant pubblico: gli altri usano il token per-tenant a DB,
             // che il nodo ha già dalla riga tenants dello snapshot.
             print_agent_legacy_token: tenantId === PUBLIC_TENANT_ID ? (process.env.PRINT_AGENT_TOKEN || null) : null,
+            // Fase B5: con l'autorità in sala i conti Passepartout si
+            // chiudono sul nodo, che deve chiuderli come il cloud: stesso
+            // tipo pagamento e documento, una sola fonte (Railway). Solo la
+            // configurazione, mai il token dell'agente: quello il nodo lo
+            // riceve dal supervisore, che sul PC lo ha già — il token del
+            // nodo non deve valere anche come agente (stessa regola che ha
+            // tolto JWT_SECRET da qui). Integrazione da env: solo il tenant
+            // pubblico.
+            passepartout_chiusura: tenantId === PUBLIC_TENANT_ID ? getPassepartoutChiusuraConfig() : null,
             jwt_public_keys: publicKeysForNodes(),
             cert: cert
                 ? { cert_pem: cert.cert_pem, key_pem: cert.key_pem, expires_at: cert.expires_at }
@@ -40408,8 +40601,12 @@ const startServer = async () => {
                 setNotificationPersistListener((tenantId, userIds) => {
                     socketService?.broadcastToUsers(tenantId, userIds, 'notification:new', {});
                 });
-                if (isPassepartoutAgentConfigured() && !isServiceNode) {
+                // Sul nodo sempre (fase B5): il token arriva dalle credenziali
+                // del cloud anche dopo l'avvio, e il namespace lo rilegge a
+                // ogni handshake.
+                if (isServiceNode || isPassepartoutAgentConfigured()) {
                     setupPassepartoutBridge(socketService.getIO());
+                    startPassepartoutCloseSweeper();
                     console.log('✅ Passepartout agent bridge attivo su /pp-agent');
                 }
                 // Sempre attivo (a differenza del pp-agent non dipende da un

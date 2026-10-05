@@ -36,6 +36,9 @@ export const SERVICE_WRITE_ROUTES: ServiceWriteRoute[] = [
     { path: /^\/bills\/\d+\/payments\/\d+\/void$/ },
     { path: /^\/bills\/\d+\/fiscal-docs$/ },
     { path: /^\/bills\/\d+\/fiscal-docs\/\d+\/void$/ },
+    // Fase B5: la chiusura sul gestionale Passepartout la fa chi possiede il
+    // conto — l'agente è collegato anche al nodo.
+    { path: /^\/bills\/\d+\/passepartout-close$/ },
     { path: /^\/cash\/session(\/\d+(\/close)?)?$/ },
     { path: /^\/print-jobs$/, method: /^POST$/ },
     // Il conto dell'asporto è un conto come gli altri.
@@ -44,8 +47,7 @@ export const SERVICE_WRITE_ROUTES: ServiceWriteRoute[] = [
 
 // Restano al cloud anche con l'autorità in sala: la fattura elettronica e
 // la nota di credito (SDI, vive su internet), il rimborso di una quota
-// pagata online (il gateway), la chiusura sul gestionale Passepartout (il
-// suo agente parla col cloud — fase B5).
+// pagata online (il gateway).
 export const SERVICE_WRITE_EXCLUDED: RegExp[] = [];
 
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
