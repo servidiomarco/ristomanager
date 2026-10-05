@@ -35,7 +35,15 @@ import { RolePermissionService } from '../auth/permissionService.js';
 import { isPlatformScopedSession } from '../auth/authService.js';
 import {
     HACCP_CORRECTION_GRACE_MINUTES,
+    HACCP_DOCUMENT_CATEGORIES,
+    HACCP_DOCUMENT_LABELS_IT,
+    HACCP_INTERVENTION_LABELS_IT,
+    HACCP_INTERVENTION_TYPES,
     HACCP_POINT_REGISTERS,
+    HACCP_TRAINING_COURSES,
+    HACCP_TRAINING_LABELS_IT,
+    HaccpDeadline,
+    HaccpInterventionType,
     HACCP_PROCESSES,
     HACCP_PROCESS_LABELS_IT,
     HACCP_RECEIPT_CATEGORIES,
@@ -264,6 +272,23 @@ const PRODUCTION_COLUMNS = `
     sanitizer, concentration, contact_minutes AS "contactMinutes", event_label AS "eventLabel",
     keep_until AS "keepUntil", compliant, problem, ${AUDIT_COLUMNS}`;
 
+const INTERVENTION_COLUMNS = `
+    id, TO_CHAR(date, 'YYYY-MM-DD') AS date, type, provider, outcome_ok AS "outcomeOk", findings, quantity,
+    reference, document_id AS "documentId", TO_CHAR(next_due, 'YYYY-MM-DD') AS "nextDue", note, ${AUDIT_COLUMNS}`;
+
+// Mai i byte nelle liste: un manuale da 5 MB viaggerebbe a ogni apertura
+// dell'archivio. Il file si scarica a parte (/documents/:id/file).
+const DOCUMENT_COLUMNS = `
+    id, category, title, filename, content_type AS "contentType", size_bytes AS "sizeBytes",
+    (bytes IS NOT NULL) AS "hasFile", TO_CHAR(valid_until, 'YYYY-MM-DD') AS "validUntil", note, archived,
+    uploaded_by_user_name AS "uploadedByUserName", created_at AS "createdAt", updated_at AS "updatedAt"`;
+
+const TRAINING_COLUMNS = `
+    id, staff_member_id AS "staffMemberId", person_name AS "personName", course, title, provider,
+    hours::float8 AS hours, TO_CHAR(completed_on, 'YYYY-MM-DD') AS "completedOn",
+    TO_CHAR(expires_on, 'YYYY-MM-DD') AS "expiresOn", document_id AS "documentId", note, archived,
+    recorded_by_user_name AS "recordedByUserName", created_at AS "createdAt", updated_at AS "updatedAt"`;
+
 const CALIBRATION_COLUMNS = `
     id, TO_CHAR(date, 'YYYY-MM-DD') AS date, point_id AS "pointId", instrument, method,
     reference_temp::float8 AS "referenceTemp", measured_temp::float8 AS "measuredTemp",
@@ -331,7 +356,7 @@ async function resolvePoint(
 
 // ---- Non conformità ------------------------------------------------------------------
 
-type NcSource = 'TEMPERATURE' | 'OIL' | 'CLEANING' | 'RECEIPT' | 'PROCESS' | 'CALIBRATION' | 'RECALL' | 'MANUAL';
+type NcSource = 'TEMPERATURE' | 'OIL' | 'CLEANING' | 'RECEIPT' | 'PROCESS' | 'CALIBRATION' | 'INTERVENTION' | 'RECALL' | 'MANUAL';
 
 // ---- Limiti del locale ---------------------------------------------------------------
 // Letti a ogni registrazione che li usa: cache breve per tenant, svuotata dal
@@ -461,6 +486,66 @@ const limitText = (min: number | null, max: number | null): string => {
 
 const temperatureTitle = (label: string, slot: number, checksPerDay: number, temperature: number, min: number | null, max: number | null): string =>
     `${label}${checksPerDay > 1 ? ` (${slot}ª)` : ''} · ${formatHaccpTemperature(temperature)} (${limitText(min, max)})`;
+
+// ---- Scadenze -----------------------------------------------------------------------------------
+// Attestati, documenti e interventi periodici: quello che l'ispettore trova
+// scaduto prima ancora di guardare i registri. Un attestato rinnovato supera
+// il vecchio (vale l'ultimo per persona e corso), un intervento il
+// precedente dello stesso tipo.
+
+const DEADLINE_HORIZON_DAYS = 60;
+
+async function computeDeadlines(tenantId: number, today: string): Promise<HaccpDeadline[]> {
+    const [trainings, documents, interventions] = await Promise.all([
+        queryWithRetry(
+            `SELECT * FROM (
+                SELECT DISTINCT ON (COALESCE(staff_member_id::text, lower(person_name)), course)
+                       id, person_name, course, title, TO_CHAR(expires_on, 'YYYY-MM-DD') AS due
+                  FROM haccp_trainings
+                 WHERE tenant_id = $1 AND NOT archived
+                 ORDER BY COALESCE(staff_member_id::text, lower(person_name)), course, completed_on DESC, id DESC
+             ) last WHERE due IS NOT NULL AND due::date <= $2::date + ${DEADLINE_HORIZON_DAYS}`,
+            [tenantId, today],
+        ),
+        queryWithRetry(
+            `SELECT id, category, title, TO_CHAR(valid_until, 'YYYY-MM-DD') AS due
+               FROM haccp_documents
+              WHERE tenant_id = $1 AND NOT archived AND valid_until IS NOT NULL
+                AND valid_until <= $2::date + ${DEADLINE_HORIZON_DAYS}`,
+            [tenantId, today],
+        ),
+        queryWithRetry(
+            `SELECT * FROM (
+                SELECT DISTINCT ON (type) id, type, provider, TO_CHAR(next_due, 'YYYY-MM-DD') AS due
+                  FROM haccp_interventions
+                 WHERE tenant_id = $1 AND voided_at IS NULL
+                 ORDER BY type, date DESC, recorded_at DESC
+             ) last WHERE due IS NOT NULL AND due::date <= $2::date + ${DEADLINE_HORIZON_DAYS}`,
+            [tenantId, today],
+        ),
+    ]);
+    const status = (due: string): HaccpDeadline['status'] => (due < today ? 'expired' : 'soon');
+    const out: HaccpDeadline[] = [
+        ...trainings.rows.map((r: any) => ({
+            kind: 'training' as const, id: String(r.id), due: r.due, status: status(r.due),
+            title: `${r.person_name} · ${r.title || HACCP_TRAINING_LABELS_IT[r.course as keyof typeof HACCP_TRAINING_LABELS_IT] || r.course}`,
+        })),
+        ...documents.rows.map((r: any) => ({
+            kind: 'document' as const, id: String(r.id), due: r.due, status: status(r.due),
+            title: r.title || HACCP_DOCUMENT_LABELS_IT[r.category as keyof typeof HACCP_DOCUMENT_LABELS_IT],
+        })),
+        ...interventions.rows.map((r: any) => ({
+            kind: 'intervention' as const, id: String(r.id), due: r.due, status: status(r.due),
+            title: `${HACCP_INTERVENTION_LABELS_IT[r.type as HaccpInterventionType] ?? r.type}${r.provider ? ` · ${r.provider}` : ''}`,
+        })),
+    ];
+    return out.sort((a, b) => a.due.localeCompare(b.due));
+}
+
+/** File ammessi nell'archivio: PDF, immagini (la foto del rapporto della
+ *  ditta) e documenti d'ufficio. */
+const DOCUMENT_TYPES = /^(application\/pdf|image\/(jpeg|png|webp|heic|heif)|application\/(msword|vnd\.openxmlformats-officedocument\.(wordprocessingml\.document|spreadsheetml\.sheet)|vnd\.ms-excel|vnd\.oasis\.opendocument\.(text|spreadsheet))|text\/plain)$/;
+const DOCUMENT_MAX_BYTES = 5 * 1024 * 1024;
 
 // ---- Il router -------------------------------------------------------------------------------
 
@@ -663,7 +748,8 @@ export function createHaccpRouter(deps: HaccpDeps): express.Router {
             const date = req.query.date;
             if (!isValidDate(date)) throw new HaccpError(400, { error: 'date (YYYY-MM-DD) is required' });
             const tenantId = req.tenantId!;
-            const [points, temps, oil, cleaning, receipts, production, calibrations, ncs, settings] = await Promise.all([
+            const today = await deps.todayIso(tenantId);
+            const [points, temps, oil, cleaning, receipts, production, calibrations, ncs, settings, deadlines] = await Promise.all([
                 queryWithRetry(
                     `SELECT ${POINT_COLUMNS} FROM haccp_points WHERE tenant_id = $1 ORDER BY register, sort_order, id`,
                     [tenantId],
@@ -714,9 +800,11 @@ export function createHaccpRouter(deps: HaccpDeps): express.Router {
                     [tenantId, date],
                 ),
                 loadSettings(tenantId),
+                computeDeadlines(tenantId, today),
             ]);
             res.json({
                 date,
+                deadlines,
                 points: points.rows,
                 temperatures: temps.rows,
                 oil: oil.rows,
@@ -1236,7 +1324,7 @@ export function createHaccpRouter(deps: HaccpDeps): express.Router {
     type FieldSpec = { column: string; parse: (v: unknown) => unknown; required?: boolean };
     interface NcSpec { source: NcSource; open: boolean; title: string; detail: string | null; closedWith?: string | null; fixedReason: string }
     interface FreeLog {
-        entity: 'receipt' | 'production' | 'calibration';
+        entity: 'receipt' | 'production' | 'calibration' | 'intervention';
         path: string;
         table: string;
         columns: string;
@@ -1422,6 +1510,38 @@ export function createHaccpRouter(deps: HaccpDeps): express.Router {
                     fixedReason: 'Taratura corretta, scarto nei limiti',
                 };
             },
+        },
+        {
+            entity: 'intervention',
+            path: '/interventions',
+            table: 'haccp_interventions',
+            columns: INTERVENTION_COLUMNS,
+            register: 'INTERVENTION',
+            fields: {
+                type: { column: 'type', parse: oneOf(HACCP_INTERVENTION_TYPES, 'Tipo di intervento'), required: true },
+                provider: { column: 'provider', parse: v => cleanText(v, 200) },
+                outcomeOk: { column: 'outcome_ok', parse: asBool },
+                findings: { column: 'findings', parse: v => cleanText(v, 2000) },
+                quantity: { column: 'quantity', parse: v => cleanText(v, 50) },
+                reference: { column: 'reference', parse: v => cleanText(v, 100) },
+                documentId: { column: 'document_id', parse: parseId },
+                nextDue: { column: 'next_due', parse: dateOrNull },
+                note: { column: 'note', parse: v => cleanText(v, 1000) },
+            },
+            prepare: async (client, tenantId, values) => {
+                if (values.document_id == null) return;
+                const r = await client.query(`SELECT 1 FROM haccp_documents WHERE tenant_id = $1 AND id = $2`, [tenantId, values.document_id]);
+                if (!r.rows[0]) throw new HaccpError(400, { error: 'Documento sconosciuto' });
+            },
+            // Un intervento con rilievi (tracce di roditori, acqua non
+            // potabile) è uno scostamento da rimediare come gli altri.
+            nc: row => ({
+                source: 'INTERVENTION',
+                open: row.outcomeOk === false && !row.voidedAt,
+                title: `${HACCP_INTERVENTION_LABELS_IT[row.type as HaccpInterventionType] ?? 'Intervento'}${row.provider ? ` · ${row.provider}` : ''}: rilievi`,
+                detail: row.findings ?? row.note ?? null,
+                fixedReason: 'Intervento corretto, senza rilievi',
+            }),
         },
     ];
 
@@ -1615,6 +1735,291 @@ export function createHaccpRouter(deps: HaccpDeps): express.Router {
     }
 
     // =====================================================================
+    // Archivio: documenti, formazione, scadenze, allergeni
+    // =====================================================================
+
+    router.get('/documents', ...view, async (req, res) => {
+        try {
+            const archived = req.query.archived === '1';
+            const r = await queryWithRetry(
+                `SELECT ${DOCUMENT_COLUMNS} FROM haccp_documents
+                  WHERE tenant_id = $1 ${archived ? '' : 'AND NOT archived'}
+                  ORDER BY archived, category, lower(title)`,
+                [req.tenantId!],
+            );
+            res.json({ documents: r.rows });
+        } catch (err) {
+            fail(res, err, 'GET /documents');
+        }
+    });
+
+    router.post('/documents', ...manage, async (req, res) => {
+        try {
+            const tenantId = req.tenantId!;
+            const body = req.body ?? {};
+            const category = body.category;
+            if (!HACCP_DOCUMENT_CATEGORIES.includes(category)) throw new HaccpError(400, { error: 'Tipo di documento non valido' });
+            const title = cleanText(body.title, 200);
+            if (!title) throw new HaccpError(400, { error: 'Serve un titolo' });
+            let bytes: Buffer | null = null;
+            let filename: string | null = null;
+            let contentType: string | null = null;
+            if (typeof body.data === 'string' && body.data) {
+                filename = cleanText(body.filename, 255);
+                contentType = String(body.contentType ?? '').trim().toLowerCase();
+                if (!filename) throw new HaccpError(400, { error: 'Nome del file mancante' });
+                if (!DOCUMENT_TYPES.test(contentType)) {
+                    throw new HaccpError(415, { error: 'Tipo di file non ammesso: PDF, immagini o documenti d\'ufficio' });
+                }
+                bytes = Buffer.from(body.data, 'base64');
+                if (bytes.length === 0) throw new HaccpError(400, { error: 'File vuoto' });
+                if (bytes.length > DOCUMENT_MAX_BYTES) throw new HaccpError(413, { error: 'File troppo grande: massimo 5 MB' });
+            }
+            const actor = await actorOf(req);
+            const row = await withTenant(tenantId, async client => {
+                const ins = await client.query(
+                    `INSERT INTO haccp_documents
+                        (tenant_id, category, title, filename, content_type, bytes, size_bytes, valid_until, note,
+                         uploaded_by_user_id, uploaded_by_user_name)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                     RETURNING ${DOCUMENT_COLUMNS}`,
+                    [tenantId, category, title, filename, contentType, bytes, bytes?.length ?? null,
+                        isValidDate(body.validUntil) ? body.validUntil : null, cleanText(body.note, 1000), actor.userId, actor.name],
+                );
+                await logChange(client, tenantId, {
+                    entity: 'document', entityId: ins.rows[0].id, action: 'CREATE', recordDate: null, after: ins.rows[0], actor,
+                });
+                return ins.rows[0];
+            });
+            changed(req, null, 'ARCHIVE');
+            res.status(201).json(row);
+        } catch (err) {
+            fail(res, err, 'POST /documents');
+        }
+    });
+
+    router.put('/documents/:id', ...manage, async (req, res) => {
+        try {
+            const tenantId = req.tenantId!;
+            const id = parseId(req.params.id);
+            if (!id) throw new HaccpError(400, { error: 'id non valido' });
+            const body = req.body ?? {};
+            const actor = await actorOf(req);
+            const row = await withTenant(tenantId, async client => {
+                const cur = await client.query(`SELECT ${DOCUMENT_COLUMNS} FROM haccp_documents WHERE tenant_id = $1 AND id = $2 FOR UPDATE`, [tenantId, id]);
+                const current = cur.rows[0];
+                if (!current) throw new HaccpError(404, { error: 'Documento non trovato' });
+                const category = body.category !== undefined ? body.category : current.category;
+                if (!HACCP_DOCUMENT_CATEGORIES.includes(category)) throw new HaccpError(400, { error: 'Tipo di documento non valido' });
+                const title = body.title !== undefined ? cleanText(body.title, 200) : current.title;
+                if (!title) throw new HaccpError(400, { error: 'Serve un titolo' });
+                const validUntil = body.validUntil !== undefined ? (isValidDate(body.validUntil) ? body.validUntil : null) : current.validUntil;
+                const note = body.note !== undefined ? cleanText(body.note, 1000) : current.note;
+                const archived = typeof body.archived === 'boolean' ? body.archived : current.archived;
+                const upd = await client.query(
+                    `UPDATE haccp_documents SET category = $1, title = $2, valid_until = $3, note = $4, archived = $5, updated_at = now()
+                      WHERE id = $6 RETURNING ${DOCUMENT_COLUMNS}`,
+                    [category, title, validUntil, note, archived, id],
+                );
+                await logChange(client, tenantId, {
+                    entity: 'document', entityId: id, action: 'UPDATE', recordDate: null,
+                    before: current, after: upd.rows[0], reason: cleanText(body.reason, 500), actor,
+                });
+                return upd.rows[0];
+            });
+            changed(req, null, 'ARCHIVE');
+            res.json(row);
+        } catch (err) {
+            fail(res, err, 'PUT /documents/:id');
+        }
+    });
+
+    router.get('/documents/:id/file', ...view, async (req, res) => {
+        try {
+            const id = parseId(req.params.id);
+            if (!id) throw new HaccpError(400, { error: 'id non valido' });
+            const r = await queryWithRetry(
+                `SELECT filename, content_type, bytes FROM haccp_documents WHERE tenant_id = $1 AND id = $2`,
+                [req.tenantId!, id],
+            );
+            const doc = r.rows[0];
+            if (!doc || !doc.bytes) throw new HaccpError(404, { error: 'File non trovato' });
+            res.setHeader('Content-Type', doc.content_type || 'application/octet-stream');
+            res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(doc.filename || 'documento')}`);
+            res.send(doc.bytes);
+        } catch (err) {
+            fail(res, err, 'GET /documents/:id/file');
+        }
+    });
+
+    const readTrainingInput = async (client: PoolClient, tenantId: number, body: any, current?: any) => {
+        const pick = <T>(key: string, parse: (v: unknown) => T, fallback: T): T => (body[key] !== undefined ? parse(body[key]) : fallback);
+        const staffMemberId = pick('staffMemberId', v => (isUuid(v) ? v : null), current?.staffMemberId ?? null);
+        let personName = pick('personName', v => cleanText(v, 200), current?.personName ?? null);
+        if (staffMemberId) {
+            const s = await client.query(`SELECT name, surname FROM staff_members WHERE tenant_id = $1 AND id = $2`, [tenantId, staffMemberId]);
+            if (!s.rows[0]) throw new HaccpError(400, { error: 'Persona non trovata nel Personale' });
+            if (!personName) personName = `${s.rows[0].name} ${s.rows[0].surname}`.trim();
+        }
+        if (!personName) throw new HaccpError(400, { error: 'Serve il nome della persona' });
+        const course = pick('course', v => v as string, current?.course ?? null);
+        if (!HACCP_TRAINING_COURSES.includes(course as any)) throw new HaccpError(400, { error: 'Corso non valido' });
+        const completedOn = pick('completedOn', v => (isValidDate(v) ? v : null), current?.completedOn ?? null);
+        if (!completedOn) throw new HaccpError(400, { error: 'Serve la data del corso' });
+        const expiresOn = pick('expiresOn', v => (isValidDate(v) ? v : null), current?.expiresOn ?? null);
+        if (expiresOn && expiresOn < completedOn) throw new HaccpError(400, { error: 'La scadenza viene prima del corso' });
+        const documentId = pick('documentId', parseId, current?.documentId ?? null);
+        if (documentId) {
+            const d = await client.query(`SELECT 1 FROM haccp_documents WHERE tenant_id = $1 AND id = $2`, [tenantId, documentId]);
+            if (!d.rows[0]) throw new HaccpError(400, { error: 'Documento sconosciuto' });
+        }
+        return {
+            staffMemberId, personName, course, completedOn, expiresOn, documentId,
+            title: pick('title', v => cleanText(v, 200), current?.title ?? null),
+            provider: pick('provider', v => cleanText(v, 200), current?.provider ?? null),
+            hours: pick('hours', parseNumericOrNull, current?.hours ?? null),
+            note: pick('note', v => cleanText(v, 1000), current?.note ?? null),
+            archived: typeof body.archived === 'boolean' ? body.archived : current?.archived ?? false,
+        };
+    };
+
+    router.get('/trainings', ...view, async (req, res) => {
+        try {
+            const r = await queryWithRetry(
+                `SELECT ${TRAINING_COLUMNS} FROM haccp_trainings WHERE tenant_id = $1
+                  ORDER BY archived, lower(person_name), completed_on DESC`,
+                [req.tenantId!],
+            );
+            res.json({ trainings: r.rows });
+        } catch (err) {
+            fail(res, err, 'GET /trainings');
+        }
+    });
+
+    router.post('/trainings', ...manage, async (req, res) => {
+        try {
+            const tenantId = req.tenantId!;
+            const actor = await actorOf(req);
+            const row = await withTenant(tenantId, async client => {
+                const v = await readTrainingInput(client, tenantId, req.body ?? {});
+                const ins = await client.query(
+                    `INSERT INTO haccp_trainings
+                        (tenant_id, staff_member_id, person_name, course, title, provider, hours, completed_on, expires_on,
+                         document_id, note, archived, recorded_by_user_id, recorded_by_user_name)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                     RETURNING ${TRAINING_COLUMNS}`,
+                    [tenantId, v.staffMemberId, v.personName, v.course, v.title, v.provider, v.hours, v.completedOn, v.expiresOn,
+                        v.documentId, v.note, v.archived, actor.userId, actor.name],
+                );
+                await logChange(client, tenantId, {
+                    entity: 'training', entityId: ins.rows[0].id, action: 'CREATE', recordDate: v.completedOn, after: ins.rows[0], actor,
+                });
+                return ins.rows[0];
+            });
+            changed(req, null, 'ARCHIVE');
+            res.status(201).json(row);
+        } catch (err) {
+            fail(res, err, 'POST /trainings');
+        }
+    });
+
+    router.put('/trainings/:id', ...manage, async (req, res) => {
+        try {
+            const tenantId = req.tenantId!;
+            const id = parseId(req.params.id);
+            if (!id) throw new HaccpError(400, { error: 'id non valido' });
+            const actor = await actorOf(req);
+            const row = await withTenant(tenantId, async client => {
+                const cur = await client.query(`SELECT ${TRAINING_COLUMNS} FROM haccp_trainings WHERE tenant_id = $1 AND id = $2 FOR UPDATE`, [tenantId, id]);
+                const current = cur.rows[0];
+                if (!current) throw new HaccpError(404, { error: 'Corso non trovato' });
+                const v = await readTrainingInput(client, tenantId, req.body ?? {}, current);
+                const upd = await client.query(
+                    `UPDATE haccp_trainings
+                        SET staff_member_id = $1, person_name = $2, course = $3, title = $4, provider = $5, hours = $6,
+                            completed_on = $7, expires_on = $8, document_id = $9, note = $10, archived = $11, updated_at = now()
+                      WHERE id = $12 RETURNING ${TRAINING_COLUMNS}`,
+                    [v.staffMemberId, v.personName, v.course, v.title, v.provider, v.hours, v.completedOn, v.expiresOn,
+                        v.documentId, v.note, v.archived, id],
+                );
+                await logChange(client, tenantId, {
+                    entity: 'training', entityId: id, action: 'UPDATE', recordDate: v.completedOn,
+                    before: current, after: upd.rows[0], reason: cleanText(req.body?.reason, 500), actor,
+                });
+                return upd.rows[0];
+            });
+            changed(req, null, 'ARCHIVE');
+            res.json(row);
+        } catch (err) {
+            fail(res, err, 'PUT /trainings/:id');
+        }
+    });
+
+    // L'archivio in una lettura: documenti, formazione, gli interventi degli
+    // ultimi due anni, il personale attivo (per scegliere la persona) e lo
+    // scadenzario.
+    router.get('/archive', ...view, async (req, res) => {
+        try {
+            const tenantId = req.tenantId!;
+            const today = await deps.todayIso(tenantId);
+            const [documents, trainings, interventions, staff, deadlines] = await Promise.all([
+                queryWithRetry(
+                    `SELECT ${DOCUMENT_COLUMNS} FROM haccp_documents WHERE tenant_id = $1 ORDER BY archived, category, lower(title)`,
+                    [tenantId],
+                ),
+                queryWithRetry(
+                    `SELECT ${TRAINING_COLUMNS} FROM haccp_trainings WHERE tenant_id = $1 ORDER BY archived, lower(person_name), completed_on DESC`,
+                    [tenantId],
+                ),
+                queryWithRetry(
+                    `SELECT ${INTERVENTION_COLUMNS} FROM haccp_interventions
+                      WHERE tenant_id = $1 AND voided_at IS NULL AND date >= $2::date - 730
+                      ORDER BY date DESC, recorded_at DESC`,
+                    [tenantId, today],
+                ),
+                queryWithRetry(
+                    `SELECT id, name, surname, role, category FROM staff_members
+                      WHERE tenant_id = $1 AND COALESCE(is_active, true) ORDER BY lower(surname), lower(name)`,
+                    [tenantId],
+                ),
+                computeDeadlines(tenantId, today),
+            ]);
+            res.json({
+                today,
+                documents: documents.rows,
+                trainings: trainings.rows,
+                interventions: interventions.rows,
+                staff: staff.rows,
+                deadlines,
+            });
+        } catch (err) {
+            fail(res, err, 'GET /archive');
+        }
+    });
+
+    // Il libro allergeni: i piatti attivi con i loro allergeni, come li ha
+    // scritti il menu. Il Reg. UE 1169/2011 vuole l'informazione per iscritto
+    // e consultabile: questa è la sua fonte, stampabile.
+    router.get('/allergens', ...view, async (req, res) => {
+        try {
+            const tenantId = req.tenantId!;
+            const [tenant, dishes] = await Promise.all([
+                queryWithRetry(`SELECT name FROM tenants WHERE id = $1`, [tenantId]).catch(() => ({ rows: [] as any[] })),
+                queryWithRetry(
+                    `SELECT id, name, category, COALESCE(allergens, ARRAY[]::text[]) AS allergens
+                       FROM dishes
+                      WHERE tenant_id = $1 AND is_active AND crm_enabled
+                      ORDER BY lower(COALESCE(category, '')), sort_order NULLS LAST, lower(name)`,
+                    [tenantId],
+                ),
+            ]);
+            res.json({ restaurantName: tenant.rows[0]?.name ?? null, dishes: dishes.rows });
+        } catch (err) {
+            fail(res, err, 'GET /allergens');
+        }
+    });
+
+    // =====================================================================
     // Non conformità
     // =====================================================================
 
@@ -1804,7 +2209,10 @@ export function createHaccpRouter(deps: HaccpDeps): express.Router {
             const tenantId = req.tenantId!;
             const range = [tenantId, from, to];
             const between = 'tenant_id = $1 AND date BETWEEN $2::date AND $3::date';
-            const [tenant, points, temps, oil, cleaning, receipts, production, calibrations, ncs, changes, settings] = await Promise.all([
+            // Il fascicolo per l'ispezione porta anche l'archivio: documenti
+            // validi e formazione in corso, oltre ai registri del periodo.
+            const dossier = req.query.dossier === '1';
+            const [tenant, points, temps, oil, cleaning, receipts, production, calibrations, interventions, ncs, changes, settings, documents, trainings] = await Promise.all([
                 // Il nome in testa al foglio: è la prima cosa che l'ispettore
                 // controlla, che il registro sia di questo locale.
                 queryWithRetry(`SELECT name FROM tenants WHERE id = $1`, [tenantId]).catch(() => ({ rows: [] as any[] })),
@@ -1815,6 +2223,7 @@ export function createHaccpRouter(deps: HaccpDeps): express.Router {
                 queryWithRetry(`SELECT ${RECEIPT_COLUMNS} FROM haccp_goods_receipts WHERE ${between} ORDER BY date, recorded_at`, range),
                 queryWithRetry(`SELECT ${PRODUCTION_COLUMNS} FROM haccp_production_logs WHERE ${between} ORDER BY date, recorded_at`, range),
                 queryWithRetry(`SELECT ${CALIBRATION_COLUMNS} FROM haccp_calibrations WHERE ${between} ORDER BY date, instrument`, range),
+                queryWithRetry(`SELECT ${INTERVENTION_COLUMNS} FROM haccp_interventions WHERE ${between} ORDER BY date, recorded_at`, range),
                 queryWithRetry(
                     `SELECT ${NC_COLUMNS} FROM haccp_nonconformities
                       WHERE tenant_id = $1 AND (date BETWEEN $2::date AND $3::date OR (status = 'OPEN' AND date < $2::date))
@@ -1829,9 +2238,21 @@ export function createHaccpRouter(deps: HaccpDeps): express.Router {
                     range,
                 ),
                 loadSettings(tenantId),
+                dossier
+                    ? queryWithRetry(`SELECT ${DOCUMENT_COLUMNS} FROM haccp_documents WHERE tenant_id = $1 AND NOT archived ORDER BY category, lower(title)`, [tenantId])
+                    : Promise.resolve({ rows: [] as any[] }),
+                dossier
+                    ? queryWithRetry(
+                        `SELECT ${TRAINING_COLUMNS} FROM haccp_trainings WHERE tenant_id = $1 AND NOT archived
+                          ORDER BY lower(person_name), course, completed_on DESC`,
+                        [tenantId],
+                    )
+                    : Promise.resolve({ rows: [] as any[] }),
             ]);
             res.json({
                 from, to,
+                interventions: interventions.rows,
+                ...(dossier ? { documents: documents.rows, trainings: trainings.rows } : {}),
                 restaurantName: tenant.rows[0]?.name ?? null,
                 points: points.rows,
                 temperatures: temps.rows,
@@ -1895,5 +2316,29 @@ export async function runHaccpMissingReminder(deps: HaccpDeps, tenantId: number,
         body: `${shown}${rest}`,
         url: '/?view=HACCP',
         tag: haccpMissingTag(today),
+    });
+}
+
+/** Promemoria di sistema HACCP_EXPIRIES: ogni mattina, solo se qualcosa
+ *  scade fra 30 giorni, fra 7 o oggi. Tre avvisi per scadenza invece di uno
+ *  al giorno per un mese: chi gestisce l'HACCP non impara a ignorarli. */
+export async function runHaccpExpiryReminder(deps: HaccpDeps, tenantId: number, targetRoles: string[]): Promise<void> {
+    const today = await deps.todayIso(tenantId);
+    const plus = (days: number) => {
+        const d = new Date(`${today}T00:00:00Z`);
+        d.setUTCDate(d.getUTCDate() + days);
+        return d.toISOString().slice(0, 10);
+    };
+    const marks = new Map([[today, 'oggi'], [plus(7), 'fra 7 giorni'], [plus(30), 'fra 30 giorni']]);
+    const due = (await computeDeadlines(tenantId, today)).filter(d => marks.has(d.due));
+    if (due.length === 0) return;
+    const shown = due.slice(0, 3).map(d => `${d.title} (${marks.get(d.due)})`).join(', ');
+    const rest = due.length > 3 ? ` e altre ${due.length - 3}` : '';
+    await deps.pushToRoles(tenantId, targetRoles.length > 0 ? targetRoles : ['OWNER', 'GENERAL_MANAGER', 'MANAGER'], {
+        category: 'system',
+        title: due.length === 1 ? 'Una scadenza HACCP' : `${due.length} scadenze HACCP`,
+        body: `${shown}${rest}`,
+        url: '/?view=HACCP',
+        tag: `haccp-expiry-${today}`,
     });
 }

@@ -579,7 +579,7 @@ Modulo a parte (si attiva con l'abbonamento «recensioni»).
 
 ## HACCP
 
-Registro di autocontrollo digitale, compilabile dal telefono davanti alla cella frigo (campi grandi, salvataggio a ogni campo). Schede: **Registro** (il giorno), **Non conformità**, **Rintracciabilità**, **Report** e — per chi gestisce l'HACCP — **Configura**.
+Registro di autocontrollo digitale, compilabile dal telefono davanti alla cella frigo (campi grandi, salvataggio a ogni campo). Schede: **Registro** (il giorno), **Non conformità**, **Rintracciabilità**, **Archivio**, **Report** e — per chi gestisce l'HACCP — **Configura**.
 
 **Punti di controllo del locale**
 - Postazioni di temperatura, friggitrici, punti di pulizia, termometri da tarare e attrezzature dei processi (abbattitori, forni) si configurano in **HACCP → Configura**: sono il manuale di autocontrollo del ristorante tradotto in righe del modulo. Per chi parte da zero ci sono i modelli (frigorifero ≤ 4 °C, congelatore ≤ −18 °C, banco caldo ≥ 65 °C, cappe ogni mese, termometro a sonda ogni sei mesi…).
@@ -612,8 +612,16 @@ Ogni riga registra **chi l'ha compilata e quando**, con il nome della persona. U
 - La scheda **Rintracciabilità** cerca un prodotto, un lotto, un fornitore o un documento di trasporto e mostra da dove è arrivato (fornitore, data, documento, scadenza) e in quali processi del locale è stato usato (dai lotti degli ingredienti).
 - **Avvia un richiamo** apre una non conformità di tipo richiamo con le registrazioni coinvolte; si chiude scrivendo cosa è stato ritirato e chi è stato avvisato.
 
+**Archivio: persone, interventi, documenti, allergeni**
+- **Formazione del personale**: attestati per persona (scelta dal Personale o scritta a mano) con corso (alimentarista, responsabile HACCP, allergeni, senza glutine, aggiornamento), ente, ore, data, scadenza e attestato allegato. Il rinnovo cambia da regione a regione: la scadenza si sceglie, con le scorciatoie +3 e +5 anni. Un corso rinnovato supera il vecchio.
+- **Interventi esterni**: disinfestazione, ritiro dell'olio esausto (quantità e formulario), manutenzioni, analisi dell'acqua e di laboratorio, tarature esterne, sanificazioni straordinarie; con ditta, esito, rapporto allegato e prossima scadenza. Un intervento con rilievi apre una non conformità.
+- **Documenti**: manuale di autocontrollo, registrazione sanitaria, schede tecniche e di sicurezza dei detergenti, contratti, analisi, planimetria, dichiarazioni di conformità; con il file (PDF, foto o documenti d'ufficio fino a 5 MB) o solo come riferimento all'originale cartaceo, e la data di validità. I documenti superati si archiviano.
+- **Scadenze**: attestati, documenti e interventi scaduti o in scadenza nei prossimi 60 giorni, in cima all'Archivio e nel registro del giorno. Un promemoria di sistema (Impostazioni → Promemoria, di serie alle 9:00) avvisa titolare e direzione 30 giorni prima, 7 giorni prima e il giorno della scadenza.
+- **Libro allergeni** stampabile: i 14 allergeni del Reg. UE 1169/2011 per ogni piatto attivo del menu, divisi per categoria, con i piatti senza allergeni indicati segnalati da verificare.
+
 **Report per periodo**
 - Oggi, questa settimana, questo mese, il mese scorso o un intervallo a scelta (fino a un anno). Prima di stampare il riepilogo segnala i giorni senza registrazioni, i fuori soglia e le non conformità ancora aperte.
+- **Fascicolo per l'ispezione**: lo stesso periodo con in testa i documenti in archivio (con la validità) e la formazione del personale, e gli interventi esterni del periodo.
 - Il foglio stampato ha la **scheda mensile** delle temperature (postazioni per giorni, fuori soglia in rosso), degli oli (con i composti polari) e delle pulizie, poi ricevimenti con fornitore, documento e scadenza, processi con il loro esito, tarature, **non conformità con le azioni correttive**, **correzioni e annullamenti** con l'originale e il motivo, le righe scritte in un giorno diverso e i **limiti applicati**. In testa il nome del ristorante, in fondo lo spazio per la firma del responsabile.
 
 Avvisi sul registro temperature:
@@ -753,6 +761,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-05 | HACCP | Nella nuova scheda Archivio dell'HACCP: la formazione del personale con le scadenze degli attestati, gli interventi delle ditte esterne (disinfestazione, olio esausto, analisi), i documenti con il loro file e il libro allergeni da stampare. Le scadenze compaiono anche nel registro del giorno e arrivano come promemoria; dal Report si stampa il fascicolo per l'ispezione. |
 | 2026-10-05 | HACCP | Nel registro HACCP arrivano i processi con orari e temperature vere (abbattimento, surgelazione, bonifica anti-Anisakis, cottura, rinvenimento, caldo, scongelamento, sanificazione delle verdure, campioni testimone), l'olio con i composti polari, il ricevimento con fornitore, documento di trasporto e scadenza, la taratura dei termometri e la scheda Rintracciabilità per seguire un lotto e avviare un richiamo. I limiti del tuo manuale si impostano in Configura. |
 | 2026-10-05 | HACCP | Il registro HACCP diventa quello del tuo locale: postazioni, limiti, rilevazioni al giorno e frequenze delle pulizie si configurano in HACCP → Configura. Le registrazioni non si cancellano più ma si annullano con un motivo, ogni correzione tiene l'originale, un fuori soglia o una merce respinta aprono una non conformità da chiudere con l'azione correttiva, e il report si stampa per giorno, settimana o mese. |
 | 2026-10-04 | Messaggi: WhatsApp e SMS | L'AI dei Messaggi conosce la scheda del cliente in rubrica: a chi chiede il suo tavolo preferito risponde nominandolo, invece di chiedergli quale sia. |

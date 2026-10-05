@@ -47,7 +47,7 @@ Il Reg. CE 852/2004 non elenca i registri da tenere: chiede procedure basate sui
 - Report per periodo (giorno, mese, intervallo), con griglia mensile delle temperature, non conformità e correzioni.
 - Aggiornamento in tempo reale fra i telefoni della cucina (`haccp:changed`).
 
-## Fase 2 — registri di processo e rintracciabilità ✅
+## Fase 2 — registri di processo e rintracciabilità ✅ (PR #829)
 
 - **Processi** con temperature e orari veri, al posto di «range/durata»: abbattimento (positivo e negativo), bonifica anti-Anisakis (−20 °C per 24 h o −35 °C per 15 h), cottura al cuore, rinvenimento, mantenimento a caldo, scongelamento, sanificazione delle verdure, campioni testimone dei banchetti. Esito calcolato sui limiti del locale; fuori limite apre una non conformità.
 - **Limiti del locale** (`haccp_settings`): cottura ≥ 75 °C, caldo ≥ 65 °C, abbattimento a +3 °C in 90 minuti, ecc., modificabili in Configura.
@@ -56,7 +56,7 @@ Il Reg. CE 852/2004 non elenca i registri da tenere: chiede procedure basate sui
 - **Rintracciabilità**: ricerca per lotto, prodotto o fornitore fra ricevimenti e processi; **richiamo** come non conformità dedicata.
 - **Taratura dei termometri** come registro con la sua frequenza.
 
-## Fase 3 — persone, documenti, interventi, allergeni
+## Fase 3 — persone, documenti, interventi, allergeni ✅
 
 - **Formazione**: attestati per persona (scheda del Personale) con scadenza, allegato e avviso 30 giorni prima.
 - **Interventi esterni**: disinfestazione, ritiro dell'olio esausto (CONOE), manutenzioni, analisi dell'acqua e di laboratorio; con ditta, esito, rapporto allegato e prossima scadenza.

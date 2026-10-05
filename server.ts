@@ -252,7 +252,7 @@ import {
     type ServiceOpen,
 } from './utils/leavePlan.js';
 import { formatMoneyMinor } from './utils/money.js';
-import { createHaccpRouter, runHaccpMissingReminder, type HaccpDeps } from './services/haccpRoutes.js';
+import { createHaccpRouter, runHaccpExpiryReminder, runHaccpMissingReminder, type HaccpDeps } from './services/haccpRoutes.js';
 import { shoppingReminderBody } from './utils/shoppingReminder.js';
 import { describeShiftChanges, shiftDayLabel, type ShiftDayChange } from './utils/staffShiftChange.js';
 import { buildEReceiptPayload, buildFatturaPaXml, getFiscalDriver, type FiscalSeller, type InvoiceBuyer } from './services/fiscalService.js';
@@ -344,7 +344,7 @@ const jsonVerify = (req: any, _res: any, buf: Buffer) => { req.rawBody = buf; };
 const standardJson = express.json({ limit: '2mb', verify: jsonVerify });
 const largeJson = express.json({ limit: '8mb', verify: jsonVerify });
 app.use((req, res, next) => (
-    req.path === '/messages/attachments' || req.path === '/media' || req.path === '/staff-chat/attachments' || req.path === '/support/attachments' || req.path === '/settings/logo' ? largeJson(req, res, next) : standardJson(req, res, next)
+    req.path === '/messages/attachments' || req.path === '/media' || req.path === '/staff-chat/attachments' || req.path === '/support/attachments' || req.path === '/settings/logo' || req.path === '/haccp/documents' ? largeJson(req, res, next) : standardJson(req, res, next)
 ));
 
 // Un body oltre il limite fa fallire il parser PRIMA della rotta: senza
@@ -14098,6 +14098,7 @@ const SYSTEM_REMINDER_HANDLERS: Record<string, ReminderHandler> = {
     // choice ("Chi riceve?") is honoured by the system handler as well.
     BREAD_DAILY: async (r) => { await runDailyBreadReminder(r.tenant_id, r.target_roles); },
     HACCP_TEMPERATURES: async (r) => { await runHaccpMissingReminder(haccpDeps, r.tenant_id, r.target_roles); },
+    HACCP_EXPIRIES: async (r) => { await runHaccpExpiryReminder(haccpDeps, r.tenant_id, r.target_roles); },
     SHOPPING_LIST: async (r) => { await runShoppingListReminder(r.tenant_id, r.target_roles); },
 };
 

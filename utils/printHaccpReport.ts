@@ -1,6 +1,9 @@
 import type {
   HaccpCalibration,
   HaccpChange,
+  HaccpDocument,
+  HaccpIntervention,
+  HaccpTraining,
   HaccpCleaningCheck,
   HaccpGoodsReceipt,
   HaccpNonConformity,
@@ -12,6 +15,7 @@ import type {
 } from '../services/haccpApiService';
 import type { HaccpLimits, HaccpPoint, HaccpProcess } from './haccp';
 import {
+  HACCP_DOCUMENT_LABELS_IT, HACCP_INTERVENTION_LABELS_IT, HACCP_TRAINING_LABELS_IT,
   HACCP_PROCESS_LABELS_IT, HACCP_RECEIPT_CATEGORIES, HACCP_RECEIPT_CATEGORY_LABELS_IT, HACCP_TWO_STEP_PROCESSES,
   formatHaccpDuration, formatHaccpLimit, haccpCalibrationDeviation, haccpDaysBetween, isOutOfRange,
 } from './haccp';
@@ -97,6 +101,7 @@ const ENTITY_LABELS: Record<string, string> = {
   receipt: 'Ricevimento',
   production: 'Processo',
   calibration: 'Taratura',
+  intervention: 'Intervento',
 };
 
 const FIELD_LABELS: Record<string, string> = {
@@ -347,6 +352,54 @@ const calibrationsTable = (rows: HaccpCalibration[]): string => {
   return `<table><thead><tr><th class="small">Giorno</th><th>Termometro</th><th class="small">Metodo</th><th class="small num">Riferimento</th><th class="small num">Letto</th><th class="small num">Scarto</th><th class="small">Esito</th><th class="small">Operatore</th></tr></thead><tbody>${body || emptyRow(8, 'Nessuna taratura nel periodo.')}</tbody></table>`;
 };
 
+const interventionsTable = (rows: HaccpIntervention[]): string => {
+  const body = live(rows).map(i => `
+    <tr>
+      <td class="small">${shortDate(i.date)}</td>
+      <td>${escapeHtml(HACCP_INTERVENTION_LABELS_IT[i.type] ?? i.type)}${i.provider ? `<div class="small muted">${escapeHtml(i.provider)}</div>` : ''}</td>
+      <td>${i.outcomeOk ? '<span class="badge ok">Senza rilievi</span>' : `<span class="badge alert">Con rilievi</span><div class="small">${escapeHtml(i.findings ?? '')}</div>`}</td>
+      <td class="small">${escapeHtml([i.quantity, i.reference].filter(Boolean).join(' · '))}</td>
+      <td class="small">${i.nextDue ? shortDate(i.nextDue) : ''}</td>
+      <td class="small muted">${escapeHtml(person(i.recordedByUserName))}</td>
+    </tr>`).join('');
+  return `<table><thead><tr><th class="small">Giorno</th><th>Intervento</th><th>Esito</th><th class="small">Quantità e riferimento</th><th class="small">Prossimo entro</th><th class="small">Registrato da</th></tr></thead><tbody>${body || emptyRow(6, 'Nessun intervento nel periodo.')}</tbody></table>`;
+};
+
+const today = (): string => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+const validityCell = (date: string | null): string => {
+  if (!date) return '<td class="small muted">—</td>';
+  const expired = date < today();
+  return `<td class="small ${expired ? 'alert' : ''}">${shortDate(date)}${expired ? ' · scaduto' : ''}</td>`;
+};
+
+const documentsTable = (rows: HaccpDocument[]): string => {
+  const body = rows.map(d => `
+    <tr>
+      <td>${escapeHtml(d.title)}</td>
+      <td class="small">${escapeHtml(HACCP_DOCUMENT_LABELS_IT[d.category] ?? d.category)}</td>
+      ${validityCell(d.validUntil)}
+      <td class="small muted">${d.hasFile ? 'in archivio digitale' : escapeHtml(d.note ?? 'originale cartaceo')}</td>
+    </tr>`).join('');
+  return `<table><thead><tr><th>Documento</th><th class="small">Tipo</th><th class="small">Valido fino al</th><th class="small">Dove</th></tr></thead><tbody>${body || emptyRow(4, 'Nessun documento in archivio.')}</tbody></table>`;
+};
+
+const trainingsTable = (rows: HaccpTraining[]): string => {
+  const body = rows.map(tr => `
+    <tr>
+      <td>${escapeHtml(tr.personName)}</td>
+      <td class="small">${escapeHtml(tr.title || HACCP_TRAINING_LABELS_IT[tr.course] || tr.course)}</td>
+      <td class="small">${escapeHtml([tr.provider, typeof tr.hours === 'number' ? `${num(tr.hours)} ore` : ''].filter(Boolean).join(' · '))}</td>
+      <td class="small">${shortDate(tr.completedOn)}</td>
+      ${validityCell(tr.expiresOn)}
+      <td class="small muted">${tr.documentId ? 'attestato in archivio' : ''}</td>
+    </tr>`).join('');
+  return `<table><thead><tr><th>Persona</th><th class="small">Corso</th><th class="small">Ente e ore</th><th class="small">Data</th><th class="small">Scadenza</th><th class="small"></th></tr></thead><tbody>${body || emptyRow(6, 'Nessun attestato registrato.')}</tbody></table>`;
+};
+
 /** I limiti con cui sono stati calcolati gli esiti: l'ispettore li confronta
  *  con il manuale del locale. */
 const limitsTable = (l: HaccpLimits): string => {
@@ -460,6 +513,7 @@ export const buildHaccpReportHtml = (data: HaccpReportData): string => {
   const openNc = data.nonconformities.filter(n => n.status === 'OPEN').length;
   const closedNc = data.nonconformities.filter(n => n.status === 'CLOSED').length;
 
+  const dossier = Array.isArray(data.documents) || Array.isArray(data.trainings);
   const periodTitle = singleDay
     ? `Controlli del ${longDate(data.from)}`
     : `Dal ${longDate(data.from)} al ${longDate(data.to)}`;
@@ -472,7 +526,7 @@ export const buildHaccpReportHtml = (data: HaccpReportData): string => {
 <html lang="it">
 <head>
 <meta charset="utf-8" />
-<title>Registro HACCP — ${escapeHtml(singleDay ? shortDate(data.from) : `${shortDate(data.from)}–${shortDate(data.to)}`)}</title>
+<title>${dossier ? 'Fascicolo HACCP' : 'Registro HACCP'} — ${escapeHtml(singleDay ? shortDate(data.from) : `${shortDate(data.from)}–${shortDate(data.to)}`)}</title>
 <style>
 ${PRINT_TOKENS_CSS}
   @page { size: A4 ${singleDay ? 'portrait' : 'landscape'}; margin: 12mm; }
@@ -536,7 +590,7 @@ ${PRINT_TOKENS_CSS}
 </head>
 <body>
   <header>
-    <div class="eyebrow">Registro HACCP</div>
+    <div class="eyebrow">${dossier ? 'Fascicolo HACCP per l\'ispezione' : 'Registro HACCP'}</div>
     <h1>${escapeHtml(periodTitle)}</h1>
     ${data.restaurantName ? `<div class="restaurant">${escapeHtml(data.restaurantName)}</div>` : ''}
     <div class="summary">
@@ -548,6 +602,16 @@ ${PRINT_TOKENS_CSS}
       <span class="pill">Correzioni e annullamenti: ${data.changes.length}</span>
     </div>
   </header>
+
+  ${dossier ? `<section>
+    <h2>Documenti</h2>
+    ${documentsTable(data.documents ?? [])}
+  </section>
+
+  <section>
+    <h2>Formazione del personale</h2>
+    ${trainingsTable(data.trainings ?? [])}
+  </section>` : ''}
 
   <section>
     <h2>Temperature</h2>
@@ -574,6 +638,11 @@ ${PRINT_TOKENS_CSS}
     <h2>Processi: abbattimento, cottura, bonifica, scongelamento</h2>
     ${productionTable(data.production, !singleDay)}
   </section>
+
+  ${dossier || (data.interventions && live(data.interventions).length > 0) ? `<section>
+    <h2>Interventi esterni</h2>
+    ${interventionsTable(data.interventions ?? [])}
+  </section>` : ''}
 
   ${data.calibrations && data.calibrations.length > 0 ? `<section>
     <h2>Taratura termometri</h2>

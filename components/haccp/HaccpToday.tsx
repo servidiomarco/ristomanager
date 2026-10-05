@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  Thermometer, Flame, Sparkles, Truck, Timer, Gauge, Printer, CalendarDays,
+  Thermometer, Flame, Sparkles, Truck, Timer, Gauge, Printer, CalendarDays, CalendarClock,
   Check, X, AlertTriangle, RefreshCw, ShieldAlert, Settings2,
 } from 'lucide-react';
 import {
@@ -48,12 +48,13 @@ interface HistoryTarget { entity: string; entityId: string; title: string }
 export const HaccpToday: React.FC<{
   refreshKey: number;
   onOpenNonConformities: () => void;
+  onOpenArchive?: () => void;
   /** Le aperte di tutti i giorni, a ogni rilettura: il contatore sulla
    *  scheda segue così anche le chiusure fatte da qui, che il socket non
    *  rimanda a chi le ha fatte. */
   onNcCountChange?: (open: number) => void;
   onConfigure?: () => void;
-}> = ({ refreshKey, onOpenNonConformities, onNcCountChange, onConfigure }) => {
+}> = ({ refreshKey, onOpenNonConformities, onOpenArchive, onNcCountChange, onConfigure }) => {
   const { t } = useTranslation('haccp', { useSuspense: false });
   const { user, hasPermission } = useAuth();
   const canRecord = hasPermission('haccp:record');
@@ -312,6 +313,25 @@ export const HaccpToday: React.FC<{
           }
         >
           {t('nc.openCount', '{{count}} non conformità da chiudere con l\'azione correttiva', { count: openNcCount })}
+        </Callout>
+      )}
+
+      {/* Lo scadenzario: un attestato scaduto o una disinfestazione da
+          rifare si vedono anche da chi apre solo il registro del giorno. */}
+      {day?.deadlines && day.deadlines.length > 0 && (
+        <Callout
+          tone={day.deadlines.some(d => d.status === 'expired') ? 'critical' : 'pending'}
+          icon={CalendarClock}
+          action={onOpenArchive && (
+            <button type="button" onClick={onOpenArchive} className={`${dsButton.quiet} h-9 px-3 text-[14px]`}>
+              {t('nc.see', 'Vedi')}
+            </button>
+          )}
+        >
+          {t('deadlinesCallout', '{{count}} scadenze: {{prima}}', {
+            count: day.deadlines.length,
+            prima: `${day.deadlines[0].title} (${formatLongDate(day.deadlines[0].due)})`,
+          })}
         </Callout>
       )}
 

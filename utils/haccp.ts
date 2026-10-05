@@ -358,3 +358,71 @@ export const evaluateHaccpReceipt = (
 
 export const haccpCalibrationDeviation = (reference: number, measured: number): number =>
   Math.round(Math.abs(measured - reference) * 10) / 10;
+
+// =============================================================================
+// Persone, documenti, interventi (Fase 3)
+// =============================================================================
+
+export type HaccpInterventionType =
+  | 'DISINFESTAZIONE' | 'RITIRO_OLIO' | 'MANUTENZIONE' | 'ANALISI_ACQUA' | 'ANALISI_LAB' | 'TARATURA' | 'SANIFICAZIONE' | 'ALTRO';
+export const HACCP_INTERVENTION_TYPES: HaccpInterventionType[] = [
+  'DISINFESTAZIONE', 'RITIRO_OLIO', 'MANUTENZIONE', 'ANALISI_ACQUA', 'ANALISI_LAB', 'TARATURA', 'SANIFICAZIONE', 'ALTRO',
+];
+export const HACCP_INTERVENTION_LABELS_IT: Record<HaccpInterventionType, string> = {
+  DISINFESTAZIONE: 'Disinfestazione',
+  RITIRO_OLIO: 'Ritiro olio esausto',
+  MANUTENZIONE: 'Manutenzione',
+  ANALISI_ACQUA: 'Analisi dell\'acqua',
+  ANALISI_LAB: 'Analisi di laboratorio',
+  TARATURA: 'Taratura esterna',
+  SANIFICAZIONE: 'Sanificazione straordinaria',
+  ALTRO: 'Altro intervento',
+};
+
+export type HaccpTrainingCourse = 'ALIMENTARISTA' | 'RESPONSABILE' | 'ALLERGENI' | 'CELIACHIA' | 'AGGIORNAMENTO' | 'ALTRO';
+export const HACCP_TRAINING_COURSES: HaccpTrainingCourse[] = ['ALIMENTARISTA', 'RESPONSABILE', 'ALLERGENI', 'CELIACHIA', 'AGGIORNAMENTO', 'ALTRO'];
+export const HACCP_TRAINING_LABELS_IT: Record<HaccpTrainingCourse, string> = {
+  ALIMENTARISTA: 'Alimentarista (ex libretto sanitario)',
+  RESPONSABILE: 'Responsabile HACCP',
+  ALLERGENI: 'Allergeni',
+  CELIACHIA: 'Senza glutine / celiachia',
+  AGGIORNAMENTO: 'Aggiornamento',
+  ALTRO: 'Altro corso',
+};
+
+export type HaccpDocumentCategory =
+  | 'MANUALE' | 'REGISTRAZIONE' | 'SCHEDA_TECNICA' | 'SCHEDA_SICUREZZA' | 'CONTRATTO'
+  | 'ANALISI' | 'PLANIMETRIA' | 'ATTESTATO' | 'RAPPORTO' | 'DICHIARAZIONE' | 'ALTRO';
+export const HACCP_DOCUMENT_CATEGORIES: HaccpDocumentCategory[] = [
+  'MANUALE', 'REGISTRAZIONE', 'SCHEDA_TECNICA', 'SCHEDA_SICUREZZA', 'CONTRATTO',
+  'ANALISI', 'PLANIMETRIA', 'ATTESTATO', 'RAPPORTO', 'DICHIARAZIONE', 'ALTRO',
+];
+export const HACCP_DOCUMENT_LABELS_IT: Record<HaccpDocumentCategory, string> = {
+  MANUALE: 'Manuale di autocontrollo',
+  REGISTRAZIONE: 'Registrazione sanitaria (SCIA)',
+  SCHEDA_TECNICA: 'Scheda tecnica',
+  SCHEDA_SICUREZZA: 'Scheda di sicurezza',
+  CONTRATTO: 'Contratto',
+  ANALISI: 'Analisi',
+  PLANIMETRIA: 'Planimetria',
+  ATTESTATO: 'Attestato',
+  RAPPORTO: 'Rapporto di intervento',
+  DICHIARAZIONE: 'Dichiarazione di conformità',
+  ALTRO: 'Altro documento',
+};
+
+/** I 14 allergeni del Reg. UE 1169/2011 (All. II), con gli stessi nomi che il
+ *  menu salva sui piatti (COMMON_ALLERGENS in types.ts): il libro allergeni
+ *  incrocia per nome. */
+export const HACCP_EU_ALLERGENS = [
+  'Glutine', 'Crostacei', 'Uova', 'Pesce', 'Arachidi', 'Soia', 'Latte',
+  'Frutta a guscio', 'Sedano', 'Senape', 'Sesamo', 'Solfiti', 'Lupini', 'Molluschi',
+];
+
+export interface HaccpDeadline {
+  kind: 'training' | 'document' | 'intervention';
+  id: string;
+  title: string;
+  due: string;
+  status: 'expired' | 'soon';
+}
