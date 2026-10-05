@@ -406,3 +406,31 @@ Restano le ultime tre versioni in `versions\`. Il supervisore stesso non si
 aggiorna da solo: se cambia, si ricopia `supervisor.mjs` e si riavvia il
 servizio.
 
+## Il conto sul nodo (fase B3)
+
+Con «Servizio completo sul nodo» acceso, oltre alle comande nascono sul nodo
+anche conti, incassi, sconti, storni, chiusure, preconto, scontrino sul
+registratore (`rt-local`, job nella coda del nodo: l'agente di stampa con
+`NODE_URL` lo stampa) e sessione di cassa. Tutto risale al cloud con id da
+un miliardo in su.
+
+- **Il recinto del cloud** rifiuta (409 `authority_on_node`) ogni battitura
+  di servizio finché l'interruttore è acceso, anche a nodo muto: non c'è
+  più ripiego automatico sul cloud per comande e conti. Col PC morto si
+  spegne l'interruttore con `force`: `POST /sala-node/authority
+  {"enabled": false, "force": true}` da una sessione con settings:full (la
+  card non ha ancora il bottone: si possono perdere le battiture non
+  replicate).
+- **Cancelli dell'accensione**: provider fiscale `rt-local` (o nessuno), e
+  nessun pagamento col QR in corso (`fiscal_needs_cloud`,
+  `qr_payments_live`).
+- **Pagamento col QR sospeso** (`pay_unavailable_on_node`): l'ospite legge
+  «paga in cassa». Tornerà attivo passando dal nodo (fase B3b).
+- **Caparre**: le richieste di pagamento scendono al nodo
+  (`paymentRequest:changed`), che accredita la caparra pagata sul conto
+  aperto della prenotazione.
+- **Restano al cloud**: fattura elettronica e nota di credito (SDI), rimborso
+  di una quota o di una caparra accreditata (a servizio chiuso: con
+  l'interruttore acceso rispondono 409 `refund_needs_cloud_authority`), la
+  chiusura su Passepartout (fase B5).
+

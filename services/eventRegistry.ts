@@ -114,6 +114,10 @@ export const DOMAIN_EVENTS: Record<string, DomainEventSpec> = {
     'bill:changed': spec('service'),
     'cash:changed': spec('service'),
     'fiscalDoc:changed': spec('split'),
+    // Fase B3: le richieste di pagamento (caparre, link, quote) restano del
+    // cloud — i gateway parlano con lui — ma scendono al nodo, che con il
+    // servizio in sala accredita le caparre sul conto.
+    'paymentRequest:changed': spec('cloud'),
 
     // --- Asporto: nasce online o al telefono (cloud), avanza in cucina e
     //     al ritiro (servizio) → split finché la fase 4 non li separa.

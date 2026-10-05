@@ -148,6 +148,34 @@ export const routeWriteUrl = (url: string, method?: string): string => {
     return isServiceWrite(method || 'GET', pathname) ? `${config.node_url}${rest}` : url;
 };
 
+// --- Le LETTURE del dominio servizio con l'autorità in sala (fase B3) -----
+// Conti, cassa e comande nascono sul nodo: chi li rilegge dal cloud vede
+// una copia che arriva in replica qualche istante dopo (e, a linea giù, non
+// arriva affatto). Con l'autorità in sala anche le letture di questi
+// domini vanno al nodo. Il resto (CRM, report, fiscalità di back-office)
+// resta al cloud.
+const AUTHORITY_READS: RegExp[] = [
+    /^\/bills(\/.*)?$/,
+    /^\/cash(\/.*)?$/,
+    /^\/tables\/\d+\/bill$/,
+    /^\/reservations\/\d+\/bill$/,
+    /^\/orders(\/.*)?$/,
+    /^\/kds(\/.*)?$/,
+];
+
+/** Instradamento di una richiesta del dominio servizio: le scritture come
+ *  routeWriteUrl, le letture dei conti, della cassa e delle comande al nodo
+ *  quando l'autorità è in sala. No-op per tutto il resto. */
+export const routeServiceUrl = (url: string, method?: string): string => {
+    const m = (method || 'GET').toUpperCase();
+    if (m !== 'GET' && m !== 'HEAD') return routeWriteUrl(url, m);
+    if (!config.authority_enabled || !nodeActive()) return url;
+    if (!url.startsWith(CLOUD_API_URL)) return url;
+    const rest = url.slice(CLOUD_API_URL.length);
+    const pathname = rest.split('?')[0];
+    return AUTHORITY_READS.some(r => r.test(pathname)) ? `${config.node_url}${rest}` : url;
+};
+
 /** URL del socket: nodo se attivo, altrimenti cloud. */
 export const serviceSocketUrl = (): string =>
     nodeActive() ? (config.node_url as string) : CLOUD_API_URL;
