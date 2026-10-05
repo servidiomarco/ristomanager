@@ -47,16 +47,26 @@ export interface FetchedRows {
     order_revisions?: any[];
     takeaway_orders?: any[];
     takeaway_order_items?: any[];
+    // Fase B2: conti (con pagamenti e quote), sessioni di cassa, documenti
+    // fiscali. Un lato più vecchio non li manda: si convergerà al prossimo
+    // evento dopo l'aggiornamento.
+    table_bills?: any[];
+    table_bill_payments?: any[];
+    table_bill_splits?: any[];
+    cash_sessions?: any[];
+    fiscal_documents?: any[];
 }
 
-export type WantedRows = Record<'tables' | 'reservations' | 'orders' | 'takeaways', number[]>;
+type FetchKind = 'tables' | 'reservations' | 'orders' | 'takeaways' | 'bills' | 'cashSessions' | 'fiscalDocs';
+export type WantedRows = Record<'tables' | 'reservations' | 'orders' | 'takeaways', number[]>
+    & Partial<Record<'bills' | 'cashSessions' | 'fiscalDocs', number[]>>;
 
 // Come converge ogni tipo: 'fetch' = riga corrente dall'autorità; 'payload'
 // = lo snapshot viaggia nell'evento (unioni/nascosti/chiusure, fase 1b);
 // 'delete' = si toglie per riferimento. Un tipo assente si salta (ma si
 // importa comunque nel log locale).
 type Convergence =
-    | { mode: 'fetch'; kind: 'tables' | 'reservations' | 'orders' | 'takeaways'; idFrom: string }
+    | { mode: 'fetch'; kind: FetchKind; idFrom: string }
     | { mode: 'payload'; table: string }
     | { mode: 'delete'; table: string; idFrom: string };
 
@@ -78,6 +88,11 @@ const CONVERGENCE: Record<string, Convergence> = {
     'tableHidden:deleted': { mode: 'delete', table: 'table_hidden_overrides', idFrom: 'id' },
     'roomClosed:created': { mode: 'payload', table: 'room_closed_overrides' },
     'roomClosed:deleted': { mode: 'delete', table: 'room_closed_overrides', idFrom: 'id' },
+    // Fase B2: l'aggregato conto (conto + pagamenti + quote), la sessione di
+    // cassa, il documento fiscale. Riga assente all'autorità = via anche qui.
+    'bill:changed': { mode: 'fetch', kind: 'bills', idFrom: 'bill_id' },
+    'cash:changed': { mode: 'fetch', kind: 'cashSessions', idFrom: 'cash_session_id' },
+    'fiscalDoc:changed': { mode: 'fetch', kind: 'fiscalDocs', idFrom: 'fiscal_document_id' },
 };
 
 /** I tipi che sul NODO arrivano ai client LAN già dal giro import→
@@ -97,13 +112,60 @@ const upsertRow = async (client: any, table: string, row: any): Promise<void> =>
     );
 };
 
+// Upsert SUL POSTO (fase B2): INSERT … ON CONFLICT (id) DO UPDATE. Il
+// «via la riga, dentro quella nuova» di upsertRow va bene sul nodo, dove la
+// replica gira in replica-mode e le FK tacciono; sul cloud no: cancellare un
+// conto con documenti fiscali è vietato (RESTRICT), e cancellare una
+// prenotazione si porterebbe via a cascata i suoi conti. Per conti, cassa e
+// documenti fiscali si aggiorna la riga dov'è.
+const columnsCache = new Map<string, string[]>();
+const updatableColumns = async (client: any, table: string): Promise<string[]> => {
+    const cached = columnsCache.get(table);
+    if (cached) return cached;
+    const rs = await client.query(
+        `SELECT column_name FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = $1 AND column_name <> 'id' AND is_generated = 'NEVER'
+          ORDER BY ordinal_position`,
+        [table]
+    );
+    const cols = rs.rows.map((r: any) => String(r.column_name));
+    columnsCache.set(table, cols);
+    return cols;
+};
+
+const upsertInPlace = async (client: any, table: string, row: any): Promise<void> => {
+    if (row?.id == null) return;
+    const cols = await updatableColumns(client, table);
+    const set = cols.map(c => `"${c}" = EXCLUDED."${c}"`).join(', ');
+    await client.query(
+        `INSERT INTO ${table} SELECT * FROM jsonb_populate_recordset(NULL::${table}, $1::jsonb)
+         ON CONFLICT (id) DO UPDATE SET ${set}`,
+        [JSON.stringify([row])]
+    );
+};
+
+// Una riga sparita all'autorità si toglie anche qui; ma se qui qualcosa la
+// referenzia ancora (sul cloud le FK sono vive) non si blocca lo stream per
+// sempre: si logga e si va avanti, il prossimo evento riproverà.
+const deleteTolerant = async (client: any, table: string, id: number): Promise<void> => {
+    await client.query('SAVEPOINT replica_delete');
+    try {
+        await client.query(`DELETE FROM ${table} WHERE id = $1`, [id]);
+        await client.query('RELEASE SAVEPOINT replica_delete');
+    } catch (err: any) {
+        await client.query('ROLLBACK TO SAVEPOINT replica_delete');
+        console.warn(`[replica] ${table} ${id} non tolto (ancora referenziato):`, err?.message || err);
+    }
+};
+
 // Le sequence locali oltre gli id arrivati, ma ognuna nel suo spazio (fase
 // B1, services/idSpace.ts): il nodo sopra NODE_ID_BASE, il cloud sotto.
 /** Gli id da rifetchare per un batch: il chiamante li passa al suo
  *  fetchRows (HTTP verso il cloud, o RPC socket verso il nodo). */
 export const wantedRowsFor = (events: ReplicaEvent[]): WantedRows => {
-    const wanted: Record<'tables' | 'reservations' | 'orders' | 'takeaways', Set<number>> = {
+    const wanted: Record<FetchKind, Set<number>> = {
         tables: new Set(), reservations: new Set(), orders: new Set(), takeaways: new Set(),
+        bills: new Set(), cashSessions: new Set(), fiscalDocs: new Set(),
     };
     for (const ev of events) {
         const conv = CONVERGENCE[ev.type];
@@ -117,6 +179,9 @@ export const wantedRowsFor = (events: ReplicaEvent[]): WantedRows => {
         reservations: [...wanted.reservations],
         orders: [...wanted.orders],
         takeaways: [...wanted.takeaways],
+        bills: [...wanted.bills],
+        cashSessions: [...wanted.cashSessions],
+        fiscalDocs: [...wanted.fiscalDocs],
     };
 };
 
@@ -133,7 +198,7 @@ export const applyReplicaBatch = async (opts: {
 
     // Prima il rifetch (fuori transazione: è rete), poi l'applicazione.
     const wanted = wantedRowsFor(events);
-    const rows: FetchedRows = (wanted.tables.length || wanted.reservations.length || wanted.orders.length || wanted.takeaways.length)
+    const rows: FetchedRows = Object.values(wanted).some(list => (list?.length ?? 0) > 0)
         ? await opts.fetchRows(wanted)
         : {};
     const byId = (list?: any[]): Map<number, any> => new Map((list ?? []).map((r: any) => [Number(r.id), r]));
@@ -142,6 +207,9 @@ export const applyReplicaBatch = async (opts: {
         reservations: byId(rows.reservations),
         orders: byId(rows.orders),
         takeaways: byId(rows.takeaway_orders),
+        bills: byId(rows.table_bills),
+        cashSessions: byId(rows.cash_sessions),
+        fiscalDocs: byId(rows.fiscal_documents),
     };
     const groupBy = (list: any[] | undefined, key: string): Map<number, any[]> => {
         const map = new Map<number, any[]>();
@@ -156,6 +224,8 @@ export const applyReplicaBatch = async (opts: {
     const itemsByOrder = groupBy(rows.order_items, 'order_id');
     const revisionsByOrder = groupBy(rows.order_revisions, 'order_id');
     const takeawayItemsByOrder = groupBy(rows.takeaway_order_items, 'takeaway_order_id');
+    const paymentsByBill = groupBy(rows.table_bill_payments, 'table_bill_id');
+    const splitsByBill = groupBy(rows.table_bill_splits, 'table_bill_id');
 
     const client = await pool.connect();
     const touched = new Set<string>();
@@ -239,6 +309,46 @@ export const applyReplicaBatch = async (opts: {
                     );
                 }
                 touched.add('takeaway_orders'); touched.add('takeaway_order_items');
+                continue;
+            }
+            if (conv.kind === 'bills') {
+                // L'aggregato conto: si sostituiscono pagamenti e quote del
+                // conto con quelli dell'autorità, poi il conto stesso.
+                // Le quote (pagamenti col QR) sono del cloud: le sostituisce
+                // solo il NODO che applica lo stream del cloud. Sul cloud le
+                // referenziano le richieste di pagamento, e restano sue.
+                const replaceSplits = cursorStream === 'cloud';
+                const bill = fetched.bills.get(id);
+                await client.query(`DELETE FROM table_bill_payments WHERE table_bill_id = $1`, [id]);
+                if (replaceSplits) await client.query(`DELETE FROM table_bill_splits WHERE table_bill_id = $1`, [id]);
+                if (!bill) {
+                    await deleteTolerant(client, 'table_bills', id);
+                    continue;
+                }
+                await upsertInPlace(client, 'table_bills', bill);
+                const children: Array<[string, any[] | undefined]> = [['table_bill_payments', paymentsByBill.get(id)]];
+                if (replaceSplits) children.unshift(['table_bill_splits', splitsByBill.get(id)]);
+                for (const [table, list] of children) {
+                    if (list && list.length) {
+                        await client.query(
+                            `INSERT INTO ${table} SELECT * FROM jsonb_populate_recordset(NULL::${table}, $1::jsonb)`,
+                            [JSON.stringify(list)]
+                        );
+                    }
+                }
+                touched.add('table_bills'); touched.add('table_bill_payments');
+                if (replaceSplits) touched.add('table_bill_splits');
+                continue;
+            }
+            if (conv.kind === 'cashSessions' || conv.kind === 'fiscalDocs') {
+                const table = conv.kind === 'cashSessions' ? 'cash_sessions' : 'fiscal_documents';
+                const row = fetched[conv.kind].get(id);
+                if (!row) {
+                    await deleteTolerant(client, table, id);
+                    continue;
+                }
+                await upsertInPlace(client, table, row);
+                touched.add(table);
                 continue;
             }
             const table = conv.kind; // 'tables' | 'reservations': nome tabella = kind

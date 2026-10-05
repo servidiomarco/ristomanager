@@ -103,6 +103,17 @@ export const DOMAIN_EVENTS: Record<string, DomainEventSpec> = {
     'paymentRequest:updated': spec('cloud'),
     'payments:seen': spec('cloud'),
     'fiscal:updated': spec('cloud'),
+    // Fase B2: gli eventi DI REPLICA di conti, cassa e documenti fiscali.
+    // Portano solo il riferimento e convergono per rifetch (replicaApply);
+    // i client continuano ad ascoltare i nomi qui sopra, che le route
+    // trasmettono come prima. bill:changed copre l'aggregato intero (conto,
+    // pagamenti, quote): la fase B3 separerà le quote, che restano al cloud.
+    // fiscalDoc:changed copre scontrini, proforma E fatture: le fatture
+    // restano al cloud anche dopo la B3, quindi è split finché non si
+    // sdoppia.
+    'bill:changed': spec('service'),
+    'cash:changed': spec('service'),
+    'fiscalDoc:changed': spec('split'),
 
     // --- Asporto: nasce online o al telefono (cloud), avanza in cucina e
     //     al ritiro (servizio) → split finché la fase 4 non li separa.

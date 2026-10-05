@@ -50,6 +50,9 @@ export interface VoidBillPayload {
   notes?: string;
 }
 
+const newPaymentKey = (): string =>
+  `pay-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+
 const getHeaders = (): HeadersInit => {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const socketId = socketClient.getSocket()?.id;
@@ -138,11 +141,13 @@ class BillsApiService {
     });
   }
 
-  /** Registra un incasso a conto ancora aperto (contanti/POS a metà servizio). */
-  async recordPayment(billId: number, payload: BillPaymentInput): Promise<TableBillWithSplits> {
+  /** Registra un incasso a conto ancora aperto (contanti/POS a metà servizio).
+   *  La chiave di idempotenza (fase B2) è una per tocco: il ritentativo dopo
+   *  un 401 o un timeout la riusa, e il server non incassa due volte. */
+  async recordPayment(billId: number, payload: BillPaymentInput, idempotencyKey: string = newPaymentKey()): Promise<TableBillWithSplits> {
     return apiRequest<TableBillWithSplits>(`${API_URL}/bills/${billId}/payments`, {
       method: 'POST',
-      headers: getHeaders(),
+      headers: { ...getHeaders(), 'Idempotency-Key': idempotencyKey },
       body: JSON.stringify(payload),
     });
   }

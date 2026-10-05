@@ -25,7 +25,7 @@ import { renderPrenota } from './services/prenotaSeo.js';
 import { COST_USD_SQL, UNPRICED_SQL, USD_EUR } from './services/aiPricing.js';
 import { BILLABLE_SECONDS_SQL, billableMinutes, estimatedRevenueCents, VOICE_ALERT_PERCENT_OPTIONS } from './services/voicePlan.js';
 import { getVoicePlan, getVoiceMonthUsage, mergeVoicePlan, claimNewVoiceUsageAlerts } from './services/voiceUsage.js';
-import { outboxEnqueueInTx, outboxKick, outboxRegister, startOutboxDispatcher } from './services/outboxService.js';
+import { outboxEnqueueInTx, outboxKick, outboxRegister, startOutboxDispatcher, withOutboxTx } from './services/outboxService.js';
 import { SERVER_PROFILE, isServiceNode } from './services/topology.js';
 // Prima di ogni altra riga di log: sul nodo la task è headless e il file è
 // l'unico posto dove leggere (lezione del 23/09).
@@ -3901,6 +3901,7 @@ async function chiudiComandaPassepartoutPerBill(
                      billRs.rows[0].total_cents, proforma ? 'PROFORMA' : 'RECEIPT']
                 );
                 if (ins.rows[0]) {
+                    await logFiscalDocChanged(null, tenantId, ins.rows[0].id);
                     try { socketService?.broadcastToAll(tenantId, 'fiscal:updated', { bill_id: billId, doc: ins.rows[0] }); } catch (_) {}
                 }
             }
@@ -5739,6 +5740,7 @@ async function creditPaidDepositsToBill(tenantId: number, billId: number): Promi
             [billId]
         );
         settled = (settledRs.rowCount ?? 0) > 0;
+        if (created.length > 0 || settled) await logBillChanged(client, tenantId, billId);
         await client.query('COMMIT');
     } catch (err) {
         await client.query('ROLLBACK').catch(() => {});
@@ -5985,6 +5987,7 @@ app.post('/reservations/:id/bill', authenticate, requirePermission('payments:ful
              servizioConto.service_date, servizioConto.shift, req.tenantId!]
         );
         const bill = inserted.rows[0];
+        await logBillChanged(null, req.tenantId!, bill.id);
 
         try { socketService?.broadcastToAll(req.tenantId!, 'bill:opened', bill); } catch (_) {}
 
@@ -6311,6 +6314,7 @@ app.post('/bills/:id/close', authenticate, requirePermission('payments:full'), a
                 [id, finalStatus, req.user?.userId ?? null, Math.round(tipCents), notesForDb, req.tenantId!, lotteryCode, tipMethod]
             );
             updatedRow = upd.rows[0];
+            await logBillChanged(client, req.tenantId!, id);
             await client.query('COMMIT');
         } catch (txErr) {
             await client.query('ROLLBACK').catch(() => {});
@@ -6409,6 +6413,7 @@ app.post('/bills/:id/void', authenticate, requirePermission('payments:full'), as
         if (updated.rows.length === 0) {
             return res.status(404).json({ error: 'Bill not found or already closed/voided' });
         }
+        await logBillChanged(null, req.tenantId!, id);
 
         try { socketService?.broadcastToAll(req.tenantId!, 'bill:voided', updated.rows[0]); } catch (_) {}
 
@@ -6471,6 +6476,7 @@ app.post('/bills/:id/reopen', authenticate, requirePermission('cash:void_payment
         );
 
         const row = upd.rows[0];
+        await logBillChanged(null, req.tenantId!, id);
         // Come le altre route del conto (close, void): l'evento socket e la
         // riga stessa sono il registro — closed_at che torna NULL dice quando.
         try { socketService?.broadcastToAll(req.tenantId!, 'bill:opened', row); } catch (_) {}
@@ -6543,6 +6549,7 @@ app.post('/bills/:id/discount', authenticate, requirePermission('orders:void'), 
             [id, type, value, reason, clear ? null : (req.user?.userId ?? null)]
         );
         const synced = await syncBillTotalInTx(client, req.tenantId!, id);
+        await logBillChanged(client, req.tenantId!, id);
         await client.query('COMMIT');
 
         try { socketService?.broadcastToAll(req.tenantId!, 'bill:updated', synced.bill); } catch (_) {}
@@ -6585,6 +6592,11 @@ app.post('/bills/:id/payments', authenticate, requirePermission('payments:full')
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid bill id' });
         const parsed = parseStaffBillPayment(req.body);
         if ('error' in parsed) return res.status(400).json({ error: parsed.error });
+        // Fase B2: la Idempotency-Key del client. Lo stesso incasso ritentato
+        // (rete, coda offline, nodo caduto e ritentato sul cloud) torna la
+        // riga già scritta invece di incassare due volte.
+        const keyHeader = req.headers['idempotency-key'];
+        const commandId = typeof keyHeader === 'string' && keyHeader.trim() ? keyHeader.trim().slice(0, 128) : null;
 
         const client = await pool.connect();
         let payment: any = null;
@@ -6595,6 +6607,19 @@ app.post('/bills/:id/payments', authenticate, requirePermission('payments:full')
                 `SELECT id, total_cents, status FROM table_bills WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
                 [id, req.tenantId!]
             );
+            // Sotto il lucchetto del conto: un doppione concorrente aspetta
+            // qui e poi trova la riga del primo.
+            if (commandId) {
+                const replay = await client.query(
+                    `SELECT id FROM table_bill_payments WHERE tenant_id = $1 AND command_id = $2`,
+                    [req.tenantId!, commandId]
+                );
+                if (replay.rowCount) {
+                    await client.query('ROLLBACK');
+                    const view = await loadBillView(req.tenantId!, id);
+                    return res.status(200).json({ ...(view ?? {}), idempotent_replay: true });
+                }
+            }
             if (billRs.rowCount === 0 || !['OPEN', 'LOCKED'].includes(billRs.rows[0].status)) {
                 await client.query('ROLLBACK');
                 return res.status(409).json({ error: 'Il conto non è aperto: registra gli incassi dalla chiusura.' });
@@ -6612,11 +6637,11 @@ app.post('/bills/:id/payments', authenticate, requirePermission('payments:full')
                 return res.status(409).json({ error: 'Importo oltre il residuo', max_allowed_cents: Math.max(0, residual) });
             }
             const ins = await client.query(
-                `INSERT INTO table_bill_payments (tenant_id, table_bill_id, method, amount_cents, meta, recorded_by_user_id)
-                 VALUES ($1, $2, $3, $4, $5, $6)
+                `INSERT INTO table_bill_payments (tenant_id, table_bill_id, method, amount_cents, meta, recorded_by_user_id, command_id)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7)
                  RETURNING id, table_bill_id, method, amount_cents, table_bill_split_id,
                            meta, recorded_by_user_id, recorded_at, voided_at, voided_by_user_id, void_reason`,
-                [req.tenantId!, id, parsed.method, parsed.amount_cents, parsed.meta ? JSON.stringify(parsed.meta) : null, req.user?.userId ?? null]
+                [req.tenantId!, id, parsed.method, parsed.amount_cents, parsed.meta ? JSON.stringify(parsed.meta) : null, req.user?.userId ?? null, commandId]
             );
             payment = ins.rows[0];
             const settled = await client.query(
@@ -6630,6 +6655,7 @@ app.post('/bills/:id/payments', authenticate, requirePermission('payments:full')
                 [id]
             );
             settledRow = settled.rows[0] ?? null;
+            await logBillChanged(client, req.tenantId!, id);
             await client.query('COMMIT');
         } catch (txErr) {
             await client.query('ROLLBACK').catch(() => {});
@@ -6713,6 +6739,7 @@ app.post('/bills/:id/payments/:paymentId/void', authenticate, requirePermission(
                 [id]
             );
             reopenedRow = reopen.rows[0] ?? null;
+            await logBillChanged(client, req.tenantId!, id);
             await client.query('COMMIT');
         } catch (txErr) {
             await client.query('ROLLBACK').catch(() => {});
@@ -7343,6 +7370,7 @@ async function registerNativeProforma(tenantId: number, billId: number, userId: 
         [tenantId, billId, bill.total_cents, userId, newFiscalPublicToken()]
     );
     if (!ins.rows[0]) return { skipped: 'doc_exists' };
+    await logFiscalDocChanged(null, tenantId, ins.rows[0]?.id);
     try { socketService?.broadcastToAll(tenantId, 'fiscal:updated', { bill_id: billId, doc: ins.rows[0] }); } catch (_) {}
     return { doc: ins.rows[0] };
 }
@@ -7369,6 +7397,7 @@ async function registerExternalRtReceipt(tenantId: number, billId: number, userI
         [tenantId, billId, bill.total_cents, userId, docNumber]
     );
     if (!ins.rows[0]) return { skipped: 'doc_exists' };
+    await logFiscalDocChanged(null, tenantId, ins.rows[0]?.id);
     try { socketService?.broadcastToAll(tenantId, 'fiscal:updated', { bill_id: billId, doc: ins.rows[0] }); } catch (_) {}
     return { doc: ins.rows[0] };
 }
@@ -7385,6 +7414,7 @@ async function supersedeNativeProforma(tenantId: number, billId: number): Promis
          RETURNING id`,
         [billId, tenantId]
     );
+    for (const row of upd.rows) await logFiscalDocChanged(null, tenantId, row.id);
     return (upd.rowCount ?? 0) > 0;
 }
 
@@ -7514,6 +7544,7 @@ async function emitFiscalDocForBill(tenantId: number, billId: number, userId: nu
         const pending = await queryWithRetry(
             `SELECT ${FISCAL_DOC_COLUMNS} FROM fiscal_documents WHERE id = $1`, [doc.id]
         );
+        await logFiscalDocChanged(null, tenantId, pending.rows[0]?.id);
         try { socketService?.broadcastToAll(tenantId, 'fiscal:updated', { bill_id: billId, doc: pending.rows[0] }); } catch (_) {}
         return { doc: pending.rows[0] };
     }
@@ -7546,6 +7577,7 @@ async function emitFiscalDocForBill(tenantId: number, billId: number, userId: nu
         console.error('[fiscal] emissione fallita per conto', billId, err?.message);
     }
 
+    await logFiscalDocChanged(null, tenantId, finalRow?.id);
     try { socketService?.broadcastToAll(tenantId, 'fiscal:updated', { bill_id: billId, doc: finalRow }); } catch (_) {}
     return { doc: finalRow };
 }
@@ -7686,6 +7718,7 @@ app.post('/bills/:id/fiscal-docs', authenticate, requirePermission('payments:ful
                 `UPDATE table_bills SET lottery_code = $1 WHERE id = $2 AND tenant_id = $3`,
                 [lotteryRaw, id, req.tenantId!]
             );
+            await logBillChanged(null, req.tenantId!, id);
         }
 
         // documento: 'Cassa' → scontrino battuto sull'RT esterno, anche a
@@ -7796,6 +7829,7 @@ app.post('/bills/:id/fiscal-docs/:fid/void', authenticate, requirePermission('pa
              RETURNING ${FISCAL_DOC_COLUMNS}`,
             [fid, JSON.stringify(raw ?? null)]
         );
+        await logFiscalDocChanged(null, req.tenantId!, upd.rows[0]?.id);
         try { socketService?.broadcastToAll(req.tenantId!, 'fiscal:updated', { bill_id: id, doc: upd.rows[0] }); } catch (_) {}
 
         if (req.user) {
@@ -7901,6 +7935,7 @@ app.post('/bills/:id/fiscal-docs/:fid/credit-note', authenticate, requirePermiss
                 [req.tenantId!, id, docNumber, doc.provider, sellerRes.seller.vat_number, doc.total_cents,
                  req.user?.userId ?? null, JSON.stringify({ xml, buyer }), String(err?.message ?? err).slice(0, 1000), fid]
             );
+            await logFiscalDocChanged(null, req.tenantId!, failIns.rows[0]?.id);
             try { socketService?.broadcastToAll(req.tenantId!, 'fiscal:updated', { bill_id: id, doc: failIns.rows[0] }); } catch (_) {}
             return res.status(502).json({ error: 'Nota di credito non emessa', detail: err?.message, doc: failIns.rows[0] });
         }
@@ -7934,7 +7969,9 @@ app.post('/bills/:id/fiscal-docs/:fid/credit-note', authenticate, requirePermiss
         }
 
         try {
+            await logFiscalDocChanged(null, req.tenantId!, voidedInvoice?.id);
             socketService?.broadcastToAll(req.tenantId!, 'fiscal:updated', { bill_id: id, doc: voidedInvoice });
+            await logFiscalDocChanged(null, req.tenantId!, creditNote?.id);
             socketService?.broadcastToAll(req.tenantId!, 'fiscal:updated', { bill_id: id, doc: creditNote });
         } catch (_) {}
 
@@ -8089,6 +8126,7 @@ app.post('/webhook/t/:tenantToken/openapi-fiscale', express.urlencoded({ extende
              failed ? `Provider: ${sdiStatus || state}${entity?.details?.sdi_message ?? entity?.error_message ? ` — ${String(entity?.details?.sdi_message ?? entity?.error_message).slice(0, 500)}` : ''}` : null,
              docNumber]
         );
+        await logFiscalDocChanged(null, tenantId, upd.rows[0]?.id);
         try { socketService?.broadcastToAll(tenantId, 'fiscal:updated', { bill_id: doc.table_bill_id, doc: upd.rows[0] }); } catch (_) {}
         if (failed) console.warn(`[fiscal] webhook: documento ${doc.id} (conto ${doc.table_bill_id}) segnato FAILED da ${sdiStatus || state}`);
         res.json({ ok: true });
@@ -8309,6 +8347,7 @@ app.post('/bills/:id/invoices', authenticate, requirePermission('payments:full')
             console.error('[fiscal] fattura fallita per conto', id, err?.message);
         }
 
+        await logFiscalDocChanged(null, req.tenantId!, finalRow?.id);
         try { socketService?.broadcastToAll(req.tenantId!, 'fiscal:updated', { bill_id: id, doc: finalRow }); } catch (_) {}
 
         if (req.user) {
@@ -8438,6 +8477,7 @@ app.post('/bills/splits/:id/refund', authenticate, requirePermission('payments:f
             }
         }
 
+        await logBillChanged(null, req.tenantId!, row.table_bill_id);
         const socketId = req.headers['x-socket-id'] as string;
         if (socketService) {
             try {
@@ -9066,6 +9106,7 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
             // claim after release.
         }
 
+        await logBillChanged(null, bill.tenant_id, bill.id);
         try {
             socketService?.broadcastToAll(bill.tenant_id, 'bill:split-claimed', {
                 bill_id: bill.id,
@@ -9128,6 +9169,7 @@ app.post('/pay/:token/release', publicPayLimiter, async (req, res) => runAsPlatf
             return res.status(409).json({ error: 'Split not found or not releasable' });
         }
 
+        await logBillChanged(null, bill.tenant_id, bill.id);
         try {
             socketService?.broadcastToAll(bill.tenant_id, 'bill:split-released', {
                 bill_id: bill.id,
@@ -11289,6 +11331,7 @@ async function applyBillSplitTransition(
             console.error('[bill-split] mirror insert failed for split', splitId, mirrorErr?.message);
         }
 
+        await logBillChanged(null, tenantId, billId);
         try {
             socketService?.broadcastToAll(tenantId, 'bill:split-paid', {
                 bill_id: billId, split_id: splitId, amount_cents: amount,
@@ -11318,7 +11361,10 @@ async function applyBillSplitTransition(
             [billId, tenantId]
         );
         if ((settled.rowCount ?? 0) > 0) {
+            await logBillChanged(null, tenantId, billId);
             try { socketService?.broadcastToAll(tenantId, 'bill:settled', settled.rows[0]); } catch (_) {}
+            await autoCloseSettledBill(tenantId, billId).catch(err =>
+                console.error('[bill-split] chiusura automatica fallita per conto', billId, err?.message || err));
         }
         return;
     }
@@ -11332,6 +11378,7 @@ async function applyBillSplitTransition(
             [splitId]
         );
         if ((upd.rowCount ?? 0) > 0) {
+            await logBillChanged(null, tenantId, billId);
             try {
                 socketService?.broadcastToAll(tenantId, 'bill:split-abandoned', {
                     bill_id: billId, split_id: splitId,
@@ -11339,6 +11386,65 @@ async function applyBillSplitTransition(
             } catch (_) {}
         }
     }
+}
+
+// Conto saldato per intero online (QR o link): si chiude da solo e lo
+// scontrino parte da solo (decisione del 05/10/2026, fase B2). Prima restava
+// SETTLED: pagato, ma senza documento fiscale e fuori dalla chiusura di
+// cassa, finché qualcuno non premeva «Chiudi» — il «limbo» dei conti online.
+// Solo dove lo scontrino è automatico (registratore in LAN, Openapi, mock dei
+// test): con la cassa esterna o Passepartout il documento lo batte qualcuno,
+// e il conto resta in Cassa tra quelli da chiudere, come prima.
+const AUTO_CLOSE_FISCAL_PROVIDERS = new Set(['rt-local', 'openapi', 'mock']);
+
+async function autoCloseSettledBill(tenantId: number, billId: number): Promise<any | null> {
+    if (!AUTO_CLOSE_FISCAL_PROVIDERS.has(await getFiscalProviderSetting(tenantId))) return null;
+    const client = await pool.connect();
+    let row: any = null;
+    try {
+        await client.query('BEGIN');
+        const cur = await client.query(
+            `SELECT status, external_ref FROM table_bills WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
+            [billId, tenantId]
+        );
+        if (cur.rows[0]?.status !== 'SETTLED' || passepartoutComandaIdFromRef(cur.rows[0].external_ref) != null) {
+            await client.query('ROLLBACK');
+            return null;
+        }
+        const upd = await client.query(
+            `UPDATE table_bills
+             SET status = 'CLOSED',
+                 closed_at = CURRENT_TIMESTAMP,
+                 closed_by_user_id = NULL,
+                 cash_settled_cents = (
+                     SELECT COALESCE(SUM(amount_cents), 0)::int
+                     FROM table_bill_payments
+                     WHERE table_bill_id = $1 AND method = 'CONTANTI' AND table_bill_split_id IS NULL AND voided_at IS NULL
+                 ),
+                 share_token = NULL
+             WHERE id = $1 AND tenant_id = $2 AND status = 'SETTLED'
+             RETURNING id, reservation_id, table_id, total_cents, covers, currency,
+                       items, status, share_token, opened_at, closed_at,
+                       opened_by_user_id, closed_by_user_id, external_ref,
+                       cash_settled_cents, tip_cents, tip_method, notes`,
+            [billId, tenantId]
+        );
+        row = upd.rows[0] ?? null;
+        if (row) await logBillChanged(client, tenantId, billId);
+        await client.query('COMMIT');
+    } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw err;
+    } finally {
+        client.release();
+    }
+    if (!row) return null;
+    try { socketService?.broadcastToAll(tenantId, 'bill:closed', row); } catch (_) {}
+    if (Number(row.total_cents) > 0) {
+        emitFiscalDocForBill(tenantId, billId, null)
+            .catch(err => console.error('[fiscal] emissione dopo chiusura automatica fallita per conto', billId, err?.message));
+    }
+    return row;
 }
 
 // Shared side-effect pipeline for a payment order state change, in the
@@ -11990,6 +12096,7 @@ app.post('/payments/:id/refund', authenticate, requirePermission('payments:full'
                      RETURNING *`,
                     [s.table_bill_id, req.tenantId!]
                 );
+                await logBillChanged(null, req.tenantId!, s.table_bill_id);
                 try {
                     socketService?.broadcastToAll(req.tenantId!, 'bill:split-refunded', { bill_id: s.table_bill_id });
                     if ((reopened.rowCount ?? 0) > 0) socketService?.broadcastToAll(req.tenantId!, 'bill:opened', reopened.rows[0]);
@@ -12138,6 +12245,54 @@ const runWithOutboxTx = async <T>(fn: (client: any) => Promise<T>): Promise<T> =
         client.release();
     }
 };
+
+// --- Conti, cassa e documenti fiscali nel log di replica (fase B2) --------
+// Il nodo di sala serviva /bills/open dalla foto del bootstrap: un conto
+// aperto o pagato dopo non c'era. E per la fase B3 (conto e scontrino sul
+// nodo) ogni scrittura su conti, pagamenti, quote, sessioni di cassa e
+// documenti fiscali deve finire nel log. Qui gli eventi di replica: solo il
+// riferimento, l'altro lato rilegge la riga (convergenza per rifetch). Con
+// una transazione in mano l'evento entra NELLA transazione; altrimenti
+// subito dopo, in una sua — mai un errore di log che fa fallire l'incasso.
+type OutboxClient = { query: (sql: string, params?: any[]) => Promise<any> };
+
+async function logReplicaChange(
+    client: OutboxClient | null,
+    tenantId: number,
+    event: 'bill:changed' | 'cash:changed' | 'fiscalDoc:changed',
+    aggregate: string,
+    payload: Record<string, number>,
+): Promise<void> {
+    if (client) {
+        await outboxEnqueueInTx(client, tenantId, event, aggregate, payload);
+        return;
+    }
+    try {
+        await withOutboxTx(c => outboxEnqueueInTx(c, tenantId, event, aggregate, payload));
+        outboxKick();
+    } catch (err: any) {
+        console.error(`[outbox] ${event} non registrato (${JSON.stringify(payload)}):`, err?.message || err);
+    }
+}
+
+/** Il conto con i suoi pagamenti e le sue quote è cambiato. */
+function logBillChanged(client: OutboxClient | null, tenantId: number, billId: number | string | null | undefined): Promise<void> {
+    const id = Number(billId);
+    if (!Number.isInteger(id) || id <= 0) return Promise.resolve();
+    return logReplicaChange(client, tenantId, 'bill:changed', 'bill', { bill_id: id });
+}
+
+function logCashChanged(client: OutboxClient | null, tenantId: number, sessionId: number | string | null | undefined): Promise<void> {
+    const id = Number(sessionId);
+    if (!Number.isInteger(id) || id <= 0) return Promise.resolve();
+    return logReplicaChange(client, tenantId, 'cash:changed', 'cash_session', { cash_session_id: id });
+}
+
+function logFiscalDocChanged(client: OutboxClient | null, tenantId: number, docId: number | string | null | undefined): Promise<void> {
+    const id = Number(docId);
+    if (!Number.isInteger(id) || id <= 0) return Promise.resolve();
+    return logReplicaChange(client, tenantId, 'fiscalDoc:changed', 'fiscal_document', { fiscal_document_id: id });
+}
 
 app.put('/tables/:id', authenticate, requirePermission('floorplan:update_status'), async (req, res) => {
     try {
@@ -13931,6 +14086,7 @@ const startBillSplitReconcileScheduler = () => {
                         [row.split_id]
                     );
                     if ((upd.rowCount ?? 0) > 0) {
+                        await logBillChanged(null, rowTenantId, upd.rows[0].table_bill_id);
                         try {
                             socketService?.broadcastToAll(rowTenantId, 'bill:split-abandoned', {
                                 bill_id: upd.rows[0].table_bill_id,
@@ -27948,6 +28104,7 @@ app.post('/takeaway/orders/:id/bill', authenticate, requireFeature('takeaway'), 
             const billId = Number(ins.rows[0].id);
             await client.query('UPDATE orders SET table_bill_id = $2 WHERE id = $1', [tw.kitchen_order_id, billId]);
             await syncBillTotalInTx(client, req.tenantId!, billId);
+            await logBillChanged(client, req.tenantId!, billId);
             if (order.status === 'OPEN') {
                 await client.query(
                     `UPDATE orders SET status = 'CLOSED', closed_at = CURRENT_TIMESTAMP, closed_by_user_id = $2
@@ -36088,6 +36245,7 @@ async function resyncBillForOrder(tenantId: number, orderId: number): Promise<{ 
     try {
         await client.query('BEGIN');
         const result = await syncBillTotalInTx(client, tenantId, billId);
+        await logBillChanged(client, tenantId, billId);
         await client.query('COMMIT');
         try { socketService?.broadcastToAll(tenantId, 'bill:updated', result.bill); } catch (_) {}
         return null;
@@ -36188,6 +36346,7 @@ app.patch('/orders/:id', authenticate, requirePermission('orders:take'), async (
                 `UPDATE table_bills SET covers = $2 WHERE id = $1 AND tenant_id = $3`,
                 [upd.rows[0].table_bill_id, upd.rows[0].covers, req.tenantId!]
             );
+            await logBillChanged(null, req.tenantId!, upd.rows[0].table_bill_id);
         }
 
         const view = await loadOrderView(req.tenantId!, id);
@@ -36337,6 +36496,7 @@ app.post('/orders/:id/close', authenticate, requirePermission('orders:take'), as
         // La chiusura viaggia con la transazione: sala e cassa non possono
         // restare con una comanda che risulta ancora aperta.
         await outboxEnqueueInTx(client, req.tenantId!, 'order:updated', `order:${orderId}`, { order_id: orderId }, outboxContext(req));
+        await logBillChanged(client, req.tenantId!, synced.bill?.id);
         await client.query('COMMIT');
         client.release();
 
@@ -36474,6 +36634,7 @@ app.post('/tables/:id/bill', authenticate, requirePermission('payments:full'), a
         }
 
         const bill = inserted.rows[0];
+        await logBillChanged(null, req.tenantId!, bill.id);
         try { socketService?.broadcastToAll(req.tenantId!, 'bill:opened', bill); } catch (_) {}
         res.status(201).json({ bill, splits: [], paid_cents: 0, claimed_cents: 0, residual_cents: bill.total_cents });
     } catch (err: any) {
@@ -36934,6 +37095,7 @@ app.post('/orders/:id/transfer', authenticate, requirePermission('orders:take'),
                 `UPDATE table_bills SET table_id = $2, reservation_id = NULL WHERE id = $1`,
                 [order.table_bill_id, targetId]
             );
+            await logBillChanged(client, req.tenantId!, order.table_bill_id);
         }
         await client.query('COMMIT');
         client.release();
@@ -37693,6 +37855,7 @@ app.post('/cash/session', authenticate, requirePermission('cash:close_session'),
         }
 
         const view = await loadCashSession(req.tenantId!, service);
+        await logCashChanged(null, req.tenantId!, view.session?.id);
         try { socketService?.broadcastToAll(req.tenantId!, 'cash:session-opened', view.session); } catch (_) {}
         res.status(201).json(view);
     } catch (err: any) {
@@ -37727,6 +37890,7 @@ app.patch('/cash/session/:id', authenticate, requirePermission('cash:close_sessi
 
         const row = upd.rows[0];
         const view = await loadCashSession(req.tenantId!, { service_date: row.service_date, shift: row.shift });
+        await logCashChanged(null, req.tenantId!, view.session?.id);
         try { socketService?.broadcastToAll(req.tenantId!, 'cash:session-opened', view.session); } catch (_) {}
         res.json(view);
     } catch (err: any) {
@@ -37783,6 +37947,7 @@ app.post('/cash/session/:id/close', authenticate, requirePermission('cash:close_
         if (upd.rows.length === 0) return res.status(409).json({ error: 'La cassa è già chiusa' });
 
         const view = await loadCashSession(req.tenantId!, service);
+        await logCashChanged(null, req.tenantId!, view.session?.id);
         try { socketService?.broadcastToAll(req.tenantId!, 'cash:session-closed', view.session); } catch (_) {}
         // I conti aperti non bloccano la chiusura: restano incassabili, anche
         // domani. La UI li mostra, la cassa si chiude lo stesso.
@@ -38559,6 +38724,7 @@ app.post('/print-agent/jobs/:id/ack', printAgentAuth, async (req: any, res) => {
                      ok, req.printAgentTenantId]
                 );
                 if (upd.rows[0]) {
+                    await logFiscalDocChanged(null, req.printAgentTenantId, upd.rows[0]?.id);
                     try { socketService?.broadcastToAll(req.printAgentTenantId, 'fiscal:updated', { bill_id: billId, doc: upd.rows[0] }); } catch (_) {}
                 }
             }
@@ -38854,6 +39020,11 @@ const SNAPSHOT_TABLES: SnapshotTableSpec[] = [
     { name: 'payment_requests', where: `created_at >= $2::date` },
     { name: 'table_bill_splits', where: `table_bill_id IN (SELECT id FROM table_bills WHERE tenant_id = $1 AND service_date >= $2::date)` },
     { name: 'table_bill_payments', where: `table_bill_id IN (SELECT id FROM table_bills WHERE tenant_id = $1 AND service_date >= $2::date)` },
+    // Fase B2: i documenti fiscali e le sessioni di cassa della finestra —
+    // con la fase B3 il nodo chiude conti ed emette scontrini, e deve sapere
+    // quali esistono già (l'indice «un documento vivo per conto»).
+    { name: 'fiscal_documents', where: `created_at >= $2::date` },
+    { name: 'cash_sessions', where: `service_date >= $2::date` },
     { name: 'takeaway_orders', where: `pickup_date >= $2::date` },
     { name: 'takeaway_order_items', where: `takeaway_order_id IN (SELECT id FROM takeaway_orders WHERE tenant_id = $1 AND pickup_date >= $2::date)` },
 ];
@@ -39007,6 +39178,19 @@ app.post('/sala-node/rows', salaNodeAuth, async (req: any, res) => {
                 ? queryWithRetry(`SELECT * FROM takeaway_order_items WHERE tenant_id = $1 AND takeaway_order_id = ANY($2::int[])`, [tenantId, takeawayIds])
                 : Promise.resolve({ rows: [] as any[] }),
         ]);
+        // Fase B2: l'aggregato conto (conto, pagamenti, quote), le sessioni
+        // di cassa, i documenti fiscali.
+        const billIds = ids('bills');
+        const cashIds = ids('cashSessions');
+        const fiscalIds = ids('fiscalDocs');
+        const none = { rows: [] as any[] };
+        const [billsRs, billPaymentsRs, billSplitsRs, cashRs, fiscalRs] = await Promise.all([
+            billIds.length ? queryWithRetry(`SELECT * FROM table_bills WHERE tenant_id = $1 AND id = ANY($2::bigint[])`, [tenantId, billIds]) : Promise.resolve(none),
+            billIds.length ? queryWithRetry(`SELECT * FROM table_bill_payments WHERE tenant_id = $1 AND table_bill_id = ANY($2::bigint[])`, [tenantId, billIds]) : Promise.resolve(none),
+            billIds.length ? queryWithRetry(`SELECT * FROM table_bill_splits WHERE tenant_id = $1 AND table_bill_id = ANY($2::bigint[])`, [tenantId, billIds]) : Promise.resolve(none),
+            cashIds.length ? queryWithRetry(`SELECT * FROM cash_sessions WHERE tenant_id = $1 AND id = ANY($2::bigint[])`, [tenantId, cashIds]) : Promise.resolve(none),
+            fiscalIds.length ? queryWithRetry(`SELECT * FROM fiscal_documents WHERE tenant_id = $1 AND id = ANY($2::bigint[])`, [tenantId, fiscalIds]) : Promise.resolve(none),
+        ]);
         res.json({
             tables: tablesRs.rows,
             reservations: reservationsRs.rows,
@@ -39015,6 +39199,11 @@ app.post('/sala-node/rows', salaNodeAuth, async (req: any, res) => {
             order_revisions: revisionsRs.rows,
             takeaway_orders: takeawayRs.rows,
             takeaway_order_items: takeawayItemsRs.rows,
+            table_bills: billsRs.rows,
+            table_bill_payments: billPaymentsRs.rows,
+            table_bill_splits: billSplitsRs.rows,
+            cash_sessions: cashRs.rows,
+            fiscal_documents: fiscalRs.rows,
         });
     } catch (err: any) {
         console.error('POST /sala-node/rows error:', err);
@@ -40112,6 +40301,45 @@ const startServer = async () => {
                             };
                         outboxRegister('takeaway:created', rebroadcastTakeaway('takeaway:created'));
                         outboxRegister('takeaway:updated', rebroadcastTakeaway('takeaway:updated'));
+                        // Fase B2 — conti, cassa e documenti fiscali IMPORTATI
+                        // dal nodo: i client del cloud li vedono con gli eventi
+                        // di sempre. Solo sul cloud: sul nodo gli eventi del
+                        // cloud arrivano già ai palmari col relay (rigiocarli
+                        // anche qui raddoppierebbe suoni e toast). Servono dalla
+                        // fase B3, quando i conti nascono sul nodo.
+                        if (!isServiceNode) {
+                            outboxRegister('bill:changed', async (tenantId, payload, meta) => {
+                                if (meta?.origin !== 'replica') return;
+                                const id = Number(payload?.bill_id);
+                                if (!Number.isFinite(id)) return;
+                                const rs = await queryWithRetry('SELECT * FROM table_bills WHERE id = $1 AND tenant_id = $2', [id, tenantId]);
+                                const row = rs.rows[0];
+                                if (!row) return;
+                                const event = row.status === 'CLOSED' ? 'bill:closed'
+                                    : row.status === 'VOIDED' ? 'bill:voided'
+                                    : row.status === 'SETTLED' ? 'bill:settled'
+                                    : 'bill:updated';
+                                socketService?.broadcastToAll(tenantId, event, row);
+                            });
+                            outboxRegister('cash:changed', async (tenantId, payload, meta) => {
+                                if (meta?.origin !== 'replica') return;
+                                const id = Number(payload?.cash_session_id);
+                                if (!Number.isFinite(id)) return;
+                                const rs = await queryWithRetry('SELECT service_date, shift, closed_at FROM cash_sessions WHERE id = $1 AND tenant_id = $2', [id, tenantId]);
+                                const row = rs.rows[0];
+                                if (!row) return;
+                                const view = await loadCashSession(tenantId, { service_date: row.service_date, shift: row.shift });
+                                socketService?.broadcastToAll(tenantId, row.closed_at ? 'cash:session-closed' : 'cash:session-opened', view.session);
+                            });
+                            outboxRegister('fiscalDoc:changed', async (tenantId, payload, meta) => {
+                                if (meta?.origin !== 'replica') return;
+                                const id = Number(payload?.fiscal_document_id);
+                                if (!Number.isFinite(id)) return;
+                                const rs = await queryWithRetry(`SELECT ${FISCAL_DOC_COLUMNS} FROM fiscal_documents WHERE id = $1 AND tenant_id = $2`, [id, tenantId]);
+                                const doc = rs.rows[0];
+                                if (doc) socketService?.broadcastToAll(tenantId, 'fiscal:updated', { bill_id: doc.table_bill_id, doc });
+                            });
+                        }
                         startOutboxDispatcher();
                         // Rinnovo certificati del nodo di sala: parte solo a
                         // migration riuscite (la sua tabella deve esistere) e

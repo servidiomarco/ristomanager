@@ -378,6 +378,8 @@ Modulo completo per presa comanda, produzione e coordinamento delle uscite. Si a
 
 **Conto al tavolo per l'ospite (pay-at-table)**
 - Il cameriere stampa un **QR**; l'ospite paga dal telefono, senza app e senza login.
+- **Conto pagato tutto col QR: si chiude da solo e lo scontrino parte da solo**, se lo scontrino è automatico (registratore telematico collegato al CRM o scontrino elettronico). Prima restava «pagato» ma aperto, senza documento fiscale e fuori dalla chiusura di cassa, finché qualcuno non lo chiudeva. Con la cassa esterna o Passepartout il documento lo batte la cassa, e il conto resta tra quelli da chiudere, come prima.
+- Un incasso registrato due volte per un tocco ripetuto o una rete che balla non si raddoppia: il secondo tentativo ritrova il primo.
 - Nel foglio del conto (palmare comande, Pagamenti, cassa) una **barra di avanzamento** sotto il QR mostra pagato e percentuale: si riempie da sola quando arriva una quota, e finché il QR è attivo una luce scorre sul tratto scoperto — si vede a colpo d'occhio che il conto è «in ascolto».
 - **Dividi il conto**: quota uguale, importo libero, **per riga** ("io ho preso solo l'antipasto") o **tutto il conto** in un tocco ("offro io": paga l'intero residuo, quote degli altri già scalate), con etichetta facoltativa del pagante.
 - Il «per riga» va **a pezzi**: le righe con più unità — «4× Coperto», «2× Supplì» — hanno lo stepper «1/4» e il tocco sulla riga ne prende uno, così al tavolo da quattro ognuno paga il suo coperto e il prossimo trova «3× Coperto · 1 già pagato». Contano anche i pezzi incassati in cassa col «dividi per piatti».
@@ -776,6 +778,8 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-05 | Pagamenti, conto al tavolo e cassa | Un conto pagato tutto col QR si chiude da solo e lo scontrino parte da solo, se lo scontrino è automatico (registratore collegato al CRM o scontrino elettronico): non resta più «pagato» ma aperto. Un incasso ripetuto per un doppio tocco o una rete che balla non si raddoppia. |
+| 2026-10-05 | Nodo di sala (modalità ibrida) | Conti, incassi, scontrini e sessioni di cassa arrivano anche sul nodo di sala: a linea caduta i conti aperti mostrati in sala sono quelli veri, non quelli del giorno dell'installazione. |
 | 2026-10-05 | Nodo di sala (modalità ibrida) | La pastiglia «Live» dice da quando il locale lavora in isola («dalle 21:47»). La card del nodo mostra il ritardo della sincronizzazione nei due versi, le battiture ancora da inviare e la versione del nodo; a linea caduta legge lo stato direttamente dal nodo. |
 | 2026-10-05 | Nodo di sala (modalità ibrida) | Nuovo PIN di sala: si imposta dal proprio profilo e, con la linea giù, dalla pagina di accesso si entra scegliendo il nome e digitando il PIN, solo per sala, comande, cucina, conti e cassa. Al ritorno della linea si rientra col login normale. |
 | 2026-10-05 | Nodo di sala (modalità ibrida) | A linea caduta chi è collegato resta dentro fino a 12 ore dopo la scadenza dell'accesso, e menu, listini, utenti e impostazioni cambiati nel cloud arrivano sul nodo in un paio di minuti. Se l'accesso scade del tutto senza linea, un avviso lo dice e l'app riparte da sola al ritorno di internet. |

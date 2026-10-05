@@ -153,9 +153,20 @@ const serveNodeRows = async (req: any, ack: (res: any) => void): Promise<void> =
             const reservationIds = ids('reservations');
             const orderIds = ids('orders');
             const takeawayIds = ids('takeaways');
+            const billIds = ids('bills');
+            const cashIds = ids('cashSessions');
+            const fiscalIds = ids('fiscalDocs');
             // rls-bypass: solo nodo (superuser locale, un tenant): righe per id, il DB del nodo ha un tenant solo
             const q = (sql: string, params: any[]) => pool.query(sql, params).then(r => r.rows);
             const none: any[] = [];
+            // Fase B2: l'aggregato conto, le sessioni di cassa, i documenti fiscali.
+            const [table_bills, table_bill_payments, table_bill_splits, cash_sessions, fiscal_documents] = await Promise.all([
+                billIds.length ? q(`SELECT * FROM table_bills WHERE id = ANY($1::bigint[])`, [billIds]) : none,
+                billIds.length ? q(`SELECT * FROM table_bill_payments WHERE table_bill_id = ANY($1::bigint[])`, [billIds]) : none,
+                billIds.length ? q(`SELECT * FROM table_bill_splits WHERE table_bill_id = ANY($1::bigint[])`, [billIds]) : none,
+                cashIds.length ? q(`SELECT * FROM cash_sessions WHERE id = ANY($1::bigint[])`, [cashIds]) : none,
+                fiscalIds.length ? q(`SELECT * FROM fiscal_documents WHERE id = ANY($1::bigint[])`, [fiscalIds]) : none,
+            ]);
             const [tables, reservations, orders, order_items, order_revisions, takeaway_orders, takeaway_order_items] = await Promise.all([
                 tableIds.length ? q(`SELECT * FROM tables WHERE id = ANY($1::int[])`, [tableIds]) : none,
                 reservationIds.length ? q(`SELECT * FROM reservations WHERE id = ANY($1::int[])`, [reservationIds]) : none,
@@ -165,7 +176,10 @@ const serveNodeRows = async (req: any, ack: (res: any) => void): Promise<void> =
                 takeawayIds.length ? q(`SELECT * FROM takeaway_orders WHERE id = ANY($1::int[])`, [takeawayIds]) : none,
                 takeawayIds.length ? q(`SELECT * FROM takeaway_order_items WHERE takeaway_order_id = ANY($1::int[])`, [takeawayIds]) : none,
             ]);
-            ack({ tables, reservations, orders, order_items, order_revisions, takeaway_orders, takeaway_order_items });
+            ack({
+                tables, reservations, orders, order_items, order_revisions, takeaway_orders, takeaway_order_items,
+                table_bills, table_bill_payments, table_bill_splits, cash_sessions, fiscal_documents,
+            });
         });
     } catch (err: any) {
         ack({ error: err?.message || String(err) });
