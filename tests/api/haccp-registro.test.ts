@@ -176,6 +176,15 @@ describe('HACCP · registro', () => {
             expect(closed.body.status).toBe('CLOSED');
             expect(closed.body.closedByUserName).toBe('Cuoca Registro');
 
+            // Corretta di nuovo e sempre fuori soglia: lo scostamento è lo
+            // stesso, già rimediato — nessuna seconda non conformità.
+            const again = await api().post('/haccp/temperatures').set(bearer(owner)).send({
+                date: '2026-09-16', pointId: fridgeId, temperature: 8.5,
+            });
+            expect(again.status).toBe(201);
+            const same = await api().get('/haccp/nonconformities').set(bearer(owner)).query({ status: 'all' });
+            expect(same.body.nonconformities.filter((n: any) => n.sourceId === out.body.id)).toHaveLength(1);
+
             // Annullata la lettura, l'azione fatta resta: la chiusa non si tocca.
             const voided = await api().post(`/haccp/temperatures/${out.body.id}/void`).set(bearer(owner)).send({});
             expect(voided.status).toBe(200);

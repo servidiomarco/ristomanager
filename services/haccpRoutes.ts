@@ -311,7 +311,13 @@ type NcSource = 'TEMPERATURE' | 'OIL' | 'CLEANING' | 'RECEIPT' | 'PROCESS' | 'MA
 /** Tiene allineata la non conformità di una registrazione: aperta finché il
  *  valore è fuori, annullata se la registrazione torna in regola o viene
  *  annullata prima che qualcuno abbia scritto l'azione correttiva. Una non
- *  conformità già chiusa non si tocca: l'azione è stata fatta e resta. */
+ *  conformità già chiusa non si tocca e non se ne apre un'altra: l'azione è
+ *  stata fatta per quello scostamento, e correggere di nuovo la lettura (8 °C
+ *  diventa 8,5 °C) non è un fatto nuovo da rimediare.
+ *
+ *  `closedWith`: lo scostamento nasce già rimediato (il termometro fuori
+ *  taratura e già sostituito) — la non conformità si registra chiusa, con
+ *  quell'azione. */
 async function syncSourceNc(
     client: PoolClient,
     tenantId: number,
@@ -325,16 +331,35 @@ async function syncSourceNc(
         detail: string | null;
         actor: Actor;
         closingReason: string;
+        closedWith?: string | null;
     },
 ): Promise<void> {
     const existing = await client.query(
         `SELECT ${NC_COLUMNS} FROM haccp_nonconformities
-          WHERE tenant_id = $1 AND source = $2 AND source_id = $3 AND status = 'OPEN'
+          WHERE tenant_id = $1 AND source = $2 AND source_id = $3 AND status IN ('OPEN', 'CLOSED')
+          ORDER BY (status = 'OPEN') DESC, opened_at DESC
+          LIMIT 1
           FOR UPDATE`,
         [tenantId, nc.source, nc.sourceId],
     );
-    const current = existing.rows[0];
+    const found = existing.rows[0];
+    if (found?.status === 'CLOSED') return;
+    const current = found;
     if (nc.open) {
+        if (current && nc.closedWith) {
+            const upd = await client.query(
+                `UPDATE haccp_nonconformities
+                    SET title = $1, detail = $2, status = 'CLOSED', corrective_action = $3, closed_at = now(),
+                        closed_by_user_id = $4, closed_by_user_name = $5, updated_at = now()
+                  WHERE id = $6 RETURNING ${NC_COLUMNS}`,
+                [nc.title, nc.detail, nc.closedWith, nc.actor.userId, nc.actor.name, current.id],
+            );
+            await logChange(client, tenantId, {
+                entity: 'nonconformity', entityId: current.id, action: 'UPDATE', recordDate: nc.date,
+                before: current, after: upd.rows[0], actor: nc.actor,
+            });
+            return;
+        }
         if (current) {
             if (current.title === nc.title && (current.detail ?? null) === nc.detail) return;
             const upd = await client.query(
@@ -348,12 +373,18 @@ async function syncSourceNc(
             });
             return;
         }
+        const closed = !!nc.closedWith;
         const ins = await client.query(
             `INSERT INTO haccp_nonconformities
-                (tenant_id, date, source, source_id, point_id, title, detail, opened_by_user_id, opened_by_user_name)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                (tenant_id, date, source, source_id, point_id, title, detail, opened_by_user_id, opened_by_user_name,
+                 status, corrective_action, closed_at, closed_by_user_id, closed_by_user_name)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
              RETURNING ${NC_COLUMNS}`,
-            [tenantId, nc.date, nc.source, nc.sourceId, nc.pointId, nc.title, nc.detail, nc.actor.userId, nc.actor.name],
+            [
+                tenantId, nc.date, nc.source, nc.sourceId, nc.pointId, nc.title, nc.detail, nc.actor.userId, nc.actor.name,
+                closed ? 'CLOSED' : 'OPEN', closed ? nc.closedWith : null, closed ? new Date() : null,
+                closed ? nc.actor.userId : null, closed ? nc.actor.name : null,
+            ],
         );
         await logChange(client, tenantId, {
             entity: 'nonconformity', entityId: ins.rows[0].id, action: 'CREATE', recordDate: nc.date,
