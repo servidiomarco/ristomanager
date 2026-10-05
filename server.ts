@@ -8874,7 +8874,6 @@ app.get('/scontrino/:token', publicPayLimiter, async (req, res) => runAsPlatform
     }
 }));
 
-// rls-bypass: quota ospite senza JWT, conto per share_token unico; ogni scrittura porta bill.tenant_id
 // La quota del QR (pay-at-table), separata in due dalla fase B3b: la QUOTA
 // la crea chi possiede il conto (il cloud, o il nodo col servizio in sala —
 // che la riceve con una chiamata sul canale /sala-node), l'ORDINE di
@@ -9082,6 +9081,7 @@ async function claimSplitLocally(token: string, body: any): Promise<LocalClaim> 
     }
 }
 
+// rls-bypass: quota ospite senza JWT, conto per share_token unico; ogni scrittura porta bill.tenant_id
 app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (req, res) => runAsPlatform(async () => {
     try {
         const token = String(req.params.token || '');
@@ -9241,6 +9241,7 @@ async function releaseSplitLocally(token: string, splitId: number): Promise<Loca
     return { released: { tenant_id: Number(bill.tenant_id), bill_id: Number(bill.id), split_id: splitId } };
 }
 
+// rls-bypass: rilascio quota senza JWT, conto per share_token unico; UPDATE per split_id + bill.id
 app.post('/pay/:token/release', publicPayLimiter, async (req, res) => runAsPlatform(async () => {
     try {
         const token = String(req.params.token || '');
