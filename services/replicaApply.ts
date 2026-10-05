@@ -26,6 +26,7 @@
 import pool from '../db.js';
 import { outboxImportInTx } from './outboxService.js';
 import { syncIdSequence } from './idSpace.js';
+import { eventSpec } from './eventRegistry.js';
 
 export interface ReplicaEvent {
     seq: number;
@@ -75,6 +76,8 @@ const CONVERGENCE: Record<string, Convergence> = {
     'table:updated': { mode: 'fetch', kind: 'tables', idFrom: 'table_id' },
     'reservation:created': { mode: 'fetch', kind: 'reservations', idFrom: 'reservation_id' },
     'reservation:updated': { mode: 'fetch', kind: 'reservations', idFrom: 'reservation_id' },
+    // Tappa C: tavolo e arrivo, le sole colonne del servizio.
+    'reservation:service-updated': { mode: 'fetch', kind: 'reservations', idFrom: 'reservation_id' },
     'reservation:deleted': { mode: 'delete', table: 'reservations', idFrom: 'reservation_id' },
     'order:created': { mode: 'fetch', kind: 'orders', idFrom: 'order_id' },
     'order:updated': { mode: 'fetch', kind: 'orders', idFrom: 'order_id' },
@@ -102,6 +105,11 @@ const CONVERGENCE: Record<string, Convergence> = {
  *  (raddoppierebbe i broadcast); per tutti gli altri (features:updated,
  *  kds:*, bill:*, menu…) l'envelope è l'unica strada verso la LAN. */
 export const CONVERGED_TYPES: ReadonlySet<string> = new Set(Object.keys(CONVERGENCE));
+
+/** Le colonne della prenotazione che appartengono al servizio (tappa C):
+ *  le scrive PATCH /reservations/:id/service, e col servizio in sala il
+ *  PUT del cloud non le tocca. */
+export const RESERVATION_SERVICE_COLUMNS: readonly string[] = ['table_id', 'arrival_status'];
 
 /** Upsert brutale e idempotente: via la riga con quell'id, dentro quella
  *  nuova — jsonb_populate_recordset fa i cast per nome di colonna. */
@@ -135,9 +143,9 @@ const updatableColumns = async (client: any, table: string): Promise<string[]> =
     return cols;
 };
 
-const upsertInPlace = async (client: any, table: string, row: any): Promise<void> => {
+const upsertInPlace = async (client: any, table: string, row: any, keep: readonly string[] = []): Promise<void> => {
     if (row?.id == null) return;
-    const cols = await updatableColumns(client, table);
+    const cols = (await updatableColumns(client, table)).filter(c => !keep.includes(c));
     const set = cols.map(c => `"${c}" = EXCLUDED."${c}"`).join(', ');
     await client.query(
         `INSERT INTO ${table} SELECT * FROM jsonb_populate_recordset(NULL::${table}, $1::jsonb)
@@ -318,6 +326,56 @@ export const applyReplicaBatch = async (opts: {
         // documenti fiscali del lotto li citano, e sul cloud le FK sono vive.
         for (const id of fetched.bills.keys()) await applyBill(id);
 
+        // Le prenotazioni per colonna (tappa C). La prenotazione è del
+        // cloud, tavolo e arrivo del servizio: con l'autorità in sala il
+        // nodo non si fa riscrivere quelle due colonne da una riga del
+        // cloud (che le ha vecchie di qualche secondo, o di un'ora a linea
+        // giù), e reservation:service-updated porta SOLO quelle. Così un
+        // nome corretto nel cloud e un tavolo assegnato in sala, nello
+        // stesso minuto, sopravvivono tutti e due. Annullata o rifiutata
+        // nel cloud = tavolo libero anche sul nodo, come fa il PUT.
+        const onNodeSide = cursorStream === 'cloud';
+        let serviceOnNodeCached: boolean | null = null;
+        const serviceOnNode = async (): Promise<boolean> => {
+            if (serviceOnNodeCached === null) {
+                const rs = await client.query(
+                    `SELECT value FROM app_settings WHERE tenant_id = $1 AND key = 'sala_node_authority_enabled'`,
+                    [tenantId]
+                );
+                serviceOnNodeCached = rs.rows[0]?.value === true;
+            }
+            return serviceOnNodeCached;
+        };
+        const applyReservation = async (type: string, id: number): Promise<void> => {
+            const row = fetched.reservations.get(id);
+            if (!row) {
+                // La prenotazione esiste finché il cloud la tiene: al nodo
+                // può mancare solo perché fuori dalla sua finestra.
+                if (onNodeSide) await client.query(`DELETE FROM reservations WHERE id = $1`, [id]);
+                return;
+            }
+            const local = await client.query(`SELECT 1 FROM reservations WHERE id = $1`, [id]);
+            touched.add('reservations');
+            if (local.rows.length === 0) {
+                await upsertInPlace(client, 'reservations', row);
+                return;
+            }
+            if (type === 'reservation:service-updated') {
+                await client.query(
+                    `UPDATE reservations SET table_id = $2, arrival_status = $3 WHERE id = $1`,
+                    [id, row.table_id ?? null, row.arrival_status ?? 'WAITING']
+                );
+                return;
+            }
+            if (onNodeSide && await serviceOnNode()) {
+                const releases = row.reservation_status === 'CANCELLED' || row.reservation_status === 'DECLINED';
+                await upsertInPlace(client, 'reservations', row,
+                    releases ? ['arrival_status'] : RESERVATION_SERVICE_COLUMNS);
+                return;
+            }
+            await upsertInPlace(client, 'reservations', row);
+        };
+
         for (const ev of events) {
             // L'import SEMPRE, anche per i tipi che non sappiamo applicare:
             // i broadcast partono dal dispatcher locale, e il log resta
@@ -325,6 +383,11 @@ export const applyReplicaBatch = async (opts: {
             await outboxImportInTx(client, tenantId, ev);
             const conv = CONVERGENCE[ev.type];
             if (!conv) continue;
+            // Tappa C: sul cloud, un evento che il registro dà al cloud
+            // (reservation:updated, :deleted…) arrivato dal nodo si registra
+            // ma non si applica — il nodo non è padrone di quei dati, e una
+            // sua copia vecchia riscriverebbe la prenotazione vera.
+            if (!onNodeSide && eventSpec(ev.type)?.authority === 'cloud') continue;
             if (conv.mode === 'delete') {
                 const id = Number(ev.payload?.[conv.idFrom]);
                 if (Number.isInteger(id)) await client.query(`DELETE FROM ${conv.table} WHERE id = $1`, [id]);
@@ -363,6 +426,10 @@ export const applyReplicaBatch = async (opts: {
                     );
                 }
                 touched.add('orders'); touched.add('order_items'); touched.add('order_revisions');
+                continue;
+            }
+            if (conv.kind === 'reservations') {
+                await applyReservation(ev.type, id);
                 continue;
             }
             if (conv.kind === 'takeaways') {

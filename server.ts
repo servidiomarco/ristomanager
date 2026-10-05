@@ -396,6 +396,23 @@ app.use((req, res, next) => {
     }).catch(() => next());
 });
 
+// --- Il recinto rovescio, sul nodo (tappa C) --------------------------------
+// La prenotazione è del cloud: sul nodo si toccano solo le colonne del
+// servizio (tavolo, arrivo), lo scambio e il walk-in. Un PUT o una DELETE
+// arrivati al nodo cambierebbero una copia che il cloud non accetta indietro
+// (gli eventi del cloud non si importano dal nodo, services/replicaApply.ts):
+// meglio un no chiaro. Il client non li manda qui — le scritture non di
+// servizio vanno al cloud, e a linea giù aspettano nella coda.
+app.use((req, res, next) => {
+    if (!isServiceNode || !/^\/reservations(\/|$)/.test(req.path)) return next();
+    if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method.toUpperCase())) return next();
+    if (serviceWriteRoute(req.method, req.path)) return next();
+    res.status(409).json({
+        error: 'cloud_authority',
+        message: 'Questa modifica alla prenotazione si fa dal cloud: con la linea giù riprova quando torna internet.',
+    });
+});
+
 // ============================================
 // TURNI DI SERVIZIO — validazione applicativa
 // ============================================
@@ -942,6 +959,7 @@ async function handleTwilioWhatsAppStatus(tenantId: number, req: express.Request
              RETURNING *`,
             [status, errText, MessageSid, tenantId]
         );
+        if (updated.rows[0]) await logReservationChanged(null, tenantId, updated.rows[0].id);
         if (updated.rows[0] && socketService) {
             try { socketService.broadcastReservationUpdated(tenantId, updated.rows[0]); }
             catch (err) { console.warn('[Twilio] status broadcast failed:', err); }
@@ -2195,7 +2213,22 @@ async function isTableInClosedRoom(tenantId: number, tableId: number | null | un
 async function broadcastReservationsUpdatedByIds(ids: number[]): Promise<void> {
     if (!socketService || ids.length === 0) return;
     try {
-        const result = await queryWithRetry(`
+        const rows = await selectEnrichedReservations(ids);
+        for (const row of rows) {
+            socketService.broadcastReservationSynced(Number(row.tenant_id) || PUBLIC_TENANT_ID, row);
+        }
+    } catch (err) {
+        console.warn('[sync] broadcastReservationsUpdatedByIds failed:', err);
+    }
+}
+
+/** Le prenotazioni con l'arricchimento della GET /reservations (VIP, tavolo
+ *  preferito, ultimo pagamento): la forma che i client si aspettano in un
+ *  reservation:updated. Il client SOSTITUISCE la riga: una riga nuda
+ *  spegneva i badge VIP fino al ricaricamento. */
+async function selectEnrichedReservations(ids: number[]): Promise<any[]> {
+    if (ids.length === 0) return [];
+    const result = await queryWithRetry(`
             SELECT r.*, u.full_name AS created_by_user_name,
                    c.is_vip AS customer_is_vip,
                    c.is_blacklisted AS customer_is_blacklisted,
@@ -2238,12 +2271,7 @@ async function broadcastReservationsUpdatedByIds(ids: number[]): Promise<void> {
             ) lp ON true
             WHERE r.id = ANY($1::int[])
         `, [ids]);
-        for (const row of result.rows) {
-            socketService.broadcastReservationSynced(Number(row.tenant_id) || PUBLIC_TENANT_ID, row);
-        }
-    } catch (err) {
-        console.warn('[sync] broadcastReservationsUpdatedByIds failed:', err);
-    }
+    return result.rows;
 }
 
 // Find tables already booked on a given date+shift, either by a reservation
@@ -2711,7 +2739,8 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
             queryWithRetry(
                 `UPDATE reservations SET language = $1 WHERE id = $2 AND tenant_id = $3`,
                 [resolvedLanguage, newReservation.id, req.tenantId!]
-            ).catch(err => console.warn('POST /reservations language backfill failed:', err));
+            ).then(() => logReservationChanged(null, req.tenantId!, newReservation.id))
+                .catch(err => console.warn('POST /reservations language backfill failed:', err));
             newReservation.language = resolvedLanguage;
         }
         // Propagate marketing consent to the (now-existing) customer record.
@@ -2791,19 +2820,27 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
         // l'evento siede legittimamente in una sala chiusa al servizio
         // normale. Se il client non ha mandato il campo, fa fede il
         // collegamento già salvato.
-        let isBanquetLinked = banquetMenuId != null;
-        if (!isBanquetLinked && !banquetProvided && table_id != null) {
-            const stored = await queryWithRetry('SELECT banquet_menu_id FROM reservations WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
-            isBanquetLinked = stored.rows[0]?.banquet_menu_id != null;
-        }
-        if (!isBanquetLinked && await isTableInClosedRoom(req.tenantId!, table_id)) {
-            return res.status(400).json({ error: 'La sala selezionata è chiusa. Scegli un tavolo in una sala aperta.' });
-        }
+        // Tappa C: col servizio in sala tavolo e arrivo sono del nodo
+        // (PATCH /reservations/:id/service, che il client manda lì). Qui il
+        // PUT del cloud li lascia com'erano: la copia del client può essere
+        // vecchia di qualche secondo, e riscriverli annullerebbe un
+        // ospite appena seduto. Unica eccezione: annullata o rifiutata
+        // libera il tavolo, e il nodo fa lo stesso ricevendo la riga.
+        const serviceOnNode = !isServiceNode && await getFeatureFlag(req.tenantId!, 'sala_node_authority_enabled', false);
         // Both CANCELLED and DECLINED free the assigned table so it can be
         // reused, and skip the conflict check (the row is no longer live).
         const releasesTable = reservation_status === 'CANCELLED' || reservation_status === 'DECLINED';
+        const keepTable = serviceOnNode && !releasesTable;
+        let isBanquetLinked = banquetMenuId != null;
+        if (!keepTable && !isBanquetLinked && !banquetProvided && table_id != null) {
+            const stored = await queryWithRetry('SELECT banquet_menu_id FROM reservations WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
+            isBanquetLinked = stored.rows[0]?.banquet_menu_id != null;
+        }
+        if (!keepTable && !isBanquetLinked && await isTableInClosedRoom(req.tenantId!, table_id)) {
+            return res.status(400).json({ error: 'La sala selezionata è chiusa. Scegli un tavolo in una sala aperta.' });
+        }
         const effectiveTableId = releasesTable ? null : (table_id ?? null);
-        if (!releasesTable && table_id != null && reservation_time && shift) {
+        if (!keepTable && !releasesTable && table_id != null && reservation_time && shift) {
             const eventDate = new Date(reservation_time).toISOString().substring(0, 10);
             const conflicts = await findTableConflicts(req.tenantId!, eventDate, shift, [Number(table_id)], {
                 excludeReservationId: Number(id),
@@ -2836,7 +2873,11 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                 FROM reservations WHERE id = $14 AND tenant_id = $18
             ), upd AS (
                 UPDATE reservations
-                SET customer_name = $1, reservation_time = ${reservationTimeSql(reservation_time, 2, TZ)}, shift = $3, guests = $4, children = $5, table_id = $6, notes = $7, email = $8, phone = $9, payment_status = $10, arrival_status = $11, reservation_status = $12, duration_minutes = $13,
+                SET customer_name = $1, reservation_time = ${reservationTimeSql(reservation_time, 2, TZ)}, shift = $3, guests = $4, children = $5,
+                    table_id = CASE WHEN $21::boolean THEN table_id ELSE $6 END,
+                    notes = $7, email = $8, phone = $9, payment_status = $10,
+                    arrival_status = CASE WHEN $22::boolean THEN arrival_status ELSE $11 END,
+                    reservation_status = $12, duration_minutes = $13,
                     consent_marketing = COALESCE($15, consent_marketing),
                     consent_data_health = COALESCE($16, consent_data_health),
                     consent_updated_at = CASE WHEN ($15 IS NOT NULL OR $16 IS NOT NULL) THEN CURRENT_TIMESTAMP ELSE consent_updated_at END,
@@ -2890,6 +2931,8 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                 req.tenantId!,
                 banquetProvided,
                 banquetMenuId,
+                keepTable,
+                serviceOnNode,
             ]
             );
             if (updRes.rows[0]) {
@@ -2923,7 +2966,8 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                 customer_name,
                 (() => {
                     const prevT = previousTableId == null ? null : Number(previousTableId);
-                    const newT = effectiveTableId == null ? null : Number(effectiveTableId);
+                    const storedT = updatedReservation?.table_id ?? effectiveTableId;
+                    const newT = storedT == null ? null : Number(storedT);
                     return {
                         guests, reservation_time, shift, payment_status, arrival_status, reservation_status,
                         table_id: newT,
@@ -3109,6 +3153,153 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
 // Reminder manuale dal tab Comunicazione del modal. WhatsApp col template
 // approvato, SMS finché TWILIO_WA_CONTENT_SID_BOOKING_REMINDER non è
 // impostata. Marca reminder_sent e broadcast, così la card lo racconta.
+// --- L'accoglienza in sala: tavolo e arrivo (tappa C) ----------------------
+// Il PUT qui sopra riscrive la prenotazione intera, ed è del cloud. Durante
+// il servizio la reception cambia SOLO due cose: dove siede l'ospite e a che
+// punto è (arrivato, in uscita, tavolo liberato). Quelle due colonne sono
+// del servizio: questo comando le scrive e basta, col servizio in sala nasce
+// sul nodo (services/serviceWrites.ts) e funziona a linea caduta, anche con
+// la sessione del PIN (floorplan:update_status). Il cloud e il nodo si
+// scambiano solo quelle due colonne (reservation:service-updated), così un
+// nome corretto nel cloud e un tavolo assegnato in sala convivono.
+const ARRIVAL_STATUSES = new Set(['WAITING', 'ARRIVED', 'DEPARTING', 'DEPARTED']);
+
+app.patch('/reservations/:id/service', authenticate, requireAnyPermission('reservations:full', 'floorplan:update_status'), async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'id non valido' });
+        const body = req.body ?? {};
+        const hasTable = Object.prototype.hasOwnProperty.call(body, 'table_id');
+        const hasArrival = Object.prototype.hasOwnProperty.call(body, 'arrival_status');
+        if (!hasTable && !hasArrival) {
+            return res.status(400).json({ error: 'Niente da cambiare: servono table_id o arrival_status' });
+        }
+        const tableId = hasTable && body.table_id != null ? Number(body.table_id) : null;
+        if (hasTable && body.table_id != null && (!Number.isInteger(tableId) || (tableId as number) <= 0)) {
+            return res.status(400).json({ error: 'table_id non valido' });
+        }
+        const arrival = hasArrival ? String(body.arrival_status) : null;
+        if (hasArrival && !ARRIVAL_STATUSES.has(arrival as string)) {
+            return res.status(400).json({ error: 'arrival_status non valido' });
+        }
+
+        const curRs = await queryWithRetry(
+            `SELECT id, customer_name, reservation_time, shift, duration_minutes, banquet_menu_id, table_id
+               FROM reservations WHERE id = $1 AND tenant_id = $2`,
+            [id, req.tenantId!]
+        );
+        const cur = curRs.rows[0];
+        if (!cur) return res.status(404).json({ error: 'Prenotazione non trovata' });
+
+        // Le stesse regole del PUT per un tavolo nuovo: del ristorante, in una
+        // sala aperta (salvo banchetti), libero nella finestra dell'ospite.
+        if (tableId != null && tableId !== Number(cur.table_id)) {
+            const tbl = await queryWithRetry(`SELECT id FROM tables WHERE id = $1 AND tenant_id = $2`, [tableId, req.tenantId!]);
+            if (tbl.rows.length === 0) return res.status(404).json({ error: 'Tavolo non trovato' });
+            if (cur.banquet_menu_id == null && await isTableInClosedRoom(req.tenantId!, tableId)) {
+                return res.status(400).json({ error: 'La sala selezionata è chiusa. Scegli un tavolo in una sala aperta.' });
+            }
+            const eventDate = new Date(cur.reservation_time).toISOString().substring(0, 10);
+            const conflicts = await findTableConflicts(req.tenantId!, eventDate, cur.shift, [tableId], {
+                excludeReservationId: id,
+                reservationStart: cur.reservation_time,
+                reservationDurationMin: cur.duration_minutes ?? (cur.shift === 'LUNCH' ? 90 : 120),
+            });
+            if (conflicts.length > 0) {
+                return res.status(409).json({ error: buildConflictMessage(conflicts), conflicts });
+            }
+        }
+
+        await runWithOutboxTx(async (tx) => {
+            const upd = await tx.query(
+                `UPDATE reservations
+                    SET table_id = CASE WHEN $3::boolean THEN $4::int ELSE table_id END,
+                        arrival_status = COALESCE($5::text, arrival_status)
+                  WHERE id = $1 AND tenant_id = $2
+                  RETURNING id`,
+                [id, req.tenantId!, hasTable, tableId, arrival]
+            );
+            if (upd.rows[0]) {
+                await outboxEnqueueInTx(tx, req.tenantId!, 'reservation:service-updated', `reservation:${id}`,
+                    { reservation_id: id }, outboxContext(req));
+            }
+        });
+        outboxKick();
+
+        const [row] = await selectEnrichedReservations([id]);
+        if (req.user) {
+            const prevT = cur.table_id == null ? null : Number(cur.table_id);
+            LogService.logActivity(
+                req.tenantId!, req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.RESERVATION, id, cur.customer_name,
+                {
+                    ...(hasArrival ? { arrival_status: arrival } : {}),
+                    ...(hasTable ? { table_id: tableId, ...(prevT !== tableId ? { prev_table_id: prevT } : {}) } : {}),
+                }
+            );
+        }
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService && row) socketService.broadcastReservationUpdated(req.tenantId!, row, socketId);
+        res.json(row);
+    } catch (err: any) {
+        console.error('PATCH /reservations/:id/service error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Il walk-in: un ospite senza prenotazione, arrivato adesso. Nasce dove sta
+// il servizio (col servizio in sala sul nodo, con un id nel suo spazio): a
+// linea caduta la sala continua a far sedere chi entra. Solo l'essenziale:
+// niente conferme da mandare, e la scheda in rubrica la apre il cloud quando
+// la riga gli arriva (sul nodo la rubrica è una copia).
+app.post('/reservations/walk-in', authenticate, requireAnyPermission('reservations:full', 'floorplan:update_status'), async (req, res) => {
+    try {
+        const name = typeof req.body?.customer_name === 'string' ? req.body.customer_name.trim().slice(0, 200) : '';
+        const guests = Number(req.body?.guests);
+        if (!name) return res.status(400).json({ error: 'Il nome è obbligatorio' });
+        if (!Number.isInteger(guests) || guests < 1 || guests > 200) {
+            return res.status(400).json({ error: 'Numero di ospiti non valido' });
+        }
+        const phone = typeof req.body?.phone === 'string' && req.body.phone.trim() ? req.body.phone.trim().slice(0, 40) : null;
+        const notes = typeof req.body?.notes === 'string' && req.body.notes.trim() ? req.body.notes.trim().slice(0, 2000) : null;
+        const service = resolveService(new Date(), (await getTenantLocale(req.tenantId!)).timezone);
+
+        const id = await runWithOutboxTx(async (tx) => {
+            const ins = await tx.query(
+                `INSERT INTO reservations
+                    (customer_name, reservation_time, shift, guests, phone, notes, payment_status,
+                     arrival_status, reservation_status, source, created_by_user_id, tenant_id)
+                 VALUES ($1, CURRENT_TIMESTAMP, $2, $3, $4, $5, 'PENDING', 'ARRIVED', 'CONFIRMED', 'MANUAL', $6, $7)
+                 RETURNING id`,
+                [name, service.shift, guests, phone, notes, req.user?.userId ?? null, req.tenantId!]
+            );
+            const newId = Number(ins.rows[0].id);
+            await outboxEnqueueInTx(tx, req.tenantId!, 'reservation:created', `reservation:${newId}`,
+                { reservation_id: newId }, outboxContext(req));
+            return newId;
+        });
+        outboxKick();
+
+        if (!isServiceNode) {
+            const actor = req.user ? { userId: req.user.userId, email: req.user.email } : null;
+            await upsertCustomerFromReservation(req.tenantId!, name, phone, null, actor);
+        }
+        const [row] = await selectEnrichedReservations([id]);
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!, req.user.userId, req.user.email, req.user.email,
+                ActivityAction.CREATE, ResourceType.RESERVATION, id, name, { guests, walk_in: true }
+            );
+        }
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService && row) socketService.broadcastReservationCreated(req.tenantId!, row, socketId);
+        res.status(201).json(row);
+    } catch (err: any) {
+        console.error('POST /reservations/walk-in error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
 app.post('/reservations/:id/send-reminder', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
         const fusoMsg = (await getTenantLocale(req.tenantId!)).timezone;
@@ -3145,6 +3336,7 @@ app.post('/reservations/:id/send-reminder', authenticate, requirePermission('res
             `UPDATE reservations SET reminder_sent = true WHERE id = $1 AND tenant_id = $2 RETURNING *`,
             [id, req.tenantId!]
         );
+        if (upd.rows[0]) await logReservationChanged(null, req.tenantId!, upd.rows[0].id);
         if (upd.rows[0] && socketService) {
             try { socketService.broadcastReservationUpdated(req.tenantId!, upd.rows[0]); } catch (_) {}
         }
@@ -3222,7 +3414,9 @@ app.delete('/reservations/:id', authenticate, requirePermission('reservations:fu
 // assign-table picker by tapping an occupied tile. Doing it in one TX avoids
 // the intermediate state where both bookings briefly point at the same table
 // (which the application-level conflict check would reject).
-app.post('/reservations/:id/swap-table', authenticate, requirePermission('reservations:full'), async (req, res) => {
+// Tappa C: chi siede gli ospiti (floorplan:update_status) può scambiare i
+// tavoli anche senza reservations:full — è la sessione del PIN di sala.
+app.post('/reservations/:id/swap-table', authenticate, requireAnyPermission('reservations:full', 'floorplan:update_status'), async (req, res) => {
     const client = await pool.connect();
     try {
         const aId = Number(req.params.id);
@@ -3278,10 +3472,12 @@ app.post('/reservations/:id/swap-table', authenticate, requirePermission('reserv
 
         // Fase 1c: lo scambio tavoli è un atto di servizio puro — nel log di
         // replica per entrambe le prenotazioni, nella transazione già aperta.
-        // Solo-log: il broadcast resta diretto dopo il COMMIT.
+        // Solo-log: il broadcast resta diretto dopo il COMMIT. Tappa C: come
+        // evento di servizio (solo il tavolo), e col servizio in sala nasce
+        // sul nodo.
         const swapCtx = outboxContext(req);
-        await outboxEnqueueInTx(client, req.tenantId!, 'reservation:updated', `reservation:${aId}`, { reservation_id: aId }, swapCtx);
-        await outboxEnqueueInTx(client, req.tenantId!, 'reservation:updated', `reservation:${bId}`, { reservation_id: bId }, swapCtx);
+        await outboxEnqueueInTx(client, req.tenantId!, 'reservation:service-updated', `reservation:${aId}`, { reservation_id: aId }, swapCtx);
+        await outboxEnqueueInTx(client, req.tenantId!, 'reservation:service-updated', `reservation:${bId}`, { reservation_id: bId }, swapCtx);
 
         const enriched = await client.query(
             `SELECT r.*, u.full_name AS created_by_user_name,
@@ -3373,6 +3569,7 @@ async function promoteReservationIfPending(tenantId: number, reservationId: numb
             [reservationId, tenantId]
         );
         if (upd.rows.length === 0) return null;
+        await logReservationChanged(null, tenantId, upd.rows[0].id);
         // Live views listen on this event to update badges/status pills.
         if (socketService) {
             try { socketService.broadcastReservationUpdated(tenantId, upd.rows[0]); }
@@ -3556,6 +3753,7 @@ app.post('/reservations/:id/confirm-email', authenticate, requirePermission('res
              RETURNING *`,
             [sent.messageId || null, reservation.id, req.tenantId!]
         );
+        if (updated.rows[0]) await logReservationChanged(null, req.tenantId!, updated.rows[0].id);
         if (updated.rows[0] && socketService) {
             try { socketService.broadcastReservationUpdated(req.tenantId!, updated.rows[0]); }
             catch (err) { console.warn('[confirmation] email broadcast failed:', err); }
@@ -11886,6 +12084,7 @@ async function applyPaymentOrderTransition(
                          RETURNING *`,
                         [reservation.id, row.tenant_id]
                     );
+                    if (upd.rows[0]) await logReservationChanged(null, Number(row.tenant_id) || PUBLIC_TENANT_ID, upd.rows[0].id);
                     if (upd.rows[0] && socketService) {
                         try { socketService.broadcastReservationUpdated(Number(row.tenant_id) || PUBLIC_TENANT_ID, upd.rows[0]); }
                         catch (err) { console.warn('[payments] reservation broadcast failed:', err); }
@@ -12566,7 +12765,7 @@ type OutboxClient = { query: (sql: string, params?: any[]) => Promise<any> };
 async function logReplicaChange(
     client: OutboxClient | null,
     tenantId: number,
-    event: 'bill:changed' | 'cash:changed' | 'fiscalDoc:changed' | 'paymentRequest:changed',
+    event: 'bill:changed' | 'cash:changed' | 'fiscalDoc:changed' | 'paymentRequest:changed' | 'reservation:updated',
     aggregate: string,
     payload: Record<string, number>,
 ): Promise<void> {
@@ -12579,6 +12778,23 @@ async function logReplicaChange(
         outboxKick();
     } catch (err: any) {
         console.error(`[outbox] ${event} non registrato (${JSON.stringify(payload)}):`, err?.message || err);
+    }
+}
+
+// --- Le prenotazioni nel log di replica (tappa C) ---------------------------
+// Ogni modifica del cloud a una prenotazione deve arrivare al nodo: dalla
+// fase B4 l'app legge le prenotazioni da lì. Prima nel log c'erano solo
+// nascita, PUT, scambio e cancellazione; conferma dopo la caparra, rifiuto,
+// esito dei messaggi di conferma, promemoria, lingua, rinomina a cascata
+// dalla rubrica restavano broadcast diretti che il nodo non vedeva mai. Sul
+// nodo è un no-op: la prenotazione è del cloud, e il nodo scrive solo
+// tavolo e arrivo (reservation:service-updated).
+async function logReservationChanged(client: OutboxClient | null, tenantId: number, ids: number | number[]): Promise<void> {
+    if (isServiceNode) return;
+    for (const id of Array.isArray(ids) ? ids : [ids]) {
+        const n = Number(id);
+        if (!Number.isInteger(n) || n <= 0) continue;
+        await logReplicaChange(client, tenantId, 'reservation:updated', `reservation:${n}`, { reservation_id: n });
     }
 }
 
@@ -14600,6 +14816,7 @@ const declineReservationForExpiredLink = async (
         if (updated.rowCount === 0) return;
         const r = updated.rows[0];
         console.log(`[payment-expiry] prenotazione ${r.id} declinata: caparra non pagata (tenant ${tenantId})`);
+        await logReservationChanged(null, tenantId, Number(r.id));
         await broadcastReservationsUpdatedByIds([Number(r.id)]);
         if (message === 'declined' && (r.phone || r.email)) {
             dispatchBookingNotification({
@@ -15852,6 +16069,7 @@ app.put('/customers/:id', authenticate, requirePermission('customers:full'), asy
         // After the transaction commits, tell every connected client which
         // reservations changed so their booking cards update in place (the
         // denormalized customer_name/phone lives on the reservation row).
+        await logReservationChanged(null, req.tenantId!, cascadedReservationIds);
         await broadcastReservationsUpdatedByIds(cascadedReservationIds);
 
         if (req.user) {
@@ -16018,6 +16236,7 @@ app.post('/customers/:sourceId/merge-into/:targetId', authenticate, requirePermi
 
         // Push the re-tagged reservations to every client so booking cards
         // reflect the merged customer's name without a refresh.
+        await logReservationChanged(null, req.tenantId!, cascadedReservationIds);
         await broadcastReservationsUpdatedByIds(cascadedReservationIds);
 
         if (req.user) {
@@ -16114,6 +16333,7 @@ app.delete('/customers/:id', authenticate, requirePermission('customers:full'), 
                     AND reservation_time < CURRENT_TIMESTAMP`,
                 [reservationIds, req.tenantId!]
             );
+            await logReservationChanged(null, req.tenantId!, reservationIds);
         }
         await queryWithRetry(
             `UPDATE activity_logs
@@ -25068,6 +25288,7 @@ async function recordConfirmationSent(
          RETURNING *`,
         [initialStatus, result.channel, result.sid ?? null, reservationId, tenantId]
     );
+    if (updated.rows[0]) await logReservationChanged(null, tenantId, updated.rows[0].id);
     if (updated.rows[0] && socketService) {
         try { socketService.broadcastReservationUpdated(tenantId, updated.rows[0]); }
         catch (err) { console.warn('[confirmation] broadcast failed:', err); }
@@ -27771,7 +27992,13 @@ app.post('/table-assignment-suggestions/:id/confirm', authenticate, requirePermi
             `UPDATE table_assignment_suggestions SET status = 'CONFIRMED', resolved_at = CURRENT_TIMESTAMP, resolved_by_user_id = $2 WHERE id = $1`,
             [id, req.user?.userId ?? null]
         );
+        // Tappa C: il tavolo della prenotazione è una colonna di servizio.
+        // Il suggerimento si conferma nel cloud (le proposte vivono lì) e
+        // il nodo prende il tavolo come da un'assegnazione in sala.
+        await outboxEnqueueInTx(client, req.tenantId!, 'reservation:service-updated', `reservation:${reservation.id}`,
+            { reservation_id: Number(reservation.id) }, outboxContext(req));
         await client.query('COMMIT');
+        outboxKick();
 
         if (req.user) {
             LogService.logActivity(
@@ -32972,7 +33199,8 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
             queryWithRetry(
                 `UPDATE reservations SET language = $1 WHERE id = $2 AND tenant_id = $3`,
                 [resolvedLanguage, created.id, tenantId]
-            ).catch(err => console.warn('[public-booking] language backfill failed:', err));
+            ).then(() => logReservationChanged(null, tenantId, created.id))
+                .catch(err => console.warn('[public-booking] language backfill failed:', err));
             created.language = resolvedLanguage;
         }
 
@@ -40712,21 +40940,32 @@ const startServer = async () => {
                         // dispatcher SOLO per gli importati — sui 'local' il
                         // broadcast l'ha già fatto la route, e raddoppiarlo
                         // significherebbe doppi toast sui client.
+                        // Tappa C: righe arricchite (VIP, tavolo preferito,
+                        // ultimo pagamento) — il client sostituisce la riga, e
+                        // una riga nuda spegneva i badge fino al ricaricamento.
                         outboxRegister('reservation:created', async (tenantId, payload, meta) => {
                             if (meta?.origin !== 'replica') return;
                             const id = Number(payload?.reservation_id);
                             if (!Number.isFinite(id)) return;
-                            const rs = await queryWithRetry('SELECT * FROM reservations WHERE id = $1 AND tenant_id = $2', [id, tenantId]);
-                            if (rs.rows[0]) socketService?.broadcastReservationCreated(tenantId, rs.rows[0]);
+                            const [row] = await selectEnrichedReservations([id]);
+                            if (!row) return;
+                            socketService?.broadcastReservationCreated(tenantId, row);
+                            // Un walk-in nato in sala: la scheda in rubrica la
+                            // apre il cloud, che della rubrica è il padrone.
+                            if (!isServiceNode && row.phone) {
+                                await upsertCustomerFromReservation(tenantId, row.customer_name, row.phone, row.email ?? null, null)
+                                    .catch(err => console.warn('[replica] rubrica dal walk-in non aggiornata:', err?.message || err));
+                            }
                         });
                         const rebroadcastReservationUpdate = async (tenantId: number, payload: any, meta?: { origin: string }) => {
                             if (meta?.origin !== 'replica') return;
                             const id = Number(payload?.reservation_id);
                             if (!Number.isFinite(id)) return;
-                            const rs = await queryWithRetry('SELECT * FROM reservations WHERE id = $1 AND tenant_id = $2', [id, tenantId]);
-                            if (rs.rows[0]) socketService?.broadcastReservationUpdated(tenantId, rs.rows[0]);
+                            const [row] = await selectEnrichedReservations([id]);
+                            if (row) socketService?.broadcastReservationUpdated(tenantId, row);
                         };
                         outboxRegister('reservation:updated', rebroadcastReservationUpdate);
+                        outboxRegister('reservation:service-updated', rebroadcastReservationUpdate);
                         outboxRegister('reservation:deleted', async (tenantId, payload, meta) => {
                             if (meta?.origin !== 'replica') return;
                             const id = Number(payload?.reservation_id);
