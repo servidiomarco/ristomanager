@@ -1,8 +1,8 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
-// Build version identifier - change this to verify deployments
-const BUILD_VERSION = '2026-04-29-v3';
+// La versione che gira: lo SHA del commit (services/buildInfo.ts).
+import { BUILD_VERSION } from './services/buildInfo.js';
 console.log(`🚀 Server starting - Build version: ${BUILD_VERSION}`);
 
 import express from 'express';
@@ -38,7 +38,7 @@ import { loadNodeTlsMaterial, startNodeCredentialsRefresh } from './services/sal
 import { initSalaNodeFileLog } from './services/salaNodeLog.js';
 import { startSalaNodeWatchdog } from './services/salaNodeWatchdog.js';
 import { createServer as createHttpsServer, type Server as HttpsServer } from 'https';
-import { startSalaNodeReplica } from './services/salaNodeReplica.js';
+import { startSalaNodeReplica, getSalaNodeLocalStatus } from './services/salaNodeReplica.js';
 import { salaNodeAccessPolicy, startSalaNodeAccess } from './services/salaNodeAccess.js';
 import { startSalaNodeConfigSync, kickConfigSync } from './services/salaNodeConfigSync.js';
 import { VOICE_CHANNEL, WHATSAPP_CHANNEL, type ToolOutcome } from './services/bookingTools.js';
@@ -667,7 +667,7 @@ app.get('/ready', async (_req, res) => {
 // reappear right after every "Ricarica" during that window.
 // Endpoint is public — no auth needed, it's just the current build SHA.
 app.get('/version', (_req, res) => {
-    const version = (process.env.RAILWAY_GIT_COMMIT_SHA || '').slice(0, 7) || 'dev';
+    const version = BUILD_VERSION;
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
     res.json({ version });
 });
@@ -21157,7 +21157,7 @@ async function buildSupportServerContext(tenantId: number, userId: number, categ
     const count = (s: string) => jobCounts.find((r: any) => r.status === s)?.n ?? 0;
     return {
         captured_at: new Date().toISOString(),
-        server_version: (process.env.RAILWAY_GIT_COMMIT_SHA || '').slice(0, 7) || 'dev',
+        server_version: BUILD_VERSION,
         tenant: tenantRow ? { id: tenantId, ...tenantRow } : { id: tenantId },
         user: userRow,
         features: features ? Object.keys(features).filter(k => features[k]) : null,
@@ -38991,6 +38991,22 @@ app.post('/sala-node/rows', salaNodeAuth, async (req: any, res) => {
     }
 });
 
+// --- Lo stato del nodo visto DAL nodo (fase A3) ----------------------------
+// La card in Impostazioni legge lo stato del nodo dal cloud: a linea giù è
+// proprio quando serve, ed è irraggiungibile. Questa rotta vive solo sul
+// nodo e risponde in LAN: uplink, da quando è giù, ritardi nei due versi,
+// battiture che il cloud non ha ancora, versione. La pastiglia Live la usa
+// per dire «isola dalle 21:47». Niente di riservato: basta essere collegati.
+app.get('/sala-node/local-status', authenticate, async (_req, res) => {
+    if (!isServiceNode) return res.status(404).json({ error: 'Not found' });
+    try {
+        res.json(await getSalaNodeLocalStatus());
+    } catch (err: any) {
+        console.error('GET /sala-node/local-status error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 // --- La configurazione allineata dopo il bootstrap (fase A2) ---------------
 // Lo snapshot porta menu, listini, utenti, stampanti, impostazioni... una
 // volta sola. Il log degli eventi porta solo il dominio servizio: un piatto
@@ -39314,6 +39330,9 @@ app.get('/sala/config', authenticate, async (req, res) => {
                         && await isFeatureEnabledForTenant(req.tenantId!, 'sala_node'),
                     ...settings,
                     ...getSalaNodeStatus(req.tenantId!),
+                    // Per il confronto in card: la versione del nodo contro
+                    // quella del cloud (fase A3).
+                    cloud_version: BUILD_VERSION,
                     cert_expires_at: cert.rows[0]?.expires_at ?? null,
                 };
             })(),

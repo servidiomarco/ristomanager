@@ -299,3 +299,22 @@ passo 3 già fatto, rimettere anche `JWT_HS256_ACCEPT` e il segreto nel
   riconosce quei token: a linea tornata l'app chiede il login normale.
   Gli hash dei PIN scendono al nodo con la configurazione (le password no).
 
+## Occhi sul nodo: ritardi, isola, versione (fase A3)
+
+- **I tre numeri** li calcola il nodo, l'unico che li sa anche a linea giù:
+  ritardo cloud→nodo (secondi dall'ultimo giro riuscito col cloud),
+  ritardo nodo→cloud (età della più vecchia battitura locale che il cloud
+  non ha) e battiture in attesa. Il punto fino a cui il cloud ha applicato
+  il log del nodo sta in `replication_cursor` (stream `node_acked`), così
+  sopravvive a un riavvio a linea giù.
+- **Dove si vedono**: nel battito `node:stats` (ogni 15 s,
+  `SALA_NODE_STATS_INTERVAL_MS`) fino alla card del cloud, riga
+  «Sincronizzazione»; e in LAN su `GET /sala-node/local-status` (solo sul
+  nodo, con un token qualunque del locale), che usano la pastiglia Live
+  («dalle 21:47») e la card quando il cloud non risponde.
+- **Versione**: `BUILD_SHA` se impostata, altrimenti lo SHA di Railway,
+  altrimenti `dist/build-info.json`, altrimenti `dev`. Sul PC conviene
+  mettere `set BUILD_SHA=<sha del commit>` nel `.cmd` finché il pacchetto
+  della fase A4 non la scrive da sé: la card la confronta con quella del
+  cloud e la mostra in giallo se diversa.
+

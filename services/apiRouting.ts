@@ -256,6 +256,43 @@ const notifyChange = () => changeCallbacks.forEach(cb => cb());
 
 export const isHybridActive = (): boolean => config.enabled && Boolean(config.node_url);
 
+// --- Lo stato del nodo visto dal nodo (fase A3) ----------------------------
+// GET /sala-node/local-status vive solo sul nodo e risponde in LAN anche a
+// linea giù: uplink, ritardi nei due versi, battiture che il cloud non ha.
+export interface SalaNodeLocalStatus {
+    version: string;
+    uplink_connected: boolean;
+    uplink_down_since: string | null;
+    lag_down_s: number | null;
+    lag_up_s: number;
+    pending_up: number;
+}
+
+const LOCAL_STATUS_TIMEOUT_MS = 3_000;
+
+/** null = nodo non configurato, irraggiungibile o risposta inattesa. */
+export const fetchNodeLocalStatus = async (): Promise<SalaNodeLocalStatus | null> => {
+    if (!config.enabled || !config.node_url) return null;
+    const token = authApiService.getAccessToken();
+    if (!token) return null;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), LOCAL_STATUS_TIMEOUT_MS);
+    try {
+        const res = await fetch(`${config.node_url}/sala-node/local-status`, {
+            headers: { Authorization: `Bearer ${token}` },
+            signal: controller.signal,
+            cache: 'no-store',
+        });
+        if (!res.ok) return null;
+        const body = await res.json();
+        return typeof body?.uplink_connected === 'boolean' ? body as SalaNodeLocalStatus : null;
+    } catch {
+        return null;
+    } finally {
+        clearTimeout(timer);
+    }
+};
+
 /** Il nodo per l'accesso col PIN di sala (fase A2): solo con l'autorità in
  *  sala, perché una sessione del PIN vale solo sul nodo e le scritture
  *  devono andare lì. null = niente PIN su questo dispositivo. */

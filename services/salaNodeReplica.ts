@@ -20,12 +20,16 @@ import { io, type Socket } from 'socket.io-client';
 import pool, { runAsPlatform } from '../db.js';
 import { isServiceNode } from './topology.js';
 import { applyReplicaBatch, CONVERGED_TYPES, type ReplicaEvent, type WantedRows, type FetchedRows } from './replicaApply.js';
+import { BUILD_VERSION } from './buildInfo.js';
 
 const PULL_LIMIT = 500;
 // Dopo quanto silenzio l'uplink si considera giù: un socket che si
 // riconnette in pochi secondi (riavvio di Railway, Wi-Fi che balla) non
 // deve far scattare la proroga degli accessi (salaNodeAccess).
 const UPLINK_DOWN_AFTER_MS = Math.max(1_000, Number(process.env.SALA_NODE_UPLINK_DOWN_AFTER_MS) || 30_000);
+// Il battito verso il cloud (node:stats): la card lo legge per dire online,
+// versione e ritardi. Configurabile solo per i test.
+const STATS_INTERVAL_MS = Math.max(1_000, Number(process.env.SALA_NODE_STATS_INTERVAL_MS) || 15_000);
 const POLL_MS = Math.max(1_000, Number(process.env.SALA_NODE_PULL_INTERVAL_MS) || 15_000);
 const WAKE_DEBOUNCE_MS = 150;
 
@@ -64,8 +68,12 @@ const pullOnce = async (): Promise<boolean> => runAsPlatform(async () => {
     const after = Number(cur.rows[0].applied_seq);
     const body = await cloudGet(`/sala-node/events?after=${after}&limit=${PULL_LIMIT}`);
     const events: ReplicaEvent[] = Array.isArray(body?.events) ? body.events : [];
-    if (events.length === 0) return false;
+    if (events.length === 0) {
+        lastCloudPullOkAt = Date.now();
+        return false;
+    }
     await applyReplicaBatch({ tenantId, events, cursorStream: 'cloud', fetchRows: fetchRowsFromCloud });
+    lastCloudPullOkAt = Date.now();
     console.log(`[replica] applicati ${events.length} eventi, cursore a ${events[events.length - 1].seq}`);
     return true;
 });
@@ -79,6 +87,8 @@ const serveNodePull = async (req: any, ack: (res: any) => void): Promise<void> =
             const after = Number(req?.after);
             const limit = Math.min(PULL_LIMIT, Math.max(1, Number(req?.limit) || PULL_LIMIT));
             if (!Number.isFinite(after) || after < 0) return ack({ error: 'after non valido' });
+            // Il cloud chiede «dopo after»: fin lì ha già applicato tutto.
+            void rememberCloudAck(after);
             // rls-bypass: solo nodo (superuser locale, un tenant): outbox 'local' senza filtro tenant, è tutto suo
             const rs = await pool.query(
                 `SELECT id, event_id, event, aggregate, payload, command_id, causation_id, actor, schema_ver, created_at
@@ -172,6 +182,74 @@ let uplinkDownSince = Date.now();
 export const isCloudUplinkDown = (): boolean =>
     isServiceNode && !uplinkConnected && Date.now() - uplinkDownSince >= UPLINK_DOWN_AFTER_MS;
 
+// --- I tre numeri dell'osservabilità (fase A3; sez. «Osservabilità» del
+// brainstorming): ritardo cloud→nodo, ritardo nodo→cloud, battiture del nodo
+// che il cloud non ha ancora. Tutti dal punto di vista del nodo, che è
+// l'unico a saperli anche a linea giù.
+
+// Ultimo giro di pull dal cloud andato a buon fine (anche vuoto): da qui il
+// ritardo cloud→nodo, «quanto è vecchia la mia copia del cloud».
+let lastCloudPullOkAt: number | null = null;
+
+// Fin dove il cloud ha applicato il log del nodo: è l'`after` che il cloud
+// manda a ogni node:pull. Sta anche su disco (replication_cursor, stream
+// 'node_acked'), così un nodo riavviato a linea giù sa ancora cosa manca.
+let cloudAckedSeq: number | null = null;
+
+// rls-bypass: solo nodo, giro di sistema: il cursore 'node_acked' è del nodo, un tenant solo
+const rememberCloudAck = async (after: number): Promise<void> => runAsPlatform(async () => {
+    if (cloudAckedSeq !== null && after <= cloudAckedSeq) return;
+    cloudAckedSeq = after;
+    try {
+        // rls-bypass: solo nodo (superuser locale, un tenant): il tenant si copia dal cursore 'cloud'
+        await pool.query(
+            `INSERT INTO replication_cursor (tenant_id, stream, applied_seq)
+             SELECT tenant_id, 'node_acked', $1 FROM replication_cursor WHERE stream = 'cloud' LIMIT 1
+             ON CONFLICT (tenant_id, stream)
+             DO UPDATE SET applied_seq = GREATEST(replication_cursor.applied_seq, EXCLUDED.applied_seq), updated_at = CURRENT_TIMESTAMP`,
+            [after]
+        );
+    } catch { /* il numero in memoria basta fino al prossimo giro */ }
+});
+
+export interface SalaNodeLocalStatus {
+    version: string;
+    uplink_connected: boolean;
+    /** Da quando l'uplink è giù (ISO), null se è su. */
+    uplink_down_since: string | null;
+    /** Secondi dall'ultimo giro riuscito col cloud (null = mai). */
+    lag_down_s: number | null;
+    /** Età in secondi della più vecchia battitura locale che il cloud non ha. */
+    lag_up_s: number;
+    /** Battiture locali che il cloud non ha ancora. */
+    pending_up: number;
+}
+
+// rls-bypass: solo nodo, nessuna sessione: legge il suo outbox locale e il cursore 'node_acked'
+export const getSalaNodeLocalStatus = async (): Promise<SalaNodeLocalStatus> => runAsPlatform(async () => {
+    if (cloudAckedSeq === null) {
+        // rls-bypass: solo nodo (superuser locale, un tenant): il cursore 'node_acked' è unico
+        const cur = await pool.query(`SELECT applied_seq FROM replication_cursor WHERE stream = 'node_acked' LIMIT 1`);
+        cloudAckedSeq = cur.rows.length ? Number(cur.rows[0].applied_seq) : 0;
+    }
+    // rls-bypass: solo nodo (superuser locale, un tenant): outbox 'local' senza filtro tenant, è tutto suo
+    const pending = await pool.query(
+        `SELECT COUNT(*)::int AS n, MIN(created_at) AS oldest
+           FROM outbox_events WHERE origin = 'local' AND id > $1`,
+        [cloudAckedSeq]
+    );
+    const oldest = pending.rows[0]?.oldest ? new Date(pending.rows[0].oldest).getTime() : null;
+    const now = Date.now();
+    return {
+        version: BUILD_VERSION,
+        uplink_connected: uplinkConnected,
+        uplink_down_since: uplinkConnected ? null : new Date(uplinkDownSince).toISOString(),
+        lag_down_s: lastCloudPullOkAt === null ? null : Math.max(0, Math.round((now - lastCloudPullOkAt) / 1000)),
+        lag_up_s: oldest === null ? 0 : Math.max(0, Math.round((now - oldest) / 1000)),
+        pending_up: Number(pending.rows[0]?.n ?? 0),
+    };
+});
+
 export interface SalaNodeReplicaOpts {
     getClients?: () => number;
     /** Rigioca un envelope relay:event ai client LAN del nodo (room per
@@ -237,13 +315,20 @@ export const startSalaNodeReplica = (opts?: SalaNodeReplicaOpts): void => {
     // vivo e i palmari collegati — e l'interruttore autorità congelato).
     const statsTimer = setInterval(() => {
         if (!socket.connected) return;
-        socket.emit('node:stats', {
-            clients: opts?.getClients?.() ?? 0,
-            cache_entries: 0,
-            oldest_cache_age_s: null,
-            version: 'service-node-4',
+        void getSalaNodeLocalStatus().then((local) => {
+            socket.emit('node:stats', {
+                clients: opts?.getClients?.() ?? 0,
+                cache_entries: 0,
+                oldest_cache_age_s: null,
+                version: local.version,
+                lag_up_s: local.lag_up_s,
+                lag_down_s: local.lag_down_s,
+                pending_up: local.pending_up,
+            });
+        }).catch(() => {
+            socket.emit('node:stats', { clients: opts?.getClients?.() ?? 0, cache_entries: 0, oldest_cache_age_s: null, version: BUILD_VERSION });
         });
-    }, 15_000);
+    }, STATS_INTERVAL_MS);
     if (typeof statsTimer.unref === 'function') statsTimer.unref();
     socket.on('relay:event', (envelope: any) => {
         // Doppio mestiere dell'envelope: sveglia il pull, e per i tipi che

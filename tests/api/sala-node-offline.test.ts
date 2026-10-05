@@ -72,6 +72,7 @@ describe('nodo di sala a linea giù: configurazione allineata e proroga degli ac
     let line: Awaited<ReturnType<typeof startLine>>;
     let waiterId = 0;
     let renamedDish: { id: number; name: string } | null = null;
+    let offlineTableId = 0;
 
     const finoA = async (cond: () => Promise<boolean>, descr: string, timeoutMs = 30_000): Promise<void> => {
         const deadline = Date.now() + timeoutMs;
@@ -139,6 +140,7 @@ describe('nodo di sala a linea giù: configurazione allineata e proroga degli ac
                 SALA_NODE_PULL_INTERVAL_MS: '1000',
                 SALA_NODE_CONFIG_SYNC_MS: '1000',
                 SALA_NODE_UPLINK_DOWN_AFTER_MS: '1000',
+                SALA_NODE_STATS_INTERVAL_MS: '1000',
                 JWT_SECRET: '',
                 JWT_REFRESH_SECRET: '',
                 SALA_NODE_STATE_DIR: mkdtempSync(path.join(os.tmpdir(), 'nodo-offline-')),
@@ -204,6 +206,7 @@ describe('nodo di sala a linea giù: configurazione allineata e proroga degli ac
             name: 'OFF1', shape: 'SQUARE', seats: 2, x: 40, y: 40, room_id: room.body.id, status: 'FREE',
         });
         expect(table.status).toBe(201);
+        offlineTableId = table.body.id;
         await finoA(async () => {
             const r = await nodeDb!.query('SELECT 1 FROM tables WHERE id = $1', [table.body.id]);
             return r.rows.length === 1;
@@ -223,6 +226,28 @@ describe('nodo di sala a linea giù: configurazione allineata e proroga degli ac
         expect((await nodeGet(altro)).status).toBe(401);
         expect((await nodeGet(ownerAccess)).status).toBe(200);
     });
+
+    it('occhi sul nodo a linea su: stato locale in LAN, versione e ritardi nella card del cloud', async () => {
+        const local = await fetch(`${nodeBase}/sala-node/local-status`, { headers: { Authorization: `Bearer ${ownerAccess}` } });
+        expect(local.status).toBe(200);
+        const s = await local.json();
+        expect(s.uplink_connected).toBe(true);
+        expect(s.uplink_down_since).toBeNull();
+        expect(typeof s.version).toBe('string');
+        expect(s.pending_up).toBe(0);
+        // Solo sul nodo.
+        expect((await api().get('/sala-node/local-status').set(bearer(ownerAccess))).status).toBe(404);
+
+        // Il battito porta versione e ritardi fino alla card del cloud.
+        await finoA(async () => {
+            const cfg = await api().get('/sala/config').set(bearer(ownerAccess));
+            return typeof cfg.body?.sala_node?.lag_up_s === 'number';
+        }, 'ritardi nella card del cloud');
+        const cfg = await api().get('/sala/config').set(bearer(ownerAccess));
+        expect(cfg.body.sala_node.version).toBe(cfg.body.sala_node.cloud_version);
+        expect(typeof cfg.body.sala_node.lag_down_s).toBe('number');
+        expect(cfg.body.sala_node.pending_up).toBe(0);
+    }, 60_000);
 
     it('a linea su un token scaduto non ha proroga: il client deve rinnovare', async () => {
         const scaduto = mint(ownerClaims, -3600);
@@ -322,5 +347,18 @@ describe('nodo di sala a linea giù: configurazione allineata e proroga degli ac
 
         // Il token valido resta valido, ovviamente.
         expect((await nodeGet(ownerAccess)).status).toBe(200);
+
+        // Occhi in isola: il nodo dice da quando e cosa ha ancora da mandare.
+        const scrittura = await fetch(`${nodeBase}/tables/${offlineTableId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ownerAccess}` },
+            body: JSON.stringify({ status: 'OCCUPIED' }),
+        });
+        expect(scrittura.status).toBe(200);
+        const isola = await (await fetch(`${nodeBase}/sala-node/local-status`, { headers: { Authorization: `Bearer ${ownerAccess}` } })).json();
+        expect(isola.uplink_connected).toBe(false);
+        expect(typeof isola.uplink_down_since).toBe('string');
+        expect(isola.pending_up).toBeGreaterThanOrEqual(1);
+        expect(isola.lag_up_s).toBeGreaterThanOrEqual(0);
     }, 60_000);
 });

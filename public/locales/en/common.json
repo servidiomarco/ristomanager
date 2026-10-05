@@ -278,7 +278,9 @@
     "cloud": {
       "on": "Working online",
       "off": "Can't reach online"
-    }
+    },
+    "island": "Line down since {{ora}}",
+    "islandShort": "since {{ora}}"
   },
   "palette": {
     "aria": "Global search",
