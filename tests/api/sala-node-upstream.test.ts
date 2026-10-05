@@ -184,6 +184,15 @@ describe('stream inverso nodo→cloud', () => {
             const r = await cloudDb!.query('SELECT 1 FROM table_merges WHERE id = $1', [mergeBody.id]);
             return r.rows.length === 1;
         }, 'unione del nodo risalita sul cloud');
+
+        // Spazi di id separati (fase B1): la riga nata sul nodo ha un id da
+        // un miliardo in su, e il cloud che la applica NON porta la propria
+        // sequenza lassù — la prossima unione del cloud resta nel suo spazio.
+        expect(Number(mergeBody.id)).toBeGreaterThanOrEqual(1_000_000_000);
+        const cloudSeq = await cloudDb!.query(`SELECT last_value FROM table_merges_id_seq`);
+        expect(Number(cloudSeq.rows[0].last_value)).toBeLessThan(1_000_000_000);
+        const nodeSeq = await nodeDb!.query(`SELECT last_value FROM orders_id_seq`);
+        expect(Number(nodeSeq.rows[0].last_value)).toBeGreaterThanOrEqual(999_999_999);
     });
 
     it("l'interruttore autorità si accende ad allineamento raggiunto e si spegne col drenaggio (4b)", async () => {
@@ -201,6 +210,21 @@ describe('stream inverso nodo→cloud', () => {
             const on = await api().post('/sala-node/authority').set(bearer(token)).send({ enabled: true });
             expect(on.status).toBe(200);
             expect(on.body.enabled).toBe(true);
+
+            // Il recinto (fase B1): a nodo vivo il cloud rifiuta le battiture
+            // di servizio, il nodo le accetta. Le scritture fuori dal
+            // servizio (qui la pianta) restano al cloud.
+            const sulCloud = await api().put(`/tables/${tableId}`).set(bearer(token)).send({ status: 'FREE' });
+            expect(sulCloud.status).toBe(409);
+            expect(sulCloud.body.error).toBe('authority_on_node');
+            const sulNodo = await fetch(`${nodeBase}/tables/${tableId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ status: 'FREE' }),
+            });
+            expect(sulNodo.status).toBe(200);
+            const pianta = await api().post('/rooms').set(bearer(token)).send({ name: 'Sala del recinto', width: 300, height: 200 });
+            expect(pianta.status).toBe(201);
 
             // Lo spegnimento drena (qui è già tutto importato) e restituisce.
             const off = await api().post('/sala-node/authority').set(bearer(token)).send({ enabled: false });

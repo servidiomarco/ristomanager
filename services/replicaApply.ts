@@ -25,6 +25,7 @@
 
 import pool from '../db.js';
 import { outboxImportInTx } from './outboxService.js';
+import { syncIdSequence } from './idSpace.js';
 
 export interface ReplicaEvent {
     seq: number;
@@ -96,25 +97,8 @@ const upsertRow = async (client: any, table: string, row: any): Promise<void> =>
     );
 };
 
-/** Le sequence locali vanno tenute oltre gli id dell'autorità, o il primo
- *  INSERT nativo di questo lato colliderà. */
-const bumpSequence = async (client: any, table: string): Promise<void> => {
-    const seqName = await client.query(
-        `SELECT pg_get_serial_sequence($1, 'id') AS s
-         WHERE EXISTS (
-            SELECT 1 FROM information_schema.columns
-            WHERE table_schema = 'public' AND table_name = $1 AND column_name = 'id'
-         )`,
-        [table]
-    );
-    if (seqName.rows[0]?.s) {
-        await client.query(
-            `SELECT setval($1, GREATEST((SELECT last_value FROM ${seqName.rows[0].s}), (SELECT COALESCE(MAX(id), 0) FROM ${table}), 1))`,
-            [seqName.rows[0].s]
-        );
-    }
-};
-
+// Le sequence locali oltre gli id arrivati, ma ognuna nel suo spazio (fase
+// B1, services/idSpace.ts): il nodo sopra NODE_ID_BASE, il cloud sotto.
 /** Gli id da rifetchare per un batch: il chiamante li passa al suo
  *  fetchRows (HTTP verso il cloud, o RPC socket verso il nodo). */
 export const wantedRowsFor = (events: ReplicaEvent[]): WantedRows => {
@@ -266,7 +250,7 @@ export const applyReplicaBatch = async (opts: {
             await upsertRow(client, table, row);
             touched.add(table);
         }
-        for (const table of touched) await bumpSequence(client, table);
+        for (const table of touched) await syncIdSequence(client, table);
         // L'inbox: il cursore avanza NELLA stessa transazione delle
         // proiezioni — righe, import e punto di ripresa sono un fatto solo.
         await client.query(

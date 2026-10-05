@@ -105,6 +105,7 @@ import logRoutes from './activityLogs/logRoutes.js';
 import { authenticate, authorize, requirePermission, requireAnyPermission, requireStepUp, setNodeAccessPolicy } from './auth/authMiddleware.js';
 import { AuthService } from './auth/authService.js';
 import { publicKeysForNodes } from './auth/jwtKeys.js';
+import { isServiceWrite } from './services/serviceWrites.js';
 import { RolePermissionService, isReportsAdmin, ALL_PERMISSIONS, ALL_PERMISSION_KEYS, type Permission } from './auth/permissionService.js';
 import { canAssignToRole } from './auth/permissions.js';
 import { LogService, ActivityAction, ResourceType } from './activityLogs/logService.js';
@@ -361,6 +362,36 @@ app.use((err: any, _req: express.Request, res: express.Response, next: express.N
         return res.status(413).json({ error: 'File troppo grande' });
     }
     return next(err);
+});
+
+// --- Il recinto delle scritture di servizio (fase B1) ----------------------
+// Con «Servizio completo sul nodo» acceso le battiture di sala nascono sul
+// nodo. Se il nodo è vivo (il cloud lo sente da meno di 60 s), la stessa
+// scrittura arrivata al cloud — un telefono col 4G, un client col nodo in
+// circuito aperto — si rifiuta con 409: accettarla vorrebbe dire due verità
+// sulla stessa comanda al rientro. Nodo muto da oltre 60 s = il downgrade è
+// il failover: il cloud torna a scrivere. L'elenco è lo stesso del client
+// (services/serviceWrites.ts). Il nodo stesso non ha recinto.
+const SERVICE_FENCE_NODE_SILENT_S = 60;
+app.use((req, res, next) => {
+    if (isServiceNode || !isServiceWrite(req.method, req.path)) return next();
+    const header = req.headers.authorization;
+    const payload = header?.startsWith('Bearer ') ? AuthService.verifyAccessToken(header.slice(7)) : null;
+    // Senza token valido decide la rotta (401 dal suo authenticate).
+    if (!payload) return next();
+    const tenantId = Number.isInteger(payload.tenantId) && payload.tenantId > 0 ? payload.tenantId : 1;
+    runWithTenantContext(tenantId, async () => {
+        const status = getSalaNodeStatus(tenantId);
+        const nodeAlive = status.last_seen_seconds !== null && status.last_seen_seconds < SERVICE_FENCE_NODE_SILENT_S;
+        if (nodeAlive && await getFeatureFlag(tenantId, 'sala_node_authority_enabled', false)) {
+            res.status(409).json({
+                error: 'authority_on_node',
+                message: 'Il servizio è sul nodo di sala: questa battitura va fatta dalla rete del locale.',
+            });
+            return;
+        }
+        next();
+    }).catch(() => next());
 });
 
 // ============================================

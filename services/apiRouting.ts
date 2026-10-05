@@ -20,6 +20,7 @@
 // cache — riparte già puntato al nodo).
 
 import { authApiService } from './authApiService';
+import { isServiceWrite } from './serviceWrites';
 
 export const CLOUD_API_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';
 
@@ -134,39 +135,17 @@ export const routedGetUrl = (path: string): string => {
 // letture: nodo che non risponde → cloudFallbackUrl ritenta sul cloud e il
 // circuito si apre — «il downgrade è il failover», e resta convergente
 // perché anche la scrittura sul cloud riscende in replica.
-const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
-const WRITE_ROUTABLE: Array<{ path: RegExp; method?: RegExp }> = [
-    // Comande e cucina: il cuore dell'autorità di servizio.
-    { path: /^\/orders(\/.*)?$/ },
-    { path: /^\/kds\/.+$/ },
-    // Stato del tavolo: SOLO il PUT — la DELETE è pianta (autorità cloud).
-    { path: /^\/tables\/\d+$/, method: /^PUT$/ },
-    { path: /^\/table-merges$/ },
-    { path: /^\/table-hidden$/ },
-    { path: /^\/room-closed$/ },
-    // Asporto: la board (stato, lancio, righe) è servizio; la nascita resta
-    // al cloud (tipo split, arriva online e al telefono).
-    { path: /^\/takeaway\/orders\/\d+$/, method: /^PATCH$/ },
-    { path: /^\/takeaway\/orders\/\d+\/(status|fire)$/ },
-];
-// La chiusura comanda apre e salda il CONTO: i conti sono autorità cloud
-// fino alla fase 5 — una chiusura battuta sul nodo creerebbe un incasso
-// che il protocollo non sa ancora riportare su.
-const WRITE_EXCLUDED = [/^\/orders\/\d+\/close$/];
-
+// L'elenco vive in services/serviceWrites.ts: lo stesso che il cloud usa
+// per il suo recinto (fase B1), così i due lati non possono divergere.
 /** Riscrive un URL di SCRITTURA verso il nodo quando l'autorità è in sala.
  *  Chiamata in testa ai fetchWithAuth dei servizi: per le URL del cloud non
  *  whitelisted (o a autorità spenta) è un no-op puro. */
 export const routeWriteUrl = (url: string, method?: string): string => {
-    const m = (method || 'GET').toUpperCase();
-    if (!WRITE_METHODS.has(m)) return url;
     if (!config.authority_enabled || !nodeActive()) return url;
     if (!url.startsWith(CLOUD_API_URL)) return url;
     const rest = url.slice(CLOUD_API_URL.length);
     const pathname = rest.split('?')[0];
-    if (WRITE_EXCLUDED.some(r => r.test(pathname))) return url;
-    const hit = WRITE_ROUTABLE.some(r => r.path.test(pathname) && (!r.method || r.method.test(m)));
-    return hit ? `${config.node_url}${rest}` : url;
+    return isServiceWrite(method || 'GET', pathname) ? `${config.node_url}${rest}` : url;
 };
 
 /** URL del socket: nodo se attivo, altrimenti cloud. */
