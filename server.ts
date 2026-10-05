@@ -76,7 +76,7 @@ import {
     comandaToBillPayload,
     PassepartoutBridgeError,
 } from './services/passepartoutBridge.js';
-import { setupSalaNodeBridge, getSalaNodeStatus, disconnectSalaNode, askNodeStatus } from './services/salaNodeBridge.js';
+import { setupSalaNodeBridge, getSalaNodeStatus, disconnectSalaNode, askNodeStatus, askNode } from './services/salaNodeBridge.js';
 import {
     SUPPORT_CATEGORIES, SUPPORT_STATUSES, SUPPORT_SUBJECT_MAX, SUPPORT_BODY_MAX, SUPPORT_ATTACHMENTS_MAX, SUPPORT_RATING_COMMENT_MAX,
     sanitizeClientContext, supportTenantTag, supportPlatformTag,
@@ -8875,17 +8875,24 @@ app.get('/scontrino/:token', publicPayLimiter, async (req, res) => runAsPlatform
 }));
 
 // rls-bypass: quota ospite senza JWT, conto per share_token unico; ogni scrittura porta bill.tenant_id
-app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (req, res) => runAsPlatform(async () => {
+// La quota del QR (pay-at-table), separata in due dalla fase B3b: la QUOTA
+// la crea chi possiede il conto (il cloud, o il nodo col servizio in sala —
+// che la riceve con una chiamata sul canale /sala-node), l'ORDINE di
+// pagamento lo crea sempre il cloud, che ha le credenziali del gateway.
+type LocalClaim =
+    | { error: { status: number; body: any } }
+    | { claim: { tenant_id: number; bill_id: number; reservation_id: number | null; bill_label: string; split_id: number; kind: string; amount: number; claimant_label: string | null; expires_at: string; split_row?: any } };
+
+const claimError = (status: number, body: any): LocalClaim => ({ error: { status, body } });
+
+async function claimSplitLocally(token: string, body: any): Promise<LocalClaim> {
     const client = await pool.connect();
     try {
-        const token = String(req.params.token || '');
-        if (!token || token.length < 20) return res.status(404).json({ error: 'Not found' });
-
-        const kind = String(req.body?.kind || '');
+        const kind = String(body?.kind || '');
         if (kind !== 'equal_share' && kind !== 'fixed_amount' && kind !== 'per_item' && kind !== 'full_bill') {
-            return res.status(400).json({ error: 'kind must be equal_share, fixed_amount, per_item or full_bill' });
+            return claimError(400, { error: 'kind must be equal_share, fixed_amount, per_item or full_bill' });
         }
-        const rawLabel = typeof req.body?.claimant_label === 'string' ? req.body.claimant_label.trim().slice(0, 40) : '';
+        const rawLabel = typeof body?.claimant_label === 'string' ? body.claimant_label.trim().slice(0, 40) : '';
         const claimantLabel = rawLabel || null;
 
         await client.query('BEGIN');
@@ -8905,22 +8912,14 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
         );
         if (billRs.rowCount === 0) {
             await client.query('ROLLBACK');
-            return res.status(404).json({ error: 'Not found' });
+            return claimError(404, { error: 'Not found' });
         }
         const bill = billRs.rows[0];
         // Il flag del ristorante del conto: risolto DOPO il lookup per token,
         // perché è la riga a dire di chi è il conto.
         if (!(await isPayAtTableActive(bill.tenant_id))) {
             await client.query('ROLLBACK');
-            return res.status(404).json({ error: 'Not found' });
-        }
-        // Fase B3: col servizio in sala il conto vive sul nodo e qui il
-        // cloud non può aprirvi quote — la quota pagata finirebbe su una
-        // copia del conto. L'ospite paga in cassa. (Il QR passerà dal nodo
-        // con la fase B3b.)
-        if (await getFeatureFlag(Number(bill.tenant_id), 'sala_node_authority_enabled', false)) {
-            await client.query('ROLLBACK');
-            return res.status(409).json({ error: 'pay_unavailable_on_node', message: 'Pagamento dal telefono non disponibile adesso: paga in cassa.' });
+            return claimError(404, { error: 'Not found' });
         }
         const billLabel = bill.table_name ? `tavolo ${bill.table_name}` : `conto #${bill.id}`;
 
@@ -8939,7 +8938,7 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
         const residual = bill.total_cents - claimed;
         if (residual <= 0) {
             await client.query('ROLLBACK');
-            return res.status(409).json({ error: 'Bill already fully claimed', max_allowed_cents: 0 });
+            return claimError(409, { error: 'Bill already fully claimed', max_allowed_cents: 0 });
         }
 
         let amount: number;
@@ -8951,25 +8950,25 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
             // coperti»); item_ids = righe intere, dal client della finestra fra
             // i due deploy. Si normalizzano entrambe a unità.
             const requested = new Map<number, number>();
-            if (Array.isArray(req.body?.item_units)) {
-                for (const u of req.body.item_units) {
+            if (Array.isArray(body?.item_units)) {
+                for (const u of body.item_units) {
                     const id = Number(u?.order_item_id);
                     const units = Number(u?.units);
                     if (!Number.isFinite(id) || !Number.isInteger(units) || units <= 0) {
                         await client.query('ROLLBACK');
-                        return res.status(400).json({ error: 'item_units must be [{order_item_id, units}] with positive integers' });
+                        return claimError(400, { error: 'item_units must be [{order_item_id, units}] with positive integers' });
                     }
                     requested.set(id, (requested.get(id) ?? 0) + units);
                 }
-            } else if (Array.isArray(req.body?.item_ids)) {
-                for (const n of req.body.item_ids) {
+            } else if (Array.isArray(body?.item_ids)) {
+                for (const n of body.item_ids) {
                     const id = Number(n);
                     if (Number.isFinite(id)) requested.set(id, Number(byId.get(id)?.qty ?? 1));
                 }
             }
             if (requested.size === 0) {
                 await client.query('ROLLBACK');
-                return res.status(400).json({ error: 'item_units must be a non-empty array' });
+                return claimError(400, { error: 'item_units must be a non-empty array' });
             }
             const itemsSum = billItems.reduce(
                 (n: number, i: any) => n + Number(i.unit_price_cents || 0) * Number(i.qty || 0), 0
@@ -8979,7 +8978,7 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
             // per piatto non è disponibile.
             if (billItems.length === 0 || itemsSum !== bill.total_cents) {
                 await client.query('ROLLBACK');
-                return res.status(409).json({ error: 'Per-item split not available for this bill' });
+                return claimError(409, { error: 'Per-item split not available for this bill' });
             }
 
             // Pezzi già impegnati da altri — quote ospite e incassi staff:
@@ -8992,7 +8991,7 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
                 const it = byId.get(id);
                 if (!it) {
                     await client.query('ROLLBACK');
-                    return res.status(400).json({ error: 'Unknown item', item_id: id });
+                    return claimError(400, { error: 'Unknown item', item_id: id });
                 }
                 const free = Number(it.qty) - (taken.get(id) ?? 0);
                 if (units > free) { conflict.push(id); continue; }
@@ -9000,15 +8999,15 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
             }
             if (conflict.length > 0) {
                 await client.query('ROLLBACK');
-                return res.status(409).json({ error: 'Some items are already claimed', conflicting_item_ids: conflict });
+                return claimError(409, { error: 'Some items are already claimed', conflicting_item_ids: conflict });
             }
             if (sum <= 0) {
                 await client.query('ROLLBACK');
-                return res.status(400).json({ error: 'Selected items total zero' });
+                return claimError(400, { error: 'Selected items total zero' });
             }
             if (sum > residual) {
                 await client.query('ROLLBACK');
-                return res.status(409).json({ error: 'Amount exceeds residual', max_allowed_cents: residual });
+                return claimError(409, { error: 'Amount exceeds residual', max_allowed_cents: residual });
             }
             amount = sum;
             claimedItemUnits = [...requested].map(([order_item_id, units]) => ({ order_item_id, units }));
@@ -9022,15 +9021,15 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
             // sul bottone.
             amount = residual;
         } else {
-            const raw = Number(req.body?.amount_cents);
+            const raw = Number(body?.amount_cents);
             if (!Number.isFinite(raw) || raw <= 0) {
                 await client.query('ROLLBACK');
-                return res.status(400).json({ error: 'amount_cents must be a positive integer' });
+                return claimError(400, { error: 'amount_cents must be a positive integer' });
             }
             amount = Math.round(raw);
             if (amount > residual) {
                 await client.query('ROLLBACK');
-                return res.status(409).json({ error: 'Amount exceeds residual', max_allowed_cents: residual });
+                return claimError(409, { error: 'Amount exceeds residual', max_allowed_cents: residual });
             }
         }
 
@@ -9056,12 +9055,66 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
             // a friendly 409.
             await client.query('ROLLBACK');
             if (err?.code === '23514') {
-                return res.status(409).json({ error: 'Bill capacity changed, retry', detail: err?.message });
+                return claimError(409, { error: 'Bill capacity changed, retry', detail: err?.message });
             }
             throw err;
         }
 
         await client.query('COMMIT');
+        return {
+            claim: {
+                tenant_id: Number(bill.tenant_id),
+                bill_id: Number(bill.id),
+                reservation_id: bill.reservation_id ?? null,
+                bill_label: billLabel,
+                split_id: Number(splitId),
+                kind,
+                amount,
+                claimant_label: claimantLabel,
+                expires_at: expiresAt.toISOString(),
+            },
+        };
+    } catch (err) {
+        try { await client.query('ROLLBACK'); } catch { /* noop */ }
+        throw err;
+    } finally {
+        client.release();
+    }
+}
+
+app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (req, res) => runAsPlatform(async () => {
+    try {
+        const token = String(req.params.token || '');
+        if (!token || token.length < 20) return res.status(404).json({ error: 'Not found' });
+
+        // Fase B3b: col servizio in sala il conto è del nodo, e la quota la
+        // crea lui (chiamata sul canale /sala-node). Nodo irraggiungibile:
+        // l'ospite paga in cassa.
+        const owner = await queryWithRetry(`SELECT tenant_id FROM table_bills WHERE share_token = $1 LIMIT 1`, [token]);
+        const ownerTenant = owner.rows[0] ? Number(owner.rows[0].tenant_id) : null;
+        const onNode = ownerTenant !== null && await nodeOwnsBills(ownerTenant);
+        let outcome: LocalClaim;
+        if (onNode) {
+            const answer = await askNode(ownerTenant!, 'pay:claim', { token, body: req.body ?? {} });
+            if (!answer?.ok || !answer.result) {
+                return res.status(409).json({ error: 'pay_unavailable_on_node', message: 'Pagamento dal telefono non disponibile adesso: paga in cassa.' });
+            }
+            outcome = answer.result as LocalClaim;
+        } else {
+            outcome = await claimSplitLocally(token, req.body ?? {});
+        }
+        if ('error' in outcome) return res.status(outcome.error.status).json(outcome.error.body);
+        const c = outcome.claim;
+        // Quota nata sul nodo: la sua copia qui, identica, prima della
+        // richiesta di pagamento che la cita (la replica la riscriverà uguale).
+        if (onNode && c.split_row) {
+            const cols = Object.keys(c.split_row).filter(k => k !== 'id');
+            await queryWithRetry(
+                `INSERT INTO table_bill_splits SELECT * FROM jsonb_populate_recordset(NULL::table_bill_splits, $1::jsonb)
+                 ON CONFLICT (id) DO UPDATE SET ${cols.map(k => `"${k}" = EXCLUDED."${k}"`).join(', ')}`,
+                [JSON.stringify([c.split_row])]
+            );
+        }
 
         // Create the gateway order AFTER commit — if the API call fails
         // the split stays CLAIMED and the reconcile job will abandon it
@@ -9071,17 +9124,17 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
         try {
             // Gateway e credenziali del ristorante del conto, non del tenant
             // storico: il denaro deve arrivare sul merchant giusto.
-            if (!(await isPaymentConfiguredForFlow(bill.tenant_id, 'bill'))) {
-                throw new Error(`${providerLabel(await getPaymentProviderForFlow(bill.tenant_id, 'bill'))} not configured`);
+            if (!(await isPaymentConfiguredForFlow(c.tenant_id, 'bill'))) {
+                throw new Error(`${providerLabel(await getPaymentProviderForFlow(c.tenant_id, 'bill'))} not configured`);
             }
             // La valuta è quella del ristorante, non una costante: il
             // gateway addebita in quella e la riga la registra uguale.
-            const billCurrency = (await getTenantLocale(bill.tenant_id)).currency;
-            const order = await createPaymentOrder(bill.tenant_id, {
-                amount,
+            const billCurrency = (await getTenantLocale(c.tenant_id)).currency;
+            const order = await createPaymentOrder(c.tenant_id, {
+                amount: c.amount,
                 currency: billCurrency,
-                description: `Conto ${billLabel} - quota${claimantLabel ? ' ' + claimantLabel : ''}`,
-                reference: `bill_split:${splitId}`,
+                description: `Conto ${c.bill_label} - quota${c.claimant_label ? ' ' + c.claimant_label : ''}`,
+                reference: `bill_split:${c.split_id}`,
                 flow: 'bill',
                 // Back to the bill page after checkout (whatever method the
                 // guest picked), so they see the progress bar advance
@@ -9097,65 +9150,97 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
                  VALUES ($10, $1, $2, $11, $3, $4, $5, $6, $7, $8, $9)
                  RETURNING id`,
                 [
-                    bill.reservation_id || null,
-                    amount,
-                    `Conto ${billLabel}`,
+                    c.reservation_id || null,
+                    c.amount,
+                    `Conto ${c.bill_label}`,
                     order.status,
                     order.provider,
                     order.id,
                     order.checkoutUrl,
-                    splitId,
-                    JSON.stringify({ ...order.metadata, bill_split_id: splitId }),
-                    bill.tenant_id,
+                    c.split_id,
+                    JSON.stringify({ ...order.metadata, bill_split_id: c.split_id }),
+                    c.tenant_id,
                     billCurrency,
                 ]
             );
             paymentRequestId = prIns.rows[0].id;
 
-            await queryWithRetry(
-                `UPDATE table_bill_splits SET payment_request_id = $1 WHERE id = $2`,
-                [paymentRequestId, splitId]
-            );
+            // Col conto sul nodo il collegamento quota→richiesta lo fa il nodo,
+            // quando la richiesta gli arriva in replica (la quota è sua).
+            if (!onNode) {
+                await queryWithRetry(
+                    `UPDATE table_bill_splits SET payment_request_id = $1 WHERE id = $2`,
+                    [paymentRequestId, c.split_id]
+                );
+            }
+            await logPaymentRequestChanged(null, c.tenant_id, paymentRequestId);
         } catch (err: any) {
-            console.error('[pay] payment order creation failed for split', splitId, err?.message || err);
+            console.error('[pay] payment order creation failed for split', c.split_id, err?.message || err);
             // Non-fatal for the API response: the client gets the split
             // but no checkout_url — the UI can offer "riprova" via a new
             // claim after release.
         }
 
-        await logBillChanged(null, bill.tenant_id, bill.id);
+        if (!onNode) await logBillChanged(null, c.tenant_id, c.bill_id);
         try {
-            socketService?.broadcastToAll(bill.tenant_id, 'bill:split-claimed', {
-                bill_id: bill.id,
-                split_id: splitId,
-                kind,
-                amount_cents: amount,
-                claimant_label: claimantLabel,
+            socketService?.broadcastToAll(c.tenant_id, 'bill:split-claimed', {
+                bill_id: c.bill_id,
+                split_id: c.split_id,
+                kind: c.kind,
+                amount_cents: c.amount,
+                claimant_label: c.claimant_label,
             });
         } catch (_) {}
 
         res.status(201).json({
-            split_id: splitId,
-            amount_cents: amount,
-            claimant_label: claimantLabel,
-            expires_at: expiresAt.toISOString(),
+            split_id: c.split_id,
+            amount_cents: c.amount,
+            claimant_label: c.claimant_label,
+            expires_at: c.expires_at,
             checkout_url: checkoutUrl,
             payment_request_id: paymentRequestId,
         });
     } catch (err: any) {
-        try { await client.query('ROLLBACK'); } catch { /* noop */ }
         console.error('POST /pay/:token/claim error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
-    } finally {
-        client.release();
     }
 }));
 
-// POST /pay/:token/release — voluntarily gives up an unpaid claim. Both
-// the split_id and the token must match — this prevents someone with the
-// token from cancelling a split they didn't create (still not
-// authenticated, but at least you need to know the id you're releasing).
-// rls-bypass: rilascio quota senza JWT, conto per share_token unico; UPDATE per split_id + bill.id
+// Il rilascio della quota: come la creazione (fase B3b), lo fa chi possiede
+// il conto.
+type LocalRelease =
+    | { error: { status: number; body: any } }
+    | { released: { tenant_id: number; bill_id: number; split_id: number } };
+
+async function releaseSplitLocally(token: string, splitId: number): Promise<LocalRelease> {
+    const bill = await loadBillByToken(token);
+    if (!bill) return { error: { status: 404, body: { error: 'Not found' } } };
+    // Flag del ristorante del conto, risolto dalla riga (vedi GET /pay/:token).
+    if (!(await isPayAtTableActive(bill.tenant_id))) {
+        return { error: { status: 404, body: { error: 'Not found' } } };
+    }
+    const upd = await queryWithRetry(
+        `UPDATE table_bill_splits
+         SET status = 'RELEASED', released_at = CURRENT_TIMESTAMP
+         WHERE id = $1
+           AND table_bill_id = $2
+           AND status = 'CLAIMED'
+         RETURNING id`,
+        [splitId, bill.id]
+    );
+    if (upd.rowCount === 0) {
+        return { error: { status: 409, body: { error: 'Split not found or not releasable' } } };
+    }
+    await logBillChanged(null, bill.tenant_id, bill.id);
+    try {
+        socketService?.broadcastToAll(bill.tenant_id, 'bill:split-released', {
+            bill_id: bill.id,
+            split_id: splitId,
+        });
+    } catch (_) {}
+    return { released: { tenant_id: Number(bill.tenant_id), bill_id: Number(bill.id), split_id: splitId } };
+}
+
 app.post('/pay/:token/release', publicPayLimiter, async (req, res) => runAsPlatform(async () => {
     try {
         const token = String(req.params.token || '');
@@ -9166,34 +9251,22 @@ app.post('/pay/:token/release', publicPayLimiter, async (req, res) => runAsPlatf
             return res.status(400).json({ error: 'split_id required' });
         }
 
-        const bill = await loadBillByToken(token);
-        if (!bill) return res.status(404).json({ error: 'Not found' });
-        // Flag del ristorante del conto, risolto dalla riga (vedi GET /pay/:token).
-        if (!(await isPayAtTableActive(bill.tenant_id))) {
-            return res.status(404).json({ error: 'Not found' });
+        const owner = await queryWithRetry(`SELECT tenant_id FROM table_bills WHERE share_token = $1 LIMIT 1`, [token]);
+        const ownerTenant = owner.rows[0] ? Number(owner.rows[0].tenant_id) : null;
+        let outcome: LocalRelease;
+        if (ownerTenant !== null && await nodeOwnsBills(ownerTenant)) {
+            const answer = await askNode(ownerTenant, 'pay:release', { token, split_id: splitId });
+            if (!answer?.ok || !answer.result) {
+                return res.status(409).json({ error: 'pay_unavailable_on_node', message: 'Pagamento dal telefono non disponibile adesso: paga in cassa.' });
+            }
+            outcome = answer.result as LocalRelease;
+            if ('released' in outcome) {
+                try { socketService?.broadcastToAll(ownerTenant, 'bill:split-released', { bill_id: outcome.released.bill_id, split_id: splitId }); } catch (_) {}
+            }
+        } else {
+            outcome = await releaseSplitLocally(token, splitId);
         }
-
-        const upd = await queryWithRetry(
-            `UPDATE table_bill_splits
-             SET status = 'RELEASED', released_at = CURRENT_TIMESTAMP
-             WHERE id = $1
-               AND table_bill_id = $2
-               AND status = 'CLAIMED'
-             RETURNING id`,
-            [splitId, bill.id]
-        );
-        if (upd.rowCount === 0) {
-            return res.status(409).json({ error: 'Split not found or not releasable' });
-        }
-
-        await logBillChanged(null, bill.tenant_id, bill.id);
-        try {
-            socketService?.broadcastToAll(bill.tenant_id, 'bill:split-released', {
-                bill_id: bill.id,
-                split_id: splitId,
-            });
-        } catch (_) {}
-
+        if ('error' in outcome) return res.status(outcome.error.status).json(outcome.error.body);
         res.json({ released: true, split_id: splitId });
     } catch (err: any) {
         console.error('POST /pay/:token/release error:', err);
@@ -11286,6 +11359,11 @@ async function applyBillSplitTransition(
     }
     const { table_bill_id: billId, amount_cents: amount } = splitRs.rows[0];
 
+    // Fase B3b: col servizio in sala la quota e il conto sono del nodo. Qui
+    // (cloud) la richiesta di pagamento è già aggiornata e scende al nodo,
+    // che applica lui la transizione: pagata, specchio, saldo, chiusura.
+    if (await nodeOwnsBills(tenantId)) return;
+
     if (event === 'ORDER_COMPLETED') {
         if (!isFirstCompletion) return;
 
@@ -11331,23 +11409,6 @@ async function applyBillSplitTransition(
             }
         }
 
-        // Col servizio in sala (fase B3) il conto è del nodo: niente specchio,
-        // niente saldo, niente chiusura da qui. Il QR è sospeso con
-        // l'autorità in sala, quindi questo è il caso raro di un pagamento
-        // aperto prima dell'accensione e concluso dopo: lo si dice alla sala,
-        // che lo registra in cassa. (Con la fase B3b il nodo lo applicherà
-        // da solo.)
-        if (await nodeOwnsBills(tenantId)) {
-            console.warn('[bill-split] quota', splitId, 'pagata online su un conto in sala (conto', billId, '): da registrare in cassa');
-            pushSendToRoles(tenantId, ['OWNER', 'GENERAL_MANAGER', 'MANAGER', 'CASSA'], {
-                category: 'payment',
-                title: 'Pagamento online su un conto in sala',
-                body: `${formatMoneyMinor(amount, (await getTenantLocale(tenantId)).currency)} pagati dal telefono sul conto #${billId}: registralo in cassa come «pagato online».`,
-                url: `/?view=CASSA`,
-                tag: `bill-split-on-node-${splitId}`,
-            }, { excludeUserId: null }).catch(() => {});
-            return;
-        }
 
         // Specchio nel libro cassa: la quota pagata online diventa una riga
         // LINK_ONLINE, così la chiusura di cassa somma per metodo da una
@@ -12348,6 +12409,31 @@ async function applyCloudEffectsOnNode(tenantId: number, events: Array<{ type: s
     if (prIds.length === 0) return;
     await runWithTenantContext(tenantId, async () => {
         if (!(await getFeatureFlag(tenantId, 'sala_node_authority_enabled', false))) return;
+        // Fase B3b: le quote del QR. La quota è del nodo, la richiesta di
+        // pagamento del cloud: qui la si collega alla quota e, a pagamento
+        // concluso o fallito, si applica la transizione — quota pagata,
+        // specchio nel libro cassa, conto saldato e (con lo scontrino
+        // automatico) chiuso con lo scontrino. Idempotente: le transizioni
+        // partono solo da quote ancora CLAIMED.
+        const splitPrs = await queryWithRetry(
+            `SELECT pr.id, pr.table_bill_split_id AS split_id, UPPER(pr.status) AS status, pr.completed_at,
+                    s.payment_request_id AS linked, s.table_bill_id AS bill_id
+               FROM payment_requests pr
+               JOIN table_bill_splits s ON s.id = pr.table_bill_split_id
+              WHERE pr.id = ANY($1::bigint[]) AND pr.tenant_id = $2`,
+            [prIds, tenantId]
+        );
+        for (const pr of splitPrs.rows) {
+            if (pr.linked == null) {
+                await queryWithRetry(`UPDATE table_bill_splits SET payment_request_id = $1 WHERE id = $2 AND payment_request_id IS NULL`, [pr.id, pr.split_id]);
+                await logBillChanged(null, tenantId, pr.bill_id);
+            }
+            if (pr.completed_at && ['COMPLETED', 'PAID'].includes(pr.status)) {
+                await applyBillSplitTransition(tenantId, Number(pr.split_id), 'ORDER_COMPLETED', true);
+            } else if (['CANCELLED', 'FAILED'].includes(pr.status)) {
+                await applyBillSplitTransition(tenantId, Number(pr.split_id), 'ORDER_CANCELLED', false);
+            }
+        }
         const bills = await queryWithRetry(
             `SELECT DISTINCT b.id
                FROM payment_requests pr
@@ -12364,6 +12450,35 @@ async function applyCloudEffectsOnNode(tenantId: number, events: Array<{ type: s
                 try { socketService?.broadcastToAll(tenantId, credit.settled ? 'bill:settled' : 'bill:updated', { id: Number(row.id) }); } catch (_) {}
             }
         }
+    });
+}
+
+/** Sul NODO (fase B3b): una quota del QR rimasta CLAIMED senza ordine di
+ *  pagamento (il gateway aveva fallito alla creazione) e scaduta da oltre
+ *  10 minuti si libera — nel cloud lo faceva il riconciliatore, ma col
+ *  servizio in sala la quota è del nodo. Quelle con un ordine le chiude la
+ *  richiesta di pagamento che scende dal cloud. */
+async function sweepStaleNodeClaims(): Promise<void> {
+    if (!isServiceNode) return;
+    // rls-bypass: solo nodo, giro di sistema: un tenant solo, quello del cursore di replica
+    await runAsPlatform(async () => {
+        const cur = await queryWithRetry(`SELECT tenant_id FROM replication_cursor WHERE stream = 'cloud' LIMIT 1`);
+        const tenantId = Number(cur.rows[0]?.tenant_id);
+        if (!Number.isInteger(tenantId) || tenantId <= 0) return;
+        await runWithTenantContext(tenantId, async () => {
+            if (!(await getFeatureFlag(tenantId, 'sala_node_authority_enabled', false))) return;
+            const upd = await queryWithRetry(
+                `UPDATE table_bill_splits SET status = 'ABANDONED'
+                  WHERE tenant_id = $1 AND status = 'CLAIMED' AND payment_request_id IS NULL
+                    AND expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP - interval '10 minutes'
+                  RETURNING id, table_bill_id`,
+                [tenantId]
+            );
+            for (const row of upd.rows) {
+                await logBillChanged(null, tenantId, row.table_bill_id);
+                try { socketService?.broadcastToAll(tenantId, 'bill:split-abandoned', { bill_id: row.table_bill_id, split_id: row.id }); } catch (_) {}
+            }
+        });
     });
 }
 
@@ -14177,6 +14292,9 @@ const startBillSplitReconcileScheduler = () => {
                 // Fallback: only for splits with NO linked order (order
                 // creation had failed at claim time) — nothing payable
                 // exists, so freeing the capacity is safe.
+                // Col servizio in sala (fase B3b) la quota è del nodo: la
+                // libera lui (sweepStaleNodeClaims), non la copia del cloud.
+                if (!handled && await nodeOwnsBills(rowTenantId)) handled = true;
                 if (!handled) {
                     const upd = await queryWithRetry(
                         `UPDATE table_bill_splits
@@ -40615,6 +40733,32 @@ const startServer = async () => {
                         },
                         onCloudEvent: kickConfigSync,
                         onApplied: applyCloudEffectsOnNode,
+                        // Fase B3b: la quota del QR su un conto del nodo.
+                        rpc: {
+                            // rls-bypass: solo nodo, chiamata del cloud senza sessione: il conto si risolve dal token come nella rotta pubblica
+                            'pay:claim': (payload: any) => runAsPlatform(async () => {
+                                const outcome = await claimSplitLocally(String(payload?.token || ''), payload?.body ?? {});
+                                if ('claim' in outcome) {
+                                    const c = outcome.claim;
+                                    // La riga intera viaggia col risultato: il cloud la deve
+                                    // avere PRIMA di crearci sopra la richiesta di pagamento
+                                    // (FK viva), e la replica arriverebbe un istante dopo.
+                                    const row = await queryWithRetry('SELECT * FROM table_bill_splits WHERE id = $1', [c.split_id]);
+                                    c.split_row = row.rows[0] ?? null;
+                                    await logBillChanged(null, c.tenant_id, c.bill_id);
+                                    try {
+                                        socketService?.broadcastToAll(c.tenant_id, 'bill:split-claimed', {
+                                            bill_id: c.bill_id, split_id: c.split_id, kind: c.kind,
+                                            amount_cents: c.amount, claimant_label: c.claimant_label,
+                                        });
+                                    } catch (_) {}
+                                }
+                                return outcome;
+                            }),
+                            // rls-bypass: solo nodo, chiamata del cloud senza sessione: come la rotta pubblica di rilascio
+                            'pay:release': (payload: any) => runAsPlatform(() =>
+                                releaseSplitLocally(String(payload?.token || ''), Number(payload?.split_id))),
+                        },
                     });
                     // Fase A2, solo nodo: la configurazione (menu, utenti,
                     // stampanti, impostazioni) resta allineata al cloud, e il
@@ -40623,6 +40767,8 @@ const startServer = async () => {
                     if (isServiceNode) {
                         startSalaNodeAccess();
                         startSalaNodeConfigSync();
+                        const claimSweep = setInterval(() => { void sweepStaleNodeClaims().catch(() => {}); }, 60_000);
+                        if (typeof claimSweep.unref === 'function') claimSweep.unref();
                     }
                     // Il cane da guardia dell'uplink (no-op sul nodo): push a
                     // OWNER/GM se un nodo con l'ibrido acceso tace oltre soglia.

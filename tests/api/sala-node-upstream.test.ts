@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { existsSync, mkdtempSync } from 'node:fs';
 import { Client } from 'pg';
+import { createHmac } from 'node:crypto';
 import { api, bearer, ownerToken } from './helpers';
 
 // Fase 4a della tappa 4, end-to-end: lo STREAM INVERSO. Si scrive SUL NODO
@@ -304,10 +305,6 @@ describe('stream inverso nodo→cloud', () => {
             const cloudPay = await api().post(`/bills/${secondBill.id}/payments`).set(bearer(token)).send({ method: 'CONTANTI', amount_cents: 100 });
             expect(cloudPay.status).toBe(409);
             expect(cloudPay.body.error).toBe('authority_on_node');
-            // E il QR è sospeso: l'ospite paga in cassa.
-            const claim = await api().post(`/pay/${secondBill.share_token}/claim`).send({ kind: 'full_bill' });
-            expect(claim.status).toBe(409);
-            expect(claim.body.error).toBe('pay_unavailable_on_node');
             const voided = await nodeFetch(`/bills/${secondBill.id}/void`, 'POST', {});
             expect(voided.status).toBe(200);
 
@@ -319,6 +316,114 @@ describe('stream inverso nodo→cloud', () => {
             await api().put('/settings/features').set(bearer(token)).send({ sala_node_enabled: hybridPrima });
         }
     }, 90_000);
+
+    it('col servizio in sala il QR passa dal nodo: quota, pagamento, chiusura e scontrino (fase B3b)', async () => {
+        const WEBHOOK_SECRET = 'segreto-webhook-qr-nodo';
+        const nodeFetch = (path: string, method: string, body?: any) => fetch(`${nodeBase}${path}`, {
+            method,
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: body === undefined ? undefined : JSON.stringify(body),
+        });
+        const flags = await api().get('/settings/features').set(bearer(token));
+        const hybridPrima = flags.body.sala_node_enabled === true;
+        await api().put('/settings/features').set(bearer(token)).send({ sala_node_enabled: true });
+        await api().put('/settings/fiscal').set(bearer(token)).send({ provider: 'mock', vat_number: '11122211133' });
+        await api().put('/settings/integrations/revolut').set(bearer(token)).send({ webhook_secret: WEBHOOK_SECRET });
+        try {
+            await finoA(async () => {
+                const o = await api().get('/sala-node/authority').set(bearer(token));
+                return o.body.node_online === true && o.body.aligned === true;
+            }, 'repliche allineate');
+            await finoA(async () => {
+                const r = await nodeDb!.query(`SELECT text_value FROM app_settings WHERE key = 'fiscal_provider'`);
+                return r.rows[0]?.text_value === 'mock';
+            }, 'provider fiscale sul nodo');
+            await cloudDb!.query(`UPDATE table_bill_splits SET status = 'RELEASED', released_at = CURRENT_TIMESTAMP WHERE status = 'CLAIMED'`);
+            const on = await api().post('/sala-node/authority').set(bearer(token)).send({ enabled: true });
+            expect(on.status).toBe(200);
+            await finoA(async () => {
+                const r = await nodeDb!.query(`SELECT value FROM app_settings WHERE key = 'sala_node_authority_enabled'`);
+                return r.rows[0]?.value === true;
+            }, 'interruttore sul nodo');
+
+            const opened = await nodeFetch(`/tables/${tableId}/bill`, 'POST', { total_cents: 3000, covers: 2 });
+            expect(opened.status).toBe(201);
+            const bill = (await opened.json()).bill;
+            await finoA(async () => {
+                const r = await cloudDb!.query('SELECT share_token FROM table_bills WHERE id = $1', [bill.id]);
+                return Boolean(r.rows[0]?.share_token);
+            }, 'conto sul cloud');
+
+            // La quota: l'ospite parla col cloud, la quota nasce sul nodo.
+            const claim = await api().post(`/pay/${bill.share_token}/claim`).send({ kind: 'full_bill', claimant_label: 'Ospite' });
+            expect(claim.status).toBe(201);
+            const splitId = Number(claim.body.split_id);
+            expect(splitId).toBeGreaterThanOrEqual(1_000_000_000);
+            const sulNodo = await nodeDb!.query('SELECT status FROM table_bill_splits WHERE id = $1', [splitId]);
+            expect(sulNodo.rows[0]?.status).toBe('CLAIMED');
+
+            // Il gateway (qui assente) avrebbe creato l'ordine: la richiesta
+            // di pagamento del cloud punta alla quota del nodo.
+            const orderId = `ordine-qr-nodo-${bill.id}`;
+            await cloudDb!.query(
+                `INSERT INTO payment_requests (tenant_id, amount_cents, currency, description, status, provider, provider_order_id, table_bill_split_id)
+                 VALUES (1, 3000, 'EUR', 'Quota dal nodo', 'PENDING', 'revolut', $1, $2)`,
+                [orderId, splitId]
+            );
+            const body = JSON.stringify({ event: 'ORDER_COMPLETED', order_id: orderId });
+            const ts = String(Date.now());
+            const signature = createHmac('sha256', WEBHOOK_SECRET).update(`v1.${ts}.${body}`).digest('hex');
+            const hook = await api().post('/webhook/revolut')
+                .set('Content-Type', 'application/json')
+                .set('Revolut-Request-Timestamp', ts)
+                .set('Revolut-Signature', `v1=${signature}`)
+                .send(body);
+            expect(hook.status).toBe(200);
+
+            // Il nodo applica: quota pagata, conto chiuso, scontrino; e risale.
+            await finoA(async () => {
+                const r = await nodeDb!.query(
+                    `SELECT b.status, s.status AS split_status,
+                            (SELECT COUNT(*)::int FROM fiscal_documents f WHERE f.table_bill_id = b.id AND f.status = 'CONFIRMED') AS docs
+                       FROM table_bills b JOIN table_bill_splits s ON s.table_bill_id = b.id
+                      WHERE b.id = $1 AND s.id = $2`,
+                    [bill.id, splitId]
+                );
+                return r.rows[0]?.status === 'CLOSED' && r.rows[0]?.split_status === 'PAID' && r.rows[0]?.docs === 1;
+            }, 'quota pagata, conto chiuso e scontrino sul nodo', 30_000);
+            await finoA(async () => {
+                const r = await cloudDb!.query(
+                    `SELECT b.status, (SELECT COUNT(*)::int FROM fiscal_documents f WHERE f.table_bill_id = b.id AND f.status = 'CONFIRMED') AS docs
+                       FROM table_bills b WHERE b.id = $1`,
+                    [bill.id]
+                );
+                return r.rows[0]?.status === 'CLOSED' && r.rows[0]?.docs === 1;
+            }, 'conto chiuso e scontrino sul cloud', 30_000);
+
+            // Il rilascio passa dal nodo anche lui.
+            const second = await nodeFetch(`/tables/${tableId}/bill`, 'POST', { total_cents: 1200, covers: 1 });
+            const secondBill = (await second.json()).bill;
+            await finoA(async () => {
+                const r = await cloudDb!.query('SELECT share_token FROM table_bills WHERE id = $1', [secondBill.id]);
+                return Boolean(r.rows[0]?.share_token);
+            }, 'secondo conto sul cloud');
+            const claim2 = await api().post(`/pay/${secondBill.share_token}/claim`).send({ kind: 'full_bill' });
+            expect(claim2.status).toBe(201);
+            const release = await api().post(`/pay/${secondBill.share_token}/release`).send({ split_id: claim2.body.split_id });
+            expect(release.status).toBe(200);
+            const rel = await nodeDb!.query('SELECT status FROM table_bill_splits WHERE id = $1', [claim2.body.split_id]);
+            expect(rel.rows[0]?.status).toBe('RELEASED');
+            await nodeFetch(`/bills/${secondBill.id}/void`, 'POST', {});
+
+            const off = await api().post('/sala-node/authority').set(bearer(token)).send({ enabled: false });
+            expect(off.status).toBe(200);
+        } finally {
+            await api().post('/sala-node/authority').set(bearer(token)).send({ enabled: false, force: true });
+            await api().put('/settings/fiscal').set(bearer(token)).send({ provider: 'none' });
+            await api().put('/settings/integrations/revolut').set(bearer(token)).send({ webhook_secret: '' });
+            await api().put('/settings/features').set(bearer(token)).send({ sala_node_enabled: hybridPrima });
+        }
+    }, 120_000);
 
     it("niente eco: l'evento importato dal nodo non riscende al nodo come nuovo", async () => {
         // Lo stream in discesa manda solo origin='local': l'evento del

@@ -185,6 +185,22 @@ export async function askNodeStatus(tenantId: number): Promise<{ applied_cloud_s
     }
 }
 
+/** Una chiamata del cloud al nodo (fase B3b): il pagamento col QR passa
+ *  dal nodo quando il conto è suo. null = nodo non collegato, o che non
+ *  risponde entro il tempo: chi chiama decide il ripiego («paga in cassa»).
+ *  Il nodo risponde { ok: true, result } o { ok: false, error }. */
+export async function askNode(tenantId: number, method: string, payload: unknown, timeoutMs = 8_000): Promise<{ ok: boolean; result?: any; error?: string } | null> {
+    const entry = nodesByTenant.get(tenantId);
+    if (!entry || !entry.socket.connected) return null;
+    try {
+        const res: any = await entry.socket.timeout(timeoutMs).emitWithAck('node:rpc', { method, payload });
+        if (!res || typeof res.ok !== 'boolean') return null;
+        return res;
+    } catch {
+        return null;
+    }
+}
+
 const NODE_ONLINE_WINDOW_MS = 30_000;
 
 export function getSalaNodeStatus(tenantId: number) {

@@ -424,8 +424,14 @@ un miliardo in su.
 - **Cancelli dell'accensione**: provider fiscale `rt-local` (o nessuno), e
   nessun pagamento col QR in corso (`fiscal_needs_cloud`,
   `qr_payments_live`).
-- **Pagamento col QR sospeso** (`pay_unavailable_on_node`): l'ospite legge
-  «paga in cassa». Tornerà attivo passando dal nodo (fase B3b).
+- **Pagamento col QR dal nodo** (fase B3b): l'ospite parla col cloud, che
+  chiede la quota al nodo (`node:rpc` `pay:claim`/`pay:release` sul canale
+  /sala-node), crea l'ordine col gateway (le credenziali restano nel cloud)
+  e manda giù la richiesta di pagamento. A pagamento concluso il nodo segna
+  la quota pagata, salda e (con `rt-local`) chiude il conto e fa lo
+  scontrino. Nodo irraggiungibile dal cloud: `pay_unavailable_on_node`,
+  l'ospite legge «paga in cassa». Una quota senza ordine scaduta da 10
+  minuti la libera il nodo da solo.
 - **Caparre**: le richieste di pagamento scendono al nodo
   (`paymentRequest:changed`), che accredita la caparra pagata sul conto
   aperto della prenotazione.

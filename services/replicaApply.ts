@@ -268,36 +268,51 @@ export const applyReplicaBatch = async (opts: {
             await client.query('ROLLBACK');
             await client.query('BEGIN');
         }
-        // L'aggregato conto: si sostituiscono pagamenti (e, sul nodo, quote)
-        // con quelli dell'autorità, poi il conto stesso. Le quote (pagamenti
-        // col QR) sono del cloud: le sostituisce solo il NODO che applica lo
-        // stream del cloud; sul cloud le referenziano le richieste di
-        // pagamento, e restano sue. Una volta per conto per lotto.
+        // L'aggregato conto (conto, quote, pagamenti) dall'autorità: dal
+        // cloud quando il conto è suo, dal nodo col servizio in sala (anche
+        // le quote del QR, dalla fase B3b). Una volta per conto per lotto.
         const appliedBills = new Set<number>();
         const applyBill = async (id: number): Promise<void> => {
             if (appliedBills.has(id)) return;
             appliedBills.add(id);
-            const replaceSplits = cursorStream === 'cloud';
+            const onNodeSide = cursorStream === 'cloud';
             const bill = fetched.bills.get(id);
             await client.query(`DELETE FROM table_bill_payments WHERE table_bill_id = $1`, [id]);
-            if (replaceSplits) await client.query(`DELETE FROM table_bill_splits WHERE table_bill_id = $1`, [id]);
+            // Sul nodo (replica-mode, FK mute) le quote si sostituiscono in
+            // blocco. Sul cloud le referenziano le richieste di pagamento (FK
+            // vive): si aggiornano sul posto, e quelle sparite si tolgono se
+            // nessuno le cita più.
+            if (onNodeSide) await client.query(`DELETE FROM table_bill_splits WHERE table_bill_id = $1`, [id]);
             if (!bill) {
                 await deleteTolerant(client, 'table_bills', id);
                 return;
             }
             await upsertInPlace(client, 'table_bills', bill);
-            const children: Array<[string, any[] | undefined]> = [['table_bill_payments', paymentsByBill.get(id)]];
-            if (replaceSplits) children.unshift(['table_bill_splits', splitsByBill.get(id)]);
-            for (const [table, list] of children) {
-                if (list && list.length) {
+            const splits = splitsByBill.get(id) ?? [];
+            if (onNodeSide) {
+                if (splits.length) {
                     await client.query(
-                        `INSERT INTO ${table} SELECT * FROM jsonb_populate_recordset(NULL::${table}, $1::jsonb)`,
-                        [JSON.stringify(list)]
+                        `INSERT INTO table_bill_splits SELECT * FROM jsonb_populate_recordset(NULL::table_bill_splits, $1::jsonb)`,
+                        [JSON.stringify(splits)]
                     );
                 }
+            } else {
+                for (const split of splits) await upsertInPlace(client, 'table_bill_splits', split);
+                const keep = splits.map((r: any) => Number(r.id));
+                const gone = await client.query(
+                    `SELECT id FROM table_bill_splits WHERE table_bill_id = $1 AND NOT (id = ANY($2::bigint[]))`,
+                    [id, keep]
+                );
+                for (const row of gone.rows) await deleteTolerant(client, 'table_bill_splits', Number(row.id));
             }
-            touched.add('table_bills'); touched.add('table_bill_payments');
-            if (replaceSplits) touched.add('table_bill_splits');
+            const payments = paymentsByBill.get(id) ?? [];
+            if (payments.length) {
+                await client.query(
+                    `INSERT INTO table_bill_payments SELECT * FROM jsonb_populate_recordset(NULL::table_bill_payments, $1::jsonb)`,
+                    [JSON.stringify(payments)]
+                );
+            }
+            touched.add('table_bills'); touched.add('table_bill_payments'); touched.add('table_bill_splits');
         };
         // Prima i conti (anche quelli presi per dipendenza): comande e
         // documenti fiscali del lotto li citano, e sul cloud le FK sono vive.

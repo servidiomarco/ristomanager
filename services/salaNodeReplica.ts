@@ -284,6 +284,8 @@ export interface SalaNodeReplicaOpts {
     onCloudEvent?: (event: string) => void;
     /** Gli effetti locali dopo un lotto del cloud applicato (fase B3). */
     onApplied?: (tenantId: number, events: ReplicaEvent[]) => Promise<void>;
+    /** Le chiamate del cloud al nodo (fase B3b), per nome. */
+    rpc?: Record<string, (payload: any) => Promise<any>>;
 }
 
 export const startSalaNodeReplica = (opts?: SalaNodeReplicaOpts): void => {
@@ -380,6 +382,15 @@ export const startSalaNodeReplica = (opts?: SalaNodeReplicaOpts): void => {
     socket.on('node:pull', (req, ack) => { if (typeof ack === 'function') void serveNodePull(req, ack); });
     socket.on('node:rows', (req, ack) => { if (typeof ack === 'function') void serveNodeRows(req, ack); });
     socket.on('node:status', (req, ack) => { if (typeof ack === 'function') void serveNodeStatus(req, ack); });
+    // Le chiamate del cloud (fase B3b: la quota del QR su un conto del nodo).
+    socket.on('node:rpc', (req: any, ack: any) => {
+        if (typeof ack !== 'function') return;
+        const handler = opts?.rpc?.[String(req?.method)];
+        if (!handler) return ack({ ok: false, error: 'unknown_method' });
+        handler(req?.payload)
+            .then((result) => ack({ ok: true, result }))
+            .catch((err: any) => ack({ ok: false, error: err?.message || String(err) }));
+    });
     let connErrLogged = 0;
     socket.on('connect_error', (err) => {
         if (Date.now() - connErrLogged > 60_000) {
