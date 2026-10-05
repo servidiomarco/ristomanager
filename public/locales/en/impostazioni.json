@@ -30,7 +30,8 @@
       "Cassa": "Till",
       "Chat staff": "Staff chat",
       "Recensioni": "Reviews",
-      "Asporto": "Takeaway"
+      "Asporto": "Takeaway",
+      "HACCP": "HACCP"
     },
     "p": {
       "view": "View",
@@ -47,7 +48,10 @@
       "ordersExpedite": "Pass — fire the courses",
       "ordersVoid": "Void sent lines",
       "takeawayView": "View takeaway orders",
-      "takeawayManage": "Manage takeaway orders"
+      "takeawayManage": "Manage takeaway orders",
+      "haccpView": "View logs and reports",
+      "haccpRecord": "Record and correct",
+      "haccpManage": "Set up points and limits"
     }
   },
   "prom": {

@@ -145,6 +145,21 @@ export async function provisionTenant(input: ProvisionTenantInput): Promise<Prov
             [tenantId]
         );
 
+        // Promemoria di sistema dell'HACCP: le migration li seminano solo per
+        // i ristoranti che esistevano già, e un ristorante nuovo resterebbe
+        // senza l'avviso delle temperature mancanti e delle scadenze. Tacciono
+        // da soli finché il registro non si usa.
+        await client.query(
+            `INSERT INTO reminders
+                (tenant_id, title, description, kind, frequency, schedule_time, target_roles, active, system_key)
+             VALUES
+                ($1, 'Temperature HACCP', 'Avvisa se a quest''ora mancano rilevazioni nel registro temperature di oggi.',
+                 'RECURRING', 'DAILY', '11:00', ARRAY['OWNER', 'GENERAL_MANAGER', 'MANAGER', 'KITCHEN']::TEXT[], TRUE, 'HACCP_TEMPERATURES'),
+                ($1, 'Scadenze HACCP', 'Avvisa 30 giorni prima, 7 giorni prima e il giorno stesso della scadenza di attestati, documenti e interventi.',
+                 'RECURRING', 'DAILY', '09:00', ARRAY['OWNER', 'GENERAL_MANAGER', 'MANAGER']::TEXT[], TRUE, 'HACCP_EXPIRIES')`,
+            [tenantId]
+        );
+
         // Entitlement: tutti spenti se non richiesti esplicitamente — gli
         // add-on si vendono, non si regalano. Le righe nascono comunque tutte
         // e tre, così il pannello le vede e i toggle sono UPDATE, non INSERT.

@@ -69,6 +69,17 @@ describe('staff, haccp, inventario', () => {
     });
 
     describe('haccp', () => {
+        // Le postazioni sono dati del ristorante: le due celle del test si
+        // creano come le creerebbe il titolare da HACCP → Configura.
+        beforeAll(async () => {
+            for (const label of ['Frigo carne', 'Frigo pesce']) {
+                const res = await api().post('/haccp/points').set(bearer(token)).send({
+                    register: 'TEMPERATURE', label, maxTemp: 4,
+                });
+                expect([201, 409]).toContain(res.status);
+            }
+        });
+
         it('la seconda lettura temperatura sulla stessa cella aggiorna, non duplica', async () => {
             const first = await api().post('/haccp/temperatures').set(bearer(token)).send({
                 date: '2026-09-02',
@@ -88,7 +99,9 @@ describe('staff, haccp, inventario', () => {
                 note: 'ricontrollo serale',
             });
             expect(second.status).toBe(201);
-            // Upsert su (tenant_id, date, location): stessa riga, valori nuovi.
+            // Upsert sulla riga viva di (giorno, postazione, rilevazione):
+            // stessa riga, valori nuovi. Chi l'ha scritta la corregge entro 15
+            // minuti senza motivo; lo storico tiene comunque l'originale.
             expect(second.body.id).toBe(firstId);
             expect(second.body.temperature).toBe(2.8);
             expect(second.body.note).toBe('ricontrollo serale');

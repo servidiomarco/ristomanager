@@ -26,7 +26,7 @@ const VIEW_PERMISSIONS: Record<ViewState, string> = {
   [ViewState.ASPORTO]: 'takeaway:view',
   [ViewState.ATTIVITA]: 'dashboard:view',
   [ViewState.LISTA_DELLA_SPESA]: 'dashboard:view',
-  [ViewState.HACCP]: 'dashboard:view',
+  [ViewState.HACCP]: 'haccp:view',
   [ViewState.CONVERSAZIONI]: 'voice_calls:view',
   [ViewState.MESSAGGI]: 'reservations:view',
   [ViewState.CHAT_STAFF]: 'staffchat:use',
