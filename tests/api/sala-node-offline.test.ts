@@ -376,5 +376,25 @@ describe('nodo di sala a linea giù: configurazione allineata e proroga degli ac
         expect(typeof isola.uplink_down_since).toBe('string');
         expect(isola.pending_up).toBeGreaterThanOrEqual(1);
         expect(isola.lag_up_s).toBeGreaterThanOrEqual(0);
+
+        // In isola il preconto esce senza il QR di pagamento: il conto è nato
+        // qui a linea giù, il cloud non lo conosce e l'ospite col 4G
+        // leggerebbe «conto non trovato».
+        const nodePost = (p: string, body: any) => fetch(`${nodeBase}${p}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ownerAccess}` },
+            body: JSON.stringify(body),
+        });
+        const conto = await nodePost(`/tables/${offlineTableId}/bill`, { total_cents: 1500, covers: 2 });
+        expect(conto.status).toBe(201);
+        const billId = (await conto.json()).bill.id;
+        const preconto = await nodePost('/print-jobs', { bill_id: billId, kind: 'PRECONTO', origin: 'https://crm.example.com' });
+        expect(preconto.status).toBe(201);
+        const job = await nodeDb!.query(
+            `SELECT payload FROM print_jobs WHERE kind = 'PRECONTO' AND (payload->>'bill_id')::bigint = $1 ORDER BY id DESC LIMIT 1`,
+            [billId]
+        );
+        expect(job.rows[0]).toBeTruthy();
+        expect(job.rows[0].payload.share_url).toBeNull();
     }, 60_000);
 });
