@@ -207,6 +207,7 @@
   "ddtScan": {
     "check": "Check the lines and add the measured temperature.",
     "empty": "No lines read: try a sharper photo.",
+    "emptyWhy": "Nothing to record: {{motivo}}",
     "failed": "Reading failed",
     "include": "Record {{nome}}",
     "notConfigured": "Delivery note reading is not enabled.",

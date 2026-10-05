@@ -123,7 +123,7 @@ export const ReceiptsSection: React.FC<{
           suppliers={suppliers}
           limits={limits}
           onAdd={onAdd}
-          onFillForm={(sup, ddt) => { setSupplier(sup); setDdtNumber(ddt); }}
+          onFillForm={(sup, ddt) => { if (sup.trim()) setSupplier(sup); if (ddt.trim()) setDdtNumber(ddt); }}
         />
       )}
       {editable && (
@@ -365,8 +365,15 @@ const DdtScan: React.FC<{
         return;
       }
       const p = await haccpApiService.scanDdt({ contentType: prepared.contentType, data: prepared.data });
+      // Nessuna riga non vuol dire sempre foto sfocata: una bolla di soli
+      // articoli non alimentari torna vuota di proposito, e il perché il
+      // modello lo scrive negli avvisi. Fornitore e documento letti passano
+      // comunque al modulo.
       if (p.lines.length === 0) {
-        setError(t('ddtScan.empty', 'Nessuna riga letta: prova con una foto più nitida.'));
+        onFillForm(p.supplierMatch?.name ?? p.supplier ?? '', p.ddtNumber ?? '');
+        setError(p.warnings.length > 0
+          ? t('ddtScan.emptyWhy', 'Nessun prodotto da registrare: {{motivo}}', { motivo: p.warnings.join(' · ') })
+          : t('ddtScan.empty', 'Nessuna riga letta: prova con una foto più nitida.'));
         return;
       }
       setProposal(p);

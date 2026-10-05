@@ -207,6 +207,7 @@
   "ddtScan": {
     "check": "Controlla le righe e aggiungi la temperatura misurata.",
     "empty": "Nessuna riga letta: prova con una foto più nitida.",
+    "emptyWhy": "Nessun prodotto da registrare: {{motivo}}",
     "failed": "Lettura non riuscita",
     "include": "Registra {{nome}}",
     "notConfigured": "La lettura delle bolle non è attiva.",
