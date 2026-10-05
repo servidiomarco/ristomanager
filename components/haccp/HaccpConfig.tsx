@@ -10,6 +10,8 @@ import {
 import { HACCP_REGISTER_FREQUENCIES, formatHaccpLimit } from '../../utils/haccp';
 import { Callout, ModalShell, SegmentedControl, dsButton, dsInput, dsSelect, dsTextarea } from '../ds';
 import { HaccpLimitsCard } from './HaccpLimitsCard';
+import { HaccpSensorsCard } from './HaccpSensorsCard';
+import { HaccpLabelPresetsCard } from './HaccpLabels';
 import { Card, CardHeader, TFunc, chip, emptyNote, formatNumber, frequencyLabel, parseNumber, quietIconButton, rowList } from './haccpUi';
 
 
@@ -204,6 +206,8 @@ export const HaccpConfig: React.FC<{ refreshKey: number }> = ({ refreshKey }) =>
         );
       })}
       <HaccpLimitsCard refreshKey={refreshKey} />
+      <HaccpLabelPresetsCard refreshKey={refreshKey} />
+      <HaccpSensorsCard points={points ?? []} refreshKey={refreshKey} />
       <PointDialog target={editing} onClose={() => setEditing(null)} onSaved={load} />
     </div>
   );

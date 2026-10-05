@@ -2,14 +2,66 @@ import { authApiService } from './authApiService';
 import { socketClient } from './socketClient';
 import { buildApiError, ApiError } from './apiError';
 import type {
-  HaccpDeadline, HaccpDocumentCategory, HaccpFrequency, HaccpInterventionType, HaccpLimits, HaccpPoint, HaccpProcess,
-  HaccpReceiptCategory, HaccpRegister, HaccpTrainingCourse,
+  HaccpDeadline, HaccpDocumentCategory, HaccpFrequency, HaccpInterventionType, HaccpLabelKind, HaccpLimits, HaccpPoint,
+  HaccpProcess, HaccpReceiptCategory, HaccpRegister, HaccpTrainingCourse,
 } from '../utils/haccp';
 
 export type {
-  HaccpDeadline, HaccpDocumentCategory, HaccpFrequency, HaccpInterventionType, HaccpLimits, HaccpPoint, HaccpProcess,
-  HaccpReceiptCategory, HaccpRegister, HaccpTrainingCourse,
+  HaccpDeadline, HaccpDocumentCategory, HaccpFrequency, HaccpInterventionType, HaccpLabelKind, HaccpLimits, HaccpPoint,
+  HaccpProcess, HaccpReceiptCategory, HaccpRegister, HaccpTrainingCourse,
 } from '../utils/haccp';
+
+export interface HaccpSensor {
+  id: number;
+  externalId: string;
+  label: string | null;
+  vendor: string | null;
+  pointId: number | null;
+  active: boolean;
+  lastValue: number | null;
+  lastSeenAt: string | null;
+  battery: number | null;
+  outSince: string | null;
+  createdAt: string;
+}
+
+export interface HaccpLabel {
+  id: string;
+  kind: HaccpLabelKind;
+  labelDate: string;
+  product: string;
+  preparedAt: string;
+  expiryDate: string;
+  lot: string | null;
+  storage: string | null;
+  allergens: string[];
+  note: string | null;
+  copies: number;
+  printer: string | null;
+  printJobId: number | null;
+  printedByUserName: string | null;
+  createdAt: string;
+}
+
+export interface HaccpLabelPreset {
+  id: number;
+  name: string;
+  kind: HaccpLabelKind;
+  shelfLifeDays: number;
+  storage: string | null;
+  allergens: string[];
+  sortOrder: number;
+  active: boolean;
+}
+
+export interface HaccpDdtProposal {
+  supplier: string | null;
+  supplierMatch: { id: string; name: string } | null;
+  ddtNumber: string | null;
+  documentDate: string | null;
+  lines: Array<{ product: string; lotNumber: string | null; expiryDate: string | null; quantity: string | null; category: HaccpReceiptCategory | null }>;
+  warnings: string[];
+}
 
 const API_URL = import.meta.env.VITE_API_URL || "https://ristomanager-production.up.railway.app";
 
@@ -244,6 +296,8 @@ export interface HaccpDay {
   limits?: HaccpLimits;
   /** Attestati, documenti e interventi scaduti o in scadenza. */
   deadlines?: HaccpDeadline[];
+  /** I sensori assegnati a una postazione, con l'ultima lettura. */
+  sensors?: HaccpSensor[];
   canManage: boolean;
 }
 
@@ -259,6 +313,7 @@ export interface HaccpReportData {
   production: HaccpProductionLog[];
   calibrations?: HaccpCalibration[];
   interventions?: HaccpIntervention[];
+  labels?: HaccpLabel[];
   nonconformities: HaccpNonConformity[];
   changes: HaccpChange[];
   limits?: HaccpLimits;
@@ -565,6 +620,57 @@ class HaccpApiService {
 
   getAllergens(): Promise<{ restaurantName: string | null; dishes: HaccpAllergenDish[] }> {
     return get('/allergens');
+  }
+
+  // --- Sensori ---
+  getSensors(): Promise<{ sensors: HaccpSensor[]; token: string | null }> {
+    return get('/sensors');
+  }
+
+  regenerateSensorToken(): Promise<{ token: string }> {
+    return send('POST', '/sensors/token', {});
+  }
+
+  updateSensor(id: number, input: { pointId?: number | null; label?: string | null; active?: boolean }): Promise<HaccpSensor> {
+    return send('PUT', `/sensors/${id}`, input);
+  }
+
+  getSensorReadings(id: number, hours = 24): Promise<{ readings: Array<{ measuredAt: string; value: number }> }> {
+    return get(`/sensors/${id}/readings?hours=${hours}`);
+  }
+
+  /** L'indirizzo a cui i gateway dei sensori mandano le letture. */
+  sensorIngestUrl(): string {
+    return `${API_URL}/haccp/sensors/ingest`;
+  }
+
+  // --- Etichette ---
+  getLabelConfig(): Promise<{ presets: HaccpLabelPreset[]; printers: string[] }> {
+    return get('/labels/config');
+  }
+
+  getLabels(date: string): Promise<{ labels: HaccpLabel[] }> {
+    return get(`/labels?date=${date}`);
+  }
+
+  createLabel(input: {
+    kind: HaccpLabelKind; product: string; preparedAt?: string; expiryDate: string; lot?: string | null; storage?: string | null;
+    allergens?: string[]; note?: string | null; copies?: number; printer?: string | null; sourceEntity?: string | null; sourceId?: string | null;
+  }): Promise<HaccpLabel> {
+    return send('POST', '/labels', input);
+  }
+
+  createLabelPreset(input: Partial<Omit<HaccpLabelPreset, 'id' | 'sortOrder'>> & { name: string; shelfLifeDays: number }): Promise<HaccpLabelPreset> {
+    return send('POST', '/label-presets', input);
+  }
+
+  updateLabelPreset(id: number, input: Partial<Omit<HaccpLabelPreset, 'id' | 'sortOrder'>>): Promise<HaccpLabelPreset> {
+    return send('PUT', `/label-presets/${id}`, input);
+  }
+
+  // --- Lettura AI della bolla ---
+  scanDdt(file: { contentType: string; data: string }): Promise<HaccpDdtProposal> {
+    return send('POST', '/receipts/scan', file);
   }
 }
 

@@ -594,7 +594,18 @@ Registro di autocontrollo digitale, compilabile dal telefono davanti alla cella 
 3. **Pulizie** attrezzature e superfici, con le frequenze sopra.
 4. **Taratura termometri** — ghiaccio fondente, ebollizione o termometro di riferimento; il registro dice quali sono da fare nel loro periodo. Uno scarto oltre il limite apre una non conformità, già chiusa se il termometro è stato ricalibrato o sostituito sul momento.
 5. **Ricevimento merci** — prodotto, **fornitore** (dall'anagrafica della Lista della spesa), **documento di trasporto**, tipo di merce con la sua soglia, lotto, **scadenza**, temperatura, imballo integro, Accettato/Respinto. Il modulo avvisa prima di registrare se la merce è fuori temperatura, scaduta o con l'imballo rovinato.
+   - **Leggi la bolla** (AI): dalla foto o dal PDF del documento di trasporto il modulo propone fornitore (agganciato all'anagrafica quando il nome corrisponde), numero del documento e righe con prodotto, tipo, lotto e scadenza. Si correggono, si aggiunge la temperatura misurata e si registrano tutte insieme; niente va a registro senza conferma. Il consumo compare in Consumi AI.
 6. **Processi** con orari e temperature vere: abbattimento, surgelazione, bonifica anti-Anisakis, cottura, rinvenimento, mantenimento a caldo, scongelamento, sanificazione delle verdure, campione testimone dei banchetti. Abbattimenti, bonifiche e scongelamenti si **avviano e si chiudono** anche a ore di distanza (i cicli aperti restano in cima al registro, anche il giorno dopo). L'esito si calcola sui limiti del manuale e si vede già mentre si compila; fuori limite si apre una non conformità. Si annotano anche attrezzatura, quantità, lotti degli ingredienti e scadenza assegnata.
+
+**Etichette dei contenitori**
+- Dal pulsante **Etichetta** del registro, o dalla riga di un processo (con prodotto, lotto e scadenza già scritti): prodotto, «prodotto / aperto / scongelato il», **scade il**, lotto interno, conservazione, allergeni (i 14 del Reg. UE 1169/2011), note e copie.
+- I **modelli** (Configura → Modelli di etichetta) danno durata in giorni, conservazione e allergeni con un tocco: la scadenza si calcola dalla data di partenza e resta correggibile. Per partire: preparazione cotta, conserva aperta, prodotto scongelato.
+- Esce sulla **stampante termica** scelta (quelle di Impostazioni → Stampanti, tramite l'agente di stampa del locale) o **dal browser** su una stampante di etichette da 62 mm. Ogni etichetta resta registrata con chi l'ha stampata e compare nel report.
+
+**Sensori di temperatura**
+- I sensori wireless scrivono le temperature da soli: in Configura → Sensori di temperatura si crea l'indirizzo con il token da dare al gateway dei sensori (formato JSON semplice o il webhook dei gateway Monnit).
+- Un sensore mai visto compare alla prima lettura, **da assegnare** a una postazione. Assegnato, compila la rilevazione della sua fascia (orari in Configura → Limiti, di serie 9:00, 16:00 e 21:00) nelle due ore successive, se nessuno l'ha già scritta; la riga porta «Sensore» e il suo nome.
+- Fuori soglia per più di 30 minuti (configurabile) apre **una** non conformità per escursione e avvisa titolare, direzione e cucina; un sensore senza segnale da più di un'ora avvisa. Nel registro di oggi ogni postazione con sensore mostra l'ultimo valore e l'ora.
 
 Ogni riga registra **chi l'ha compilata e quando**, con il nome della persona. Una riga scritta in un giorno diverso da quello del registro (il foglio di ieri compilato oggi) lo dice. Più telefoni sullo stesso registro si vedono a vicenda in tempo reale.
 
@@ -622,7 +633,7 @@ Ogni riga registra **chi l'ha compilata e quando**, con il nome della persona. U
 **Report per periodo**
 - Oggi, questa settimana, questo mese, il mese scorso o un intervallo a scelta (fino a un anno). Prima di stampare il riepilogo segnala i giorni senza registrazioni, i fuori soglia e le non conformità ancora aperte.
 - **Fascicolo per l'ispezione**: lo stesso periodo con in testa i documenti in archivio (con la validità) e la formazione del personale, e gli interventi esterni del periodo.
-- Il foglio stampato ha la **scheda mensile** delle temperature (postazioni per giorni, fuori soglia in rosso), degli oli (con i composti polari) e delle pulizie, poi ricevimenti con fornitore, documento e scadenza, processi con il loro esito, tarature, **non conformità con le azioni correttive**, **correzioni e annullamenti** con l'originale e il motivo, le righe scritte in un giorno diverso e i **limiti applicati**. In testa il nome del ristorante, in fondo lo spazio per la firma del responsabile.
+- Il foglio stampato ha la **scheda mensile** delle temperature (postazioni per giorni, fuori soglia in rosso), degli oli (con i composti polari) e delle pulizie, poi ricevimenti con fornitore, documento e scadenza, processi con il loro esito, etichette stampate, tarature, **non conformità con le azioni correttive**, **correzioni e annullamenti** con l'originale e il motivo, le righe scritte in un giorno diverso e i **limiti applicati**. In testa il nome del ristorante, in fondo lo spazio per la firma del responsabile.
 
 Avvisi sul registro temperature:
 
@@ -761,6 +772,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-05 | HACCP | Nell'HACCP arrivano le etichette dei contenitori (prodotto, aperto o scongelato il, scadenza, lotto, allergeni) da stampare sulla termica o dal browser, con i modelli di durata in Configura; i sensori wireless di temperatura che compilano il registro da soli e avvisano se una cella resta fuori soglia; e «Leggi la bolla», che dalla foto del documento di trasporto propone le righe del ricevimento. |
 | 2026-10-05 | HACCP | Nella nuova scheda Archivio dell'HACCP: la formazione del personale con le scadenze degli attestati, gli interventi delle ditte esterne (disinfestazione, olio esausto, analisi), i documenti con il loro file e il libro allergeni da stampare. Le scadenze compaiono anche nel registro del giorno e arrivano come promemoria; dal Report si stampa il fascicolo per l'ispezione. |
 | 2026-10-05 | HACCP | Nel registro HACCP arrivano i processi con orari e temperature vere (abbattimento, surgelazione, bonifica anti-Anisakis, cottura, rinvenimento, caldo, scongelamento, sanificazione delle verdure, campioni testimone), l'olio con i composti polari, il ricevimento con fornitore, documento di trasporto e scadenza, la taratura dei termometri e la scheda Rintracciabilità per seguire un lotto e avviare un richiamo. I limiti del tuo manuale si impostano in Configura. |
 | 2026-10-05 | HACCP | Il registro HACCP diventa quello del tuo locale: postazioni, limiti, rilevazioni al giorno e frequenze delle pulizie si configurano in HACCP → Configura. Le registrazioni non si cancellano più ma si annullano con un motivo, ogni correzione tiene l'originale, un fuori soglia o una merce respinta aprono una non conformità da chiudere con l'azione correttiva, e il report si stampa per giorno, settimana o mese. |
