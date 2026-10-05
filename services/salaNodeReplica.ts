@@ -22,6 +22,10 @@ import { isServiceNode } from './topology.js';
 import { applyReplicaBatch, CONVERGED_TYPES, type ReplicaEvent, type WantedRows, type FetchedRows } from './replicaApply.js';
 
 const PULL_LIMIT = 500;
+// Dopo quanto silenzio l'uplink si considera giù: un socket che si
+// riconnette in pochi secondi (riavvio di Railway, Wi-Fi che balla) non
+// deve far scattare la proroga degli accessi (salaNodeAccess).
+const UPLINK_DOWN_AFTER_MS = Math.max(1_000, Number(process.env.SALA_NODE_UPLINK_DOWN_AFTER_MS) || 30_000);
 const POLL_MS = Math.max(1_000, Number(process.env.SALA_NODE_PULL_INTERVAL_MS) || 15_000);
 const WAKE_DEBOUNCE_MS = 150;
 
@@ -158,11 +162,24 @@ const serveNodeRows = async (req: any, ack: (res: any) => void): Promise<void> =
     }
 };
 
+// Lo stato dell'uplink verso il cloud. Parte «giù» dall'avvio: un nodo
+// acceso a linea caduta non si collegherà mai, e deve saperlo.
+let uplinkConnected = false;
+let uplinkDownSince = Date.now();
+
+/** Il cloud non risponde da almeno UPLINK_DOWN_AFTER_MS: il nodo lavora
+ *  in isola. Solo col profilo service-node ha senso. */
+export const isCloudUplinkDown = (): boolean =>
+    isServiceNode && !uplinkConnected && Date.now() - uplinkDownSince >= UPLINK_DOWN_AFTER_MS;
+
 export interface SalaNodeReplicaOpts {
     getClients?: () => number;
     /** Rigioca un envelope relay:event ai client LAN del nodo (room per
      *  room, come faceva il relay tappa-3). Iniettato da server.ts. */
     relayToLocal?: (rooms: string[], event: string, data: any) => void;
+    /** Ogni tipo di evento annunciato dal cloud: la sincronizzazione della
+     *  configurazione (salaNodeConfigSync) lo usa come sveglia. */
+    onCloudEvent?: (event: string) => void;
 }
 
 export const startSalaNodeReplica = (opts?: SalaNodeReplicaOpts): void => {
@@ -206,8 +223,13 @@ export const startSalaNodeReplica = (opts?: SalaNodeReplicaOpts): void => {
         auth: { token: nodeToken() },
     });
     socket.on('connect', () => {
+        uplinkConnected = true;
         console.log('[replica] uplink connesso al cloud');
         void drain();
+    });
+    socket.on('disconnect', () => {
+        if (uplinkConnected) uplinkDownSince = Date.now();
+        uplinkConnected = false;
     });
     // Il battito: il bridge marca il nodo online solo se node:stats arriva
     // entro 30s — il relay tappa-3 lo mandava, il full-server pure (trovato
@@ -232,6 +254,9 @@ export const startSalaNodeReplica = (opts?: SalaNodeReplicaOpts): void => {
         // il loro broadcast lo fa il dispatcher all'import (catch-up
         // post-outage compreso), e raddoppiarli = doppi toast.
         wake();
+        try {
+            if (typeof envelope?.event === 'string') opts?.onCloudEvent?.(envelope.event);
+        } catch { /* best effort */ }
         try {
             if (envelope && Array.isArray(envelope.rooms) && typeof envelope.event === 'string'
                 && !CONVERGED_TYPES.has(envelope.event)) {

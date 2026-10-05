@@ -228,10 +228,14 @@ class AuthApiService {
   // session keeper: rinnovare in anticipo evita che la scadenza cada nel
   // mezzo di un'azione (il 401+retry funziona, ma il socket resta giù
   // finché qualcuno non rifà una richiesta).
+  // La soglia è metà della vita del token (6h): se la linea cade, il
+  // palmare ha sempre almeno 3 ore di token buono, più la proroga del nodo
+  // di sala (12h dopo la scadenza). Con 30 minuti un guasto lungo poteva
+  // cominciare con il token già agli sgoccioli.
   async refreshIfExpiring(): Promise<void> {
     if (!this.getRefreshToken()) return;
     const expiry = this.accessTokenExpiryMs();
-    if (expiry !== null && expiry - Date.now() > 30 * 60 * 1000) return;
+    if (expiry !== null && expiry - Date.now() > 3 * 60 * 60 * 1000) return;
     await this.refreshToken();
   }
 

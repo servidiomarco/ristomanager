@@ -199,10 +199,27 @@ export const fetchNodeAware = async (url: string, options: RequestInit = {}): Pr
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), NODE_FETCH_TIMEOUT_MS);
     try {
-        return await fetch(url, { ...options, signal: controller.signal });
+        const response = await fetch(url, { ...options, signal: controller.signal });
+        if (response.status === 401 && isNodeUrl(url)) void noteNodeUnauthorized(response.clone());
+        return response;
     } finally {
         clearTimeout(timer);
     }
+};
+
+/** Il nodo ha rifiutato il token perché la proroga a linea giù è finita
+ *  (fase A2): il refresh col cloud non può riuscire, e senza un avviso
+ *  l'app sembrerebbe collegata con ogni azione che fallisce. Lo dice a
+ *  chi ascolta (AuthContext) con un evento globale. */
+const noteNodeUnauthorized = async (response: Response): Promise<void> => {
+    try {
+        const body = await response.json();
+        if (body?.error === 'session_expired_offline') signalOfflineSessionExpired();
+    } catch { /* corpo non JSON: un 401 qualunque */ }
+};
+
+export const signalOfflineSessionExpired = (): void => {
+    window.dispatchEvent(new CustomEvent('sala-node:session-expired-offline'));
 };
 
 /** Da chiamare nel catch di un fetch: se l'URL era del nodo, segna il

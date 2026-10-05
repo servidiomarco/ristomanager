@@ -5,6 +5,7 @@
 // Il database indicato da DATABASE_URL viene DROPPATO e ricreato a ogni run:
 // per questo il setup rifiuta qualunque host non locale — la stessa guardia
 // degli script in scripts/ (dev-comande.sh, test-locale.sh).
+import { generateKeyPairSync } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
@@ -92,6 +93,13 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     process.env.CLOUDFLARE_API_TOKEN = '';
     process.env.ACME_STAGING = '1';
 
+    // La chiave privata ES256 della suite: la genera il setup (non il
+    // server) così i test possono coniare token che il server non darebbe
+    // mai — scaduti da ore, di un altro tenant — per provare la proroga del
+    // nodo di sala a linea giù (fase A2). In process.env la leggono i worker.
+    process.env.TEST_JWT_ES256_PRIVATE_KEY = generateKeyPairSync('ec', { namedCurve: 'prime256v1' })
+        .privateKey.export({ type: 'pkcs8', format: 'pem' }) as string;
+
     const port = Number(process.env.TEST_API_PORT || 3199);
     const child: ChildProcess = spawn('node', [distServer], {
         env: {
@@ -99,10 +107,10 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
             DATABASE_URL: serverDbUrl,
             PORT: String(port),
             JWT_SECRET: 'test-jwt-secret',
-            // Tutta la suite firma gli access token ES256 (fase A1), con la
-            // coppia usa e getta che il server si genera fuori produzione: i
-            // nodi di prova li verificano con la sola chiave pubblica.
+            // Tutta la suite firma gli access token ES256 (fase A1): i nodi
+            // di prova li verificano con la sola chiave pubblica.
             JWT_SIGN_ES256: '1',
+            JWT_ES256_PRIVATE_KEY: process.env.TEST_JWT_ES256_PRIVATE_KEY,
             // La suite fa più POST pubblici al minuto dallo stesso IP di
             // quanti il limiter di produzione ne conceda (5).
             PUBLIC_BOOKING_RATE_LIMIT: '1000',

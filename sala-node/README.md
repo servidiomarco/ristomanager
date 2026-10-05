@@ -269,3 +269,24 @@ Rotazione futura della chiave: la pubblica uscente
 Tornare indietro: togliere `JWT_SIGN_ES256` (si torna a firmare HS256); al
 passo 3 già fatto, rimettere anche `JWT_HS256_ACCEPT` e il segreto nel
 `.cmd`.
+
+
+## Accesso a linea giù e configurazione allineata (fase A2)
+
+- **Proroga degli accessi.** Login e refresh vivono nel cloud. A linea giù
+  (uplink muto da `SALA_NODE_UPLINK_DOWN_AFTER_MS`, 30 s di default) il nodo
+  accetta un access token SCADUTO da meno di `SALA_NODE_OFFLINE_GRACE_HOURS`
+  (12 di default), del suo tenant, di un utente attivo nella copia locale.
+  Oltre risponde 401 `session_expired_offline` e l'app mostra «Accesso
+  scaduto senza linea» finché la linea non torna. I client rinnovano il
+  token a metà vita (3 ore), quindi un guasto comincia sempre con almeno
+  3 ore di token buono.
+- **Un solo ristorante.** Il nodo rifiuta i token di un tenant diverso dal
+  suo (quello del cursore di replica), e prima del bootstrap rifiuta tutto.
+- **Configurazione allineata.** Ogni 2 minuti (`SALA_NODE_CONFIG_SYNC_MS`),
+  e subito quando il cloud annuncia una modifica di menu, sale o personale,
+  il nodo chiede `POST /sala-node/config` con le impronte delle tabelle di
+  configurazione e applica solo quelle cambiate (la rubrica clienti ogni
+  15 minuti). Nel log: `[config] allineate dal cloud: dishes, users`. Gli
+  hash delle password non scendono mai.
+

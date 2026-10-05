@@ -244,6 +244,32 @@ export class AuthService {
     }
   }
 
+  // Come verifyAccessToken, ma un token SCADUTO con firma valida non è null:
+  // torna con expired=true e la scadenza. Serve al nodo di sala, che a linea
+  // giù concede una proroga (auth/authMiddleware.ts, salaNodeAccess). La
+  // firma si verifica comunque per intero: si ignora solo exp.
+  static inspectAccessToken(token: string): { payload: TokenPayload; expired: boolean; expiresAtMs: number | null } | null {
+    const valid = AuthService.verifyAccessToken(token);
+    if (valid) {
+      const exp = (valid as any).exp;
+      return { payload: valid, expired: false, expiresAtMs: typeof exp === 'number' ? exp * 1000 : null };
+    }
+    try {
+      const header = (jwt.decode(token, { complete: true }) as jwt.Jwt | null)?.header;
+      let payload: any = null;
+      if (header?.alg === 'ES256' && typeof header.kid === 'string') {
+        const key = getTrustedPublicKey(header.kid);
+        if (key) payload = jwt.verify(token, key, { algorithms: ['ES256'], ignoreExpiration: true });
+      } else if (header?.alg === 'HS256' && JWT_SECRET && hs256Accepted()) {
+        payload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'], ignoreExpiration: true });
+      }
+      if (!payload || typeof payload.exp !== 'number') return null;
+      return { payload: payload as TokenPayload, expired: true, expiresAtMs: payload.exp * 1000 };
+    } catch {
+      return null;
+    }
+  }
+
   // Verify refresh token
   static verifyRefreshToken(token: string): TokenPayload | null {
     try {

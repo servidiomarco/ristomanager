@@ -30,12 +30,17 @@ import { SERVER_PROFILE, isServiceNode } from './services/topology.js';
 // Prima di ogni altra riga di log: sul nodo la task è headless e il file è
 // l'unico posto dove leggere (lezione del 23/09).
 initSalaNodeFileLog();
+// Solo nodo (fase A2): il tenant del nodo e la proroga degli accessi a
+// linea giù, prima che arrivi la prima richiesta.
+if (isServiceNode) setNodeAccessPolicy(salaNodeAccessPolicy);
 import { scheduleSalaNodeBootstrap } from './services/salaNodeBootstrap.js';
 import { loadNodeTlsMaterial, startNodeCredentialsRefresh } from './services/salaNodeLocalTls.js';
 import { initSalaNodeFileLog } from './services/salaNodeLog.js';
 import { startSalaNodeWatchdog } from './services/salaNodeWatchdog.js';
 import { createServer as createHttpsServer, type Server as HttpsServer } from 'https';
 import { startSalaNodeReplica } from './services/salaNodeReplica.js';
+import { salaNodeAccessPolicy, startSalaNodeAccess } from './services/salaNodeAccess.js';
+import { startSalaNodeConfigSync, kickConfigSync } from './services/salaNodeConfigSync.js';
 import { VOICE_CHANNEL, WHATSAPP_CHANNEL, type ToolOutcome } from './services/bookingTools.js';
 import { TENANT_FEATURES, getTenantFeatures, isFeatureEnabledForTenant, invalidateTenantFeaturesCache, clearTenantFeaturesCache, type TenantFeature } from './services/entitlements.js';
 import { clearTenantLocaleCache, getTenantLocale, sqlTimeZone } from './services/tenantLocale.js';
@@ -97,7 +102,7 @@ import { isWinePairingConfigured, suggestWinePairings } from './services/aiWineP
 import { Shift, PaymentStatus, UserRole } from './types.js';
 import authRoutes from './auth/authRoutes.js';
 import logRoutes from './activityLogs/logRoutes.js';
-import { authenticate, authorize, requirePermission, requireAnyPermission, requireStepUp } from './auth/authMiddleware.js';
+import { authenticate, authorize, requirePermission, requireAnyPermission, requireStepUp, setNodeAccessPolicy } from './auth/authMiddleware.js';
 import { AuthService } from './auth/authService.js';
 import { publicKeysForNodes } from './auth/jwtKeys.js';
 import { RolePermissionService, isReportsAdmin, ALL_PERMISSIONS, ALL_PERMISSION_KEYS, type Permission } from './auth/permissionService.js';
@@ -38979,6 +38984,58 @@ app.post('/sala-node/rows', salaNodeAuth, async (req: any, res) => {
     }
 });
 
+// --- La configurazione allineata dopo il bootstrap (fase A2) ---------------
+// Lo snapshot porta menu, listini, utenti, stampanti, impostazioni... una
+// volta sola. Il log degli eventi porta solo il dominio servizio: un piatto
+// aggiunto nel cloud alle 18 non arrivava mai nel database del nodo, e con
+// l'autorità al nodo il cameriere non poteva batterlo. Idem un utente
+// disattivato, o creato dopo l'installazione. Qui il nodo chiede le tabelle
+// di configurazione (quelle dello snapshot senza finestra temporale) con
+// l'impronta che ne conosce; il cloud risponde le righe SOLO delle tabelle
+// cambiate. L'impronta si calcola in Postgres sulle righe senza le colonne
+// segrete, così un login (last_login) non sposta niente che conti.
+const CONFIG_SYNC_TABLES: SnapshotTableSpec[] = SNAPSHOT_TABLES.filter(spec => !spec.where?.includes('$2'));
+const CONFIG_SYNC_BY_NAME = new Map(CONFIG_SYNC_TABLES.map(spec => [spec.name, spec]));
+
+app.post('/sala-node/config', salaNodeAuth, async (req: any, res) => {
+    try {
+        const tenantId = req.salaNodeTenantId as number;
+        const asked = req.body?.tables && typeof req.body.tables === 'object' ? req.body.tables : {};
+        const changed: Record<string, { hash: string; rows: any[] }> = {};
+        const unchanged: string[] = [];
+        for (const [name, known] of Object.entries(asked)) {
+            const spec = CONFIG_SYNC_BY_NAME.get(name);
+            if (!spec) continue;
+            const tenantColumn = spec.name === 'tenants' ? 'id' : 'tenant_id';
+            const where = `${tenantColumn} = $1${spec.where ? ` AND (${spec.where})` : ''}`;
+            const hashRs = await queryWithRetry(
+                `SELECT md5(COALESCE(string_agg(x, '|' ORDER BY x), '')) AS h
+                   FROM (SELECT (to_jsonb(t) - $2::text[])::text AS x FROM ${spec.name} t WHERE ${where}) s`,
+                [tenantId, spec.dropColumns ?? []]
+            );
+            const hash = String(hashRs.rows[0].h);
+            if (typeof known === 'string' && known === hash) {
+                unchanged.push(name);
+                continue;
+            }
+            const rowsRs = await queryWithRetry(`SELECT * FROM ${spec.name} WHERE ${where}`, [tenantId]);
+            changed[name] = {
+                hash,
+                rows: spec.dropColumns
+                    ? rowsRs.rows.map((row: any) => {
+                        for (const col of spec.dropColumns!) delete row[col];
+                        return row;
+                    })
+                    : rowsRs.rows,
+            };
+        }
+        res.json({ tenant_id: tenantId, changed, unchanged });
+    } catch (err: any) {
+        console.error('POST /sala-node/config error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 // --- L'interruttore «Servizio completo sul nodo» (tappa 4, fase 4b) --------
 // L'autorità del dominio servizio passa al nodo SOLO da qui, mai dal PUT
 // generico dei flag: spostare l'autorità su un nodo spento o indietro col
@@ -40111,7 +40168,16 @@ const startServer = async () => {
                                 for (const room of rooms) io.to(room).emit(event, data);
                             } catch { /* mai rompere il giro */ }
                         },
+                        onCloudEvent: kickConfigSync,
                     });
+                    // Fase A2, solo nodo: la configurazione (menu, utenti,
+                    // stampanti, impostazioni) resta allineata al cloud, e il
+                    // tenant del nodo si legge dal cursore per la politica
+                    // d'accesso. Sul cloud sono no-op.
+                    if (isServiceNode) {
+                        startSalaNodeAccess();
+                        startSalaNodeConfigSync();
+                    }
                     // Il cane da guardia dell'uplink (no-op sul nodo): push a
                     // OWNER/GM se un nodo con l'ibrido acceso tace oltre soglia.
                     startSalaNodeWatchdog();

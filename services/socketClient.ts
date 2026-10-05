@@ -1,5 +1,5 @@
 import { io, Socket } from 'socket.io-client';
-import { serviceSocketUrl, isNodeUrl, noteNodeFailure } from './apiRouting';
+import { serviceSocketUrl, isNodeUrl, noteNodeFailure, signalOfflineSessionExpired } from './apiRouting';
 
 // Token storage key (must match authApiService)
 const ACCESS_TOKEN_KEY = 'ristomanager_access_token';
@@ -112,6 +112,13 @@ class SocketClient {
       // Verso il cloud invece si insiste all'infinito, com'è sempre stato:
       // non c'è un piano B.
       const uri = (this.socket?.io as any)?.uri as string | undefined;
+      // Il nodo c'è ma la proroga a linea giù è finita (fase A2): non è un
+      // guasto del nodo, aprire il circuito manderebbe al cloud che non
+      // risponde. Si avvisa e basta.
+      if (error.message === 'session_expired_offline') {
+        signalOfflineSessionExpired();
+        return;
+      }
       if (this.reconnectAttempts >= 2 && uri && isNodeUrl(uri)) {
         noteNodeFailure();
         this.reconnectWithToken();
