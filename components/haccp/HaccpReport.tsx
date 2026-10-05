@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, CalendarRange, Printer } from 'lucide-react';
+import { AlertTriangle, CalendarRange, FolderOpen, Printer } from 'lucide-react';
 import { haccpApiService, HaccpReportData } from '../../services/haccpApiService';
 import { addDaysToIso, haccpDaysBetween, haccpPeriodRange, isOutOfRange } from '../../utils/haccp';
 import { printHaccpReport } from '../../utils/printHaccpReport';
@@ -33,6 +33,21 @@ export const HaccpReport: React.FC<{ refreshKey: number }> = ({ refreshKey }) =>
   const [data, setData] = useState<HaccpReportData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [printingDossier, setPrintingDossier] = useState(false);
+
+  /** Il fascicolo per l'ispezione: lo stesso periodo, più documenti validi e
+   *  formazione in corso in testa. Si chiede a parte perché porta l'archivio. */
+  const printDossier = async () => {
+    setPrintingDossier(true);
+    try {
+      const d = await haccpApiService.getReport(range.from, range.to, true);
+      printHaccpReport(d);
+    } catch (e: any) {
+      setError(e?.message || t('err.print', 'Stampa non riuscita'));
+    } finally {
+      setPrintingDossier(false);
+    }
+  };
 
   const range = useMemo(() => rangeOf(preset, custom), [preset, custom]);
   const validRange = range.from <= range.to;
@@ -114,15 +129,27 @@ export const HaccpReport: React.FC<{ refreshKey: number }> = ({ refreshKey }) =>
             : t('report.rangeTitle', '{{dal}} – {{al}}', { dal: formatLongDate(range.from), al: formatLongDate(range.to) })}
           icon={<CalendarRange className="h-4 w-4" />}
           aside={
-            <button
-              type="button"
-              className={dsButton.primary}
-              disabled={!data || loading || !validRange}
-              onClick={() => data && printHaccpReport(data)}
-            >
-              <Printer className="h-4 w-4" aria-hidden />
-              {t('printReport', 'Stampa report')}
-            </button>
+            <div className="flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                className={dsButton.quiet}
+                disabled={loading || !validRange || printingDossier}
+                onClick={printDossier}
+                title={t('report.dossierHint', 'Registri del periodo più documenti, formazione e interventi')}
+              >
+                <FolderOpen className="h-4 w-4" aria-hidden />
+                <span className="max-sm:hidden">{t('report.dossier', 'Fascicolo per l\'ispezione')}</span>
+              </button>
+              <button
+                type="button"
+                className={dsButton.primary}
+                disabled={!data || loading || !validRange}
+                onClick={() => data && printHaccpReport(data)}
+              >
+                <Printer className="h-4 w-4" aria-hidden />
+                {t('printReport', 'Stampa report')}
+              </button>
+            </div>
           }
         />
         {loading && !summary ? (

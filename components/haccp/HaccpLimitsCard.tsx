@@ -32,6 +32,11 @@ const toDraft = (l: HaccpLimits): Draft => {
     oilTemp: formatNumber(l.oil.maxTemp),
     calibration: formatNumber(l.calibration.maxDeviation),
     sampleHours: formatNumber(l.sample.keepHours),
+    sensorSlot1: l.sensors.slotTimes[0] ?? '',
+    sensorSlot2: l.sensors.slotTimes[1] ?? '',
+    sensorSlot3: l.sensors.slotTimes[2] ?? '',
+    sensorOut: formatNumber(l.sensors.outMinutes),
+    sensorOffline: formatNumber(l.sensors.offlineMinutes),
   };
   for (const c of HACCP_RECEIPT_CATEGORIES) d[`receipt_${c}`] = formatNumber(l.receipt[c]);
   return d;
@@ -57,6 +62,14 @@ const fromDraft = (d: Draft, base: HaccpLimits): HaccpLimits => {
     receipt,
     calibration: { maxDeviation: n('calibration', base.calibration.maxDeviation) },
     sample: { keepHours: n('sampleHours', base.sample.keepHours) },
+    sensors: {
+      slotTimes: [1, 2, 3].map((k, i) => {
+        const v = (d[`sensorSlot${k}`] ?? '').trim();
+        return /^([01]\d|2[0-3]):[0-5]\d$/.test(v) ? v : base.sensors.slotTimes[i];
+      }),
+      outMinutes: n('sensorOut', base.sensors.outMinutes),
+      offlineMinutes: n('sensorOffline', base.sensors.offlineMinutes),
+    },
   };
 };
 
@@ -160,6 +173,26 @@ export const HaccpLimitsCard: React.FC<{ refreshKey: number }> = ({ refreshKey }
           {num('calibration', t('limits.calibration', 'Scarto taratura ≤'), '°C')}
           {num('sampleHours', t('limits.sample', 'Campione testimone'), 'h')}
         </>)}
+        <div className="space-y-2">
+          <h3 className="text-[14px] font-semibold text-[var(--ds-text-secondary)]">{t('limits.sensors', 'Sensori')}</h3>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+            {[1, 2, 3].map(k => (
+              <div key={k}>
+                <label htmlFor={`haccp-limit-slot-${k}`} className={fieldLabel}>{t('limits.slotN', '{{n}}ª rilevazione dalle', { n: k })}</label>
+                <input
+                  id={`haccp-limit-slot-${k}`}
+                  type="time"
+                  value={draft[`sensorSlot${k}`] ?? ''}
+                  onChange={set(`sensorSlot${k}`)}
+                  className={`${dsInput} tabular-nums`}
+                />
+              </div>
+            ))}
+            {num('sensorOut', t('limits.sensorOut', 'Fuori soglia per'), 'min')}
+            {num('sensorOffline', t('limits.sensorOffline', 'Senza segnale dopo'), 'min')}
+          </div>
+          <p className="text-[13px] text-[var(--ds-text-muted)]">{t('limits.sensorsHint', 'Il sensore scrive la rilevazione nelle due ore dopo l\'orario della sua fascia, se nessuno l\'ha già scritta.')}</p>
+        </div>
         <div className="space-y-2">
           <h3 className="text-[14px] font-semibold text-[var(--ds-text-secondary)]">{t('limits.receipt', 'Ricevimento: temperatura massima per tipo di merce')}</h3>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">

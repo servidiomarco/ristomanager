@@ -327,6 +327,13 @@ const quickActions = (nc: HaccpNonConformity, t: TFunc): string[] => {
         t('action.recalibrated', 'Termometro ricalibrato'),
         t('action.thermoReplaced', 'Termometro sostituito'),
       ];
+    case 'INTERVENTION':
+      return [
+        t('action.followUp', 'Intervento correttivo della ditta programmato'),
+        t('action.discarded', 'Prodotti eliminati'),
+        t('action.sealed', 'Aperture sigillate e area pulita'),
+        t('action.reported', 'Segnalato al responsabile'),
+      ];
     case 'RECALL':
       return [
         t('action.withdrawn', 'Prodotto ritirato dal magazzino'),

@@ -189,6 +189,11 @@ export interface HaccpLimits {
   calibration: { maxDeviation: number };
   /** Campione testimone: quante ore si conserva. */
   sample: { keepHours: number };
+  /** Sensori: in quali fasce orarie compilano le rilevazioni del giorno
+   *  (una per rilevazione prevista dalla postazione), dopo quanti minuti
+   *  fuori soglia aprono una non conformità, dopo quanti di silenzio
+   *  avvisano. */
+  sensors: { slotTimes: string[]; outMinutes: number; offlineMinutes: number };
 }
 
 export const HACCP_DEFAULT_LIMITS: HaccpLimits = {
@@ -206,6 +211,7 @@ export const HACCP_DEFAULT_LIMITS: HaccpLimits = {
   },
   calibration: { maxDeviation: 1 },
   sample: { keepHours: 72 },
+  sensors: { slotTimes: ['09:00', '16:00', '21:00'], outMinutes: 30, offlineMinutes: 60 },
 };
 
 const num = (v: unknown, fallback: number): number =>
@@ -240,6 +246,14 @@ export const mergeHaccpLimits = (stored: unknown): HaccpLimits => {
     receipt,
     calibration: { maxDeviation: num(s.calibration?.maxDeviation, d.calibration.maxDeviation) },
     sample: { keepHours: num(s.sample?.keepHours, d.sample.keepHours) },
+    sensors: {
+      slotTimes: d.sensors.slotTimes.map((def, i) => {
+        const v = Array.isArray(s.sensors?.slotTimes) ? s.sensors.slotTimes[i] : undefined;
+        return typeof v === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(v) ? v : def;
+      }),
+      outMinutes: num(s.sensors?.outMinutes, d.sensors.outMinutes),
+      offlineMinutes: num(s.sensors?.offlineMinutes, d.sensors.offlineMinutes),
+    },
   };
 };
 
@@ -358,3 +372,84 @@ export const evaluateHaccpReceipt = (
 
 export const haccpCalibrationDeviation = (reference: number, measured: number): number =>
   Math.round(Math.abs(measured - reference) * 10) / 10;
+
+// =============================================================================
+// Persone, documenti, interventi (Fase 3)
+// =============================================================================
+
+export type HaccpInterventionType =
+  | 'DISINFESTAZIONE' | 'RITIRO_OLIO' | 'MANUTENZIONE' | 'ANALISI_ACQUA' | 'ANALISI_LAB' | 'TARATURA' | 'SANIFICAZIONE' | 'ALTRO';
+export const HACCP_INTERVENTION_TYPES: HaccpInterventionType[] = [
+  'DISINFESTAZIONE', 'RITIRO_OLIO', 'MANUTENZIONE', 'ANALISI_ACQUA', 'ANALISI_LAB', 'TARATURA', 'SANIFICAZIONE', 'ALTRO',
+];
+export const HACCP_INTERVENTION_LABELS_IT: Record<HaccpInterventionType, string> = {
+  DISINFESTAZIONE: 'Disinfestazione',
+  RITIRO_OLIO: 'Ritiro olio esausto',
+  MANUTENZIONE: 'Manutenzione',
+  ANALISI_ACQUA: 'Analisi dell\'acqua',
+  ANALISI_LAB: 'Analisi di laboratorio',
+  TARATURA: 'Taratura esterna',
+  SANIFICAZIONE: 'Sanificazione straordinaria',
+  ALTRO: 'Altro intervento',
+};
+
+export type HaccpTrainingCourse = 'ALIMENTARISTA' | 'RESPONSABILE' | 'ALLERGENI' | 'CELIACHIA' | 'AGGIORNAMENTO' | 'ALTRO';
+export const HACCP_TRAINING_COURSES: HaccpTrainingCourse[] = ['ALIMENTARISTA', 'RESPONSABILE', 'ALLERGENI', 'CELIACHIA', 'AGGIORNAMENTO', 'ALTRO'];
+export const HACCP_TRAINING_LABELS_IT: Record<HaccpTrainingCourse, string> = {
+  ALIMENTARISTA: 'Alimentarista (ex libretto sanitario)',
+  RESPONSABILE: 'Responsabile HACCP',
+  ALLERGENI: 'Allergeni',
+  CELIACHIA: 'Senza glutine / celiachia',
+  AGGIORNAMENTO: 'Aggiornamento',
+  ALTRO: 'Altro corso',
+};
+
+export type HaccpDocumentCategory =
+  | 'MANUALE' | 'REGISTRAZIONE' | 'SCHEDA_TECNICA' | 'SCHEDA_SICUREZZA' | 'CONTRATTO'
+  | 'ANALISI' | 'PLANIMETRIA' | 'ATTESTATO' | 'RAPPORTO' | 'DICHIARAZIONE' | 'ALTRO';
+export const HACCP_DOCUMENT_CATEGORIES: HaccpDocumentCategory[] = [
+  'MANUALE', 'REGISTRAZIONE', 'SCHEDA_TECNICA', 'SCHEDA_SICUREZZA', 'CONTRATTO',
+  'ANALISI', 'PLANIMETRIA', 'ATTESTATO', 'RAPPORTO', 'DICHIARAZIONE', 'ALTRO',
+];
+export const HACCP_DOCUMENT_LABELS_IT: Record<HaccpDocumentCategory, string> = {
+  MANUALE: 'Manuale di autocontrollo',
+  REGISTRAZIONE: 'Registrazione sanitaria (SCIA)',
+  SCHEDA_TECNICA: 'Scheda tecnica',
+  SCHEDA_SICUREZZA: 'Scheda di sicurezza',
+  CONTRATTO: 'Contratto',
+  ANALISI: 'Analisi',
+  PLANIMETRIA: 'Planimetria',
+  ATTESTATO: 'Attestato',
+  RAPPORTO: 'Rapporto di intervento',
+  DICHIARAZIONE: 'Dichiarazione di conformità',
+  ALTRO: 'Altro documento',
+};
+
+/** I 14 allergeni del Reg. UE 1169/2011 (All. II), con gli stessi nomi che il
+ *  menu salva sui piatti (COMMON_ALLERGENS in types.ts): il libro allergeni
+ *  incrocia per nome. */
+export const HACCP_EU_ALLERGENS = [
+  'Glutine', 'Crostacei', 'Uova', 'Pesce', 'Arachidi', 'Soia', 'Latte',
+  'Frutta a guscio', 'Sedano', 'Senape', 'Sesamo', 'Solfiti', 'Lupini', 'Molluschi',
+];
+
+export interface HaccpDeadline {
+  kind: 'training' | 'document' | 'intervention';
+  id: string;
+  title: string;
+  due: string;
+  status: 'expired' | 'soon';
+}
+
+// =============================================================================
+// Etichette (Fase 4)
+// =============================================================================
+
+export type HaccpLabelKind = 'PRODUZIONE' | 'APERTURA' | 'SCONGELAMENTO';
+export const HACCP_LABEL_KINDS: HaccpLabelKind[] = ['PRODUZIONE', 'APERTURA', 'SCONGELAMENTO'];
+/** Come l'etichetta dice la data di partenza: «Prodotto il», «Aperto il». */
+export const HACCP_LABEL_KIND_LABELS_IT: Record<HaccpLabelKind, string> = {
+  PRODUZIONE: 'Prodotto il',
+  APERTURA: 'Aperto il',
+  SCONGELAMENTO: 'Scongelato il',
+};

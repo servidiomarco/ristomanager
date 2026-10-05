@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  Thermometer, Flame, Sparkles, Truck, Timer, Gauge, Printer, CalendarDays,
-  Check, X, AlertTriangle, RefreshCw, ShieldAlert, Settings2,
+  Thermometer, Flame, Sparkles, Truck, Timer, Gauge, Printer, CalendarDays, CalendarClock,
+  Check, X, AlertTriangle, RefreshCw, ShieldAlert, Settings2, Tag, Radio,
 } from 'lucide-react';
 import {
   haccpApiService,
@@ -17,6 +17,7 @@ import {
   HaccpCleaningCheck,
   HaccpNonConformity,
   HaccpAuditFields,
+  HaccpSensor,
   isReasonRequired,
 } from '../../services/haccpApiService';
 import { supplierApiService, type Supplier } from '../../services/shoppingApiService';
@@ -27,12 +28,14 @@ import { SkeletonHaccpSections } from '../SkeletonCards';
 import { Callout, EmptyState, SegmentedControl, dsButton, dsIconButton } from '../ds';
 import {
   Card, CardHeader, CloseNcDialog, HistoryDialog, NcLine, ReasonDialog, ReasonRequest, RowStamp, TFunc,
-  correctableWithoutReason, field, formatLongDate, formatNumber, frequencyLabel,
+  correctableWithoutReason, field, formatLongDate, formatNumber, formatTime, frequencyLabel,
   parseNumber, row, rowList, todayISO,
 } from './haccpUi';
 import { ReceiptsSection } from './HaccpReceipts';
 import { ProcessesSection } from './HaccpProcesses';
 import { CalibrationsList } from './HaccpCalibrations';
+import { LabelDialog, LabelPrefill } from './HaccpLabels';
+import { useToast } from '../../contexts/ToastContext';
 
 /* Il modulo del giorno. Si compila col telefono davanti alla cella: ogni
    campo salva quando lo si lascia, e il server decide se è una registrazione
@@ -48,12 +51,13 @@ interface HistoryTarget { entity: string; entityId: string; title: string }
 export const HaccpToday: React.FC<{
   refreshKey: number;
   onOpenNonConformities: () => void;
+  onOpenArchive?: () => void;
   /** Le aperte di tutti i giorni, a ogni rilettura: il contatore sulla
    *  scheda segue così anche le chiusure fatte da qui, che il socket non
    *  rimanda a chi le ha fatte. */
   onNcCountChange?: (open: number) => void;
   onConfigure?: () => void;
-}> = ({ refreshKey, onOpenNonConformities, onNcCountChange, onConfigure }) => {
+}> = ({ refreshKey, onOpenNonConformities, onOpenArchive, onNcCountChange, onConfigure }) => {
   const { t } = useTranslation('haccp', { useSuspense: false });
   const { user, hasPermission } = useAuth();
   const canRecord = hasPermission('haccp:record');
@@ -65,6 +69,8 @@ export const HaccpToday: React.FC<{
   const [closingNc, setClosingNc] = useState<HaccpNonConformity | null>(null);
   const [history, setHistory] = useState<HistoryTarget | null>(null);
   const [printing, setPrinting] = useState(false);
+  const [labelPrefill, setLabelPrefill] = useState<LabelPrefill | null>(null);
+  const { addToast } = useToast();
   // L'anagrafica fornitori della Lista della spesa, per il ricevimento: si
   // legge una volta, e se non arriva il campo resta libero.
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -271,6 +277,18 @@ export const HaccpToday: React.FC<{
           <Printer className="h-4 w-4" aria-hidden />
           <span className="hidden sm:inline">{t('printDay', 'Stampa il giorno')}</span>
         </button>
+        {canRecord && (
+          <button
+            type="button"
+            onClick={() => setLabelPrefill({})}
+            title={t('labels.title', 'Etichetta')}
+            aria-label={t('labels.title', 'Etichetta')}
+            className={`${dsButton.secondary} w-11 flex-shrink-0 px-0 sm:w-auto sm:px-5`}
+          >
+            <Tag className="h-4 w-4" aria-hidden />
+            <span className="hidden sm:inline">{t('labels.title', 'Etichetta')}</span>
+          </button>
+        )}
         <button
           type="button"
           onClick={() => reload(date)}
@@ -315,6 +333,25 @@ export const HaccpToday: React.FC<{
         </Callout>
       )}
 
+      {/* Lo scadenzario: un attestato scaduto o una disinfestazione da
+          rifare si vedono anche da chi apre solo il registro del giorno. */}
+      {day?.deadlines && day.deadlines.length > 0 && (
+        <Callout
+          tone={day.deadlines.some(d => d.status === 'expired') ? 'critical' : 'pending'}
+          icon={CalendarClock}
+          action={onOpenArchive && (
+            <button type="button" onClick={onOpenArchive} className={`${dsButton.quiet} h-9 px-3 text-[14px]`}>
+              {t('nc.see', 'Vedi')}
+            </button>
+          )}
+        >
+          {t('deadlinesCallout', '{{count}} scadenze: {{prima}}', {
+            count: day.deadlines.length,
+            prima: `${day.deadlines[0].title} (${formatLongDate(day.deadlines[0].due)})`,
+          })}
+        </Callout>
+      )}
+
       {isFuture && (
         <Callout tone="info" icon={CalendarDays}>
           {t('futureDay', 'Un giorno che deve ancora venire non si compila.')}
@@ -351,6 +388,8 @@ export const HaccpToday: React.FC<{
                   <TemperaturePointRow
                     key={p.id}
                     point={p}
+                    sensor={date === todayISO() ? day.sensors?.find(s => s.pointId === p.id && s.active) : undefined}
+                    offlineMinutes={limits?.sensors?.offlineMinutes ?? 60}
                     readings={Array.from({ length: p.checksPerDay }, (_, i) => readings.get(`${p.id}:${i + 1}`) ?? null)}
                     ncBySource={ncBySource}
                     editable={editable}
@@ -517,6 +556,14 @@ export const HaccpToday: React.FC<{
               onVoid={r => confirmVoid(r, r.product, reason => haccpApiService.voidProductionLog(r.id, reason))}
               onCloseNc={setClosingNc}
               onHistory={r => setHistory({ entity: 'production', entityId: r.id, title: r.product })}
+              onLabel={canRecord ? r => setLabelPrefill({
+                kind: r.process === 'SCONGELAMENTO' ? 'SCONGELAMENTO' : 'PRODUZIONE',
+                product: r.product,
+                lot: r.internalLot,
+                expiryDate: r.expiryDate,
+                sourceEntity: 'production',
+                sourceId: r.id,
+              }) : undefined}
             />
           </Card>
         </>
@@ -530,6 +577,11 @@ export const HaccpToday: React.FC<{
         onSaved={() => reload(date, true)}
       />
       <HistoryDialog target={history} onClose={() => setHistory(null)} />
+      <LabelDialog
+        prefill={labelPrefill}
+        onClose={() => setLabelPrefill(null)}
+        onDone={message => { setLabelPrefill(null); addToast(message, 'success'); }}
+      />
     </div>
   );
 };
@@ -540,6 +592,9 @@ export const HaccpToday: React.FC<{
 
 const TemperaturePointRow: React.FC<{
   point: HaccpPoint;
+  /** Il sensore assegnato, solo per oggi: è il valore di adesso. */
+  sensor?: HaccpSensor;
+  offlineMinutes: number;
   readings: Array<HaccpTemperatureReading | null>;
   ncBySource: Map<string, HaccpNonConformity>;
   editable: boolean;
@@ -547,9 +602,11 @@ const TemperaturePointRow: React.FC<{
   onVoid: (r: HaccpTemperatureReading) => void;
   onCloseNc: (nc: HaccpNonConformity) => void;
   onHistory: (r: HaccpTemperatureReading) => void;
-}> = ({ point, readings, ncBySource, editable, onSave, onVoid, onCloseNc, onHistory }) => {
+}> = ({ point, sensor, offlineMinutes, readings, ncBySource, editable, onSave, onVoid, onCloseNc, onHistory }) => {
   const { t } = useTranslation('haccp', { useSuspense: false });
   const multi = point.checksPerDay > 1;
+  const sensorOffline = !!sensor && (!sensor.lastSeenAt || Date.now() - new Date(sensor.lastSeenAt).getTime() > offlineMinutes * 60_000);
+  const sensorOut = !!sensor && !sensorOffline && sensor.lastValue !== null && isOutOfRange(sensor.lastValue, point.minTemp, point.maxTemp);
   return (
     <div className="grid grid-cols-12 gap-x-3 gap-y-1 py-2.5">
       <div className="col-span-12 min-w-0 sm:col-span-4 sm:pt-2.5">
@@ -557,6 +614,16 @@ const TemperaturePointRow: React.FC<{
         <div className="text-[13px] tabular-nums text-[var(--ds-text-muted)]">
           {t('limitLabel', 'Limite {{limite}}', { limite: formatHaccpLimit(point.minTemp, point.maxTemp) })}
         </div>
+        {sensor && (
+          <div className={`flex items-center gap-1 text-[13px] tabular-nums ${sensorOffline || sensorOut ? 'text-[var(--ds-critical-text)]' : 'text-[var(--ds-text-secondary)]'}`}>
+            <Radio className="h-3.5 w-3.5 flex-shrink-0" aria-hidden />
+            {sensorOffline
+              ? (sensor.lastSeenAt
+                ? t('sensors.offlineSince', 'Sensore senza segnale dalle {{ora}}', { ora: formatTime(sensor.lastSeenAt) })
+                : t('sensors.offlineNever', 'Sensore mai collegato'))
+              : t('sensors.now', 'Sensore {{valore}} °C alle {{ora}}', { valore: formatNumber(sensor.lastValue), ora: formatTime(sensor.lastSeenAt) })}
+          </div>
+        )}
       </div>
       <div className="col-span-12 space-y-1 sm:col-span-8">
         {readings.map((r, i) => (

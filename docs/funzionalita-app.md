@@ -579,7 +579,7 @@ Modulo a parte (si attiva con l'abbonamento «recensioni»).
 
 ## HACCP
 
-Registro di autocontrollo digitale, compilabile dal telefono davanti alla cella frigo (campi grandi, salvataggio a ogni campo). Schede: **Registro** (il giorno), **Non conformità**, **Rintracciabilità**, **Report** e — per chi gestisce l'HACCP — **Configura**.
+Registro di autocontrollo digitale, compilabile dal telefono davanti alla cella frigo (campi grandi, salvataggio a ogni campo). Schede: **Registro** (il giorno), **Non conformità**, **Rintracciabilità**, **Archivio**, **Report** e — per chi gestisce l'HACCP — **Configura**.
 
 **Punti di controllo del locale**
 - Postazioni di temperatura, friggitrici, punti di pulizia, termometri da tarare e attrezzature dei processi (abbattitori, forni) si configurano in **HACCP → Configura**: sono il manuale di autocontrollo del ristorante tradotto in righe del modulo. Per chi parte da zero ci sono i modelli (frigorifero ≤ 4 °C, congelatore ≤ −18 °C, banco caldo ≥ 65 °C, cappe ogni mese, termometro a sonda ogni sei mesi…).
@@ -594,7 +594,18 @@ Registro di autocontrollo digitale, compilabile dal telefono davanti alla cella 
 3. **Pulizie** attrezzature e superfici, con le frequenze sopra.
 4. **Taratura termometri** — ghiaccio fondente, ebollizione o termometro di riferimento; il registro dice quali sono da fare nel loro periodo. Uno scarto oltre il limite apre una non conformità, già chiusa se il termometro è stato ricalibrato o sostituito sul momento.
 5. **Ricevimento merci** — prodotto, **fornitore** (dall'anagrafica della Lista della spesa), **documento di trasporto**, tipo di merce con la sua soglia, lotto, **scadenza**, temperatura, imballo integro, Accettato/Respinto. Il modulo avvisa prima di registrare se la merce è fuori temperatura, scaduta o con l'imballo rovinato.
+   - **Leggi la bolla** (AI): dalla foto o dal PDF del documento di trasporto il modulo propone fornitore (agganciato all'anagrafica quando il nome corrisponde), numero del documento e righe con prodotto, tipo, lotto e scadenza. Si correggono, si aggiunge la temperatura misurata e si registrano tutte insieme; niente va a registro senza conferma. Il consumo compare in Consumi AI.
 6. **Processi** con orari e temperature vere: abbattimento, surgelazione, bonifica anti-Anisakis, cottura, rinvenimento, mantenimento a caldo, scongelamento, sanificazione delle verdure, campione testimone dei banchetti. Abbattimenti, bonifiche e scongelamenti si **avviano e si chiudono** anche a ore di distanza (i cicli aperti restano in cima al registro, anche il giorno dopo). L'esito si calcola sui limiti del manuale e si vede già mentre si compila; fuori limite si apre una non conformità. Si annotano anche attrezzatura, quantità, lotti degli ingredienti e scadenza assegnata.
+
+**Etichette dei contenitori**
+- Dal pulsante **Etichetta** del registro, o dalla riga di un processo (con prodotto, lotto e scadenza già scritti): prodotto, «prodotto / aperto / scongelato il», **scade il**, lotto interno, conservazione, allergeni (i 14 del Reg. UE 1169/2011), note e copie.
+- I **modelli** (Configura → Modelli di etichetta) danno durata in giorni, conservazione e allergeni con un tocco: la scadenza si calcola dalla data di partenza e resta correggibile. Per partire: preparazione cotta, conserva aperta, prodotto scongelato.
+- Esce sulla **stampante termica** scelta (quelle di Impostazioni → Stampanti, tramite l'agente di stampa del locale) o **dal browser** su una stampante di etichette da 62 mm. Ogni etichetta resta registrata con chi l'ha stampata e compare nel report.
+
+**Sensori di temperatura**
+- I sensori wireless scrivono le temperature da soli: in Configura → Sensori di temperatura si crea l'indirizzo con il token da dare al gateway dei sensori (formato JSON semplice o il webhook dei gateway Monnit).
+- Un sensore mai visto compare alla prima lettura, **da assegnare** a una postazione. Assegnato, compila la rilevazione della sua fascia (orari in Configura → Limiti, di serie 9:00, 16:00 e 21:00) nelle due ore successive, se nessuno l'ha già scritta; la riga porta «Sensore» e il suo nome.
+- Fuori soglia per più di 30 minuti (configurabile) apre **una** non conformità per escursione e avvisa titolare, direzione e cucina; un sensore senza segnale da più di un'ora avvisa. Nel registro di oggi ogni postazione con sensore mostra l'ultimo valore e l'ora.
 
 Ogni riga registra **chi l'ha compilata e quando**, con il nome della persona. Una riga scritta in un giorno diverso da quello del registro (il foglio di ieri compilato oggi) lo dice. Più telefoni sullo stesso registro si vedono a vicenda in tempo reale.
 
@@ -612,9 +623,17 @@ Ogni riga registra **chi l'ha compilata e quando**, con il nome della persona. U
 - La scheda **Rintracciabilità** cerca un prodotto, un lotto, un fornitore o un documento di trasporto e mostra da dove è arrivato (fornitore, data, documento, scadenza) e in quali processi del locale è stato usato (dai lotti degli ingredienti).
 - **Avvia un richiamo** apre una non conformità di tipo richiamo con le registrazioni coinvolte; si chiude scrivendo cosa è stato ritirato e chi è stato avvisato.
 
+**Archivio: persone, interventi, documenti, allergeni**
+- **Formazione del personale**: attestati per persona (scelta dal Personale o scritta a mano) con corso (alimentarista, responsabile HACCP, allergeni, senza glutine, aggiornamento), ente, ore, data, scadenza e attestato allegato. Il rinnovo cambia da regione a regione: la scadenza si sceglie, con le scorciatoie +3 e +5 anni. Un corso rinnovato supera il vecchio.
+- **Interventi esterni**: disinfestazione, ritiro dell'olio esausto (quantità e formulario), manutenzioni, analisi dell'acqua e di laboratorio, tarature esterne, sanificazioni straordinarie; con ditta, esito, rapporto allegato e prossima scadenza. Un intervento con rilievi apre una non conformità.
+- **Documenti**: manuale di autocontrollo, registrazione sanitaria, schede tecniche e di sicurezza dei detergenti, contratti, analisi, planimetria, dichiarazioni di conformità; con il file (PDF, foto o documenti d'ufficio fino a 5 MB) o solo come riferimento all'originale cartaceo, e la data di validità. I documenti superati si archiviano.
+- **Scadenze**: attestati, documenti e interventi scaduti o in scadenza nei prossimi 60 giorni, in cima all'Archivio e nel registro del giorno. Un promemoria di sistema (Impostazioni → Promemoria, di serie alle 9:00) avvisa titolare e direzione 30 giorni prima, 7 giorni prima e il giorno della scadenza.
+- **Libro allergeni** stampabile: i 14 allergeni del Reg. UE 1169/2011 per ogni piatto attivo del menu, divisi per categoria, con i piatti senza allergeni indicati segnalati da verificare.
+
 **Report per periodo**
 - Oggi, questa settimana, questo mese, il mese scorso o un intervallo a scelta (fino a un anno). Prima di stampare il riepilogo segnala i giorni senza registrazioni, i fuori soglia e le non conformità ancora aperte.
-- Il foglio stampato ha la **scheda mensile** delle temperature (postazioni per giorni, fuori soglia in rosso), degli oli (con i composti polari) e delle pulizie, poi ricevimenti con fornitore, documento e scadenza, processi con il loro esito, tarature, **non conformità con le azioni correttive**, **correzioni e annullamenti** con l'originale e il motivo, le righe scritte in un giorno diverso e i **limiti applicati**. In testa il nome del ristorante, in fondo lo spazio per la firma del responsabile.
+- **Fascicolo per l'ispezione**: lo stesso periodo con in testa i documenti in archivio (con la validità) e la formazione del personale, e gli interventi esterni del periodo.
+- Il foglio stampato ha la **scheda mensile** delle temperature (postazioni per giorni, fuori soglia in rosso), degli oli (con i composti polari) e delle pulizie, poi ricevimenti con fornitore, documento e scadenza, processi con il loro esito, etichette stampate, tarature, **non conformità con le azioni correttive**, **correzioni e annullamenti** con l'originale e il motivo, le righe scritte in un giorno diverso e i **limiti applicati**. In testa il nome del ristorante, in fondo lo spazio per la firma del responsabile.
 
 Avvisi sul registro temperature:
 
@@ -753,6 +772,8 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-05 | HACCP | Nell'HACCP arrivano le etichette dei contenitori (prodotto, aperto o scongelato il, scadenza, lotto, allergeni) da stampare sulla termica o dal browser, con i modelli di durata in Configura; i sensori wireless di temperatura che compilano il registro da soli e avvisano se una cella resta fuori soglia; e «Leggi la bolla», che dalla foto del documento di trasporto propone le righe del ricevimento. |
+| 2026-10-05 | HACCP | Nella nuova scheda Archivio dell'HACCP: la formazione del personale con le scadenze degli attestati, gli interventi delle ditte esterne (disinfestazione, olio esausto, analisi), i documenti con il loro file e il libro allergeni da stampare. Le scadenze compaiono anche nel registro del giorno e arrivano come promemoria; dal Report si stampa il fascicolo per l'ispezione. |
 | 2026-10-05 | HACCP | Nel registro HACCP arrivano i processi con orari e temperature vere (abbattimento, surgelazione, bonifica anti-Anisakis, cottura, rinvenimento, caldo, scongelamento, sanificazione delle verdure, campioni testimone), l'olio con i composti polari, il ricevimento con fornitore, documento di trasporto e scadenza, la taratura dei termometri e la scheda Rintracciabilità per seguire un lotto e avviare un richiamo. I limiti del tuo manuale si impostano in Configura. |
 | 2026-10-05 | HACCP | Il registro HACCP diventa quello del tuo locale: postazioni, limiti, rilevazioni al giorno e frequenze delle pulizie si configurano in HACCP → Configura. Le registrazioni non si cancellano più ma si annullano con un motivo, ogni correzione tiene l'originale, un fuori soglia o una merce respinta aprono una non conformità da chiudere con l'azione correttiva, e il report si stampa per giorno, settimana o mese. |
 | 2026-10-04 | Messaggi: WhatsApp e SMS | L'AI dei Messaggi conosce la scheda del cliente in rubrica: a chi chiede il suo tavolo preferito risponde nominandolo, invece di chiedergli quale sia. |
