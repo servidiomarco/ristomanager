@@ -30,19 +30,21 @@
     --ds-action-bg: #111827;
     --ds-action-fg: #ffffff;
 
-    --ds-shadow-card: 0 1px 2px rgba(16, 17, 25, 0.04), 0 12px 32px -14px rgba(16, 17, 25, 0.12);
-
     --ds-public-canvas: #f7f4ec;
     --ds-public-font: 'Hanken Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     --ds-public-wordmark: 'Cormorant Garamond', Georgia, 'Times New Roman', serif;
 
     /* Solo di questa pagina: il vetro della barra categorie (il canvas al
-       semitrasparente, sfocato sotto), la riga che compare quando si
-       aggancia, il segnaposto delle foto e il fondo del visore. */
-    --menu-glass: rgba(247, 244, 236, 0.84);
+       semitrasparente, sfocato sotto), le righe sottili tra i piatti, il
+       fondo delle pillole allergeni, il segnaposto delle foto, il lampo sul
+       vino raggiunto da un abbinamento e il fondo del visore. */
+    --menu-glass: rgba(247, 244, 236, 0.82);
     --menu-hairline: rgba(17, 17, 19, 0.08);
+    --menu-chip: rgba(17, 17, 19, 0.05);
     --menu-placeholder: #ece8de;
-    --menu-scrim: rgba(10, 10, 12, 0.9);
+    --menu-flash: rgba(17, 17, 19, 0.06);
+    --menu-scrim: rgba(10, 10, 12, 0.92);
+    --menu-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -58,6 +60,7 @@ body {
     -webkit-tap-highlight-color: transparent;
 }
 button { font: inherit; color: inherit; cursor: pointer; border: none; background: none; padding: 0; }
+h2, h3, p { margin: 0; }
 :focus-visible { outline: 2px solid var(--ds-border-focus); outline-offset: 2px; border-radius: 4px; }
 .tnum { font-variant-numeric: tabular-nums; }
 .sr-only {
@@ -74,11 +77,11 @@ button { font: inherit; color: inherit; cursor: pointer; border: none; backgroun
    carica sempre è la variante per fondo chiaro e su una testata scura
    sparirebbe. */
 .hero {
-    padding: 10px 16px 6px;
+    padding: 10px 16px 4px;
     padding-top: max(10px, env(safe-area-inset-top));
 }
 .hero__bar {
-    max-width: 760px; margin: 0 auto; min-height: 52px;
+    max-width: 720px; margin: 0 auto; min-height: 52px;
     display: flex; align-items: center; justify-content: space-between; gap: 12px;
 }
 .hero__brand { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; }
@@ -87,15 +90,17 @@ button { font: inherit; color: inherit; cursor: pointer; border: none; backgroun
    il bianco prende il colore del fondo e l'inchiostro resta com'è; un logo
    già trasparente non cambia. */
 .hero__logo {
-    height: 56px; width: auto; max-width: min(200px, 55vw); object-fit: contain; display: block;
+    height: 52px; width: auto; max-width: min(200px, 55vw); object-fit: contain; display: block;
     mix-blend-mode: multiply;
     opacity: 0; transition: opacity 0.35s ease;
 }
 .hero__logo.is-pronto { opacity: 1; }
+/* Il serif resta solo qui, dove fa le veci del logo che manca (§16.5): il
+   resto della pagina è grottesco, come l'interfaccia. */
 .hero__name {
     font-family: var(--ds-public-wordmark); font-weight: 600;
     font-size: 26px; line-height: 1.1; letter-spacing: -0.005em;
-    margin: 0; max-width: 100%;
+    max-width: 100%;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 /* Logo e nome insieme raddoppierebbero il marchio (come in prenota): col
@@ -106,7 +111,7 @@ button { font: inherit; color: inherit; cursor: pointer; border: none; backgroun
 }
 .hero.con-logo .hero__tagline { display: none; }
 .hero__tagline {
-    margin: 2px 0 0; font-size: 12px; letter-spacing: 0.06em; color: var(--ds-text-muted);
+    margin-top: 2px; font-size: 12px; letter-spacing: 0.04em; color: var(--ds-text-muted);
     max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
@@ -115,11 +120,12 @@ button { font: inherit; color: inherit; cursor: pointer; border: none; backgroun
 .lingua {
     flex: none; position: relative; display: inline-flex; align-items: center; gap: 6px;
     height: 36px; padding: 0 12px 0 10px; border-radius: 999px;
-    background: rgba(17, 17, 19, 0.05); color: var(--ds-text-secondary);
+    background: var(--ds-surface); color: var(--ds-text-primary);
+    box-shadow: inset 0 0 0 1px var(--menu-hairline);
     font-size: 13px; font-weight: 600;
 }
-.lingua svg { width: 16px; height: 16px; flex-shrink: 0; }
-.lingua__chevron { width: 14px !important; height: 14px !important; opacity: 0.6; }
+.lingua svg { width: 16px; height: 16px; flex-shrink: 0; color: var(--ds-text-muted); }
+.lingua__chevron { width: 14px !important; height: 14px !important; }
 .lingua select {
     position: absolute; inset: 0; width: 100%; height: 100%;
     opacity: 0; cursor: pointer; font-size: 16px; /* 16px: iOS non zooma */
@@ -128,8 +134,9 @@ button { font: inherit; color: inherit; cursor: pointer; border: none; backgroun
 .lingua:focus-within { outline: 2px solid var(--ds-border-focus); outline-offset: 2px; }
 
 /* --- Barra categorie -----------------------------------------------------
-   Si aggancia in alto e segue la lettura: la categoria sotto gli occhi è
-   quella piena, e la barra scorre da sola per tenerla in vista. */
+   Si aggancia in alto e segue la lettura. La pillola piena è un elemento
+   solo che scivola da una categoria all'altra invece di riaccendersi a
+   ogni tocco: l'ospite vede dove è andato, non solo dove è arrivato. */
 .catnav {
     position: sticky; top: 0; z-index: 10;
     background: var(--menu-glass);
@@ -141,86 +148,160 @@ button { font: inherit; color: inherit; cursor: pointer; border: none; backgroun
 .catnav.is-stuck { border-bottom-color: var(--menu-hairline); box-shadow: 0 10px 24px -20px rgba(16, 17, 25, 0.35); }
 .catnav__inner {
     position: relative; /* offsetParent delle pillole, per centrarle */
-    max-width: 760px; margin: 0 auto;
-    display: flex; gap: 4px; padding: 8px 16px;
+    max-width: 720px; margin: 0 auto;
+    display: flex; padding: 6px 28px 6px 16px; /* a destra quanto la sfumatura */
     overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none;
     -webkit-mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 28px), transparent 100%);
     mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 28px), transparent 100%);
 }
 .catnav__inner::-webkit-scrollbar { display: none; }
 .catnav a {
+    position: relative; z-index: 1;
     flex: none; display: inline-flex; align-items: center;
-    height: 40px; padding: 0 16px; border-radius: 999px;
+    height: 44px; padding: 0 14px;
     white-space: nowrap; text-decoration: none;
     font-size: 14px; font-weight: 600; color: var(--ds-text-muted);
-    transition: background-color 0.2s ease, color 0.2s ease;
+    transition: color 0.25s ease;
 }
-.catnav a[aria-current="true"] { background: var(--ds-text-primary); color: #ffffff; }
+.catnav a[aria-current="true"] { color: var(--ds-action-fg); }
+.catnav a:focus-visible { outline-offset: -4px; border-radius: 999px; }
+.catnav__pill {
+    position: absolute; left: 0; top: 10px; height: 36px; width: 0;
+    border-radius: 999px; background: var(--ds-action-bg);
+    transition: transform 0.38s var(--menu-ease), width 0.38s var(--menu-ease);
+    pointer-events: none;
+}
+.catnav__pill.is-fermo { transition: none; }
 
-/* --- Sezioni e piatti ---------------------------------------------------- */
-main { max-width: 760px; margin: 0 auto; padding: 4px 16px 48px; }
-.sezione { margin-top: 28px; }
+/* --- Sezioni e piatti ----------------------------------------------------
+   Niente card: i piatti stanno direttamente sul canvas, separati da una
+   riga sottile. Le scatole bianche con l'ombra raddoppiavano i bordi
+   intorno a ogni portata e la pagina sembrava un modulo da compilare; le
+   foto fanno già da àncora per l'occhio. */
+main { max-width: 720px; margin: 0 auto; padding: 0 16px 40px; }
+.sezione { padding-top: 36px; }
+.sezione__testa {
+    display: flex; align-items: baseline; gap: 8px;
+    padding-bottom: 6px;
+}
 .sezione h2 {
-    font-family: var(--ds-public-wordmark); font-size: 30px; font-weight: 600;
-    line-height: 1.1; letter-spacing: -0.005em;
-    margin: 0 4px 14px; scroll-margin-top: 72px;
+    font-size: 26px; font-weight: 700; line-height: 1.15; letter-spacing: -0.025em;
+    scroll-margin-top: 76px;
 }
-.card { background: var(--ds-surface); border-radius: 20px; box-shadow: var(--ds-shadow-card); overflow: hidden; }
+.sezione__conta { font-size: 14px; font-weight: 600; color: var(--ds-text-subtle); }
+.sezione:first-child { padding-top: 20px; }
 
-/* Testo a sinistra, foto a destra, prezzo in fondo al testo: lo schema
-   che l'ospite conosce dalle app di consegna, e la foto non spinge il
-   nome fuori asse quando c'è in una riga e nell'altra no. */
-.piatto { position: relative; display: flex; gap: 16px; padding: 18px; }
-.piatto + .piatto::before {
-    content: ''; position: absolute; top: 0; left: 18px; right: 18px;
-    height: 1px; background: var(--ds-border);
+/* Nome e prezzo sulla stessa riga, come su una carta stampata: al tavolo
+   l'ospite legge il menu scorrendo nomi e prezzi, e le bibite e i liquori
+   — senza foto né descrizione — tornano una riga ciascuno invece di tre. */
+.piatto {
+    position: relative; isolation: isolate;
+    display: flex; gap: 16px; padding: 18px 0;
+    scroll-margin-top: 76px;
 }
+.piatto + .piatto { border-top: 1px solid var(--menu-hairline); }
+/* Bibite e liquori: solo nome e prezzo, una riga stretta come in carta. */
+.piatto.is-riga { padding: 13px 0; }
+.piatto:focus { outline: none; }
 .piatto__testo { flex: 1; min-width: 0; }
-.piatto__nome { font-weight: 600; font-size: 16px; line-height: 1.3; letter-spacing: -0.005em; }
-.piatto__desc { color: var(--ds-text-secondary); font-size: 14px; line-height: 1.45; margin-top: 4px; }
-/* Allergeni e vini in --ds-text-muted, non subtle: sono informazioni che
-   l'ospite cerca, e il grigio chiaro sul bianco non passava il contrasto. */
-.piatto__meta {
-    display: flex; gap: 6px; align-items: flex-start;
-    color: var(--ds-text-muted); font-size: 12.5px; line-height: 1.4; margin-top: 8px;
+.piatto__riga { display: flex; align-items: baseline; gap: 12px; }
+.piatto__nome {
+    flex: 1; min-width: 0;
+    font-size: 16px; font-weight: 600; line-height: 1.3; letter-spacing: -0.01em;
 }
-.piatto__meta + .piatto__meta { margin-top: 4px; }
-.piatto__meta svg { width: 14px; height: 14px; flex-shrink: 0; margin-top: 1px; }
-.piatto__abbinati { font-style: italic; }
-.piatto__prezzo { font-weight: 600; font-size: 15px; margin-top: 10px; }
+.piatto__prezzo { flex: none; font-size: 15px; font-weight: 600; white-space: nowrap; }
+/* La scheda del vino (cantina · denominazione · vitigno · grado) è la parte
+   prima del «—» nella descrizione: si legge da sola, in piccolo, e la nota
+   di degustazione sotto può restare chiusa senza perdere niente di utile. */
+.piatto__scheda { font-size: 13px; line-height: 1.4; color: var(--ds-text-muted); margin-top: 3px; }
+.piatto__desc { font-size: 14px; line-height: 1.5; color: var(--ds-text-secondary); margin-top: 4px; }
+.piatto__desc.is-chiusa {
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
+}
+/* Bersaglio di 44px senza spostare il testo: il padding lo allarga e il
+   margine negativo se lo riprende. */
+.piatto__altro {
+    display: block; margin: -8px 0 -10px; padding: 10px 0 12px;
+    font-size: 13px; font-weight: 600; color: var(--ds-text-primary);
+    text-decoration: underline; text-decoration-color: var(--menu-hairline);
+    text-underline-offset: 3px; text-decoration-thickness: 1.5px;
+}
+
+/* Allergeni in pillole: si contano a colpo d'occhio, e chi ne cerca uno lo
+   trova senza leggere una frase. In --ds-text-secondary, non subtle: sono
+   informazioni che l'ospite cerca. */
+.piatto__allergeni {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px;
+    margin-top: 10px; font-size: 12px; line-height: 1;
+}
+.piatto__etichetta { color: var(--ds-text-muted); font-weight: 500; margin-right: 2px; }
+.chip {
+    display: inline-flex; align-items: center; height: 22px; padding: 0 8px;
+    border-radius: 999px; background: var(--menu-chip);
+    color: var(--ds-text-secondary); font-weight: 500;
+}
+.piatto__abbinati {
+    display: flex; gap: 6px; align-items: flex-start;
+    margin-top: 8px; font-size: 13px; line-height: 1.45; color: var(--ds-text-muted);
+}
+.piatto__abbinati svg { width: 14px; height: 14px; flex-shrink: 0; margin-top: 2px; }
+.piatto__abbinati a {
+    color: var(--ds-text-primary); font-weight: 500; text-decoration: underline;
+    text-decoration-color: var(--ds-text-subtle); text-underline-offset: 3px;
+}
 
 .piatto__foto {
-    flex: none; align-self: flex-start;
-    width: 96px; height: 96px; border-radius: 14px; overflow: hidden;
+    position: relative; flex: none; align-self: flex-start;
+    width: 96px; height: 96px; border-radius: 16px; overflow: hidden;
     background: var(--menu-placeholder); cursor: zoom-in;
 }
 .piatto__foto img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.piatto__foto:focus-visible { border-radius: 14px; }
+/* Un filo scuro sul bordo: le foto chiare (un dolce, un piatto bianco) si
+   stacchevano dal canvas crema. */
+.piatto__foto::after {
+    content: ''; position: absolute; inset: 0; border-radius: inherit;
+    box-shadow: inset 0 0 0 1px rgba(17, 17, 19, 0.06); pointer-events: none;
+}
+/* Le bottiglie sono foto verticali su fondo bianco: ritagliate a quadrato
+   restava un pezzo d'etichetta. Intere, su una piastrella bianca. */
+.piatto__foto.is-bottiglia { background: var(--ds-surface); }
+.piatto__foto.is-bottiglia img { object-fit: contain; padding: 8px 0; }
+.piatto__foto:focus-visible { border-radius: 16px; }
+
+/* Il vino raggiunto da «Si abbina con» lampeggia una volta, per dire
+   all'occhio dove guardare dopo il salto. */
+.piatto.is-evidenziato::before {
+    content: ''; position: absolute; inset: 4px -12px; z-index: -1;
+    border-radius: 16px; background: var(--menu-flash);
+    animation: lampo 1.8s ease both;
+}
+@keyframes lampo { 0%, 45% { opacity: 1; } 100% { opacity: 0; } }
 
 @media (min-width: 640px) {
-    .piatto { padding: 20px 22px; gap: 20px; }
-    .piatto + .piatto::before { left: 22px; right: 22px; }
+    .sezione { padding-top: 44px; }
+    .sezione h2 { font-size: 30px; }
+    .piatto { padding: 22px 0; gap: 22px; }
     .piatto__foto { width: 112px; height: 112px; }
 }
 
 /* Primo caricamento: le sezioni salgono in sequenza. Solo la prima volta —
    al cambio lingua il contenuto resta fermo sotto gli occhi. */
-.anima .sezione { animation: sale 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
-.anima .sezione:nth-child(2) { animation-delay: 0.05s; }
-.anima .sezione:nth-child(3) { animation-delay: 0.1s; }
-.anima .sezione:nth-child(n+4) { animation-delay: 0.15s; }
-@keyframes sale { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.anima .sezione { animation: sale 0.5s var(--menu-ease) both; }
+.anima .sezione:nth-child(2) { animation-delay: 0.06s; }
+.anima .sezione:nth-child(3) { animation-delay: 0.12s; }
+.anima .sezione:nth-child(n+4) { animation-delay: 0.18s; }
+@keyframes sale { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
 
 /* --- Attesa e stati ------------------------------------------------------ */
-.scheletro__titolo { width: 132px; height: 26px; border-radius: 8px; margin: 28px 4px 16px; }
-.scheletro__riga { display: flex; gap: 16px; padding: 18px; }
-.scheletro__riga + .scheletro__riga { border-top: 1px solid var(--ds-border); }
+.scheletro__titolo { width: 140px; height: 26px; border-radius: 8px; margin: 36px 0 12px; }
+.scheletro__riga { display: flex; gap: 16px; padding: 18px 0; }
+.scheletro__riga + .scheletro__riga { border-top: 1px solid var(--menu-hairline); }
 .scheletro__testo { flex: 1; display: flex; flex-direction: column; gap: 8px; }
 .scheletro__testo span { height: 12px; border-radius: 6px; }
 .scheletro__testo span:first-child { width: 55%; height: 15px; }
 .scheletro__testo span:nth-child(2) { width: 85%; }
-.scheletro__testo span:nth-child(3) { width: 28%; margin-top: 6px; }
-.scheletro__foto { width: 96px; height: 96px; border-radius: 14px; flex: none; }
+.scheletro__testo span:nth-child(3) { width: 40%; }
+.scheletro__foto { width: 96px; height: 96px; border-radius: 16px; flex: none; }
 .scheletro__titolo, .scheletro__testo span, .scheletro__foto {
     background: linear-gradient(90deg, var(--menu-placeholder) 0%, #f4f1ea 50%, var(--menu-placeholder) 100%);
     background-size: 200% 100%;
@@ -233,12 +314,17 @@ main { max-width: 760px; margin: 0 auto; padding: 4px 16px 48px; }
     text-align: center; color: var(--ds-text-muted); padding: 64px 24px;
 }
 .stato svg { width: 40px; height: 40px; color: var(--ds-text-subtle); }
-.stato p { margin: 0; max-width: 320px; }
+.stato p { max-width: 320px; }
 
 footer {
-    text-align: center; color: var(--ds-text-muted);
-    font-family: var(--ds-public-wordmark); font-size: 18px; font-weight: 600;
-    padding: 8px 20px 48px; padding-bottom: max(48px, calc(env(safe-area-inset-bottom) + 24px));
+    max-width: 720px; margin: 0 auto;
+    text-align: center; color: var(--ds-text-subtle);
+    font-size: 13px; font-weight: 500;
+    padding: 0 16px 40px; padding-bottom: max(40px, calc(env(safe-area-inset-bottom) + 24px));
+}
+footer:not(:empty)::before {
+    content: ''; display: block; width: 32px; height: 1px; margin: 0 auto 20px;
+    background: var(--ds-text-subtle); opacity: 0.5;
 }
 
 /* --- Visore foto ---------------------------------------------------------
@@ -254,11 +340,11 @@ footer {
     animation: velo 0.22s ease-out both;
 }
 .fotovelo img {
-    max-height: 70vh; max-width: min(100%, 720px); border-radius: 22px; object-fit: contain;
+    max-height: 70vh; max-width: min(100%, 720px); border-radius: 20px; object-fit: contain;
     box-shadow: 0 30px 80px -24px rgba(0, 0, 0, 0.7);
-    animation: foto 0.32s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    animation: foto 0.36s var(--menu-ease) both;
 }
-.fotovelo__nome { font-size: 20px; font-weight: 600; color: #ffffff; text-align: center; line-height: 1.3; }
+.fotovelo__nome { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; color: #ffffff; text-align: center; line-height: 1.3; }
 .fotovelo__prezzo { font-size: 16px; color: rgba(255, 255, 255, 0.7); margin-top: 4px; text-align: center; }
 .fotovelo__chiudi {
     position: absolute; right: 16px; top: max(16px, env(safe-area-inset-top));
@@ -268,7 +354,7 @@ footer {
 }
 .fotovelo__chiudi svg { width: 18px; height: 18px; }
 @keyframes velo { from { opacity: 0; } to { opacity: 1; } }
-@keyframes foto { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: none; } }
+@keyframes foto { from { opacity: 0; transform: scale(0.96) translateY(8px); } to { opacity: 1; transform: none; } }
 
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation: none !important; transition: none !important; }
@@ -298,11 +384,9 @@ footer {
 <main id="main" aria-busy="true">
     <div aria-hidden="true">
         <div class="scheletro__titolo"></div>
-        <div class="card">
-            <div class="scheletro__riga"><div class="scheletro__testo"><span></span><span></span><span></span></div><div class="scheletro__foto"></div></div>
-            <div class="scheletro__riga"><div class="scheletro__testo"><span></span><span></span><span></span></div></div>
-            <div class="scheletro__riga"><div class="scheletro__testo"><span></span><span></span><span></span></div><div class="scheletro__foto"></div></div>
-        </div>
+        <div class="scheletro__riga"><div class="scheletro__testo"><span></span><span></span><span></span></div><div class="scheletro__foto"></div></div>
+        <div class="scheletro__riga"><div class="scheletro__testo"><span></span><span></span><span></span></div></div>
+        <div class="scheletro__riga"><div class="scheletro__testo"><span></span><span></span><span></span></div><div class="scheletro__foto"></div></div>
     </div>
 </main>
 
@@ -314,10 +398,10 @@ footer {
     /* Testi della pagina nelle quattro lingue del menu. I piatti usano le
        traduzioni del CRM quando ci sono, altrimenti restano in italiano. */
     var UI = {
-        it: { lingua: 'Lingua', categorie: 'Categorie', foto: 'Foto', chiudi: 'Chiudi', allergeni: 'Allergeni', abbinati: 'Si abbina con', vuoto: 'Il menu non è al momento disponibile.', errore: 'Non riusciamo a caricare il menu. Riprova tra poco.' },
-        en: { lingua: 'Language', categorie: 'Categories', foto: 'Photo', chiudi: 'Close', allergeni: 'Allergens', abbinati: 'Pairs with', vuoto: 'The menu is not available right now.', errore: 'We could not load the menu. Please try again shortly.' },
-        fr: { lingua: 'Langue', categorie: 'Catégories', foto: 'Photo', chiudi: 'Fermer', allergeni: 'Allergènes', abbinati: 'S’accorde avec', vuoto: 'Le menu n’est pas disponible pour le moment.', errore: 'Impossible de charger le menu. Réessayez dans un instant.' },
-        de: { lingua: 'Sprache', categorie: 'Kategorien', foto: 'Foto', chiudi: 'Schließen', allergeni: 'Allergene', abbinati: 'Passt zu', vuoto: 'Die Speisekarte ist derzeit nicht verfügbar.', errore: 'Die Speisekarte konnte nicht geladen werden. Bitte versuche es gleich noch einmal.' }
+        it: { lingua: 'Lingua', categorie: 'Categorie', foto: 'Foto', chiudi: 'Chiudi', allergeni: 'Allergeni', abbinati: 'Si abbina con', altro: 'Leggi tutto', meno: 'Riduci', vuoto: 'Il menu non è al momento disponibile.', errore: 'Non riusciamo a caricare il menu. Riprova tra poco.' },
+        en: { lingua: 'Language', categorie: 'Categories', foto: 'Photo', chiudi: 'Close', allergeni: 'Allergens', abbinati: 'Pairs with', altro: 'Read more', meno: 'Show less', vuoto: 'The menu is not available right now.', errore: 'We could not load the menu. Please try again shortly.' },
+        fr: { lingua: 'Langue', categorie: 'Catégories', foto: 'Photo', chiudi: 'Fermer', allergeni: 'Allergènes', abbinati: 'S’accorde avec', altro: 'Lire la suite', meno: 'Réduire', vuoto: 'Le menu n’est pas disponible pour le moment.', errore: 'Impossible de charger le menu. Réessayez dans un instant.' },
+        de: { lingua: 'Sprache', categorie: 'Kategorien', foto: 'Foto', chiudi: 'Schließen', allergeni: 'Allergene', abbinati: 'Passt zu', altro: 'Weiterlesen', meno: 'Weniger', vuoto: 'Die Speisekarte ist derzeit nicht verfügbar.', errore: 'Die Speisekarte konnte nicht geladen werden. Bitte versuche es gleich noch einmal.' }
     };
     // Ogni lingua col suo nome: chi cerca la propria la riconosce così.
     var NOME_LINGUA = { it: 'Italiano', en: 'English', fr: 'Français', de: 'Deutsch' };
@@ -353,9 +437,6 @@ footer {
     }
 
     var ICONA = {
-        // Cerchio con la «i»: neutro, non un avviso — gli allergeni sono
-        // un'informazione, non un pericolo per tutti.
-        info: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>',
         calice: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3h8l-.5 6a3.5 3.5 0 0 1-7 0L8 3ZM12 12.5V20M8.5 20h7"/></svg>',
         piatto: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="7"/><circle cx="12" cy="13" r="3.5"/><path d="M3 4v4a2 2 0 0 0 2 2V20M5 4v4M21 4c-1.5 1-2 3-2 5h2v11"/></svg>',
         chiudi: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>'
@@ -381,15 +462,44 @@ footer {
     function t(chiave) { return UI[lang][chiave]; }
     function euro(n) {
         // La valuta arriva col menu: fino a quel momento (e se manca) l'euro,
-        // che è dove l'applicazione ha sempre vissuto.
+        // che è dove l'applicazione ha sempre vissuto. I centesimi solo
+        // quando ci sono: «9 €» si legge prima di «9,00 €».
         var valuta = (dati && dati.currency) || 'EUR';
-        return new Intl.NumberFormat(lang === 'it' ? 'it-IT' : lang, { style: 'currency', currency: valuta }).format(n);
+        var tondo = Math.round(n * 100) % 100 === 0;
+        return new Intl.NumberFormat(lang === 'it' ? 'it-IT' : lang, {
+            style: 'currency', currency: valuta,
+            minimumFractionDigits: tondo ? 0 : 2, maximumFractionDigits: 2
+        }).format(n);
     }
+    /* Mai maiuscolo (§5.2), nemmeno quando la traduzione arriva così dal CRM
+       («SOFT DRINKS»): una scritta tutta maiuscola torna con la sola
+       iniziale. Sigle corte come «DOC» restano. */
+    function senzaMaiuscolo(s) {
+        s = String(s);
+        if (s.length > 4 && s === s.toUpperCase() && s !== s.toLowerCase()) {
+            return s.charAt(0) + s.slice(1).toLowerCase();
+        }
+        return s;
+    }
+    /* Le schede dei vini sono scritte «cantina · DOC · vitigno · grado — nota»:
+       la parte prima del trattino lungo va sotto il nome, la nota sotto.
+       Un piatto senza trattino resta una descrizione sola. */
     function testoPiatto(p) {
         var tr = p.translations && p.translations[lang];
+        var desc = (lang !== 'it' && tr && tr.description) ? tr.description : (p.description || '');
+        var scheda = '';
+        var taglio = desc.indexOf(' — ');
+        if (taglio > 0 && taglio < 160) {
+            scheda = desc.slice(0, taglio).trim();
+            desc = desc.slice(taglio + 3).trim();
+        }
         return {
             nome: (lang !== 'it' && tr && tr.name) ? tr.name : p.name,
-            desc: (lang !== 'it' && tr && tr.description) ? tr.description : (p.description || '')
+            scheda: scheda,
+            desc: desc,
+            // Gli ingredienti restano sempre aperti, servono a scegliere; si
+            // chiude solo la nota di degustazione, o un testo lungo.
+            chiudi: !!scheda || desc.length > 220
         };
     }
     function nomeAllergene(a) {
@@ -398,13 +508,14 @@ footer {
     }
     function nomeCategoria(cat) {
         var tr = dati.categorie && dati.categorie[cat];
-        return (lang !== 'it' && tr && tr[lang]) ? tr[lang] : cat;
+        return senzaMaiuscolo((lang !== 'it' && tr && tr[lang]) ? tr[lang] : cat);
     }
     function esc(s) {
         return String(s).replace(/[&<>"]/g, function (c) {
             return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
         });
     }
+    function chiave(nome) { return String(nome).trim().toLowerCase(); }
 
     function mostraStato(testo) {
         main.removeAttribute('aria-busy');
@@ -450,7 +561,7 @@ footer {
             return d !== 0 ? d : a.localeCompare(b);
         });
 
-        navBox.innerHTML = '';
+        navBox.innerHTML = '<span class="catnav__pill is-fermo" id="catnav-pill" aria-hidden="true"></span>';
         cats.forEach(function (cat, i) {
             var a = document.createElement('a');
             a.href = '#cat-' + i;
@@ -460,32 +571,75 @@ footer {
         });
         catnav.hidden = cats.length < 2;
 
+        /* Ogni piatto ha un id: «Si abbina con» porta al vino in carta.
+           Si confronta il nome italiano, quello che il CRM salva negli
+           abbinamenti; un vino che non è in questo menu resta testo. */
+        var n = 0;
+        var idDi = {};
+        cats.forEach(function (cat) {
+            perCat[cat].forEach(function (p) { p._id = 'p-' + (n++); if (!idDi[chiave(p.name)]) idDi[chiave(p.name)] = p._id; });
+        });
+
         var html = '';
         cats.forEach(function (cat, i) {
-            html += '<section class="sezione" aria-labelledby="cat-' + i + '"><h2 id="cat-' + i + '">' + esc(nomeCategoria(cat)) + '</h2><div class="card">';
-            perCat[cat].forEach(function (p) {
+            var lista = perCat[cat];
+            html += '<section class="sezione" aria-labelledby="cat-' + i + '"><div class="sezione__testa"><h2 id="cat-' + i + '">' + esc(nomeCategoria(cat)) + '</h2>'
+                + '<span class="sezione__conta tnum" aria-hidden="true">' + lista.length + '</span></div>';
+            lista.forEach(function (p) {
                 var tp = testoPiatto(p);
                 var prezzo = p.price > 0 ? euro(p.price) : '';
-                html += '<div class="piatto">'
-                    + '<div class="piatto__testo"><div class="piatto__nome">' + esc(tp.nome) + '</div>'
-                    + (tp.desc ? '<div class="piatto__desc">' + esc(tp.desc) + '</div>' : '')
-                    + (p.allergens && p.allergens.length ? '<div class="piatto__meta">' + ICONA.info + '<span>' + esc(t('allergeni')) + ': ' + esc(p.allergens.map(nomeAllergene).join(', ')) + '</span></div>' : '')
-                    + (p.abbinati && p.abbinati.length ? '<div class="piatto__meta piatto__abbinati">' + ICONA.calice + '<span>' + esc(t('abbinati')) + ': ' + esc(p.abbinati.join(', ')) + '</span></div>' : '')
-                    + (prezzo ? '<div class="piatto__prezzo tnum">' + esc(prezzo) + '</div>' : '')
+                var abbinati = (p.abbinati || []).map(function (v) {
+                    var id = idDi[chiave(v)];
+                    return id ? '<a href="#' + id + '" data-vai="' + id + '">' + esc(v) + '</a>' : esc(v);
+                });
+                var soloRiga = !tp.desc && !tp.scheda && !p.photo_url && !abbinati.length && !(p.allergens && p.allergens.length);
+                html += '<article class="piatto' + (soloRiga ? ' is-riga' : '') + '" id="' + p._id + '" tabindex="-1">'
+                    + '<div class="piatto__testo">'
+                    + '<div class="piatto__riga"><h3 class="piatto__nome">' + esc(tp.nome) + '</h3>'
+                    + (prezzo ? '<span class="piatto__prezzo tnum">' + esc(prezzo) + '</span>' : '') + '</div>'
+                    + (tp.scheda ? '<p class="piatto__scheda">' + esc(tp.scheda) + '</p>' : '')
+                    + (tp.desc ? '<p class="piatto__desc' + (tp.chiudi ? ' is-chiusa' : '') + '" id="' + p._id + '-d">' + esc(tp.desc) + '</p>' : '')
+                    + (tp.desc && tp.chiudi ? '<button type="button" class="piatto__altro" aria-controls="' + p._id + '-d" aria-expanded="false" hidden>' + esc(t('altro')) + '</button>' : '')
+                    + (p.allergens && p.allergens.length ? '<div class="piatto__allergeni"><span class="piatto__etichetta">' + esc(t('allergeni')) + '</span>'
+                        + p.allergens.map(function (a) { return '<span class="chip">' + esc(nomeAllergene(a)) + '</span>'; }).join('') + '</div>' : '')
+                    + (abbinati.length ? '<div class="piatto__abbinati">' + ICONA.calice + '<span>' + esc(t('abbinati')) + ' ' + abbinati.join(', ') + '</span></div>' : '')
                     + '</div>'
                     + (p.photo_url ? '<button type="button" class="piatto__foto" aria-label="' + esc(t('foto') + ': ' + tp.nome) + '" data-nome="' + esc(tp.nome) + '" data-prezzo="' + esc(prezzo) + '"><img src="' + esc(p.photo_url) + '" alt="" loading="lazy" decoding="async" width="112" height="112" /></button>' : '')
-                    + '</div>';
+                    + '</article>';
             });
-            html += '</div></section>';
+            html += '</section>';
         });
         if (!html) { mostraStato(t('vuoto')); return; }
         main.removeAttribute('aria-busy');
         main.classList.toggle('anima', primoRender && !riduciMoto);
         primoRender = false;
         main.innerHTML = html;
+        misuraNote();
         attiva = -1;
         spia();
     }
+
+    /* «Leggi tutto» compare solo se la nota è davvero tagliata: una nota di
+       due righe non deve promettere altro testo. Si rimisura quando cambia
+       la larghezza (rotazione del telefono). */
+    function misuraNote() {
+        var bottoni = main.querySelectorAll('.piatto__altro');
+        for (var i = 0; i < bottoni.length; i++) {
+            var b = bottoni[i];
+            if (b.getAttribute('aria-expanded') === 'true') continue;
+            var nota = document.getElementById(b.getAttribute('aria-controls'));
+            b.hidden = !nota || nota.scrollHeight <= nota.clientHeight + 1;
+        }
+    }
+    main.addEventListener('click', function (ev) {
+        var b = ev.target.closest ? ev.target.closest('.piatto__altro') : null;
+        if (!b) return;
+        var nota = document.getElementById(b.getAttribute('aria-controls'));
+        var apri = b.getAttribute('aria-expanded') !== 'true';
+        nota.classList.toggle('is-chiusa', !apri);
+        b.setAttribute('aria-expanded', String(apri));
+        b.textContent = apri ? t('meno') : t('altro');
+    });
 
     /* --- La barra segue la lettura ---------------------------------------
        La categoria «attiva» è l'ultima il cui titolo è passato sotto la
@@ -497,13 +651,26 @@ footer {
     var scelta = -1;
     var inAttesa = false;
 
+    // La pillola piena segue la categoria attiva. Al primo posizionamento
+    // (e dopo un cambio lingua o di larghezza) ci va senza scivolare.
+    function posaPillola(anima) {
+        var pill = document.getElementById('catnav-pill');
+        var p = navBox.querySelector('a[aria-current="true"]');
+        if (!pill || !p) return;
+        pill.classList.toggle('is-fermo', !anima);
+        pill.style.width = p.offsetWidth + 'px';
+        pill.style.transform = 'translateX(' + p.offsetLeft + 'px)';
+    }
+
     function segna(idx) {
         if (idx === attiva) return;
+        var prima = attiva;
         attiva = idx;
-        var pillole = navBox.children;
+        var pillole = navBox.querySelectorAll('a[data-i]');
         for (var i = 0; i < pillole.length; i++) pillole[i].setAttribute('aria-current', String(i === idx));
         var p = pillole[idx];
         if (!p || catnav.hidden) return;
+        posaPillola(prima !== -1 && !riduciMoto);
         // Scorre solo la barra (scrollLeft), mai la pagina: scrollIntoView
         // su iOS sposta anche la finestra.
         var sinistra = p.offsetLeft - (navBox.clientWidth - p.offsetWidth) / 2;
@@ -532,12 +699,34 @@ footer {
     window.addEventListener('scroll', function () {
         if (!inAttesa) { inAttesa = true; requestAnimationFrame(spia); }
     }, { passive: true });
-    window.addEventListener('resize', spia, { passive: true });
+    var larghezza = window.innerWidth;
+    window.addEventListener('resize', function () {
+        spia();
+        posaPillola(false);
+        // Solo la larghezza cambia dove vanno a capo le note: su iOS la
+        // barra dell'indirizzo che entra ed esce manda resize di sola altezza.
+        if (window.innerWidth !== larghezza) { larghezza = window.innerWidth; misuraNote(); }
+    }, { passive: true });
+    // Le pillole si misurano col font di sistema finché Hanken Grotesk non
+    // arriva: a font caricato larghezze e note vanno rimisurate. Anche
+    // loadingdone, perché ready può risolversi prima che il font sia chiesto.
+    if (document.fonts && document.fonts.ready) {
+        var rimisura = function () { posaPillola(false); misuraNote(); };
+        document.fonts.ready.then(rimisura);
+        if (document.fonts.addEventListener) document.fonts.addEventListener('loadingdone', rimisura);
+    }
     // Un gesto dell'ospite (dito, rotella, tastiera) rimette la barra a
     // seguire lo scorrimento; quello animato da un tocco non ne genera.
     ['touchstart', 'wheel', 'keydown'].forEach(function (ev) {
         window.addEventListener(ev, function () { scelta = -1; }, { passive: true });
     });
+
+    function vaiA(el, idx) {
+        scelta = idx;
+        segna(idx);
+        var y = el.getBoundingClientRect().top + window.scrollY - catnav.offsetHeight - 12;
+        window.scrollTo({ top: Math.max(0, y), behavior: riduciMoto ? 'auto' : 'smooth' });
+    }
 
     navBox.addEventListener('click', function (ev) {
         var a = ev.target.closest ? ev.target.closest('a[data-i]') : null;
@@ -545,15 +734,31 @@ footer {
         ev.preventDefault();
         var i = Number(a.getAttribute('data-i'));
         var titolo = document.getElementById('cat-' + i);
-        if (!titolo) return;
-        scelta = i;
-        segna(i);
-        var y = titolo.getBoundingClientRect().top + window.scrollY - catnav.offsetHeight - 12;
-        window.scrollTo({ top: Math.max(0, y), behavior: riduciMoto ? 'auto' : 'smooth' });
+        if (titolo) vaiA(titolo, i);
+    });
+
+    // «Si abbina con Virgani» porta al Virgani in carta, lo fa lampeggiare
+    // una volta e ci sposta il focus, per chi naviga con lo screen reader.
+    main.addEventListener('click', function (ev) {
+        var a = ev.target.closest ? ev.target.closest('a[data-vai]') : null;
+        if (!a) return;
+        var vino = document.getElementById(a.getAttribute('data-vai'));
+        if (!vino) return;
+        ev.preventDefault();
+        var sezioni = main.querySelectorAll('.sezione');
+        var idx = Array.prototype.indexOf.call(sezioni, vino.closest('.sezione'));
+        vaiA(vino, idx);
+        vino.classList.remove('is-evidenziato');
+        void vino.offsetWidth; // riparte l'animazione se si ritocca lo stesso vino
+        vino.classList.add('is-evidenziato');
+        vino.focus({ preventScroll: true });
+    });
+    main.addEventListener('animationend', function (ev) {
+        if (ev.animationName === 'lampo') ev.target.classList.remove('is-evidenziato');
     });
 
     /* Il visore foto: si apre dal tocco sulla miniatura, si chiude con un
-       tocco ovunque o con Esc. Delegato su document perché le card si
+       tocco ovunque o con Esc. Delegato su document perché le righe si
        rirenderizzano a ogni cambio lingua. */
     var apertoDa = null;
     function chiudiFoto() {
@@ -609,6 +814,12 @@ footer {
     document.addEventListener('keydown', function (ev) {
         if (ev.key === 'Escape') chiudiFoto();
     });
+    // Una foto verticale è una bottiglia: va intera, non ritagliata.
+    document.addEventListener('load', function (ev) {
+        var el = ev.target;
+        var btn = el && el.closest ? el.closest('.piatto__foto') : null;
+        if (btn && el.naturalHeight > el.naturalWidth * 1.15) btn.classList.add('is-bottiglia');
+    }, true);
     // Una foto che non scarica (link rotto, file rimosso) toglie la sua
     // miniatura: meglio nessuna foto che un riquadro vuoto da toccare.
     document.addEventListener('error', function (ev) {
@@ -632,7 +843,7 @@ footer {
             // branding manca dal backend di prima del restyling (frontend e
             // backend non escono insieme): senza, la testata resta col nome.
             var branding = json.branding && typeof json.branding === 'object' ? json.branding : {};
-            document.getElementById('nome-ristorante').textContent = nome || ' ';
+            document.getElementById('nome-ristorante').textContent = nome || ' ';
             document.title = (nome ? nome + ' · ' : '') + 'Menu';
             document.getElementById('footer').textContent = nome;
             if (typeof branding.tagline === 'string' && branding.tagline) {
