@@ -146,10 +146,23 @@ const updatableColumns = async (client: any, table: string): Promise<string[]> =
 const upsertInPlace = async (client: any, table: string, row: any, keep: readonly string[] = []): Promise<void> => {
     if (row?.id == null) return;
     const cols = (await updatableColumns(client, table)).filter(c => !keep.includes(c));
-    const set = cols.map(c => `"${c}" = EXCLUDED."${c}"`).join(', ');
+    // Prima l'UPDATE, l'INSERT solo se la riga manca. Non INSERT … ON
+    // CONFLICT DO UPDATE: i trigger BEFORE INSERT scattano anche quando poi
+    // il conflitto diventa un aggiornamento, e quello delle quote
+    // (enforce_table_bill_split_sum, che per un INSERT conta tutte le quote
+    // vive) contava due volte la quota già in casa. Il replica-mode sul nodo
+    // spegne i trigger; sul cloud di Railway, senza superuser, restano
+    // accesi — visto solo nella suite con RLS rigida.
+    const set = cols.map(c => `"${c}" = src."${c}"`).join(', ');
+    const upd = await client.query(
+        `UPDATE ${table} AS t SET ${set}
+           FROM jsonb_populate_record(NULL::${table}, $1::jsonb) AS src
+          WHERE t.id = src.id`,
+        [JSON.stringify(row)]
+    );
+    if ((upd.rowCount ?? 0) > 0) return;
     await client.query(
-        `INSERT INTO ${table} SELECT * FROM jsonb_populate_recordset(NULL::${table}, $1::jsonb)
-         ON CONFLICT (id) DO UPDATE SET ${set}`,
+        `INSERT INTO ${table} SELECT * FROM jsonb_populate_recordset(NULL::${table}, $1::jsonb)`,
         [JSON.stringify([row])]
     );
 };

@@ -4240,8 +4240,11 @@ function startPassepartoutCloseSweeper(): void {
         if (!getPassepartoutAgentStatus().connected) return;
         const config = getPassepartoutChiusuraConfig();
         if (!config) return;
+        // queryWithRetry e non pool.query: solo lui porta il contesto sul
+        // client (db.ts), e sotto RLS rigida — come gira Railway — un
+        // pool.query nudo vede zero righe anche dentro runAsPlatform.
         // rls-bypass: spazzino senza sessione; ogni riga si lavora nel contesto del suo tenant_id
-        const rs = await runAsPlatform(() => pool.query(
+        const rs = await runAsPlatform(() => queryWithRetry(
             `SELECT fd.id, fd.tenant_id, fd.table_bill_id, fd.doc_type, fd.attempts, fd.created_at,
                     COALESCE(fd.response, '{}'::jsonb) AS response, b.external_ref
                FROM fiscal_documents fd JOIN table_bills b ON b.id = fd.table_bill_id
@@ -4253,10 +4256,12 @@ function startPassepartoutCloseSweeper(): void {
             const billId = Number(row.table_bill_id);
             const idComanda = passepartoutComandaIdFromRef(row.external_ref);
             if (idComanda == null || ppCloseInFlight.has(billId)) continue;
-            if (!isServiceNode && await nodeOwnsBills(tenantId)) continue;
             const nextAt = Date.parse(String(row.response?.next_at ?? ''));
             if (Number.isFinite(nextAt) && nextAt > Date.now()) continue;
             await runWithTenantContext(tenantId, async () => {
+                // Dentro il contesto: fuori, sotto RLS rigida, il flag si
+                // leggerebbe come spento.
+                if (!isServiceNode && await nodeOwnsBills(tenantId)) return;
                 const offline = Number(row.response?.offline_attempts ?? 0);
                 const reached = Number(row.attempts) > offline;
                 const expired = Date.now() - new Date(row.created_at).getTime() > PP_CLOSE_WINDOW_MS;
