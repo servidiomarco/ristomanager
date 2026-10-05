@@ -70,6 +70,7 @@
   "closeCycle": "Chiudi il ciclo",
   "closeCycleRequired": "Servono l'ora di fine e la temperatura al cuore.",
   "closeCycleTitle": "Chiudi il ciclo",
+  "closedByName": "chiuso da {{nome}}",
   "compliant": "Conforme",
   "concentration": "Concentrazione",
   "config": {
