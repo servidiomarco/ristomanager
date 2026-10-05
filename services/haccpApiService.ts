@@ -1,9 +1,9 @@
 import { authApiService } from './authApiService';
 import { socketClient } from './socketClient';
 import { buildApiError, ApiError } from './apiError';
-import type { HaccpFrequency, HaccpPoint, HaccpRegister } from '../utils/haccp';
+import type { HaccpFrequency, HaccpLimits, HaccpPoint, HaccpProcess, HaccpReceiptCategory, HaccpRegister } from '../utils/haccp';
 
-export type { HaccpFrequency, HaccpPoint, HaccpRegister } from '../utils/haccp';
+export type { HaccpFrequency, HaccpLimits, HaccpPoint, HaccpProcess, HaccpReceiptCategory, HaccpRegister } from '../utils/haccp';
 
 const API_URL = import.meta.env.VITE_API_URL || "https://ristomanager-production.up.railway.app";
 
@@ -44,6 +44,9 @@ export interface HaccpOilCheck extends HaccpAuditFields {
   pointId: number | null;
   fryerLabel: string;
   action: HaccpOilAction;
+  /** Assenti su un server della versione precedente. */
+  polarCompounds?: number | null;
+  oilTemp?: number | null;
   note: string | null;
 }
 
@@ -64,15 +67,59 @@ export interface HaccpGoodsReceipt extends HaccpAuditFields {
   temperature: number | null;
   accepted: boolean;
   note: string | null;
+  supplierId?: string | null;
+  supplierName?: string | null;
+  ddtNumber?: string | null;
+  expiryDate?: string | null;
+  packagingOk?: boolean | null;
+  category?: HaccpReceiptCategory | null;
+  quantity?: string | null;
 }
 
+/** Un processo (abbattimento, cottura, bonifica…). Le righe di prima della
+ *  Fase 2 sono LEGACY, con range e durata. */
 export interface HaccpProductionLog extends HaccpAuditFields {
   id: string;
   date: string;
   product: string;
+  process?: HaccpProcess;
   blastTempRange: string | null;
   blastDuration: string | null;
   internalLot: string | null;
+  note: string | null;
+  equipmentPointId?: number | null;
+  equipmentLabel?: string | null;
+  startedAt?: string | null;
+  startTemp?: number | null;
+  endedAt?: string | null;
+  endTemp?: number | null;
+  /** Chi ha chiuso il ciclo, se non è chi l'ha avviato. */
+  endedByUserName?: string | null;
+  quantity?: string | null;
+  expiryDate?: string | null;
+  sourceLots?: string | null;
+  sanitizer?: string | null;
+  concentration?: string | null;
+  contactMinutes?: number | null;
+  eventLabel?: string | null;
+  keepUntil?: string | null;
+  compliant?: boolean | null;
+  problem?: string | null;
+}
+
+export type HaccpCalibrationMethod = 'GHIACCIO' | 'EBOLLIZIONE' | 'RIFERIMENTO';
+export type HaccpCalibrationOutcome = 'OK' | 'CORRETTO' | 'SOSTITUITO';
+
+export interface HaccpCalibration extends HaccpAuditFields {
+  id: string;
+  date: string;
+  pointId: number;
+  instrument: string;
+  method: HaccpCalibrationMethod;
+  referenceTemp: number;
+  measuredTemp: number;
+  maxDeviation: number;
+  outcome: HaccpCalibrationOutcome;
   note: string | null;
 }
 
@@ -116,13 +163,18 @@ export interface HaccpDay {
   points: HaccpPoint[];
   temperatures: HaccpTemperatureReading[];
   oil: HaccpOilCheck[];
-  /** Le pulizie fatte nella finestra che copre anche le settimanali e le
-   *  mensili: dal primo del mese (o da sei giorni prima) al giorno. */
+  /** L'ultima pulizia di ogni punto fino al giorno (una per punto): le
+   *  periodiche coprono il loro periodo. */
   cleaning: HaccpCleaningCheck[];
   receipts: HaccpGoodsReceipt[];
+  /** I processi del giorno più i cicli ancora aperti dei giorni prima. */
   production: HaccpProductionLog[];
+  /** L'ultima taratura di ogni termometro fino al giorno. Assente su un
+   *  server della versione precedente. */
+  calibrations?: HaccpCalibration[];
   /** Quelle del giorno più tutte le aperte. */
   nonconformities: HaccpNonConformity[];
+  limits?: HaccpLimits;
   canManage: boolean;
 }
 
@@ -136,10 +188,20 @@ export interface HaccpReportData {
   cleaning: HaccpCleaningCheck[];
   receipts: HaccpGoodsReceipt[];
   production: HaccpProductionLog[];
+  calibrations?: HaccpCalibration[];
   nonconformities: HaccpNonConformity[];
   changes: HaccpChange[];
+  limits?: HaccpLimits;
   generatedAt: string;
 }
+
+export interface HaccpTraceResult {
+  q: string;
+  receipts: HaccpGoodsReceipt[];
+  production: HaccpProductionLog[];
+}
+
+export type HaccpProcessInput = Partial<Omit<HaccpProductionLog, 'id' | 'date' | keyof HaccpAuditFields | 'compliant' | 'problem' | 'keepUntil' | 'equipmentLabel' | 'endedByUserName'>> & { product?: string };
 
 export interface HaccpPointInput {
   register?: HaccpRegister;
@@ -260,6 +322,8 @@ class HaccpApiService {
     date: string;
     pointId: number;
     action: HaccpOilAction;
+    polarCompounds?: number | null;
+    oilTemp?: number | null;
     note?: string | null;
     reason?: string | null;
   }): Promise<HaccpOilCheck> {
@@ -285,6 +349,13 @@ class HaccpApiService {
     temperature?: number | null;
     accepted: boolean;
     note?: string | null;
+    supplierId?: string | null;
+    supplierName?: string | null;
+    ddtNumber?: string | null;
+    expiryDate?: string | null;
+    packagingOk?: boolean | null;
+    category?: HaccpReceiptCategory | null;
+    quantity?: string | null;
   }): Promise<HaccpGoodsReceipt> {
     return send('POST', '/receipts', input);
   }
@@ -293,20 +364,52 @@ class HaccpApiService {
     return send('POST', `/receipts/${id}/void`, { reason });
   }
 
-  // --- Produzione / abbattimento ---
-  createProductionLog(input: {
-    date: string;
-    product: string;
-    blastTempRange?: string | null;
-    blastDuration?: string | null;
-    internalLot?: string | null;
-    note?: string | null;
-  }): Promise<HaccpProductionLog> {
+  // --- Processi (abbattimento, cottura, bonifica…) ---
+  createProductionLog(input: HaccpProcessInput & { date: string; product: string }): Promise<HaccpProductionLog> {
     return send('POST', '/production', input);
+  }
+
+  /** Chiude un ciclo (fine e temperatura finale) o corregge un processo. */
+  updateProductionLog(id: string, input: HaccpProcessInput & { reason?: string | null }): Promise<HaccpProductionLog> {
+    return send('PUT', `/production/${id}`, input);
   }
 
   voidProductionLog(id: string, reason: string | null): Promise<HaccpProductionLog> {
     return send('POST', `/production/${id}/void`, { reason });
+  }
+
+  // --- Taratura dei termometri ---
+  createCalibration(input: {
+    date: string;
+    pointId: number;
+    method: HaccpCalibrationMethod;
+    referenceTemp: number;
+    measuredTemp: number;
+    outcome: HaccpCalibrationOutcome;
+    note?: string | null;
+  }): Promise<HaccpCalibration> {
+    return send('POST', '/calibrations', input);
+  }
+
+  voidCalibration(id: string, reason: string | null): Promise<HaccpCalibration> {
+    return send('POST', `/calibrations/${id}/void`, { reason });
+  }
+
+  // --- Limiti del locale ---
+  getSettings(): Promise<{ limits: HaccpLimits; defaults: HaccpLimits }> {
+    return get('/settings');
+  }
+
+  saveSettings(limits: HaccpLimits, reason?: string | null): Promise<{ limits: HaccpLimits }> {
+    return send('PUT', '/settings', { limits, reason: reason ?? null });
+  }
+
+  // --- Rintracciabilità ---
+  trace(q: string, from?: string, to?: string): Promise<HaccpTraceResult> {
+    const params = new URLSearchParams({ q });
+    if (from) params.set('from', from);
+    if (to) params.set('to', to);
+    return get(`/trace?${params.toString()}`);
   }
 
   // --- Non conformità ---
@@ -319,7 +422,7 @@ class HaccpApiService {
     return get(`/nonconformities${qs ? `?${qs}` : ''}`);
   }
 
-  createNonConformity(input: { date: string; title: string; detail?: string | null; correctiveAction?: string | null }): Promise<HaccpNonConformity> {
+  createNonConformity(input: { date: string; title: string; detail?: string | null; correctiveAction?: string | null; source?: 'MANUAL' | 'RECALL' }): Promise<HaccpNonConformity> {
     return send('POST', '/nonconformities', input);
   }
 

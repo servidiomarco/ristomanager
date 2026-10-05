@@ -37,7 +37,7 @@ Il Reg. CE 852/2004 non elenca i registri da tenere: chiede procedure basate sui
 - **Non conformità** (`haccp_nonconformities`): si aprono da sole quando un valore esce dalla soglia (temperatura, olio, merce respinta, processo fuori limite) o a mano. Si chiudono scrivendo l'azione correttiva. Il report le elenca con chi le ha chiuse.
 - **Permessi**: `haccp:view` (vede registri e report), `haccp:record` (compila), `haccp:manage` (configura punti e limiti, archivio documenti, formazione). Concessi dalla migration a chi oggi vede l'HACCP (`dashboard:view`); `manage` a titolare, direzione e manager.
 
-## Fase 1 — fondamenta
+## Fase 1 — fondamenta ✅ (PR #828)
 
 - Punti di controllo configurabili da **HACCP → Configura**, con il Frantoio migrato sui suoi punti attuali (lo storico si aggancia per nome).
 - Fino a tre rilevazioni al giorno per postazione, soglia minima per il caldo.
@@ -47,7 +47,7 @@ Il Reg. CE 852/2004 non elenca i registri da tenere: chiede procedure basate sui
 - Report per periodo (giorno, mese, intervallo), con griglia mensile delle temperature, non conformità e correzioni.
 - Aggiornamento in tempo reale fra i telefoni della cucina (`haccp:changed`).
 
-## Fase 2 — registri di processo e rintracciabilità
+## Fase 2 — registri di processo e rintracciabilità ✅
 
 - **Processi** con temperature e orari veri, al posto di «range/durata»: abbattimento (positivo e negativo), bonifica anti-Anisakis (−20 °C per 24 h o −35 °C per 15 h), cottura al cuore, rinvenimento, mantenimento a caldo, scongelamento, sanificazione delle verdure, campioni testimone dei banchetti. Esito calcolato sui limiti del locale; fuori limite apre una non conformità.
 - **Limiti del locale** (`haccp_settings`): cottura ≥ 75 °C, caldo ≥ 65 °C, abbattimento a +3 °C in 90 minuti, ecc., modificabili in Configura.

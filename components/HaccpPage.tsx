@@ -8,17 +8,18 @@ import { HaccpToday } from './haccp/HaccpToday';
 import { HaccpNonConformities } from './haccp/HaccpNonConformities';
 import { HaccpReport } from './haccp/HaccpReport';
 import { HaccpConfig } from './haccp/HaccpConfig';
+import { HaccpTrace } from './haccp/HaccpTrace';
 
-/* Il registro HACCP (docs/haccp-piano.md). Quattro schede: il modulo del
-   giorno, le non conformità da chiudere, il report per periodo e — per chi
-   gestisce l'HACCP — i punti di controllo del locale.
+/* Il registro HACCP (docs/haccp-piano.md). Le schede: il modulo del giorno,
+   le non conformità da chiudere, la rintracciabilità per lotto, il report
+   per periodo e — per chi gestisce l'HACCP — punti di controllo e limiti.
 
    ATTENZIONE — quello che NON si traduce: i nomi dei punti di controllo
    («Frigo antipasti», «Friggitrice 3») sono dati del ristorante, scritti da
    lui nella sua lingua; e il foglio stampato (utils/printHaccpReport.ts) è un
    documento per l'ASL, in italiano. */
 
-type Tab = 'today' | 'nc' | 'report' | 'config';
+type Tab = 'today' | 'nc' | 'trace' | 'report' | 'config';
 
 export const HaccpPage: React.FC = () => {
   const { t } = useTranslation('haccp', { useSuspense: false });
@@ -43,6 +44,7 @@ export const HaccpPage: React.FC = () => {
   const options: Array<{ value: Tab; label: string; badge?: number; badgeTone?: 'neutral' | 'alert' }> = [
     { value: 'today', label: t('tab.today', 'Registro') },
     { value: 'nc', label: t('tab.nc', 'Non conformità'), badge: openNc || undefined, badgeTone: 'alert' },
+    { value: 'trace', label: t('tab.trace', 'Rintracciabilità') },
     { value: 'report', label: t('tab.report', 'Report') },
     ...(canManage ? [{ value: 'config' as const, label: t('tab.config', 'Configura') }] : []),
   ];
@@ -79,6 +81,7 @@ export const HaccpPage: React.FC = () => {
             />
           )}
           {tab === 'nc' && <HaccpNonConformities refreshKey={refreshKey} canManage={canManage} onCountChange={setOpenNc} />}
+          {tab === 'trace' && <HaccpTrace refreshKey={refreshKey} onRecallCreated={() => setTab('nc')} />}
           {tab === 'report' && <HaccpReport refreshKey={refreshKey} />}
           {tab === 'config' && canManage && <HaccpConfig refreshKey={refreshKey} />}
         </div>

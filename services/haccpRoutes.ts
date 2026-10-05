@@ -35,14 +35,25 @@ import { RolePermissionService } from '../auth/permissionService.js';
 import { isPlatformScopedSession } from '../auth/authService.js';
 import {
     HACCP_CORRECTION_GRACE_MINUTES,
-    HACCP_FREQUENCIES,
     HACCP_POINT_REGISTERS,
+    HACCP_PROCESSES,
+    HACCP_PROCESS_LABELS_IT,
+    HACCP_RECEIPT_CATEGORIES,
+    HACCP_REGISTER_FREQUENCIES,
+    HACCP_TWO_STEP_PROCESSES,
     HaccpFrequency,
+    HaccpLimits,
+    HaccpProcess,
     HaccpRegister,
+    evaluateHaccpOil,
+    evaluateHaccpProcess,
+    evaluateHaccpReceipt,
     formatHaccpTemperature,
+    haccpCalibrationDeviation,
     haccpMissingTag,
     haccpTemperatureTag,
     isOutOfRange,
+    mergeHaccpLimits,
 } from '../utils/haccp.js';
 
 export interface HaccpPush {
@@ -231,18 +242,32 @@ const TEMP_COLUMNS = `
 
 const OIL_COLUMNS = `
     id, TO_CHAR(date, 'YYYY-MM-DD') AS date, point_id AS "pointId", fryer_label AS "fryerLabel",
-    action, note, ${AUDIT_COLUMNS}`;
+    action, polar_compounds::float8 AS "polarCompounds", oil_temp::float8 AS "oilTemp", note, ${AUDIT_COLUMNS}`;
 
 const CLEANING_COLUMNS = `
     id, TO_CHAR(date, 'YYYY-MM-DD') AS date, point_id AS "pointId", point, done, note, ${AUDIT_COLUMNS}`;
 
 const RECEIPT_COLUMNS = `
     id, TO_CHAR(date, 'YYYY-MM-DD') AS date, product, lot_number AS "lotNumber",
-    temperature::float8 AS temperature, accepted, note, ${AUDIT_COLUMNS}`;
+    temperature::float8 AS temperature, accepted, note,
+    supplier_id AS "supplierId", supplier_name AS "supplierName", ddt_number AS "ddtNumber",
+    TO_CHAR(expiry_date, 'YYYY-MM-DD') AS "expiryDate", packaging_ok AS "packagingOk", category, quantity,
+    ${AUDIT_COLUMNS}`;
 
 const PRODUCTION_COLUMNS = `
-    id, TO_CHAR(date, 'YYYY-MM-DD') AS date, product, blast_temp_range AS "blastTempRange",
-    blast_duration AS "blastDuration", internal_lot AS "internalLot", note, ${AUDIT_COLUMNS}`;
+    id, TO_CHAR(date, 'YYYY-MM-DD') AS date, product, process, blast_temp_range AS "blastTempRange",
+    blast_duration AS "blastDuration", internal_lot AS "internalLot", note,
+    equipment_point_id AS "equipmentPointId", equipment_label AS "equipmentLabel",
+    started_at AS "startedAt", start_temp::float8 AS "startTemp", ended_at AS "endedAt", end_temp::float8 AS "endTemp",
+    ended_by_user_name AS "endedByUserName",
+    quantity, TO_CHAR(expiry_date, 'YYYY-MM-DD') AS "expiryDate", source_lots AS "sourceLots",
+    sanitizer, concentration, contact_minutes AS "contactMinutes", event_label AS "eventLabel",
+    keep_until AS "keepUntil", compliant, problem, ${AUDIT_COLUMNS}`;
+
+const CALIBRATION_COLUMNS = `
+    id, TO_CHAR(date, 'YYYY-MM-DD') AS date, point_id AS "pointId", instrument, method,
+    reference_temp::float8 AS "referenceTemp", measured_temp::float8 AS "measuredTemp",
+    max_deviation::float8 AS "maxDeviation", outcome, note, ${AUDIT_COLUMNS}`;
 
 const POINT_COLUMNS = `
     id, register, label, min_temp::float8 AS "minTemp", max_temp::float8 AS "maxTemp",
@@ -306,7 +331,26 @@ async function resolvePoint(
 
 // ---- Non conformità ------------------------------------------------------------------
 
-type NcSource = 'TEMPERATURE' | 'OIL' | 'CLEANING' | 'RECEIPT' | 'PROCESS' | 'MANUAL';
+type NcSource = 'TEMPERATURE' | 'OIL' | 'CLEANING' | 'RECEIPT' | 'PROCESS' | 'CALIBRATION' | 'RECALL' | 'MANUAL';
+
+// ---- Limiti del locale ---------------------------------------------------------------
+// Letti a ogni registrazione che li usa: cache breve per tenant, svuotata dal
+// PUT /settings. Un ristorante senza riga ha i valori di riferimento.
+
+const limitsCache = new Map<number, { limits: HaccpLimits; stored: unknown; at: number }>();
+const LIMITS_TTL_MS = 30_000;
+
+async function loadSettings(tenantId: number): Promise<{ limits: HaccpLimits; stored: unknown }> {
+    const cached = limitsCache.get(tenantId);
+    if (cached && Date.now() - cached.at < LIMITS_TTL_MS) return cached;
+    const r = await queryWithRetry(`SELECT limits FROM haccp_settings WHERE tenant_id = $1`, [tenantId]);
+    const stored = r.rows[0]?.limits ?? null;
+    const entry = { limits: mergeHaccpLimits(stored), stored, at: Date.now() };
+    limitsCache.set(tenantId, entry);
+    return entry;
+}
+
+const loadLimits = async (tenantId: number): Promise<HaccpLimits> => (await loadSettings(tenantId)).limits;
 
 /** Tiene allineata la non conformità di una registrazione: aperta finché il
  *  valore è fuori, annullata se la registrazione torna in regola o viene
@@ -500,8 +544,12 @@ export function createHaccpRouter(deps: HaccpDeps): express.Router {
         } else {
             checksPerDay = 1;
         }
-        if (register === 'CLEANING') {
-            if (!HACCP_FREQUENCIES.includes(frequency)) throw new HaccpError(400, { error: 'Frequenza non valida' });
+        const allowed = HACCP_REGISTER_FREQUENCIES[register];
+        if (allowed) {
+            // Un termometro nuovo senza frequenza: la taratura semestrale è la
+            // più comune nei manuali.
+            if (body.frequency === undefined && !current && register === 'THERMOMETER') frequency = 'SEMIANNUAL';
+            if (!allowed.includes(frequency)) throw new HaccpError(400, { error: 'Frequenza non valida' });
         } else {
             frequency = 'DAILY';
         }
@@ -615,14 +663,7 @@ export function createHaccpRouter(deps: HaccpDeps): express.Router {
             const date = req.query.date;
             if (!isValidDate(date)) throw new HaccpError(400, { error: 'date (YYYY-MM-DD) is required' });
             const tenantId = req.tenantId!;
-            // Le pulizie settimanali e mensili valgono per il loro periodo: una
-            // fatta martedì copre la settimana, e il modulo di giovedì deve
-            // saperlo. La finestra più larga è il mese.
-            const monthStart = `${date.slice(0, 7)}-01`;
-            const weekBack = new Date(`${date}T00:00:00Z`);
-            weekBack.setUTCDate(weekBack.getUTCDate() - 6);
-            const cleaningFrom = [monthStart, weekBack.toISOString().slice(0, 10)].sort()[0];
-            const [points, temps, oil, cleaning, receipts, production, ncs] = await Promise.all([
+            const [points, temps, oil, cleaning, receipts, production, calibrations, ncs, settings] = await Promise.all([
                 queryWithRetry(
                     `SELECT ${POINT_COLUMNS} FROM haccp_points WHERE tenant_id = $1 ORDER BY register, sort_order, id`,
                     [tenantId],
@@ -637,20 +678,33 @@ export function createHaccpRouter(deps: HaccpDeps): express.Router {
                       WHERE tenant_id = $1 AND date = $2 AND voided_at IS NULL ORDER BY fryer_label`,
                     [tenantId, date],
                 ),
+                // L'ultima pulizia di ogni punto fino al giorno: le periodiche
+                // (la settimanale di martedì, la semestrale di marzo) coprono il
+                // loro periodo, e il modulo decide se il punto è ancora dovuto.
                 queryWithRetry(
-                    `SELECT ${CLEANING_COLUMNS} FROM haccp_cleaning_checks
-                      WHERE tenant_id = $1 AND date BETWEEN $2::date AND $3::date AND voided_at IS NULL AND done
-                      ORDER BY date DESC`,
-                    [tenantId, cleaningFrom, date],
+                    `SELECT DISTINCT ON (point_id) ${CLEANING_COLUMNS} FROM haccp_cleaning_checks
+                      WHERE tenant_id = $1 AND date <= $2 AND voided_at IS NULL AND done AND point_id IS NOT NULL
+                      ORDER BY point_id, date DESC, recorded_at DESC`,
+                    [tenantId, date],
                 ),
                 queryWithRetry(
                     `SELECT ${RECEIPT_COLUMNS} FROM haccp_goods_receipts
                       WHERE tenant_id = $1 AND date = $2 AND voided_at IS NULL ORDER BY recorded_at`,
                     [tenantId, date],
                 ),
+                // I processi del giorno più i cicli ancora aperti dei giorni
+                // prima: la bonifica messa in congelatore ieri si chiude oggi.
                 queryWithRetry(
                     `SELECT ${PRODUCTION_COLUMNS} FROM haccp_production_logs
-                      WHERE tenant_id = $1 AND date = $2 AND voided_at IS NULL ORDER BY recorded_at`,
+                      WHERE tenant_id = $1 AND voided_at IS NULL
+                        AND (date = $2 OR (ended_at IS NULL AND process = ANY($3::text[]) AND date BETWEEN $2::date - 7 AND $2::date))
+                      ORDER BY recorded_at`,
+                    [tenantId, date, HACCP_TWO_STEP_PROCESSES],
+                ),
+                queryWithRetry(
+                    `SELECT DISTINCT ON (point_id) ${CALIBRATION_COLUMNS} FROM haccp_calibrations
+                      WHERE tenant_id = $1 AND date <= $2 AND voided_at IS NULL
+                      ORDER BY point_id, date DESC, recorded_at DESC`,
                     [tenantId, date],
                 ),
                 queryWithRetry(
@@ -659,6 +713,7 @@ export function createHaccpRouter(deps: HaccpDeps): express.Router {
                       ORDER BY opened_at DESC`,
                     [tenantId, date],
                 ),
+                loadSettings(tenantId),
             ]);
             res.json({
                 date,
@@ -668,11 +723,93 @@ export function createHaccpRouter(deps: HaccpDeps): express.Router {
                 cleaning: cleaning.rows,
                 receipts: receipts.rows,
                 production: production.rows,
+                calibrations: calibrations.rows,
                 nonconformities: ncs.rows,
+                limits: settings.limits,
                 canManage: await canManage(req),
             });
         } catch (err) {
             fail(res, err, 'GET /day');
+        }
+    });
+
+    // =====================================================================
+    // Limiti del locale
+    // =====================================================================
+
+    router.get('/settings', ...view, async (req, res) => {
+        try {
+            const { limits } = await loadSettings(req.tenantId!);
+            res.json({ limits, defaults: mergeHaccpLimits(null) });
+        } catch (err) {
+            fail(res, err, 'GET /settings');
+        }
+    });
+
+    // Si salvano interi, già ripuliti: un valore non numerico torna al
+    // riferimento invece di finire a database e rompere ogni calcolo dopo.
+    router.put('/settings', ...manage, async (req, res) => {
+        try {
+            const tenantId = req.tenantId!;
+            const next = mergeHaccpLimits(req.body?.limits);
+            const actor = await actorOf(req);
+            const reason = cleanText(req.body?.reason, 500);
+            await withTenant(tenantId, async client => {
+                const cur = await client.query(`SELECT limits FROM haccp_settings WHERE tenant_id = $1 FOR UPDATE`, [tenantId]);
+                const before = mergeHaccpLimits(cur.rows[0]?.limits ?? null);
+                await client.query(
+                    `INSERT INTO haccp_settings (tenant_id, limits, updated_at, updated_by_user_name)
+                     VALUES ($1, $2, now(), $3)
+                     ON CONFLICT (tenant_id) DO UPDATE SET limits = EXCLUDED.limits, updated_at = now(),
+                         updated_by_user_name = EXCLUDED.updated_by_user_name`,
+                    [tenantId, JSON.stringify(next), actor.name],
+                );
+                await logChange(client, tenantId, {
+                    entity: 'settings', entityId: tenantId, action: 'UPDATE', recordDate: null,
+                    before, after: next, reason, actor,
+                });
+            });
+            limitsCache.delete(tenantId);
+            changed(req, null, 'SETTINGS');
+            res.json({ limits: next });
+        } catch (err) {
+            fail(res, err, 'PUT /settings');
+        }
+    });
+
+    // =====================================================================
+    // Rintracciabilità: un passo indietro (fornitore, documento, lotto) e un
+    // passo nel locale (i processi che hanno usato quel lotto)
+    // =====================================================================
+
+    router.get('/trace', ...view, async (req, res) => {
+        try {
+            const q = cleanText(req.query.q, 100);
+            if (!q || q.length < 2) throw new HaccpError(400, { error: 'Scrivi almeno due caratteri' });
+            const from = isValidDate(req.query.from) ? req.query.from : null;
+            const to = isValidDate(req.query.to) ? req.query.to : null;
+            const like = `%${q.replace(/[\\%_]/g, m => `\\${m}`)}%`;
+            const tenantId = req.tenantId!;
+            const range = `AND ($3::date IS NULL OR date >= $3::date) AND ($4::date IS NULL OR date <= $4::date)`;
+            const [receipts, production] = await Promise.all([
+                queryWithRetry(
+                    `SELECT ${RECEIPT_COLUMNS} FROM haccp_goods_receipts
+                      WHERE tenant_id = $1 AND voided_at IS NULL ${range}
+                        AND (product ILIKE $2 OR lot_number ILIKE $2 OR supplier_name ILIKE $2 OR ddt_number ILIKE $2)
+                      ORDER BY date DESC, recorded_at DESC LIMIT 200`,
+                    [tenantId, like, from, to],
+                ),
+                queryWithRetry(
+                    `SELECT ${PRODUCTION_COLUMNS} FROM haccp_production_logs
+                      WHERE tenant_id = $1 AND voided_at IS NULL ${range}
+                        AND (product ILIKE $2 OR internal_lot ILIKE $2 OR source_lots ILIKE $2)
+                      ORDER BY date DESC, recorded_at DESC LIMIT 200`,
+                    [tenantId, like, from, to],
+                ),
+            ]);
+            res.json({ q, receipts: receipts.rows, production: production.rows });
+        } catch (err) {
+            fail(res, err, 'GET /trace');
         }
     });
 
@@ -908,6 +1045,25 @@ export function createHaccpRouter(deps: HaccpDeps): express.Router {
         }
     });
 
+    /** Composti polari oltre il limite (e l'olio non cambiato) o olio troppo
+     *  caldo: non conformità sulla riga del controllo. */
+    const oilNc = async (client: PoolClient, tenantId: number, point: PointRow, row: any, actor: Actor, reason: string | null, limits: HaccpLimits) => {
+        const problems = row.voidedAt ? [] : evaluateHaccpOil(row, limits);
+        await syncSourceNc(client, tenantId, {
+            source: 'OIL',
+            sourceId: row.id,
+            date: row.date,
+            pointId: point.id,
+            open: problems.length > 0,
+            title: `${point.label} · ${problems.join(', ')}`,
+            detail: row.note ?? null,
+            actor,
+            closingReason: row.voidedAt
+                ? `Controllo annullato${reason ? `: ${reason}` : ''}`
+                : `Controllo corretto, olio nei limiti${reason ? `: ${reason}` : ''}`,
+        });
+    };
+
     router.post('/oil', ...record, async (req, res) => {
         try {
             const tenantId = req.tenantId!;
@@ -919,7 +1075,13 @@ export function createHaccpRouter(deps: HaccpDeps): express.Router {
             }
             const note = cleanText(body.note, 1000);
             const reason = cleanText(body.reason, 500);
+            // Misure facoltative: un client della versione precedente non le
+            // manda, e allora restano quelle già scritte.
+            const polar = body.polarCompounds === undefined ? undefined : parseNumericOrNull(body.polarCompounds);
+            const oilTemp = body.oilTemp === undefined ? undefined : parseNumericOrNull(body.oilTemp);
+            if (typeof polar === 'number' && (polar < 0 || polar > 100)) throw new HaccpError(400, { error: 'Composti polari fra 0 e 100%' });
             const actor = await actorOf(req);
+            const limits = await loadLimits(tenantId);
             const result = await withConflictRetry(() => withTenant(tenantId, async client => {
                 const point = await resolvePoint(client, tenantId, 'OIL', body.pointId, body.fryerLabel);
                 const found = await client.query(
@@ -929,30 +1091,38 @@ export function createHaccpRouter(deps: HaccpDeps): express.Router {
                 );
                 const existing = found.rows[0] ?? null;
                 if (existing) {
-                    if (existing.action === action && (existing.note ?? null) === note) return { row: existing, changed: false };
+                    const nextPolar = polar === undefined ? existing.polarCompounds : polar;
+                    const nextTemp = oilTemp === undefined ? existing.oilTemp : oilTemp;
+                    if (existing.action === action && (existing.note ?? null) === note
+                        && existing.polarCompounds === nextPolar && existing.oilTemp === nextTemp) {
+                        return { row: existing, changed: false };
+                    }
                     assertCorrectable(existing, actor, reason);
                     const upd = await client.query(
                         `UPDATE haccp_oil_checks
-                            SET action = $1, note = $2, fryer_label = $3,
-                                updated_at = now(), updated_by_user_id = $4, updated_by_user_name = $5
-                          WHERE id = $6 RETURNING ${OIL_COLUMNS}`,
-                        [action, note, point.label, actor.userId, actor.name, existing.id],
+                            SET action = $1, note = $2, fryer_label = $3, polar_compounds = $4, oil_temp = $5,
+                                updated_at = now(), updated_by_user_id = $6, updated_by_user_name = $7
+                          WHERE id = $8 RETURNING ${OIL_COLUMNS}`,
+                        [action, note, point.label, nextPolar, nextTemp, actor.userId, actor.name, existing.id],
                     );
                     await logChange(client, tenantId, {
                         entity: 'oil', entityId: existing.id, action: 'UPDATE', recordDate: date,
                         before: existing, after: upd.rows[0], reason, actor,
                     });
+                    await oilNc(client, tenantId, point, upd.rows[0], actor, reason, limits);
                     return { row: upd.rows[0], changed: true };
                 }
                 const ins = await client.query(
                     `INSERT INTO haccp_oil_checks
-                        (tenant_id, date, point_id, fryer_label, action, note, recorded_by_user_id, recorded_by_user_name)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING ${OIL_COLUMNS}`,
-                    [tenantId, date, point.id, point.label, action, note, actor.userId, actor.name],
+                        (tenant_id, date, point_id, fryer_label, action, polar_compounds, oil_temp, note,
+                         recorded_by_user_id, recorded_by_user_name)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING ${OIL_COLUMNS}`,
+                    [tenantId, date, point.id, point.label, action, polar ?? null, oilTemp ?? null, note, actor.userId, actor.name],
                 );
                 await logChange(client, tenantId, {
                     entity: 'oil', entityId: ins.rows[0].id, action: 'CREATE', recordDate: date, after: ins.rows[0], actor,
                 });
+                await oilNc(client, tenantId, point, ins.rows[0], actor, null, limits);
                 return { row: ins.rows[0], changed: true };
             }));
             if (result.changed) changed(req, date, 'OIL');
@@ -1053,77 +1223,241 @@ export function createHaccpRouter(deps: HaccpDeps): express.Router {
     });
 
     // =====================================================================
-    // Ricevimento merci e produzione: registrazioni libere, più al giorno
+    // Registrazioni libere, più al giorno: ricevimento merci, processi,
+    // tarature dei termometri
     // =====================================================================
+    // Un solo motore per le tre: creazione, correzione e annullamento con le
+    // regole di sempre. Ognuna dichiara i suoi campi; `prepare` completa la
+    // riga prima di scriverla (il nome del fornitore, lo strumento tarato),
+    // `derive` calcola dopo la scrittura quello che decide il server (l'esito
+    // di un processo sui limiti del locale), `nc` dice quale non conformità
+    // la riga apre.
 
+    type FieldSpec = { column: string; parse: (v: unknown) => unknown; required?: boolean };
+    interface NcSpec { source: NcSource; open: boolean; title: string; detail: string | null; closedWith?: string | null; fixedReason: string }
     interface FreeLog {
-        entity: 'receipt' | 'production';
+        entity: 'receipt' | 'production' | 'calibration';
+        path: string;
         table: string;
         columns: string;
         register: string;
-        /** Campi del body → colonna, con il parser. */
-        fields: Record<string, { column: string; parse: (v: unknown) => unknown }>;
-        required: string;
-        /** La non conformità che la riga apre (merce respinta), o null. */
-        nc?: (row: any) => { open: boolean; title: string; detail: string | null } | null;
+        fields: Record<string, FieldSpec>;
+        prepare?: (client: PoolClient, tenantId: number, values: Record<string, unknown>, existing: any | null, limits: HaccpLimits) => Promise<void>;
+        derive?: (row: any, limits: HaccpLimits) => Record<string, unknown>;
+        nc?: (row: any, limits: HaccpLimits) => NcSpec | null;
     }
 
     const asBool = (v: unknown) => v !== false;
+    const boolOrNull = (v: unknown) => (v === null ? null : v !== false);
+    const oneOf = <T extends string>(allowed: readonly T[], label: string) => (v: unknown): T | null => {
+        if (v === null || v === '') return null;
+        if (typeof v === 'string' && (allowed as readonly string[]).includes(v)) return v as T;
+        throw new HaccpError(400, { error: `${label} non valido` });
+    };
+    const dateOrNull = (v: unknown): string | null => (isValidDate(v) ? v : null);
+    const instantOrNull = (v: unknown): string | null => {
+        if (typeof v !== 'string' || !v) return null;
+        const d = new Date(v);
+        return Number.isNaN(d.getTime()) ? null : d.toISOString();
+    };
+    const minutesOrNull = (v: unknown): number | null => {
+        const n = parseNumericOrNull(v);
+        return n === null ? null : Math.max(0, Math.min(1440, Math.round(n)));
+    };
+    const uuidOrNull = (v: unknown): string | null => (isUuid(v) ? v : null);
+    const lotSuffix = (lot: string | null | undefined) => (lot ? ` (lotto ${lot})` : '');
+
     const FREE_LOGS: FreeLog[] = [
         {
             entity: 'receipt',
+            path: '/receipts',
             table: 'haccp_goods_receipts',
             columns: RECEIPT_COLUMNS,
             register: 'RECEIPT',
-            required: 'product',
             fields: {
-                product: { column: 'product', parse: v => cleanText(v, 255) },
+                product: { column: 'product', parse: v => cleanText(v, 255), required: true },
                 lotNumber: { column: 'lot_number', parse: v => cleanText(v, 100) },
                 temperature: { column: 'temperature', parse: parseNumericOrNull },
                 accepted: { column: 'accepted', parse: asBool },
                 note: { column: 'note', parse: v => cleanText(v, 1000) },
+                supplierId: { column: 'supplier_id', parse: uuidOrNull },
+                supplierName: { column: 'supplier_name', parse: v => cleanText(v, 255) },
+                ddtNumber: { column: 'ddt_number', parse: v => cleanText(v, 50) },
+                expiryDate: { column: 'expiry_date', parse: dateOrNull },
+                packagingOk: { column: 'packaging_ok', parse: boolOrNull },
+                category: { column: 'category', parse: oneOf(HACCP_RECEIPT_CATEGORIES, 'Tipo di merce') },
+                quantity: { column: 'quantity', parse: v => cleanText(v, 50) },
             },
-            nc: row => ({
-                open: row.accepted === false && !row.voidedAt,
-                title: `Merce respinta · ${row.product}${row.lotNumber ? ` (lotto ${row.lotNumber})` : ''}`,
-                detail: row.note ?? null,
-            }),
+            // Il fornitore scelto dall'anagrafica porta il suo nome sulla riga:
+            // se domani viene rinominato o cancellato, il registro dice ancora
+            // da chi è arrivata la merce.
+            prepare: async (client, tenantId, values) => {
+                if (values.supplier_id === undefined) return;
+                if (values.supplier_id === null) return;
+                const r = await client.query(`SELECT name FROM suppliers WHERE tenant_id = $1 AND id = $2`, [tenantId, values.supplier_id]);
+                if (!r.rows[0]) { values.supplier_id = null; return; }
+                if (!values.supplier_name) values.supplier_name = r.rows[0].name;
+            },
+            nc: (row, limits) => {
+                const problems = evaluateHaccpReceipt(row, limits);
+                const rejected = row.accepted === false;
+                return {
+                    source: 'RECEIPT',
+                    open: (rejected || problems.length > 0) && !row.voidedAt,
+                    title: `${rejected ? 'Merce respinta' : 'Ricevimento fuori norma'} · ${row.product}${lotSuffix(row.lotNumber)}`,
+                    detail: [problems.join(', '), row.supplierName ? `fornitore ${row.supplierName}` : '', row.note ?? ''].filter(Boolean).join(' · ') || null,
+                    fixedReason: 'Ricevimento corretto, di nuovo in regola',
+                };
+            },
         },
         {
             entity: 'production',
+            path: '/production',
             table: 'haccp_production_logs',
             columns: PRODUCTION_COLUMNS,
             register: 'PRODUCTION',
-            required: 'product',
             fields: {
-                product: { column: 'product', parse: v => cleanText(v, 255) },
+                product: { column: 'product', parse: v => cleanText(v, 255), required: true },
+                process: { column: 'process', parse: oneOf(HACCP_PROCESSES, 'Processo') },
                 blastTempRange: { column: 'blast_temp_range', parse: v => cleanText(v, 20) },
                 blastDuration: { column: 'blast_duration', parse: v => cleanText(v, 20) },
                 internalLot: { column: 'internal_lot', parse: v => cleanText(v, 100) },
                 note: { column: 'note', parse: v => cleanText(v, 1000) },
+                equipmentPointId: { column: 'equipment_point_id', parse: parseId },
+                startedAt: { column: 'started_at', parse: instantOrNull },
+                startTemp: { column: 'start_temp', parse: parseNumericOrNull },
+                endedAt: { column: 'ended_at', parse: instantOrNull },
+                endTemp: { column: 'end_temp', parse: parseNumericOrNull },
+                quantity: { column: 'quantity', parse: v => cleanText(v, 50) },
+                expiryDate: { column: 'expiry_date', parse: dateOrNull },
+                sourceLots: { column: 'source_lots', parse: v => cleanText(v, 1000) },
+                sanitizer: { column: 'sanitizer', parse: v => cleanText(v, 100) },
+                concentration: { column: 'concentration', parse: v => cleanText(v, 50) },
+                contactMinutes: { column: 'contact_minutes', parse: minutesOrNull },
+                eventLabel: { column: 'event_label', parse: v => cleanText(v, 255) },
+            },
+            prepare: async (client, tenantId, values, existing) => {
+                const process = (values.process ?? existing?.process ?? 'LEGACY') as HaccpProcess;
+                // Un processo a un tempo (cottura, caldo…) è una misura sola:
+                // senza ora, vale adesso.
+                if (!HACCP_TWO_STEP_PROCESSES.includes(process) && process !== 'LEGACY' && values.end_temp != null
+                    && values.ended_at == null && !existing?.endedAt) {
+                    values.ended_at = new Date().toISOString();
+                }
+                if (values.equipment_point_id !== undefined) {
+                    if (values.equipment_point_id === null) {
+                        values.equipment_label = null;
+                    } else {
+                        const r = await client.query(
+                            `SELECT label FROM haccp_points WHERE tenant_id = $1 AND id = $2 AND register = 'EQUIPMENT'`,
+                            [tenantId, values.equipment_point_id],
+                        );
+                        if (!r.rows[0]) throw new HaccpError(400, { error: 'Attrezzatura sconosciuta' });
+                        values.equipment_label = r.rows[0].label;
+                    }
+                }
+                const startedAt = (values.started_at ?? existing?.startedAt ?? null) as string | null;
+                const endedAt = (values.ended_at ?? existing?.endedAt ?? null) as string | null;
+                if (startedAt && endedAt && new Date(endedAt).getTime() < new Date(startedAt).getTime()) {
+                    throw new HaccpError(400, { error: 'La fine viene prima dell\'inizio' });
+                }
+            },
+            derive: (row, limits) => {
+                const { compliant, problem } = evaluateHaccpProcess(row, limits);
+                const out: Record<string, unknown> = { compliant, problem };
+                if (row.process === 'CAMPIONE') {
+                    const from = row.endedAt ?? row.startedAt ?? row.recordedAt;
+                    out.keep_until = from ? new Date(new Date(from).getTime() + limits.sample.keepHours * 3600_000).toISOString() : null;
+                }
+                return out;
+            },
+            nc: row => ({
+                source: 'PROCESS',
+                open: row.compliant === false && !row.voidedAt,
+                title: `${HACCP_PROCESS_LABELS_IT[row.process as HaccpProcess] ?? 'Processo'} · ${row.product}${lotSuffix(row.internalLot)}`,
+                detail: [row.problem ?? '', row.note ?? ''].filter(Boolean).join(' · ') || null,
+                fixedReason: 'Processo corretto, di nuovo nei limiti',
+            }),
+        },
+        {
+            entity: 'calibration',
+            path: '/calibrations',
+            table: 'haccp_calibrations',
+            columns: CALIBRATION_COLUMNS,
+            register: 'CALIBRATION',
+            fields: {
+                pointId: { column: 'point_id', parse: parseId, required: true },
+                method: { column: 'method', parse: oneOf(['GHIACCIO', 'EBOLLIZIONE', 'RIFERIMENTO'] as const, 'Metodo'), required: true },
+                referenceTemp: { column: 'reference_temp', parse: parseNumericOrNull, required: true },
+                measuredTemp: { column: 'measured_temp', parse: parseNumericOrNull, required: true },
+                outcome: { column: 'outcome', parse: oneOf(['OK', 'CORRETTO', 'SOSTITUITO'] as const, 'Esito') },
+                note: { column: 'note', parse: v => cleanText(v, 1000) },
+            },
+            // Lo strumento e lo scarto ammesso si fotografano alla taratura:
+            // cambiare il limite domani non riscrive l'esito di oggi.
+            prepare: async (client, tenantId, values, existing, limits) => {
+                if (values.point_id !== undefined) {
+                    const r = await client.query(
+                        `SELECT label, active FROM haccp_points WHERE tenant_id = $1 AND id = $2 AND register = 'THERMOMETER'`,
+                        [tenantId, values.point_id],
+                    );
+                    if (!r.rows[0]) throw new HaccpError(400, { error: 'Termometro sconosciuto', code: 'unknown_point' });
+                    if (!r.rows[0].active && !existing) throw new HaccpError(400, { error: 'Termometro archiviato', code: 'archived_point' });
+                    values.instrument = r.rows[0].label;
+                }
+                if (!existing) values.max_deviation = limits.calibration.maxDeviation;
+            },
+            nc: row => {
+                const deviation = haccpCalibrationDeviation(row.referenceTemp, row.measuredTemp);
+                const over = deviation > row.maxDeviation;
+                return {
+                    source: 'CALIBRATION',
+                    open: over && !row.voidedAt,
+                    title: `Taratura · ${row.instrument}: scarto ${formatHaccpTemperature(deviation)} (massimo ${formatHaccpTemperature(row.maxDeviation)})`,
+                    detail: row.note ?? null,
+                    // Ricalibrato o sostituito sul momento: la non conformità
+                    // nasce chiusa con quell'azione.
+                    closedWith: row.outcome === 'SOSTITUITO' ? 'Termometro sostituito'
+                        : row.outcome === 'CORRETTO' ? 'Termometro ricalibrato' : null,
+                    fixedReason: 'Taratura corretta, scarto nei limiti',
+                };
             },
         },
     ];
 
     for (const log of FREE_LOGS) {
-        const path = log.entity === 'receipt' ? '/receipts' : '/production';
-        const ncSync = async (client: PoolClient, tenantId: number, row: any, actor: Actor, reason: string | null) => {
+        const path = log.path;
+        const ncSync = async (client: PoolClient, tenantId: number, row: any, actor: Actor, reason: string | null, limits: HaccpLimits) => {
             if (!log.nc) return;
-            const nc = log.nc(row);
+            const nc = log.nc(row, limits);
             if (!nc) return;
             await syncSourceNc(client, tenantId, {
-                source: 'RECEIPT',
+                source: nc.source,
                 sourceId: row.id,
                 date: row.date,
-                pointId: null,
+                pointId: row.pointId ?? null,
                 open: nc.open,
                 title: nc.title,
                 detail: nc.detail,
+                closedWith: nc.closedWith ?? null,
                 actor,
                 closingReason: row.voidedAt
                     ? `Registrazione annullata${reason ? `: ${reason}` : ''}`
-                    : `Merce accettata dopo la correzione${reason ? `: ${reason}` : ''}`,
+                    : `${nc.fixedReason}${reason ? `: ${reason}` : ''}`,
             });
+        };
+        /** Dopo la scrittura: i campi che decide il server (esito sui limiti). */
+        const applyDerived = async (client: PoolClient, row: any, limits: HaccpLimits): Promise<any> => {
+            if (!log.derive) return row;
+            const derived = log.derive(row, limits);
+            const cols = Object.keys(derived);
+            if (cols.length === 0) return row;
+            const upd = await client.query(
+                `UPDATE ${log.table} SET ${cols.map((c, i) => `${c} = $${i + 1}`).join(', ')}
+                  WHERE id = $${cols.length + 1} RETURNING ${log.columns}`,
+                [...cols.map(c => derived[c]), row.id],
+            );
+            return upd.rows[0];
         };
 
         router.get(path, ...view, async (req, res) => {
@@ -1146,23 +1480,32 @@ export function createHaccpRouter(deps: HaccpDeps): express.Router {
                 const tenantId = req.tenantId!;
                 const body = req.body ?? {};
                 const date = await registerDate(tenantId, body.date);
+                // Solo i campi presenti: quelli assenti prendono il default
+                // della tabella (il processo di un client vecchio è LEGACY).
                 const values: Record<string, unknown> = {};
-                for (const [key, f] of Object.entries(log.fields)) values[f.column] = f.parse(body[key]);
-                if (!values[log.fields[log.required].column]) throw new HaccpError(400, { error: `${log.required} is required` });
+                for (const [key, f] of Object.entries(log.fields)) {
+                    if (body[key] !== undefined) values[f.column] = f.parse(body[key]);
+                    if (f.required && (values[f.column] === undefined || values[f.column] === null)) {
+                        throw new HaccpError(400, { error: `${key} is required` });
+                    }
+                }
                 const actor = await actorOf(req);
-                const cols = Object.keys(values);
+                const limits = await loadLimits(tenantId);
                 const row = await withTenant(tenantId, async client => {
+                    if (log.prepare) await log.prepare(client, tenantId, values, null, limits);
+                    const cols = Object.keys(values);
                     const ins = await client.query(
-                        `INSERT INTO ${log.table} (tenant_id, date, ${cols.join(', ')}, recorded_by_user_id, recorded_by_user_name)
-                         VALUES ($1, $2, ${cols.map((_, i) => `$${i + 3}`).join(', ')}, $${cols.length + 3}, $${cols.length + 4})
+                        `INSERT INTO ${log.table} (tenant_id, date, ${cols.map(c => `${c}, `).join('')}recorded_by_user_id, recorded_by_user_name)
+                         VALUES ($1, $2, ${cols.map((_, i) => `$${i + 3}, `).join('')}$${cols.length + 3}, $${cols.length + 4})
                          RETURNING ${log.columns}`,
                         [tenantId, date, ...cols.map(c => values[c]), actor.userId, actor.name],
                     );
+                    const written = await applyDerived(client, ins.rows[0], limits);
                     await logChange(client, tenantId, {
-                        entity: log.entity, entityId: ins.rows[0].id, action: 'CREATE', recordDate: date, after: ins.rows[0], actor,
+                        entity: log.entity, entityId: written.id, action: 'CREATE', recordDate: date, after: written, actor,
                     });
-                    await ncSync(client, tenantId, ins.rows[0], actor, null);
-                    return ins.rows[0];
+                    await ncSync(client, tenantId, written, actor, null, limits);
+                    return written;
                 });
                 changed(req, date, log.register);
                 res.status(201).json(row);
@@ -1179,6 +1522,7 @@ export function createHaccpRouter(deps: HaccpDeps): express.Router {
                 const body = req.body ?? {};
                 const reason = cleanText(body.reason, 500);
                 const actor = await actorOf(req);
+                const limits = await loadLimits(tenantId);
                 const row = await withTenant(tenantId, async client => {
                     const found = await client.query(
                         `SELECT ${log.columns} FROM ${log.table} WHERE tenant_id = $1 AND id = $2 AND voided_at IS NULL FOR UPDATE`,
@@ -1186,31 +1530,42 @@ export function createHaccpRouter(deps: HaccpDeps): express.Router {
                     );
                     const existing = found.rows[0];
                     if (!existing) throw new HaccpError(404, { error: 'Not found' });
-                    const sets: string[] = [];
-                    const params: unknown[] = [];
+                    const values: Record<string, unknown> = {};
                     for (const [key, f] of Object.entries(log.fields)) {
                         if (body[key] === undefined) continue;
                         const v = f.parse(body[key]);
-                        if (key === log.required && !v) throw new HaccpError(400, { error: `${log.required} is required` });
-                        params.push(v);
-                        sets.push(`${f.column} = $${params.length}`);
+                        if (f.required && (v === null || v === undefined)) throw new HaccpError(400, { error: `${key} is required` });
+                        values[f.column] = v;
                     }
-                    if (sets.length === 0) return existing;
-                    assertCorrectable(existing, actor, reason);
-                    params.push(actor.userId, actor.name, id);
+                    if (Object.keys(values).length === 0) return existing;
+                    // Chiudere un ciclo avviato (fine e temperatura finale) non è
+                    // correggerlo: è il suo secondo tempo, e lo può fare chiunque
+                    // stia in cucina senza motivarlo.
+                    const closingCycle = HACCP_TWO_STEP_PROCESSES.includes(existing.process)
+                        && !existing.endedAt
+                        && Object.keys(values).every(c => c === 'ended_at' || c === 'end_temp' || c === 'note' || c === 'expiry_date');
+                    if (!closingCycle) assertCorrectable(existing, actor, reason);
+                    if (log.prepare) await log.prepare(client, tenantId, values, existing, limits);
+                    const cols = Object.keys(values);
+                    const params = [...cols.map(c => values[c]), actor.userId, actor.name, id];
+                    // Chi chiude il ciclo firma la chiusura, non una correzione:
+                    // la riga non si segna «corretta».
+                    const signature = closingCycle
+                        ? `ended_by_user_id = $${cols.length + 1}, ended_by_user_name = $${cols.length + 2}`
+                        : `updated_at = now(), updated_by_user_id = $${cols.length + 1}, updated_by_user_name = $${cols.length + 2}`;
                     const upd = await client.query(
                         `UPDATE ${log.table}
-                            SET ${sets.join(', ')}, updated_at = now(),
-                                updated_by_user_id = $${params.length - 2}, updated_by_user_name = $${params.length - 1}
-                          WHERE id = $${params.length} RETURNING ${log.columns}`,
+                            SET ${cols.map((c, i) => `${c} = $${i + 1}`).join(', ')}, ${signature}
+                          WHERE id = $${cols.length + 3} RETURNING ${log.columns}`,
                         params,
                     );
+                    const written = await applyDerived(client, upd.rows[0], limits);
                     await logChange(client, tenantId, {
                         entity: log.entity, entityId: id, action: 'UPDATE', recordDate: existing.date,
-                        before: existing, after: upd.rows[0], reason, actor,
+                        before: existing, after: written, reason: closingCycle ? reason ?? 'Ciclo chiuso' : reason, actor,
                     });
-                    await ncSync(client, tenantId, upd.rows[0], actor, reason);
-                    return upd.rows[0];
+                    await ncSync(client, tenantId, written, actor, reason, limits);
+                    return written;
                 });
                 changed(req, row.date, log.register);
                 res.json(row);
@@ -1226,6 +1581,7 @@ export function createHaccpRouter(deps: HaccpDeps): express.Router {
                 if (!isUuid(id)) throw new HaccpError(400, { error: 'id non valido' });
                 const reason = cleanText(req.body?.reason ?? req.query.reason, 500);
                 const actor = await actorOf(req);
+                const limits = await loadLimits(tenantId);
                 const row = await withTenant(tenantId, async client => {
                     const found = await client.query(
                         `SELECT ${log.columns} FROM ${log.table} WHERE tenant_id = $1 AND id = $2 AND voided_at IS NULL FOR UPDATE`,
@@ -1244,7 +1600,7 @@ export function createHaccpRouter(deps: HaccpDeps): express.Router {
                         entity: log.entity, entityId: id, action: 'VOID', recordDate: existing.date,
                         before: existing, reason, actor,
                     });
-                    await ncSync(client, tenantId, upd.rows[0], actor, reason);
+                    await ncSync(client, tenantId, upd.rows[0], actor, reason, limits);
                     return upd.rows[0];
                 });
                 changed(req, row.date, log.register);
@@ -1295,6 +1651,9 @@ export function createHaccpRouter(deps: HaccpDeps): express.Router {
             if (!title) throw new HaccpError(400, { error: 'Serve una descrizione della non conformità' });
             const detail = cleanText(body.detail, 2000);
             const correctiveAction = cleanText(body.correctiveAction, 2000);
+            // Un richiamo di prodotto nasce da Rintracciabilità ed è una non
+            // conformità come le altre, con la sua fonte: il report le distingue.
+            const source = body.source === 'RECALL' ? 'RECALL' : 'MANUAL';
             const actor = await actorOf(req);
             const row = await withTenant(tenantId, async client => {
                 // Una non conformità trovata e risolta subito (lo scaffale
@@ -1304,7 +1663,7 @@ export function createHaccpRouter(deps: HaccpDeps): express.Router {
                     `INSERT INTO haccp_nonconformities
                         (tenant_id, date, source, title, detail, opened_by_user_id, opened_by_user_name,
                          status, corrective_action, closed_at, closed_by_user_id, closed_by_user_name)
-                     VALUES ($1, $2, 'MANUAL', $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                     VALUES ($1, $2, $12, $3, $4, $5, $6, $7, $8, $9, $10, $11)
                      RETURNING ${NC_COLUMNS}`,
                     [
                         tenantId, date, title, detail, actor.userId, actor.name,
@@ -1312,6 +1671,7 @@ export function createHaccpRouter(deps: HaccpDeps): express.Router {
                         closedNow ? new Date() : null,
                         closedNow ? actor.userId : null,
                         closedNow ? actor.name : null,
+                        source,
                     ],
                 );
                 await logChange(client, tenantId, {
@@ -1444,7 +1804,7 @@ export function createHaccpRouter(deps: HaccpDeps): express.Router {
             const tenantId = req.tenantId!;
             const range = [tenantId, from, to];
             const between = 'tenant_id = $1 AND date BETWEEN $2::date AND $3::date';
-            const [tenant, points, temps, oil, cleaning, receipts, production, ncs, changes] = await Promise.all([
+            const [tenant, points, temps, oil, cleaning, receipts, production, calibrations, ncs, changes, settings] = await Promise.all([
                 // Il nome in testa al foglio: è la prima cosa che l'ispettore
                 // controlla, che il registro sia di questo locale.
                 queryWithRetry(`SELECT name FROM tenants WHERE id = $1`, [tenantId]).catch(() => ({ rows: [] as any[] })),
@@ -1454,6 +1814,7 @@ export function createHaccpRouter(deps: HaccpDeps): express.Router {
                 queryWithRetry(`SELECT ${CLEANING_COLUMNS} FROM haccp_cleaning_checks WHERE ${between} ORDER BY date, point`, range),
                 queryWithRetry(`SELECT ${RECEIPT_COLUMNS} FROM haccp_goods_receipts WHERE ${between} ORDER BY date, recorded_at`, range),
                 queryWithRetry(`SELECT ${PRODUCTION_COLUMNS} FROM haccp_production_logs WHERE ${between} ORDER BY date, recorded_at`, range),
+                queryWithRetry(`SELECT ${CALIBRATION_COLUMNS} FROM haccp_calibrations WHERE ${between} ORDER BY date, instrument`, range),
                 queryWithRetry(
                     `SELECT ${NC_COLUMNS} FROM haccp_nonconformities
                       WHERE tenant_id = $1 AND (date BETWEEN $2::date AND $3::date OR (status = 'OPEN' AND date < $2::date))
@@ -1467,6 +1828,7 @@ export function createHaccpRouter(deps: HaccpDeps): express.Router {
                       ORDER BY created_at, id`,
                     range,
                 ),
+                loadSettings(tenantId),
             ]);
             res.json({
                 from, to,
@@ -1477,8 +1839,10 @@ export function createHaccpRouter(deps: HaccpDeps): express.Router {
                 cleaning: cleaning.rows,
                 receipts: receipts.rows,
                 production: production.rows,
+                calibrations: calibrations.rows,
                 nonconformities: ncs.rows,
                 changes: changes.rows,
+                limits: settings.limits,
                 generatedAt: new Date().toISOString(),
             });
         } catch (err) {

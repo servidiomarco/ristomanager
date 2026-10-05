@@ -1,4 +1,5 @@
 import type {
+  HaccpCalibration,
   HaccpChange,
   HaccpCleaningCheck,
   HaccpGoodsReceipt,
@@ -9,8 +10,11 @@ import type {
   HaccpReportData,
   HaccpTemperatureReading,
 } from '../services/haccpApiService';
-import type { HaccpPoint } from './haccp';
-import { formatHaccpLimit, haccpDaysBetween, isOutOfRange } from './haccp';
+import type { HaccpLimits, HaccpPoint, HaccpProcess } from './haccp';
+import {
+  HACCP_PROCESS_LABELS_IT, HACCP_RECEIPT_CATEGORIES, HACCP_RECEIPT_CATEGORY_LABELS_IT, HACCP_TWO_STEP_PROCESSES,
+  formatHaccpDuration, formatHaccpLimit, haccpCalibrationDeviation, haccpDaysBetween, isOutOfRange,
+} from './haccp';
 import { printHtmlDocument, PRINT_TOKENS_CSS } from './printDocument';
 
 /* Il registro HACCP stampato, per un giorno o per un periodo.
@@ -91,7 +95,8 @@ const ENTITY_LABELS: Record<string, string> = {
   oil: 'Olio',
   cleaning: 'Pulizia',
   receipt: 'Ricevimento',
-  production: 'Produzione',
+  production: 'Processo',
+  calibration: 'Taratura',
 };
 
 const FIELD_LABELS: Record<string, string> = {
@@ -105,6 +110,16 @@ const FIELD_LABELS: Record<string, string> = {
   internalLot: 'lotto interno',
   blastTempRange: 'range',
   blastDuration: 'durata',
+  polarCompounds: 'composti polari',
+  oilTemp: 'temperatura olio',
+  startTemp: 'temperatura iniziale',
+  endTemp: 'temperatura finale',
+  endedAt: 'fine',
+  supplierName: 'fornitore',
+  ddtNumber: 'documento',
+  expiryDate: 'scadenza',
+  measuredTemp: 'lettura',
+  outcome: 'esito',
 };
 
 const live = <T extends { voidedAt?: string | null }>(rows: T[]): T[] => rows.filter(r => !r.voidedAt);
@@ -146,9 +161,11 @@ const dayOil = (data: HaccpReportData): string => {
   const points = pointsFor(data, 'OIL', new Set(rows.map(r => r.pointId ?? -1)));
   const body = points.map(p => {
     const r = rows.find(x => x.pointId === p.id);
-    return `<tr><td>${escapeHtml(p.label)}</td><td>${r ? `<span class="badge">${OIL_LABELS[r.action]}</span>` : '<span class="muted">—</span>'}</td><td class="small muted">${escapeHtml(r?.note ?? '')}</td><td class="small muted">${r ? `${escapeHtml(person(r.recordedByUserName))} ${time(r.recordedAt)}` : ''}</td></tr>`;
+    const polar = typeof r?.polarCompounds === 'number' ? `${num(r.polarCompounds)}%` : '—';
+    const temp = typeof r?.oilTemp === 'number' ? `${num(r.oilTemp)} °C` : '—';
+    return `<tr><td>${escapeHtml(p.label)}</td><td>${r ? `<span class="badge">${OIL_LABELS[r.action]}</span>` : '<span class="muted">—</span>'}</td><td class="num small">${polar}</td><td class="num small">${temp}</td><td class="small muted">${escapeHtml(r?.note ?? '')}</td><td class="small muted">${r ? `${escapeHtml(person(r.recordedByUserName))} ${time(r.recordedAt)}` : ''}</td></tr>`;
   }).join('');
-  return `<table><thead><tr><th>Friggitrice</th><th>Olio</th><th class="small">Note</th><th class="small">Operatore</th></tr></thead><tbody>${body || emptyRow(4)}</tbody></table>`;
+  return `<table><thead><tr><th>Friggitrice</th><th>Olio</th><th class="small num">Polari</th><th class="small num">Temp.</th><th class="small">Note</th><th class="small">Operatore</th></tr></thead><tbody>${body || emptyRow(6)}</tbody></table>`;
 };
 
 const dayCleaning = (data: HaccpReportData): string => {
@@ -205,12 +222,14 @@ const oilGrid = (data: HaccpReportData, days: string[]): string => {
     const body = points.map(p => {
       const cells = mdays.map(d => {
         const r = index.get(`${p.id}:${d}`);
-        return r ? `<td class="cell${r.action === 'SOSTITUITO' ? ' strong' : ''}">${OIL_CODES[r.action]}</td>` : '<td class="cell empty"></td>';
+        if (!r) return '<td class="cell empty"></td>';
+        const polar = typeof r.polarCompounds === 'number' ? `<div class="polar">${num(r.polarCompounds)}%</div>` : '';
+        return `<td class="cell${r.action === 'SOSTITUITO' ? ' strong' : ''}">${OIL_CODES[r.action]}${polar}</td>`;
       }).join('');
       return `<tr><td class="label-col">${escapeHtml(p.label)}</td>${cells}</tr>`;
     }).join('');
     return `<h3>${escapeHtml(monthLabel(month))}</h3><table class="grid"><thead>${gridHead(mdays)}</thead><tbody>${body || emptyRow(mdays.length + 1)}</tbody></table>`;
-  }).join('') + '<p class="legend">s = olio sostituito · f = filtrato · u = utilizzabile</p>';
+  }).join('') + '<p class="legend">s = olio sostituito · f = filtrato · u = utilizzabile · sotto, i composti polari misurati</p>';
 };
 
 const cleaningGrid = (data: HaccpReportData, days: string[]): string => {
@@ -236,33 +255,118 @@ const emptyRow = (cols: number, label = 'Nessuna registrazione.'): string =>
   `<tr><td colspan="${cols}" class="empty">${escapeHtml(label)}</td></tr>`;
 
 const receiptsTable = (rows: HaccpGoodsReceipt[], multiDay: boolean): string => {
-  const body = live(rows).map(r => `
+  const body = live(rows).map(r => {
+    const origin = [r.supplierName, r.ddtNumber ? `DDT ${r.ddtNumber}` : ''].filter(Boolean).join(' · ');
+    const lot = [r.lotNumber, r.expiryDate ? `scad. ${shortDate(r.expiryDate)}` : ''].filter(Boolean).join(' · ');
+    const kind = r.category ? HACCP_RECEIPT_CATEGORY_LABELS_IT[r.category] : '';
+    return `
     <tr>
       ${multiDay ? `<td class="small">${shortDate(r.date)}</td>` : ''}
-      <td>${escapeHtml(r.product)}</td>
-      <td class="small muted">${escapeHtml(r.lotNumber ?? '')}</td>
+      <td>${escapeHtml(r.product)}${kind ? `<div class="small muted">${escapeHtml(kind)}</div>` : ''}</td>
+      <td class="small">${escapeHtml(origin)}</td>
+      <td class="small muted">${escapeHtml(lot)}</td>
       <td class="num small">${r.temperature !== null ? `${num(r.temperature)} °C` : '—'}</td>
-      <td>${r.accepted ? '<span class="badge ok">Accettato</span>' : '<span class="badge alert">Respinto</span>'}</td>
+      <td>${r.accepted ? '<span class="badge ok">Accettato</span>' : '<span class="badge alert">Respinto</span>'}${r.packagingOk === false ? '<div class="small">imballo non integro</div>' : ''}</td>
       <td class="small muted">${escapeHtml(r.note ?? '')}</td>
       <td class="small muted">${escapeHtml(person(r.recordedByUserName))} ${time(r.recordedAt)}</td>
-    </tr>`).join('');
-  const cols = multiDay ? 7 : 6;
-  return `<table><thead><tr>${multiDay ? '<th class="small">Giorno</th>' : ''}<th>Prodotto</th><th class="small">Lotto</th><th class="small">Temp.</th><th>Esito</th><th class="small">Note</th><th class="small">Operatore</th></tr></thead><tbody>${body || emptyRow(cols)}</tbody></table>`;
+    </tr>`;
+  }).join('');
+  const cols = multiDay ? 8 : 7;
+  return `<table><thead><tr>${multiDay ? '<th class="small">Giorno</th>' : ''}<th>Prodotto</th><th class="small">Fornitore e documento</th><th class="small">Lotto e scadenza</th><th class="small num">Temp.</th><th>Esito</th><th class="small">Note</th><th class="small">Operatore</th></tr></thead><tbody>${body || emptyRow(cols)}</tbody></table>`;
+};
+
+const signedNum = (n: number | null | undefined): string =>
+  typeof n === 'number' ? `${n > 0 ? '+' : ''}${num(n)} °C` : '—';
+
+/** Il dettaglio di un processo sul foglio: da quanto a quanto e in quanto
+ *  tempo, la temperatura al cuore, il prodotto sanificante, l'evento. */
+const processDetail = (p: HaccpProductionLog): string => {
+  const process = (p.process ?? 'LEGACY') as HaccpProcess;
+  if (process === 'LEGACY') return [p.blastTempRange, p.blastDuration].filter(Boolean).join(' · ');
+  if (HACCP_TWO_STEP_PROCESSES.includes(process)) {
+    const start = p.startedAt ? `${time(p.startedAt)} ${signedNum(p.startTemp)}` : '';
+    if (!p.endedAt) return `${start} → in corso`;
+    const mins = p.startedAt ? Math.round((new Date(p.endedAt).getTime() - new Date(p.startedAt).getTime()) / 60000) : null;
+    return `${start} → ${dateTime(p.endedAt)} ${signedNum(p.endTemp)}${mins !== null ? ` (${formatHaccpDuration(mins)})` : ''}`;
+  }
+  if (process === 'SANIFICAZIONE') {
+    return [p.sanitizer, p.concentration, typeof p.contactMinutes === 'number' ? `${p.contactMinutes} minuti` : ''].filter(Boolean).join(' · ');
+  }
+  if (process === 'CAMPIONE') {
+    return [p.eventLabel, p.keepUntil ? `conservare fino a ${dateTime(p.keepUntil)}` : ''].filter(Boolean).join(' · ');
+  }
+  return `al cuore ${signedNum(p.endTemp)} alle ${time(p.endedAt)}`;
 };
 
 const productionTable = (rows: HaccpProductionLog[], multiDay: boolean): string => {
-  const body = live(rows).map(p => `
+  const body = live(rows).map(p => {
+    const process = (p.process ?? 'LEGACY') as HaccpProcess;
+    const extra = [
+      p.equipmentLabel,
+      p.quantity,
+      p.sourceLots ? `ingredienti ${p.sourceLots}` : '',
+      p.expiryDate ? `scad. ${shortDate(p.expiryDate)}` : '',
+    ].filter(Boolean).join(' · ');
+    const outcome = p.compliant === true ? '<span class="badge ok">Conforme</span>'
+      : p.compliant === false ? `<span class="badge alert">Fuori limite</span><div class="small">${escapeHtml(p.problem ?? '')}</div>`
+        : '';
+    return `
     <tr>
       ${multiDay ? `<td class="small">${shortDate(p.date)}</td>` : ''}
-      <td>${escapeHtml(p.product)}</td>
-      <td class="small muted">${escapeHtml(p.internalLot ?? '')}</td>
-      <td class="small">${escapeHtml(p.blastTempRange ?? '—')}</td>
-      <td class="small">${escapeHtml(p.blastDuration ?? '—')}</td>
+      <td class="small">${escapeHtml(HACCP_PROCESS_LABELS_IT[process])}</td>
+      <td>${escapeHtml(p.product)}${p.internalLot ? ` <span class="small muted">lotto ${escapeHtml(p.internalLot)}</span>` : ''}${extra ? `<div class="small muted">${escapeHtml(extra)}</div>` : ''}</td>
+      <td class="small">${escapeHtml(processDetail(p))}</td>
+      <td>${outcome}</td>
       <td class="small muted">${escapeHtml(p.note ?? '')}</td>
       <td class="small muted">${escapeHtml(person(p.recordedByUserName))} ${time(p.recordedAt)}</td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
   const cols = multiDay ? 7 : 6;
-  return `<table><thead><tr>${multiDay ? '<th class="small">Giorno</th>' : ''}<th>Prodotto</th><th class="small">Lotto interno</th><th class="small">Range temp.</th><th class="small">Durata</th><th class="small">Note</th><th class="small">Operatore</th></tr></thead><tbody>${body || emptyRow(cols)}</tbody></table>`;
+  return `<table><thead><tr>${multiDay ? '<th class="small">Giorno</th>' : ''}<th class="small">Processo</th><th>Prodotto</th><th class="small">Dettaglio</th><th>Esito</th><th class="small">Note</th><th class="small">Operatore</th></tr></thead><tbody>${body || emptyRow(cols)}</tbody></table>`;
+};
+
+const CAL_METHODS: Record<string, string> = { GHIACCIO: 'ghiaccio fondente', EBOLLIZIONE: 'ebollizione', RIFERIMENTO: 'termometro di riferimento' };
+const CAL_OUTCOMES: Record<string, string> = { OK: 'Nei limiti', CORRETTO: 'Ricalibrato', SOSTITUITO: 'Sostituito' };
+
+const calibrationsTable = (rows: HaccpCalibration[]): string => {
+  const body = live(rows).map(c => {
+    const dev = haccpCalibrationDeviation(c.referenceTemp, c.measuredTemp);
+    const over = dev > c.maxDeviation;
+    return `
+    <tr>
+      <td class="small">${shortDate(c.date)}</td>
+      <td>${escapeHtml(c.instrument)}</td>
+      <td class="small">${escapeHtml(CAL_METHODS[c.method] ?? c.method)}</td>
+      <td class="num small">${num(c.referenceTemp)} °C</td>
+      <td class="num small">${num(c.measuredTemp)} °C</td>
+      <td class="num small ${over ? 'alert' : ''}">${num(dev)} °C <span class="muted">(max ${num(c.maxDeviation)})</span></td>
+      <td class="small">${escapeHtml(CAL_OUTCOMES[c.outcome] ?? c.outcome)}</td>
+      <td class="small muted">${escapeHtml(person(c.recordedByUserName))}</td>
+    </tr>`;
+  }).join('');
+  return `<table><thead><tr><th class="small">Giorno</th><th>Termometro</th><th class="small">Metodo</th><th class="small num">Riferimento</th><th class="small num">Letto</th><th class="small num">Scarto</th><th class="small">Esito</th><th class="small">Operatore</th></tr></thead><tbody>${body || emptyRow(8, 'Nessuna taratura nel periodo.')}</tbody></table>`;
+};
+
+/** I limiti con cui sono stati calcolati gli esiti: l'ispettore li confronta
+ *  con il manuale del locale. */
+const limitsTable = (l: HaccpLimits): string => {
+  const receipt = HACCP_RECEIPT_CATEGORIES
+    .filter(c => typeof l.receipt[c] === 'number')
+    .map(c => `${HACCP_RECEIPT_CATEGORY_LABELS_IT[c].toLowerCase()} ≤ ${num(l.receipt[c])} °C`)
+    .join(', ');
+  const rows: Array<[string, string]> = [
+    ['Abbattimento', `al cuore ≤ ${signedNum(l.blastChill.targetTemp)} entro ${formatHaccpDuration(l.blastChill.maxMinutes)}`],
+    ['Surgelazione', `al cuore ≤ ${signedNum(l.deepFreeze.targetTemp)} entro ${formatHaccpDuration(l.deepFreeze.maxMinutes)}`],
+    ['Bonifica anti-Anisakis', l.anisakis.map(r => `≤ ${signedNum(r.temp)} per ${r.hours} ore`).join(' oppure ')],
+    ['Cottura / rinvenimento', `al cuore ≥ ${num(l.cooking.minCore)} °C / ≥ ${num(l.reheating.minCore)} °C`],
+    ['Mantenimento a caldo', `≥ ${num(l.hotHolding.minTemp)} °C`],
+    ['Scongelamento', `a fine ciclo ≤ ${signedNum(l.thawing.maxTemp)}`],
+    ['Olio di frittura', `composti polari ≤ ${num(l.oil.maxPolar)}%, olio ≤ ${num(l.oil.maxTemp)} °C`],
+    ['Ricevimento', receipt || '—'],
+    ['Taratura termometri', `scarto ≤ ${num(l.calibration.maxDeviation)} °C`],
+    ['Campione testimone', `conservato ${num(l.sample.keepHours)} ore`],
+  ];
+  return `<table><tbody>${rows.map(([k, v]) => `<tr><td style="width:45mm">${escapeHtml(k)}</td><td class="small">${escapeHtml(v)}</td></tr>`).join('')}</tbody></table>`;
 };
 
 const NC_STATUS: Record<HaccpNonConformity['status'], string> = { OPEN: 'Aperta', CLOSED: 'Chiusa', VOID: 'Annullata' };
@@ -293,7 +397,7 @@ const showValue = (v: unknown): string => {
 
 const changeSubject = (c: HaccpChange): string => {
   const s = (c.before ?? c.after ?? {}) as Record<string, unknown>;
-  const name = s.location ?? s.fryerLabel ?? s.point ?? s.product ?? '';
+  const name = s.location ?? s.fryerLabel ?? s.point ?? s.product ?? s.instrument ?? '';
   const slot = typeof s.slot === 'number' && s.slot > 1 ? ` (${s.slot}ª)` : '';
   return `${ENTITY_LABELS[c.entity] ?? c.entity} · ${String(name)}${slot}`;
 };
@@ -331,7 +435,8 @@ const backdatedTable = (data: HaccpReportData): string => {
     ...live(data.oil).map(r => ({ ...r, what: `Olio · ${r.fryerLabel} · ${OIL_LABELS[r.action]}` })),
     ...live(data.cleaning).filter(r => r.done).map((r: HaccpCleaningCheck) => ({ ...r, what: `Pulizia · ${r.point}` })),
     ...live(data.receipts).map(r => ({ ...r, what: `Ricevimento · ${r.product}` })),
-    ...live(data.production).map(r => ({ ...r, what: `Produzione · ${r.product}` })),
+    ...live(data.production).map(r => ({ ...r, what: `${HACCP_PROCESS_LABELS_IT[(r.process ?? 'LEGACY') as HaccpProcess]} · ${r.product}` })),
+    ...live(data.calibrations ?? []).map(r => ({ ...r, what: `Taratura · ${r.instrument}` })),
   ].filter(r => writtenOther(r));
   if (all.length === 0) return '';
   all.sort((a, b) => a.date.localeCompare(b.date));
@@ -420,6 +525,7 @@ ${PRINT_TOKENS_CSS}
   table.grid td.cell.ok { color: #047857; font-weight: 700; }
   table.grid td.cell.strong { font-weight: 700; }
   .limit { font-size: 8px; color: var(--ds-print-ink-muted); }
+  .polar { font-size: 7px; font-weight: 400; color: var(--ds-print-ink-muted); }
   .legend { margin: 4px 0 0; font-size: 9px; color: var(--ds-print-ink-muted); }
   sup { font-size: 7px; }
   .sign-grid { margin-top: 26px; display: grid; grid-template-columns: 1fr 1fr; gap: 24px; break-inside: avoid; }
@@ -437,7 +543,7 @@ ${PRINT_TOKENS_CSS}
       <span class="pill">Temperature: ${temps.length}</span>
       <span class="pill${outCount ? ' alert' : ''}">Fuori soglia: ${outCount}</span>
       <span class="pill">Ricevimenti: ${live(data.receipts).length}</span>
-      <span class="pill">Produzioni: ${live(data.production).length}</span>
+      <span class="pill">Processi: ${live(data.production).length}</span>
       <span class="pill${openNc ? ' alert' : ''}">Non conformità: ${closedNc} chiuse${openNc ? `, ${openNc} aperte` : ''}</span>
       <span class="pill">Correzioni e annullamenti: ${data.changes.length}</span>
     </div>
@@ -465,9 +571,14 @@ ${PRINT_TOKENS_CSS}
   </section>
 
   <section>
-    <h2>Abbattimento / produzione</h2>
+    <h2>Processi: abbattimento, cottura, bonifica, scongelamento</h2>
     ${productionTable(data.production, !singleDay)}
   </section>
+
+  ${data.calibrations && data.calibrations.length > 0 ? `<section>
+    <h2>Taratura termometri</h2>
+    ${calibrationsTable(data.calibrations)}
+  </section>` : ''}
 
   <section>
     <h2>Non conformità e azioni correttive</h2>
@@ -480,6 +591,11 @@ ${PRINT_TOKENS_CSS}
   </section>
 
   ${backdatedTable(data)}
+
+  ${data.limits ? `<section>
+    <h2>Limiti applicati</h2>
+    ${limitsTable(data.limits)}
+  </section>` : ''}
 
   <div class="sign-grid">
     <div class="sign-box">Responsabile HACCP</div>

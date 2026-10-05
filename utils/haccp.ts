@@ -10,11 +10,18 @@
  * Frantoio scritta nel codice, e ogni ristorante nuovo se la ritrovava. */
 
 export type HaccpRegister = 'TEMPERATURE' | 'OIL' | 'CLEANING' | 'THERMOMETER' | 'EQUIPMENT';
-export type HaccpFrequency = 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'ON_DEMAND';
+export type HaccpFrequency = 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'QUARTERLY' | 'SEMIANNUAL' | 'ANNUAL' | 'ON_DEMAND';
 
-/** I registri a punti che la Fase 1 sa configurare e compilare. */
-export const HACCP_POINT_REGISTERS: HaccpRegister[] = ['TEMPERATURE', 'OIL', 'CLEANING'];
-export const HACCP_FREQUENCIES: HaccpFrequency[] = ['DAILY', 'WEEKLY', 'MONTHLY', 'ON_DEMAND'];
+/** I registri a punti che si configurano e si compilano. EQUIPMENT sono le
+ *  attrezzature dei processi (abbattitori, forni): non si compilano da sole,
+ *  si scelgono nel processo. */
+export const HACCP_POINT_REGISTERS: HaccpRegister[] = ['TEMPERATURE', 'OIL', 'CLEANING', 'THERMOMETER', 'EQUIPMENT'];
+export const HACCP_FREQUENCIES: HaccpFrequency[] = ['DAILY', 'WEEKLY', 'MONTHLY', 'QUARTERLY', 'SEMIANNUAL', 'ANNUAL', 'ON_DEMAND'];
+/** Le frequenze che un registro a periodi ammette. */
+export const HACCP_REGISTER_FREQUENCIES: Partial<Record<HaccpRegister, HaccpFrequency[]>> = {
+  CLEANING: ['DAILY', 'WEEKLY', 'MONTHLY', 'QUARTERLY', 'SEMIANNUAL', 'ANNUAL', 'ON_DEMAND'],
+  THERMOMETER: ['MONTHLY', 'QUARTERLY', 'SEMIANNUAL', 'ANNUAL'],
+};
 
 export interface HaccpPoint {
   id: number;
@@ -87,12 +94,16 @@ export const haccpPeriodRange = (frequency: HaccpFrequency, date: string): { fro
     const from = addDaysToIso(date, -back);
     return { from, to: addDaysToIso(from, 6) };
   }
-  if (frequency === 'MONTHLY') {
-    const from = `${date.slice(0, 7)}-01`;
-    const d = isoToUtc(from);
-    d.setUTCMonth(d.getUTCMonth() + 1);
-    d.setUTCDate(0);
-    return { from, to: utcToIso(d) };
+  // Mese, trimestre, semestre e anno solari: la taratura «semestrale» fatta a
+  // marzo copre gennaio–giugno, come la intende il manuale.
+  const months = frequency === 'MONTHLY' ? 1 : frequency === 'QUARTERLY' ? 3 : frequency === 'SEMIANNUAL' ? 6 : frequency === 'ANNUAL' ? 12 : 0;
+  if (months > 0) {
+    const year = Number(date.slice(0, 4));
+    const month0 = Number(date.slice(5, 7)) - 1;
+    const startMonth0 = Math.floor(month0 / months) * months;
+    const from = utcToIso(new Date(Date.UTC(year, startMonth0, 1)));
+    const to = utcToIso(new Date(Date.UTC(year, startMonth0 + months, 0)));
+    return { from, to };
   }
   return { from: date, to: date };
 };
@@ -103,3 +114,247 @@ export const haccpDaysBetween = (from: string, to: string): string[] => {
   for (let d = from; d <= to && out.length < 400; d = addDaysToIso(d, 1)) out.push(d);
   return out;
 };
+
+// =============================================================================
+// Limiti del locale (Fase 2)
+// =============================================================================
+// I valori di riferimento dei manuali correnti. Il limite che conta è quello
+// del manuale del locale: si cambiano in HACCP → Configura (haccp_settings),
+// e una chiave assente vale il riferimento — un ristorante nuovo parte coperto.
+
+export type HaccpProcess =
+  | 'LEGACY' | 'ABBATTIMENTO' | 'SURGELAZIONE' | 'ANISAKIS' | 'COTTURA' | 'RINVENIMENTO'
+  | 'MANTENIMENTO_CALDO' | 'SCONGELAMENTO' | 'SANIFICAZIONE' | 'CAMPIONE';
+
+/** I processi che si registrano oggi (LEGACY è il vecchio «range/durata»). */
+export const HACCP_PROCESSES: Exclude<HaccpProcess, 'LEGACY'>[] = [
+  'ABBATTIMENTO', 'SURGELAZIONE', 'ANISAKIS', 'COTTURA', 'RINVENIMENTO',
+  'MANTENIMENTO_CALDO', 'SCONGELAMENTO', 'SANIFICAZIONE', 'CAMPIONE',
+];
+
+/** I nomi dei processi sul foglio e nelle non conformità (il foglio è in
+ *  italiano: è un documento per l'ASL). */
+export const HACCP_PROCESS_LABELS_IT: Record<HaccpProcess, string> = {
+  LEGACY: 'Abbattimento',
+  ABBATTIMENTO: 'Abbattimento',
+  SURGELAZIONE: 'Surgelazione',
+  ANISAKIS: 'Bonifica anti-Anisakis',
+  COTTURA: 'Cottura',
+  RINVENIMENTO: 'Rinvenimento',
+  MANTENIMENTO_CALDO: 'Mantenimento a caldo',
+  SCONGELAMENTO: 'Scongelamento',
+  SANIFICAZIONE: 'Sanificazione verdure',
+  CAMPIONE: 'Campione testimone',
+};
+
+export const HACCP_RECEIPT_CATEGORY_LABELS_IT: Record<string, string> = {
+  REFRIGERATO: 'Refrigerato',
+  CARNE: 'Carne',
+  POLLAME: 'Pollame',
+  PESCE: 'Pesce',
+  LATTICINI: 'Latticini',
+  SURGELATO: 'Surgelato',
+  ORTOFRUTTA: 'Ortofrutta',
+  SECCO: 'Secco',
+  ALTRO: 'Altro',
+};
+
+/** Processi a due tempi: si avviano e si chiudono, anche a ore di distanza. */
+export const HACCP_TWO_STEP_PROCESSES: HaccpProcess[] = ['ABBATTIMENTO', 'SURGELAZIONE', 'ANISAKIS', 'SCONGELAMENTO'];
+
+export type HaccpReceiptCategory =
+  | 'REFRIGERATO' | 'CARNE' | 'POLLAME' | 'PESCE' | 'LATTICINI' | 'SURGELATO' | 'ORTOFRUTTA' | 'SECCO' | 'ALTRO';
+export const HACCP_RECEIPT_CATEGORIES: HaccpReceiptCategory[] = [
+  'REFRIGERATO', 'CARNE', 'POLLAME', 'PESCE', 'LATTICINI', 'SURGELATO', 'ORTOFRUTTA', 'SECCO', 'ALTRO',
+];
+
+export interface HaccpLimits {
+  /** Abbattimento positivo: al cuore ≤ targetTemp entro maxMinutes. */
+  blastChill: { targetTemp: number; maxMinutes: number };
+  /** Abbattimento negativo (surgelazione): al cuore ≤ targetTemp entro maxMinutes. */
+  deepFreeze: { targetTemp: number; maxMinutes: number };
+  /** Bonifica anti-Anisakis (Reg. CE 853/2004, All. III, Sez. VIII): basta
+   *  una delle combinazioni — ≤ temp in ogni parte per almeno hours. */
+  anisakis: Array<{ temp: number; hours: number }>;
+  cooking: { minCore: number };
+  reheating: { minCore: number };
+  hotHolding: { minTemp: number };
+  /** Scongelamento in frigo: a fine ciclo il prodotto non supera maxTemp. */
+  thawing: { maxTemp: number };
+  /** Olio di frittura: composti polari (Circ. Min. Sanità 1/1991) e
+   *  temperatura (acrilammide, Reg. UE 2017/2158). */
+  oil: { maxPolar: number; maxTemp: number };
+  /** Ricevimento: temperatura massima per tipo di merce (null = nessuna). */
+  receipt: Record<HaccpReceiptCategory, number | null>;
+  calibration: { maxDeviation: number };
+  /** Campione testimone: quante ore si conserva. */
+  sample: { keepHours: number };
+}
+
+export const HACCP_DEFAULT_LIMITS: HaccpLimits = {
+  blastChill: { targetTemp: 3, maxMinutes: 90 },
+  deepFreeze: { targetTemp: -18, maxMinutes: 240 },
+  anisakis: [{ temp: -20, hours: 24 }, { temp: -35, hours: 15 }],
+  cooking: { minCore: 75 },
+  reheating: { minCore: 75 },
+  hotHolding: { minTemp: 65 },
+  thawing: { maxTemp: 4 },
+  oil: { maxPolar: 25, maxTemp: 175 },
+  receipt: {
+    REFRIGERATO: 4, CARNE: 7, POLLAME: 4, PESCE: 2, LATTICINI: 4, SURGELATO: -15,
+    ORTOFRUTTA: null, SECCO: null, ALTRO: null,
+  },
+  calibration: { maxDeviation: 1 },
+  sample: { keepHours: 72 },
+};
+
+const num = (v: unknown, fallback: number): number =>
+  typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+const numOrNull = (v: unknown, fallback: number | null): number | null =>
+  v === null ? null : typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+
+/** I limiti effettivi: quelli salvati sopra i riferimenti, chiave per
+ *  chiave. Un valore non numerico (un JSON scritto a mano, una versione
+ *  vecchia) torna al riferimento invece di rompere il calcolo. */
+export const mergeHaccpLimits = (stored: unknown): HaccpLimits => {
+  const s = (stored && typeof stored === 'object' ? stored : {}) as Record<string, any>;
+  const d = HACCP_DEFAULT_LIMITS;
+  const anisakis = Array.isArray(s.anisakis)
+    ? s.anisakis
+      .map((r: any) => ({ temp: num(r?.temp, NaN), hours: num(r?.hours, NaN) }))
+      .filter((r: { temp: number; hours: number }) => Number.isFinite(r.temp) && Number.isFinite(r.hours) && r.hours > 0)
+    : [];
+  const receipt = { ...d.receipt };
+  for (const c of HACCP_RECEIPT_CATEGORIES) {
+    if (s.receipt && c in s.receipt) receipt[c] = numOrNull(s.receipt[c], d.receipt[c]);
+  }
+  return {
+    blastChill: { targetTemp: num(s.blastChill?.targetTemp, d.blastChill.targetTemp), maxMinutes: num(s.blastChill?.maxMinutes, d.blastChill.maxMinutes) },
+    deepFreeze: { targetTemp: num(s.deepFreeze?.targetTemp, d.deepFreeze.targetTemp), maxMinutes: num(s.deepFreeze?.maxMinutes, d.deepFreeze.maxMinutes) },
+    anisakis: anisakis.length > 0 ? anisakis : d.anisakis,
+    cooking: { minCore: num(s.cooking?.minCore, d.cooking.minCore) },
+    reheating: { minCore: num(s.reheating?.minCore, d.reheating.minCore) },
+    hotHolding: { minTemp: num(s.hotHolding?.minTemp, d.hotHolding.minTemp) },
+    thawing: { maxTemp: num(s.thawing?.maxTemp, d.thawing.maxTemp) },
+    oil: { maxPolar: num(s.oil?.maxPolar, d.oil.maxPolar), maxTemp: num(s.oil?.maxTemp, d.oil.maxTemp) },
+    receipt,
+    calibration: { maxDeviation: num(s.calibration?.maxDeviation, d.calibration.maxDeviation) },
+    sample: { keepHours: num(s.sample?.keepHours, d.sample.keepHours) },
+  };
+};
+
+// ---- Esiti --------------------------------------------------------------------
+
+const deg = (n: number): string => `${formatDegrees(n)} °C`;
+const signedDeg = (n: number): string => `${n > 0 ? '+' : ''}${formatDegrees(n)} °C`;
+const minutesBetween = (from: string | null | undefined, to: string | null | undefined): number | null => {
+  if (!from || !to) return null;
+  const ms = new Date(to).getTime() - new Date(from).getTime();
+  return Number.isFinite(ms) ? Math.round(ms / 60000) : null;
+};
+export const formatHaccpDuration = (minutes: number): string => {
+  if (minutes < 120) return `${minutes} minuti`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m ? `${h} h ${m} min` : `${h} ore`;
+};
+
+export interface HaccpProcessInput {
+  process: HaccpProcess;
+  startedAt?: string | null;
+  startTemp?: number | null;
+  endedAt?: string | null;
+  endTemp?: number | null;
+}
+
+/** L'esito di un processo sui limiti del locale. compliant null = non
+ *  valutabile (ciclo in corso, processo senza soglia, vecchio registro). Il
+ *  problema è scritto per il foglio dell'ispettore: cosa è successo e il
+ *  limite che non è stato rispettato. */
+export const evaluateHaccpProcess = (p: HaccpProcessInput, limits: HaccpLimits): { compliant: boolean | null; problem: string | null } => {
+  const end = typeof p.endTemp === 'number' ? p.endTemp : null;
+  const start = typeof p.startTemp === 'number' ? p.startTemp : null;
+  const minutes = minutesBetween(p.startedAt, p.endedAt);
+  switch (p.process) {
+    case 'ABBATTIMENTO':
+    case 'SURGELAZIONE': {
+      if (end === null || !p.endedAt) return { compliant: null, problem: null };
+      const l = p.process === 'ABBATTIMENTO' ? limits.blastChill : limits.deepFreeze;
+      const tempOk = end <= l.targetTemp;
+      const timeOk = minutes === null || minutes <= l.maxMinutes;
+      if (tempOk && timeOk) return { compliant: true, problem: null };
+      const when = minutes !== null ? ` dopo ${formatHaccpDuration(minutes)}` : '';
+      return {
+        compliant: false,
+        problem: `al cuore ${signedDeg(end)}${when} (limite ${signedDeg(l.targetTemp)} entro ${formatHaccpDuration(l.maxMinutes)})`,
+      };
+    }
+    case 'ANISAKIS': {
+      if (end === null || !p.endedAt || minutes === null) return { compliant: null, problem: null };
+      const warmest = start === null ? end : Math.max(start, end);
+      const hours = minutes / 60;
+      const ok = limits.anisakis.some(r => warmest <= r.temp && hours >= r.hours);
+      if (ok) return { compliant: true, problem: null };
+      const rules = limits.anisakis.map(r => `${signedDeg(r.temp)} per ${r.hours} ore`).join(' o ');
+      return { compliant: false, problem: `${signedDeg(warmest)} per ${formatHaccpDuration(minutes)} (serve ${rules})` };
+    }
+    case 'COTTURA':
+    case 'RINVENIMENTO': {
+      if (end === null) return { compliant: null, problem: null };
+      const min = p.process === 'COTTURA' ? limits.cooking.minCore : limits.reheating.minCore;
+      return end >= min
+        ? { compliant: true, problem: null }
+        : { compliant: false, problem: `al cuore ${deg(end)} (minimo ${deg(min)})` };
+    }
+    case 'MANTENIMENTO_CALDO': {
+      if (end === null) return { compliant: null, problem: null };
+      return end >= limits.hotHolding.minTemp
+        ? { compliant: true, problem: null }
+        : { compliant: false, problem: `${deg(end)} (minimo ${deg(limits.hotHolding.minTemp)})` };
+    }
+    case 'SCONGELAMENTO': {
+      if (end === null || !p.endedAt) return { compliant: null, problem: null };
+      return end <= limits.thawing.maxTemp
+        ? { compliant: true, problem: null }
+        : { compliant: false, problem: `${signedDeg(end)} a fine scongelamento (massimo ${signedDeg(limits.thawing.maxTemp)})` };
+    }
+    default:
+      return { compliant: null, problem: null };
+  }
+};
+
+/** I problemi di un controllo dell'olio. Oltre il limite di composti polari
+ *  l'olio va cambiato: se è stato sostituito, la misura era quella dell'olio
+ *  tolto e non c'è niente da rimediare. */
+export const evaluateHaccpOil = (
+  o: { action: string; polarCompounds?: number | null; oilTemp?: number | null },
+  limits: HaccpLimits,
+): string[] => {
+  const problems: string[] = [];
+  if (typeof o.polarCompounds === 'number' && o.polarCompounds > limits.oil.maxPolar && o.action !== 'SOSTITUITO') {
+    problems.push(`composti polari ${formatDegrees(o.polarCompounds)}% (limite ${formatDegrees(limits.oil.maxPolar)}%)`);
+  }
+  if (typeof o.oilTemp === 'number' && o.oilTemp > limits.oil.maxTemp) {
+    problems.push(`olio a ${deg(o.oilTemp)} (massimo ${deg(limits.oil.maxTemp)})`);
+  }
+  return problems;
+};
+
+/** I problemi di un ricevimento: fuori temperatura per il tipo di merce,
+ *  scaduto, imballo non integro. */
+export const evaluateHaccpReceipt = (
+  r: { date: string; category?: HaccpReceiptCategory | null; temperature?: number | null; expiryDate?: string | null; packagingOk?: boolean | null },
+  limits: HaccpLimits,
+): string[] => {
+  const problems: string[] = [];
+  const max = r.category ? limits.receipt[r.category] : null;
+  if (typeof max === 'number' && typeof r.temperature === 'number' && r.temperature > max) {
+    problems.push(`arrivata a ${signedDeg(r.temperature)} (massimo ${signedDeg(max)})`);
+  }
+  if (r.expiryDate && r.expiryDate < r.date) problems.push('scaduta');
+  if (r.packagingOk === false) problems.push('imballo non integro');
+  return problems;
+};
+
+export const haccpCalibrationDeviation = (reference: number, measured: number): number =>
+  Math.round(Math.abs(measured - reference) * 10) / 10;

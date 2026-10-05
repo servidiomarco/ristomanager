@@ -579,20 +579,22 @@ Modulo a parte (si attiva con l'abbonamento «recensioni»).
 
 ## HACCP
 
-Registro di autocontrollo digitale, compilabile dal telefono davanti alla cella frigo (campi grandi, salvataggio a ogni campo). Quattro schede: **Registro** (il giorno), **Non conformità**, **Report** e — per chi gestisce l'HACCP — **Configura**.
+Registro di autocontrollo digitale, compilabile dal telefono davanti alla cella frigo (campi grandi, salvataggio a ogni campo). Schede: **Registro** (il giorno), **Non conformità**, **Rintracciabilità**, **Report** e — per chi gestisce l'HACCP — **Configura**.
 
 **Punti di controllo del locale**
-- Postazioni di temperatura, friggitrici e punti di pulizia si configurano in **HACCP → Configura**: sono il manuale di autocontrollo del ristorante tradotto in righe del modulo. Per chi parte da zero ci sono i modelli (frigorifero ≤ 4 °C, congelatore ≤ −18 °C, banco caldo ≥ 65 °C, cappe ogni mese…).
+- Postazioni di temperatura, friggitrici, punti di pulizia, termometri da tarare e attrezzature dei processi (abbattitori, forni) si configurano in **HACCP → Configura**: sono il manuale di autocontrollo del ristorante tradotto in righe del modulo. Per chi parte da zero ci sono i modelli (frigorifero ≤ 4 °C, congelatore ≤ −18 °C, banco caldo ≥ 65 °C, cappe ogni mese, termometro a sonda ogni sei mesi…).
 - Ogni postazione ha il suo **limite** (massimo per frigo e congelatori, minimo per il caldo, o entrambi) e da **una a tre rilevazioni al giorno**.
-- Ogni punto di pulizia ha la sua **frequenza**: ogni giorno, ogni settimana, ogni mese o su richiesta (per esempio la pulizia dopo la lavorazione di allergeni). Il registro del giorno chiede solo quelle dovute: una settimanale fatta lunedì resta spuntata per tutta la settimana.
+- Ogni punto di pulizia ha la sua **frequenza**: ogni giorno, settimana, mese, tre mesi, sei mesi, anno o su richiesta (per esempio la pulizia dopo la lavorazione di allergeni). Il registro del giorno chiede solo quelle dovute: una settimanale fatta lunedì resta spuntata per tutta la settimana.
+- **Limiti del manuale** (Configura): abbattimento a +3 °C entro 90 minuti, surgelazione a −18 °C entro 4 ore, bonifica anti-Anisakis (−20 °C per 24 ore o −35 °C per 15 ore), cottura e rinvenimento al cuore ≥ 75 °C, mantenimento a caldo ≥ 65 °C, composti polari dell'olio ≤ 25%, temperatura massima al ricevimento per tipo di merce, scarto ammesso nella taratura dei termometri, ore di conservazione del campione testimone. Partono dai valori di riferimento dei manuali correnti e si cambiano lasciando il motivo.
 - Un punto non si cancella: si archivia, e lo storico resta agganciato. Cambiare un limite resta nello storico con il motivo.
 
 **Il registro del giorno**
 1. **Temperature** — il campo parte dal limite da confermare o sovrascrivere; fuori soglia diventa rosso.
-2. **Oli di frittura** — Filtrato / Sostituito / Utilizzabile.
+2. **Oli di frittura** — Filtrato / Sostituito / Utilizzabile, con i **composti polari** (%) e la temperatura dell'olio se misurati: oltre il limite, e con l'olio non cambiato, si apre una non conformità.
 3. **Pulizie** attrezzature e superfici, con le frequenze sopra.
-4. **Ricevimento merci** — prodotto, lotto, temperatura, Accettato/Respinto, note.
-5. **Abbattimento / produzione** — prodotto, lotto interno, temperature, durata.
+4. **Taratura termometri** — ghiaccio fondente, ebollizione o termometro di riferimento; il registro dice quali sono da fare nel loro periodo. Uno scarto oltre il limite apre una non conformità, già chiusa se il termometro è stato ricalibrato o sostituito sul momento.
+5. **Ricevimento merci** — prodotto, **fornitore** (dall'anagrafica della Lista della spesa), **documento di trasporto**, tipo di merce con la sua soglia, lotto, **scadenza**, temperatura, imballo integro, Accettato/Respinto. Il modulo avvisa prima di registrare se la merce è fuori temperatura, scaduta o con l'imballo rovinato.
+6. **Processi** con orari e temperature vere: abbattimento, surgelazione, bonifica anti-Anisakis, cottura, rinvenimento, mantenimento a caldo, scongelamento, sanificazione delle verdure, campione testimone dei banchetti. Abbattimenti, bonifiche e scongelamenti si **avviano e si chiudono** anche a ore di distanza (i cicli aperti restano in cima al registro, anche il giorno dopo). L'esito si calcola sui limiti del manuale e si vede già mentre si compila; fuori limite si apre una non conformità. Si annotano anche attrezzatura, quantità, lotti degli ingredienti e scadenza assegnata.
 
 Ogni riga registra **chi l'ha compilata e quando**, con il nome della persona. Una riga scritta in un giorno diverso da quello del registro (il foglio di ieri compilato oggi) lo dice. Più telefoni sullo stesso registro si vedono a vicenda in tempo reale.
 
@@ -606,9 +608,13 @@ Ogni riga registra **chi l'ha compilata e quando**, con il nome della persona. U
 - Le non conformità si chiudono **solo scrivendo l'azione correttiva**. Se ne possono segnalare anche a mano (prodotto scaduto, tracce di infestanti, semilavorato senza etichetta…), già chiuse se il rimedio è fatto.
 - La scheda **Non conformità** mostra quelle da chiudere (con il contatore sulla scheda) e lo storico di tutte. Annullarne una aperta per errore è da responsabile, sempre motivato.
 
+**Rintracciabilità e richiami**
+- La scheda **Rintracciabilità** cerca un prodotto, un lotto, un fornitore o un documento di trasporto e mostra da dove è arrivato (fornitore, data, documento, scadenza) e in quali processi del locale è stato usato (dai lotti degli ingredienti).
+- **Avvia un richiamo** apre una non conformità di tipo richiamo con le registrazioni coinvolte; si chiude scrivendo cosa è stato ritirato e chi è stato avvisato.
+
 **Report per periodo**
 - Oggi, questa settimana, questo mese, il mese scorso o un intervallo a scelta (fino a un anno). Prima di stampare il riepilogo segnala i giorni senza registrazioni, i fuori soglia e le non conformità ancora aperte.
-- Il foglio stampato ha la **scheda mensile** delle temperature (postazioni per giorni, fuori soglia in rosso), degli oli e delle pulizie, poi ricevimenti, produzioni, **non conformità con le azioni correttive**, **correzioni e annullamenti** con l'originale e il motivo, e le righe scritte in un giorno diverso. In testa il nome del ristorante, in fondo lo spazio per la firma del responsabile.
+- Il foglio stampato ha la **scheda mensile** delle temperature (postazioni per giorni, fuori soglia in rosso), degli oli (con i composti polari) e delle pulizie, poi ricevimenti con fornitore, documento e scadenza, processi con il loro esito, tarature, **non conformità con le azioni correttive**, **correzioni e annullamenti** con l'originale e il motivo, le righe scritte in un giorno diverso e i **limiti applicati**. In testa il nome del ristorante, in fondo lo spazio per la firma del responsabile.
 
 Avvisi sul registro temperature:
 
@@ -747,6 +753,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-05 | HACCP | Nel registro HACCP arrivano i processi con orari e temperature vere (abbattimento, surgelazione, bonifica anti-Anisakis, cottura, rinvenimento, caldo, scongelamento, sanificazione delle verdure, campioni testimone), l'olio con i composti polari, il ricevimento con fornitore, documento di trasporto e scadenza, la taratura dei termometri e la scheda Rintracciabilità per seguire un lotto e avviare un richiamo. I limiti del tuo manuale si impostano in Configura. |
 | 2026-10-05 | HACCP | Il registro HACCP diventa quello del tuo locale: postazioni, limiti, rilevazioni al giorno e frequenze delle pulizie si configurano in HACCP → Configura. Le registrazioni non si cancellano più ma si annullano con un motivo, ogni correzione tiene l'originale, un fuori soglia o una merce respinta aprono una non conformità da chiudere con l'azione correttiva, e il report si stampa per giorno, settimana o mese. |
 | 2026-10-04 | Messaggi: WhatsApp e SMS | L'AI dei Messaggi conosce la scheda del cliente in rubrica: a chi chiede il suo tavolo preferito risponde nominandolo, invece di chiedergli quale sia. |
 | 2026-10-03 | Menu digitale pubblico | Sul menu del QR il logo sta in una testata bassa, a sinistra, con la lingua accanto: i piatti partono più in alto. Un logo con lo sfondo bianco non mostra più il riquadro bianco sul fondo della pagina. |

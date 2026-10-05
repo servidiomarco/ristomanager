@@ -1,36 +1,38 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  Thermometer, Flame, Sparkles, Truck, Snowflake, Printer, CalendarDays,
-  Check, X, Plus, Trash2, AlertTriangle, RefreshCw, ShieldAlert, Settings2,
+  Thermometer, Flame, Sparkles, Truck, Timer, Gauge, Printer, CalendarDays,
+  Check, X, AlertTriangle, RefreshCw, ShieldAlert, Settings2,
 } from 'lucide-react';
 import {
   haccpApiService,
   HACCP_OIL_ACTIONS,
-  HACCP_BLAST_TEMP_RANGES,
-  HACCP_BLAST_DURATIONS,
+  HaccpCalibration,
   HaccpDay,
+  HaccpLimits,
   HaccpPoint,
   HaccpTemperatureReading,
   HaccpOilCheck,
   HaccpOilAction,
   HaccpCleaningCheck,
-  HaccpGoodsReceipt,
-  HaccpProductionLog,
   HaccpNonConformity,
   HaccpAuditFields,
   isReasonRequired,
 } from '../../services/haccpApiService';
-import { formatHaccpLimit, haccpPeriodRange, isOutOfRange } from '../../utils/haccp';
+import { supplierApiService, type Supplier } from '../../services/shoppingApiService';
+import { evaluateHaccpOil, formatHaccpLimit, haccpPeriodRange, isOutOfRange } from '../../utils/haccp';
 import { printHaccpReport } from '../../utils/printHaccpReport';
 import { useAuth } from '../../contexts/AuthContext';
 import { SkeletonHaccpSections } from '../SkeletonCards';
-import { Callout, EmptyState, SegmentedControl, dsButton, dsIconButton, dsSelect } from '../ds';
+import { Callout, EmptyState, SegmentedControl, dsButton, dsIconButton } from '../ds';
 import {
-  Card, CardHeader, CloseNcDialog, HistoryDialog, ReasonDialog, ReasonRequest, RowStamp, TFunc,
-  correctableWithoutReason, deleteButton, emptyNote, field, fieldLabel, formatLongDate, formatNumber,
+  Card, CardHeader, CloseNcDialog, HistoryDialog, NcLine, ReasonDialog, ReasonRequest, RowStamp, TFunc,
+  correctableWithoutReason, field, formatLongDate, formatNumber, frequencyLabel,
   parseNumber, row, rowList, todayISO,
 } from './haccpUi';
+import { ReceiptsSection } from './HaccpReceipts';
+import { ProcessesSection } from './HaccpProcesses';
+import { CalibrationsList } from './HaccpCalibrations';
 
 /* Il modulo del giorno. Si compila col telefono davanti alla cella: ogni
    campo salva quando lo si lascia, e il server decide se è una registrazione
@@ -63,6 +65,12 @@ export const HaccpToday: React.FC<{
   const [closingNc, setClosingNc] = useState<HaccpNonConformity | null>(null);
   const [history, setHistory] = useState<HistoryTarget | null>(null);
   const [printing, setPrinting] = useState(false);
+  // L'anagrafica fornitori della Lista della spesa, per il ricevimento: si
+  // legge una volta, e se non arriva il campo resta libero.
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  useEffect(() => {
+    supplierApiService.getAll().then(setSuppliers).catch(() => setSuppliers([]));
+  }, []);
 
   const loadSeq = useRef(0);
   const reload = useCallback(async (dateToLoad: string, quiet = false) => {
@@ -149,6 +157,15 @@ export const HaccpToday: React.FC<{
   const temperaturePoints = useMemo(() => pointsOf('TEMPERATURE'), [pointsOf]);
   const oilPoints = useMemo(() => pointsOf('OIL'), [pointsOf]);
   const cleaningPoints = useMemo(() => pointsOf('CLEANING'), [pointsOf]);
+  const thermometers = useMemo(() => pointsOf('THERMOMETER'), [pointsOf]);
+  const equipment = useMemo(() => pointsOf('EQUIPMENT'), [pointsOf]);
+  const limits: HaccpLimits | undefined = day?.limits;
+
+  const lastCalibration = useMemo(() => {
+    const map = new Map<number, HaccpCalibration>();
+    (day?.calibrations ?? []).forEach(c => map.set(c.pointId, c));
+    return map;
+  }, [day]);
 
   const readings = useMemo(() => {
     const map = new Map<string, HaccpTemperatureReading>();
@@ -163,7 +180,8 @@ export const HaccpToday: React.FC<{
   }, [day]);
 
   /** Per ogni punto di pulizia: la registrazione che copre il periodo della
-   *  sua frequenza (il giorno, la settimana, il mese). */
+   *  sua frequenza (il giorno, la settimana, il mese, il semestre…). Il
+   *  server manda l'ultima pulizia di ogni punto fino al giorno. */
   const cleaningDone = useMemo(() => {
     const map = new Map<number, HaccpCleaningCheck>();
     for (const p of cleaningPoints) {
@@ -175,6 +193,12 @@ export const HaccpToday: React.FC<{
     }
     return map;
   }, [cleaningPoints, day, date]);
+
+  const dueCalibrations = thermometers.filter(p => {
+    const c = lastCalibration.get(p.id);
+    const range = haccpPeriodRange(p.frequency, date);
+    return !c || c.date < range.from || c.date > range.to;
+  }).length;
 
   /** Le non conformità per registrazione d'origine (aperte e chiuse del
    *  giorno): la riga mostra il bottone dell'azione o l'azione scritta. */
@@ -213,7 +237,7 @@ export const HaccpToday: React.FC<{
     }
   };
 
-  const noPoints = !loading && day && temperaturePoints.length + oilPoints.length + cleaningPoints.length === 0;
+  const noPoints = !loading && day && temperaturePoints.length + oilPoints.length + cleaningPoints.length + thermometers.length === 0;
 
   return (
     <div className="space-y-4">
@@ -362,11 +386,14 @@ export const HaccpToday: React.FC<{
                     point={p}
                     check={oilByPoint.get(p.id) ?? null}
                     editable={editable}
-                    onSave={(action, note) => withReason(
-                      reason => haccpApiService.saveOilCheck({ date, pointId: p.id, action, note, reason }),
+                    limits={limits}
+                    onSave={(action, note, polarCompounds, oilTemp) => withReason(
+                      reason => haccpApiService.saveOilCheck({ date, pointId: p.id, action, note, polarCompounds, oilTemp, reason }),
                       { title: t('correctTitle', 'Correggere la registrazione?'), subtitle: p.label },
                     )}
                     onHistory={c => setHistory({ entity: 'oil', entityId: c.id, title: p.label })}
+                    nc={ncBySource}
+                    onCloseNc={setClosingNc}
                   />
                 ))}
               </div>
@@ -395,6 +422,36 @@ export const HaccpToday: React.FC<{
             </Card>
           )}
 
+          {thermometers.length > 0 && (
+            <Card>
+              <CardHeader
+                title={t('card.calibrations', 'Taratura termometri')}
+                icon={<Gauge className="h-4 w-4" />}
+                status={dueCalibrations > 0
+                  ? t('dueCount', '{{count}} da fare', { count: dueCalibrations })
+                  : t('allDone', 'In regola')}
+                statusTone={dueCalibrations > 0 ? 'pending' : 'positive'}
+              />
+              <CalibrationsList
+                date={date}
+                thermometers={thermometers}
+                last={lastCalibration}
+                limits={limits}
+                editable={editable}
+                onSave={async input => {
+                  try {
+                    await haccpApiService.createCalibration({ date, ...input });
+                    reload(date, true);
+                    return true;
+                  } catch (e: any) {
+                    setError(e?.message || t('err.save', 'Salvataggio non riuscito'));
+                    return false;
+                  }
+                }}
+              />
+            </Card>
+          )}
+
           <Card>
             <CardHeader
               title={t('card.receipts', 'Ricevimento merci')}
@@ -402,7 +459,10 @@ export const HaccpToday: React.FC<{
               status={t('records', '{{count}} registrazioni', { count: day.receipts.length })}
             />
             <ReceiptsSection
+              date={date}
               rows={day.receipts}
+              suppliers={suppliers}
+              limits={limits}
               ncBySource={ncBySource}
               editable={editable}
               onAdd={async input => {
@@ -423,12 +483,16 @@ export const HaccpToday: React.FC<{
 
           <Card>
             <CardHeader
-              title={t('card.production', 'Abbattimento / produzione')}
-              icon={<Snowflake className="h-4 w-4" />}
-              status={t('records', '{{count}} registrazioni', { count: day.production.length })}
+              title={t('card.processes', 'Processi')}
+              icon={<Timer className="h-4 w-4" />}
+              status={t('records', '{{count}} registrazioni', { count: day.production.filter(r => r.date === date).length })}
             />
-            <ProductionSection
+            <ProcessesSection
+              date={date}
               rows={day.production}
+              equipment={equipment}
+              limits={limits}
+              ncBySource={ncBySource}
               editable={editable}
               onAdd={async input => {
                 try {
@@ -440,7 +504,18 @@ export const HaccpToday: React.FC<{
                   return false;
                 }
               }}
+              onCloseCycle={async (r, input) => {
+                try {
+                  await haccpApiService.updateProductionLog(r.id, input);
+                  reload(date, true);
+                  return true;
+                } catch (e: any) {
+                  setError(e?.message || t('err.production', 'Errore nel salvataggio produzione'));
+                  return false;
+                }
+              }}
               onVoid={r => confirmVoid(r, r.product, reason => haccpApiService.voidProductionLog(r.id, reason))}
+              onCloseNc={setClosingNc}
               onHistory={r => setHistory({ entity: 'production', entityId: r.id, title: r.product })}
             />
           </Card>
@@ -455,33 +530,6 @@ export const HaccpToday: React.FC<{
         onSaved={() => reload(date, true)}
       />
       <HistoryDialog target={history} onClose={() => setHistory(null)} />
-    </div>
-  );
-};
-
-// =============================================================================
-// Non conformità in riga
-// =============================================================================
-
-const NcLine: React.FC<{ nc: HaccpNonConformity | undefined; onCloseNc: (nc: HaccpNonConformity) => void; editable: boolean }> = ({ nc, onCloseNc, editable }) => {
-  const { t } = useTranslation('haccp', { useSuspense: false });
-  if (!nc || nc.status === 'VOID') return null;
-  if (nc.status === 'CLOSED') {
-    return (
-      <div className="col-span-12 text-[13px] text-[var(--ds-text-muted)]">
-        {t('nc.actionDone', 'Azione correttiva: {{azione}}', { azione: nc.correctiveAction ?? '' })}
-      </div>
-    );
-  }
-  return (
-    <div className="col-span-12 flex flex-wrap items-center gap-2 rounded-[var(--ds-radius-sm)] bg-[var(--ds-critical-tint)] px-3 py-2 text-[13px] text-[var(--ds-critical-text)]">
-      <ShieldAlert className="h-4 w-4 flex-shrink-0" aria-hidden />
-      <span className="min-w-0 flex-1">{t('nc.needsAction', 'Fuori norma: serve l\'azione correttiva')}</span>
-      {editable && (
-        <button type="button" onClick={() => onCloseNc(nc)} className={`${dsButton.secondary} h-9 px-3 text-[14px]`}>
-          {t('nc.writeAction', 'Scrivi l\'azione')}
-        </button>
-      )}
     </div>
   );
 };
@@ -674,27 +722,60 @@ export const oilActionLabel = (a: HaccpOilAction, t?: TFunc): string =>
 const OilRow: React.FC<{
   point: HaccpPoint;
   check: HaccpOilCheck | null;
+  limits: HaccpLimits | undefined;
   editable: boolean;
-  onSave: (action: HaccpOilAction, note: string | null) => SaveOutcome;
+  onSave: (action: HaccpOilAction, note: string | null, polarCompounds: number | null, oilTemp: number | null) => SaveOutcome;
   onHistory: (c: HaccpOilCheck) => void;
-}> = ({ point, check, editable, onSave, onHistory }) => {
+  nc: Map<string, HaccpNonConformity>;
+  onCloseNc: (nc: HaccpNonConformity) => void;
+}> = ({ point, check, limits, editable, onSave, onHistory, nc, onCloseNc }) => {
   const { t } = useTranslation('haccp', { useSuspense: false });
   const [action, setAction] = useState<HaccpOilAction | null>(check?.action ?? null);
   const [note, setNote] = useState(check?.note ?? '');
+  const [polar, setPolar] = useState(formatNumber(check?.polarCompounds));
+  const [oilTemp, setOilTemp] = useState(formatNumber(check?.oilTemp));
   useEffect(() => { setAction(check?.action ?? null); }, [check?.action]);
   useEffect(() => { setNote(check?.note ?? ''); }, [check?.note]);
+  useEffect(() => { setPolar(formatNumber(check?.polarCompounds)); }, [check?.polarCompounds]);
+  useEffect(() => { setOilTemp(formatNumber(check?.oilTemp)); }, [check?.oilTemp]);
+
+  const current = () => ({
+    note: note.trim() || null,
+    polar: parseNumber(polar),
+    temp: parseNumber(oilTemp),
+  });
+  const reset = () => {
+    setAction(check?.action ?? null);
+    setNote(check?.note ?? '');
+    setPolar(formatNumber(check?.polarCompounds));
+    setOilTemp(formatNumber(check?.oilTemp));
+  };
 
   const pick = async (a: HaccpOilAction) => {
     if (a === check?.action) return;
     setAction(a);
-    const ok = await onSave(a, note.trim() || null);
-    if (!ok) setAction(check?.action ?? null);
+    const c = current();
+    const ok = await onSave(a, c.note, c.polar, c.temp);
+    if (!ok) reset();
   };
-  const commitNote = async () => {
-    if (!action || (note.trim() || '') === (check?.note ?? '')) return;
-    const ok = await onSave(action, note.trim() || null);
-    if (!ok) setNote(check?.note ?? '');
+  /** Note e misure si salvano quando si lascia il campo, a scelta fatta. */
+  const commit = async () => {
+    if (!action) return;
+    const c = current();
+    if ((c.note ?? '') === (check?.note ?? '') && c.polar === (check?.polarCompounds ?? null) && c.temp === (check?.oilTemp ?? null)) return;
+    const ok = await onSave(action, c.note, c.polar, c.temp);
+    if (!ok) reset();
   };
+
+  const problems = limits && action
+    ? evaluateHaccpOil({ action, polarCompounds: parseNumber(polar), oilTemp: parseNumber(oilTemp) }, limits)
+    : [];
+  const polarOver = !!limits && action !== 'SOSTITUITO' && (parseNumber(polar) ?? 0) > limits.oil.maxPolar;
+  const tempOver = !!limits && (parseNumber(oilTemp) ?? -Infinity) > limits.oil.maxTemp;
+  const measureTone = (over: boolean) => over
+    ? 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] ring-1 ring-inset ring-[var(--ds-critical-solid)]'
+    : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)]';
+  const measureClass = 'h-11 w-full rounded-[var(--ds-radius-control)] pl-3 pr-9 text-right text-[15px] tabular-nums placeholder:text-[var(--ds-text-muted)] transition-shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50';
 
   return (
     <div className={row}>
@@ -712,19 +793,59 @@ const OilRow: React.FC<{
           options={HACCP_OIL_ACTIONS.map(a => ({ value: a, label: oilActionLabel(a, t) }))}
         />
       </div>
-      <div className="col-span-12 sm:col-span-4">
-        <input
-          type="text"
-          value={note}
-          placeholder={t('notePlaceholder', 'Note (opzionale)')}
-          aria-label={t('noteAria', 'Note {{punto}}', { punto: point.label })}
-          onChange={e => setNote(e.target.value)}
-          onBlur={commitNote}
-          disabled={!action || !editable}
-          className={`${field} disabled:opacity-50`}
-        />
+      {/* Le misure sono facoltative: le scrive chi ha il tester dei composti
+          polari e il termometro dell'olio. */}
+      <div className="col-span-6 sm:col-span-2">
+        <div className="relative">
+          <input
+            type="text"
+            inputMode="decimal"
+            value={polar}
+            placeholder={t('polarShort', 'Polari')}
+            aria-label={t('polarAria', 'Composti polari {{friggitrice}}', { friggitrice: point.label })}
+            onChange={e => setPolar(e.target.value)}
+            onBlur={commit}
+            disabled={!action || !editable}
+            className={`${measureClass} ${measureTone(polarOver)}`}
+          />
+          <span className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-[13px] text-[var(--ds-text-muted)]">%</span>
+        </div>
       </div>
+      <div className="col-span-6 sm:col-span-2">
+        <div className="relative">
+          <input
+            type="text"
+            inputMode="decimal"
+            value={oilTemp}
+            placeholder={t('oilTempShort', 'Olio')}
+            aria-label={t('oilTempAria', 'Temperatura olio {{friggitrice}}', { friggitrice: point.label })}
+            onChange={e => setOilTemp(e.target.value)}
+            onBlur={commit}
+            disabled={!action || !editable}
+            className={`${measureClass} ${measureTone(tempOver)}`}
+          />
+          <span className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-[13px] text-[var(--ds-text-muted)]">°C</span>
+        </div>
+      </div>
+      {(action || note) && (
+        <div className="col-span-12">
+          <input
+            type="text"
+            value={note}
+            placeholder={t('notePlaceholder', 'Note (opzionale)')}
+            aria-label={t('noteAria', 'Note {{punto}}', { punto: point.label })}
+            onChange={e => setNote(e.target.value)}
+            onBlur={commit}
+            disabled={!action || !editable}
+            className={`${field} disabled:opacity-50`}
+          />
+        </div>
+      )}
+      {problems.length > 0 && !(check && nc.get(check.id)) && (
+        <div className="col-span-12 text-[13px] text-[var(--ds-critical-text)]">{problems.join(', ')}</div>
+      )}
       {check && <RowStamp row={check} onHistory={() => onHistory(check)} />}
+      {check && <NcLine nc={nc.get(check.id)} onCloseNc={onCloseNc} editable={editable} />}
     </div>
   );
 };
@@ -733,14 +854,6 @@ const OilRow: React.FC<{
 // Pulizie
 // =============================================================================
 
-const FREQUENCY_LABELS_IT: Record<HaccpPoint['frequency'], string> = {
-  DAILY: 'ogni giorno',
-  WEEKLY: 'ogni settimana',
-  MONTHLY: 'ogni mese',
-  ON_DEMAND: 'su richiesta',
-};
-
-export const frequencyLabel = (f: HaccpPoint['frequency'], t: TFunc): string => t(`freq.${f}`, FREQUENCY_LABELS_IT[f]);
 
 const CleaningList: React.FC<{
   points: HaccpPoint[];
@@ -862,286 +975,6 @@ const CleaningRow: React.FC<{
         />
       </div>
       {check && !elsewhere && <RowStamp row={check} onHistory={() => onHistory(check)} />}
-    </div>
-  );
-};
-
-// =============================================================================
-// Ricevimento merci
-// =============================================================================
-
-/* Accettato / Respinto restano due pastiglie colorate invece di un controllo
-   segmentato: su un registro sanitario il verde e il rosso si leggono prima
-   della parola. */
-const outcomeChip = (active: boolean, tone: 'positive' | 'critical'): string => {
-  const base =
-    'inline-flex h-11 flex-1 items-center justify-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 text-[14px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
-  if (!active) return `${base} bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]`;
-  return tone === 'positive'
-    ? `${base} bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] ring-2 ring-inset ring-[var(--ds-seated-solid)]`
-    : `${base} bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] ring-2 ring-inset ring-[var(--ds-critical-solid)]`;
-};
-
-const ReceiptsSection: React.FC<{
-  rows: HaccpGoodsReceipt[];
-  ncBySource: Map<string, HaccpNonConformity>;
-  editable: boolean;
-  onAdd: (input: { product: string; lotNumber: string | null; temperature: number | null; accepted: boolean; note: string | null }) => Promise<boolean>;
-  onVoid: (r: HaccpGoodsReceipt) => void;
-  onCloseNc: (nc: HaccpNonConformity) => void;
-  onHistory: (r: HaccpGoodsReceipt) => void;
-}> = ({ rows, ncBySource, editable, onAdd, onVoid, onCloseNc, onHistory }) => {
-  const { t } = useTranslation('haccp', { useSuspense: false });
-  const [product, setProduct] = useState('');
-  const [lotNumber, setLotNumber] = useState('');
-  const [temperature, setTemperature] = useState('');
-  const [accepted, setAccepted] = useState(true);
-  const [note, setNote] = useState('');
-  const [busy, setBusy] = useState(false);
-  const productInputRef = useRef<HTMLInputElement>(null);
-
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!product.trim() || busy) return;
-    setBusy(true);
-    const ok = await onAdd({
-      product: product.trim(),
-      lotNumber: lotNumber.trim() || null,
-      temperature: parseNumber(temperature),
-      accepted,
-      note: note.trim() || null,
-    });
-    setBusy(false);
-    if (!ok) return;
-    setProduct(''); setLotNumber(''); setTemperature(''); setAccepted(true); setNote('');
-    productInputRef.current?.focus();
-  };
-
-  return (
-    <div className="space-y-2">
-      {editable && (
-        <form onSubmit={submit} className="grid grid-cols-12 items-end gap-2 border-b border-[var(--ds-border)] pb-4">
-          <div className="col-span-12 sm:col-span-4">
-            <label className={fieldLabel} htmlFor="haccp-receipt-product">{t('product', 'Prodotto')}</label>
-            <input
-              id="haccp-receipt-product"
-              ref={productInputRef}
-              type="text"
-              value={product}
-              onChange={e => setProduct(e.target.value)}
-              className={field}
-            />
-          </div>
-          <div className="col-span-6 sm:col-span-2">
-            <label className={fieldLabel} htmlFor="haccp-receipt-lot">{t('lot', 'Lotto')}</label>
-            <input id="haccp-receipt-lot" type="text" value={lotNumber} onChange={e => setLotNumber(e.target.value)} className={`${field} tabular-nums`} />
-          </div>
-          <div className="col-span-6 sm:col-span-2">
-            <label className={fieldLabel} htmlFor="haccp-receipt-temp">{t('temp', 'Temp. (°C)')}</label>
-            <input
-              id="haccp-receipt-temp"
-              type="text"
-              inputMode="decimal"
-              value={temperature}
-              onChange={e => setTemperature(e.target.value)}
-              className={`${field} text-right tabular-nums`}
-            />
-          </div>
-          <div className="col-span-6 sm:col-span-2">
-            <span className={fieldLabel}>{t('outcome', 'Esito')}</span>
-            <div className="flex gap-1.5">
-              <button type="button" onClick={() => setAccepted(true)} aria-pressed={accepted} className={outcomeChip(accepted, 'positive')}>
-                {t('accepted', 'Accettato')}
-              </button>
-              <button type="button" onClick={() => setAccepted(false)} aria-pressed={!accepted} className={outcomeChip(!accepted, 'critical')}>
-                {t('rejected', 'Respinto')}
-              </button>
-            </div>
-          </div>
-          <div className="col-span-6 sm:col-span-2">
-            <button type="submit" disabled={!product.trim() || busy} className={`w-full ${dsButton.primary}`}>
-              <Plus className="h-4 w-4" aria-hidden />
-              {t('add', 'Aggiungi')}
-            </button>
-          </div>
-          <div className="col-span-12">
-            <input
-              type="text"
-              value={note}
-              onChange={e => setNote(e.target.value)}
-              placeholder={accepted ? t('notePlaceholder', 'Note (opzionale)') : t('rejectReasonPlaceholder', 'Perché è respinta')}
-              aria-label={t('receiptNoteAria', 'Note ricevimento')}
-              className={field}
-            />
-          </div>
-        </form>
-      )}
-
-      {rows.length === 0 ? (
-        <div className={emptyNote}>{t('noRecords', 'Nessuna registrazione per oggi.')}</div>
-      ) : (
-        <ul className={rowList}>
-          {rows.map(r => (
-            <li key={r.id} className={row}>
-              <div className="col-span-12 min-w-0 truncate text-[15px] font-medium text-[var(--ds-text-primary)] sm:col-span-4">
-                {r.product}
-                {r.lotNumber && (
-                  <span className="ml-1.5 text-[13px] tabular-nums text-[var(--ds-text-muted)]">{t('lotInline', '· lotto {{numero}}', { numero: r.lotNumber })}</span>
-                )}
-              </div>
-              <div className="col-span-4 text-right text-[15px] tabular-nums text-[var(--ds-text-secondary)] sm:col-span-2">
-                {r.temperature !== null ? `${formatNumber(r.temperature)} °C` : '—'}
-              </div>
-              <div className="col-span-4 sm:col-span-2">
-                <span className={`inline-flex items-center gap-1 rounded-[var(--ds-radius-control)] px-2.5 py-1 text-[13px] font-medium ${r.accepted ? 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]' : 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)]'}`}>
-                  {r.accepted ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
-                  {r.accepted ? t('accepted', 'Accettato') : t('rejected', 'Respinto')}
-                </span>
-              </div>
-              <div className="col-span-3 truncate text-[14px] text-[var(--ds-text-muted)] sm:col-span-3">{r.note || ''}</div>
-              <div className="col-span-1 text-right">
-                {editable && (
-                  <button
-                    type="button"
-                    onClick={() => onVoid(r)}
-                    className={deleteButton}
-                    title={t('void', 'Annulla')}
-                    aria-label={t('voidNamed', 'Annulla la registrazione di {{nome}}', { nome: r.product })}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                )}
-              </div>
-              <RowStamp row={r} onHistory={() => onHistory(r)} />
-              <NcLine nc={ncBySource.get(r.id)} onCloseNc={onCloseNc} editable={editable} />
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-};
-
-// =============================================================================
-// Abbattimento / produzione
-// =============================================================================
-
-const ProductionSection: React.FC<{
-  rows: HaccpProductionLog[];
-  editable: boolean;
-  onAdd: (input: { product: string; blastTempRange: string | null; blastDuration: string | null; internalLot: string | null; note: string | null }) => Promise<boolean>;
-  onVoid: (r: HaccpProductionLog) => void;
-  onHistory: (r: HaccpProductionLog) => void;
-}> = ({ rows, editable, onAdd, onVoid, onHistory }) => {
-  const { t } = useTranslation('haccp', { useSuspense: false });
-  const [product, setProduct] = useState('');
-  const [blastTempRange, setBlastTempRange] = useState<string>(HACCP_BLAST_TEMP_RANGES[0]);
-  const [blastDuration, setBlastDuration] = useState<string>(HACCP_BLAST_DURATIONS[0]);
-  const [internalLot, setInternalLot] = useState('');
-  const [note, setNote] = useState('');
-  const [busy, setBusy] = useState(false);
-  const productInputRef = useRef<HTMLInputElement>(null);
-
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!product.trim() || busy) return;
-    setBusy(true);
-    const ok = await onAdd({
-      product: product.trim(),
-      blastTempRange: blastTempRange || null,
-      blastDuration: blastDuration || null,
-      internalLot: internalLot.trim() || null,
-      note: note.trim() || null,
-    });
-    setBusy(false);
-    if (!ok) return;
-    setProduct(''); setInternalLot(''); setNote('');
-    productInputRef.current?.focus();
-  };
-
-  return (
-    <div className="space-y-2">
-      {editable && (
-        <form onSubmit={submit} className="grid grid-cols-12 items-end gap-2 border-b border-[var(--ds-border)] pb-4">
-          <div className="col-span-12 sm:col-span-4">
-            <label className={fieldLabel} htmlFor="haccp-production-product">{t('product', 'Prodotto')}</label>
-            <input
-              id="haccp-production-product"
-              ref={productInputRef}
-              type="text"
-              value={product}
-              onChange={e => setProduct(e.target.value)}
-              className={field}
-            />
-          </div>
-          <div className="col-span-6 sm:col-span-2">
-            <label className={fieldLabel} htmlFor="haccp-production-range">{t('tempRange', 'Range temp.')}</label>
-            <select id="haccp-production-range" value={blastTempRange} onChange={e => setBlastTempRange(e.target.value)} className={dsSelect}>
-              {HACCP_BLAST_TEMP_RANGES.map(r => <option key={r} value={r}>{r}</option>)}
-            </select>
-          </div>
-          <div className="col-span-6 sm:col-span-2">
-            <label className={fieldLabel} htmlFor="haccp-production-duration">{t('duration', 'Durata')}</label>
-            <select id="haccp-production-duration" value={blastDuration} onChange={e => setBlastDuration(e.target.value)} className={dsSelect}>
-              {HACCP_BLAST_DURATIONS.map(d => <option key={d} value={d}>{d}</option>)}
-            </select>
-          </div>
-          <div className="col-span-6 sm:col-span-2">
-            <label className={fieldLabel} htmlFor="haccp-production-lot">{t('internalLot', 'Lotto interno')}</label>
-            <input id="haccp-production-lot" type="text" value={internalLot} onChange={e => setInternalLot(e.target.value)} className={`${field} tabular-nums`} />
-          </div>
-          <div className="col-span-6 sm:col-span-2">
-            <button type="submit" disabled={!product.trim() || busy} className={`w-full ${dsButton.primary}`}>
-              <Plus className="h-4 w-4" aria-hidden />
-              {t('add', 'Aggiungi')}
-            </button>
-          </div>
-          <div className="col-span-12">
-            <input
-              type="text"
-              value={note}
-              onChange={e => setNote(e.target.value)}
-              placeholder={t('notePlaceholder', 'Note (opzionale)')}
-              aria-label={t('productionNoteAria', 'Note produzione')}
-              className={field}
-            />
-          </div>
-        </form>
-      )}
-
-      {rows.length === 0 ? (
-        <div className={emptyNote}>{t('noRecords', 'Nessuna registrazione per oggi.')}</div>
-      ) : (
-        <ul className={rowList}>
-          {rows.map(r => (
-            <li key={r.id} className={row}>
-              <div className="col-span-12 min-w-0 truncate text-[15px] font-medium text-[var(--ds-text-primary)] sm:col-span-4">
-                {r.product}
-                {r.internalLot && (
-                  <span className="ml-1.5 text-[13px] tabular-nums text-[var(--ds-text-muted)]">{t('lotInline', '· lotto {{numero}}', { numero: r.internalLot })}</span>
-                )}
-              </div>
-              <div className="col-span-4 text-[15px] tabular-nums text-[var(--ds-text-secondary)] sm:col-span-2">{r.blastTempRange || '—'}</div>
-              <div className="col-span-4 text-[15px] tabular-nums text-[var(--ds-text-secondary)] sm:col-span-2">{r.blastDuration || '—'}</div>
-              <div className="col-span-3 truncate text-[14px] text-[var(--ds-text-muted)] sm:col-span-3">{r.note || ''}</div>
-              <div className="col-span-1 text-right">
-                {editable && (
-                  <button
-                    type="button"
-                    onClick={() => onVoid(r)}
-                    className={deleteButton}
-                    title={t('void', 'Annulla')}
-                    aria-label={t('voidNamed', 'Annulla la registrazione di {{nome}}', { nome: r.product })}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                )}
-              </div>
-              <RowStamp row={r} onHistory={() => onHistory(r)} />
-            </li>
-          ))}
-        </ul>
-      )}
     </div>
   );
 };

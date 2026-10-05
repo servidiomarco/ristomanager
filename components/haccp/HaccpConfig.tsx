@@ -1,23 +1,24 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, ArchiveRestore, ArrowDown, ArrowUp, Flame, Pencil, Plus, Sparkles, Thermometer } from 'lucide-react';
+import { AlertTriangle, ArchiveRestore, ArrowDown, ArrowUp, Flame, Gauge, Pencil, Plus, Sparkles, Thermometer, Wrench } from 'lucide-react';
 import {
   haccpApiService,
   HaccpFrequency,
   HaccpPoint,
   HaccpRegister,
 } from '../../services/haccpApiService';
-import { formatHaccpLimit } from '../../utils/haccp';
-import { Callout, ModalShell, SegmentedControl, dsButton, dsInput, dsTextarea } from '../ds';
-import { Card, CardHeader, TFunc, chip, emptyNote, formatNumber, parseNumber, quietIconButton, rowList } from './haccpUi';
-import { frequencyLabel } from './HaccpToday';
+import { HACCP_REGISTER_FREQUENCIES, formatHaccpLimit } from '../../utils/haccp';
+import { Callout, ModalShell, SegmentedControl, dsButton, dsInput, dsSelect, dsTextarea } from '../ds';
+import { HaccpLimitsCard } from './HaccpLimitsCard';
+import { Card, CardHeader, TFunc, chip, emptyNote, formatNumber, frequencyLabel, parseNumber, quietIconButton, rowList } from './haccpUi';
+
 
 /* I punti di controllo del locale: sono il manuale di autocontrollo tradotto
    in righe del modulo. Un punto non si cancella — si archivia, e lo storico
    resta agganciato: la cella dismessa a marzo deve ancora comparire nel
    report di febbraio. Cambiare un limite resta nello storico con il motivo. */
 
-type PointRegister = Extract<HaccpRegister, 'TEMPERATURE' | 'OIL' | 'CLEANING'>;
+type PointRegister = Extract<HaccpRegister, 'TEMPERATURE' | 'OIL' | 'CLEANING' | 'THERMOMETER' | 'EQUIPMENT'>;
 
 interface Preset { label: string; minTemp?: number | null; maxTemp?: number | null; frequency?: HaccpFrequency }
 
@@ -37,6 +38,20 @@ const presetsFor = (register: PointRegister, t: TFunc): Preset[] => {
     ];
   }
   if (register === 'OIL') return [{ label: t('preset.fryer', 'Friggitrice') }];
+  if (register === 'THERMOMETER') {
+    return [
+      { label: t('preset.probe', 'Termometro a sonda'), frequency: 'SEMIANNUAL' },
+      { label: t('preset.infrared', 'Termometro a infrarossi'), frequency: 'SEMIANNUAL' },
+      { label: t('preset.blastProbe', 'Sonda dell\'abbattitore'), frequency: 'ANNUAL' },
+    ];
+  }
+  if (register === 'EQUIPMENT') {
+    return [
+      { label: t('preset.blastChiller', 'Abbattitore') },
+      { label: t('preset.oven', 'Forno') },
+      { label: t('preset.freezerAnisakis', 'Congelatore per la bonifica') },
+    ];
+  }
   return [
     { label: t('preset.counters', 'Banchi di lavoro'), frequency: 'DAILY' },
     { label: t('preset.slicer', 'Affettatrice'), frequency: 'DAILY' },
@@ -69,6 +84,8 @@ export const HaccpConfig: React.FC<{ refreshKey: number }> = ({ refreshKey }) =>
     { register: 'TEMPERATURE', title: t('config.temperatures', 'Postazioni di temperatura'), icon: <Thermometer className="h-4 w-4" /> },
     { register: 'OIL', title: t('config.fryers', 'Friggitrici'), icon: <Flame className="h-4 w-4" /> },
     { register: 'CLEANING', title: t('config.cleaning', 'Punti di pulizia'), icon: <Sparkles className="h-4 w-4" /> },
+    { register: 'THERMOMETER', title: t('config.thermometers', 'Termometri da tarare'), icon: <Gauge className="h-4 w-4" /> },
+    { register: 'EQUIPMENT', title: t('config.equipment', 'Attrezzature dei processi'), icon: <Wrench className="h-4 w-4" /> },
   ];
 
   const move = async (register: PointRegister, list: HaccpPoint[], index: number, dir: -1 | 1) => {
@@ -186,6 +203,7 @@ export const HaccpConfig: React.FC<{ refreshKey: number }> = ({ refreshKey }) =>
           </Card>
         );
       })}
+      <HaccpLimitsCard refreshKey={refreshKey} />
       <PointDialog target={editing} onClose={() => setEditing(null)} onSaved={load} />
     </div>
   );
@@ -197,7 +215,7 @@ const pointSummary = (p: HaccpPoint, t: TFunc): string => {
     parts.push(formatHaccpLimit(p.minTemp, p.maxTemp));
     if (p.checksPerDay > 1) parts.push(t('config.checksN', '{{n}} rilevazioni al giorno', { n: p.checksPerDay }));
   }
-  if (p.register === 'CLEANING') parts.push(frequencyLabel(p.frequency, t));
+  if (p.register === 'CLEANING' || p.register === 'THERMOMETER') parts.push(frequencyLabel(p.frequency, t));
   if (p.instructions) parts.push(p.instructions);
   return parts.filter(Boolean).join(' · ');
 };
@@ -226,7 +244,7 @@ const PointDialog: React.FC<{
     setMinTemp(formatNumber(p ? p.minTemp : preset?.minTemp ?? null));
     setMaxTemp(formatNumber(p ? p.maxTemp : preset?.maxTemp ?? null));
     setChecksPerDay(String(p?.checksPerDay ?? 1) as '1' | '2' | '3');
-    setFrequency(p?.frequency ?? preset?.frequency ?? 'DAILY');
+    setFrequency(p?.frequency ?? preset?.frequency ?? (target.register === 'THERMOMETER' ? 'SEMIANNUAL' : 'DAILY'));
     setInstructions(p?.instructions ?? '');
     setReason('');
     setError(null);
@@ -243,6 +261,7 @@ const PointDialog: React.FC<{
   const { register, point } = target;
   const isTemp = register === 'TEMPERATURE';
   const isCleaning = register === 'CLEANING';
+  const frequencies = HACCP_REGISTER_FREQUENCIES[register];
 
   const save = async () => {
     const cleanLabel = label.trim();
@@ -258,7 +277,7 @@ const PointDialog: React.FC<{
       minTemp: isTemp ? min : null,
       maxTemp: isTemp ? max : null,
       checksPerDay: isTemp ? Number(checksPerDay) : 1,
-      frequency: isCleaning ? frequency : 'DAILY' as HaccpFrequency,
+      frequency: frequencies ? frequency : 'DAILY' as HaccpFrequency,
       instructions: instructions.trim() || null,
     };
     try {
@@ -339,17 +358,12 @@ const PointDialog: React.FC<{
             </div>
           </>
         )}
-        {isCleaning && (
+        {frequencies && (
           <div>
-            <span className="mb-2 block text-[14px] font-medium text-[var(--ds-text-secondary)]">{t('config.frequency', 'Frequenza')}</span>
-            <SegmentedControl<HaccpFrequency>
-              value={frequency}
-              onChange={setFrequency}
-              ariaLabel={t('config.frequency', 'Frequenza')}
-              overflow="scroll"
-              equalWidth={false}
-              options={(['DAILY', 'WEEKLY', 'MONTHLY', 'ON_DEMAND'] as HaccpFrequency[]).map(f => ({ value: f, label: frequencyLabel(f, t) }))}
-            />
+            <label htmlFor="haccp-point-frequency" className="mb-2 block text-[14px] font-medium text-[var(--ds-text-secondary)]">{t('config.frequency', 'Frequenza')}</label>
+            <select id="haccp-point-frequency" value={frequency} onChange={e => setFrequency(e.target.value as HaccpFrequency)} className={dsSelect}>
+              {frequencies.map(f => <option key={f} value={f}>{frequencyLabel(f, t)}</option>)}
+            </select>
           </div>
         )}
         <div>
