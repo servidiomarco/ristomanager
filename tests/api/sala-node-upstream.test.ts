@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawn, type ChildProcess } from 'node:child_process';
 import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync } from 'node:fs';
 import { Client } from 'pg';
 import { api, bearer, ownerToken } from './helpers';
 
@@ -80,8 +81,13 @@ describe('stream inverso nodo→cloud', () => {
                 SALA_NODE_CLOUD_URL: process.env.TEST_BASE_URL,
                 SALA_NODE_TOKEN: nodeToken,
                 SALA_NODE_PULL_INTERVAL_MS: '1000',
-                JWT_SECRET: 'test-jwt-secret',
-                JWT_REFRESH_SECRET: 'test-jwt-refresh-secret',
+                // Nessun segreto JWT sul nodo (fase A1): i token del cloud li
+                // verifica con le chiavi pubbliche ricevute dalle credenziali.
+                // Stringa vuota e non assente, così nemmeno la shell lo passa.
+                JWT_SECRET: '',
+                JWT_REFRESH_SECRET: '',
+                // Log e cache (chiavi, certificato) fuori dal checkout.
+                SALA_NODE_STATE_DIR: mkdtempSync(path.join(os.tmpdir(), 'nodo-di-prova-')),
             },
             stdio: ['ignore', 'pipe', 'pipe'],
         });

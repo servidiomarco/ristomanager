@@ -23,9 +23,10 @@ repo marketing (sez. 3–7).
 - Token del nodo: `tenants.sala_node_token` — si legge dal DB (psql sul
   database di produzione). Dal 25/09 il CRM non lo mostra più: apre snapshot
   e upstream del tenant, è un segreto di macchina come le env di Railway.
-- Segreto JWT: `JWT_SECRET` di Railway (variables). Dal 25/09 il cloud non
-  lo consegna più al nodo: va scritto nel `.cmd`, e riscritto a ogni
-  rotazione del segreto sul cloud.
+- Segreto JWT: dalla firma ES256 (sezione «Firma ES256» in fondo) il nodo
+  del full-server NON ne ha bisogno: verifica i token con le chiavi pubbliche
+  che riceve dal cloud. `JWT_SECRET` nel `.cmd` serve solo finché la
+  transizione non è al passo 3.
 - Rete: **prenotazione DHCP** per il PC (l'IP del record A non deve cambiare
   dopo un blackout — stessa raccomandazione mai attuata per le stampanti).
 
@@ -142,15 +143,15 @@ set SALA_NODE_CLOUD_URL=https://ristomanager-production.up.railway.app
 set SALA_NODE_TOKEN=<token dal DB>
 set SALA_NODE_STATE_DIR=C:\ristomanager-agents\sala-node-state
 set PORT=8443
-set JWT_SECRET=<lo stesso del cloud - Railway, variables>
 node dist\server.js
 ```
 
-Nota JWT: il nodo verifica i token dei client col segreto condiviso — lo
-stesso `JWT_SECRET` del cloud (Railway → variables). Senza, i palmari
-riceverebbero 401 sul nodo. `JWT_REFRESH_SECRET` NON serve: login e refresh
-vanno sempre al cloud. A ogni rotazione di `JWT_SECRET` sul cloud va
-aggiornato anche questo `.cmd`, a modalità ibrida spenta.
+Nota JWT: il nodo verifica i token dei client con le chiavi PUBBLICHE ES256
+che scarica da `/sala-node/credentials` (e tiene in
+`SALA_NODE_STATE_DIR\sala-node-jwt-keys.json` per ripartire a linea giù).
+Nessun segreto JWT sul PC; `JWT_REFRESH_SECRET` non è mai servito: login e
+refresh vanno sempre al cloud. Durante la transizione (sotto) si può avere
+ancora `set JWT_SECRET=...` nel `.cmd` per i token HS256 in circolazione.
 
 Lo scambio (fuori servizio):
 
@@ -229,3 +230,42 @@ quelli già installati). Il **token legacy** dell'agente (env
 `/sala-node/credentials`: dai nodi nuovi NON serve più copiarlo a mano nel
 `.cmd` (sul PC del Frantoio, installato prima di questo fix, la riga
 copiata a mano resta e non dà fastidio).
+
+
+## Firma ES256 (fase A1, ottobre 2026)
+
+Prima di riaccendere «Servizio completo sul nodo» il nodo non deve più
+conservare `JWT_SECRET` (audit H-05): con quel segreto chiunque legga il
+`.cmd` si conia un token di qualunque tenant. Il cloud firma ora gli access
+token con una chiave EC P-256 privata che resta su Railway; il nodo riceve
+solo le pubbliche. La transizione si fa da variabili di Railway, senza deploy:
+
+0. **Aggiornare il nodo sul PC** con una build che contiene questa fase
+   (cerca nel log `[node-tls] chiavi JWT`: senza chiave sul cloud la riga
+   non compare ancora, ed è normale). Il relay della tappa 3
+   (`sala-node\index.ts`) NON capisce ES256: deve essere già spento.
+1. **Pubblicare la chiave.** Generarla sul Mac:
+
+   ```bash
+   openssl ecparam -name prime256v1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt
+   ```
+
+   e incollarla (tutte le righe) in `JWT_ES256_PRIVATE_KEY`
+   su Railway. Il cloud continua a firmare HS256 ma consegna la pubblica:
+   entro 10 minuti (o subito, riavviando il nodo) il log del nodo dice
+   `[node-tls] chiavi JWT dal cloud: <kid>`.
+2. **Firmare ES256**: `JWT_SIGN_ES256=1` su Railway. I token nuovi escono
+   ES256 (intestazione con `kid`), quelli HS256 già emessi valgono fino alla
+   scadenza (6 ore). Verifica: un palmare appena loggato lavora sul nodo.
+3. **Almeno 6 ore dopo**: `JWT_HS256_ACCEPT=0` su Railway; togliere
+   `JWT_SECRET` dal `.cmd` del nodo e riavviarlo; **ruotare `JWT_SECRET`** su
+   Railway (è stato sul PC). Le sessioni non cadono: i refresh token usano
+   `JWT_REFRESH_SECRET`, che non è mai uscito dal cloud.
+
+Rotazione futura della chiave: la pubblica uscente
+(`openssl pkey -pubout` sulla vecchia privata) va in
+`JWT_ES256_PREVIOUS_PUBLIC_KEY` per almeno 6 ore, poi si toglie.
+
+Tornare indietro: togliere `JWT_SIGN_ES256` (si torna a firmare HS256); al
+passo 3 già fatto, rimettere anche `JWT_HS256_ACCEPT` e il segreto nel
+`.cmd`.

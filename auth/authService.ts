@@ -4,17 +4,28 @@ import jwt from 'jsonwebtoken';
 import { queryWithRetry } from '../db.js';
 import { User, UserRole } from '../types.js';
 import { getAssignableRoles } from './permissions.js';
+import { getEs256SigningKey, getTrustedPublicKey, hs256Accepted, notifyUnknownKid } from './jwtKeys.js';
+import { isServiceNode } from '../services/topology.js';
 
 // In produzione i segreti DEVONO arrivare dall'ambiente: per mesi Railway è
 // andato in produzione senza JWT_SECRET e i token erano firmati col fallback
 // committato qui sotto — chiunque leggesse il sorgente poteva coniarsi un
 // token OWNER valido (scoperto e sanato il 2026-08-22). Il boot fallisce
 // piuttosto che ripetere quella condizione.
-if (process.env.NODE_ENV === 'production' && (!process.env.JWT_SECRET || !process.env.JWT_REFRESH_SECRET)) {
+// Il nodo di sala è escluso: non firma niente e verifica con le chiavi
+// pubbliche del cloud (auth/jwtKeys.ts).
+if (process.env.NODE_ENV === 'production' && !isServiceNode && (!process.env.JWT_SECRET || !process.env.JWT_REFRESH_SECRET)) {
   throw new Error('JWT_SECRET e JWT_REFRESH_SECRET sono obbligatori in produzione');
 }
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
-const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'dev-refresh-secret-change-in-production';
+// Sul nodo di sala nessun ripiego: il nodo gira senza NODE_ENV=production e
+// col segreto di sviluppo (pubblicato qui sopra) chiunque in LAN potrebbe
+// firmarsi un token che il nodo accetta. Senza JWT_SECRET esplicito il nodo
+// verifica solo ES256 (fase A1, auth/jwtKeys.ts).
+const JWT_SECRET: string | null = process.env.JWT_SECRET
+  || (isServiceNode ? null : 'dev-secret-change-in-production');
+// Login e refresh vivono solo nel cloud: sul nodo niente ripiego nemmeno qui.
+const JWT_REFRESH_SECRET: string | null = process.env.JWT_REFRESH_SECRET
+  || (isServiceNode ? null : 'dev-refresh-secret-change-in-production');
 const JWT_EXPIRES_IN = '6h';
 const JWT_REFRESH_EXPIRES_IN = '7d';
 // Vita della riga in user_sessions: DEVE rispecchiare JWT_REFRESH_EXPIRES_IN
@@ -53,6 +64,20 @@ export const isPlatformScopedSession = (payload: TokenPayload): boolean =>
   payload.role === UserRole.PLATFORM_ADMIN
   && Number.isInteger(payload.scopedTenantId)
   && (payload.scopedTenantId as number) > 0;
+
+const requireHsSecret = (): string => {
+  if (!JWT_SECRET) throw new Error('JWT_SECRET assente: questo processo non firma token HS256');
+  return JWT_SECRET;
+};
+
+// Gli access token (e quelli di impersonation, che sono access token corti)
+// escono ES256 quando la transizione è al passo 2 (JWT_SIGN_ES256=1, vedi
+// auth/jwtKeys.ts), altrimenti HS256 come sempre.
+const signAccessToken = (payload: object, expiresIn: jwt.SignOptions['expiresIn']): string => {
+  const es = getEs256SigningKey();
+  if (es) return jwt.sign(payload, es.key, { algorithm: 'ES256', keyid: es.kid, expiresIn });
+  return jwt.sign(payload, requireHsSecret(), { algorithm: 'HS256', expiresIn });
+};
 
 export interface AuthTokens {
   accessToken: string;
@@ -102,11 +127,13 @@ export class AuthService {
 
   // Generate access and refresh tokens
   static generateTokens(payload: TokenPayload): AuthTokens {
-    const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+    const accessToken = signAccessToken(payload, JWT_EXPIRES_IN);
     // jti casuale: due login dello stesso utente nello stesso secondo
     // producono altrimenti JWT byte-identici (stesso iat), stesso digest, e
     // l'INSERT in user_sessions viola la UNIQUE su token_digest.
+    if (!JWT_REFRESH_SECRET) throw new Error('JWT_REFRESH_SECRET assente: questo processo non emette sessioni');
     const refreshToken = jwt.sign(payload, JWT_REFRESH_SECRET, {
+      algorithm: 'HS256',
       expiresIn: JWT_REFRESH_EXPIRES_IN,
       jwtid: randomUUID()
     });
@@ -122,10 +149,9 @@ export class AuthService {
   static readonly IMPERSONATION_TTL_SECONDS = 15 * 60;
 
   static generateImpersonationToken(payload: TokenPayload, impersonatedBy: string): string {
-    return jwt.sign(
+    return signAccessToken(
       { ...payload, impersonated_by: impersonatedBy },
-      JWT_SECRET,
-      { expiresIn: AuthService.IMPERSONATION_TTL_SECONDS }
+      AuthService.IMPERSONATION_TTL_SECONDS
     );
   }
 
@@ -142,14 +168,15 @@ export class AuthService {
   static generateStepUpToken(userId: number, tenantId: number, scope: string): string {
     return jwt.sign(
       { purpose: 'step_up', scope, userId, tenantId },
-      JWT_SECRET,
-      { expiresIn: AuthService.STEP_UP_TTL_SECONDS, jwtid: randomUUID() }
+      requireHsSecret(),
+      { algorithm: 'HS256', expiresIn: AuthService.STEP_UP_TTL_SECONDS, jwtid: randomUUID() }
     );
   }
 
   static verifyStepUpToken(token: string, scope: string): { userId: number; tenantId: number } | null {
     try {
-      const payload = jwt.verify(token, JWT_SECRET) as { purpose?: string; scope?: string; userId?: number; tenantId?: number };
+      if (!JWT_SECRET) return null;
+      const payload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }) as { purpose?: string; scope?: string; userId?: number; tenantId?: number };
       if (payload.purpose !== 'step_up' || payload.scope !== scope) {
         return null;
       }
@@ -193,10 +220,25 @@ export class AuthService {
     return { tokens, email: row.email };
   }
 
-  // Verify access token
+  // Verify access token. L'algoritmo si legge dall'intestazione ma la chiave
+  // la sceglie il server, e ogni verify fissa `algorithms`: un token HS256
+  // firmato usando come segreto la chiave PUBBLICA (che il nodo e chiunque
+  // la riceva conoscono) non passa — è l'«algorithm confusion».
   static verifyAccessToken(token: string): TokenPayload | null {
     try {
-      return jwt.verify(token, JWT_SECRET) as TokenPayload;
+      const header = (jwt.decode(token, { complete: true }) as jwt.Jwt | null)?.header;
+      if (header?.alg === 'ES256') {
+        const key = typeof header.kid === 'string' ? getTrustedPublicKey(header.kid) : null;
+        if (!key) {
+          notifyUnknownKid();
+          return null;
+        }
+        return jwt.verify(token, key, { algorithms: ['ES256'] }) as TokenPayload;
+      }
+      if (header?.alg === 'HS256' && JWT_SECRET && hs256Accepted()) {
+        return jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }) as TokenPayload;
+      }
+      return null;
     } catch {
       return null;
     }
@@ -205,7 +247,8 @@ export class AuthService {
   // Verify refresh token
   static verifyRefreshToken(token: string): TokenPayload | null {
     try {
-      return jwt.verify(token, JWT_REFRESH_SECRET) as TokenPayload;
+      if (!JWT_REFRESH_SECRET) return null;
+      return jwt.verify(token, JWT_REFRESH_SECRET, { algorithms: ['HS256'] }) as TokenPayload;
     } catch {
       return null;
     }

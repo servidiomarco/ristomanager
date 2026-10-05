@@ -47,3 +47,10 @@ mk.mjs
 # diffare prima di spingere, non sono la fonte — quella è il manuale.
 docs/elevenlabs-agent-prompt.live.md
 docs/elevenlabs-agent-nodes.live.md
+
+# Stato del nodo di sala scritto nella cartella corrente quando
+# SALA_NODE_STATE_DIR non è impostata (cache chiavi/certificato, log).
+sala-node-jwt-keys.json
+sala-node-tls.json
+sala-node.log
+sala-node.log.old

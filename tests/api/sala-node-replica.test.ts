@@ -91,8 +91,11 @@ describe('replica cloud→nodo', () => {
                 SALA_NODE_TOKEN: nodeToken,
                 SALA_NODE_PULL_INTERVAL_MS: '1000',
                 SALA_NODE_STATE_DIR: stateDir,
-                JWT_SECRET: 'test-jwt-secret',
-                JWT_REFRESH_SECRET: 'test-jwt-refresh-secret',
+                // Nessun segreto JWT sul nodo (fase A1): i token del cloud li
+                // verifica con le chiavi pubbliche ricevute dalle credenziali.
+                // Stringa vuota e non assente, così nemmeno la shell lo passa.
+                JWT_SECRET: '',
+                JWT_REFRESH_SECRET: '',
             },
             stdio: ['ignore', 'pipe', 'pipe'],
         });

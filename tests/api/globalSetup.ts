@@ -99,6 +99,10 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
             DATABASE_URL: serverDbUrl,
             PORT: String(port),
             JWT_SECRET: 'test-jwt-secret',
+            // Tutta la suite firma gli access token ES256 (fase A1), con la
+            // coppia usa e getta che il server si genera fuori produzione: i
+            // nodi di prova li verificano con la sola chiave pubblica.
+            JWT_SIGN_ES256: '1',
             // La suite fa più POST pubblici al minuto dallo stesso IP di
             // quanti il limiter di produzione ne conceda (5).
             PUBLIC_BOOKING_RATE_LIMIT: '1000',

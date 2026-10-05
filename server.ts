@@ -31,7 +31,7 @@ import { SERVER_PROFILE, isServiceNode } from './services/topology.js';
 // l'unico posto dove leggere (lezione del 23/09).
 initSalaNodeFileLog();
 import { scheduleSalaNodeBootstrap } from './services/salaNodeBootstrap.js';
-import { loadNodeTlsMaterial, startNodeTlsRefresh } from './services/salaNodeLocalTls.js';
+import { loadNodeTlsMaterial, startNodeCredentialsRefresh } from './services/salaNodeLocalTls.js';
 import { initSalaNodeFileLog } from './services/salaNodeLog.js';
 import { startSalaNodeWatchdog } from './services/salaNodeWatchdog.js';
 import { createServer as createHttpsServer, type Server as HttpsServer } from 'https';
@@ -99,6 +99,7 @@ import authRoutes from './auth/authRoutes.js';
 import logRoutes from './activityLogs/logRoutes.js';
 import { authenticate, authorize, requirePermission, requireAnyPermission, requireStepUp } from './auth/authMiddleware.js';
 import { AuthService } from './auth/authService.js';
+import { publicKeysForNodes } from './auth/jwtKeys.js';
 import { RolePermissionService, isReportsAdmin, ALL_PERMISSIONS, ALL_PERMISSION_KEYS, type Permission } from './auth/permissionService.js';
 import { canAssignToRole } from './auth/permissions.js';
 import { LogService, ActivityAction, ResourceType } from './activityLogs/logService.js';
@@ -29101,9 +29102,15 @@ app.get('/settings/entitlements', authenticate, requirePermission('settings:full
     }
 });
 
+// Add-on con hardware in comodato dietro (audit H-06): li accende o spegne
+// solo la piattaforma. Prima un owner poteva accendersi da solo il nodo di
+// sala con questa PUT. Rimandare il valore attuale resta lecito: è un no-op,
+// e i client che rispediscono la mappa intera non si rompono.
+const PLATFORM_ONLY_FEATURES: ReadonlySet<TenantFeature> = new Set<TenantFeature>(['sala_node']);
+
 app.put('/settings/entitlements', authenticate, requirePermission('settings:full'), async (req, res) => {
     const body = req.body ?? {};
-    const updates: Array<{ feature: TenantFeature; enabled: boolean }> = [];
+    let updates: Array<{ feature: TenantFeature; enabled: boolean }> = [];
     for (const feature of TENANT_FEATURES) {
         if (feature in body) {
             if (typeof body[feature] !== 'boolean') {
@@ -29116,6 +29123,15 @@ app.put('/settings/entitlements', authenticate, requirePermission('settings:full
         return res.status(400).json({ error: 'no_updates', message: 'No entitlement updates supplied' });
     }
     try {
+        if (!isPlatformScopedSession(req.user!) && updates.some(u => PLATFORM_ONLY_FEATURES.has(u.feature))) {
+            const current = await getTenantFeatures(req.tenantId!);
+            const blocked = updates.find(u => PLATFORM_ONLY_FEATURES.has(u.feature) && current[u.feature] !== u.enabled);
+            if (blocked) {
+                return res.status(403).json({ error: 'platform_only', message: `${blocked.feature} is managed by the platform` });
+            }
+            updates = updates.filter(u => !PLATFORM_ONLY_FEATURES.has(u.feature));
+            if (updates.length === 0) return res.json(current);
+        }
         for (const { feature, enabled } of updates) {
             await queryWithRetry(
                 `INSERT INTO tenant_features (tenant_id, feature, enabled, updated_at)
@@ -38647,9 +38663,10 @@ function salaNodeUrl(settings: { domain: string | null; port: number }): string 
 // riavvio durante un outage riparte comunque.
 // Il segreto JWT NON viaggia più qui (audit isolamento, 25/09): è la chiave
 // che firma i token di OGNI tenant e della piattaforma, e chi aveva il token
-// del nodo poteva farsi un PLATFORM_ADMIN. Il nodo lo riceve dal .cmd come
-// JWT_SECRET finché la firma non passa a una chiave asimmetrica (tappa ES256,
-// sul nodo la sola chiave pubblica).
+// del nodo poteva farsi un PLATFORM_ADMIN. Viaggiano invece le chiavi
+// PUBBLICHE ES256 (fase A1, auth/jwtKeys.ts): con quelle il nodo verifica i
+// palmari ma non conia token. Finché la transizione non è al passo 3 il nodo
+// può ancora avere JWT_SECRET nel .cmd per i token HS256 in circolazione.
 app.get('/sala-node/credentials', salaNodeAuth, async (req: any, res) => {
     try {
         const tenantId = req.salaNodeTenantId as number;
@@ -38676,6 +38693,7 @@ app.get('/sala-node/credentials', salaNodeAuth, async (req: any, res) => {
             // il tenant pubblico: gli altri usano il token per-tenant a DB,
             // che il nodo ha già dalla riga tenants dello snapshot.
             print_agent_legacy_token: tenantId === PUBLIC_TENANT_ID ? (process.env.PRINT_AGENT_TOKEN || null) : null,
+            jwt_public_keys: publicKeysForNodes(),
             cert: cert
                 ? { cert_pem: cert.cert_pem, key_pem: cert.key_pem, expires_at: cert.expires_at }
                 : null,
@@ -39786,10 +39804,11 @@ const startServer = async () => {
             const tls = await loadNodeTlsMaterial();
             if (tls) {
                 httpServer = createHttpsServer({ cert: tls.cert_pem, key: tls.key_pem }, app);
-                startNodeTlsRefresh(httpServer as HttpsServer, tls);
+                startNodeCredentialsRefresh(httpServer as HttpsServer, tls);
                 console.log(`🔒 TLS del nodo attivo${tls.expires_at ? ` (scade ${tls.expires_at})` : ''}`);
             } else {
                 httpServer = createServer(app);
+                startNodeCredentialsRefresh(null, null);
                 console.warn('⚠️  Nodo senza certificato TLS (cloud muto e cache vuota): si parte in HTTP — i palmari NON si collegheranno finché non arriva il certificato');
             }
         } else {
