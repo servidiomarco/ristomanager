@@ -385,7 +385,9 @@ app.use((req, res, next) => {
         if (await getFeatureFlag(tenantId, 'sala_node_authority_enabled', false)) {
             res.status(409).json({
                 error: 'authority_on_node',
-                message: 'Il servizio è sul nodo di sala: questa battitura va fatta dalla rete del locale.',
+                // È la frase che il cameriere legge (buildApiError mostra
+                // `message`): deve dire che niente è partito.
+                message: 'Nodo di sala non raggiungibile da qui: niente registrato. Collegati al Wi-Fi del locale e riprova.',
             });
             return;
         }

@@ -161,20 +161,54 @@ const AUTHORITY_READS: RegExp[] = [
     /^\/reservations\/\d+\/bill$/,
     /^\/orders(\/.*)?$/,
     /^\/kds(\/.*)?$/,
+    // Fase B4: quello che l'app carica all'avvio per la sala. A linea giù
+    // un ricaricamento chiedeva tutto al cloud e apriva una pianta vuota,
+    // col nodo acceso a due metri. Il nodo li ha tutti: pianta e menu dalla
+    // sincronizzazione della configurazione, unioni e stati del giorno
+    // perché nascono lì, prenotazioni dalla replica.
+    /^\/tables$/,
+    /^\/rooms$/,
+    /^\/dishes$/,
+    /^\/menus$/,
+    /^\/banquet-menus$/,
+    /^\/table-merges$/,
+    /^\/table-hidden$/,
+    /^\/room-closed$/,
+    /^\/takeaway\/orders$/,
 ];
 
+// Le prenotazioni solo a finestra: il nodo ne tiene 60 giorni (snapshot +
+// replica), l'archivio resta una lettura del cloud.
+const NODE_RESERVATIONS_DAYS = 55;
+const isNodeReservationsWindow = (pathname: string, query: string): boolean => {
+    if (pathname !== '/reservations') return false;
+    const params = new URLSearchParams(query);
+    const from = params.get('from');
+    if (!from || params.has('to')) return false;
+    const since = Date.parse(`${from}T00:00:00Z`);
+    return Number.isFinite(since) && Date.now() - since <= NODE_RESERVATIONS_DAYS * 86_400_000;
+};
+
 /** Instradamento di una richiesta del dominio servizio: le scritture come
- *  routeWriteUrl, le letture dei conti, della cassa e delle comande al nodo
- *  quando l'autorità è in sala. No-op per tutto il resto. */
+ *  routeWriteUrl, le letture dei conti, della cassa, delle comande e della
+ *  sala al nodo quando l'autorità è in sala. No-op per tutto il resto. */
 export const routeServiceUrl = (url: string, method?: string): string => {
     const m = (method || 'GET').toUpperCase();
     if (m !== 'GET' && m !== 'HEAD') return routeWriteUrl(url, m);
     if (!config.authority_enabled || !nodeActive()) return url;
     if (!url.startsWith(CLOUD_API_URL)) return url;
     const rest = url.slice(CLOUD_API_URL.length);
-    const pathname = rest.split('?')[0];
-    return AUTHORITY_READS.some(r => r.test(pathname)) ? `${config.node_url}${rest}` : url;
+    const [pathname, query = ''] = rest.split('?');
+    return AUTHORITY_READS.some(r => r.test(pathname)) || isNodeReservationsWindow(pathname, query)
+        ? `${config.node_url}${rest}`
+        : url;
 };
+
+/** Il cloud ha risposto che l'autorità è sul nodo: questo dispositivo non
+ *  raggiunge il nodo (Wi-Fi caduto, telefono sul 4G, circuito aperto) e la
+ *  battitura non è stata registrata da nessuna parte. */
+export const isAuthorityOnNodeRefusal = (status: number, body: any): boolean =>
+    status === 409 && body?.error === 'authority_on_node';
 
 /** URL del socket: nodo se attivo, altrimenti cloud. */
 export const serviceSocketUrl = (): string =>
@@ -183,6 +217,24 @@ export const serviceSocketUrl = (): string =>
 export const isNodeUrl = (url: string): boolean =>
     Boolean(config.node_url) && url.startsWith(config.node_url as string);
 
+// A circuito aperto il probe parte anche da solo. Prima lo innescava solo
+// una lettura instradata: con l'app ferma su una schermata senza polling il
+// nodo poteva tornare e il dispositivo restare sul cloud — e la coda
+// offline, che si svuota al riattacco del socket, restava piena (visto
+// nella verifica della fase B4).
+let probeTimer: ReturnType<typeof setInterval> | null = null;
+const ensureProbeTimer = (): void => {
+    if (probeTimer) return;
+    probeTimer = setInterval(() => {
+        if (!circuitOpen || !config.enabled) {
+            if (probeTimer) clearInterval(probeTimer);
+            probeTimer = null;
+            return;
+        }
+        if (Date.now() >= nextProbeAt) probeNode();
+    }, 5_000);
+};
+
 /** Il nodo non ha risposto (errore di rete o timeout): circuito aperto,
  *  tutto al cloud finché un probe /healthz non lo richiude. */
 export const noteNodeFailure = (): void => {
@@ -190,6 +242,17 @@ export const noteNodeFailure = (): void => {
     circuitOpen = true;
     nextProbeAt = Date.now() + PROBE_EVERY_MS;
     console.warn('[sala-node] nodo non raggiungibile: si torna al cloud (probe fra 30s)');
+    ensureProbeTimer();
+    notifyStatus();
+};
+
+/** Il socket si è appena collegato al nodo: è una prova di vita migliore
+ *  del probe. Si richiude il circuito senza notifyChange — il socket è già
+ *  dalla parte giusta, riattaccarlo sarebbe un giro a vuoto. */
+export const noteNodeReachable = (): void => {
+    if (!circuitOpen) return;
+    circuitOpen = false;
+    console.info('[sala-node] socket collegato al nodo: si torna a instradare in LAN');
     notifyStatus();
 };
 

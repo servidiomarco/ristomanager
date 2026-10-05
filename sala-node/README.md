@@ -440,3 +440,37 @@ un miliardo in su.
   l'interruttore acceso rispondono 409 `refund_needs_cloud_authority`), la
   chiusura su Passepartout (fase B5).
 
+
+## L'app dal nodo e la coda dei palmari (fase B4)
+
+Con «Servizio completo sul nodo» acceso il client legge dal nodo, oltre a
+comande, conti e cassa, tutto quello con cui apre la sala: `/tables`,
+`/rooms`, `/dishes`, `/menus`, `/banquet-menus`, `/table-merges`,
+`/table-hidden`, `/room-closed`, `/takeaway/orders` e `/reservations?from=`
+fino a 55 giorni indietro (il nodo ne tiene 60; l'archivio con `to=` resta
+una lettura del cloud). Un ricaricamento a linea caduta riapre la sala com'è.
+Nodo muto → stesso circuito di sempre: un tentativo sul cloud e probe ogni
+30 s. Il probe ora parte da solo a circuito aperto (prima lo innescava solo
+una lettura instradata: con l'app ferma il dispositivo restava sul cloud a
+nodo tornato), e un socket che si ricollega al nodo richiude il circuito
+subito.
+
+- **Il 409 del recinto è leggibile**: `buildApiError` mostra `message`
+  quando `error` è un codice, e il recinto dice «Nodo di sala non
+  raggiungibile da qui: niente registrato».
+- **La coda offline** (`services/offlineQueue.ts`) tiene l'URL del cloud e
+  decide la destinazione al replay (`routeWriteUrl`): una voce nata a nodo
+  spento parte verso il nodo se nel frattempo l'autorità è in sala. Si
+  accoda su errore di rete e sul 409 `authority_on_node`; 401, 502–504 e
+  quel 409 non chiudono la voce, fermano il giro.
+- **Cosa NON va in coda**: comande, conti, incassi, chiusure. La comanda
+  vuole una risposta viva (una comanda in cucina venti minuti dopo, quando
+  il cameriere l'ha già gridata, è un doppio), l'incasso e la chiusura
+  vogliono l'RT. Il palmare tiene il carrello con le chiavi per riga e
+  l'Invia si ripete senza doppi.
+- **Il doppio ack del piano non c'è**, di proposito: una copia sul palmare
+  delle battiture accettate dal nodo servirebbe solo se il disco del PC
+  morisse a linea giù, e rigiocarla altrove ristamperebbe in cucina piatti
+  già serviti (o rifarebbe scontrini). Contro quel guasto: UPS, memoria
+  dell'RT, e la riga «Sincronizzazione» della card che dice quante
+  battiture il cloud non ha ancora.

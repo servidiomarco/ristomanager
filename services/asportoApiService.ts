@@ -6,7 +6,7 @@ import { authApiService } from './authApiService';
 import { socketClient } from './socketClient';
 import type { TakeawayOrderView, TakeawaySlotBoard, TakeawayStatus } from '../types';
 import { buildApiError } from './apiError';
-import { routeWriteUrl, cloudFallbackUrl, fetchNodeAware } from './apiRouting';
+import { routeServiceUrl, cloudFallbackUrl, fetchNodeAware } from './apiRouting';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';
 
@@ -62,8 +62,9 @@ const getHeaders = (): HeadersInit => {
 const fetchWithAuth = async (url: string, options: RequestInit = {}, retried = false): Promise<Response> => {
   // Fase 4c: la board dell'asporto (stato, lancio, righe) scrive sul nodo
   // quando l'autorità è in sala; se il nodo non risponde si ritenta sul
-  // cloud, come negli altri servizi sala.
-  url = routeWriteUrl(url, (options.method as string) || 'GET');
+  // cloud, come negli altri servizi sala. Fase B4: anche la lista del
+  // giorno si legge dal nodo, dove nascono gli stati.
+  url = routeServiceUrl(url, (options.method as string) || 'GET');
   let response: Response;
   try {
     response = await fetchNodeAware(url, options);

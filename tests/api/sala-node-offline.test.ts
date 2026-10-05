@@ -302,6 +302,22 @@ describe('nodo di sala a linea giù: configurazione allineata e proroga degli ac
         expect(JSON.parse(Buffer.from(pinToken.split('.')[0], 'base64url').toString('utf8')).kid).toMatch(/^node-/);
 
         expect((await nodeGet(pinToken)).status).toBe(200);
+        // Fase B4: a linea giù l'app si riapre dal nodo. Tutto quello con cui
+        // carica la sala passa anche con la sessione del PIN: un solo 403
+        // farebbe fallire il caricamento intero.
+        const oggi = new Date().toISOString().slice(0, 10);
+        const finestra = new Date(Date.now() - 45 * 86_400_000).toISOString().slice(0, 10);
+        for (const p of [
+            '/tables', '/rooms', '/dishes', '/menus', '/banquet-menus',
+            `/reservations?from=${finestra}`,
+            `/table-merges?date=${oggi}&shift=DINNER`,
+            `/table-hidden?date=${oggi}&shift=DINNER`,
+            `/room-closed?date=${oggi}&shift=DINNER`,
+        ]) {
+            const r = await fetch(`${nodeBase}${p}`, { headers: { Authorization: `Bearer ${pinToken}` } });
+            expect(r.status, p).toBe(200);
+            expect(Array.isArray(await r.json()), p).toBe(true);
+        }
         // Amministrazione chiusa: gestione utenti (gate di ruolo) e CRM.
         expect((await fetch(`${nodeBase}/auth/users`, { headers: { Authorization: `Bearer ${pinToken}` } })).status).toBe(403);
         expect((await fetch(`${nodeBase}/customers`, { headers: { Authorization: `Bearer ${pinToken}` } })).status).toBe(403);

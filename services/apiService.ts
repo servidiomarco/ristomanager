@@ -3,7 +3,7 @@ import { socketClient } from './socketClient';
 import { authApiService } from './authApiService';
 import { buildApiError } from './apiError';
 import { offlineQueue } from './offlineQueue';
-import { routedGetUrl, routeWriteUrl, cloudFallbackUrl, noteRoutedResponse, fetchNodeAware } from './apiRouting';
+import { routedGetUrl, routeServiceUrl, cloudFallbackUrl, noteRoutedResponse, fetchNodeAware, isAuthorityOnNodeRefusal } from './apiRouting';
 
 // Use import.meta.env for Vite frontend environment variables
 const API_URL = import.meta.env.VITE_API_URL || "https://ristomanager-production.up.railway.app";
@@ -38,14 +38,15 @@ const fetchWithAuth = async (
   retried = false
 ): Promise<Response> => {
   // Fase 4c: con l'autorità in sala le scritture whitelisted (tavoli,
-  // unioni, chiusure) vanno al nodo — no-op per tutto il resto del file.
-  url = routeWriteUrl(url, (options.method as string) || 'GET');
+  // unioni, chiusure) vanno al nodo. Fase B4: anche le letture con cui
+  // l'app apre la sala (pianta, menu, prenotazioni a finestra) — no-op per
+  // tutto il resto del file.
+  url = routeServiceUrl(url, (options.method as string) || 'GET');
   let response: Response;
   try {
     response = await fetchNodeAware(url, options);
   } catch (err) {
-    // Nodo di sala non raggiungibile (il riepilogo cucina è l'unica GET di
-    // questo file instradata in LAN) → retry immediato sul cloud, come nei
+    // Nodo di sala non raggiungibile → retry immediato sul cloud, come nei
     // servizi sala; errori verso il cloud si propagano com'è sempre stato.
     const cloudUrl = cloudFallbackUrl(url);
     if (!cloudUrl) throw err;
@@ -114,6 +115,24 @@ const apiRequest = async <T>(
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({ error: 'Request failed' }));
+    // Fase B4: il cloud rifiuta perché l'autorità è sul nodo e da qui il
+    // nodo non si raggiunge. La scrittura non è stata decisa da nessuno:
+    // come un errore di rete, va in coda e partirà verso il nodo appena
+    // torna raggiungibile.
+    const method = (init.method ?? 'GET').toUpperCase();
+    if (offline && isAuthorityOnNodeRefusal(response.status, errorData)
+        && (method === 'PUT' || method === 'DELETE' || method === 'POST')) {
+      offlineQueue.enqueue({
+        method: method as 'PUT' | 'DELETE' | 'POST',
+        url,
+        body: typeof init.body === 'string' ? init.body : null,
+        description: offline.description,
+      });
+      throw buildApiError(409, {
+        error: `Nodo di sala non raggiungibile: «${offline.description}» è in coda e partirà appena torna`,
+        queued: true,
+      });
+    }
     throw buildApiError(response.status, errorData);
   }
 

@@ -222,6 +222,8 @@ describe('stream inverso nodo→cloud', () => {
             const sulCloud = await api().put(`/tables/${tableId}`).set(bearer(token)).send({ status: 'FREE' });
             expect(sulCloud.status).toBe(409);
             expect(sulCloud.body.error).toBe('authority_on_node');
+            // La frase che il cameriere legge: niente è partito.
+            expect(sulCloud.body.message).toContain('niente registrato');
             const sulNodo = await fetch(`${nodeBase}/tables/${tableId}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
