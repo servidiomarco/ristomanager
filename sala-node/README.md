@@ -318,3 +318,91 @@ passo 3 già fatto, rimettere anche `JWT_HS256_ACCEPT` e il segreto nel
   della fase A4 non la scrive da sé: la card la confronta con quella del
   cloud e la mostra in giallo se diversa.
 
+## Un servizio solo: il supervisore (fase A4)
+
+Al posto delle tre attività pianificate e dei tre `.cmd` (nodo, stampa,
+Passepartout) c'è UN servizio di sistema che lancia
+`sala-node/supervisor.mjs`. Il supervisore tiene in vita i tre processi
+(riavvio con attesa crescente fino a 1 minuto), scrive i log a rotazione in
+`logs\` (5 MB × 3 per processo), impedisce che ne partano due copie e
+installa le versioni nuove da solo.
+
+### Fase 0: il PC, prima del software
+
+Sono i guasti che nessun programma risolve:
+
+- Risparmio energia: **mai** sospensione né ibernazione (incidente del 17/09).
+- Windows Update: orario di attività 10:00–02:00, oppure riavvii solo
+  manuali. Un riavvio a metà servizio spegne nodo, stampe e Passepartout.
+- BIOS: «riaccendi al ritorno della corrente» (Restore on AC power loss).
+- Un UPS per PC, switch e registratore telematico.
+- IP fisso o prenotazione DHCP per il PC (il record DNS punta lì).
+
+### Il pacchetto
+
+Sul Mac, dal repo: `npm run package:node -- --zip` costruisce
+`build/nodo/sympotia-nodo-<sha>.zip`, una cartella autosufficiente con
+server, agente di stampa, agente Passepartout compilato, `node_modules` di
+produzione e la versione in `build-info.json`. Sul PC serve solo Node ≥ 20.
+
+### Prima installazione (fuori servizio)
+
+1. Cartella `C:\ProgramData\Sympotia\nodo\` (leggibile solo da SYSTEM e
+   Administrators). Dentro: `versions\<sha>\` = il pacchetto scompattato, e
+   `supervisor.mjs` copiato da `versions\<sha>\sala-node\`.
+2. `nodo.json` nella stessa cartella. È l'unico posto con dei segreti:
+
+   ```json
+   {
+     "cloud_url": "https://ristomanager-production.up.railway.app",
+     "node_token": "<tenants.sala_node_token>",
+     "database_url": "postgresql://postgres:<password>@localhost:5432/ristonodo",
+     "port": 8443,
+     "print_agent": {
+       "enabled": true,
+       "api_url": "https://prenotazioni.vecchiofrantoio.com",
+       "token": "<PRINT_AGENT_TOKEN>",
+       "node_url": "https://sala.<slug>.sympotia.com:8443",
+       "env": { "RT_FISCAL_HOST": "192.168.1.201", "RT_FISCAL_REPARTI": "22=1,10=2" }
+     },
+     "passepartout_agent": {
+       "enabled": true,
+       "env": {
+         "PASSEPARTOUT_WS_URL": "http://192.168.1.10:7606/AdapterWS",
+         "PASSEPARTOUT_WS_USER": "…", "PASSEPARTOUT_WS_PASSWORD": "…",
+         "PP_AGENT_SERVER_URL": "https://prenotazioni.vecchiofrantoio.com",
+         "PP_AGENT_TOKEN": "…"
+       }
+     },
+     "update_window": { "from": "04:00", "to": "10:00" }
+   }
+   ```
+
+   Durante la transizione ES256 (sopra) si può aggiungere
+   `"node_env": { "JWT_SECRET": "…" }`; finita la transizione si toglie.
+3. `node supervisor.mjs check` (controlla configurazione e versione), poi
+   `node supervisor.mjs install` e i passi che stampa: su Windows serve
+   WinSW-x64.exe rinominato `sympotia-nodo.exe` accanto all'XML.
+4. Disattivare (non cancellare) le tre attività pianificate vecchie, poi
+   `sympotia-nodo.exe start`. Tornare indietro = `sympotia-nodo.exe stop` e
+   riattivare le attività.
+
+Prima di riavviare a mano: `logs\supervisor.log` dice cosa è partito, con
+quale versione e perché un processo è ripartito.
+
+### Aggiornare
+
+Si appoggia lo zip (o la cartella) in `inbox\`. Il supervisore lo installa:
+
+- solo nella finestra `update_window` (ora di Roma, 04:00–10:00 di default);
+- solo senza comande aperte né conti aperti nelle ultime 12 ore (lo chiede
+  al nodo su `/sala-node/maintenance-check`, che risponde solo da
+  127.0.0.1);
+- se la versione nuova non risponde a `/ready` entro 3 minuti torna da solo
+  a quella di prima (`current.txt` / `previous.txt`) e sposta il pacchetto
+  in `inbox\rejected\`; se va bene finisce in `inbox\done\`.
+
+Restano le ultime tre versioni in `versions\`. Il supervisore stesso non si
+aggiorna da solo: se cambia, si ricopia `supervisor.mjs` e si riavvia il
+servizio.
+

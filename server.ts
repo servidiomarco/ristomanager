@@ -39007,6 +39007,31 @@ app.get('/sala-node/local-status', authenticate, async (_req, res) => {
     }
 });
 
+// Il supervisore del nodo (fase A4) installa le versioni nuove solo a
+// servizio fermo: niente comande aperte né conti aperti nelle ultime 12 ore
+// (una comanda dimenticata ieri non deve bloccare gli aggiornamenti per
+// sempre). Solo sul nodo e solo da 127.0.0.1: il supervisore gira sulla
+// stessa macchina e non ha un token da mostrare.
+const isLoopback = (addr: string | undefined): boolean =>
+    addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1';
+
+app.get('/sala-node/maintenance-check', async (req, res) => {
+    if (!isServiceNode) return res.status(404).json({ error: 'Not found' });
+    if (!isLoopback(req.socket.remoteAddress)) return res.status(403).json({ error: 'loopback_only' });
+    try {
+        // rls-bypass: solo nodo, chiamata del supervisore in loopback: conteggi sul DB locale di un tenant solo
+        const rs = await runAsPlatform(() => queryWithRetry(
+            `SELECT
+                (SELECT COUNT(*)::int FROM orders WHERE status = 'OPEN' AND opened_at > now() - interval '12 hours') AS open_orders,
+                (SELECT COUNT(*)::int FROM table_bills WHERE status IN ('OPEN', 'LOCKED') AND opened_at > now() - interval '12 hours') AS open_bills`
+        ));
+        res.json({ open_orders: rs.rows[0].open_orders, open_bills: rs.rows[0].open_bills, version: BUILD_VERSION });
+    } catch (err: any) {
+        console.error('GET /sala-node/maintenance-check error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 // --- La configurazione allineata dopo il bootstrap (fase A2) ---------------
 // Lo snapshot porta menu, listini, utenti, stampanti, impostazioni... una
 // volta sola. Il log degli eventi porta solo il dominio servizio: un piatto
