@@ -27,11 +27,14 @@
 // regole nuove (postazione per nome, annullamento al posto della DELETE).
 
 import express from 'express';
+import crypto from 'crypto';
 import type { Request, Response } from 'express';
 import type { PoolClient } from 'pg';
-import { queryWithRetry, withTenant } from '../db.js';
+import { queryWithRetry, runAsPlatform, runWithTenantContext, withTenant } from '../db.js';
 import { authenticate, requirePermission } from '../auth/authMiddleware.js';
 import { RolePermissionService } from '../auth/permissionService.js';
+import { isAiKeyInvalid } from '../utils/aiErrors.js';
+import { DDT_MAX_BYTES, DDT_TYPES, DdtScanError, scanDdt } from './haccpDdtScan.js';
 import { isPlatformScopedSession } from '../auth/authService.js';
 import {
     HACCP_CORRECTION_GRACE_MINUTES,
@@ -39,6 +42,8 @@ import {
     HACCP_DOCUMENT_LABELS_IT,
     HACCP_INTERVENTION_LABELS_IT,
     HACCP_INTERVENTION_TYPES,
+    HACCP_LABEL_KINDS,
+    HaccpLabelKind,
     HACCP_POINT_REGISTERS,
     HACCP_TRAINING_COURSES,
     HACCP_TRAINING_LABELS_IT,
@@ -77,9 +82,14 @@ export interface HaccpDeps {
     markNotificationsRead: (tenantId: number, tags: string[]) => Promise<void>;
     /** Il giorno di oggi nel fuso del ristorante (YYYY-MM-DD). */
     todayIso: (tenantId: number) => Promise<string>;
+    /** Giorno e ora di un istante nel fuso del ristorante. */
+    localDateTime: (tenantId: number, at: Date) => Promise<{ date: string; time: string }>;
     /** Il ristorante lavora quel giorno (almeno un servizio aperto). */
     isServiceDay: (tenantId: number, date: string) => Promise<boolean>;
     broadcast: (tenantId: number, event: string, data: unknown, excludeSocketId?: string) => void;
+    /** La chiave Anthropic rifiutata: risposta 503 leggibile e avviso alla
+     *  piattaforma (sendAiKeyInvalid di server.ts). */
+    onAiKeyInvalid: (res: Response, route: string, err: unknown) => unknown;
 }
 
 /** Chi riceve gli avvisi HACCP quando non passano da un promemoria
@@ -244,7 +254,7 @@ const AUDIT_COLUMNS = `
     void_reason AS "voidReason"`;
 
 const TEMP_COLUMNS = `
-    id, TO_CHAR(date, 'YYYY-MM-DD') AS date, point_id AS "pointId", location, slot,
+    id, TO_CHAR(date, 'YYYY-MM-DD') AS date, point_id AS "pointId", location, slot, sensor_id AS "sensorId",
     temperature::float8 AS temperature, target_min::float8 AS "targetMin", target_max::float8 AS "targetMax",
     note, ${AUDIT_COLUMNS}`;
 
@@ -288,6 +298,20 @@ const TRAINING_COLUMNS = `
     hours::float8 AS hours, TO_CHAR(completed_on, 'YYYY-MM-DD') AS "completedOn",
     TO_CHAR(expires_on, 'YYYY-MM-DD') AS "expiresOn", document_id AS "documentId", note, archived,
     recorded_by_user_name AS "recordedByUserName", created_at AS "createdAt", updated_at AS "updatedAt"`;
+
+const SENSOR_COLUMNS = `
+    id, external_id AS "externalId", label, vendor, point_id AS "pointId", active,
+    last_value::float8 AS "lastValue", last_seen_at AS "lastSeenAt", battery, out_since AS "outSince",
+    created_at AS "createdAt"`;
+
+const LABEL_COLUMNS = `
+    id, kind, TO_CHAR(label_date, 'YYYY-MM-DD') AS "labelDate", product, prepared_at AS "preparedAt",
+    TO_CHAR(expiry_date, 'YYYY-MM-DD') AS "expiryDate", lot, storage, allergens, note, copies, printer,
+    print_job_id AS "printJobId", source_entity AS "sourceEntity", source_id AS "sourceId",
+    printed_by_user_name AS "printedByUserName", created_at AS "createdAt"`;
+
+const PRESET_COLUMNS = `
+    id, name, kind, shelf_life_days AS "shelfLifeDays", storage, allergens, sort_order AS "sortOrder", active`;
 
 const CALIBRATION_COLUMNS = `
     id, TO_CHAR(date, 'YYYY-MM-DD') AS date, point_id AS "pointId", instrument, method,
@@ -356,7 +380,7 @@ async function resolvePoint(
 
 // ---- Non conformità ------------------------------------------------------------------
 
-type NcSource = 'TEMPERATURE' | 'OIL' | 'CLEANING' | 'RECEIPT' | 'PROCESS' | 'CALIBRATION' | 'INTERVENTION' | 'RECALL' | 'MANUAL';
+type NcSource = 'TEMPERATURE' | 'OIL' | 'CLEANING' | 'RECEIPT' | 'PROCESS' | 'CALIBRATION' | 'SENSOR' | 'INTERVENTION' | 'RECALL' | 'MANUAL';
 
 // ---- Limiti del locale ---------------------------------------------------------------
 // Letti a ogni registrazione che li usa: cache breve per tenant, svuotata dal
@@ -546,6 +570,81 @@ async function computeDeadlines(tenantId: number, today: string): Promise<HaccpD
  *  ditta) e documenti d'ufficio. */
 const DOCUMENT_TYPES = /^(application\/pdf|image\/(jpeg|png|webp|heic|heif)|application\/(msword|vnd\.openxmlformats-officedocument\.(wordprocessingml\.document|spreadsheetml\.sheet)|vnd\.ms-excel|vnd\.oasis\.opendocument\.(text|spreadsheet))|text\/plain)$/;
 const DOCUMENT_MAX_BYTES = 5 * 1024 * 1024;
+
+// ---- Sensori: il formato delle letture ------------------------------------------------------
+// Il fornitore non è scelto: si accetta un formato generico, documentato in
+// Configura, più quello del webhook dei gateway Monnit (iMonnit), il più
+// diffuso fra i sensori wireless da cucina. Un altro fornitore si aggiunge
+// qui, con un ramo.
+
+interface SensorReadingIn {
+    externalId: string;
+    name: string | null;
+    value: number;
+    at: Date;
+    battery: number | null;
+    vendor: string | null;
+}
+
+const parseSensorTime = (v: unknown): Date | null => {
+    if (typeof v !== 'string' && typeof v !== 'number') return null;
+    // iMonnit manda «2026-10-05 12:00:00» in UTC, senza fuso.
+    const s = typeof v === 'string' && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?$/.test(v) ? `${v.replace(' ', 'T')}Z` : v;
+    const d = new Date(s);
+    return Number.isNaN(d.getTime()) ? null : d;
+};
+
+const parseSensorPayload = (body: any): SensorReadingIn[] => {
+    const now = Date.now();
+    // Un orario assurdo (orologio del gateway sbagliato) vale «adesso»: la
+    // lettura conta, l'orario no.
+    const at = (v: unknown) => {
+        const d = parseSensorTime(v);
+        return d && d.getTime() <= now + 5 * 60_000 && d.getTime() >= now - 7 * 86_400_000 ? d : new Date(now);
+    };
+    const num = (v: unknown) => {
+        const n = typeof v === 'number' ? v : parseFloat(String(v ?? '').replace(',', '.'));
+        return Number.isFinite(n) ? n : null;
+    };
+    const out: SensorReadingIn[] = [];
+    const push = (r: { id: unknown; name?: unknown; value: unknown; at?: unknown; battery?: unknown; vendor: string | null }) => {
+        const externalId = typeof r.id === 'string' || typeof r.id === 'number' ? String(r.id).trim().slice(0, 100) : '';
+        const value = num(r.value);
+        if (!externalId || value === null || value < -60 || value > 300) return;
+        const battery = num(r.battery);
+        out.push({
+            externalId,
+            name: typeof r.name === 'string' && r.name.trim() ? r.name.trim().slice(0, 100) : null,
+            value: Math.round(value * 10) / 10,
+            at: at(r.at),
+            battery: battery === null ? null : Math.max(0, Math.min(100, Math.round(battery))),
+            vendor: r.vendor,
+        });
+    };
+    if (Array.isArray(body?.sensorMessages)) {
+        for (const m of body.sensorMessages) {
+            push({ id: m?.sensorID, name: m?.sensorName, value: m?.dataValue ?? m?.plotValues, at: m?.messageDate, battery: m?.batteryLevel, vendor: 'monnit' });
+        }
+    } else {
+        const list = Array.isArray(body?.readings) ? body.readings : body ? [body] : [];
+        for (const r of list) push({ id: r?.sensor ?? r?.sensorId ?? r?.id, name: r?.name, value: r?.value ?? r?.temperature, at: r?.at ?? r?.time, battery: r?.battery, vendor: null });
+    }
+    return out.slice(0, 500);
+};
+
+const sensorTokenCache = new Map<string, { tenantId: number; at: number }>();
+
+async function tenantBySensorToken(token: string): Promise<number | null> {
+    if (!/^[A-Za-z0-9_-]{24,64}$/.test(token)) return null;
+    const cached = sensorTokenCache.get(token);
+    if (cached && Date.now() - cached.at < 60_000) return cached.tenantId;
+    // Il token si cerca fra tutti i ristoranti: è lui a dire quale.
+    // rls-bypass: risoluzione del tenant dal token del webhook dei sensori, prima di conoscerlo
+    const r = await runAsPlatform(() => queryWithRetry(`SELECT tenant_id FROM haccp_settings WHERE sensor_token = $1`, [token]));
+    const id = r.rows[0]?.tenant_id != null ? Number(r.rows[0].tenant_id) : null;
+    if (id) sensorTokenCache.set(token, { tenantId: id, at: Date.now() });
+    return id;
+}
 
 // ---- Il router -------------------------------------------------------------------------------
 
@@ -749,7 +848,7 @@ export function createHaccpRouter(deps: HaccpDeps): express.Router {
             if (!isValidDate(date)) throw new HaccpError(400, { error: 'date (YYYY-MM-DD) is required' });
             const tenantId = req.tenantId!;
             const today = await deps.todayIso(tenantId);
-            const [points, temps, oil, cleaning, receipts, production, calibrations, ncs, settings, deadlines] = await Promise.all([
+            const [points, temps, oil, cleaning, receipts, production, calibrations, ncs, settings, deadlines, sensors] = await Promise.all([
                 queryWithRetry(
                     `SELECT ${POINT_COLUMNS} FROM haccp_points WHERE tenant_id = $1 ORDER BY register, sort_order, id`,
                     [tenantId],
@@ -801,10 +900,15 @@ export function createHaccpRouter(deps: HaccpDeps): express.Router {
                 ),
                 loadSettings(tenantId),
                 computeDeadlines(tenantId, today),
+                queryWithRetry(
+                    `SELECT ${SENSOR_COLUMNS} FROM haccp_sensors WHERE tenant_id = $1 AND active AND point_id IS NOT NULL`,
+                    [tenantId],
+                ),
             ]);
             res.json({
                 date,
                 deadlines,
+                sensors: sensors.rows,
                 points: points.rows,
                 temperatures: temps.rows,
                 oil: oil.rows,
@@ -2020,6 +2124,458 @@ export function createHaccpRouter(deps: HaccpDeps): express.Router {
     });
 
     // =====================================================================
+    // Sensori di temperatura
+    // =====================================================================
+
+    router.get('/sensors', ...manage, async (req, res) => {
+        try {
+            const tenantId = req.tenantId!;
+            const [sensors, settings] = await Promise.all([
+                queryWithRetry(`SELECT ${SENSOR_COLUMNS} FROM haccp_sensors WHERE tenant_id = $1 ORDER BY (point_id IS NULL) DESC, lower(COALESCE(label, external_id))`, [tenantId]),
+                queryWithRetry(`SELECT sensor_token FROM haccp_settings WHERE tenant_id = $1`, [tenantId]),
+            ]);
+            res.json({ sensors: sensors.rows, token: settings.rows[0]?.sensor_token ?? null });
+        } catch (err) {
+            fail(res, err, 'GET /sensors');
+        }
+    });
+
+    // Un token nuovo invalida il vecchio: il gateway va riconfigurato. Si fa
+    // quando il token è finito dove non doveva.
+    router.post('/sensors/token', ...manage, async (req, res) => {
+        try {
+            const tenantId = req.tenantId!;
+            const token = crypto.randomBytes(24).toString('base64url');
+            const actor = await actorOf(req);
+            await withTenant(tenantId, async client => {
+                await client.query(
+                    `INSERT INTO haccp_settings (tenant_id, sensor_token, updated_at, updated_by_user_name)
+                     VALUES ($1, $2, now(), $3)
+                     ON CONFLICT (tenant_id) DO UPDATE SET sensor_token = EXCLUDED.sensor_token, updated_at = now(),
+                         updated_by_user_name = EXCLUDED.updated_by_user_name`,
+                    [tenantId, token, actor.name],
+                );
+                await logChange(client, tenantId, {
+                    entity: 'settings', entityId: tenantId, action: 'UPDATE', recordDate: null,
+                    reason: 'Nuovo token dei sensori', actor,
+                });
+            });
+            sensorTokenCache.clear();
+            res.json({ token });
+        } catch (err) {
+            fail(res, err, 'POST /sensors/token');
+        }
+    });
+
+    router.put('/sensors/:id', ...manage, async (req, res) => {
+        try {
+            const tenantId = req.tenantId!;
+            const id = parseId(req.params.id);
+            if (!id) throw new HaccpError(400, { error: 'id non valido' });
+            const body = req.body ?? {};
+            const actor = await actorOf(req);
+            const row = await withTenant(tenantId, async client => {
+                const cur = await client.query(`SELECT ${SENSOR_COLUMNS} FROM haccp_sensors WHERE tenant_id = $1 AND id = $2 FOR UPDATE`, [tenantId, id]);
+                const current = cur.rows[0];
+                if (!current) throw new HaccpError(404, { error: 'Sensore non trovato' });
+                let pointId = body.pointId !== undefined ? parseId(body.pointId) : current.pointId;
+                if (pointId) {
+                    const p = await client.query(`SELECT 1 FROM haccp_points WHERE tenant_id = $1 AND id = $2 AND register = 'TEMPERATURE' AND active`, [tenantId, pointId]);
+                    if (!p.rows[0]) throw new HaccpError(400, { error: 'Postazione di temperatura sconosciuta' });
+                } else {
+                    pointId = null;
+                }
+                const label = body.label !== undefined ? cleanText(body.label, 100) : current.label;
+                const active = typeof body.active === 'boolean' ? body.active : current.active;
+                const upd = await client.query(
+                    `UPDATE haccp_sensors SET point_id = $1, label = $2, active = $3, out_since = NULL, updated_at = now()
+                      WHERE id = $4 RETURNING ${SENSOR_COLUMNS}`,
+                    [pointId, label, active, id],
+                );
+                await logChange(client, tenantId, {
+                    entity: 'sensor', entityId: id, action: 'UPDATE', recordDate: null, before: current, after: upd.rows[0], actor,
+                });
+                return upd.rows[0];
+            });
+            changed(req, null, 'SENSORS');
+            res.json(row);
+        } catch (err) {
+            fail(res, err, 'PUT /sensors/:id');
+        }
+    });
+
+    router.get('/sensors/:id/readings', ...view, async (req, res) => {
+        try {
+            const id = parseId(req.params.id);
+            if (!id) throw new HaccpError(400, { error: 'id non valido' });
+            const hours = Math.min(Math.max(parseInt(String(req.query.hours ?? '24'), 10) || 24, 1), 24 * 14);
+            const r = await queryWithRetry(
+                `SELECT measured_at AS "measuredAt", value::float8 AS value FROM haccp_sensor_readings
+                  WHERE tenant_id = $1 AND sensor_id = $2 AND measured_at >= now() - ($3::int * interval '1 hour')
+                  ORDER BY measured_at`,
+                [req.tenantId!, id, hours],
+            );
+            res.json({ readings: r.rows });
+        } catch (err) {
+            fail(res, err, 'GET /sensors/:id/readings');
+        }
+    });
+
+    /** Una lettura di sensore su una postazione: compila la rilevazione del
+     *  giorno se è la sua fascia e la riga è vuota (mai sopra a quella di una
+     *  persona), e segue l'escursione fuori soglia. */
+    const applySensorReading = async (tenantId: number, sensor: any, reading: SensorReadingIn, limits: HaccpLimits): Promise<void> => {
+        const pointRes = await queryWithRetry(`SELECT ${POINT_COLUMNS} FROM haccp_points WHERE tenant_id = $1 AND id = $2 AND active`, [tenantId, sensor.pointId]);
+        const point = pointRes.rows[0] as PointRow | undefined;
+        if (!point) return;
+        const actor: Actor = { userId: null, name: `Sensore ${sensor.label || sensor.externalId}` };
+        const local = await deps.localDateTime(tenantId, reading.at);
+        const today = await deps.todayIso(tenantId);
+
+        // La rilevazione del giorno: nella prima ora utile dopo l'orario della
+        // sua fascia (e fino a due ore dopo). Un sensore rimasto muto la
+        // mattina non scrive alle 17 la rilevazione delle 9.
+        const toMinutes = (hhmm: string) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
+        const nowMin = toMinutes(local.time);
+        for (let slot = 1; slot <= point.checksPerDay; slot++) {
+            const slotTime = limits.sensors.slotTimes[slot - 1];
+            if (!slotTime) continue;
+            const from = toMinutes(slotTime);
+            if (nowMin < from || nowMin > from + 120 || local.date !== today) continue;
+            const written = await withConflictRetry(() => withTenant(tenantId, async client => {
+                const found = await client.query(
+                    `SELECT 1 FROM haccp_temperature_readings
+                      WHERE tenant_id = $1 AND date = $2 AND point_id = $3 AND slot = $4 AND voided_at IS NULL`,
+                    [tenantId, local.date, point.id, slot],
+                );
+                if (found.rows[0]) return null;
+                const ins = await client.query(
+                    `INSERT INTO haccp_temperature_readings
+                        (tenant_id, date, point_id, location, slot, temperature, target_min, target_max, note,
+                         recorded_by_user_id, recorded_by_user_name, recorded_at, sensor_id)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULL, $10, $11, $12)
+                     RETURNING ${TEMP_COLUMNS}`,
+                    [tenantId, local.date, point.id, point.label, slot, reading.value, point.minTemp, point.maxTemp,
+                        null, actor.name, reading.at.toISOString(), sensor.id],
+                );
+                const row = ins.rows[0];
+                await logChange(client, tenantId, {
+                    entity: 'temperature', entityId: row.id, action: 'CREATE', recordDate: local.date, after: row, actor,
+                });
+                await temperatureNc(client, tenantId, point, row, actor, null);
+                return row;
+            }));
+            if (written) {
+                await notifyTemperature(tenantId, point, written, null, null);
+                deps.broadcast(tenantId, 'haccp:changed', { date: local.date, register: 'TEMPERATURE' });
+            }
+        }
+
+        // Escursione: fuori soglia da più di N minuti → non conformità e avviso,
+        // una per escursione. Rientrata, la non conformità resta da chiudere:
+        // l'escursione c'è stata, e la merce dentro va valutata.
+        const out = isOutOfRange(reading.value, point.minTemp, point.maxTemp);
+        if (!out) {
+            if (sensor.outSince) await queryWithRetry(`UPDATE haccp_sensors SET out_since = NULL WHERE id = $1 AND tenant_id = $2`, [sensor.id, tenantId]);
+            return;
+        }
+        const outSince: Date = sensor.outSince ? new Date(sensor.outSince) : reading.at;
+        if (!sensor.outSince) await queryWithRetry(`UPDATE haccp_sensors SET out_since = $1 WHERE id = $2 AND tenant_id = $3`, [reading.at.toISOString(), sensor.id, tenantId]);
+        const minutes = Math.round((reading.at.getTime() - outSince.getTime()) / 60000);
+        if (minutes < limits.sensors.outMinutes) return;
+        const sourceId = `${sensor.id}@${outSince.toISOString()}`;
+        const opened = await withTenant(tenantId, async client => {
+            const exists = await client.query(
+                `SELECT 1 FROM haccp_nonconformities WHERE tenant_id = $1 AND source = 'SENSOR' AND source_id = $2`,
+                [tenantId, sourceId],
+            );
+            if (exists.rows[0]) return false;
+            const since = await deps.localDateTime(tenantId, outSince);
+            await syncSourceNc(client, tenantId, {
+                source: 'SENSOR',
+                sourceId,
+                date: since.date,
+                pointId: point.id,
+                open: true,
+                title: `${point.label} · ${formatHaccpTemperature(reading.value)} da ${minutes} minuti (${limitText(point.minTemp, point.maxTemp)})`,
+                detail: `Fuori soglia dalle ${since.time}, rilevato dal sensore ${sensor.label || sensor.externalId}`,
+                actor,
+                closingReason: '',
+            });
+            return true;
+        });
+        if (opened) {
+            await deps.pushToRoles(tenantId, HACCP_ALERT_ROLES, {
+                category: 'system',
+                title: 'Temperatura fuori soglia',
+                body: `${point.label} · ${formatHaccpTemperature(reading.value)} da ${minutes} minuti (${limitText(point.minTemp, point.maxTemp)})`,
+                url: '/?view=HACCP',
+                tag: `haccp-sensor-${sensor.id}`,
+            }).catch(() => {});
+            deps.broadcast(tenantId, 'haccp:changed', { date: null, register: 'NONCONFORMITY' });
+        }
+    };
+
+    // Il webhook dei gateway: niente login, il token del ristorante in
+    // intestazione (X-Haccp-Sensor-Token) o nell'indirizzo (?token=), per i
+    // gateway che non sanno mandare intestazioni.
+    router.post('/sensors/ingest', async (req, res) => {
+        try {
+            const token = String(req.headers['x-haccp-sensor-token'] ?? req.query.token ?? '');
+            const tenantId = await tenantBySensorToken(token);
+            if (!tenantId) return res.status(401).json({ error: 'Token dei sensori non valido' });
+            const readings = parseSensorPayload(req.body);
+            if (readings.length === 0) return res.status(400).json({ error: 'Nessuna lettura riconosciuta' });
+            const result = await runWithTenantContext(tenantId, async () => {
+                const limits = await loadLimits(tenantId);
+                let accepted = 0;
+                const sensors = new Map<string, any>();
+                for (const r of readings) {
+                    let sensor = sensors.get(r.externalId);
+                    if (!sensor) {
+                        // Un sensore mai visto si registra da solo, non assegnato:
+                        // compare in Configura, dove gli si dà la postazione.
+                        const up = await queryWithRetry(
+                            `INSERT INTO haccp_sensors (tenant_id, external_id, label, vendor)
+                             VALUES ($1, $2, $3, $4)
+                             ON CONFLICT (tenant_id, external_id) DO UPDATE SET
+                                 label = COALESCE(haccp_sensors.label, EXCLUDED.label),
+                                 vendor = COALESCE(haccp_sensors.vendor, EXCLUDED.vendor)
+                             RETURNING ${SENSOR_COLUMNS}`,
+                            [tenantId, r.externalId, r.name, r.vendor],
+                        );
+                        sensor = up.rows[0];
+                        sensors.set(r.externalId, sensor);
+                    }
+                    if (!sensor.active) continue;
+                    await queryWithRetry(
+                        `INSERT INTO haccp_sensor_readings (tenant_id, sensor_id, measured_at, value) VALUES ($1, $2, $3, $4)`,
+                        [tenantId, sensor.id, r.at.toISOString(), r.value],
+                    );
+                    const upd = await queryWithRetry(
+                        `UPDATE haccp_sensors
+                            SET last_value = CASE WHEN last_seen_at IS NULL OR $1 >= last_seen_at THEN $2 ELSE last_value END,
+                                last_seen_at = GREATEST(COALESCE(last_seen_at, $1), $1),
+                                battery = COALESCE($3, battery), updated_at = now()
+                          WHERE id = $4 AND tenant_id = $5 RETURNING ${SENSOR_COLUMNS}`,
+                        [r.at.toISOString(), r.value, r.battery, sensor.id, tenantId],
+                    );
+                    sensor = upd.rows[0];
+                    sensors.set(r.externalId, sensor);
+                    accepted++;
+                    if (sensor.pointId) {
+                        await applySensorReading(tenantId, sensor, r, limits);
+                        const fresh = await queryWithRetry(`SELECT ${SENSOR_COLUMNS} FROM haccp_sensors WHERE id = $1 AND tenant_id = $2`, [sensor.id, tenantId]);
+                        sensors.set(r.externalId, fresh.rows[0]);
+                    }
+                }
+                return { accepted, sensors: sensors.size };
+            });
+            res.json(result);
+        } catch (err) {
+            fail(res, err, 'POST /sensors/ingest');
+        }
+    });
+
+    // =====================================================================
+    // Lettura AI del documento di trasporto
+    // =====================================================================
+    // Propone, non scrive: il modulo mostra le righe lette, la persona le
+    // corregge e le registra una per una con temperatura ed esito.
+
+    router.post('/receipts/scan', ...record, async (req, res) => {
+        try {
+            const tenantId = req.tenantId!;
+            const contentType = String(req.body?.contentType ?? '').trim().toLowerCase();
+            const data = typeof req.body?.data === 'string' ? req.body.data : '';
+            if (!DDT_TYPES.test(contentType)) throw new HaccpError(415, { error: 'Serve una foto (JPG, PNG, WebP) o un PDF della bolla' });
+            const bytes = Buffer.from(data, 'base64');
+            if (bytes.length === 0) throw new HaccpError(400, { error: 'File vuoto' });
+            if (bytes.length > DDT_MAX_BYTES) throw new HaccpError(413, { error: 'File troppo grande: massimo 5 MB' });
+            const userEmail = req.user?.email ?? null;
+            const result = await scanDdt({ data, contentType }, usage => {
+                // Telemetria per Consumi AI: non fa aspettare la risposta.
+                queryWithRetry(
+                    `INSERT INTO ai_token_usage (provider, feature, model, prompt_tokens, output_tokens, total_tokens, user_email, tenant_id)
+                     VALUES ('anthropic', 'haccp_ddt', $1, $2, $3, $4, $5, $6)`,
+                    [usage.model, usage.promptTokens, usage.outputTokens, usage.totalTokens, userEmail, tenantId],
+                ).catch(err => console.error('[haccp] ai_token_usage (haccp_ddt) non scritto:', err?.message || err));
+            });
+            // Il fornitore letto si aggancia all'anagrafica quando il nome
+            // corrisponde: la riga porterà il suo id, come se l'avessero scelto.
+            let supplier: { id: string; name: string } | null = null;
+            if (result.supplier) {
+                const r = await queryWithRetry(
+                    `SELECT id, name FROM suppliers
+                      WHERE tenant_id = $1 AND (lower(name) = lower($2) OR position(lower(name) IN lower($2)) > 0
+                            OR position(lower($2) IN lower(name)) > 0)
+                      ORDER BY length(name) DESC LIMIT 1`,
+                    [tenantId, result.supplier],
+                );
+                supplier = r.rows[0] ?? null;
+            }
+            res.json({ ...result, supplierMatch: supplier });
+        } catch (err: any) {
+            if (isAiKeyInvalid(err)) return deps.onAiKeyInvalid(res, 'POST /haccp/receipts/scan', err);
+            if (err instanceof DdtScanError) {
+                const status = err.kind === 'not_configured' ? 503 : err.kind === 'refused' ? 422 : 502;
+                return res.status(status).json({
+                    error: err.kind === 'not_configured' ? 'Lettura delle bolle non disponibile' : err.message,
+                    code: `ddt_${err.kind}`,
+                });
+            }
+            fail(res, err, 'POST /receipts/scan');
+        }
+    });
+
+    // =====================================================================
+    // Etichette
+    // =====================================================================
+
+    router.get('/labels/config', ...view, async (req, res) => {
+        try {
+            const tenantId = req.tenantId!;
+            const [presets, printers] = await Promise.all([
+                queryWithRetry(`SELECT ${PRESET_COLUMNS} FROM haccp_label_presets WHERE tenant_id = $1 ORDER BY active DESC, sort_order, lower(name)`, [tenantId]),
+                queryWithRetry(
+                    `SELECT name FROM printers WHERE tenant_id = $1 AND is_active AND kind = 'THERMAL' ORDER BY name`,
+                    [tenantId],
+                ).catch(() => ({ rows: [] as any[] })),
+            ]);
+            res.json({ presets: presets.rows, printers: printers.rows.map((r: any) => r.name) });
+        } catch (err) {
+            fail(res, err, 'GET /labels/config');
+        }
+    });
+
+    router.get('/labels', ...view, async (req, res) => {
+        try {
+            const { date } = req.query;
+            if (!isValidDate(date)) throw new HaccpError(400, { error: 'date (YYYY-MM-DD) is required' });
+            const r = await queryWithRetry(
+                `SELECT ${LABEL_COLUMNS} FROM haccp_labels WHERE tenant_id = $1 AND label_date = $2 ORDER BY created_at DESC`,
+                [req.tenantId!, date],
+            );
+            res.json({ labels: r.rows });
+        } catch (err) {
+            fail(res, err, 'GET /labels');
+        }
+    });
+
+    const cleanAllergens = (v: unknown): string[] =>
+        Array.isArray(v) ? v.map(a => cleanText(a, 40)).filter((a): a is string => !!a).slice(0, 20) : [];
+
+    // Un'etichetta si registra sempre (chi, quando, cosa, con che scadenza) e
+    // si stampa sulla termica se ne è scelta una; senza, il modulo la stampa
+    // dal browser. Sulla termica esce come job ETICHETTA dell'agente.
+    router.post('/labels', ...record, async (req, res) => {
+        try {
+            const tenantId = req.tenantId!;
+            const body = req.body ?? {};
+            const kind = body.kind as HaccpLabelKind;
+            if (!HACCP_LABEL_KINDS.includes(kind)) throw new HaccpError(400, { error: 'Tipo di etichetta non valido' });
+            const product = cleanText(body.product, 255);
+            if (!product) throw new HaccpError(400, { error: 'Serve il prodotto' });
+            const preparedAt = body.preparedAt ? new Date(String(body.preparedAt)) : new Date();
+            if (Number.isNaN(preparedAt.getTime())) throw new HaccpError(400, { error: 'Data di preparazione non valida' });
+            const expiryDate = isValidDate(body.expiryDate) ? body.expiryDate : null;
+            if (!expiryDate) throw new HaccpError(400, { error: 'Serve la scadenza' });
+            const copies = Math.max(1, Math.min(20, parseInt(String(body.copies ?? '1'), 10) || 1));
+            const printer = typeof body.printer === 'string' && /^[a-z0-9_-]{1,30}$/i.test(body.printer) ? body.printer : null;
+            const actor = await actorOf(req);
+            const labelDate = await deps.todayIso(tenantId);
+            const result = await withTenant(tenantId, async client => {
+                let jobId: number | null = null;
+                const values = {
+                    kind, product, lot: cleanText(body.lot, 100), storage: cleanText(body.storage, 60),
+                    allergens: cleanAllergens(body.allergens), note: cleanText(body.note, 200),
+                };
+                if (printer) {
+                    const p = await client.query(`SELECT 1 FROM printers WHERE tenant_id = $1 AND name = $2 AND is_active AND kind = 'THERMAL'`, [tenantId, printer]);
+                    if (!p.rows[0]) throw new HaccpError(400, { error: 'Stampante sconosciuta' });
+                    const job = await client.query(
+                        `INSERT INTO print_jobs (tenant_id, kind, payload, printer, created_by_user_id)
+                         VALUES ($1, 'ETICHETTA', $2, $3, $4) RETURNING id`,
+                        [tenantId, JSON.stringify({
+                            ...values, prepared_at: preparedAt.toISOString(), expiry_date: expiryDate,
+                            copies, operator: actor.name,
+                        }), printer, actor.userId],
+                    );
+                    jobId = job.rows[0].id;
+                }
+                const ins = await client.query(
+                    `INSERT INTO haccp_labels
+                        (tenant_id, kind, label_date, product, prepared_at, expiry_date, lot, storage, allergens, note, copies,
+                         printer, print_job_id, source_entity, source_id, printed_by_user_id, printed_by_user_name)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+                     RETURNING ${LABEL_COLUMNS}`,
+                    [tenantId, kind, labelDate, product, preparedAt.toISOString(), expiryDate, values.lot, values.storage,
+                        values.allergens, values.note, copies, printer, jobId, cleanText(body.sourceEntity, 20),
+                        cleanText(body.sourceId, 64), actor.userId, actor.name],
+                );
+                return ins.rows[0];
+            });
+            changed(req, labelDate, 'LABELS');
+            res.status(201).json(result);
+        } catch (err) {
+            fail(res, err, 'POST /labels');
+        }
+    });
+
+    const readPreset = (body: any, current?: any) => {
+        const name = body.name !== undefined ? cleanText(body.name, 100) : current?.name;
+        if (!name) throw new HaccpError(400, { error: 'Serve un nome' });
+        const kind = body.kind !== undefined ? body.kind : current?.kind ?? 'PRODUZIONE';
+        if (!HACCP_LABEL_KINDS.includes(kind)) throw new HaccpError(400, { error: 'Tipo di etichetta non valido' });
+        const days = body.shelfLifeDays !== undefined ? parseInt(String(body.shelfLifeDays), 10) : current?.shelfLifeDays;
+        if (!Number.isInteger(days) || days < 0 || days > 3650) throw new HaccpError(400, { error: 'Durata in giorni non valida' });
+        return {
+            name, kind, days,
+            storage: body.storage !== undefined ? cleanText(body.storage, 60) : current?.storage ?? null,
+            allergens: body.allergens !== undefined ? cleanAllergens(body.allergens) : current?.allergens ?? [],
+            active: typeof body.active === 'boolean' ? body.active : current?.active ?? true,
+        };
+    };
+
+    router.post('/label-presets', ...manage, async (req, res) => {
+        try {
+            const tenantId = req.tenantId!;
+            const v = readPreset(req.body ?? {});
+            const r = await queryWithRetry(
+                `INSERT INTO haccp_label_presets (tenant_id, name, kind, shelf_life_days, storage, allergens, active, sort_order)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE((SELECT MAX(sort_order) + 1 FROM haccp_label_presets WHERE tenant_id = $1::bigint), 1))
+                 RETURNING ${PRESET_COLUMNS}`,
+                [tenantId, v.name, v.kind, v.days, v.storage, v.allergens, v.active],
+            );
+            changed(req, null, 'LABELS');
+            res.status(201).json(r.rows[0]);
+        } catch (err) {
+            fail(res, err, 'POST /label-presets');
+        }
+    });
+
+    router.put('/label-presets/:id', ...manage, async (req, res) => {
+        try {
+            const tenantId = req.tenantId!;
+            const id = parseId(req.params.id);
+            if (!id) throw new HaccpError(400, { error: 'id non valido' });
+            const cur = await queryWithRetry(`SELECT ${PRESET_COLUMNS} FROM haccp_label_presets WHERE tenant_id = $1 AND id = $2`, [tenantId, id]);
+            if (!cur.rows[0]) throw new HaccpError(404, { error: 'Modello non trovato' });
+            const v = readPreset(req.body ?? {}, cur.rows[0]);
+            const r = await queryWithRetry(
+                `UPDATE haccp_label_presets SET name = $1, kind = $2, shelf_life_days = $3, storage = $4, allergens = $5,
+                        active = $6, updated_at = now()
+                  WHERE tenant_id = $7 AND id = $8 RETURNING ${PRESET_COLUMNS}`,
+                [v.name, v.kind, v.days, v.storage, v.allergens, v.active, tenantId, id],
+            );
+            changed(req, null, 'LABELS');
+            res.json(r.rows[0]);
+        } catch (err) {
+            fail(res, err, 'PUT /label-presets/:id');
+        }
+    });
+
+    // =====================================================================
     // Non conformità
     // =====================================================================
 
@@ -2212,7 +2768,7 @@ export function createHaccpRouter(deps: HaccpDeps): express.Router {
             // Il fascicolo per l'ispezione porta anche l'archivio: documenti
             // validi e formazione in corso, oltre ai registri del periodo.
             const dossier = req.query.dossier === '1';
-            const [tenant, points, temps, oil, cleaning, receipts, production, calibrations, interventions, ncs, changes, settings, documents, trainings] = await Promise.all([
+            const [tenant, points, temps, oil, cleaning, receipts, production, calibrations, interventions, labels, ncs, changes, settings, documents, trainings] = await Promise.all([
                 // Il nome in testa al foglio: è la prima cosa che l'ispettore
                 // controlla, che il registro sia di questo locale.
                 queryWithRetry(`SELECT name FROM tenants WHERE id = $1`, [tenantId]).catch(() => ({ rows: [] as any[] })),
@@ -2224,6 +2780,13 @@ export function createHaccpRouter(deps: HaccpDeps): express.Router {
                 queryWithRetry(`SELECT ${PRODUCTION_COLUMNS} FROM haccp_production_logs WHERE ${between} ORDER BY date, recorded_at`, range),
                 queryWithRetry(`SELECT ${CALIBRATION_COLUMNS} FROM haccp_calibrations WHERE ${between} ORDER BY date, instrument`, range),
                 queryWithRetry(`SELECT ${INTERVENTION_COLUMNS} FROM haccp_interventions WHERE ${between} ORDER BY date, recorded_at`, range),
+                // Le etichette del periodo: il lotto interno e la scadenza
+                // scritti sul contenitore, la rintracciabilità «un passo avanti».
+                queryWithRetry(
+                    `SELECT ${LABEL_COLUMNS} FROM haccp_labels WHERE tenant_id = $1 AND label_date BETWEEN $2::date AND $3::date
+                      ORDER BY label_date, created_at`,
+                    range,
+                ),
                 queryWithRetry(
                     `SELECT ${NC_COLUMNS} FROM haccp_nonconformities
                       WHERE tenant_id = $1 AND (date BETWEEN $2::date AND $3::date OR (status = 'OPEN' AND date < $2::date))
@@ -2252,6 +2815,7 @@ export function createHaccpRouter(deps: HaccpDeps): express.Router {
             res.json({
                 from, to,
                 interventions: interventions.rows,
+                labels: labels.rows,
                 ...(dossier ? { documents: documents.rows, trainings: trainings.rows } : {}),
                 restaurantName: tenant.rows[0]?.name ?? null,
                 points: points.rows,
@@ -2341,4 +2905,39 @@ export async function runHaccpExpiryReminder(deps: HaccpDeps, tenantId: number, 
         url: '/?view=HACCP',
         tag: `haccp-expiry-${today}`,
     });
+}
+
+/** Il sensore che tace: ogni dieci minuti (scheduler di server.ts) si
+ *  cercano i sensori assegnati senza letture da più dei minuti di silenzio
+ *  del locale, e si avvisa una volta per silenzio — torna a suonare solo dopo
+ *  che il sensore ha ripreso a parlare. Gira come lavoro di piattaforma: ogni
+ *  riga porta il suo ristorante. */
+export async function haccpSensorWatchTick(deps: HaccpDeps): Promise<void> {
+    const r = await queryWithRetry(
+        `SELECT s.id, s.tenant_id, COALESCE(s.label, s.external_id) AS name, s.last_seen_at, p.label AS point_label
+           FROM haccp_sensors s
+           JOIN haccp_points p ON p.id = s.point_id AND p.tenant_id = s.tenant_id AND p.active
+          WHERE s.active AND s.last_seen_at IS NOT NULL
+            AND (s.offline_alerted_at IS NULL OR s.offline_alerted_at < s.last_seen_at)`,
+    );
+    const limitsByTenant = new Map<number, HaccpLimits>();
+    for (const row of r.rows) {
+        const tenantId = Number(row.tenant_id);
+        let limits = limitsByTenant.get(tenantId);
+        if (!limits) {
+            limits = await runWithTenantContext(tenantId, () => loadLimits(tenantId));
+            limitsByTenant.set(tenantId, limits);
+        }
+        const silentMin = (Date.now() - new Date(row.last_seen_at).getTime()) / 60000;
+        if (silentMin < limits.sensors.offlineMinutes) continue;
+        const local = await deps.localDateTime(tenantId, new Date(row.last_seen_at));
+        await queryWithRetry(`UPDATE haccp_sensors SET offline_alerted_at = now() WHERE id = $1 AND tenant_id = $2`, [row.id, tenantId]);
+        await deps.pushToRoles(tenantId, HACCP_ALERT_ROLES, {
+            category: 'system',
+            title: 'Sensore senza segnale',
+            body: `${row.point_label} · ${row.name}: ultimo dato alle ${local.time}`,
+            url: '/?view=HACCP',
+            tag: `haccp-sensor-offline-${row.id}`,
+        }).catch(err => console.error('[haccp] avviso sensore muto fallito:', err));
+    }
 }

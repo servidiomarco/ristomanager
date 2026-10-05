@@ -252,7 +252,7 @@ import {
     type ServiceOpen,
 } from './utils/leavePlan.js';
 import { formatMoneyMinor } from './utils/money.js';
-import { createHaccpRouter, runHaccpExpiryReminder, runHaccpMissingReminder, type HaccpDeps } from './services/haccpRoutes.js';
+import { createHaccpRouter, haccpSensorWatchTick, runHaccpExpiryReminder, runHaccpMissingReminder, type HaccpDeps } from './services/haccpRoutes.js';
 import { shoppingReminderBody } from './utils/shoppingReminder.js';
 import { describeShiftChanges, shiftDayLabel, type ShiftDayChange } from './utils/staffShiftChange.js';
 import { buildEReceiptPayload, buildFatturaPaXml, getFiscalDriver, type FiscalSeller, type InvoiceBuyer } from './services/fiscalService.js';
@@ -344,7 +344,7 @@ const jsonVerify = (req: any, _res: any, buf: Buffer) => { req.rawBody = buf; };
 const standardJson = express.json({ limit: '2mb', verify: jsonVerify });
 const largeJson = express.json({ limit: '8mb', verify: jsonVerify });
 app.use((req, res, next) => (
-    req.path === '/messages/attachments' || req.path === '/media' || req.path === '/staff-chat/attachments' || req.path === '/support/attachments' || req.path === '/settings/logo' || req.path === '/haccp/documents' ? largeJson(req, res, next) : standardJson(req, res, next)
+    req.path === '/messages/attachments' || req.path === '/media' || req.path === '/staff-chat/attachments' || req.path === '/support/attachments' || req.path === '/settings/logo' || req.path === '/haccp/documents' || req.path === '/haccp/receipts/scan' ? largeJson(req, res, next) : standardJson(req, res, next)
 ));
 
 // Un body oltre il limite fa fallire il parser PRIMA della rotta: senza
@@ -13763,6 +13763,7 @@ const SCHEDULER_LOCK_ELEVENLABS_QUOTA = 761006;
 const SCHEDULER_LOCK_REVIEW_REQUESTS = 761007;
 const SCHEDULER_LOCK_PLATFORM_HEALTH = 761008;
 const SCHEDULER_LOCK_HEALTH_RETENTION = 761009;
+const SCHEDULER_LOCK_HACCP_SENSORS = 761010;
 
 // Il lock advisory è di SESSIONE: va preso su un client dedicato tenuto per
 // tutta la durata del tick (sul pool condiviso un'altra query potrebbe
@@ -25002,6 +25003,10 @@ const haccpDeps: HaccpDeps = {
     pushToRoles: (tenantId, roles, push, options) => pushSendToRoles(tenantId, roles, push, options),
     markNotificationsRead: (tenantId, tags) => markSharedNotificationsRead(tenantId, tags),
     todayIso: async (tenantId) => getItalianTodayIso(new Date(), (await getTenantLocale(tenantId)).timezone),
+    localDateTime: async (tenantId, at) => {
+        const p = getItalianDateParts(at, (await getTenantLocale(tenantId)).timezone);
+        return { date: `${p.year}-${p.month}-${p.day}`, time: `${p.hour}:${p.minute}` };
+    },
     isServiceDay: async (tenantId, date) => {
         const serviceOpen = makeServiceOpen(await loadOpeningCalendar(tenantId, date, date));
         return serviceOpen(date, 'LUNCH') || serviceOpen(date, 'DINNER');
@@ -25009,8 +25014,16 @@ const haccpDeps: HaccpDeps = {
     broadcast: (tenantId, event, data, excludeSocketId) => {
         socketService?.broadcastToAll(tenantId, event, data, excludeSocketId);
     },
+    onAiKeyInvalid: (res, route, err) => sendAiKeyInvalid(res, route, err),
 };
 app.use('/haccp', createHaccpRouter(haccpDeps));
+
+// I sensori HACCP che tacciono: ogni dieci minuti, una replica sola.
+const startHaccpSensorWatch = () => {
+    const tick = () => runSchedulerTickWithLock(SCHEDULER_LOCK_HACCP_SENSORS, 'haccp-sensors', () => haccpSensorWatchTick(haccpDeps))
+        .catch(err => console.error('[haccp-sensors] tick fallito:', err?.message || err));
+    setInterval(tick, 10 * 60 * 1000);
+};
 
 
 // ============================================
@@ -39998,6 +40011,7 @@ const startServer = async () => {
                     if (!isServiceNode) try {
                         startRemindersScheduler();
                         console.log('✅ Reminders scheduler started (polls every 5 min, Europe/Rome)');
+                        startHaccpSensorWatch();
                     } catch (schedErr) {
                         console.error('Bread reminder scheduler failed to start:', schedErr);
                     }

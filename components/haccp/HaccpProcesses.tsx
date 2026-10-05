@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Plus, Timer, Trash2 } from 'lucide-react';
+import { Plus, Tag, Timer, Trash2 } from 'lucide-react';
 import type {
   HaccpLimits,
   HaccpNonConformity,
@@ -18,7 +18,7 @@ import {
 } from '../../utils/haccp';
 import { ModalShell, StatusPill, dsButton, dsInput, dsSelect } from '../ds';
 import {
-  NcLine, RowStamp, TFunc, deleteButton, emptyNote, field, fieldLabel, formatLongDate, formatNumber,
+  NcLine, RowStamp, TFunc, deleteButton, quietIconButton, emptyNote, field, fieldLabel, formatLongDate, formatNumber,
   formatShortDate, formatTime, parseNumber, personName, row, rowList,
 } from './haccpUi';
 
@@ -104,7 +104,9 @@ export const ProcessesSection: React.FC<{
   onVoid: (r: HaccpProductionLog) => void;
   onCloseNc: (nc: HaccpNonConformity) => void;
   onHistory: (r: HaccpProductionLog) => void;
-}> = ({ date, rows, equipment, limits, ncBySource, editable, onAdd, onCloseCycle, onVoid, onCloseNc, onHistory }) => {
+  /** L'etichetta del contenitore, con prodotto, lotto e scadenza del ciclo. */
+  onLabel?: (r: HaccpProductionLog) => void;
+}> = ({ date, rows, equipment, limits, ncBySource, editable, onAdd, onCloseCycle, onVoid, onCloseNc, onHistory, onLabel }) => {
   const { t } = useTranslation('haccp', { useSuspense: false });
   const [process, setProcess] = useState<HaccpProcess>('ABBATTIMENTO');
   const [product, setProduct] = useState('');
@@ -327,7 +329,7 @@ export const ProcessesSection: React.FC<{
         <ul className={rowList}>
           {others.map(r => (
             <ProcessRow key={r.id} r={r} date={date} ncBySource={ncBySource} editable={editable}
-              onVoid={onVoid} onCloseNc={onCloseNc} onHistory={onHistory} />
+              onVoid={onVoid} onCloseNc={onCloseNc} onHistory={onHistory} onLabel={onLabel} />
           ))}
         </ul>
       )}
@@ -356,7 +358,8 @@ const ProcessRow: React.FC<{
   onVoid: (r: HaccpProductionLog) => void;
   onCloseNc: (nc: HaccpNonConformity) => void;
   onHistory: (r: HaccpProductionLog) => void;
-}> = ({ r, date, ncBySource, editable, onCloseCycle, onVoid, onCloseNc, onHistory }) => {
+  onLabel?: (r: HaccpProductionLog) => void;
+}> = ({ r, date, ncBySource, editable, onCloseCycle, onVoid, onCloseNc, onHistory, onLabel }) => {
   const { t } = useTranslation('haccp', { useSuspense: false });
   const process = (r.process ?? 'LEGACY') as HaccpProcess;
   const extra = [
@@ -387,7 +390,18 @@ const ProcessRow: React.FC<{
         )}
         {onCloseCycle && !editable && <StatusPill tone="pending">{t('inProgress', 'In corso')}</StatusPill>}
       </div>
-      <div className="col-span-4 text-right sm:col-span-1">
+      <div className="col-span-4 flex justify-end gap-1 sm:col-span-1">
+        {onLabel && (
+          <button
+            type="button"
+            onClick={() => onLabel(r)}
+            className={quietIconButton}
+            title={t('labels.title', 'Etichetta')}
+            aria-label={t('labels.forNamed', 'Etichetta per {{nome}}', { nome: r.product })}
+          >
+            <Tag className="h-4 w-4" />
+          </button>
+        )}
         {editable && (
           <button
             type="button"

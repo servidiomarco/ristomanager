@@ -3,6 +3,7 @@ import type {
   HaccpChange,
   HaccpDocument,
   HaccpIntervention,
+  HaccpLabel,
   HaccpTraining,
   HaccpCleaningCheck,
   HaccpGoodsReceipt,
@@ -15,7 +16,7 @@ import type {
 } from '../services/haccpApiService';
 import type { HaccpLimits, HaccpPoint, HaccpProcess } from './haccp';
 import {
-  HACCP_DOCUMENT_LABELS_IT, HACCP_INTERVENTION_LABELS_IT, HACCP_TRAINING_LABELS_IT,
+  HACCP_DOCUMENT_LABELS_IT, HACCP_INTERVENTION_LABELS_IT, HACCP_LABEL_KIND_LABELS_IT, HACCP_TRAINING_LABELS_IT,
   HACCP_PROCESS_LABELS_IT, HACCP_RECEIPT_CATEGORIES, HACCP_RECEIPT_CATEGORY_LABELS_IT, HACCP_TWO_STEP_PROCESSES,
   formatHaccpDuration, formatHaccpLimit, haccpCalibrationDeviation, haccpDaysBetween, isOutOfRange,
 } from './haccp';
@@ -365,6 +366,19 @@ const interventionsTable = (rows: HaccpIntervention[]): string => {
   return `<table><thead><tr><th class="small">Giorno</th><th>Intervento</th><th>Esito</th><th class="small">Quantità e riferimento</th><th class="small">Prossimo entro</th><th class="small">Registrato da</th></tr></thead><tbody>${body || emptyRow(6, 'Nessun intervento nel periodo.')}</tbody></table>`;
 };
 
+const labelsTable = (rows: HaccpLabel[]): string => {
+  const body = rows.map(l => `
+    <tr>
+      <td class="small">${shortDate(l.labelDate)}</td>
+      <td>${escapeHtml(l.product)}<div class="small muted">${escapeHtml(HACCP_LABEL_KIND_LABELS_IT[l.kind] ?? l.kind)}</div></td>
+      <td class="small">${escapeHtml(l.lot ?? '')}</td>
+      <td class="small">${shortDate(l.expiryDate)}</td>
+      <td class="small">${escapeHtml(l.allergens.join(', '))}</td>
+      <td class="small muted">${escapeHtml(person(l.printedByUserName))}</td>
+    </tr>`).join('');
+  return `<table><thead><tr><th class="small">Giorno</th><th>Prodotto</th><th class="small">Lotto</th><th class="small">Scade il</th><th class="small">Allergeni</th><th class="small">Operatore</th></tr></thead><tbody>${body}</tbody></table>`;
+};
+
 const today = (): string => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -642,6 +656,11 @@ ${PRINT_TOKENS_CSS}
   ${dossier || (data.interventions && live(data.interventions).length > 0) ? `<section>
     <h2>Interventi esterni</h2>
     ${interventionsTable(data.interventions ?? [])}
+  </section>` : ''}
+
+  ${data.labels && data.labels.length > 0 ? `<section>
+    <h2>Etichette dei contenitori</h2>
+    ${labelsTable(data.labels)}
   </section>` : ''}
 
   ${data.calibrations && data.calibrations.length > 0 ? `<section>

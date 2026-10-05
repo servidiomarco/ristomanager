@@ -189,6 +189,11 @@ export interface HaccpLimits {
   calibration: { maxDeviation: number };
   /** Campione testimone: quante ore si conserva. */
   sample: { keepHours: number };
+  /** Sensori: in quali fasce orarie compilano le rilevazioni del giorno
+   *  (una per rilevazione prevista dalla postazione), dopo quanti minuti
+   *  fuori soglia aprono una non conformità, dopo quanti di silenzio
+   *  avvisano. */
+  sensors: { slotTimes: string[]; outMinutes: number; offlineMinutes: number };
 }
 
 export const HACCP_DEFAULT_LIMITS: HaccpLimits = {
@@ -206,6 +211,7 @@ export const HACCP_DEFAULT_LIMITS: HaccpLimits = {
   },
   calibration: { maxDeviation: 1 },
   sample: { keepHours: 72 },
+  sensors: { slotTimes: ['09:00', '16:00', '21:00'], outMinutes: 30, offlineMinutes: 60 },
 };
 
 const num = (v: unknown, fallback: number): number =>
@@ -240,6 +246,14 @@ export const mergeHaccpLimits = (stored: unknown): HaccpLimits => {
     receipt,
     calibration: { maxDeviation: num(s.calibration?.maxDeviation, d.calibration.maxDeviation) },
     sample: { keepHours: num(s.sample?.keepHours, d.sample.keepHours) },
+    sensors: {
+      slotTimes: d.sensors.slotTimes.map((def, i) => {
+        const v = Array.isArray(s.sensors?.slotTimes) ? s.sensors.slotTimes[i] : undefined;
+        return typeof v === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(v) ? v : def;
+      }),
+      outMinutes: num(s.sensors?.outMinutes, d.sensors.outMinutes),
+      offlineMinutes: num(s.sensors?.offlineMinutes, d.sensors.offlineMinutes),
+    },
   };
 };
 
@@ -426,3 +440,16 @@ export interface HaccpDeadline {
   due: string;
   status: 'expired' | 'soon';
 }
+
+// =============================================================================
+// Etichette (Fase 4)
+// =============================================================================
+
+export type HaccpLabelKind = 'PRODUZIONE' | 'APERTURA' | 'SCONGELAMENTO';
+export const HACCP_LABEL_KINDS: HaccpLabelKind[] = ['PRODUZIONE', 'APERTURA', 'SCONGELAMENTO'];
+/** Come l'etichetta dice la data di partenza: «Prodotto il», «Aperto il». */
+export const HACCP_LABEL_KIND_LABELS_IT: Record<HaccpLabelKind, string> = {
+  PRODUZIONE: 'Prodotto il',
+  APERTURA: 'Aperto il',
+  SCONGELAMENTO: 'Scongelato il',
+};
