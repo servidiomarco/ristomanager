@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { AuthService, TokenPayload, isPlatformScopedSession } from './authService.js';
-import { Permission } from './permissions.js';
+import { Permission, SERVICE_PERMISSIONS } from './permissions.js';
 import { RolePermissionService } from './permissionService.js';
 import { UserRole } from '../types.js';
 import { runWithTenantContext } from '../db.js';
@@ -129,6 +129,13 @@ export const authorize = (...allowedRoles: UserRole[]) => {
       return res.status(401).json({ error: 'Not authenticated' });
     }
 
+    // I gate di ruolo proteggono amministrazione (utenti, permessi,
+    // onboarding): una sessione col PIN di sala non ci entra mai, nemmeno
+    // quella di un titolare.
+    if (req.user.scope === 'service') {
+      return res.status(403).json({ error: 'Insufficient permissions' });
+    }
+
     // Layer di piattaforma: una sessione scopata su un tenant passa ogni
     // gate di ruolo — PLATFORM_ADMIN sta sopra OWNER per costruzione
     // (ROLE_RANK) e elencarlo route per route sarebbe solo rumore. Senza
@@ -156,6 +163,11 @@ export const requirePermission = (permission: Permission) => {
     // PLATFORM_ADMIN non ha righe in role_permissions e non deve averne.
     if (isPlatformScopedSession(req.user)) {
       return next();
+    }
+
+    // Sessione col PIN di sala: solo i permessi di servizio.
+    if (req.user.scope === 'service' && !SERVICE_PERMISSIONS.has(permission)) {
+      return res.status(403).json({ error: 'Insufficient permissions' });
     }
 
     try {
@@ -212,6 +224,8 @@ export const requireAnyPermission = (...permissions: Permission[]) => {
 
     try {
       for (const permission of permissions) {
+        // Sessione col PIN di sala: contano solo i permessi di servizio.
+        if (req.user.scope === 'service' && !SERVICE_PERMISSIONS.has(permission)) continue;
         if (await RolePermissionService.hasPermission(req.user.tenantId, req.user.role, permission)) {
           return next();
         }

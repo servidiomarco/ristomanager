@@ -58,6 +58,8 @@ const isUserActiveLocally = async (tenantId: number, userId: number): Promise<bo
 
 const offlineGrace = async (payload: TokenPayload, expiresAtMs: number | null): Promise<OfflineGraceVerdict> => {
     if (!isCloudUplinkDown()) return 'not_offline';
+    // Una sessione col PIN non ha proroga: scaduta, si rifà col PIN.
+    if (payload.scope === 'service') return 'expired_offline';
     // Solo access token veri: uno step-up (purpose, niente ruolo) o un
     // token senza identità non diventa un accesso perché è scaduto.
     if ((payload as any).purpose || typeof payload.role !== 'string' || !Number.isInteger(payload.userId)) return 'invalid';

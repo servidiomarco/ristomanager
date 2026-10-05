@@ -164,6 +164,7 @@ describe('nodo di sala a linea giù: configurazione allineata e proroga degli ac
         await line?.cut().catch(() => {});
         await nodeDb?.end().catch(() => {});
         if (waiterId) await cloudDb?.query('DELETE FROM users WHERE id = $1', [waiterId]).catch(() => {});
+        await cloudDb?.query('UPDATE users SET service_pin_hash = NULL, service_pin_updated_at = NULL WHERE id = $1', [ownerClaims?.userId ?? 0]).catch(() => {});
         if (renamedDish) await cloudDb?.query('UPDATE dishes SET name = $2 WHERE id = $1', [renamedDish.id, renamedDish.name]).catch(() => {});
         await cloudDb?.end().catch(() => {});
     });
@@ -229,6 +230,65 @@ describe('nodo di sala a linea giù: configurazione allineata e proroga degli ac
         expect(res.status).toBe(401);
         expect((await res.json()).error).toBe('Invalid or expired token');
     });
+
+    it('PIN di sala: si imposta nel cloud, mai banale, e il cloud non fa entrare con quello', async () => {
+        const banale = await api().put('/auth/me/service-pin').set(bearer(ownerAccess)).send({ pin: '1234' });
+        expect(banale.status).toBe(400);
+        expect(banale.body.error).toBe('trivial_pin');
+        const corto = await api().put('/auth/me/service-pin').set(bearer(ownerAccess)).send({ pin: '12' });
+        expect(corto.body.error).toBe('invalid_pin');
+        const ok = await api().put('/auth/me/service-pin').set(bearer(ownerAccess)).send({ pin: '4071' });
+        expect(ok.status).toBe(200);
+        const me = await api().get('/auth/me').set(bearer(ownerAccess));
+        expect(me.body.has_service_pin).toBe(true);
+        expect(JSON.stringify(me.body)).not.toContain('service_pin_hash');
+        // Le rotte del PIN vivono solo sul nodo.
+        expect((await api().get('/auth/pin-users')).status).toBe(404);
+        expect((await api().post('/auth/pin-login').send({ user_id: ownerClaims.userId, pin: '4071' })).status).toBe(404);
+    });
+
+    it('PIN di sala sul nodo: sessione solo di servizio, che il cloud non riconosce', async () => {
+        await finoA(async () => {
+            const r = await nodeDb!.query('SELECT service_pin_hash FROM users WHERE id = $1', [ownerClaims.userId]);
+            return Boolean(r.rows[0]?.service_pin_hash);
+        }, 'PIN sceso sul nodo');
+        const elenco = await (await fetch(`${nodeBase}/auth/pin-users`)).json();
+        expect(elenco.users.map((u: any) => u.id)).toContain(ownerClaims.userId);
+        expect(JSON.stringify(elenco)).not.toContain('pin_hash');
+
+        const pinLogin = (pin: string) => fetch(`${nodeBase}/auth/pin-login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: ownerClaims.userId, pin }),
+        });
+        const sbagliato = await pinLogin('9999');
+        expect(sbagliato.status).toBe(401);
+
+        const giusto = await pinLogin('4071');
+        expect(giusto.status).toBe(200);
+        const sessione = await giusto.json();
+        expect(sessione.refreshToken).toBeNull();
+        expect(sessione.session).toBe('pin');
+        // Solo permessi di servizio, anche per un titolare.
+        expect(sessione.permissions).toContain('orders:take');
+        expect(sessione.permissions).not.toContain('users:view');
+        expect(sessione.permissions).not.toContain('settings:full');
+        const pinToken = sessione.accessToken as string;
+        expect(JSON.parse(Buffer.from(pinToken.split('.')[0], 'base64url').toString('utf8')).kid).toMatch(/^node-/);
+
+        expect((await nodeGet(pinToken)).status).toBe(200);
+        // Amministrazione chiusa: gestione utenti (gate di ruolo) e CRM.
+        expect((await fetch(`${nodeBase}/auth/users`, { headers: { Authorization: `Bearer ${pinToken}` } })).status).toBe(403);
+        expect((await fetch(`${nodeBase}/customers`, { headers: { Authorization: `Bearer ${pinToken}` } })).status).toBe(403);
+        // Il cloud non conosce la chiave del nodo.
+        expect((await api().get('/auth/me').set(bearer(pinToken))).status).toBe(401);
+
+        // Cinque PIN sbagliati bloccano l'utente: anche quello giusto aspetta.
+        for (let i = 0; i < 5; i++) await pinLogin('9998');
+        const bloccato = await pinLogin('4071');
+        expect(bloccato.status).toBe(429);
+        expect((await bloccato.json()).error).toBe('pin_locked');
+    }, 60_000);
 
     it('a linea giù: proroga per chi è attivo, session_expired_offline per gli altri', async () => {
         await line.cut();

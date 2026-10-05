@@ -25,5 +25,15 @@
   "updatePassword": "Update password",
   "newEmail": "New email",
   "emailPwHint": "Confirms it is you.",
-  "changeEmail": "Change email"
+  "changeEmail": "Change email",
+  "pinTitle": "Floor PIN",
+  "pinHint": "4–6 digits. Lets you sign in on the floor node when the line is down, for floor, orders and till only.",
+  "pinNew": "New PIN",
+  "pinSet": "Set PIN",
+  "pinChange": "Change PIN",
+  "pinRemove": "Remove PIN",
+  "pinSaved": "PIN saved.",
+  "pinRemoved": "PIN removed.",
+  "pinInvalid": "The PIN has 4–6 digits.",
+  "pinTrivial": "Pick a less predictable PIN (no repeated or consecutive digits)."
 }

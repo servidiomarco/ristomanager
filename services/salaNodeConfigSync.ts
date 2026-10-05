@@ -34,7 +34,7 @@ const WAKE_DEBOUNCE_MS = 2_000;
 // Le stesse tabelle della CONFIG_SYNC_TABLES del cloud: il cloud ignora
 // quelle che non conosce, quindi una versione diversa non rompe niente.
 const CONFIG_TABLES = [
-    'tenants', 'users', 'role_permissions', 'rooms', 'tables', 'sala_profiles', 'stations',
+    'tenants', 'tenant_features', 'users', 'role_permissions', 'rooms', 'tables', 'sala_profiles', 'stations',
     'category_stations', 'printers', 'menus', 'menu_price_lists', 'dishes', 'dish_menus',
     'dish_prices', 'dish_components', 'modifier_groups', 'modifiers', 'dish_modifier_groups',
     'opening_hours', 'opening_hours_disabled_slots', 'special_closures', 'reservation_note_presets',

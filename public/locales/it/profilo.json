@@ -25,5 +25,15 @@
   "updatePassword": "Aggiorna password",
   "newEmail": "Nuova email",
   "emailPwHint": "Serve a confermare che sei tu.",
-  "changeEmail": "Cambia email"
+  "changeEmail": "Cambia email",
+  "pinTitle": "PIN di sala",
+  "pinHint": "4–6 cifre. Serve a entrare sul nodo di sala quando manca la linea, solo per sala, comande e cassa.",
+  "pinNew": "Nuovo PIN",
+  "pinSet": "Imposta PIN",
+  "pinChange": "Cambia PIN",
+  "pinRemove": "Togli PIN",
+  "pinSaved": "PIN salvato.",
+  "pinRemoved": "PIN tolto.",
+  "pinInvalid": "Il PIN è di 4–6 cifre.",
+  "pinTrivial": "Scegli un PIN meno prevedibile (niente cifre tutte uguali o in fila)."
 }

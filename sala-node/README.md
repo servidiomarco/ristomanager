@@ -289,4 +289,13 @@ passo 3 già fatto, rimettere anche `JWT_HS256_ACCEPT` e il segreto nel
   configurazione e applica solo quelle cambiate (la rubrica clienti ogni
   15 minuti). Nel log: `[config] allineate dal cloud: dishes, users`. Gli
   hash delle password non scendono mai.
+- **PIN di sala.** Chi ha impostato il PIN (profilo, nel cloud) entra sul
+  nodo a linea giù con `POST /auth/pin-login` (nome dall'elenco di
+  `GET /auth/pin-users` + PIN). Il nodo conia la sessione con una chiave
+  SUA (`SALA_NODE_STATE_DIR\sala-node-session-key.pem`, generata alla
+  prima accensione, mai inviata al cloud): kid `node-…`, valida
+  `SALA_NODE_PIN_SESSION_HOURS` (12), solo permessi di servizio, nessun
+  refresh. 5 PIN sbagliati bloccano l'utente 5 minuti. Il cloud non
+  riconosce quei token: a linea tornata l'app chiede il login normale.
+  Gli hash dei PIN scendono al nodo con la configurazione (le password no).
 

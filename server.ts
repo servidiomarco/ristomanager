@@ -38765,6 +38765,13 @@ const SNAPSHOT_TABLES: SnapshotTableSpec[] = [
     // agenti LAN (print agent in testa — fase stampe-dal-nodo). La tabella
     // non ha tenant_id: la sua chiave è id (special-case qui e nel loader).
     { name: 'tenants' },
+    // Gli add-on del ristorante: sul nodo li leggono i gate dei moduli
+    // (asporto, Passepartout…) e la risposta del PIN di sala. Senza, il nodo
+    // li avrebbe solo dai seed delle migration — giusti per il tenant 1,
+    // sbagliati per chiunque altro.
+    // config fuori: impostazioni dei canali (voce, piano minuti) che al
+    // nodo non servono.
+    { name: 'tenant_features', dropColumns: ['config'] },
     // Identità e permessi: servono al nodo per autorizzare i client LAN.
     { name: 'users', dropColumns: ['password_hash', 'refresh_token_hash', 'reset_token_hash', 'reset_token_expires_at'] },
     { name: 'role_permissions' },

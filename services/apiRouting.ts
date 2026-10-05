@@ -256,6 +256,12 @@ const notifyChange = () => changeCallbacks.forEach(cb => cb());
 
 export const isHybridActive = (): boolean => config.enabled && Boolean(config.node_url);
 
+/** Il nodo per l'accesso col PIN di sala (fase A2): solo con l'autorità in
+ *  sala, perché una sessione del PIN vale solo sul nodo e le scritture
+ *  devono andare lì. null = niente PIN su questo dispositivo. */
+export const pinLoginNodeUrl = (): string | null =>
+    config.enabled && config.authority_enabled && config.node_url ? config.node_url : null;
+
 // --- Stato per la pastiglia Live --------------------------------------------
 // Chi deve solo MOSTRARE da dove lavora il dispositivo (nodo, cloud o tutti e
 // due) si abbona qui. Canale separato da onRoutingChange di proposito: quello
