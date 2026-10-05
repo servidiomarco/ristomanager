@@ -283,7 +283,7 @@ export const ReceiptsSection: React.FC<{
 
 const DDT_MAX_BYTES = 5 * 1024 * 1024;
 
-const readAsBase64 = (file: File): Promise<string> =>
+const readAsBase64 = (blob: Blob): Promise<string> =>
   new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
@@ -291,8 +291,35 @@ const readAsBase64 = (file: File): Promise<string> =>
       resolve(url.slice(url.indexOf(',') + 1));
     };
     reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(blob);
   });
+
+/** La foto del telefono si riduce prima di partire: uno scatto da 48 MP
+ *  supera i 5 MB della rotta, e oltre i 2000 px di lato il modello non legge
+ *  meglio una bolla, la paga soltanto. Il PDF passa com'è. Se il browser non
+ *  sa decodificare l'immagine si manda l'originale. */
+const DDT_MAX_SIDE = 2000;
+const prepareDdtFile = async (file: File): Promise<{ contentType: string; data: string; bytes: number }> => {
+  if (!file.type.startsWith('image/')) return { contentType: file.type || 'application/octet-stream', data: await readAsBase64(file), bytes: file.size };
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, DDT_MAX_SIDE / Math.max(bitmap.width, bitmap.height));
+    if (scale === 1 && file.size <= 1_500_000 && file.type === 'image/jpeg') {
+      bitmap.close();
+      return { contentType: file.type, data: await readAsBase64(file), bytes: file.size };
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    canvas.getContext('2d')!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+    if (!blob) throw new Error('toBlob');
+    return { contentType: 'image/jpeg', data: await readAsBase64(blob), bytes: blob.size };
+  } catch {
+    return { contentType: file.type, data: await readAsBase64(file), bytes: file.size };
+  }
+};
 
 interface DdtLine {
   key: number;
@@ -329,12 +356,15 @@ const DdtScan: React.FC<{
 
   const pick = async (file: File | undefined) => {
     if (!file) return;
-    if (file.size > DDT_MAX_BYTES) { setError(t('ddtScan.tooBig', 'File troppo grande: massimo 5 MB.')); return; }
     setScanning(true);
     setError(null);
     try {
-      const data = await readAsBase64(file);
-      const p = await haccpApiService.scanDdt({ contentType: file.type || 'application/octet-stream', data });
+      const prepared = await prepareDdtFile(file);
+      if (prepared.bytes > DDT_MAX_BYTES) {
+        setError(t('ddtScan.tooBig', 'File troppo grande: massimo 5 MB.'));
+        return;
+      }
+      const p = await haccpApiService.scanDdt({ contentType: prepared.contentType, data: prepared.data });
       if (p.lines.length === 0) {
         setError(t('ddtScan.empty', 'Nessuna riga letta: prova con una foto più nitida.'));
         return;
