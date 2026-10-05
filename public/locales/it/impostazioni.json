@@ -30,7 +30,8 @@
       "Cassa": "Cassa",
       "Chat staff": "Chat staff",
       "Recensioni": "Recensioni",
-      "Asporto": "Asporto"
+      "Asporto": "Asporto",
+      "HACCP": "HACCP"
     },
     "p": {
       "view": "Visualizza",
@@ -47,7 +48,10 @@
       "ordersExpedite": "Passe — lancia le uscite",
       "ordersVoid": "Storna righe inviate",
       "takeawayView": "Visualizza ordini asporto",
-      "takeawayManage": "Gestisce ordini asporto"
+      "takeawayManage": "Gestisce ordini asporto",
+      "haccpView": "Visualizza registri e report",
+      "haccpRecord": "Compila e corregge",
+      "haccpManage": "Configura punti e limiti"
     }
   },
   "prom": {

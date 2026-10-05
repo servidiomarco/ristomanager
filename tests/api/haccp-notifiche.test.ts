@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Client } from 'pg';
 import { api, ownerToken, bearer } from './helpers';
-import { HACCP_TEMPERATURE_LOCATIONS, haccpMissingTag, haccpTemperatureTag } from '../../utils/haccp';
+import { haccpMissingTag, haccpTemperatureTag } from '../../utils/haccp';
 
 // Avvisi HACCP: una temperatura fuori soglia avvisa chi risponde del registro
 // (non chi l'ha scritta) e si chiude per tutti quando la postazione torna in
@@ -127,15 +127,21 @@ describe('HACCP · avvisi temperature', () => {
             [managerId, tag]
         );
         const id = Number(inserted.rows[0].id);
-        const locations = HACCP_TEMPERATURE_LOCATIONS;
+        // Le postazioni sono quelle del ristorante (haccp_points): il
+        // Frantoio di tenant 1 più quelle che un altro test avesse aggiunto.
+        const config = await api().get('/haccp/points').set(bearer(owner));
+        expect(config.status).toBe(200);
+        const locations = config.body.points.filter((p: any) => p.register === 'TEMPERATURE');
+        expect(locations.length).toBeGreaterThan(1);
+        const inRange = (p: any) => (typeof p.maxTemp === 'number' ? p.maxTemp - 1 : p.minTemp + 1);
         for (const loc of locations.slice(0, -1)) {
-            expect((await record(loc.location, loc.targetMax - 1, loc.targetMax)).status).toBe(201);
+            expect((await record(loc.label, inRange(loc), loc.maxTemp)).status).toBe(201);
         }
         const readAt = async () => (await db.query(`SELECT read_at FROM notifications WHERE id = $1`, [id])).rows[0].read_at;
         expect(await readAt()).toBeNull();
 
         const last = locations[locations.length - 1];
-        expect((await record(last.location, last.targetMax - 1, last.targetMax)).status).toBe(201);
+        expect((await record(last.label, inRange(last), last.maxTemp)).status).toBe(201);
         expect(await readAt()).not.toBeNull();
     });
 

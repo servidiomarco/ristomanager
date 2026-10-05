@@ -67,7 +67,14 @@ export type Permission =
   // `manage` copre creazione, modifica e cambi di stato degli ordini. Le
   // route esigono anche l'entitlement 'takeaway'.
   | 'takeaway:view'
-  | 'takeaway:manage';
+  | 'takeaway:manage'
+  // Registro HACCP (docs/haccp-piano.md): `view` apre registri e report,
+  // `record` compila e corregge (con motivo), `manage` configura punti di
+  // controllo e limiti e annulla le non conformità aperte per errore. Prima
+  // l'HACCP stava sotto dashboard:view e chiunque cancellava le righe.
+  | 'haccp:view'
+  | 'haccp:record'
+  | 'haccp:manage';
 
 // Role-permission mapping
 const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
@@ -120,7 +127,10 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'reviews:view',
     'reviews:manage',
     'takeaway:view',
-    'takeaway:manage'
+    'takeaway:manage',
+    'haccp:view',
+    'haccp:record',
+    'haccp:manage'
   ],
   [UserRole.OWNER]: [
     'dashboard:view',
@@ -167,7 +177,10 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'reviews:view',
     'reviews:manage',
     'takeaway:view',
-    'takeaway:manage'
+    'takeaway:manage',
+    'haccp:view',
+    'haccp:record',
+    'haccp:manage'
   ],
   [UserRole.GENERAL_MANAGER]: [
     'dashboard:view',
@@ -207,7 +220,10 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'reviews:view',
     'reviews:manage',
     'takeaway:view',
-    'takeaway:manage'
+    'takeaway:manage',
+    'haccp:view',
+    'haccp:record',
+    'haccp:manage'
   ],
   [UserRole.MANAGER]: [
     'dashboard:view',
@@ -242,7 +258,10 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'reviews:view',
     'reviews:manage',
     'takeaway:view',
-    'takeaway:manage'
+    'takeaway:manage',
+    'haccp:view',
+    'haccp:record',
+    'haccp:manage'
   ],
   [UserRole.RECEPTION]: [
     'dashboard:view',
@@ -258,7 +277,9 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'orders:view',
     'staffchat:use',
     'takeaway:view',
-    'takeaway:manage'
+    'takeaway:manage',
+    'haccp:view',
+    'haccp:record'
   ],
   [UserRole.WAITER]: [
     'dashboard:view',
@@ -271,7 +292,9 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'reception:view',
     'orders:view',
     'orders:take',
-    'staffchat:use'
+    'staffchat:use',
+    'haccp:view',
+    'haccp:record'
   ],
   [UserRole.KITCHEN]: [
     'menu:view',
@@ -281,7 +304,9 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'orders:view',
     'orders:kds',
     'orders:expedite',
-    'staffchat:use'
+    'staffchat:use',
+    'haccp:view',
+    'haccp:record'
   ],
   // Il cassiere. `orders:void` c'è perché senza non si storna una riga né si
   // applica lo sconto conto — le due correzioni che in cassa si fanno di
@@ -304,7 +329,9 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'cash:void_payment',
     'staffchat:use',
     'takeaway:view',
-    'takeaway:manage'
+    'takeaway:manage',
+    'haccp:view',
+    'haccp:record'
   ]
 };
 
@@ -325,7 +352,7 @@ const VIEW_PERMISSIONS: Record<ViewState, Permission[]> = {
   [ViewState.ASPORTO]: ['takeaway:view'],
   [ViewState.ATTIVITA]: ['dashboard:view'],
   [ViewState.LISTA_DELLA_SPESA]: ['dashboard:view'],
-  [ViewState.HACCP]: ['dashboard:view'],
+  [ViewState.HACCP]: ['haccp:view'],
   [ViewState.CONVERSAZIONI]: ['voice_calls:view'],
   [ViewState.MESSAGGI]: ['reservations:view'],
   [ViewState.CHAT_STAFF]: ['staffchat:use'],

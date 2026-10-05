@@ -579,20 +579,41 @@ Modulo a parte (si attiva con l'abbonamento «recensioni»).
 
 ## HACCP
 
-Registro digitale a norma, compilabile dal telefono (campi grandi, pensati per l'uso davanti alla cella frigo). Cinque registri, ognuno con contatore di completamento del giorno:
+Registro di autocontrollo digitale, compilabile dal telefono davanti alla cella frigo (campi grandi, salvataggio a ogni campo). Quattro schede: **Registro** (il giorno), **Non conformità**, **Report** e — per chi gestisce l'HACCP — **Configura**.
 
-1. **Temperature** frigoriferi e congelatori — postazioni predefinite, range atteso, evidenza scostamenti.
+**Punti di controllo del locale**
+- Postazioni di temperatura, friggitrici e punti di pulizia si configurano in **HACCP → Configura**: sono il manuale di autocontrollo del ristorante tradotto in righe del modulo. Per chi parte da zero ci sono i modelli (frigorifero ≤ 4 °C, congelatore ≤ −18 °C, banco caldo ≥ 65 °C, cappe ogni mese…).
+- Ogni postazione ha il suo **limite** (massimo per frigo e congelatori, minimo per il caldo, o entrambi) e da **una a tre rilevazioni al giorno**.
+- Ogni punto di pulizia ha la sua **frequenza**: ogni giorno, ogni settimana, ogni mese o su richiesta (per esempio la pulizia dopo la lavorazione di allergeni). Il registro del giorno chiede solo quelle dovute: una settimanale fatta lunedì resta spuntata per tutta la settimana.
+- Un punto non si cancella: si archivia, e lo storico resta agganciato. Cambiare un limite resta nello storico con il motivo.
+
+**Il registro del giorno**
+1. **Temperature** — il campo parte dal limite da confermare o sovrascrivere; fuori soglia diventa rosso.
 2. **Oli di frittura** — Filtrato / Sostituito / Utilizzabile.
-3. **Pulizie** attrezzature e superfici — punti di pulizia predefiniti.
+3. **Pulizie** attrezzature e superfici, con le frequenze sopra.
 4. **Ricevimento merci** — prodotto, lotto, temperatura, Accettato/Respinto, note.
 5. **Abbattimento / produzione** — prodotto, lotto interno, temperature, durata.
 
-Ogni riga registra **automaticamente chi ha compilato e quando**. Consultazione per giorno e **stampa del report** per i controlli.
+Ogni riga registra **chi l'ha compilata e quando**, con il nome della persona. Una riga scritta in un giorno diverso da quello del registro (il foglio di ieri compilato oggi) lo dice. Più telefoni sullo stesso registro si vedono a vicenda in tempo reale.
+
+**Correzioni a prova di ispezione**
+- Le registrazioni **non si cancellano**: si annullano con un motivo e restano nel report come annullate.
+- Chi corregge la propria registrazione entro 15 minuti non deve motivarlo (è il refuso mentre si compila); dopo, o sulla riga di un collega, il **motivo è obbligatorio**. Ogni correzione conserva il valore originale, chi l'ha fatta, quando e perché: lo **storico** si apre dalla riga.
+- Permessi dedicati nella matrice ruoli: **vede** registri e report, **compila** e corregge, **configura** punti e limiti.
+
+**Non conformità e azioni correttive**
+- Una temperatura fuori soglia o una merce respinta **aprono da sole una non conformità**. Sulla riga compare «Scrivi l'azione», con le azioni più comuni a un tocco (prodotti spostati, eliminati, tecnico chiamato…).
+- Le non conformità si chiudono **solo scrivendo l'azione correttiva**. Se ne possono segnalare anche a mano (prodotto scaduto, tracce di infestanti, semilavorato senza etichetta…), già chiuse se il rimedio è fatto.
+- La scheda **Non conformità** mostra quelle da chiudere (con il contatore sulla scheda) e lo storico di tutte. Annullarne una aperta per errore è da responsabile, sempre motivato.
+
+**Report per periodo**
+- Oggi, questa settimana, questo mese, il mese scorso o un intervallo a scelta (fino a un anno). Prima di stampare il riepilogo segnala i giorni senza registrazioni, i fuori soglia e le non conformità ancora aperte.
+- Il foglio stampato ha la **scheda mensile** delle temperature (postazioni per giorni, fuori soglia in rosso), degli oli e delle pulizie, poi ricevimenti, produzioni, **non conformità con le azioni correttive**, **correzioni e annullamenti** con l'originale e il motivo, e le righe scritte in un giorno diverso. In testa il nome del ristorante, in fondo lo spazio per la firma del responsabile.
 
 Avvisi sul registro temperature:
 
-- **Temperatura fuori soglia** — appena si registra un valore sopra il limite di una postazione, titolare, direzione e cucina ricevono una notifica («Cella 1 · 7,5 °C (limite 4 °C)»); chi l'ha scritto no, lo vede già in rosso sul modulo. Si chiude per tutti quando la postazione torna in soglia o la lettura viene cancellata. Suona solo per il giorno di oggi.
-- **Temperature mancanti** — un promemoria di sistema (Impostazioni → Promemoria, di serie alle 11:00 ogni giorno) avvisa se a quell'ora il registro di oggi non è completo, con le postazioni che mancano. Tace nei giorni di chiusura e per chi non usa il registro da un mese; si chiude per tutti appena l'ultima postazione è registrata.
+- **Temperatura fuori soglia** — appena si registra un valore oltre il limite di una postazione, titolare, direzione e cucina ricevono una notifica («Cella 1 · 7,5 °C (limite 4 °C)»); chi l'ha scritto no, lo vede già in rosso sul modulo. Si chiude per tutti quando la postazione torna in soglia o la lettura viene annullata. Suona solo per il giorno di oggi.
+- **Temperature mancanti** — un promemoria di sistema (Impostazioni → Promemoria, di serie alle 11:00 ogni giorno) avvisa se a quell'ora manca la prima rilevazione di qualche postazione, con le postazioni che mancano. Tace nei giorni di chiusura e per chi non usa il registro da un mese; si chiude per tutti appena l'ultima postazione è registrata.
 
 ---
 
@@ -726,6 +747,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-05 | HACCP | Il registro HACCP diventa quello del tuo locale: postazioni, limiti, rilevazioni al giorno e frequenze delle pulizie si configurano in HACCP → Configura. Le registrazioni non si cancellano più ma si annullano con un motivo, ogni correzione tiene l'originale, un fuori soglia o una merce respinta aprono una non conformità da chiudere con l'azione correttiva, e il report si stampa per giorno, settimana o mese. |
 | 2026-10-04 | Messaggi: WhatsApp e SMS | L'AI dei Messaggi conosce la scheda del cliente in rubrica: a chi chiede il suo tavolo preferito risponde nominandolo, invece di chiedergli quale sia. |
 | 2026-10-03 | Menu digitale pubblico | Sul menu del QR il logo sta in una testata bassa, a sinistra, con la lingua accanto: i piatti partono più in alto. Un logo con lo sfondo bianco non mostra più il riquadro bianco sul fondo della pagina. |
 | 2026-10-03 | Menu digitale pubblico | Il menu del QR ha un aspetto nuovo: in testa il logo del ristorante, la barra delle categorie che resta in alto ed evidenzia quella che si sta leggendo, le foto a destra dei piatti e la lingua scelta da una pillola che apre il selettore del telefono. Senza logo in anagrafica resta il nome del ristorante. |

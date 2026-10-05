@@ -58,7 +58,10 @@ const PERMISSION_LABELS: Record<string, { key: string; it: string }> = {
   'orders:expedite':         { key: 'perm.p.ordersExpedite', it: 'Passe — lancia le uscite' },
   'orders:void':             { key: 'perm.p.ordersVoid', it: 'Storna righe inviate' },
   'takeaway:view':           { key: 'perm.p.takeawayView', it: 'Visualizza ordini asporto' },
-  'takeaway:manage':         { key: 'perm.p.takeawayManage', it: 'Gestisce ordini asporto' }
+  'takeaway:manage':         { key: 'perm.p.takeawayManage', it: 'Gestisce ordini asporto' },
+  'haccp:view':              { key: 'perm.p.haccpView', it: 'Visualizza registri e report' },
+  'haccp:record':            { key: 'perm.p.haccpRecord', it: 'Compila e corregge' },
+  'haccp:manage':            { key: 'perm.p.haccpManage', it: 'Configura punti e limiti' }
 };
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';
