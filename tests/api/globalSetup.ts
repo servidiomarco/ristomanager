@@ -7,7 +7,7 @@
 // degli script in scripts/ (dev-comande.sh, test-locale.sh).
 import { generateKeyPairSync } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, createWriteStream } from 'node:fs';
 import path from 'node:path';
 import { Client } from 'pg';
 
@@ -139,6 +139,13 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     let bootLog = '';
     child.stdout?.on('data', d => { bootLog += d; });
     child.stderr?.on('data', d => { bootLog += d; });
+    // TEST_SERVER_LOG=<file>: tutto il log del server su file, per capire un
+    // test che fallisce lato cloud (senza, si vede solo il log di boot).
+    if (process.env.TEST_SERVER_LOG) {
+        const out = createWriteStream(process.env.TEST_SERVER_LOG);
+        child.stdout?.pipe(out);
+        child.stderr?.pipe(out);
+    }
 
     // /health risponde 200 prima ancora che lo schema esista (createSchema gira
     // in background dopo la listen), quindi non è un readiness probe. Il login
