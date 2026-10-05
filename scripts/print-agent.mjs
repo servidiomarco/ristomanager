@@ -547,6 +547,44 @@ function renderComandaAnnullo(p) {
 }
 
 // Pagina di prova dal bottone "Stampa prova" in Impostazioni.
+// ---------------------------------------------------------------------------
+// Etichetta HACCP (prodotto, aperto, scongelato)
+// ---------------------------------------------------------------------------
+// Si attacca al contenitore in cella: il nome del prodotto e la scadenza sono
+// le due cose che si leggono da un metro, e prendono il corpo grande. Il
+// resto (data di partenza, lotto, conservazione, allergeni, chi l'ha fatta)
+// sta sotto, a corpo normale. Una copia per contenitore, ognuna col suo
+// taglio.
+const LABEL_FROM = { PRODUZIONE: 'Prodotto il', APERTURA: 'Aperto il', SCONGELAMENTO: 'Scongelato il' };
+
+function renderEtichetta(p) {
+  const w = ticketWriter();
+  const pad = n => String(n).padStart(2, '0');
+  const d = new Date(p.prepared_at);
+  const from = Number.isNaN(d.getTime()) ? '' : `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const [y, m, dd] = String(p.expiry_date ?? '').split('-');
+  const expiry = y && m && dd ? `${dd}/${m}/${y}` : String(p.expiry_date ?? '');
+  const copies = Math.max(1, Math.min(20, Number(p.copies) || 1));
+  for (let i = 0; i < copies; i++) {
+    w.push(ESC, 0x40);
+    w.push(ESC, 0x74, 16);
+    w.push(ESC, 0x61, 0);
+    for (const l of wrapWords(toLatin(p.product), BIG_COLS).slice(0, 3)) w.line([{ text: l, size: BIG, bold: true }]);
+    w.line([{ text: `${LABEL_FROM[p.kind] ?? 'Preparato il'} ${from}` }]);
+    w.line([{ text: 'Scade il ', bold: true }, { text: expiry, size: TALL, bold: true }]);
+    if (p.lot) w.line([{ text: `Lotto ${p.lot}` }]);
+    if (p.storage) w.line([{ text: `Conservare ${p.storage}` }]);
+    if (Array.isArray(p.allergens) && p.allergens.length) {
+      for (const l of wrapWords(`Allergeni: ${p.allergens.join(', ')}`, COLS)) w.line([{ text: l, bold: true }]);
+    }
+    if (p.note) for (const l of wrapWords(p.note, COLS)) w.line([{ text: l }]);
+    if (p.operator) w.line([{ text: p.operator }]);
+    w.text('\n\n');
+    w.push(GS, 0x56, 0x42, 0x00);
+  }
+  return Buffer.from(w.bytes);
+}
+
 function renderTest(p) {
   const bytes = [];
   const push = (...b) => bytes.push(...b);
@@ -619,6 +657,7 @@ async function drainPrinter(name, dest, jobs) {
                : job.kind === 'COMANDA' ? renderComanda(job.payload)
                : job.kind === 'COMANDA_ANNULLO' ? renderComandaAnnullo(job.payload)
                : job.kind === 'TEST' ? renderTest(job.payload)
+               : job.kind === 'ETICHETTA' ? renderEtichetta(job.payload)
                : null;
       if (!rendered) throw new Error(`kind sconosciuto: ${job.kind}`);
     } catch (err) {

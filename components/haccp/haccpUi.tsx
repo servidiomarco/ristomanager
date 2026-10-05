@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { History, PenLine, Trash2 } from 'lucide-react';
+import { History, PenLine, ShieldAlert, Trash2 } from 'lucide-react';
 import { ModalShell, StatusPill, dsButton, dsTextarea } from '../ds';
 import { displayLocale } from '../../utils/formatLocale';
 import {
@@ -10,6 +10,7 @@ import {
   HaccpNonConformity,
 } from '../../services/haccpApiService';
 import { HACCP_CORRECTION_GRACE_MINUTES } from '../../utils/haccp';
+import type { HaccpFrequency } from '../../utils/haccp';
 
 /* Pezzi condivisi delle schede HACCP: la vestizione delle card, la firma
    delle righe, e i tre dialoghi che attraversano tutti i registri — il motivo
@@ -309,6 +310,37 @@ const quickActions = (nc: HaccpNonConformity, t: TFunc): string[] => {
         t('action.discarded', 'Prodotti eliminati'),
         t('action.supplierWarned', 'Fornitore avvisato'),
       ];
+    case 'PROCESS':
+      return [
+        t('action.discarded', 'Prodotti eliminati'),
+        t('action.reprocessed', 'Processo ripetuto fino al limite'),
+        t('action.consumedNow', 'Prodotto destinato al consumo immediato'),
+        t('action.technician', 'Chiamato il tecnico'),
+      ];
+    case 'OIL':
+      return [
+        t('action.oilChanged', 'Olio sostituito'),
+        t('action.fryerTemp', 'Temperatura della friggitrice abbassata'),
+      ];
+    case 'CALIBRATION':
+      return [
+        t('action.recalibrated', 'Termometro ricalibrato'),
+        t('action.thermoReplaced', 'Termometro sostituito'),
+      ];
+    case 'INTERVENTION':
+      return [
+        t('action.followUp', 'Intervento correttivo della ditta programmato'),
+        t('action.discarded', 'Prodotti eliminati'),
+        t('action.sealed', 'Aperture sigillate e area pulita'),
+        t('action.reported', 'Segnalato al responsabile'),
+      ];
+    case 'RECALL':
+      return [
+        t('action.withdrawn', 'Prodotto ritirato dal magazzino'),
+        t('action.supplierWarned', 'Fornitore avvisato'),
+        t('action.authorityWarned', 'ASL informata'),
+        t('action.notServed', 'Nessuna porzione servita'),
+      ];
     default:
       return [
         t('action.fixed', 'Ripristinato subito'),
@@ -445,9 +477,35 @@ const FIELD_LABELS_IT: Record<string, string> = {
   frequency: 'Frequenza',
   instructions: 'Istruzioni',
   active: 'Attivo',
+  polarCompounds: 'Composti polari',
+  oilTemp: 'Temperatura olio',
+  process: 'Processo',
+  startedAt: 'Inizio',
+  startTemp: 'Temperatura iniziale',
+  endedAt: 'Fine',
+  endTemp: 'Temperatura finale',
+  supplierName: 'Fornitore',
+  ddtNumber: 'Documento',
+  expiryDate: 'Scadenza',
+  packagingOk: 'Imballo integro',
+  category: 'Tipo di merce',
+  quantity: 'Quantità',
+  sourceLots: 'Lotti degli ingredienti',
+  sanitizer: 'Prodotto sanificante',
+  concentration: 'Concentrazione',
+  contactMinutes: 'Contatto (min)',
+  eventLabel: 'Evento',
+  equipmentLabel: 'Attrezzatura',
+  method: 'Metodo',
+  referenceTemp: 'Riferimento',
+  measuredTemp: 'Letto',
+  outcome: 'Esito',
 };
 
-const IGNORED_DIFF_KEYS = new Set(['id', 'date', 'pointId', 'location', 'fryerLabel', 'point', 'slot', 'targetMin', 'targetMax', 'sortOrder', 'register', 'source', 'sourceId', 'openedAt', 'openedByUserName', 'closedAt', 'closedByUserName', 'updatedAt']);
+// Fuori dal confronto: identità della riga, firme e i campi che calcola il
+// server (esito, problema, scadenza del campione) — cambiano da soli quando
+// cambia un valore, e ripeterli sarebbe solo rumore.
+const IGNORED_DIFF_KEYS = new Set(['id', 'date', 'pointId', 'location', 'fryerLabel', 'point', 'slot', 'targetMin', 'targetMax', 'sortOrder', 'register', 'source', 'sourceId', 'openedAt', 'openedByUserName', 'closedAt', 'closedByUserName', 'updatedAt', 'compliant', 'problem', 'keepUntil', 'supplierId', 'equipmentPointId', 'maxDeviation', 'instrument', 'endedByUserName']);
 
 const showValue = (v: unknown, t: TFunc): string => {
   if (v === null || v === undefined || v === '') return '—';
@@ -541,3 +599,43 @@ export const HistoryDialog: React.FC<{
     </ModalShell>
   );
 };
+
+// Non conformità in riga
+// =============================================================================
+
+export const NcLine: React.FC<{ nc: HaccpNonConformity | undefined; onCloseNc: (nc: HaccpNonConformity) => void; editable: boolean }> = ({ nc, onCloseNc, editable }) => {
+  const { t } = useTranslation('haccp', { useSuspense: false });
+  if (!nc || nc.status === 'VOID') return null;
+  if (nc.status === 'CLOSED') {
+    return (
+      <div className="col-span-12 text-[13px] text-[var(--ds-text-muted)]">
+        {t('nc.actionDone', 'Azione correttiva: {{azione}}', { azione: nc.correctiveAction ?? '' })}
+      </div>
+    );
+  }
+  return (
+    <div className="col-span-12 flex flex-wrap items-center gap-2 rounded-[var(--ds-radius-sm)] bg-[var(--ds-critical-tint)] px-3 py-2 text-[13px] text-[var(--ds-critical-text)]">
+      <ShieldAlert className="h-4 w-4 flex-shrink-0" aria-hidden />
+      <span className="min-w-0 flex-1">{t('nc.needsAction', 'Fuori norma: serve l\'azione correttiva')}</span>
+      {editable && (
+        <button type="button" onClick={() => onCloseNc(nc)} className={`${dsButton.secondary} h-9 px-3 text-[14px]`}>
+          {t('nc.writeAction', 'Scrivi l\'azione')}
+        </button>
+      )}
+    </div>
+  );
+};
+
+// =============================================================================
+
+const FREQUENCY_LABELS_IT: Record<HaccpFrequency, string> = {
+  DAILY: 'ogni giorno',
+  WEEKLY: 'ogni settimana',
+  MONTHLY: 'ogni mese',
+  QUARTERLY: 'ogni tre mesi',
+  SEMIANNUAL: 'ogni sei mesi',
+  ANNUAL: 'ogni anno',
+  ON_DEMAND: 'su richiesta',
+};
+
+export const frequencyLabel = (f: HaccpFrequency, t: TFunc): string => t(`freq.${f}`, FREQUENCY_LABELS_IT[f]);

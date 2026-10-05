@@ -37,7 +37,7 @@ Il Reg. CE 852/2004 non elenca i registri da tenere: chiede procedure basate sui
 - **Non conformità** (`haccp_nonconformities`): si aprono da sole quando un valore esce dalla soglia (temperatura, olio, merce respinta, processo fuori limite) o a mano. Si chiudono scrivendo l'azione correttiva. Il report le elenca con chi le ha chiuse.
 - **Permessi**: `haccp:view` (vede registri e report), `haccp:record` (compila), `haccp:manage` (configura punti e limiti, archivio documenti, formazione). Concessi dalla migration a chi oggi vede l'HACCP (`dashboard:view`); `manage` a titolare, direzione e manager.
 
-## Fase 1 — fondamenta
+## Fase 1 — fondamenta ✅ (PR #828)
 
 - Punti di controllo configurabili da **HACCP → Configura**, con il Frantoio migrato sui suoi punti attuali (lo storico si aggancia per nome).
 - Fino a tre rilevazioni al giorno per postazione, soglia minima per il caldo.
@@ -47,7 +47,7 @@ Il Reg. CE 852/2004 non elenca i registri da tenere: chiede procedure basate sui
 - Report per periodo (giorno, mese, intervallo), con griglia mensile delle temperature, non conformità e correzioni.
 - Aggiornamento in tempo reale fra i telefoni della cucina (`haccp:changed`).
 
-## Fase 2 — registri di processo e rintracciabilità
+## Fase 2 — registri di processo e rintracciabilità ✅ (PR #829)
 
 - **Processi** con temperature e orari veri, al posto di «range/durata»: abbattimento (positivo e negativo), bonifica anti-Anisakis (−20 °C per 24 h o −35 °C per 15 h), cottura al cuore, rinvenimento, mantenimento a caldo, scongelamento, sanificazione delle verdure, campioni testimone dei banchetti. Esito calcolato sui limiti del locale; fuori limite apre una non conformità.
 - **Limiti del locale** (`haccp_settings`): cottura ≥ 75 °C, caldo ≥ 65 °C, abbattimento a +3 °C in 90 minuti, ecc., modificabili in Configura.
@@ -56,7 +56,7 @@ Il Reg. CE 852/2004 non elenca i registri da tenere: chiede procedure basate sui
 - **Rintracciabilità**: ricerca per lotto, prodotto o fornitore fra ricevimenti e processi; **richiamo** come non conformità dedicata.
 - **Taratura dei termometri** come registro con la sua frequenza.
 
-## Fase 3 — persone, documenti, interventi, allergeni
+## Fase 3 — persone, documenti, interventi, allergeni ✅ (PR #830)
 
 - **Formazione**: attestati per persona (scheda del Personale) con scadenza, allegato e avviso 30 giorni prima.
 - **Interventi esterni**: disinfestazione, ritiro dell'olio esausto (CONOE), manutenzioni, analisi dell'acqua e di laboratorio; con ditta, esito, rapporto allegato e prossima scadenza.
@@ -65,11 +65,17 @@ Il Reg. CE 852/2004 non elenca i registri da tenere: chiede procedure basate sui
 - **Fascicolo per l'ispezione**: una stampa sola con documenti, formazione, registri del periodo e non conformità.
 - Scadenze (attestati, interventi, documenti) nei promemoria di sistema.
 
-## Fase 4 — etichette, sensori, AI
+## Fase 4 — etichette, sensori, AI ✅
 
 - **Etichette** di produzione e di prodotto aperto (prodotto, data, scadenza secondaria, lotto, allergeni, operatore) sulla stampante termica tramite l'agente di stampa; preset di prodotti con la loro durata.
 - **Sensori di temperatura**: webhook generico con token per ristorante (formato documentato, adattabile a Monnit, Testo, Comark…), sensore → postazione; la rilevazione del giorno si compila da sola, lo scostamento prolungato apre una non conformità, il sensore muto avvisa.
 - **AI sulle bolle**: foto del documento di trasporto → proposta di righe di ricevimento (fornitore, prodotti, lotti, scadenze) da confermare. L'AI propone, la persona conferma.
+
+Da sapere per l'esercizio:
+
+- Le etichette sulla termica sono un job `ETICHETTA` dell'agente di stampa: l'agente del PC del locale va ricopiato (`scripts/print-agent.mjs`) prima che le stampi; finché non lo si aggiorna, si stampano dal browser.
+- La lettura delle bolle usa `claude-opus-5-5` con la chiave Anthropic del servizio: senza chiave valida risponde «non disponibile» (503) e il resto del ricevimento funziona.
+- Sensori: il gateway va configurato col suo indirizzo e il token di Configura; le fasce orarie e le soglie di escursione e silenzio sono nei limiti del manuale. Il controllo dei sensori muti gira ogni 10 minuti sotto lock di scheduler.
 
 ## Fuori da questo piano
 
