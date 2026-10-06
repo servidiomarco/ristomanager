@@ -26,6 +26,7 @@
 import pool from '../db.js';
 import { outboxImportInTx } from './outboxService.js';
 import { syncIdSequence } from './idSpace.js';
+import { eventSpec } from './eventRegistry.js';
 
 export interface ReplicaEvent {
     seq: number;
@@ -75,6 +76,8 @@ const CONVERGENCE: Record<string, Convergence> = {
     'table:updated': { mode: 'fetch', kind: 'tables', idFrom: 'table_id' },
     'reservation:created': { mode: 'fetch', kind: 'reservations', idFrom: 'reservation_id' },
     'reservation:updated': { mode: 'fetch', kind: 'reservations', idFrom: 'reservation_id' },
+    // Tappa C: tavolo e arrivo, le sole colonne del servizio.
+    'reservation:service-updated': { mode: 'fetch', kind: 'reservations', idFrom: 'reservation_id' },
     'reservation:deleted': { mode: 'delete', table: 'reservations', idFrom: 'reservation_id' },
     'order:created': { mode: 'fetch', kind: 'orders', idFrom: 'order_id' },
     'order:updated': { mode: 'fetch', kind: 'orders', idFrom: 'order_id' },
@@ -102,6 +105,11 @@ const CONVERGENCE: Record<string, Convergence> = {
  *  (raddoppierebbe i broadcast); per tutti gli altri (features:updated,
  *  kds:*, bill:*, menu…) l'envelope è l'unica strada verso la LAN. */
 export const CONVERGED_TYPES: ReadonlySet<string> = new Set(Object.keys(CONVERGENCE));
+
+/** Le colonne della prenotazione che appartengono al servizio (tappa C):
+ *  le scrive PATCH /reservations/:id/service, e col servizio in sala il
+ *  PUT del cloud non le tocca. */
+export const RESERVATION_SERVICE_COLUMNS: readonly string[] = ['table_id', 'arrival_status'];
 
 /** Upsert brutale e idempotente: via la riga con quell'id, dentro quella
  *  nuova — jsonb_populate_recordset fa i cast per nome di colonna. */
@@ -135,13 +143,26 @@ const updatableColumns = async (client: any, table: string): Promise<string[]> =
     return cols;
 };
 
-const upsertInPlace = async (client: any, table: string, row: any): Promise<void> => {
+const upsertInPlace = async (client: any, table: string, row: any, keep: readonly string[] = []): Promise<void> => {
     if (row?.id == null) return;
-    const cols = await updatableColumns(client, table);
-    const set = cols.map(c => `"${c}" = EXCLUDED."${c}"`).join(', ');
+    const cols = (await updatableColumns(client, table)).filter(c => !keep.includes(c));
+    // Prima l'UPDATE, l'INSERT solo se la riga manca. Non INSERT … ON
+    // CONFLICT DO UPDATE: i trigger BEFORE INSERT scattano anche quando poi
+    // il conflitto diventa un aggiornamento, e quello delle quote
+    // (enforce_table_bill_split_sum, che per un INSERT conta tutte le quote
+    // vive) contava due volte la quota già in casa. Il replica-mode sul nodo
+    // spegne i trigger; sul cloud di Railway, senza superuser, restano
+    // accesi — visto solo nella suite con RLS rigida.
+    const set = cols.map(c => `"${c}" = src."${c}"`).join(', ');
+    const upd = await client.query(
+        `UPDATE ${table} AS t SET ${set}
+           FROM jsonb_populate_record(NULL::${table}, $1::jsonb) AS src
+          WHERE t.id = src.id`,
+        [JSON.stringify(row)]
+    );
+    if ((upd.rowCount ?? 0) > 0) return;
     await client.query(
-        `INSERT INTO ${table} SELECT * FROM jsonb_populate_recordset(NULL::${table}, $1::jsonb)
-         ON CONFLICT (id) DO UPDATE SET ${set}`,
+        `INSERT INTO ${table} SELECT * FROM jsonb_populate_recordset(NULL::${table}, $1::jsonb)`,
         [JSON.stringify([row])]
     );
 };
@@ -268,40 +289,105 @@ export const applyReplicaBatch = async (opts: {
             await client.query('ROLLBACK');
             await client.query('BEGIN');
         }
-        // L'aggregato conto: si sostituiscono pagamenti (e, sul nodo, quote)
-        // con quelli dell'autorità, poi il conto stesso. Le quote (pagamenti
-        // col QR) sono del cloud: le sostituisce solo il NODO che applica lo
-        // stream del cloud; sul cloud le referenziano le richieste di
-        // pagamento, e restano sue. Una volta per conto per lotto.
+        // L'aggregato conto (conto, quote, pagamenti) dall'autorità: dal
+        // cloud quando il conto è suo, dal nodo col servizio in sala (anche
+        // le quote del QR, dalla fase B3b). Una volta per conto per lotto.
         const appliedBills = new Set<number>();
         const applyBill = async (id: number): Promise<void> => {
             if (appliedBills.has(id)) return;
             appliedBills.add(id);
-            const replaceSplits = cursorStream === 'cloud';
+            const onNodeSide = cursorStream === 'cloud';
             const bill = fetched.bills.get(id);
             await client.query(`DELETE FROM table_bill_payments WHERE table_bill_id = $1`, [id]);
-            if (replaceSplits) await client.query(`DELETE FROM table_bill_splits WHERE table_bill_id = $1`, [id]);
+            // Sul nodo (replica-mode, FK mute) le quote si sostituiscono in
+            // blocco. Sul cloud le referenziano le richieste di pagamento (FK
+            // vive): si aggiornano sul posto, e quelle sparite si tolgono se
+            // nessuno le cita più.
+            if (onNodeSide) await client.query(`DELETE FROM table_bill_splits WHERE table_bill_id = $1`, [id]);
             if (!bill) {
                 await deleteTolerant(client, 'table_bills', id);
                 return;
             }
             await upsertInPlace(client, 'table_bills', bill);
-            const children: Array<[string, any[] | undefined]> = [['table_bill_payments', paymentsByBill.get(id)]];
-            if (replaceSplits) children.unshift(['table_bill_splits', splitsByBill.get(id)]);
-            for (const [table, list] of children) {
-                if (list && list.length) {
+            const splits = splitsByBill.get(id) ?? [];
+            if (onNodeSide) {
+                if (splits.length) {
                     await client.query(
-                        `INSERT INTO ${table} SELECT * FROM jsonb_populate_recordset(NULL::${table}, $1::jsonb)`,
-                        [JSON.stringify(list)]
+                        `INSERT INTO table_bill_splits SELECT * FROM jsonb_populate_recordset(NULL::table_bill_splits, $1::jsonb)`,
+                        [JSON.stringify(splits)]
                     );
                 }
+            } else {
+                for (const split of splits) await upsertInPlace(client, 'table_bill_splits', split);
+                const keep = splits.map((r: any) => Number(r.id));
+                const gone = await client.query(
+                    `SELECT id FROM table_bill_splits WHERE table_bill_id = $1 AND NOT (id = ANY($2::bigint[]))`,
+                    [id, keep]
+                );
+                for (const row of gone.rows) await deleteTolerant(client, 'table_bill_splits', Number(row.id));
             }
-            touched.add('table_bills'); touched.add('table_bill_payments');
-            if (replaceSplits) touched.add('table_bill_splits');
+            const payments = paymentsByBill.get(id) ?? [];
+            if (payments.length) {
+                await client.query(
+                    `INSERT INTO table_bill_payments SELECT * FROM jsonb_populate_recordset(NULL::table_bill_payments, $1::jsonb)`,
+                    [JSON.stringify(payments)]
+                );
+            }
+            touched.add('table_bills'); touched.add('table_bill_payments'); touched.add('table_bill_splits');
         };
         // Prima i conti (anche quelli presi per dipendenza): comande e
         // documenti fiscali del lotto li citano, e sul cloud le FK sono vive.
         for (const id of fetched.bills.keys()) await applyBill(id);
+
+        // Le prenotazioni per colonna (tappa C). La prenotazione è del
+        // cloud, tavolo e arrivo del servizio: con l'autorità in sala il
+        // nodo non si fa riscrivere quelle due colonne da una riga del
+        // cloud (che le ha vecchie di qualche secondo, o di un'ora a linea
+        // giù), e reservation:service-updated porta SOLO quelle. Così un
+        // nome corretto nel cloud e un tavolo assegnato in sala, nello
+        // stesso minuto, sopravvivono tutti e due. Annullata o rifiutata
+        // nel cloud = tavolo libero anche sul nodo, come fa il PUT.
+        const onNodeSide = cursorStream === 'cloud';
+        let serviceOnNodeCached: boolean | null = null;
+        const serviceOnNode = async (): Promise<boolean> => {
+            if (serviceOnNodeCached === null) {
+                const rs = await client.query(
+                    `SELECT value FROM app_settings WHERE tenant_id = $1 AND key = 'sala_node_authority_enabled'`,
+                    [tenantId]
+                );
+                serviceOnNodeCached = rs.rows[0]?.value === true;
+            }
+            return serviceOnNodeCached;
+        };
+        const applyReservation = async (type: string, id: number): Promise<void> => {
+            const row = fetched.reservations.get(id);
+            if (!row) {
+                // La prenotazione esiste finché il cloud la tiene: al nodo
+                // può mancare solo perché fuori dalla sua finestra.
+                if (onNodeSide) await client.query(`DELETE FROM reservations WHERE id = $1`, [id]);
+                return;
+            }
+            const local = await client.query(`SELECT 1 FROM reservations WHERE id = $1`, [id]);
+            touched.add('reservations');
+            if (local.rows.length === 0) {
+                await upsertInPlace(client, 'reservations', row);
+                return;
+            }
+            if (type === 'reservation:service-updated') {
+                await client.query(
+                    `UPDATE reservations SET table_id = $2, arrival_status = $3 WHERE id = $1`,
+                    [id, row.table_id ?? null, row.arrival_status ?? 'WAITING']
+                );
+                return;
+            }
+            if (onNodeSide && await serviceOnNode()) {
+                const releases = row.reservation_status === 'CANCELLED' || row.reservation_status === 'DECLINED';
+                await upsertInPlace(client, 'reservations', row,
+                    releases ? ['arrival_status'] : RESERVATION_SERVICE_COLUMNS);
+                return;
+            }
+            await upsertInPlace(client, 'reservations', row);
+        };
 
         for (const ev of events) {
             // L'import SEMPRE, anche per i tipi che non sappiamo applicare:
@@ -310,6 +396,11 @@ export const applyReplicaBatch = async (opts: {
             await outboxImportInTx(client, tenantId, ev);
             const conv = CONVERGENCE[ev.type];
             if (!conv) continue;
+            // Tappa C: sul cloud, un evento che il registro dà al cloud
+            // (reservation:updated, :deleted…) arrivato dal nodo si registra
+            // ma non si applica — il nodo non è padrone di quei dati, e una
+            // sua copia vecchia riscriverebbe la prenotazione vera.
+            if (!onNodeSide && eventSpec(ev.type)?.authority === 'cloud') continue;
             if (conv.mode === 'delete') {
                 const id = Number(ev.payload?.[conv.idFrom]);
                 if (Number.isInteger(id)) await client.query(`DELETE FROM ${conv.table} WHERE id = $1`, [id]);
@@ -348,6 +439,10 @@ export const applyReplicaBatch = async (opts: {
                     );
                 }
                 touched.add('orders'); touched.add('order_items'); touched.add('order_revisions');
+                continue;
+            }
+            if (conv.kind === 'reservations') {
+                await applyReservation(ev.type, id);
                 continue;
             }
             if (conv.kind === 'takeaways') {

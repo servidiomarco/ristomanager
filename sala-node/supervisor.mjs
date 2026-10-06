@@ -135,6 +135,7 @@ const versionOf = (appDir) => {
 
 const childSpecs = (cfg, appDir) => {
     const version = cfg.build_sha || versionOf(appDir);
+    const pp = cfg.passepartout_agent?.enabled ? cfg.passepartout_agent : null;
     const specs = [{
         name: 'nodo',
         args: [path.join(appDir, 'dist', 'server.js')],
@@ -146,6 +147,10 @@ const childSpecs = (cfg, appDir) => {
             SALA_NODE_STATE_DIR: STATE_DIR,
             PORT: String(cfg.port),
             BUILD_SHA: version,
+            // Fase B5: l'agente Passepartout si collega anche al nodo, con lo
+            // stesso token che usa col cloud. Il nodo lo riceve da qui (sta
+            // già in questo file), mai dal cloud.
+            ...(pp?.env?.PP_AGENT_TOKEN ? { PASSEPARTOUT_AGENT_TOKEN: pp.env.PP_AGENT_TOKEN } : {}),
             ...(cfg.node_env || {}),
         },
     }];
@@ -161,11 +166,17 @@ const childSpecs = (cfg, appDir) => {
             },
         });
     }
-    if (cfg.passepartout_agent?.enabled) {
+    if (pp) {
         specs.push({
             name: 'passepartout',
             args: [path.join(appDir, 'dist', 'scripts', 'passepartout-agent.js')],
-            env: { ...(cfg.passepartout_agent.env || {}) },
+            env: {
+                // Seconda fonte come l'agente di stampa: dove vivono i conti
+                // con l'autorità in sala. Di default lo stesso indirizzo
+                // che usa l'agente di stampa.
+                PP_AGENT_NODE_URL: pp.node_url || cfg.print_agent?.node_url || '',
+                ...(pp.env || {}),
+            },
         });
     }
     return specs.map(s => ({ ...s, cwd: appDir }));

@@ -5,6 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { existsSync, mkdtempSync } from 'node:fs';
 import { Client } from 'pg';
+import { createHmac } from 'node:crypto';
+import { io as ioClient } from 'socket.io-client';
 import { api, bearer, ownerToken } from './helpers';
 
 // Fase 4a della tappa 4, end-to-end: lo STREAM INVERSO. Si scrive SUL NODO
@@ -87,6 +89,14 @@ describe('stream inverso nodo→cloud', () => {
                 // Stringa vuota e non assente, così nemmeno la shell lo passa.
                 JWT_SECRET: '',
                 JWT_REFRESH_SECRET: '',
+                // L'agente Passepartout (fase B5): il token glielo dà il
+                // supervisore; tipo pagamento e documento arrivano invece
+                // dalle credenziali del cloud — qui apposta assenti.
+                PASSEPARTOUT_AGENT_TOKEN: 'test-pp-agent-token',
+                PASSEPARTOUT_TIPO_PAGAMENTO: '',
+                PASSEPARTOUT_TIPO_DOCUMENTO: '',
+                PASSEPARTOUT_CLOSE_SWEEP_MS: '300',
+                PASSEPARTOUT_CLOSE_RETRY_UNIT_MS: '300',
                 // Log e cache (chiavi, certificato) fuori dal checkout.
                 SALA_NODE_STATE_DIR: mkdtempSync(path.join(os.tmpdir(), 'nodo-di-prova-')),
             },
@@ -221,6 +231,8 @@ describe('stream inverso nodo→cloud', () => {
             const sulCloud = await api().put(`/tables/${tableId}`).set(bearer(token)).send({ status: 'FREE' });
             expect(sulCloud.status).toBe(409);
             expect(sulCloud.body.error).toBe('authority_on_node');
+            // La frase che il cameriere legge: niente è partito.
+            expect(sulCloud.body.message).toContain('niente registrato');
             const sulNodo = await fetch(`${nodeBase}/tables/${tableId}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -304,10 +316,6 @@ describe('stream inverso nodo→cloud', () => {
             const cloudPay = await api().post(`/bills/${secondBill.id}/payments`).set(bearer(token)).send({ method: 'CONTANTI', amount_cents: 100 });
             expect(cloudPay.status).toBe(409);
             expect(cloudPay.body.error).toBe('authority_on_node');
-            // E il QR è sospeso: l'ospite paga in cassa.
-            const claim = await api().post(`/pay/${secondBill.share_token}/claim`).send({ kind: 'full_bill' });
-            expect(claim.status).toBe(409);
-            expect(claim.body.error).toBe('pay_unavailable_on_node');
             const voided = await nodeFetch(`/bills/${secondBill.id}/void`, 'POST', {});
             expect(voided.status).toBe(200);
 
@@ -316,6 +324,288 @@ describe('stream inverso nodo→cloud', () => {
         } finally {
             await api().post('/sala-node/authority').set(bearer(token)).send({ enabled: false, force: true });
             await api().put('/settings/fiscal').set(bearer(token)).send({ provider: 'none' });
+            await api().put('/settings/features').set(bearer(token)).send({ sala_node_enabled: hybridPrima });
+        }
+    }, 90_000);
+
+    it('col servizio in sala il QR passa dal nodo: quota, pagamento, chiusura e scontrino (fase B3b)', async () => {
+        const WEBHOOK_SECRET = 'segreto-webhook-qr-nodo';
+        const nodeFetch = (path: string, method: string, body?: any) => fetch(`${nodeBase}${path}`, {
+            method,
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: body === undefined ? undefined : JSON.stringify(body),
+        });
+        const flags = await api().get('/settings/features').set(bearer(token));
+        const hybridPrima = flags.body.sala_node_enabled === true;
+        await api().put('/settings/features').set(bearer(token)).send({ sala_node_enabled: true });
+        await api().put('/settings/fiscal').set(bearer(token)).send({ provider: 'mock', vat_number: '11122211133' });
+        await api().put('/settings/integrations/revolut').set(bearer(token)).send({ webhook_secret: WEBHOOK_SECRET });
+        try {
+            await finoA(async () => {
+                const o = await api().get('/sala-node/authority').set(bearer(token));
+                return o.body.node_online === true && o.body.aligned === true;
+            }, 'repliche allineate');
+            await finoA(async () => {
+                const r = await nodeDb!.query(`SELECT text_value FROM app_settings WHERE key = 'fiscal_provider'`);
+                return r.rows[0]?.text_value === 'mock';
+            }, 'provider fiscale sul nodo');
+            await cloudDb!.query(`UPDATE table_bill_splits SET status = 'RELEASED', released_at = CURRENT_TIMESTAMP WHERE status = 'CLAIMED'`);
+            const on = await api().post('/sala-node/authority').set(bearer(token)).send({ enabled: true });
+            expect(on.status).toBe(200);
+            await finoA(async () => {
+                const r = await nodeDb!.query(`SELECT value FROM app_settings WHERE key = 'sala_node_authority_enabled'`);
+                return r.rows[0]?.value === true;
+            }, 'interruttore sul nodo');
+
+            const opened = await nodeFetch(`/tables/${tableId}/bill`, 'POST', { total_cents: 3000, covers: 2 });
+            expect(opened.status).toBe(201);
+            const bill = (await opened.json()).bill;
+            await finoA(async () => {
+                const r = await cloudDb!.query('SELECT share_token FROM table_bills WHERE id = $1', [bill.id]);
+                return Boolean(r.rows[0]?.share_token);
+            }, 'conto sul cloud');
+
+            // La quota: l'ospite parla col cloud, la quota nasce sul nodo.
+            const claim = await api().post(`/pay/${bill.share_token}/claim`).send({ kind: 'full_bill', claimant_label: 'Ospite' });
+            expect(claim.status).toBe(201);
+            const splitId = Number(claim.body.split_id);
+            expect(splitId).toBeGreaterThanOrEqual(1_000_000_000);
+            const sulNodo = await nodeDb!.query('SELECT status FROM table_bill_splits WHERE id = $1', [splitId]);
+            expect(sulNodo.rows[0]?.status).toBe('CLAIMED');
+
+            // Il gateway (qui assente) avrebbe creato l'ordine: la richiesta
+            // di pagamento del cloud punta alla quota del nodo.
+            const orderId = `ordine-qr-nodo-${bill.id}`;
+            await cloudDb!.query(
+                `INSERT INTO payment_requests (tenant_id, amount_cents, currency, description, status, provider, provider_order_id, table_bill_split_id)
+                 VALUES (1, 3000, 'EUR', 'Quota dal nodo', 'PENDING', 'revolut', $1, $2)`,
+                [orderId, splitId]
+            );
+            const body = JSON.stringify({ event: 'ORDER_COMPLETED', order_id: orderId });
+            const ts = String(Date.now());
+            const signature = createHmac('sha256', WEBHOOK_SECRET).update(`v1.${ts}.${body}`).digest('hex');
+            const hook = await api().post('/webhook/revolut')
+                .set('Content-Type', 'application/json')
+                .set('Revolut-Request-Timestamp', ts)
+                .set('Revolut-Signature', `v1=${signature}`)
+                .send(body);
+            expect(hook.status).toBe(200);
+
+            // Il nodo applica: quota pagata, conto chiuso, scontrino; e risale.
+            await finoA(async () => {
+                const r = await nodeDb!.query(
+                    `SELECT b.status, s.status AS split_status,
+                            (SELECT COUNT(*)::int FROM fiscal_documents f WHERE f.table_bill_id = b.id AND f.status = 'CONFIRMED') AS docs
+                       FROM table_bills b JOIN table_bill_splits s ON s.table_bill_id = b.id
+                      WHERE b.id = $1 AND s.id = $2`,
+                    [bill.id, splitId]
+                );
+                return r.rows[0]?.status === 'CLOSED' && r.rows[0]?.split_status === 'PAID' && r.rows[0]?.docs === 1;
+            }, 'quota pagata, conto chiuso e scontrino sul nodo', 30_000);
+            await finoA(async () => {
+                const r = await cloudDb!.query(
+                    `SELECT b.status, (SELECT COUNT(*)::int FROM fiscal_documents f WHERE f.table_bill_id = b.id AND f.status = 'CONFIRMED') AS docs
+                       FROM table_bills b WHERE b.id = $1`,
+                    [bill.id]
+                );
+                return r.rows[0]?.status === 'CLOSED' && r.rows[0]?.docs === 1;
+            }, 'conto chiuso e scontrino sul cloud', 30_000);
+
+            // Il rilascio passa dal nodo anche lui.
+            const second = await nodeFetch(`/tables/${tableId}/bill`, 'POST', { total_cents: 1200, covers: 1 });
+            const secondBill = (await second.json()).bill;
+            await finoA(async () => {
+                const r = await cloudDb!.query('SELECT share_token FROM table_bills WHERE id = $1', [secondBill.id]);
+                return Boolean(r.rows[0]?.share_token);
+            }, 'secondo conto sul cloud');
+            const claim2 = await api().post(`/pay/${secondBill.share_token}/claim`).send({ kind: 'full_bill' });
+            expect(claim2.status).toBe(201);
+            const release = await api().post(`/pay/${secondBill.share_token}/release`).send({ split_id: claim2.body.split_id });
+            expect(release.status).toBe(200);
+            const rel = await nodeDb!.query('SELECT status FROM table_bill_splits WHERE id = $1', [claim2.body.split_id]);
+            expect(rel.rows[0]?.status).toBe('RELEASED');
+            await nodeFetch(`/bills/${secondBill.id}/void`, 'POST', {});
+
+            const off = await api().post('/sala-node/authority').set(bearer(token)).send({ enabled: false });
+            expect(off.status).toBe(200);
+        } finally {
+            await api().post('/sala-node/authority').set(bearer(token)).send({ enabled: false, force: true });
+            await api().put('/settings/fiscal').set(bearer(token)).send({ provider: 'none' });
+            await api().put('/settings/integrations/revolut').set(bearer(token)).send({ webhook_secret: '' });
+            await api().put('/settings/features').set(bearer(token)).send({ sala_node_enabled: hybridPrima });
+        }
+    }, 120_000);
+
+    it('col servizio in sala il conto Passepartout si apre e si chiude in cassa dal nodo (fase B5)', async () => {
+        const nodeFetch = (p: string, method: string, body?: any) => fetch(`${nodeBase}${p}`, {
+            method,
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: body === undefined ? undefined : JSON.stringify(body),
+        });
+        // La configurazione di chiusura il nodo l'ha presa dalle credenziali.
+        expect(nodeLog).toContain('tipo pagamento Passepartout ereditato dal cloud');
+
+        const flags = await api().get('/settings/features').set(bearer(token));
+        const hybridPrima = flags.body.sala_node_enabled === true;
+        await api().put('/settings/features').set(bearer(token)).send({ sala_node_enabled: true });
+        await api().put('/settings/fiscal').set(bearer(token)).send({ provider: 'none' });
+        // Il tavolo nasce nel cloud (pianta) e scende con la configurazione.
+        const room = await api().post('/rooms').set(bearer(token)).send({ name: 'Sala Cassa', width: 400, height: 300 });
+        const table = await api().post('/tables').set(bearer(token)).send({
+            name: 'PPN1', shape: 'SQUARE', seats: 4, x: 40, y: 40, room_id: room.body.id, status: 'FREE',
+        });
+        await finoA(async () => (await nodeDb!.query('SELECT 1 FROM tables WHERE id = $1', [table.body.id])).rows.length === 1,
+            'tavolo sul nodo');
+
+        // L'agente del PC, collegato al NODO.
+        const chiusure: any[] = [];
+        const agente = ioClient(`${nodeBase}/pp-agent`, { auth: { token: 'test-pp-agent-token' }, transports: ['websocket'], reconnection: false });
+        agente.on('pp:call', (payload: any, ack: (r: unknown) => void) => {
+            if (payload?.op === 'comandaTavolo') {
+                return ack({ ok: true, result: payload.params?.tavolo === 'PPN1' ? {
+                    idGestionale: 9201, tavolo: 'PPN1', sala: 'Sala', coperti: 2, sconto: null, stato: '1',
+                    righe: [{ idGestionale: 92010, descrizione: 'Grigliata', articolo: 'GRIG', prezzo: 18, pezzi: 1, totale: 18, stato: '1' }],
+                } : null });
+            }
+            if (payload?.op === 'chiudi') {
+                chiusure.push(payload.params);
+                return ack({ ok: true, result: {
+                    chiuso: true, importoSospeso: 0, stato: 'Pagato', numeroScontrino: '0077-0001',
+                    totalePagato: 18, totaleDaPagare: 18, avviso: null,
+                } });
+            }
+            ack({ ok: false, error: 'op non prevista', kind: 'agent' });
+        });
+        await new Promise<void>((resolve, reject) => { agente.on('connect', () => resolve()); agente.on('connect_error', reject); });
+        agente.emit('agent:hello', { hostname: 'pc-di-sala', capabilities: ['chiudi-riprendi'] });
+        try {
+            await finoA(async () => {
+                const o = await api().get('/sala-node/authority').set(bearer(token));
+                return o.body.node_online === true && o.body.aligned === true;
+            }, 'repliche allineate');
+            await cloudDb!.query(`UPDATE table_bill_splits SET status = 'RELEASED', released_at = CURRENT_TIMESTAMP WHERE status = 'CLAIMED'`);
+            const on = await api().post('/sala-node/authority').set(bearer(token)).send({ enabled: true });
+            expect(on.status).toBe(200);
+
+            const opened = await nodeFetch(`/tables/${table.body.id}/bill`, 'POST', { source: 'passepartout', pp_tavolo: 'PPN1' });
+            expect(opened.status).toBe(201);
+            const bill = (await opened.json()).bill;
+            expect(bill.external_ref).toBe('pp:comanda:9201');
+            const close = await nodeFetch(`/bills/${bill.id}/close`, 'POST', { payments: [{ method: 'CONTANTI', amount_cents: bill.total_cents }] });
+            expect(close.status).toBe(200);
+
+            // La cassa la chiude l'agente collegato al nodo, col tipo
+            // pagamento arrivato dal cloud; il documento risale.
+            await finoA(async () => {
+                const r = await cloudDb!.query(
+                    `SELECT status, provider, provider_ref FROM fiscal_documents WHERE table_bill_id = $1`, [bill.id]
+                );
+                return r.rows[0]?.status === 'CONFIRMED' && r.rows[0]?.provider === 'passepartout' && r.rows[0]?.provider_ref === '0077-0001';
+            }, 'chiusura in cassa risalita al cloud', 30_000);
+            expect(chiusure).toHaveLength(1);
+            expect(chiusure[0]).toMatchObject({ idComanda: 9201, tipoPagamento: 'ESTERNO', riprendi: false });
+
+            // La ripresa a mano passa dal nodo: nel cloud c'è il recinto.
+            const sulCloud = await api().post(`/bills/${bill.id}/passepartout-close`).set(bearer(token)).send({});
+            expect(sulCloud.status).toBe(409);
+            expect(sulCloud.body.error).toBe('authority_on_node');
+
+            const off = await api().post('/sala-node/authority').set(bearer(token)).send({ enabled: false });
+            expect(off.status).toBe(200);
+        } finally {
+            agente.close();
+            await api().post('/sala-node/authority').set(bearer(token)).send({ enabled: false, force: true });
+            await api().put('/settings/features').set(bearer(token)).send({ sala_node_enabled: hybridPrima });
+        }
+    }, 90_000);
+
+    it("col servizio in sala l'accoglienza vive sul nodo: tavolo e arrivo lì, il resto nel cloud, e sopravvivono tutti e due (tappa C)", async () => {
+        const nodeFetch = (p: string, method: string, body?: any) => fetch(`${nodeBase}${p}`, {
+            method,
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: body === undefined ? undefined : JSON.stringify(body),
+        });
+        const flags = await api().get('/settings/features').set(bearer(token));
+        const hybridPrima = flags.body.sala_node_enabled === true;
+        await api().put('/settings/features').set(bearer(token)).send({ sala_node_enabled: true });
+        await api().put('/settings/fiscal').set(bearer(token)).send({ provider: 'none' });
+        try {
+            const created = await api().post('/reservations').set(bearer(token)).send({
+                customer_name: 'Ospite Colonne', phone: '+393339990001',
+                reservation_time: '2031-06-01T19:00:00.000Z', shift: 'DINNER', guests: 2,
+            });
+            expect(created.status).toBe(201);
+            const id = Number(created.body.id);
+            await finoA(async () => (await nodeDb!.query('SELECT 1 FROM reservations WHERE id = $1', [id])).rows.length === 1,
+                'prenotazione sul nodo');
+
+            await finoA(async () => {
+                const o = await api().get('/sala-node/authority').set(bearer(token));
+                return o.body.node_online === true && o.body.aligned === true;
+            }, 'repliche allineate');
+            await cloudDb!.query(`UPDATE table_bill_splits SET status = 'RELEASED', released_at = CURRENT_TIMESTAMP WHERE status = 'CLAIMED'`);
+            const on = await api().post('/sala-node/authority').set(bearer(token)).send({ enabled: true });
+            expect(on.status).toBe(200);
+            await finoA(async () => {
+                const r = await nodeDb!.query(`SELECT value FROM app_settings WHERE key = 'sala_node_authority_enabled'`);
+                return r.rows[0]?.value === true;
+            }, 'interruttore sul nodo');
+
+            // In sala: l'ospite arriva e si siede.
+            const seat = await nodeFetch(`/reservations/${id}/service`, 'PATCH', { table_id: tableId, arrival_status: 'ARRIVED' });
+            expect(seat.status).toBe(200);
+            // Nel cloud, nello stesso momento, si corregge il nome partendo
+            // da una copia vecchia: senza tavolo, ancora in attesa.
+            const cloudRow = (await cloudDb!.query('SELECT * FROM reservations WHERE id = $1', [id])).rows[0];
+            const put = await api().put(`/reservations/${id}`).set(bearer(token)).send({
+                customer_name: 'Ospite Rinominato', reservation_time: cloudRow.reservation_time, shift: cloudRow.shift,
+                guests: cloudRow.guests, phone: cloudRow.phone, payment_status: cloudRow.payment_status,
+                reservation_status: cloudRow.reservation_status, table_id: null, arrival_status: 'WAITING',
+            });
+            expect(put.status).toBe(200);
+            const both = async (db: Client) => (await db.query(
+                'SELECT customer_name, table_id, arrival_status FROM reservations WHERE id = $1', [id])).rows[0];
+            await finoA(async () => {
+                const [c, n] = [await both(cloudDb!), await both(nodeDb!)];
+                const ok = (r: any) => r?.customer_name === 'Ospite Rinominato' && Number(r?.table_id) === tableId && r?.arrival_status === 'ARRIVED';
+                return ok(c) && ok(n);
+            }, 'nome dal cloud e tavolo dalla sala, su tutti e due i lati', 30_000);
+
+            // I recinti, nei due sensi.
+            const cloudSeat = await api().patch(`/reservations/${id}/service`).set(bearer(token)).send({ arrival_status: 'DEPARTING' });
+            expect(cloudSeat.status).toBe(409);
+            expect(cloudSeat.body.error).toBe('authority_on_node');
+            const nodePut = await nodeFetch(`/reservations/${id}`, 'PUT', { customer_name: 'Dal nodo' });
+            expect(nodePut.status).toBe(409);
+            expect((await nodePut.json()).error).toBe('cloud_authority');
+
+            // Il walk-in nasce in sala, e la rubrica la aggiorna il cloud.
+            const walk = await nodeFetch('/reservations/walk-in', 'POST', { customer_name: 'Passante Nodo', guests: 2, phone: '+393339990002' });
+            expect(walk.status).toBe(201);
+            const walkIn = await walk.json();
+            expect(Number(walkIn.id)).toBeGreaterThanOrEqual(1_000_000_000);
+            await finoA(async () => {
+                const r = await cloudDb!.query('SELECT arrival_status FROM reservations WHERE id = $1', [walkIn.id]);
+                const c = await cloudDb!.query(`SELECT 1 FROM customers WHERE tenant_id = 1 AND regexp_replace(phone, '\\D', '', 'g') = '393339990002'`);
+                return r.rows[0]?.arrival_status === 'ARRIVED' && c.rows.length === 1;
+            }, 'walk-in e rubrica sul cloud');
+
+            // Annullata nel cloud: il tavolo si libera anche in sala.
+            const cancel = await api().put(`/reservations/${id}`).set(bearer(token)).send({
+                customer_name: 'Ospite Rinominato', reservation_time: cloudRow.reservation_time, shift: cloudRow.shift,
+                guests: cloudRow.guests, phone: cloudRow.phone, payment_status: cloudRow.payment_status,
+                reservation_status: 'CANCELLED', table_id: tableId, arrival_status: 'ARRIVED',
+            });
+            expect(cancel.status).toBe(200);
+            await finoA(async () => {
+                const [c, n] = [await both(cloudDb!), await both(nodeDb!)];
+                return c?.table_id == null && n?.table_id == null;
+            }, 'tavolo libero sui due lati');
+
+            const off = await api().post('/sala-node/authority').set(bearer(token)).send({ enabled: false });
+            expect(off.status).toBe(200);
+        } finally {
+            await api().post('/sala-node/authority').set(bearer(token)).send({ enabled: false, force: true });
             await api().put('/settings/features').set(bearer(token)).send({ sala_node_enabled: hybridPrima });
         }
     }, 90_000);
