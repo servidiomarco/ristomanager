@@ -40,6 +40,39 @@ jobs:
       - name: Build server
         run: npm run build:server
 
+  # Il nodo di sala gira sul Postgres del PC del locale (PostgreSQL 18 al
+  # Frantoio), non su quello di Railway: il 06/10 una query del suo avvio
+  # moriva solo lì (pg_get_serial_sequence valutata anche sulle tabelle di
+  # sistema) e le sequenze del nodo non entravano nel suo spazio di id. Qui
+  # i test del nodo su quella versione; orders-bills prima, perché accende
+  # comande e conti per i file che seguono.
+  api-tests-node-pg18:
+    name: Test API nodo (PostgreSQL 18)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:ci@localhost:5432/ristotest_api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Test del nodo su PostgreSQL 18 (build server + vitest)
+        run: npm run build:server && npx vitest run tests/api/orders-bills.test.ts tests/api/sala-node
+
   # Il pacchetto del nodo di sala (fase A4b del piano «sala, comande e conto
   # sul nodo»): a ogni push su main la CI costruisce lo zip da appoggiare
   # nella inbox del supervisore sul PC del locale — niente da compilare sul

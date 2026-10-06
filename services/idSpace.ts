@@ -18,18 +18,32 @@ export const NODE_ID_BASE = 1_000_000_000;
 
 type Queryable = { query: (sql: string, params?: any[]) => Promise<any> };
 
+// Le tabelle di `public` che hanno una colonna id, lette dal catalogo. MAI
+// pg_get_serial_sequence nella stessa query del filtro: il pianificatore
+// può valutarla prima di filtrare, anche sulle tabelle di sistema. Su
+// PostgreSQL 18 (quello del PC del Frantoio) la vecchia query su
+// information_schema.columns moriva con «la colonna "id" della relazione
+// "pg_statistic" non esiste», e le sequenze del nodo non sono mai entrate
+// nel suo spazio. I test girano su versioni precedenti, che non la
+// valutavano: si è visto solo sul PC, il 06/10.
+const ID_TABLES_SQL = `
+    SELECT c.relname AS t
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      JOIN pg_attribute a ON a.attrelid = c.oid
+     WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')
+       AND a.attname = 'id' AND NOT a.attisdropped`;
+
+const qualified = (table: string): string => `public."${table.replace(/"/g, '""')}"`;
+
 /** Porta la sequenza della colonna id di `table` oltre gli id del PROPRIO
  *  spazio, senza mai entrare in quello dell'altro lato. No-op per le
  *  tabelle senza colonna id (opening_hours ha una chiave composta). */
 export const syncIdSequence = async (client: Queryable, table: string): Promise<void> => {
-    const seq = await client.query(
-        `SELECT pg_get_serial_sequence($1, 'id') AS s
-         WHERE EXISTS (
-            SELECT 1 FROM information_schema.columns
-            WHERE table_schema = 'public' AND table_name = $1 AND column_name = 'id'
-         )`,
-        [table]
-    );
+    // Prima il catalogo, poi la sequenza: in due query, per il motivo sopra.
+    const has = await client.query(`${ID_TABLES_SQL} AND c.relname = $1`, [table]);
+    if (has.rows.length === 0) return;
+    const seq = await client.query(`SELECT pg_get_serial_sequence($1, 'id') AS s`, [qualified(table)]);
     const name = seq.rows[0]?.s;
     if (!name) return;
     if (isServiceNode) {
@@ -61,12 +75,13 @@ export const syncIdSequence = async (client: Queryable, table: string): Promise<
  *  installati prima di questa fase, che hanno sequenze allineate al cloud. */
 export const ensureNodeIdSpace = async (client: Queryable): Promise<number> => {
     if (!isServiceNode) return 0;
-    const tables = await client.query(
-        `SELECT DISTINCT c.table_name AS t
-           FROM information_schema.columns c
-          WHERE c.table_schema = 'public' AND c.column_name = 'id'
-            AND pg_get_serial_sequence(quote_ident(c.table_name), 'id') IS NOT NULL`
-    );
-    for (const row of tables.rows) await syncIdSequence(client, row.t);
-    return tables.rows.length;
+    const tables = await client.query(ID_TABLES_SQL);
+    let moved = 0;
+    for (const row of tables.rows) {
+        const seq = await client.query(`SELECT pg_get_serial_sequence($1, 'id') AS s`, [qualified(row.t)]);
+        if (!seq.rows[0]?.s) continue;
+        await syncIdSequence(client, row.t);
+        moved++;
+    }
+    return moved;
 };

@@ -170,10 +170,22 @@ const attempt = async (): Promise<boolean> => runAsPlatform(async () => {
             console.log(`[bootstrap] cursore già presente (seq ${cur.rows[0].applied_seq}): niente da fare, il riallineamento è del replay`);
             // I nodi installati prima della fase B1 hanno le sequenze
             // allineate al cloud: si spostano nel loro spazio a ogni avvio
-            // (idempotente).
-            const moved = await ensureNodeIdSpace(pool);
-            console.log(`[bootstrap] sequenze nello spazio del nodo: ${moved}`);
-            await syncTenantRow();
+            // (idempotente). I due passi sono indipendenti: un errore nelle
+            // sequenze non deve saltare la riga del ristorante (i token degli
+            // agenti), e viceversa. Se uno fallisce si riprova fra un minuto.
+            const errors: string[] = [];
+            try {
+                const moved = await ensureNodeIdSpace(pool);
+                console.log(`[bootstrap] sequenze nello spazio del nodo: ${moved}`);
+            } catch (err: any) {
+                errors.push(`sequenze: ${err?.message || err}`);
+            }
+            try {
+                await syncTenantRow();
+            } catch (err: any) {
+                errors.push(`riga del ristorante: ${err?.message || err}`);
+            }
+            if (errors.length > 0) throw new Error(errors.join(' · '));
             return true;
         }
     }
