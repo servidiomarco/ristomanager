@@ -25,6 +25,7 @@
 
 import pool, { runAsPlatform } from '../db.js';
 import { isServiceNode } from './topology.js';
+import { syncIdSequence, ensureNodeIdSpace } from './idSpace.js';
 
 const RETRY_MS = 60_000;
 const CHUNK_ROWS = 1_000;
@@ -101,23 +102,9 @@ const loadSnapshot = async (snap: Snapshot): Promise<void> => {
                 );
             }
             // Le righe arrivano con gli id del cloud: la sequence locale va
-            // portata oltre, o il primo INSERT nativo del nodo collide.
-            // Il WHERE EXISTS evita l'errore (che abortirebbe la tx) sulle
-            // tabelle senza colonna id (opening_hours ha PK composta).
-            const seqName = await client.query(
-                `SELECT pg_get_serial_sequence($1, 'id') AS s
-                 WHERE EXISTS (
-                    SELECT 1 FROM information_schema.columns
-                    WHERE table_schema = 'public' AND table_name = $1 AND column_name = 'id'
-                 )`,
-                [name]
-            );
-            if (seqName.rows[0]?.s) {
-                await client.query(
-                    `SELECT setval($1, GREATEST((SELECT COALESCE(MAX(id), 0) FROM ${name}), 1))`,
-                    [seqName.rows[0].s]
-                );
-            }
+            // nello spazio del nodo (fase B1), o il primo INSERT nativo
+            // collide con una riga che il cloud creerà domani.
+            await syncIdSequence(client, name);
         }
         // Il cursore, NELLA stessa transazione delle proiezioni: le righe e
         // il punto di ripresa del replay sono un fatto solo.
@@ -181,6 +168,11 @@ const attempt = async (): Promise<boolean> => runAsPlatform(async () => {
         const cur = await pool.query(`SELECT applied_seq FROM replication_cursor WHERE stream = 'cloud' LIMIT 1`);
         if (cur.rows.length > 0) {
             console.log(`[bootstrap] cursore già presente (seq ${cur.rows[0].applied_seq}): niente da fare, il riallineamento è del replay`);
+            // I nodi installati prima della fase B1 hanno le sequenze
+            // allineate al cloud: si spostano nel loro spazio a ogni avvio
+            // (idempotente).
+            const moved = await ensureNodeIdSpace(pool);
+            console.log(`[bootstrap] sequenze nello spazio del nodo: ${moved}`);
             await syncTenantRow();
             return true;
         }
@@ -189,6 +181,9 @@ const attempt = async (): Promise<boolean> => runAsPlatform(async () => {
     const righe = Object.values(snap.tables).reduce((n, rows) => n + (rows?.length ?? 0), 0);
     console.log(`[bootstrap] snapshot del tenant ${snap.tenant_id} al seq ${snap.seq}: ${righe} righe in ${Object.keys(snap.tables).length} tabelle`);
     await loadSnapshot(snap);
+    // Anche le tabelle solo locali (coda di stampa, log): tutto nello
+    // spazio del nodo fin dal primo avvio (fase B1).
+    await ensureNodeIdSpace(pool);
     console.log(`[bootstrap] ✅ proiezioni caricate, cursore 'cloud' a ${snap.seq}`);
     return true;
 });

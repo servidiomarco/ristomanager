@@ -587,7 +587,18 @@ export async function chiudiComandaCompleta(params: {
     tipoPagamento?: string;
     importoPagato?: number;
     proforma?: boolean;
+    /** Fase B5: è un nuovo tentativo (il precedente può essere riuscito con
+     *  la risposta persa per strada). Prima di tutto si guarda nell'archivio
+     *  del giorno: se il conto della comanda c'è già, nessun nuovo
+     *  ContoComanda — solo il saldo del sospeso, se manca. Senza, un
+     *  secondo tentativo rifarebbe lo scontrino. */
+    riprendi?: boolean;
 }): Promise<EsitoChiusuraComanda> {
+    if (params.riprendi) {
+        const esistente = (await getContiGiorno())
+            .filter((c) => asNumber(c.IdComanda ?? (c as any).idComanda) === params.idComanda).pop();
+        if (esistente) return completaChiusura(params, esistente, 'Conto già presente in cassa: ripreso senza nuovo documento');
+    }
     const comanda = await getComanda(params.idComanda);
     if (!comanda) {
         throw new PassepartoutError(`Comanda ${params.idComanda} non trovata sul gestionale`, 'ContoComanda');
@@ -613,13 +624,25 @@ export async function chiudiComandaCompleta(params: {
         avviso = err.message;
     }
     const conti = await getContiGiorno();
-    let conto = conti.filter((c) => asNumber(c.IdComanda ?? (c as any).idComanda) === params.idComanda).pop();
+    const conto = conti.filter((c) => asNumber(c.IdComanda ?? (c as any).idComanda) === params.idComanda).pop();
     if (!conto) {
         throw new PassepartoutError(
             avviso ?? `Conto della comanda ${params.idComanda} non trovato in archivio dopo la chiusura`,
             'ContoComanda',
         );
     }
+    return completaChiusura(params, conto, avviso);
+}
+
+/** Passo 4 della chiusura (saldo del sospeso) e l'esito: in comune fra la
+ *  chiusura piena e la ripresa di un conto già in archivio. */
+async function completaChiusura(
+    params: { idComanda: number; tipoPagamento?: string; importoPagato?: number },
+    trovato: Record<string, unknown>,
+    avvisoIniziale: string | null,
+): Promise<EsitoChiusuraComanda> {
+    let conto = trovato as any;
+    let avviso = avvisoIniziale;
     const sospeso = asNumber(conto.Sospeso) ?? 0;
     const idConto = asNumber(conto.IdGestionale ?? (conto as any).idGestionale);
     if (sospeso > 0 && params.importoPagato == null) {

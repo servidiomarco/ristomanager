@@ -28,6 +28,7 @@ const SERVER_ERROR_KEYS: Record<string, string> = {
   'Bill already fully claimed': 'errors.billFullyClaimed',
   'Per-item split not available for this bill': 'errors.perItemUnavailable',
   'Some items are already claimed': 'errors.itemsAlreadyClaimed',
+  pay_unavailable_on_node: 'errors.payAtCounter',
 };
 
 interface Props {
