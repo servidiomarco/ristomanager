@@ -359,6 +359,16 @@
     "apertiNow_other": "{{count}} tables open now",
     "apertiRefresh": "Refresh now",
     "apertiDone_one": "{{count}} table open on the till",
-    "apertiDone_other": "{{count}} tables open on the till"
+    "apertiDone_other": "{{count}} tables open on the till",
+    "qrTitle": "Pay from the QR",
+    "qrSubtitle": "Tables open on the till can pay from their phone",
+    "qrSend": "Let tables open on the till pay from the QR",
+    "qrHint": "The table QR shows «Pay the bill» even when the order exists only on the till. On tap the CRM reads the order, the guest pays (in full, split evenly or by dish, deposit already deducted) and once settled the till closes the table with {{tipo}}. If something is added on the till after payment, the table is not closed automatically and the till gets an alert with the difference.",
+    "qrHintNoType": "The table QR shows «Pay the bill» even when the order exists only on the till, and once settled the till closes the table by itself.",
+    "qrNeedPay": "Pay at table must be on: Settings → Pay at table.",
+    "qrNeedType": "Choose the till payment type above, in «Connection and till closing»: the till closes tables paid from the QR with it.",
+    "qrNodo": "With full service on the dining-room node, bills are opened by the node: paying till orders from the QR stays off.",
+    "qrNow_one": "{{count}} table open on the till right now",
+    "qrNow_other": "{{count}} tables open on the till right now"
   }
 }

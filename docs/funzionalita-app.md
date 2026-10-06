@@ -436,6 +436,12 @@ Per i ristoranti con cassa **Passepartout Menù** (modulo dedicato). Tutto si re
   - nei **report incassi**, il riquadro «Chiusi solo in cassa» con totale, conti, coperti e metodi di pagamento, separato dai totali del CRM per non contare due volte;
   - nella **chiusura di cassa**, il «Riscontro con la cassa» della giornata: conti del CRM chiusi in cassa che in cassa mancano o hanno un importo diverso, e conti della cassa pagati «esterno» senza un conto nel CRM. È il riscontro «delta zero» che prima si faceva a mano.
 - **Tavoli aperti in cassa** (sola lettura, interruttore nella sezione): ogni minuto il CRM legge le comande aperte in cassa, e quei tavoli (walk-in compresi, anche senza prenotazione) risultano **occupati** nella pianta della sala, in reception e sulla mappa delle prenotazioni. Con «Considera nella disponibilità», Sofia e le prenotazioni online non propongono un tavolo aperto in cassa finché non si libera (stima: apertura più la durata del turno; un tavolo aperto a pranzo non tocca la cena). Chi assegna a mano vede il tavolo occupato e decide: il gruppo di prima può star pagando. Se la cassa smette di rispondere, dopo cinque minuti la sala torna come prima.
+- **Pagamento dal QR dei tavoli aperti in cassa** (interruttore nella sezione; servono il conto al tavolo acceso e il tipo di pagamento in cassa): il QR del tavolo mostra «Paga il conto» anche quando la comanda è solo in Passepartout.
+  - Al tocco il CRM legge la comanda in quel momento e ne fa il conto, con le righe della cassa. Se il tavolo è stato aperto dal planning, il conto è collegato alla prenotazione e la caparra pagata online è già scalata. L'ospite paga come con ogni conto al tavolo: tutto, alla romana o per piatti.
+  - Finché nessuno ha iniziato a pagare, ogni tocco riallinea il conto alla comanda, così un piatto aggiunto in cassa compare.
+  - Saldato per intero, il conto si chiude da solo e la cassa chiude il tavolo con il tipo di pagamento esterno, emettendo lei il documento.
+  - Se dopo il pagamento in cassa la comanda cambia (un amaro aggiunto), il tavolo non si chiude da solo: chi è in cassa riceve un avviso con quanto manca o quanto è stato pagato in più, e chiude a mano. Lo stesso controllo vale per ogni conto importato dalla cassa, anche aperto dal personale.
+  - Una comanda già pagata nel CRM non si fa pagare due volte dal QR.
 
 - **Import del menu** dal catalogo articoli della cassa, varianti comprese. Le voci disattivate in cassa (articoli e categorie "muti", tenuti lì solo per lo storico) non entrano nel menu del CRM; se erano già state importate, il sync le rimuove.
 - **Categoria bloccata**: la cassa possiede la categoria dei piatti importati e il sync la riallinea a ogni giro — ma cambiare categoria **a mano** dalla scheda di un piatto della cassa alza un lucchetto: da quel momento il sync lascia la categoria del CRM (nome, prezzo, IVA e attivo restano della cassa). È ciò che permette la carta dei vini divisa per colore (Vini bianchi / Vini rosé) mentre la cassa conosce solo «Vini bianchi-rosé».
@@ -785,7 +791,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 | Resend / SMTP / IMAP | Invio e ricezione email con la casella del ristorante |
 | Revolut Merchant / SumUp | Pagamenti online: caparre, acconti, conto al tavolo |
 | Openapi.com | Scontrino elettronico e fattura elettronica (SDI) |
-| Passepartout Menù | Cassa: import menu, import conti, chiusura fiscale, prenotazioni nel planning e arrivi di ritorno (via agente LAN) |
+| Passepartout Menù | Cassa: import menu, import conti, chiusura fiscale, prenotazioni nel planning e arrivi di ritorno, pagamento dal QR delle comande (via agente LAN) |
 | Stampanti termiche ESC/POS | Comande, preconti, QR (via print agent sulla LAN) |
 | Stripe | Abbonamenti SaaS dei ristoranti (lato piattaforma) |
 | Web Push (VAPID) | Notifiche push e badge sull'icona dell'app |
@@ -798,6 +804,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-06 | Integrazione cassa Passepartout; Pagamenti, conto al tavolo e cassa; Menu digitale pubblico | Pagamento dal QR dei tavoli aperti in cassa (da Impostazioni → Passepartout): il QR del tavolo mostra «Paga il conto» anche quando la comanda è solo in Passepartout. Al tocco il conto arriva dalla cassa, con la caparra già scalata; pagato tutto, la cassa chiude il tavolo da sola. Se in cassa si aggiunge qualcosa dopo il pagamento, il tavolo non si chiude da solo e la cassa riceve un avviso con la differenza. |
 | 2026-10-06 | Menu digitale pubblico | Cartellini dei QR dei tavoli più puliti: niente più nome del ristorante né la parola «Tavolo», restano la sala e il numero; la sala e la frase sotto il QR sono stampate più grandi, sia sui cartellini sia sul foglietto per il supporto in plastica. |
 | 2026-10-06 | Integrazione cassa Passepartout; Prenotazioni; Pagamenti, conto al tavolo e cassa | Nel planning della cassa Passepartout la nota della prenotazione dice anche la caparra pagata online («Caparra pagata 40,00 euro»), così chi chiude il tavolo in cassa la scala; se la caparra viene rimborsata, la scritta sparisce da sola. |
 | 2026-10-06 | Integrazione cassa Passepartout; Sala e tavoli; Reception; Agente vocale; Prenotazioni web | Tavoli aperti in cassa (da Impostazioni → Passepartout): i tavoli con una comanda aperta in cassa, walk-in compresi, risultano occupati in sala, in reception e sulla mappa delle prenotazioni; con «Considera nella disponibilità» Sofia e le prenotazioni online non li propongono finché non si liberano. |

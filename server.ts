@@ -86,7 +86,7 @@ import {
     incassiCassa, riscontroGiorno,
 } from './services/passepartoutConti.js';
 import {
-    startPassepartoutTavoliApertiSync, elencoTavoliAperti, aggiornaTavoliAperti,
+    startPassepartoutTavoliApertiSync, elencoTavoliAperti, aggiornaTavoliAperti, comandaApertaSuiTavoli,
 } from './services/passepartoutTavoliAperti.js';
 import {
     SUPPORT_CATEGORIES, SUPPORT_STATUSES, SUPPORT_SUBJECT_MAX, SUPPORT_BODY_MAX, SUPPORT_ATTACHMENTS_MAX, SUPPORT_RATING_COMMENT_MAX,
@@ -4592,6 +4592,72 @@ app.post('/passepartout/tavoli-aperti/aggiorna', authenticate, requirePermission
     }
 });
 
+// --- Pagamento dal QR delle comande della cassa ------------------------------
+// Il QR del tavolo mostra «Paga il conto» anche a un tavolo battuto tutto in
+// cassa: al tocco il CRM importa la comanda come conto, l'ospite paga, e al
+// saldo la cassa chiude il tavolo col tipo di pagamento esterno. Servono il
+// conto al tavolo acceso e quel tipo di pagamento (sopra, «Collegamento e
+// chiusura in cassa»): senza, il tavolo pagato resterebbe aperto in cassa.
+app.get('/passepartout/qr-pagamento/config', authenticate, requirePermission('settings:full'), requireFeature('passepartout'), async (req, res) => {
+    try {
+        const tenantId = req.tenantId!;
+        const cfg = await queryWithRetry(`SELECT qr_pagamento_enabled FROM passepartout_config WHERE tenant_id = $1`, [tenantId]);
+        const chiusura = await getPassepartoutChiusuraConfig(tenantId);
+        const aperti = await queryWithRetry(
+            `SELECT COUNT(*)::int AS n FROM passepartout_tavoli_aperti WHERE tenant_id = $1 AND visto_at > now() - interval '5 minutes'`,
+            [tenantId]
+        );
+        res.json({
+            enabled: cfg.rows[0]?.qr_pagamento_enabled === true,
+            requisiti: {
+                conto_al_tavolo: await isPayAtTableActive(tenantId),
+                tipo_pagamento: chiusura?.tipoPagamento ?? null,
+                conti_in_sala: await nodeOwnsBills(tenantId),
+            },
+            aperti: Number(aperti.rows[0]?.n || 0),
+            agente: {
+                collegato: getPassepartoutAgentStatus(tenantId).connected,
+                aggiornato: passepartoutAgentSupports(tenantId, 'tavoli-aperti'),
+            },
+        });
+    } catch (err: any) {
+        console.error('GET /passepartout/qr-pagamento/config error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+app.put('/passepartout/qr-pagamento/config', authenticate, requirePermission('settings:full'), requireFeature('passepartout'), async (req, res) => {
+    try {
+        const tenantId = req.tenantId!;
+        const enabled = typeof req.body?.enabled === 'boolean' ? req.body.enabled : null;
+        if (enabled == null) return res.status(400).json({ error: 'Niente da salvare' });
+        if (enabled) {
+            if (!(await isPayAtTableActive(tenantId))) {
+                return res.status(409).json({ error: 'conto_al_tavolo_spento', message: 'Prima accendi il conto al tavolo (Impostazioni → Conto al tavolo).' });
+            }
+            if (!(await getPassepartoutChiusuraConfig(tenantId))) {
+                return res.status(409).json({ error: 'tipo_pagamento_mancante', message: 'Prima scegli il tipo di pagamento in cassa, qui sopra in «Collegamento e chiusura in cassa».' });
+            }
+        }
+        await queryWithRetry(
+            `INSERT INTO passepartout_config (tenant_id, qr_pagamento_enabled, updated_at)
+             VALUES ($1, $2, now())
+             ON CONFLICT (tenant_id) DO UPDATE SET qr_pagamento_enabled = $2, updated_at = now()`,
+            [tenantId, enabled]
+        );
+        if (req.user) {
+            LogService.logActivity(
+                tenantId, req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.SETTINGS, undefined, 'Passepartout: pagamento dal QR', { enabled }
+            );
+        }
+        res.json({ ok: true });
+    } catch (err: any) {
+        console.error('PUT /passepartout/qr-pagamento/config error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
 // --- Chiusura comanda in cassa al saldo del conto CRM ------------------------
 // Quando un conto nato da una comanda Passepartout (external_ref
 // "pp:comanda:<id>") viene CHIUSO saldato per intero, il gestionale chiude il
@@ -4688,6 +4754,58 @@ async function notifyPassepartoutDoc(tenantId: number, docId: number): Promise<v
     }
 }
 
+/** Quanto la comanda in cassa si è allontanata dalle righe del conto del
+ *  CRM che la chiude (quelle dell'import): null se combaciano, se la
+ *  comanda è già chiusa (la chiusura riprende) o se non si riesce a
+ *  leggerla — lì decide la chiamata di chiusura, come prima del controllo. */
+async function differenzaComandaCassa(
+    tenantId: number,
+    billId: number,
+    idComanda: number,
+): Promise<{ cassaCents: number; contoCents: number } | null> {
+    const rs = await queryWithRetry(`SELECT items FROM table_bills WHERE id = $1 AND tenant_id = $2`, [billId, tenantId]);
+    const items = rs.rows[0]?.items;
+    if (!Array.isArray(items) || items.length === 0) return null;
+    let comanda: PassepartoutComanda | null;
+    try {
+        comanda = await callPassepartout<PassepartoutComanda | null>(tenantId, 'comanda', { idGestionale: idComanda }, 20_000);
+    } catch {
+        return null;
+    }
+    if (!comanda || comanda.isPagato) return null;
+    const contoCents = items.reduce(
+        (sum: number, i: any) => sum + Math.round(Number(i.unit_price_cents) || 0) * (Number(i.qty) || 0), 0);
+    const cassaCents = comandaToBillPayload(comanda).total_cents;
+    return cassaCents === contoCents ? null : { cassaCents, contoCents };
+}
+
+/** Push a chi sta in cassa: il tavolo pagato dal CRM non si è chiuso in
+ *  cassa perché la comanda è cambiata. Una volta per conto. */
+async function avvisaCassaComandaCambiata(
+    tenantId: number,
+    billId: number,
+    diff: { cassaCents: number; contoCents: number },
+    valuta: string,
+): Promise<void> {
+    try {
+        const t = await queryWithRetry(
+            `SELECT t.name FROM table_bills b LEFT JOIN tables t ON t.id = b.table_id AND t.tenant_id = b.tenant_id
+              WHERE b.id = $1 AND b.tenant_id = $2`,
+            [billId, tenantId]
+        );
+        const tavolo = t.rows[0]?.name ? String(t.rows[0].name) : null;
+        await pushSendToRoles(tenantId, await ruoliCassa(tenantId), {
+            category: 'payment',
+            title: tavolo ? `Tavolo ${tavolo}: comanda cambiata in cassa` : `Conto #${billId}: comanda cambiata in cassa`,
+            body: `Pagati ${formatMoneyMinor(diff.contoCents, valuta)}, in cassa ${formatMoneyMinor(diff.cassaCents, valuta)}: chiudi il tavolo in cassa a mano.`,
+            tag: `pp-comanda-cambiata-${billId}`,
+            url: '/?view=CASSA',
+        });
+    } catch (err: any) {
+        console.warn('[passepartout] avviso «comanda cambiata» non inviato per il conto', billId, err?.message ?? err);
+    }
+}
+
 /** Un tentativo fallito: resta PENDING (lo riprova lo spazzino) finché ha
  *  senso, poi FAILED con una frase per chi è in cassa. */
 async function notePassepartoutCloseFailure(tenantId: number, docId: number, err: unknown): Promise<void> {
@@ -4765,6 +4883,27 @@ async function chiudiComandaPassepartoutPerBill(
             throw new PassepartoutBridgeError('Il conto ha già un documento fiscale in emissione', 'busy');
         }
         const proforma = doc.doc_type === 'PROFORMA';
+        // La comanda in cassa deve essere ancora quella che il conto ha
+        // incassato: una riga aggiunta in cassa dopo l'import (l'amaro
+        // ordinato dopo il pagamento dal QR) si chiuderebbe come pagata
+        // «esterno» senza che nessuno l'abbia pagata. Non si ritenta: serve
+        // qualcuno in cassa.
+        const diff = await differenzaComandaCassa(tenantId, billId, idComanda);
+        if (diff) {
+            const valuta = (await getTenantLocale(tenantId)).currency;
+            const soldi = (c: number) => formatMoneyMinor(c, valuta);
+            const scarto = Math.abs(diff.cassaCents - diff.contoCents);
+            const messaggio = `In cassa la comanda vale ${soldi(diff.cassaCents)}, il conto incassato nel CRM ${soldi(diff.contoCents)}: `
+                + `è cambiata dopo l'import. Chiudi il tavolo in cassa a mano: ${soldi(diff.contoCents)} già pagati (${config.tipoPagamento}), `
+                + (diff.cassaCents > diff.contoCents ? `${soldi(scarto)} ancora da incassare.` : `${soldi(scarto)} pagati in più.`);
+            await queryWithRetry(
+                `UPDATE fiscal_documents SET status = 'FAILED', error = $3 WHERE id = $1 AND tenant_id = $2 AND status = 'PENDING'`,
+                [doc.id, tenantId, messaggio]
+            );
+            await notifyPassepartoutDoc(tenantId, doc.id);
+            void avvisaCassaComandaCambiata(tenantId, billId, diff, valuta);
+            throw new PassepartoutBridgeError(messaggio, 'gestionale');
+        }
         // Claim atomico come per gli scontrini cloud: vince chi incrementa
         // attempts per primo. Un tentativo già fatto (anche da un processo
         // morto a metà) o un FAILED precedente = si riprende, non si rifà.
@@ -10324,15 +10463,10 @@ async function loadTableByPublicToken(token: string): Promise<{ id: number; tena
     return row ? { id: Number(row.id), tenant_id: Number(row.tenant_id), name: String(row.name) } : null;
 }
 
-/** Il conto aperto di un tavolo nel servizio in corso. Unioni comprese:
- *  l'adesivo del tavolo secondario di un'unione porta al conto del gruppo. Il
- *  table_id del conto è copiato dalla prenotazione, quindi basta quello; i
- *  conti d'asporto non hanno tavolo. Il più recente se ce n'è più d'uno.
- *  Vale anche un conto aperto nelle ultime 3 ore: chiudendo oggi una comanda
- *  rimasta appesa da un servizio passato, il conto nasce con la data di quel
- *  servizio — e il tasto non sarebbe mai comparso. Un conto dimenticato
- *  aperto da giorni, invece, resta fuori: l'ospite di oggi non lo vede. */
-async function findOpenBillForTable(tenantId: number, tableId: number): Promise<{ id: number; share_token: string; total_cents: number } | null> {
+/** I tavoli che l'adesivo di `tableId` rappresenta nel servizio in corso:
+ *  lui e gli altri della sua unione. L'adesivo del tavolo secondario porta
+ *  al conto (o alla comanda) del gruppo. */
+async function tavoliDelQr(tenantId: number, tableId: number): Promise<number[]> {
     const service = resolveService(new Date(), (await getTenantLocale(tenantId)).timezone);
     const merges = await queryWithRetry(
         `SELECT primary_id, merged_ids FROM table_merges
@@ -10345,41 +10479,246 @@ async function findOpenBillForTable(tenantId: number, tableId: number): Promise<
         ids.add(Number(row.primary_id));
         for (const m of row.merged_ids || []) ids.add(Number(m));
     }
+    return [...ids];
+}
+
+/** Il conto aperto di un tavolo nel servizio in corso. Unioni comprese. Il
+ *  table_id del conto è copiato dalla prenotazione, quindi basta quello; i
+ *  conti d'asporto non hanno tavolo. Il più recente se ce n'è più d'uno.
+ *  Vale anche un conto aperto nelle ultime 3 ore: chiudendo oggi una comanda
+ *  rimasta appesa da un servizio passato, il conto nasce con la data di quel
+ *  servizio — e il tasto non sarebbe mai comparso. Un conto dimenticato
+ *  aperto da giorni, invece, resta fuori: l'ospite di oggi non lo vede. */
+async function findOpenBillForTable(
+    tenantId: number,
+    tableId: number,
+): Promise<{ id: number; share_token: string; total_cents: number; external_ref: string | null } | null> {
+    const service = resolveService(new Date(), (await getTenantLocale(tenantId)).timezone);
     const rs = await queryWithRetry(
-        `SELECT id, share_token, total_cents FROM table_bills
+        `SELECT id, share_token, total_cents, external_ref FROM table_bills
          WHERE tenant_id = $1 AND status IN ('OPEN','LOCKED') AND share_token IS NOT NULL
            AND takeaway_order_id IS NULL
            AND ((service_date = $2::date AND shift = $3) OR opened_at > NOW() - INTERVAL '3 hours')
            AND table_id = ANY($4::int[])
          ORDER BY opened_at DESC
          LIMIT 1`,
-        [tenantId, service.service_date, service.shift, [...ids]]
+        [tenantId, service.service_date, service.shift, await tavoliDelQr(tenantId, tableId)]
     );
     const row = rs.rows[0];
-    return row ? { id: Number(row.id), share_token: String(row.share_token), total_cents: Number(row.total_cents) } : null;
+    return row ? {
+        id: Number(row.id),
+        share_token: String(row.share_token),
+        total_cents: Number(row.total_cents),
+        external_ref: row.external_ref ?? null,
+    } : null;
+}
+
+/** Pagamento dal QR delle comande della cassa Passepartout, acceso dal
+ *  ristorante (Impostazioni → Passepartout). Serve anche il tipo di
+ *  pagamento con cui la cassa chiude i conti del CRM: senza, il tavolo
+ *  pagato dal QR resterebbe aperto in cassa. Solo cloud, e solo finché i
+ *  conti sono del cloud: con l'autorità in sala li scrive il nodo. */
+async function qrCassaAttivo(tenantId: number): Promise<boolean> {
+    if (isServiceNode || await nodeOwnsBills(tenantId)) return false;
+    if (!(await isFeatureEnabledForTenant(tenantId, 'passepartout'))) return false;
+    const rs = await queryWithRetry(`SELECT qr_pagamento_enabled FROM passepartout_config WHERE tenant_id = $1`, [tenantId]);
+    if (rs.rows[0]?.qr_pagamento_enabled !== true) return false;
+    return (await getPassepartoutChiusuraConfig(tenantId)) != null;
+}
+
+/** Una comanda della cassa già incassata da un conto del CRM non si fa
+ *  pagare una seconda volta: la sua chiusura in cassa può non essere ancora
+ *  arrivata, o essersi fermata (comanda cambiata, agente spento). */
+async function comandaGiaIncassata(tenantId: number, idComanda: number): Promise<boolean> {
+    const rs = await queryWithRetry(
+        `SELECT 1 FROM table_bills
+          WHERE tenant_id = $1 AND external_ref = $2 AND status IN ('SETTLED','SETTLED_PARTIAL','CLOSED') LIMIT 1`,
+        [tenantId, `pp:comanda:${idComanda}`]
+    );
+    return rs.rows.length > 0;
 }
 
 /** «Paga il conto» per la pagina del tavolo: aperto solo col pagamento al
  *  tavolo attivo e un conto con qualcosa ancora da pagare (quote in corso e
  *  incassi staff contano come a /pay). Niente righe del conto: il dettaglio
- *  lo dà la pagina di pagamento, come per il QR del preconto. */
-async function tablePayState(tenantId: number, tableId: number): Promise<{ open: boolean; url?: string; residual_cents?: number; currency?: string }> {
+ *  lo dà la pagina di pagamento, come per il QR del preconto.
+ *
+ *  `cassa`: il tocco passa prima da POST /public/table/:token/conto/cassa.
+ *  Vale per un tavolo con la comanda solo in cassa Passepartout (il conto
+ *  si importa al tocco, e l'importo si sa solo allora) e per un conto
+ *  importato dalla cassa che nessuno ha ancora iniziato a pagare (si
+ *  riallinea, così un piatto aggiunto in cassa dopo l'import c'è). */
+async function tablePayState(tenantId: number, tableId: number): Promise<{ open: boolean; url?: string; residual_cents?: number; currency?: string; cassa?: boolean }> {
     if (!(await isPayAtTableActive(tenantId))) return { open: false };
     const bill = await findOpenBillForTable(tenantId, tableId);
-    if (!bill) return { open: false };
+    if (!bill) {
+        if (!(await qrCassaAttivo(tenantId))) return { open: false };
+        const aperta = await comandaApertaSuiTavoli(tenantId, await tavoliDelQr(tenantId, tableId));
+        if (!aperta || await comandaGiaIncassata(tenantId, aperta.pp_comanda_id)) return { open: false };
+        return { open: true, cassa: true, currency: (await getTenantLocale(tenantId)).currency };
+    }
     const claimedRs = await queryWithRetry(
-        `SELECT COALESCE(SUM(amount_cents), 0)::int AS claimed FROM table_bill_splits
+        `SELECT COALESCE(SUM(amount_cents), 0)::int AS claimed,
+                COALESCE(SUM(amount_cents) FILTER (WHERE kind <> 'deposit'), 0)::int AS ospiti
+         FROM table_bill_splits
          WHERE table_bill_id = $1 AND status IN ('CLAIMED','PAID')`,
         [bill.id]
     );
-    const residual = Math.max(0, bill.total_cents - Number(claimedRs.rows[0]?.claimed || 0) - (await staffPaidCentsForBill(bill.id)));
+    const staffPaid = await staffPaidCentsForBill(bill.id);
+    const residual = Math.max(0, bill.total_cents - Number(claimedRs.rows[0]?.claimed || 0) - staffPaid);
     if (residual <= 0) return { open: false };
+    const riallinea = passepartoutComandaIdFromRef(bill.external_ref) != null
+        && Number(claimedRs.rows[0]?.ospiti || 0) === 0 && staffPaid === 0
+        && await qrCassaAttivo(tenantId);
     return {
         open: true,
         url: `${payAtTableBaseUrl()}/pay/${bill.share_token}`,
         residual_cents: residual,
         currency: (await getTenantLocale(tenantId)).currency,
+        ...(riallinea ? { cassa: true } : {}),
     };
+}
+
+/** Le righe e il totale del conto tornano quelli della comanda in cassa,
+ *  finché nessuno ha iniziato a pagare: dopo, il conto resta com'è e una
+ *  differenza la ferma la chiusura in cassa (differenzaComandaCassa). */
+async function riallineaContoAllaComanda(tenantId: number, billId: number, comanda: PassepartoutComanda): Promise<void> {
+    const payload = comandaToBillPayload(comanda);
+    if (payload.total_cents <= 0) return;
+    const firma = (items: any[]) => (items || [])
+        .map((i: any) => `${i.order_item_id}|${i.qty}|${i.unit_price_cents}|${i.name}`).join('\n');
+    const client = await pool.connect();
+    let bill: any = null;
+    try {
+        await client.query('BEGIN');
+        const cur = await client.query(
+            `SELECT id, status, reservation_id, total_cents, items FROM table_bills WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
+            [billId, tenantId]
+        );
+        const b = cur.rows[0];
+        const pagando = await client.query(
+            `SELECT 1 FROM table_bill_splits
+              WHERE table_bill_id = $1 AND status IN ('CLAIMED','PAID') AND kind <> 'deposit' LIMIT 1`,
+            [billId]
+        );
+        if (!b || !['OPEN', 'LOCKED'].includes(b.status) || pagando.rows.length > 0
+            || (await staffPaidCentsForBill(billId, client)) > 0
+            || (Number(b.total_cents) === payload.total_cents && firma(b.items) === firma(payload.items))) {
+            await client.query('ROLLBACK');
+            return;
+        }
+        // Prima il totale, poi l'acconto: come syncBillTotalInTx.
+        await client.query(
+            `UPDATE table_bills SET total_cents = $2, items = $3::jsonb WHERE id = $1`,
+            [billId, payload.total_cents, JSON.stringify(payload.items)]
+        );
+        await maintainDepositCredit(client, tenantId, billId, b.reservation_id, payload.total_cents);
+        await logBillChanged(client, tenantId, billId);
+        await client.query('COMMIT');
+        bill = b;
+    } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw err;
+    } finally {
+        client.release();
+    }
+    try { socketService?.broadcastToAll(tenantId, 'bill:updated', { id: billId, reservation_id: bill.reservation_id }); } catch (_) {}
+}
+
+type EsitoQrCassa = { url: string } | { status: number; error: 'non_disponibile' | 'nessuna_comanda' | 'chiuso' };
+
+/** Il conto da pagare dal QR del tavolo, preso dalla cassa: quello già
+ *  aperto (riallineato alla comanda, se nessuno sta pagando) o uno nuovo
+ *  importato adesso dalla comanda aperta sul tavolo. */
+async function contoDalQrCassa(tenantId: number, tableId: number): Promise<EsitoQrCassa> {
+    if (!(await isPayAtTableActive(tenantId)) || !(await qrCassaAttivo(tenantId))) {
+        return { status: 409, error: 'non_disponibile' };
+    }
+    const urlDi = (shareToken: string) => `${payAtTableBaseUrl()}/pay/${shareToken}`;
+    const leggiComanda = (idGestionale: number) =>
+        callPassepartout<PassepartoutComanda | null>(tenantId, 'comanda', { idGestionale }, 20_000);
+
+    const esistente = await findOpenBillForTable(tenantId, tableId);
+    if (esistente) {
+        const idComanda = passepartoutComandaIdFromRef(esistente.external_ref);
+        // Un conto del CRM sul tavolo: si paga quello, la cassa non c'entra.
+        if (idComanda == null) return { url: urlDi(esistente.share_token) };
+        const comanda = await leggiComanda(idComanda);
+        if (!comanda || comanda.isPagato) return { status: 409, error: 'chiuso' };
+        await riallineaContoAllaComanda(tenantId, esistente.id, comanda);
+        return { url: urlDi(esistente.share_token) };
+    }
+
+    const aperta = await comandaApertaSuiTavoli(tenantId, await tavoliDelQr(tenantId, tableId));
+    if (!aperta) return { status: 409, error: 'nessuna_comanda' };
+    const externalRef = `pp:comanda:${aperta.pp_comanda_id}`;
+    if (await comandaGiaIncassata(tenantId, aperta.pp_comanda_id)) return { status: 409, error: 'chiuso' };
+    const comanda = await leggiComanda(aperta.pp_comanda_id);
+    if (!comanda || comanda.isPagato) return { status: 409, error: 'chiuso' };
+    const payload = comandaToBillPayload(comanda);
+    if (payload.total_cents <= 0) return { status: 409, error: 'nessuna_comanda' };
+
+    // La prenotazione del planning da cui la cassa ha aperto il tavolo, se
+    // c'è: porta con sé la caparra, che il conto scala.
+    let reservationId: number | null = null;
+    if (comanda.idPrenotazione) {
+        const pr = await queryWithRetry(
+            `SELECT p.reservation_id FROM passepartout_prenotazioni p
+               JOIN reservations r ON r.id = p.reservation_id AND r.tenant_id = p.tenant_id
+              WHERE p.tenant_id = $1 AND p.pp_id = $2 LIMIT 1`,
+            [tenantId, comanda.idPrenotazione]
+        );
+        reservationId = pr.rows[0]?.reservation_id != null ? Number(pr.rows[0].reservation_id) : null;
+    }
+
+    const servizio = resolveService(new Date(), (await getTenantLocale(tenantId)).timezone);
+    let bill: any;
+    try {
+        // opened_by_user_id NULL: aperto dall'ospite. È il segno che al saldo
+        // il conto si chiude da solo in cassa (autoCloseSettledBill).
+        const ins = await queryWithRetry(
+            `INSERT INTO table_bills
+                (tenant_id, reservation_id, table_id, total_cents, covers, share_token, opened_by_user_id,
+                 items, external_ref, service_date, shift)
+             VALUES ($1, $2, $3, $4, $5, $6, NULL, $7::jsonb, $8, $9, $10)
+             RETURNING id, reservation_id, table_id, total_cents, covers, currency,
+                       items, status, share_token, opened_at, closed_at,
+                       opened_by_user_id, closed_by_user_id, external_ref,
+                       cash_settled_cents, tip_cents, notes`,
+            [tenantId, reservationId, aperta.table_id, payload.total_cents, payload.covers,
+             crypto.randomBytes(24).toString('base64url'), JSON.stringify(payload.items), externalRef,
+             servizio.service_date, servizio.shift]
+        );
+        bill = ins.rows[0];
+    } catch (err: any) {
+        // Un conto attivo c'è già: l'altro telefono al tavolo ha toccato un
+        // attimo prima, o la prenotazione ne ha uno. Si paga quello.
+        if (err?.code !== '23505') throw err;
+        const altro = await queryWithRetry(
+            `SELECT share_token FROM table_bills
+              WHERE tenant_id = $1 AND status IN ('OPEN','LOCKED') AND share_token IS NOT NULL
+                AND service_date = $2::date AND shift = $3
+                AND ((reservation_id IS NOT NULL AND reservation_id = $4) OR (reservation_id IS NULL AND table_id = $5))
+              ORDER BY opened_at DESC LIMIT 1`,
+            [tenantId, servizio.service_date, servizio.shift, reservationId, aperta.table_id]
+        );
+        return altro.rows[0] ? { url: urlDi(String(altro.rows[0].share_token)) } : { status: 409, error: 'non_disponibile' };
+    }
+    await logBillChanged(null, tenantId, bill.id);
+    try { socketService?.broadcastToAll(tenantId, 'bill:opened', bill); } catch (_) {}
+    if (reservationId != null) {
+        const credit = await creditPaidDepositsToBill(tenantId, bill.id).catch(() => ({ credited: 0, settled: false }));
+        if (credit.credited > 0) {
+            try { socketService?.broadcastToAll(tenantId, 'bill:updated', { id: bill.id, reservation_id: reservationId }); } catch (_) {}
+        }
+        // La caparra copre tutto: niente da pagare, il tavolo si chiude in cassa.
+        if (credit.settled) {
+            await autoCloseSettledBill(tenantId, bill.id).catch(err =>
+                console.error('[passepartout] chiusura del conto coperto dalla caparra fallita per conto', bill.id, err?.message || err));
+            return { status: 409, error: 'chiuso' };
+        }
+    }
+    return { url: urlDi(String(bill.share_token)) };
 }
 
 // GET /public/table/:token — la pagina del tavolo all'avvio: ristorante,
@@ -10430,6 +10769,40 @@ app.get('/public/table/:token/conto', publicTableLimiter, async (req, res) => {
     }
 });
 
+// POST /public/table/:token/conto/cassa — il tocco su «Paga il conto» quando
+// la pagina ha `cassa`: il conto si prende dalla comanda in cassa adesso
+// (import o riallineamento) e la pagina va al pagamento. Due telefoni dello
+// stesso tavolo che toccano insieme fanno una lettura sola.
+const contiDalQrInCorso = new Map<string, Promise<EsitoQrCassa>>();
+
+app.post('/public/table/:token/conto/cassa', publicTableLimiter, async (req, res) => {
+    try {
+        const table = await loadTableByPublicToken(String(req.params.token || ''));
+        if (!table) return res.status(404).json({ error: 'Not found' });
+        await runWithTenantContext(table.tenant_id, async () => {
+            const chiave = `${table.tenant_id}:${table.id}`;
+            let inCorso = contiDalQrInCorso.get(chiave);
+            if (!inCorso) {
+                inCorso = contoDalQrCassa(table.tenant_id, table.id)
+                    .finally(() => contiDalQrInCorso.delete(chiave));
+                contiDalQrInCorso.set(chiave, inCorso);
+            }
+            const esito = await inCorso;
+            if ('url' in esito) return res.json({ url: esito.url });
+            res.status(esito.status).json({ error: esito.error });
+        });
+    } catch (err: any) {
+        // Cassa o PC di sala che non rispondono: la pagina dice di chiedere
+        // al personale, senza dettagli tecnici per l'ospite.
+        if (err instanceof PassepartoutBridgeError) {
+            console.warn('[passepartout] conto dal QR non letto dalla cassa:', err.kind, err.message);
+            return res.status(503).json({ error: 'cassa_non_raggiungibile' });
+        }
+        console.error('POST /public/table/:token/conto/cassa error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 // La pagina: lo stesso menu.html, che riconosce /t/<token> e passa in
 // modalità tavolo. Non /menu/:token — oscurerebbe GET /menu/catalogue.
 app.get('/t/:token', (_req, res) => {
@@ -10471,15 +10844,9 @@ async function notifyBillPaying(
             pushSendToUser(id, { ...payload, url: '/?view=COMANDE' })
                 .catch(err => console.warn('[pay] push cameriere non inviata:', err?.message ?? err));
         }
-        // La cassa: il ruolo CASSA; dove nessuno ce l'ha, chi apre la cassa
-        // (cash:operate). Chi ha già ricevuto la push da cameriere non la
-        // riceve due volte.
-        const cassaRs = await queryWithRetry(
-            `SELECT 1 FROM users WHERE tenant_id = $1 AND role = 'CASSA' AND is_active = TRUE LIMIT 1`,
-            [tenantId]
-        );
-        const cassaRoles = (cassaRs.rowCount ?? 0) > 0 ? ['CASSA'] : ['OWNER', 'GENERAL_MANAGER', 'MANAGER'];
-        pushSendToRoles(tenantId, cassaRoles, { ...payload, url: '/?view=CASSA' }, { excludeUserIds: waiterIds })
+        // La cassa. Chi ha già ricevuto la push da cameriere non la riceve
+        // due volte.
+        pushSendToRoles(tenantId, await ruoliCassa(tenantId), { ...payload, url: '/?view=CASSA' }, { excludeUserIds: waiterIds })
             .catch(err => console.warn('[pay] push cassa non inviata:', err?.message ?? err));
     } catch (err: any) {
         console.warn('[pay] avviso «sta pagando» fallito per il conto', billId, err?.message || err);
@@ -10487,6 +10854,16 @@ async function notifyBillPaying(
 }
 
 const billPayingTag = (billId: number): string => `bill-paying-${billId}`;
+
+/** Chi riceve gli avvisi della cassa: il ruolo CASSA; dove nessuno ce l'ha,
+ *  chi apre la cassa (cash:operate). */
+async function ruoliCassa(tenantId: number): Promise<string[]> {
+    const cassaRs = await queryWithRetry(
+        `SELECT 1 FROM users WHERE tenant_id = $1 AND role = 'CASSA' AND is_active = TRUE LIMIT 1`,
+        [tenantId]
+    );
+    return (cassaRs.rowCount ?? 0) > 0 ? ['CASSA'] : ['OWNER', 'GENERAL_MANAGER', 'MANAGER'];
+}
 
 /** Spegne «il tavolo sta pagando» quando non c'è più niente da fare: conto
  *  saldato, chiuso o annullato. Fire-and-forget come le altre chiusure. */
@@ -12713,6 +13090,10 @@ async function applyBillSplitTransition(
 // Solo dove lo scontrino è automatico (registratore in LAN, Openapi, mock dei
 // test): con la cassa esterna o Passepartout il documento lo batte qualcuno,
 // e il conto resta in Cassa tra quelli da chiudere, come prima.
+// Eccezione: il conto che l'ospite ha importato dalla cassa Passepartout col
+// QR del tavolo (opened_by_user_id NULL). Lì nessuno guarda la Cassa del CRM:
+// al saldo si chiude da solo e la cassa chiude il tavolo col tipo di
+// pagamento esterno, emettendo lei il documento.
 const AUTO_CLOSE_FISCAL_PROVIDERS = new Set(['rt-local', 'openapi', 'mock']);
 
 // Fase B3: con «Servizio completo sul nodo» acceso i conti sono del nodo. Il
@@ -12725,7 +13106,17 @@ async function nodeOwnsBills(tenantId: number): Promise<boolean> {
 }
 
 async function autoCloseSettledBill(tenantId: number, billId: number): Promise<any | null> {
-    if (!AUTO_CLOSE_FISCAL_PROVIDERS.has(await getFiscalProviderSetting(tenantId))) return null;
+    const prima = await queryWithRetry(
+        `SELECT external_ref, opened_by_user_id FROM table_bills WHERE id = $1 AND tenant_id = $2`,
+        [billId, tenantId]
+    );
+    if (!prima.rows[0]) return null;
+    const ppComandaId = passepartoutComandaIdFromRef(prima.rows[0].external_ref);
+    const ppConfig = ppComandaId != null && prima.rows[0].opened_by_user_id == null
+        ? await getPassepartoutChiusuraConfig(tenantId)
+        : null;
+    if (ppComandaId != null ? !ppConfig : !AUTO_CLOSE_FISCAL_PROVIDERS.has(await getFiscalProviderSetting(tenantId))) return null;
+    const ppDocumento = ppConfig?.tipoDocumento === 'Proforma' ? 'Proforma' as const : undefined;
     const client = await pool.connect();
     let row: any = null;
     try {
@@ -12734,7 +13125,7 @@ async function autoCloseSettledBill(tenantId: number, billId: number): Promise<a
             `SELECT status, external_ref FROM table_bills WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
             [billId, tenantId]
         );
-        if (cur.rows[0]?.status !== 'SETTLED' || passepartoutComandaIdFromRef(cur.rows[0].external_ref) != null) {
+        if (cur.rows[0]?.status !== 'SETTLED' || passepartoutComandaIdFromRef(cur.rows[0].external_ref) !== ppComandaId) {
             await client.query('ROLLBACK');
             return null;
         }
@@ -12757,6 +13148,10 @@ async function autoCloseSettledBill(tenantId: number, billId: number): Promise<a
             [billId, tenantId]
         );
         row = upd.rows[0] ?? null;
+        // La chiusura in cassa nasce nella transazione del conto, come per
+        // «Chiudi» dalla Cassa: un processo che muore dopo il COMMIT la
+        // lascia PENDING e la riprende lo spazzino.
+        if (row && ppConfig) await insertPendingPassepartoutClose(client, tenantId, billId, ppDocumento);
         if (row) await logBillChanged(client, tenantId, billId);
         await client.query('COMMIT');
     } catch (err) {
@@ -12767,6 +13162,11 @@ async function autoCloseSettledBill(tenantId: number, billId: number): Promise<a
     }
     if (!row) return null;
     try { socketService?.broadcastToAll(tenantId, 'bill:closed', row); } catch (_) {}
+    if (ppComandaId != null && ppConfig) {
+        chiudiComandaPassepartoutPerBill(tenantId, billId, ppComandaId, ppConfig, ppDocumento)
+            .catch(err => console.error('[passepartout] chiusura in cassa dopo il saldo dal QR fallita per conto', billId, err?.message));
+        return row;
+    }
     if (Number(row.total_cents) > 0) {
         emitFiscalDocForBill(tenantId, billId, null)
             .catch(err => console.error('[fiscal] emissione dopo chiusura automatica fallita per conto', billId, err?.message));

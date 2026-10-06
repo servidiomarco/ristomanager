@@ -11,6 +11,8 @@
 //
 // Una cassa muta non blocca la sala: le righe non viste all'ultima lettura
 // buona spariscono, e ad agente spento spariscono tutte dopo 5 minuti.
+// La stessa lettura serve al pagamento dal QR delle comande della cassa
+// (qr_pagamento_enabled): gira se è acceso l'uno o l'altro.
 // Solo cloud.
 
 import { queryWithRetry, runAsPlatform, runWithTenantContext } from '../db.js';
@@ -42,6 +44,34 @@ export async function tavoliApertiAccesi(tenantId: number): Promise<boolean> {
     return rs.rows[0]?.tavoli_aperti_enabled === true;
 }
 
+/** La lettura delle comande aperte serve alla sala o al pagamento dal QR. */
+async function letturaAccesa(tenantId: number): Promise<boolean> {
+    const rs = await queryWithRetry(
+        `SELECT (tavoli_aperti_enabled OR qr_pagamento_enabled) AS accesa FROM passepartout_config WHERE tenant_id = $1`,
+        [tenantId]
+    );
+    return rs.rows[0]?.accesa === true;
+}
+
+/** La comanda aperta in cassa su uno dei tavoli (il tavolo del QR e gli
+ *  altri della sua unione), dall'ultima lettura buona: quella aperta per
+ *  ultima se ce n'è più d'una. */
+export async function comandaApertaSuiTavoli(
+    tenantId: number,
+    tableIds: number[],
+): Promise<{ pp_comanda_id: number; table_id: number } | null> {
+    const rs = await queryWithRetry(
+        `SELECT pp_comanda_id, table_id FROM passepartout_tavoli_aperti
+          WHERE tenant_id = $1 AND table_id = ANY($2::int[])
+            AND visto_at > now() - make_interval(mins => ${SCADENZA_MIN})
+          ORDER BY aperta_da DESC NULLS LAST, pp_comanda_id DESC
+          LIMIT 1`,
+        [tenantId, tableIds]
+    );
+    const r = rs.rows[0];
+    return r ? { pp_comanda_id: Number(r.pp_comanda_id), table_id: Number(r.table_id) } : null;
+}
+
 /** I tavoli aperti in cassa del ristorante, per la sala. Vuoto a
  *  interruttore spento: la sala non deve vedere dati vecchi. */
 export async function elencoTavoliAperti(tenantId: number): Promise<TavoloApertoInCassa[]> {
@@ -68,7 +98,7 @@ const ultimeImpronte = new Map<number, string>();
 
 /** Una lettura per un ristorante, DENTRO il suo contesto tenant. */
 export async function aggiornaTavoliAperti(tenantId: number): Promise<TavoloApertoInCassa[] | null> {
-    if (!(await tavoliApertiAccesi(tenantId))) return null;
+    if (!(await letturaAccesa(tenantId))) return null;
     if (!(await isFeatureEnabledForTenant(tenantId, 'passepartout'))) return null;
     if (!passepartoutAgentSupports(tenantId, CAPACITA)) return null;
     let aperte: PassepartoutComandaAperta[];
@@ -164,9 +194,10 @@ async function giro(): Promise<void> {
         }
         const pronti = connectedPassepartoutTenants().filter((t) => passepartoutAgentSupports(t, CAPACITA));
         if (pronti.length === 0) return;
-        // rls-bypass: solo l'elenco dei ristoranti con i tavoli aperti accesi; ognuno si lavora nel suo contesto tenant
+        // rls-bypass: solo l'elenco dei ristoranti con la lettura accesa; ognuno si lavora nel suo contesto tenant
         const rs = await runAsPlatform(() => queryWithRetry(
-            `SELECT tenant_id FROM passepartout_config WHERE tavoli_aperti_enabled AND tenant_id = ANY($1::bigint[])`,
+            `SELECT tenant_id FROM passepartout_config
+              WHERE (tavoli_aperti_enabled OR qr_pagamento_enabled) AND tenant_id = ANY($1::bigint[])`,
             [pronti]
         ));
         for (const row of rs.rows) {
