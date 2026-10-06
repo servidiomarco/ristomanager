@@ -49,7 +49,7 @@ export class PassepartoutBridgeError extends Error {
 
 let agentSocket: Socket | null = null;
 let connectedAt: Date | null = null;
-let agentHello: { hostname?: string; versioneGestionale?: string } = {};
+let agentHello: { hostname?: string; versioneGestionale?: string; capabilities?: string[] } = {};
 
 export function isPassepartoutAgentConfigured(): boolean {
     return Boolean((process.env.PASSEPARTOUT_AGENT_TOKEN || '').trim());
@@ -62,7 +62,17 @@ export function getPassepartoutAgentStatus() {
         connected_at: connectedAt?.toISOString() ?? null,
         hostname: agentHello.hostname ?? null,
         versione_gestionale: agentHello.versioneGestionale ?? null,
+        capabilities: agentHello.capabilities ?? [],
     };
+}
+
+/** L'agente collegato dichiara di saper fare `cap` (nel suo agent:hello).
+ *  'chiudi-riprendi' (fase B5): prima di chiudere guarda nell'archivio del
+ *  giorno se il conto della comanda c'è già, così un nuovo tentativo dopo
+ *  una risposta persa non rifà lo scontrino. Un agente vecchio non lo dice,
+ *  e con lui i tentativi automatici non partono. */
+export function passepartoutAgentSupports(cap: string): boolean {
+    return agentSocket != null && (agentHello.capabilities ?? []).includes(cap);
 }
 
 export function setupPassepartoutBridge(io: SocketIOServer) {
@@ -89,6 +99,9 @@ export function setupPassepartoutBridge(io: SocketIOServer) {
             agentHello = {
                 hostname: typeof info?.hostname === 'string' ? info.hostname : undefined,
                 versioneGestionale: typeof info?.versioneGestionale === 'string' ? info.versioneGestionale : undefined,
+                capabilities: Array.isArray(info?.capabilities)
+                    ? info.capabilities.filter((c: unknown): c is string => typeof c === 'string').slice(0, 20)
+                    : [],
             };
         });
 

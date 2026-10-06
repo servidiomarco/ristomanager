@@ -38,7 +38,7 @@ import { loadNodeTlsMaterial, startNodeCredentialsRefresh } from './services/sal
 import { initSalaNodeFileLog } from './services/salaNodeLog.js';
 import { startSalaNodeWatchdog } from './services/salaNodeWatchdog.js';
 import { createServer as createHttpsServer, type Server as HttpsServer } from 'https';
-import { startSalaNodeReplica, getSalaNodeLocalStatus } from './services/salaNodeReplica.js';
+import { startSalaNodeReplica, getSalaNodeLocalStatus, isCloudUplinkDown } from './services/salaNodeReplica.js';
 import { salaNodeAccessPolicy, startSalaNodeAccess } from './services/salaNodeAccess.js';
 import { startSalaNodeConfigSync, kickConfigSync } from './services/salaNodeConfigSync.js';
 import { VOICE_CHANNEL, WHATSAPP_CHANNEL, type ToolOutcome } from './services/bookingTools.js';
@@ -72,11 +72,12 @@ import {
     setupPassepartoutBridge,
     isPassepartoutAgentConfigured,
     getPassepartoutAgentStatus,
+    passepartoutAgentSupports,
     callPassepartout,
     comandaToBillPayload,
     PassepartoutBridgeError,
 } from './services/passepartoutBridge.js';
-import { setupSalaNodeBridge, getSalaNodeStatus, disconnectSalaNode, askNodeStatus } from './services/salaNodeBridge.js';
+import { setupSalaNodeBridge, getSalaNodeStatus, disconnectSalaNode, askNodeStatus, askNode } from './services/salaNodeBridge.js';
 import {
     SUPPORT_CATEGORIES, SUPPORT_STATUSES, SUPPORT_SUBJECT_MAX, SUPPORT_BODY_MAX, SUPPORT_ATTACHMENTS_MAX, SUPPORT_RATING_COMMENT_MAX,
     sanitizeClientContext, supportTenantTag, supportPlatformTag,
@@ -105,7 +106,7 @@ import logRoutes from './activityLogs/logRoutes.js';
 import { authenticate, authorize, requirePermission, requireAnyPermission, requireStepUp, setNodeAccessPolicy } from './auth/authMiddleware.js';
 import { AuthService } from './auth/authService.js';
 import { publicKeysForNodes } from './auth/jwtKeys.js';
-import { isServiceWrite } from './services/serviceWrites.js';
+import { serviceWriteRoute } from './services/serviceWrites.js';
 import { RolePermissionService, isReportsAdmin, ALL_PERMISSIONS, ALL_PERMISSION_KEYS, type Permission } from './auth/permissionService.js';
 import { canAssignToRole } from './auth/permissions.js';
 import { LogService, ActivityAction, ResourceType } from './activityLogs/logService.js';
@@ -364,34 +365,52 @@ app.use((err: any, _req: express.Request, res: express.Response, next: express.N
     return next(err);
 });
 
-// --- Il recinto delle scritture di servizio (fase B1) ----------------------
-// Con «Servizio completo sul nodo» acceso le battiture di sala nascono sul
-// nodo. Se il nodo è vivo (il cloud lo sente da meno di 60 s), la stessa
-// scrittura arrivata al cloud — un telefono col 4G, un client col nodo in
-// circuito aperto — si rifiuta con 409: accettarla vorrebbe dire due verità
-// sulla stessa comanda al rientro. Nodo muto da oltre 60 s = il downgrade è
-// il failover: il cloud torna a scrivere. L'elenco è lo stesso del client
-// (services/serviceWrites.ts). Il nodo stesso non ha recinto.
-const SERVICE_FENCE_NODE_SILENT_S = 60;
+// --- Il recinto delle scritture di servizio (fasi B1, B3) -----------------
+// Con «Servizio completo sul nodo» acceso le battiture di sala — comande,
+// conti, incassi, scontrini, cassa — nascono sul nodo. La stessa scrittura
+// arrivata al cloud (un telefono col 4G, un client col nodo in circuito
+// aperto) si rifiuta con 409, anche col nodo muto: due verità sulla stessa
+// comanda o sullo stesso conto al rientro sarebbero un doppio incasso. Col
+// PC del locale morto si spegne l'interruttore con l'uscita d'emergenza
+// (force). L'elenco è lo stesso del client (services/serviceWrites.ts). Il
+// nodo stesso non ha recinto.
 app.use((req, res, next) => {
-    if (isServiceNode || !isServiceWrite(req.method, req.path)) return next();
+    const route = isServiceNode ? null : serviceWriteRoute(req.method, req.path);
+    if (!route) return next();
     const header = req.headers.authorization;
     const payload = header?.startsWith('Bearer ') ? AuthService.verifyAccessToken(header.slice(7)) : null;
     // Senza token valido decide la rotta (401 dal suo authenticate).
     if (!payload) return next();
     const tenantId = Number.isInteger(payload.tenantId) && payload.tenantId > 0 ? payload.tenantId : 1;
     runWithTenantContext(tenantId, async () => {
-        const status = getSalaNodeStatus(tenantId);
-        const nodeAlive = status.last_seen_seconds !== null && status.last_seen_seconds < SERVICE_FENCE_NODE_SILENT_S;
-        if (nodeAlive && await getFeatureFlag(tenantId, 'sala_node_authority_enabled', false)) {
+        if (await getFeatureFlag(tenantId, 'sala_node_authority_enabled', false)) {
             res.status(409).json({
                 error: 'authority_on_node',
-                message: 'Il servizio è sul nodo di sala: questa battitura va fatta dalla rete del locale.',
+                // È la frase che il cameriere legge (buildApiError mostra
+                // `message`): deve dire che niente è partito.
+                message: 'Nodo di sala non raggiungibile da qui: niente registrato. Collegati al Wi-Fi del locale e riprova.',
             });
             return;
         }
         next();
     }).catch(() => next());
+});
+
+// --- Il recinto rovescio, sul nodo (tappa C) --------------------------------
+// La prenotazione è del cloud: sul nodo si toccano solo le colonne del
+// servizio (tavolo, arrivo), lo scambio e il walk-in. Un PUT o una DELETE
+// arrivati al nodo cambierebbero una copia che il cloud non accetta indietro
+// (gli eventi del cloud non si importano dal nodo, services/replicaApply.ts):
+// meglio un no chiaro. Il client non li manda qui — le scritture non di
+// servizio vanno al cloud, e a linea giù aspettano nella coda.
+app.use((req, res, next) => {
+    if (!isServiceNode || !/^\/reservations(\/|$)/.test(req.path)) return next();
+    if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method.toUpperCase())) return next();
+    if (serviceWriteRoute(req.method, req.path)) return next();
+    res.status(409).json({
+        error: 'cloud_authority',
+        message: 'Questa modifica alla prenotazione si fa dal cloud: con la linea giù riprova quando torna internet.',
+    });
 });
 
 // ============================================
@@ -940,6 +959,7 @@ async function handleTwilioWhatsAppStatus(tenantId: number, req: express.Request
              RETURNING *`,
             [status, errText, MessageSid, tenantId]
         );
+        if (updated.rows[0]) await logReservationChanged(null, tenantId, updated.rows[0].id);
         if (updated.rows[0] && socketService) {
             try { socketService.broadcastReservationUpdated(tenantId, updated.rows[0]); }
             catch (err) { console.warn('[Twilio] status broadcast failed:', err); }
@@ -2193,7 +2213,22 @@ async function isTableInClosedRoom(tenantId: number, tableId: number | null | un
 async function broadcastReservationsUpdatedByIds(ids: number[]): Promise<void> {
     if (!socketService || ids.length === 0) return;
     try {
-        const result = await queryWithRetry(`
+        const rows = await selectEnrichedReservations(ids);
+        for (const row of rows) {
+            socketService.broadcastReservationSynced(Number(row.tenant_id) || PUBLIC_TENANT_ID, row);
+        }
+    } catch (err) {
+        console.warn('[sync] broadcastReservationsUpdatedByIds failed:', err);
+    }
+}
+
+/** Le prenotazioni con l'arricchimento della GET /reservations (VIP, tavolo
+ *  preferito, ultimo pagamento): la forma che i client si aspettano in un
+ *  reservation:updated. Il client SOSTITUISCE la riga: una riga nuda
+ *  spegneva i badge VIP fino al ricaricamento. */
+async function selectEnrichedReservations(ids: number[]): Promise<any[]> {
+    if (ids.length === 0) return [];
+    const result = await queryWithRetry(`
             SELECT r.*, u.full_name AS created_by_user_name,
                    c.is_vip AS customer_is_vip,
                    c.is_blacklisted AS customer_is_blacklisted,
@@ -2236,12 +2271,7 @@ async function broadcastReservationsUpdatedByIds(ids: number[]): Promise<void> {
             ) lp ON true
             WHERE r.id = ANY($1::int[])
         `, [ids]);
-        for (const row of result.rows) {
-            socketService.broadcastReservationSynced(Number(row.tenant_id) || PUBLIC_TENANT_ID, row);
-        }
-    } catch (err) {
-        console.warn('[sync] broadcastReservationsUpdatedByIds failed:', err);
-    }
+    return result.rows;
 }
 
 // Find tables already booked on a given date+shift, either by a reservation
@@ -2709,7 +2739,8 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
             queryWithRetry(
                 `UPDATE reservations SET language = $1 WHERE id = $2 AND tenant_id = $3`,
                 [resolvedLanguage, newReservation.id, req.tenantId!]
-            ).catch(err => console.warn('POST /reservations language backfill failed:', err));
+            ).then(() => logReservationChanged(null, req.tenantId!, newReservation.id))
+                .catch(err => console.warn('POST /reservations language backfill failed:', err));
             newReservation.language = resolvedLanguage;
         }
         // Propagate marketing consent to the (now-existing) customer record.
@@ -2789,19 +2820,27 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
         // l'evento siede legittimamente in una sala chiusa al servizio
         // normale. Se il client non ha mandato il campo, fa fede il
         // collegamento già salvato.
-        let isBanquetLinked = banquetMenuId != null;
-        if (!isBanquetLinked && !banquetProvided && table_id != null) {
-            const stored = await queryWithRetry('SELECT banquet_menu_id FROM reservations WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
-            isBanquetLinked = stored.rows[0]?.banquet_menu_id != null;
-        }
-        if (!isBanquetLinked && await isTableInClosedRoom(req.tenantId!, table_id)) {
-            return res.status(400).json({ error: 'La sala selezionata è chiusa. Scegli un tavolo in una sala aperta.' });
-        }
+        // Tappa C: col servizio in sala tavolo e arrivo sono del nodo
+        // (PATCH /reservations/:id/service, che il client manda lì). Qui il
+        // PUT del cloud li lascia com'erano: la copia del client può essere
+        // vecchia di qualche secondo, e riscriverli annullerebbe un
+        // ospite appena seduto. Unica eccezione: annullata o rifiutata
+        // libera il tavolo, e il nodo fa lo stesso ricevendo la riga.
+        const serviceOnNode = !isServiceNode && await getFeatureFlag(req.tenantId!, 'sala_node_authority_enabled', false);
         // Both CANCELLED and DECLINED free the assigned table so it can be
         // reused, and skip the conflict check (the row is no longer live).
         const releasesTable = reservation_status === 'CANCELLED' || reservation_status === 'DECLINED';
+        const keepTable = serviceOnNode && !releasesTable;
+        let isBanquetLinked = banquetMenuId != null;
+        if (!keepTable && !isBanquetLinked && !banquetProvided && table_id != null) {
+            const stored = await queryWithRetry('SELECT banquet_menu_id FROM reservations WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
+            isBanquetLinked = stored.rows[0]?.banquet_menu_id != null;
+        }
+        if (!keepTable && !isBanquetLinked && await isTableInClosedRoom(req.tenantId!, table_id)) {
+            return res.status(400).json({ error: 'La sala selezionata è chiusa. Scegli un tavolo in una sala aperta.' });
+        }
         const effectiveTableId = releasesTable ? null : (table_id ?? null);
-        if (!releasesTable && table_id != null && reservation_time && shift) {
+        if (!keepTable && !releasesTable && table_id != null && reservation_time && shift) {
             const eventDate = new Date(reservation_time).toISOString().substring(0, 10);
             const conflicts = await findTableConflicts(req.tenantId!, eventDate, shift, [Number(table_id)], {
                 excludeReservationId: Number(id),
@@ -2834,7 +2873,11 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                 FROM reservations WHERE id = $14 AND tenant_id = $18
             ), upd AS (
                 UPDATE reservations
-                SET customer_name = $1, reservation_time = ${reservationTimeSql(reservation_time, 2, TZ)}, shift = $3, guests = $4, children = $5, table_id = $6, notes = $7, email = $8, phone = $9, payment_status = $10, arrival_status = $11, reservation_status = $12, duration_minutes = $13,
+                SET customer_name = $1, reservation_time = ${reservationTimeSql(reservation_time, 2, TZ)}, shift = $3, guests = $4, children = $5,
+                    table_id = CASE WHEN $21::boolean THEN table_id ELSE $6 END,
+                    notes = $7, email = $8, phone = $9, payment_status = $10,
+                    arrival_status = CASE WHEN $22::boolean THEN arrival_status ELSE $11 END,
+                    reservation_status = $12, duration_minutes = $13,
                     consent_marketing = COALESCE($15, consent_marketing),
                     consent_data_health = COALESCE($16, consent_data_health),
                     consent_updated_at = CASE WHEN ($15 IS NOT NULL OR $16 IS NOT NULL) THEN CURRENT_TIMESTAMP ELSE consent_updated_at END,
@@ -2888,6 +2931,8 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                 req.tenantId!,
                 banquetProvided,
                 banquetMenuId,
+                keepTable,
+                serviceOnNode,
             ]
             );
             if (updRes.rows[0]) {
@@ -2921,7 +2966,8 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                 customer_name,
                 (() => {
                     const prevT = previousTableId == null ? null : Number(previousTableId);
-                    const newT = effectiveTableId == null ? null : Number(effectiveTableId);
+                    const storedT = updatedReservation?.table_id ?? effectiveTableId;
+                    const newT = storedT == null ? null : Number(storedT);
                     return {
                         guests, reservation_time, shift, payment_status, arrival_status, reservation_status,
                         table_id: newT,
@@ -3107,6 +3153,153 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
 // Reminder manuale dal tab Comunicazione del modal. WhatsApp col template
 // approvato, SMS finché TWILIO_WA_CONTENT_SID_BOOKING_REMINDER non è
 // impostata. Marca reminder_sent e broadcast, così la card lo racconta.
+// --- L'accoglienza in sala: tavolo e arrivo (tappa C) ----------------------
+// Il PUT qui sopra riscrive la prenotazione intera, ed è del cloud. Durante
+// il servizio la reception cambia SOLO due cose: dove siede l'ospite e a che
+// punto è (arrivato, in uscita, tavolo liberato). Quelle due colonne sono
+// del servizio: questo comando le scrive e basta, col servizio in sala nasce
+// sul nodo (services/serviceWrites.ts) e funziona a linea caduta, anche con
+// la sessione del PIN (floorplan:update_status). Il cloud e il nodo si
+// scambiano solo quelle due colonne (reservation:service-updated), così un
+// nome corretto nel cloud e un tavolo assegnato in sala convivono.
+const ARRIVAL_STATUSES = new Set(['WAITING', 'ARRIVED', 'DEPARTING', 'DEPARTED']);
+
+app.patch('/reservations/:id/service', authenticate, requireAnyPermission('reservations:full', 'floorplan:update_status'), async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'id non valido' });
+        const body = req.body ?? {};
+        const hasTable = Object.prototype.hasOwnProperty.call(body, 'table_id');
+        const hasArrival = Object.prototype.hasOwnProperty.call(body, 'arrival_status');
+        if (!hasTable && !hasArrival) {
+            return res.status(400).json({ error: 'Niente da cambiare: servono table_id o arrival_status' });
+        }
+        const tableId = hasTable && body.table_id != null ? Number(body.table_id) : null;
+        if (hasTable && body.table_id != null && (!Number.isInteger(tableId) || (tableId as number) <= 0)) {
+            return res.status(400).json({ error: 'table_id non valido' });
+        }
+        const arrival = hasArrival ? String(body.arrival_status) : null;
+        if (hasArrival && !ARRIVAL_STATUSES.has(arrival as string)) {
+            return res.status(400).json({ error: 'arrival_status non valido' });
+        }
+
+        const curRs = await queryWithRetry(
+            `SELECT id, customer_name, reservation_time, shift, duration_minutes, banquet_menu_id, table_id
+               FROM reservations WHERE id = $1 AND tenant_id = $2`,
+            [id, req.tenantId!]
+        );
+        const cur = curRs.rows[0];
+        if (!cur) return res.status(404).json({ error: 'Prenotazione non trovata' });
+
+        // Le stesse regole del PUT per un tavolo nuovo: del ristorante, in una
+        // sala aperta (salvo banchetti), libero nella finestra dell'ospite.
+        if (tableId != null && tableId !== Number(cur.table_id)) {
+            const tbl = await queryWithRetry(`SELECT id FROM tables WHERE id = $1 AND tenant_id = $2`, [tableId, req.tenantId!]);
+            if (tbl.rows.length === 0) return res.status(404).json({ error: 'Tavolo non trovato' });
+            if (cur.banquet_menu_id == null && await isTableInClosedRoom(req.tenantId!, tableId)) {
+                return res.status(400).json({ error: 'La sala selezionata è chiusa. Scegli un tavolo in una sala aperta.' });
+            }
+            const eventDate = new Date(cur.reservation_time).toISOString().substring(0, 10);
+            const conflicts = await findTableConflicts(req.tenantId!, eventDate, cur.shift, [tableId], {
+                excludeReservationId: id,
+                reservationStart: cur.reservation_time,
+                reservationDurationMin: cur.duration_minutes ?? (cur.shift === 'LUNCH' ? 90 : 120),
+            });
+            if (conflicts.length > 0) {
+                return res.status(409).json({ error: buildConflictMessage(conflicts), conflicts });
+            }
+        }
+
+        await runWithOutboxTx(async (tx) => {
+            const upd = await tx.query(
+                `UPDATE reservations
+                    SET table_id = CASE WHEN $3::boolean THEN $4::int ELSE table_id END,
+                        arrival_status = COALESCE($5::text, arrival_status)
+                  WHERE id = $1 AND tenant_id = $2
+                  RETURNING id`,
+                [id, req.tenantId!, hasTable, tableId, arrival]
+            );
+            if (upd.rows[0]) {
+                await outboxEnqueueInTx(tx, req.tenantId!, 'reservation:service-updated', `reservation:${id}`,
+                    { reservation_id: id }, outboxContext(req));
+            }
+        });
+        outboxKick();
+
+        const [row] = await selectEnrichedReservations([id]);
+        if (req.user) {
+            const prevT = cur.table_id == null ? null : Number(cur.table_id);
+            LogService.logActivity(
+                req.tenantId!, req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.RESERVATION, id, cur.customer_name,
+                {
+                    ...(hasArrival ? { arrival_status: arrival } : {}),
+                    ...(hasTable ? { table_id: tableId, ...(prevT !== tableId ? { prev_table_id: prevT } : {}) } : {}),
+                }
+            );
+        }
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService && row) socketService.broadcastReservationUpdated(req.tenantId!, row, socketId);
+        res.json(row);
+    } catch (err: any) {
+        console.error('PATCH /reservations/:id/service error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Il walk-in: un ospite senza prenotazione, arrivato adesso. Nasce dove sta
+// il servizio (col servizio in sala sul nodo, con un id nel suo spazio): a
+// linea caduta la sala continua a far sedere chi entra. Solo l'essenziale:
+// niente conferme da mandare, e la scheda in rubrica la apre il cloud quando
+// la riga gli arriva (sul nodo la rubrica è una copia).
+app.post('/reservations/walk-in', authenticate, requireAnyPermission('reservations:full', 'floorplan:update_status'), async (req, res) => {
+    try {
+        const name = typeof req.body?.customer_name === 'string' ? req.body.customer_name.trim().slice(0, 200) : '';
+        const guests = Number(req.body?.guests);
+        if (!name) return res.status(400).json({ error: 'Il nome è obbligatorio' });
+        if (!Number.isInteger(guests) || guests < 1 || guests > 200) {
+            return res.status(400).json({ error: 'Numero di ospiti non valido' });
+        }
+        const phone = typeof req.body?.phone === 'string' && req.body.phone.trim() ? req.body.phone.trim().slice(0, 40) : null;
+        const notes = typeof req.body?.notes === 'string' && req.body.notes.trim() ? req.body.notes.trim().slice(0, 2000) : null;
+        const service = resolveService(new Date(), (await getTenantLocale(req.tenantId!)).timezone);
+
+        const id = await runWithOutboxTx(async (tx) => {
+            const ins = await tx.query(
+                `INSERT INTO reservations
+                    (customer_name, reservation_time, shift, guests, phone, notes, payment_status,
+                     arrival_status, reservation_status, source, created_by_user_id, tenant_id)
+                 VALUES ($1, CURRENT_TIMESTAMP, $2, $3, $4, $5, 'PENDING', 'ARRIVED', 'CONFIRMED', 'MANUAL', $6, $7)
+                 RETURNING id`,
+                [name, service.shift, guests, phone, notes, req.user?.userId ?? null, req.tenantId!]
+            );
+            const newId = Number(ins.rows[0].id);
+            await outboxEnqueueInTx(tx, req.tenantId!, 'reservation:created', `reservation:${newId}`,
+                { reservation_id: newId }, outboxContext(req));
+            return newId;
+        });
+        outboxKick();
+
+        if (!isServiceNode) {
+            const actor = req.user ? { userId: req.user.userId, email: req.user.email } : null;
+            await upsertCustomerFromReservation(req.tenantId!, name, phone, null, actor);
+        }
+        const [row] = await selectEnrichedReservations([id]);
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!, req.user.userId, req.user.email, req.user.email,
+                ActivityAction.CREATE, ResourceType.RESERVATION, id, name, { guests, walk_in: true }
+            );
+        }
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService && row) socketService.broadcastReservationCreated(req.tenantId!, row, socketId);
+        res.status(201).json(row);
+    } catch (err: any) {
+        console.error('POST /reservations/walk-in error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
 app.post('/reservations/:id/send-reminder', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
         const fusoMsg = (await getTenantLocale(req.tenantId!)).timezone;
@@ -3143,6 +3336,7 @@ app.post('/reservations/:id/send-reminder', authenticate, requirePermission('res
             `UPDATE reservations SET reminder_sent = true WHERE id = $1 AND tenant_id = $2 RETURNING *`,
             [id, req.tenantId!]
         );
+        if (upd.rows[0]) await logReservationChanged(null, req.tenantId!, upd.rows[0].id);
         if (upd.rows[0] && socketService) {
             try { socketService.broadcastReservationUpdated(req.tenantId!, upd.rows[0]); } catch (_) {}
         }
@@ -3220,7 +3414,9 @@ app.delete('/reservations/:id', authenticate, requirePermission('reservations:fu
 // assign-table picker by tapping an occupied tile. Doing it in one TX avoids
 // the intermediate state where both bookings briefly point at the same table
 // (which the application-level conflict check would reject).
-app.post('/reservations/:id/swap-table', authenticate, requirePermission('reservations:full'), async (req, res) => {
+// Tappa C: chi siede gli ospiti (floorplan:update_status) può scambiare i
+// tavoli anche senza reservations:full — è la sessione del PIN di sala.
+app.post('/reservations/:id/swap-table', authenticate, requireAnyPermission('reservations:full', 'floorplan:update_status'), async (req, res) => {
     const client = await pool.connect();
     try {
         const aId = Number(req.params.id);
@@ -3276,10 +3472,12 @@ app.post('/reservations/:id/swap-table', authenticate, requirePermission('reserv
 
         // Fase 1c: lo scambio tavoli è un atto di servizio puro — nel log di
         // replica per entrambe le prenotazioni, nella transazione già aperta.
-        // Solo-log: il broadcast resta diretto dopo il COMMIT.
+        // Solo-log: il broadcast resta diretto dopo il COMMIT. Tappa C: come
+        // evento di servizio (solo il tavolo), e col servizio in sala nasce
+        // sul nodo.
         const swapCtx = outboxContext(req);
-        await outboxEnqueueInTx(client, req.tenantId!, 'reservation:updated', `reservation:${aId}`, { reservation_id: aId }, swapCtx);
-        await outboxEnqueueInTx(client, req.tenantId!, 'reservation:updated', `reservation:${bId}`, { reservation_id: bId }, swapCtx);
+        await outboxEnqueueInTx(client, req.tenantId!, 'reservation:service-updated', `reservation:${aId}`, { reservation_id: aId }, swapCtx);
+        await outboxEnqueueInTx(client, req.tenantId!, 'reservation:service-updated', `reservation:${bId}`, { reservation_id: bId }, swapCtx);
 
         const enriched = await client.query(
             `SELECT r.*, u.full_name AS created_by_user_name,
@@ -3371,6 +3569,7 @@ async function promoteReservationIfPending(tenantId: number, reservationId: numb
             [reservationId, tenantId]
         );
         if (upd.rows.length === 0) return null;
+        await logReservationChanged(null, tenantId, upd.rows[0].id);
         // Live views listen on this event to update badges/status pills.
         if (socketService) {
             try { socketService.broadcastReservationUpdated(tenantId, upd.rows[0]); }
@@ -3554,6 +3753,7 @@ app.post('/reservations/:id/confirm-email', authenticate, requirePermission('res
              RETURNING *`,
             [sent.messageId || null, reservation.id, req.tenantId!]
         );
+        if (updated.rows[0]) await logReservationChanged(null, req.tenantId!, updated.rows[0].id);
         if (updated.rows[0] && socketService) {
             try { socketService.broadcastReservationUpdated(req.tenantId!, updated.rows[0]); }
             catch (err) { console.warn('[confirmation] email broadcast failed:', err); }
@@ -3855,6 +4055,86 @@ function getPassepartoutChiusuraConfig(): { tipoPagamento: string; tipoDocumento
     };
 }
 
+// --- Chiusura in cassa durevole (fase B5) ------------------------------------
+// Prima la chiusura era un colpo solo, fuori dalla risposta: agente spento,
+// rete che balla o processo riavviato fra il saldo e la chiamata, e il
+// tavolo restava aperto in cassa senza che nessuno lo sapesse. Ora la
+// chiusura è una riga di fiscal_documents (provider 'passepartout'):
+// PENDING nella STESSA transazione che chiude il conto, CONFIRMED con
+// l'esito della cassa, FAILED quando serve una mano (il bottone «Chiudi in
+// cassa» della card compare solo lì). Uno spazzino riprova i PENDING.
+//
+// Il tentativo è un'azione FISCALE: rifarlo dopo una risposta persa
+// rifarebbe lo scontrino. Per questo dal secondo tentativo si passa
+// `riprendi` e l'agente guarda prima nell'archivio del giorno; un agente
+// che non dichiara 'chiudi-riprendi' non riceve tentativi automatici dopo
+// che uno è arrivato fino a lui.
+const PP_CLOSE_MAX_ATTEMPTS = 6;
+const PP_CLOSE_WINDOW_MS = 12 * 60 * 60 * 1000;
+const PP_CLOSE_SWEEP_MS = Math.max(200, Number(process.env.PASSEPARTOUT_CLOSE_SWEEP_MS) || 60_000);
+// Unità dell'attesa fra i tentativi (1, 2, 4, 8, 15 unità): un minuto; i
+// test la accorciano.
+const PP_CLOSE_RETRY_UNIT_MS = Math.max(100, Number(process.env.PASSEPARTOUT_CLOSE_RETRY_UNIT_MS) || 60_000);
+const ppCloseInFlight = new Set<number>();
+
+/** La riga PENDING della chiusura in cassa, dentro la transazione del
+ *  chiamante. L'indice «un documento vivo per conto» assorbe i doppioni. */
+async function insertPendingPassepartoutClose(client: any, tenantId: number, billId: number, documento?: 'Scontrino' | 'Proforma'): Promise<number | null> {
+    const ins = await client.query(
+        `INSERT INTO fiscal_documents (tenant_id, table_bill_id, doc_type, provider, status, total_cents)
+         SELECT $1, $2, $3, 'passepartout', 'PENDING', total_cents FROM table_bills WHERE id = $2 AND tenant_id = $1
+         ON CONFLICT (table_bill_id) WHERE status IN ('PENDING', 'CONFIRMED') AND table_bill_split_id IS NULL AND doc_type <> 'CREDIT_NOTE' DO NOTHING
+         RETURNING id`,
+        [tenantId, billId, documento === 'Proforma' ? 'PROFORMA' : 'RECEIPT']
+    );
+    const id = ins.rows[0]?.id ?? null;
+    if (id != null) await logFiscalDocChanged(client, tenantId, id);
+    return id;
+}
+
+async function notifyPassepartoutDoc(tenantId: number, docId: number): Promise<void> {
+    await logFiscalDocChanged(null, tenantId, docId);
+    outboxKick();
+    const rs = await queryWithRetry(`SELECT ${FISCAL_DOC_COLUMNS} FROM fiscal_documents WHERE id = $1 AND tenant_id = $2`, [docId, tenantId]);
+    const doc = rs.rows[0];
+    if (doc) {
+        try { socketService?.broadcastToAll(tenantId, 'fiscal:updated', { bill_id: doc.table_bill_id, doc }); } catch (_) {}
+    }
+}
+
+/** Un tentativo fallito: resta PENDING (lo riprova lo spazzino) finché ha
+ *  senso, poi FAILED con una frase per chi è in cassa. */
+async function notePassepartoutCloseFailure(tenantId: number, docId: number, err: unknown): Promise<void> {
+    const kind = err instanceof PassepartoutBridgeError ? err.kind : 'agent';
+    const message = (err as any)?.message ? String((err as any).message).slice(0, 500) : 'errore sconosciuto';
+    const rs = await queryWithRetry(
+        `SELECT attempts, created_at, COALESCE(response, '{}'::jsonb) AS response FROM fiscal_documents WHERE id = $1 AND tenant_id = $2`,
+        [docId, tenantId]
+    );
+    const row = rs.rows[0];
+    if (!row) return;
+    const offline = Number(row.response?.offline_attempts ?? 0) + (kind === 'agent_offline' ? 1 : 0);
+    const reached = Number(row.attempts) > offline;
+    const expired = Date.now() - new Date(row.created_at).getTime() > PP_CLOSE_WINDOW_MS;
+    let failReason: string | null = null;
+    if (Number(row.attempts) >= PP_CLOSE_MAX_ATTEMPTS || expired) {
+        failReason = `Chiusura in cassa non riuscita dopo ${row.attempts} tentativi: ${message}`;
+    } else if (reached && !passepartoutAgentSupports('chiudi-riprendi')) {
+        failReason = `Chiusura in cassa non riuscita: ${message}. Controlla in cassa se il conto c'è già prima di riprovare.`;
+    }
+    // Attesa crescente: 1, 2, 4, 8, 15 minuti.
+    const waitMs = Math.min(15, 2 ** Math.max(0, Number(row.attempts) - 1)) * PP_CLOSE_RETRY_UNIT_MS;
+    await queryWithRetry(
+        `UPDATE fiscal_documents
+            SET status = CASE WHEN $3::text IS NULL THEN status ELSE 'FAILED' END,
+                error = COALESCE($3, $4),
+                response = COALESCE(response, '{}'::jsonb) || jsonb_build_object('offline_attempts', $5::int, 'next_at', $6::text)
+          WHERE id = $1 AND tenant_id = $2 AND status = 'PENDING'`,
+        [docId, tenantId, failReason, message, offline, new Date(Date.now() + waitMs).toISOString()]
+    );
+    await notifyPassepartoutDoc(tenantId, docId);
+}
+
 async function chiudiComandaPassepartoutPerBill(
     tenantId: number,
     billId: number,
@@ -3865,51 +4145,147 @@ async function chiudiComandaPassepartoutPerBill(
      *  Scelta del cameriere nel dialog di chiusura, non un'euristica. */
     documento?: 'Scontrino' | 'Proforma',
 ): Promise<EsitoChiusuraComanda> {
-    const proforma = documento === 'Proforma';
-    // Timeout largo: la sequenza sull'agente può includere invio in
-    // produzione, attesa e saldo del sospeso (vedi chiudiComandaCompleta).
-    const esito = await callPassepartout<EsitoChiusuraComanda>('chiudi', {
-        idComanda,
-        tipoPagamento: config.tipoPagamento,
-        tipoDocumento: proforma ? 'Proforma' : config.tipoDocumento,
-        proforma,
-    }, 60_000);
-    try { socketService?.broadcastToAll(tenantId, 'passepartout:chiusura', { bill_id: billId, id_comanda: idComanda, esito }); } catch (_) {}
-    if (esito.avviso) console.warn('[passepartout] chiusura comanda', idComanda, 'con avviso:', esito.avviso);
-    // Il documento l'ha emesso la cassa: registrarlo in fiscal_documents dà
-    // alla card Scontrino lo stesso ciclo di vita dei documenti Openapi
-    // (badge, numero, niente bottone Emetti). Per lo scontrino provider_ref
-    // è il numero fiscale dell'RT; la proforma non ne ha (doc_type PROFORMA,
-    // provider_ref NULL). L'indice one-live-per-bill assorbe i replay del
-    // retry. La registrazione non deve mai far fallire la chiusura.
-    if (esito.numeroScontrino || proforma) {
-        try {
-            const billRs = await queryWithRetry(
-                `SELECT total_cents FROM table_bills WHERE id = $1 AND tenant_id = $2`,
+    if (ppCloseInFlight.has(billId)) {
+        throw new PassepartoutBridgeError('Chiusura in cassa già in corso per questo conto', 'busy');
+    }
+    ppCloseInFlight.add(billId);
+    try {
+        // La riga viva: quella nata con la chiusura del conto, o una nuova
+        // (conto chiuso prima della fase B5, o dopo un FAILED).
+        let live = await queryWithRetry(
+            `SELECT id, status, provider, doc_type, attempts, response FROM fiscal_documents
+              WHERE table_bill_id = $1 AND tenant_id = $2 AND status IN ('PENDING', 'CONFIRMED')
+                AND table_bill_split_id IS NULL AND doc_type <> 'CREDIT_NOTE'
+              LIMIT 1`,
+            [billId, tenantId]
+        );
+        if (!live.rows[0]) {
+            await runWithOutboxTx(client => insertPendingPassepartoutClose(client, tenantId, billId, documento));
+            live = await queryWithRetry(
+                `SELECT id, status, provider, doc_type, attempts, response FROM fiscal_documents
+                  WHERE table_bill_id = $1 AND tenant_id = $2 AND status IN ('PENDING', 'CONFIRMED')
+                    AND table_bill_split_id IS NULL AND doc_type <> 'CREDIT_NOTE'
+                  LIMIT 1`,
                 [billId, tenantId]
             );
-            if (billRs.rows[0]) {
-                const ins = await queryWithRetry(
-                    // Arbitro sull'indice a livello conto (predicato con
-                    // split IS NULL dalla migration fattura-elettronica).
-                    `INSERT INTO fiscal_documents
-                        (tenant_id, table_bill_id, doc_type, provider, status, provider_ref, response, total_cents, confirmed_at)
-                     VALUES ($1, $2, $6, 'passepartout', 'CONFIRMED', $3, $4::jsonb, $5, CURRENT_TIMESTAMP)
-                     ON CONFLICT (table_bill_id) WHERE status IN ('PENDING', 'CONFIRMED') AND table_bill_split_id IS NULL AND doc_type <> 'CREDIT_NOTE' DO NOTHING
-                     RETURNING ${FISCAL_DOC_COLUMNS}`,
-                    [tenantId, billId, esito.numeroScontrino || null, JSON.stringify(esito),
-                     billRs.rows[0].total_cents, proforma ? 'PROFORMA' : 'RECEIPT']
-                );
-                if (ins.rows[0]) {
-                    await logFiscalDocChanged(null, tenantId, ins.rows[0].id);
-                    try { socketService?.broadcastToAll(tenantId, 'fiscal:updated', { bill_id: billId, doc: ins.rows[0] }); } catch (_) {}
-                }
-            }
-        } catch (err: any) {
-            console.error('[passepartout] registrazione documento fallita per conto', billId, err?.message);
         }
+        const doc = live.rows[0];
+        if (!doc) throw new PassepartoutBridgeError('Documento della chiusura non creato', 'agent');
+        if (doc.status === 'CONFIRMED') {
+            // Già chiuso in cassa: nessuna seconda chiamata fiscale.
+            return doc.response as EsitoChiusuraComanda;
+        }
+        if (doc.provider !== 'passepartout') {
+            throw new PassepartoutBridgeError('Il conto ha già un documento fiscale in emissione', 'busy');
+        }
+        const proforma = doc.doc_type === 'PROFORMA';
+        // Claim atomico come per gli scontrini cloud: vince chi incrementa
+        // attempts per primo. Un tentativo già fatto (anche da un processo
+        // morto a metà) o un FAILED precedente = si riprende, non si rifà.
+        const claim = await queryWithRetry(
+            `UPDATE fiscal_documents SET attempts = attempts + 1
+              WHERE id = $1 AND status = 'PENDING' AND attempts = $2
+              RETURNING attempts`,
+            [doc.id, doc.attempts]
+        );
+        if ((claim.rowCount ?? 0) === 0) {
+            throw new PassepartoutBridgeError('Chiusura in cassa già in corso per questo conto', 'busy');
+        }
+        const failedBefore = await queryWithRetry(
+            `SELECT 1 FROM fiscal_documents WHERE table_bill_id = $1 AND tenant_id = $2 AND provider = 'passepartout' AND status = 'FAILED' LIMIT 1`,
+            [billId, tenantId]
+        );
+        const riprendi = Number(doc.attempts) > 0 || failedBefore.rows.length > 0;
+
+        let esito: EsitoChiusuraComanda;
+        try {
+            // Timeout largo: la sequenza sull'agente può includere invio in
+            // produzione, attesa e saldo del sospeso (vedi chiudiComandaCompleta).
+            esito = await callPassepartout<EsitoChiusuraComanda>('chiudi', {
+                idComanda,
+                tipoPagamento: config.tipoPagamento,
+                tipoDocumento: proforma ? 'Proforma' : config.tipoDocumento,
+                proforma,
+                riprendi,
+            }, 60_000);
+        } catch (err) {
+            await notePassepartoutCloseFailure(tenantId, doc.id, err)
+                .catch(e => console.error('[passepartout] esito del tentativo non registrato per conto', billId, e?.message));
+            throw err;
+        }
+        try { socketService?.broadcastToAll(tenantId, 'passepartout:chiusura', { bill_id: billId, id_comanda: idComanda, esito }); } catch (_) {}
+        if (esito.avviso) console.warn('[passepartout] chiusura comanda', idComanda, 'con avviso:', esito.avviso);
+        // Il documento l'ha emesso la cassa: la card Scontrino lo mostra
+        // come gli altri (badge, numero, niente bottone Emetti). Per lo
+        // scontrino provider_ref è il numero fiscale dell'RT; la proforma
+        // non ne ha.
+        await queryWithRetry(
+            `UPDATE fiscal_documents
+                SET status = 'CONFIRMED', provider_ref = $3, response = $4::jsonb, error = NULL, confirmed_at = CURRENT_TIMESTAMP
+              WHERE id = $1 AND tenant_id = $2`,
+            [doc.id, tenantId, esito.numeroScontrino || null, JSON.stringify(esito)]
+        );
+        await notifyPassepartoutDoc(tenantId, doc.id);
+        return esito;
+    } finally {
+        ppCloseInFlight.delete(billId);
     }
-    return esito;
+}
+
+/** Lo spazzino delle chiusure in cassa rimaste PENDING: gira dove gira il
+ *  ponte, sui soli conti di cui questo processo è il padrone (con
+ *  l'autorità in sala, il nodo). */
+function startPassepartoutCloseSweeper(): void {
+    const sweep = async (): Promise<void> => {
+        if (!getPassepartoutAgentStatus().connected) return;
+        const config = getPassepartoutChiusuraConfig();
+        if (!config) return;
+        // queryWithRetry e non pool.query: solo lui porta il contesto sul
+        // client (db.ts), e sotto RLS rigida — come gira Railway — un
+        // pool.query nudo vede zero righe anche dentro runAsPlatform.
+        // rls-bypass: spazzino senza sessione; ogni riga si lavora nel contesto del suo tenant_id
+        const rs = await runAsPlatform(() => queryWithRetry(
+            `SELECT fd.id, fd.tenant_id, fd.table_bill_id, fd.doc_type, fd.attempts, fd.created_at,
+                    COALESCE(fd.response, '{}'::jsonb) AS response, b.external_ref
+               FROM fiscal_documents fd JOIN table_bills b ON b.id = fd.table_bill_id
+              WHERE fd.provider = 'passepartout' AND fd.status = 'PENDING' AND b.status = 'CLOSED'
+              ORDER BY fd.id LIMIT 20`
+        ));
+        for (const row of rs.rows) {
+            const tenantId = Number(row.tenant_id);
+            const billId = Number(row.table_bill_id);
+            const idComanda = passepartoutComandaIdFromRef(row.external_ref);
+            if (idComanda == null || ppCloseInFlight.has(billId)) continue;
+            const nextAt = Date.parse(String(row.response?.next_at ?? ''));
+            if (Number.isFinite(nextAt) && nextAt > Date.now()) continue;
+            await runWithTenantContext(tenantId, async () => {
+                // Dentro il contesto: fuori, sotto RLS rigida, il flag si
+                // leggerebbe come spento.
+                if (!isServiceNode && await nodeOwnsBills(tenantId)) return;
+                const offline = Number(row.response?.offline_attempts ?? 0);
+                const reached = Number(row.attempts) > offline;
+                const expired = Date.now() - new Date(row.created_at).getTime() > PP_CLOSE_WINDOW_MS;
+                if (expired || Number(row.attempts) >= PP_CLOSE_MAX_ATTEMPTS || (reached && !passepartoutAgentSupports('chiudi-riprendi'))) {
+                    await queryWithRetry(
+                        `UPDATE fiscal_documents SET status = 'FAILED',
+                                error = COALESCE(error, 'Chiusura in cassa non riuscita: controlla in cassa e chiudi a mano')
+                          WHERE id = $1 AND tenant_id = $2 AND status = 'PENDING'`,
+                        [row.id, tenantId]
+                    );
+                    await notifyPassepartoutDoc(tenantId, Number(row.id));
+                    return;
+                }
+                await chiudiComandaPassepartoutPerBill(tenantId, billId, idComanda, config,
+                    row.doc_type === 'PROFORMA' ? 'Proforma' : undefined)
+                    .then(() => console.log(`[passepartout] chiusura in cassa ripresa per conto ${billId}`))
+                    .catch(err => console.warn(`[passepartout] chiusura in cassa ancora in sospeso per conto ${billId}:`, err?.message));
+            });
+        }
+    };
+    const timer = setInterval(() => {
+        sweep().catch(err => console.error('[passepartout] spazzino chiusure:', err?.message || err));
+    }, PP_CLOSE_SWEEP_MS);
+    if (typeof timer.unref === 'function') timer.unref();
 }
 
 // Ritenta la chiusura in cassa di un conto Passepartout già CLOSED (agente
@@ -3940,6 +4316,9 @@ app.post('/bills/:id/passepartout-close', authenticate, requirePermission('payme
         const esito = await chiudiComandaPassepartoutPerBill(req.tenantId!, id, idComanda, config, documento);
         res.json({ id_comanda: idComanda, esito });
     } catch (err: any) {
+        if (err instanceof PassepartoutBridgeError && err.kind === 'busy') {
+            return res.status(409).json({ error: 'passepartout_busy', message: err.message });
+        }
         if (sendPassepartoutError(res, err)) return;
         console.error('POST /bills/:id/passepartout-close error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
@@ -5669,6 +6048,10 @@ app.get('/m/:slug', withPublicTenant(serveMenuDigitale));
 // payment_request dai webhook) — scopa conto, acconti e quote sullo stesso
 // ristorante.
 async function creditPaidDepositsToBill(tenantId: number, billId: number): Promise<{ credited: number; splits: any[]; settled: boolean }> {
+    // Col servizio in sala (fase B3) l'acconto lo accredita il nodo, che
+    // riceve le richieste di pagamento in replica: dal cloud scriverebbe su
+    // una copia del conto.
+    if (await nodeOwnsBills(tenantId)) return { credited: 0, splits: [], settled: false };
     const client = await pool.connect();
     const created: any[] = [];
     let settled = false;
@@ -6314,6 +6697,15 @@ app.post('/bills/:id/close', authenticate, requirePermission('payments:full'), a
                 [id, finalStatus, req.user?.userId ?? null, Math.round(tipCents), notesForDb, req.tenantId!, lotteryCode, tipMethod]
             );
             updatedRow = upd.rows[0];
+            // Fase B5: la chiusura in cassa di un conto Passepartout nasce
+            // qui, nella transazione del conto — un processo che muore dopo
+            // il COMMIT la lascia PENDING e la riprende lo spazzino, invece
+            // di perderla.
+            if (finalStatus === 'CLOSED' && passepartoutComandaIdFromRef(updatedRow?.external_ref) != null
+                && getPassepartoutChiusuraConfig()) {
+                await insertPendingPassepartoutClose(client, req.tenantId!, id,
+                    req.body?.passepartout_documento === 'Proforma' ? 'Proforma' : undefined);
+            }
             await logBillChanged(client, req.tenantId!, id);
             await client.query('COMMIT');
         } catch (txErr) {
@@ -8382,6 +8774,11 @@ app.post('/bills/splits/:id/refund', authenticate, requirePermission('payments:f
     try {
         const splitId = parseInt(req.params.id, 10);
         if (!Number.isFinite(splitId)) return res.status(400).json({ error: 'Invalid split id' });
+        // Fase B3: il rimborso di una quota riapre il conto, che col servizio
+        // in sala è del nodo.
+        if (await nodeOwnsBills(req.tenantId!)) {
+            return res.status(409).json({ error: 'refund_needs_cloud_authority', message: 'Col servizio in sala il conto vive sul nodo: questo rimborso tocca un conto, fallo a servizio chiuso (spegni «Servizio completo sul nodo»)' });
+        }
 
         const rs = await queryWithRetry(
             `SELECT s.id, s.kind, s.status AS split_status, s.amount_cents, s.claimant_label, s.table_bill_id,
@@ -8484,6 +8881,7 @@ app.post('/bills/splits/:id/refund', authenticate, requirePermission('payments:f
                 socketService.broadcastToAll(req.tenantId!, 'bill:split-refunded', {
                     bill_id: row.table_bill_id, split_id: splitId, amount_cents: row.amount_cents,
                 }, socketId);
+                if (updatedPr) await logPaymentRequestChanged(null, req.tenantId!, updatedPr?.id);
                 if (updatedPr) socketService.broadcastToAll(req.tenantId!, 'paymentRequest:updated', updatedPr);
             } catch (_) {}
         }
@@ -8865,18 +9263,24 @@ app.get('/scontrino/:token', publicPayLimiter, async (req, res) => runAsPlatform
     }
 }));
 
-// rls-bypass: quota ospite senza JWT, conto per share_token unico; ogni scrittura porta bill.tenant_id
-app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (req, res) => runAsPlatform(async () => {
+// La quota del QR (pay-at-table), separata in due dalla fase B3b: la QUOTA
+// la crea chi possiede il conto (il cloud, o il nodo col servizio in sala —
+// che la riceve con una chiamata sul canale /sala-node), l'ORDINE di
+// pagamento lo crea sempre il cloud, che ha le credenziali del gateway.
+type LocalClaim =
+    | { error: { status: number; body: any } }
+    | { claim: { tenant_id: number; bill_id: number; reservation_id: number | null; bill_label: string; split_id: number; kind: string; amount: number; claimant_label: string | null; expires_at: string; split_row?: any } };
+
+const claimError = (status: number, body: any): LocalClaim => ({ error: { status, body } });
+
+async function claimSplitLocally(token: string, body: any): Promise<LocalClaim> {
     const client = await pool.connect();
     try {
-        const token = String(req.params.token || '');
-        if (!token || token.length < 20) return res.status(404).json({ error: 'Not found' });
-
-        const kind = String(req.body?.kind || '');
+        const kind = String(body?.kind || '');
         if (kind !== 'equal_share' && kind !== 'fixed_amount' && kind !== 'per_item' && kind !== 'full_bill') {
-            return res.status(400).json({ error: 'kind must be equal_share, fixed_amount, per_item or full_bill' });
+            return claimError(400, { error: 'kind must be equal_share, fixed_amount, per_item or full_bill' });
         }
-        const rawLabel = typeof req.body?.claimant_label === 'string' ? req.body.claimant_label.trim().slice(0, 40) : '';
+        const rawLabel = typeof body?.claimant_label === 'string' ? body.claimant_label.trim().slice(0, 40) : '';
         const claimantLabel = rawLabel || null;
 
         await client.query('BEGIN');
@@ -8896,14 +9300,14 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
         );
         if (billRs.rowCount === 0) {
             await client.query('ROLLBACK');
-            return res.status(404).json({ error: 'Not found' });
+            return claimError(404, { error: 'Not found' });
         }
         const bill = billRs.rows[0];
         // Il flag del ristorante del conto: risolto DOPO il lookup per token,
         // perché è la riga a dire di chi è il conto.
         if (!(await isPayAtTableActive(bill.tenant_id))) {
             await client.query('ROLLBACK');
-            return res.status(404).json({ error: 'Not found' });
+            return claimError(404, { error: 'Not found' });
         }
         const billLabel = bill.table_name ? `tavolo ${bill.table_name}` : `conto #${bill.id}`;
 
@@ -8922,7 +9326,7 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
         const residual = bill.total_cents - claimed;
         if (residual <= 0) {
             await client.query('ROLLBACK');
-            return res.status(409).json({ error: 'Bill already fully claimed', max_allowed_cents: 0 });
+            return claimError(409, { error: 'Bill already fully claimed', max_allowed_cents: 0 });
         }
 
         let amount: number;
@@ -8934,25 +9338,25 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
             // coperti»); item_ids = righe intere, dal client della finestra fra
             // i due deploy. Si normalizzano entrambe a unità.
             const requested = new Map<number, number>();
-            if (Array.isArray(req.body?.item_units)) {
-                for (const u of req.body.item_units) {
+            if (Array.isArray(body?.item_units)) {
+                for (const u of body.item_units) {
                     const id = Number(u?.order_item_id);
                     const units = Number(u?.units);
                     if (!Number.isFinite(id) || !Number.isInteger(units) || units <= 0) {
                         await client.query('ROLLBACK');
-                        return res.status(400).json({ error: 'item_units must be [{order_item_id, units}] with positive integers' });
+                        return claimError(400, { error: 'item_units must be [{order_item_id, units}] with positive integers' });
                     }
                     requested.set(id, (requested.get(id) ?? 0) + units);
                 }
-            } else if (Array.isArray(req.body?.item_ids)) {
-                for (const n of req.body.item_ids) {
+            } else if (Array.isArray(body?.item_ids)) {
+                for (const n of body.item_ids) {
                     const id = Number(n);
                     if (Number.isFinite(id)) requested.set(id, Number(byId.get(id)?.qty ?? 1));
                 }
             }
             if (requested.size === 0) {
                 await client.query('ROLLBACK');
-                return res.status(400).json({ error: 'item_units must be a non-empty array' });
+                return claimError(400, { error: 'item_units must be a non-empty array' });
             }
             const itemsSum = billItems.reduce(
                 (n: number, i: any) => n + Number(i.unit_price_cents || 0) * Number(i.qty || 0), 0
@@ -8962,7 +9366,7 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
             // per piatto non è disponibile.
             if (billItems.length === 0 || itemsSum !== bill.total_cents) {
                 await client.query('ROLLBACK');
-                return res.status(409).json({ error: 'Per-item split not available for this bill' });
+                return claimError(409, { error: 'Per-item split not available for this bill' });
             }
 
             // Pezzi già impegnati da altri — quote ospite e incassi staff:
@@ -8975,7 +9379,7 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
                 const it = byId.get(id);
                 if (!it) {
                     await client.query('ROLLBACK');
-                    return res.status(400).json({ error: 'Unknown item', item_id: id });
+                    return claimError(400, { error: 'Unknown item', item_id: id });
                 }
                 const free = Number(it.qty) - (taken.get(id) ?? 0);
                 if (units > free) { conflict.push(id); continue; }
@@ -8983,15 +9387,15 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
             }
             if (conflict.length > 0) {
                 await client.query('ROLLBACK');
-                return res.status(409).json({ error: 'Some items are already claimed', conflicting_item_ids: conflict });
+                return claimError(409, { error: 'Some items are already claimed', conflicting_item_ids: conflict });
             }
             if (sum <= 0) {
                 await client.query('ROLLBACK');
-                return res.status(400).json({ error: 'Selected items total zero' });
+                return claimError(400, { error: 'Selected items total zero' });
             }
             if (sum > residual) {
                 await client.query('ROLLBACK');
-                return res.status(409).json({ error: 'Amount exceeds residual', max_allowed_cents: residual });
+                return claimError(409, { error: 'Amount exceeds residual', max_allowed_cents: residual });
             }
             amount = sum;
             claimedItemUnits = [...requested].map(([order_item_id, units]) => ({ order_item_id, units }));
@@ -9005,15 +9409,15 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
             // sul bottone.
             amount = residual;
         } else {
-            const raw = Number(req.body?.amount_cents);
+            const raw = Number(body?.amount_cents);
             if (!Number.isFinite(raw) || raw <= 0) {
                 await client.query('ROLLBACK');
-                return res.status(400).json({ error: 'amount_cents must be a positive integer' });
+                return claimError(400, { error: 'amount_cents must be a positive integer' });
             }
             amount = Math.round(raw);
             if (amount > residual) {
                 await client.query('ROLLBACK');
-                return res.status(409).json({ error: 'Amount exceeds residual', max_allowed_cents: residual });
+                return claimError(409, { error: 'Amount exceeds residual', max_allowed_cents: residual });
             }
         }
 
@@ -9039,12 +9443,67 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
             // a friendly 409.
             await client.query('ROLLBACK');
             if (err?.code === '23514') {
-                return res.status(409).json({ error: 'Bill capacity changed, retry', detail: err?.message });
+                return claimError(409, { error: 'Bill capacity changed, retry', detail: err?.message });
             }
             throw err;
         }
 
         await client.query('COMMIT');
+        return {
+            claim: {
+                tenant_id: Number(bill.tenant_id),
+                bill_id: Number(bill.id),
+                reservation_id: bill.reservation_id ?? null,
+                bill_label: billLabel,
+                split_id: Number(splitId),
+                kind,
+                amount,
+                claimant_label: claimantLabel,
+                expires_at: expiresAt.toISOString(),
+            },
+        };
+    } catch (err) {
+        try { await client.query('ROLLBACK'); } catch { /* noop */ }
+        throw err;
+    } finally {
+        client.release();
+    }
+}
+
+// rls-bypass: quota ospite senza JWT, conto per share_token unico; ogni scrittura porta bill.tenant_id
+app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (req, res) => runAsPlatform(async () => {
+    try {
+        const token = String(req.params.token || '');
+        if (!token || token.length < 20) return res.status(404).json({ error: 'Not found' });
+
+        // Fase B3b: col servizio in sala il conto è del nodo, e la quota la
+        // crea lui (chiamata sul canale /sala-node). Nodo irraggiungibile:
+        // l'ospite paga in cassa.
+        const owner = await queryWithRetry(`SELECT tenant_id FROM table_bills WHERE share_token = $1 LIMIT 1`, [token]);
+        const ownerTenant = owner.rows[0] ? Number(owner.rows[0].tenant_id) : null;
+        const onNode = ownerTenant !== null && await nodeOwnsBills(ownerTenant);
+        let outcome: LocalClaim;
+        if (onNode) {
+            const answer = await askNode(ownerTenant!, 'pay:claim', { token, body: req.body ?? {} });
+            if (!answer?.ok || !answer.result) {
+                return res.status(409).json({ error: 'pay_unavailable_on_node', message: 'Pagamento dal telefono non disponibile adesso: paga in cassa.' });
+            }
+            outcome = answer.result as LocalClaim;
+        } else {
+            outcome = await claimSplitLocally(token, req.body ?? {});
+        }
+        if ('error' in outcome) return res.status(outcome.error.status).json(outcome.error.body);
+        const c = outcome.claim;
+        // Quota nata sul nodo: la sua copia qui, identica, prima della
+        // richiesta di pagamento che la cita (la replica la riscriverà uguale).
+        if (onNode && c.split_row) {
+            const cols = Object.keys(c.split_row).filter(k => k !== 'id');
+            await queryWithRetry(
+                `INSERT INTO table_bill_splits SELECT * FROM jsonb_populate_recordset(NULL::table_bill_splits, $1::jsonb)
+                 ON CONFLICT (id) DO UPDATE SET ${cols.map(k => `"${k}" = EXCLUDED."${k}"`).join(', ')}`,
+                [JSON.stringify([c.split_row])]
+            );
+        }
 
         // Create the gateway order AFTER commit — if the API call fails
         // the split stays CLAIMED and the reconcile job will abandon it
@@ -9054,17 +9513,17 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
         try {
             // Gateway e credenziali del ristorante del conto, non del tenant
             // storico: il denaro deve arrivare sul merchant giusto.
-            if (!(await isPaymentConfiguredForFlow(bill.tenant_id, 'bill'))) {
-                throw new Error(`${providerLabel(await getPaymentProviderForFlow(bill.tenant_id, 'bill'))} not configured`);
+            if (!(await isPaymentConfiguredForFlow(c.tenant_id, 'bill'))) {
+                throw new Error(`${providerLabel(await getPaymentProviderForFlow(c.tenant_id, 'bill'))} not configured`);
             }
             // La valuta è quella del ristorante, non una costante: il
             // gateway addebita in quella e la riga la registra uguale.
-            const billCurrency = (await getTenantLocale(bill.tenant_id)).currency;
-            const order = await createPaymentOrder(bill.tenant_id, {
-                amount,
+            const billCurrency = (await getTenantLocale(c.tenant_id)).currency;
+            const order = await createPaymentOrder(c.tenant_id, {
+                amount: c.amount,
                 currency: billCurrency,
-                description: `Conto ${billLabel} - quota${claimantLabel ? ' ' + claimantLabel : ''}`,
-                reference: `bill_split:${splitId}`,
+                description: `Conto ${c.bill_label} - quota${c.claimant_label ? ' ' + c.claimant_label : ''}`,
+                reference: `bill_split:${c.split_id}`,
                 flow: 'bill',
                 // Back to the bill page after checkout (whatever method the
                 // guest picked), so they see the progress bar advance
@@ -9080,64 +9539,97 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
                  VALUES ($10, $1, $2, $11, $3, $4, $5, $6, $7, $8, $9)
                  RETURNING id`,
                 [
-                    bill.reservation_id || null,
-                    amount,
-                    `Conto ${billLabel}`,
+                    c.reservation_id || null,
+                    c.amount,
+                    `Conto ${c.bill_label}`,
                     order.status,
                     order.provider,
                     order.id,
                     order.checkoutUrl,
-                    splitId,
-                    JSON.stringify({ ...order.metadata, bill_split_id: splitId }),
-                    bill.tenant_id,
+                    c.split_id,
+                    JSON.stringify({ ...order.metadata, bill_split_id: c.split_id }),
+                    c.tenant_id,
                     billCurrency,
                 ]
             );
             paymentRequestId = prIns.rows[0].id;
 
-            await queryWithRetry(
-                `UPDATE table_bill_splits SET payment_request_id = $1 WHERE id = $2`,
-                [paymentRequestId, splitId]
-            );
+            // Col conto sul nodo il collegamento quota→richiesta lo fa il nodo,
+            // quando la richiesta gli arriva in replica (la quota è sua).
+            if (!onNode) {
+                await queryWithRetry(
+                    `UPDATE table_bill_splits SET payment_request_id = $1 WHERE id = $2`,
+                    [paymentRequestId, c.split_id]
+                );
+            }
+            await logPaymentRequestChanged(null, c.tenant_id, paymentRequestId);
         } catch (err: any) {
-            console.error('[pay] payment order creation failed for split', splitId, err?.message || err);
+            console.error('[pay] payment order creation failed for split', c.split_id, err?.message || err);
             // Non-fatal for the API response: the client gets the split
             // but no checkout_url — the UI can offer "riprova" via a new
             // claim after release.
         }
 
-        await logBillChanged(null, bill.tenant_id, bill.id);
+        if (!onNode) await logBillChanged(null, c.tenant_id, c.bill_id);
         try {
-            socketService?.broadcastToAll(bill.tenant_id, 'bill:split-claimed', {
-                bill_id: bill.id,
-                split_id: splitId,
-                kind,
-                amount_cents: amount,
-                claimant_label: claimantLabel,
+            socketService?.broadcastToAll(c.tenant_id, 'bill:split-claimed', {
+                bill_id: c.bill_id,
+                split_id: c.split_id,
+                kind: c.kind,
+                amount_cents: c.amount,
+                claimant_label: c.claimant_label,
             });
         } catch (_) {}
 
         res.status(201).json({
-            split_id: splitId,
-            amount_cents: amount,
-            claimant_label: claimantLabel,
-            expires_at: expiresAt.toISOString(),
+            split_id: c.split_id,
+            amount_cents: c.amount,
+            claimant_label: c.claimant_label,
+            expires_at: c.expires_at,
             checkout_url: checkoutUrl,
             payment_request_id: paymentRequestId,
         });
     } catch (err: any) {
-        try { await client.query('ROLLBACK'); } catch { /* noop */ }
         console.error('POST /pay/:token/claim error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
-    } finally {
-        client.release();
     }
 }));
 
-// POST /pay/:token/release — voluntarily gives up an unpaid claim. Both
-// the split_id and the token must match — this prevents someone with the
-// token from cancelling a split they didn't create (still not
-// authenticated, but at least you need to know the id you're releasing).
+// Il rilascio della quota: come la creazione (fase B3b), lo fa chi possiede
+// il conto.
+type LocalRelease =
+    | { error: { status: number; body: any } }
+    | { released: { tenant_id: number; bill_id: number; split_id: number } };
+
+async function releaseSplitLocally(token: string, splitId: number): Promise<LocalRelease> {
+    const bill = await loadBillByToken(token);
+    if (!bill) return { error: { status: 404, body: { error: 'Not found' } } };
+    // Flag del ristorante del conto, risolto dalla riga (vedi GET /pay/:token).
+    if (!(await isPayAtTableActive(bill.tenant_id))) {
+        return { error: { status: 404, body: { error: 'Not found' } } };
+    }
+    const upd = await queryWithRetry(
+        `UPDATE table_bill_splits
+         SET status = 'RELEASED', released_at = CURRENT_TIMESTAMP
+         WHERE id = $1
+           AND table_bill_id = $2
+           AND status = 'CLAIMED'
+         RETURNING id`,
+        [splitId, bill.id]
+    );
+    if (upd.rowCount === 0) {
+        return { error: { status: 409, body: { error: 'Split not found or not releasable' } } };
+    }
+    await logBillChanged(null, bill.tenant_id, bill.id);
+    try {
+        socketService?.broadcastToAll(bill.tenant_id, 'bill:split-released', {
+            bill_id: bill.id,
+            split_id: splitId,
+        });
+    } catch (_) {}
+    return { released: { tenant_id: Number(bill.tenant_id), bill_id: Number(bill.id), split_id: splitId } };
+}
+
 // rls-bypass: rilascio quota senza JWT, conto per share_token unico; UPDATE per split_id + bill.id
 app.post('/pay/:token/release', publicPayLimiter, async (req, res) => runAsPlatform(async () => {
     try {
@@ -9149,34 +9641,22 @@ app.post('/pay/:token/release', publicPayLimiter, async (req, res) => runAsPlatf
             return res.status(400).json({ error: 'split_id required' });
         }
 
-        const bill = await loadBillByToken(token);
-        if (!bill) return res.status(404).json({ error: 'Not found' });
-        // Flag del ristorante del conto, risolto dalla riga (vedi GET /pay/:token).
-        if (!(await isPayAtTableActive(bill.tenant_id))) {
-            return res.status(404).json({ error: 'Not found' });
+        const owner = await queryWithRetry(`SELECT tenant_id FROM table_bills WHERE share_token = $1 LIMIT 1`, [token]);
+        const ownerTenant = owner.rows[0] ? Number(owner.rows[0].tenant_id) : null;
+        let outcome: LocalRelease;
+        if (ownerTenant !== null && await nodeOwnsBills(ownerTenant)) {
+            const answer = await askNode(ownerTenant, 'pay:release', { token, split_id: splitId });
+            if (!answer?.ok || !answer.result) {
+                return res.status(409).json({ error: 'pay_unavailable_on_node', message: 'Pagamento dal telefono non disponibile adesso: paga in cassa.' });
+            }
+            outcome = answer.result as LocalRelease;
+            if ('released' in outcome) {
+                try { socketService?.broadcastToAll(ownerTenant, 'bill:split-released', { bill_id: outcome.released.bill_id, split_id: splitId }); } catch (_) {}
+            }
+        } else {
+            outcome = await releaseSplitLocally(token, splitId);
         }
-
-        const upd = await queryWithRetry(
-            `UPDATE table_bill_splits
-             SET status = 'RELEASED', released_at = CURRENT_TIMESTAMP
-             WHERE id = $1
-               AND table_bill_id = $2
-               AND status = 'CLAIMED'
-             RETURNING id`,
-            [splitId, bill.id]
-        );
-        if (upd.rowCount === 0) {
-            return res.status(409).json({ error: 'Split not found or not releasable' });
-        }
-
-        await logBillChanged(null, bill.tenant_id, bill.id);
-        try {
-            socketService?.broadcastToAll(bill.tenant_id, 'bill:split-released', {
-                bill_id: bill.id,
-                split_id: splitId,
-            });
-        } catch (_) {}
-
+        if ('error' in outcome) return res.status(outcome.error.status).json(outcome.error.body);
         res.json({ released: true, split_id: splitId });
     } catch (err: any) {
         console.error('POST /pay/:token/release error:', err);
@@ -11228,6 +11708,7 @@ app.post('/payments/requests', authenticate, requirePermission('reservations:ful
             );
         }
 
+        await logPaymentRequestChanged(null, req.tenantId!, paymentRequest?.id);
         try { socketService?.broadcastToAll(req.tenantId!, 'paymentRequest:created', paymentRequest); }
         catch (err) { console.warn('[payments] socket broadcast failed:', (err as any)?.message || err); }
 
@@ -11267,6 +11748,11 @@ async function applyBillSplitTransition(
         return;
     }
     const { table_bill_id: billId, amount_cents: amount } = splitRs.rows[0];
+
+    // Fase B3b: col servizio in sala la quota e il conto sono del nodo. Qui
+    // (cloud) la richiesta di pagamento è già aggiornata e scende al nodo,
+    // che applica lui la transizione: pagata, specchio, saldo, chiusura.
+    if (await nodeOwnsBills(tenantId)) return;
 
     if (event === 'ORDER_COMPLETED') {
         if (!isFirstCompletion) return;
@@ -11312,6 +11798,7 @@ async function applyBillSplitTransition(
                 return;
             }
         }
+
 
         // Specchio nel libro cassa: la quota pagata online diventa una riga
         // LINK_ONLINE, così la chiusura di cassa somma per metodo da una
@@ -11396,6 +11883,15 @@ async function applyBillSplitTransition(
 // test): con la cassa esterna o Passepartout il documento lo batte qualcuno,
 // e il conto resta in Cassa tra quelli da chiudere, come prima.
 const AUTO_CLOSE_FISCAL_PROVIDERS = new Set(['rt-local', 'openapi', 'mock']);
+
+// Fase B3: con «Servizio completo sul nodo» acceso i conti sono del nodo. Il
+// cloud (webhook di pagamento, riconciliatori, rimborsi) non li scrive più:
+// una sua scrittura riscenderebbe sul nodo e calpesterebbe il conto vero.
+// Vale l'interruttore, non la vita del nodo: anche a nodo muto il conto
+// resta suo finché qualcuno non spegne l'interruttore.
+async function nodeOwnsBills(tenantId: number): Promise<boolean> {
+    return isServiceNode ? false : getFeatureFlag(tenantId, 'sala_node_authority_enabled', false);
+}
 
 async function autoCloseSettledBill(tenantId: number, billId: number): Promise<any | null> {
     if (!AUTO_CLOSE_FISCAL_PROVIDERS.has(await getFiscalProviderSetting(tenantId))) return null;
@@ -11529,6 +12025,7 @@ async function applyPaymentOrderTransition(
         client.release();
     }
 
+    await logPaymentRequestChanged(null, Number(row.tenant_id) || PUBLIC_TENANT_ID, row?.id);
     try { socketService?.broadcastToAll(Number(row.tenant_id) || PUBLIC_TENANT_ID, 'paymentRequest:updated', row); }
     catch (err) { console.warn('[payments] socket broadcast failed:', (err as any)?.message || err); }
 
@@ -11592,6 +12089,7 @@ async function applyPaymentOrderTransition(
                          RETURNING *`,
                         [reservation.id, row.tenant_id]
                     );
+                    if (upd.rows[0]) await logReservationChanged(null, Number(row.tenant_id) || PUBLIC_TENANT_ID, upd.rows[0].id);
                     if (upd.rows[0] && socketService) {
                         try { socketService.broadcastReservationUpdated(Number(row.tenant_id) || PUBLIC_TENANT_ID, upd.rows[0]); }
                         catch (err) { console.warn('[payments] reservation broadcast failed:', err); }
@@ -12014,6 +12512,18 @@ app.post('/payments/:id/refund', authenticate, requirePermission('payments:full'
                 error: 'Questo pagamento è una quota di un conto: usa il rimborso della quota, che riapre anche il conto',
             });
         }
+        // Fase B3: un acconto già accreditato su un conto si storna dal conto,
+        // che col servizio in sala è del nodo. Prima del gateway, non dopo:
+        // il denaro non deve partire se il conto non si può correggere.
+        if (await nodeOwnsBills(req.tenantId!)) {
+            const credited = await queryWithRetry(
+                `SELECT 1 FROM table_bill_splits WHERE payment_request_id = $1 AND tenant_id = $2 AND kind = 'deposit' AND status = 'PAID' LIMIT 1`,
+                [payment.id, req.tenantId!]
+            );
+            if ((credited.rowCount ?? 0) > 0) {
+                return res.status(409).json({ error: 'refund_needs_cloud_authority', message: 'Col servizio in sala il conto vive sul nodo: questo rimborso tocca un conto, fallo a servizio chiuso (spegni «Servizio completo sul nodo»)' });
+            }
+        }
         if (!['COMPLETED', 'PAID'].includes(String(payment.status || '').toUpperCase())) {
             return res.status(409).json({ error: `Il pagamento non è rimborsabile (stato ${payment.status})` });
         }
@@ -12059,6 +12569,7 @@ app.post('/payments/:id/refund', authenticate, requirePermission('payments:full'
         );
         const row = updated.rows[0];
 
+        await logPaymentRequestChanged(null, req.tenantId!, row?.id);
         try { socketService?.broadcastToAll(req.tenantId!, 'paymentRequest:updated', row); }
         catch (err) { console.warn('[payments] refund broadcast failed:', (err as any)?.message || err); }
 
@@ -12259,7 +12770,7 @@ type OutboxClient = { query: (sql: string, params?: any[]) => Promise<any> };
 async function logReplicaChange(
     client: OutboxClient | null,
     tenantId: number,
-    event: 'bill:changed' | 'cash:changed' | 'fiscalDoc:changed',
+    event: 'bill:changed' | 'cash:changed' | 'fiscalDoc:changed' | 'paymentRequest:changed' | 'reservation:updated',
     aggregate: string,
     payload: Record<string, number>,
 ): Promise<void> {
@@ -12275,6 +12786,110 @@ async function logReplicaChange(
     }
 }
 
+// --- Le prenotazioni nel log di replica (tappa C) ---------------------------
+// Ogni modifica del cloud a una prenotazione deve arrivare al nodo: dalla
+// fase B4 l'app legge le prenotazioni da lì. Prima nel log c'erano solo
+// nascita, PUT, scambio e cancellazione; conferma dopo la caparra, rifiuto,
+// esito dei messaggi di conferma, promemoria, lingua, rinomina a cascata
+// dalla rubrica restavano broadcast diretti che il nodo non vedeva mai. Sul
+// nodo è un no-op: la prenotazione è del cloud, e il nodo scrive solo
+// tavolo e arrivo (reservation:service-updated).
+async function logReservationChanged(client: OutboxClient | null, tenantId: number, ids: number | number[]): Promise<void> {
+    if (isServiceNode) return;
+    for (const id of Array.isArray(ids) ? ids : [ids]) {
+        const n = Number(id);
+        if (!Number.isInteger(n) || n <= 0) continue;
+        await logReplicaChange(client, tenantId, 'reservation:updated', `reservation:${n}`, { reservation_id: n });
+    }
+}
+
+/** Sul NODO, dopo un lotto del cloud (fase B3): una caparra pagata online
+ *  (richiesta di pagamento COMPLETED, senza quota) per una prenotazione che
+ *  ha un conto aperto in sala si accredita qui — col servizio in sala il
+ *  cloud non tocca più i conti. Idempotente: l'accredito ha il suo indice
+ *  unico per richiesta di pagamento. */
+async function applyCloudEffectsOnNode(tenantId: number, events: Array<{ type: string; payload: any }>): Promise<void> {
+    if (!isServiceNode) return;
+    const prIds = events
+        .filter(ev => ev.type === 'paymentRequest:changed')
+        .map(ev => Number(ev.payload?.payment_request_id))
+        .filter(id => Number.isInteger(id) && id > 0);
+    if (prIds.length === 0) return;
+    await runWithTenantContext(tenantId, async () => {
+        if (!(await getFeatureFlag(tenantId, 'sala_node_authority_enabled', false))) return;
+        // Fase B3b: le quote del QR. La quota è del nodo, la richiesta di
+        // pagamento del cloud: qui la si collega alla quota e, a pagamento
+        // concluso o fallito, si applica la transizione — quota pagata,
+        // specchio nel libro cassa, conto saldato e (con lo scontrino
+        // automatico) chiuso con lo scontrino. Idempotente: le transizioni
+        // partono solo da quote ancora CLAIMED.
+        const splitPrs = await queryWithRetry(
+            `SELECT pr.id, pr.table_bill_split_id AS split_id, UPPER(pr.status) AS status, pr.completed_at,
+                    s.payment_request_id AS linked, s.table_bill_id AS bill_id
+               FROM payment_requests pr
+               JOIN table_bill_splits s ON s.id = pr.table_bill_split_id
+              WHERE pr.id = ANY($1::bigint[]) AND pr.tenant_id = $2`,
+            [prIds, tenantId]
+        );
+        for (const pr of splitPrs.rows) {
+            if (pr.linked == null) {
+                await queryWithRetry(`UPDATE table_bill_splits SET payment_request_id = $1 WHERE id = $2 AND payment_request_id IS NULL`, [pr.id, pr.split_id]);
+                await logBillChanged(null, tenantId, pr.bill_id);
+            }
+            if (pr.completed_at && ['COMPLETED', 'PAID'].includes(pr.status)) {
+                await applyBillSplitTransition(tenantId, Number(pr.split_id), 'ORDER_COMPLETED', true);
+            } else if (['CANCELLED', 'FAILED'].includes(pr.status)) {
+                await applyBillSplitTransition(tenantId, Number(pr.split_id), 'ORDER_CANCELLED', false);
+            }
+        }
+        const bills = await queryWithRetry(
+            `SELECT DISTINCT b.id
+               FROM payment_requests pr
+               JOIN table_bills b ON b.reservation_id = pr.reservation_id AND b.tenant_id = pr.tenant_id
+              WHERE pr.id = ANY($1::bigint[]) AND pr.tenant_id = $2
+                AND pr.table_bill_split_id IS NULL
+                AND UPPER(pr.status) IN ('COMPLETED', 'PAID') AND pr.completed_at IS NOT NULL
+                AND b.status IN ('OPEN', 'LOCKED')`,
+            [prIds, tenantId]
+        );
+        for (const row of bills.rows) {
+            const credit = await creditPaidDepositsToBill(tenantId, Number(row.id));
+            if (credit.credited > 0 || credit.settled) {
+                try { socketService?.broadcastToAll(tenantId, credit.settled ? 'bill:settled' : 'bill:updated', { id: Number(row.id) }); } catch (_) {}
+            }
+        }
+    });
+}
+
+/** Sul NODO (fase B3b): una quota del QR rimasta CLAIMED senza ordine di
+ *  pagamento (il gateway aveva fallito alla creazione) e scaduta da oltre
+ *  10 minuti si libera — nel cloud lo faceva il riconciliatore, ma col
+ *  servizio in sala la quota è del nodo. Quelle con un ordine le chiude la
+ *  richiesta di pagamento che scende dal cloud. */
+async function sweepStaleNodeClaims(): Promise<void> {
+    if (!isServiceNode) return;
+    // rls-bypass: solo nodo, giro di sistema: un tenant solo, quello del cursore di replica
+    await runAsPlatform(async () => {
+        const cur = await queryWithRetry(`SELECT tenant_id FROM replication_cursor WHERE stream = 'cloud' LIMIT 1`);
+        const tenantId = Number(cur.rows[0]?.tenant_id);
+        if (!Number.isInteger(tenantId) || tenantId <= 0) return;
+        await runWithTenantContext(tenantId, async () => {
+            if (!(await getFeatureFlag(tenantId, 'sala_node_authority_enabled', false))) return;
+            const upd = await queryWithRetry(
+                `UPDATE table_bill_splits SET status = 'ABANDONED'
+                  WHERE tenant_id = $1 AND status = 'CLAIMED' AND payment_request_id IS NULL
+                    AND expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP - interval '10 minutes'
+                  RETURNING id, table_bill_id`,
+                [tenantId]
+            );
+            for (const row of upd.rows) {
+                await logBillChanged(null, tenantId, row.table_bill_id);
+                try { socketService?.broadcastToAll(tenantId, 'bill:split-abandoned', { bill_id: row.table_bill_id, split_id: row.id }); } catch (_) {}
+            }
+        });
+    });
+}
+
 /** Il conto con i suoi pagamenti e le sue quote è cambiato. */
 function logBillChanged(client: OutboxClient | null, tenantId: number, billId: number | string | null | undefined): Promise<void> {
     const id = Number(billId);
@@ -12286,6 +12901,14 @@ function logCashChanged(client: OutboxClient | null, tenantId: number, sessionId
     const id = Number(sessionId);
     if (!Number.isInteger(id) || id <= 0) return Promise.resolve();
     return logReplicaChange(client, tenantId, 'cash:changed', 'cash_session', { cash_session_id: id });
+}
+
+/** Una richiesta di pagamento (caparra, link, quota) è cambiata: scende al
+ *  nodo, che col servizio in sala accredita le caparre (fase B3). */
+function logPaymentRequestChanged(client: OutboxClient | null, tenantId: number, prId: number | string | null | undefined): Promise<void> {
+    const id = Number(prId);
+    if (!Number.isInteger(id) || id <= 0) return Promise.resolve();
+    return logReplicaChange(client, tenantId, 'paymentRequest:changed', 'payment_request', { payment_request_id: id });
 }
 
 function logFiscalDocChanged(client: OutboxClient | null, tenantId: number, docId: number | string | null | undefined): Promise<void> {
@@ -14077,6 +14700,9 @@ const startBillSplitReconcileScheduler = () => {
                 // Fallback: only for splits with NO linked order (order
                 // creation had failed at claim time) — nothing payable
                 // exists, so freeing the capacity is safe.
+                // Col servizio in sala (fase B3b) la quota è del nodo: la
+                // libera lui (sweepStaleNodeClaims), non la copia del cloud.
+                if (!handled && await nodeOwnsBills(rowTenantId)) handled = true;
                 if (!handled) {
                     const upd = await queryWithRetry(
                         `UPDATE table_bill_splits
@@ -14195,6 +14821,7 @@ const declineReservationForExpiredLink = async (
         if (updated.rowCount === 0) return;
         const r = updated.rows[0];
         console.log(`[payment-expiry] prenotazione ${r.id} declinata: caparra non pagata (tenant ${tenantId})`);
+        await logReservationChanged(null, tenantId, Number(r.id));
         await broadcastReservationsUpdatedByIds([Number(r.id)]);
         if (message === 'declined' && (r.phone || r.email)) {
             dispatchBookingNotification({
@@ -15447,6 +16074,7 @@ app.put('/customers/:id', authenticate, requirePermission('customers:full'), asy
         // After the transaction commits, tell every connected client which
         // reservations changed so their booking cards update in place (the
         // denormalized customer_name/phone lives on the reservation row).
+        await logReservationChanged(null, req.tenantId!, cascadedReservationIds);
         await broadcastReservationsUpdatedByIds(cascadedReservationIds);
 
         if (req.user) {
@@ -15613,6 +16241,7 @@ app.post('/customers/:sourceId/merge-into/:targetId', authenticate, requirePermi
 
         // Push the re-tagged reservations to every client so booking cards
         // reflect the merged customer's name without a refresh.
+        await logReservationChanged(null, req.tenantId!, cascadedReservationIds);
         await broadcastReservationsUpdatedByIds(cascadedReservationIds);
 
         if (req.user) {
@@ -15709,6 +16338,7 @@ app.delete('/customers/:id', authenticate, requirePermission('customers:full'), 
                     AND reservation_time < CURRENT_TIMESTAMP`,
                 [reservationIds, req.tenantId!]
             );
+            await logReservationChanged(null, req.tenantId!, reservationIds);
         }
         await queryWithRetry(
             `UPDATE activity_logs
@@ -24663,6 +25293,7 @@ async function recordConfirmationSent(
          RETURNING *`,
         [initialStatus, result.channel, result.sid ?? null, reservationId, tenantId]
     );
+    if (updated.rows[0]) await logReservationChanged(null, tenantId, updated.rows[0].id);
     if (updated.rows[0] && socketService) {
         try { socketService.broadcastReservationUpdated(tenantId, updated.rows[0]); }
         catch (err) { console.warn('[confirmation] broadcast failed:', err); }
@@ -27366,7 +27997,13 @@ app.post('/table-assignment-suggestions/:id/confirm', authenticate, requirePermi
             `UPDATE table_assignment_suggestions SET status = 'CONFIRMED', resolved_at = CURRENT_TIMESTAMP, resolved_by_user_id = $2 WHERE id = $1`,
             [id, req.user?.userId ?? null]
         );
+        // Tappa C: il tavolo della prenotazione è una colonna di servizio.
+        // Il suggerimento si conferma nel cloud (le proposte vivono lì) e
+        // il nodo prende il tavolo come da un'assegnazione in sala.
+        await outboxEnqueueInTx(client, req.tenantId!, 'reservation:service-updated', `reservation:${reservation.id}`,
+            { reservation_id: Number(reservation.id) }, outboxContext(req));
         await client.query('COMMIT');
+        outboxKick();
 
         if (req.user) {
             LogService.logActivity(
@@ -32567,7 +33204,8 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
             queryWithRetry(
                 `UPDATE reservations SET language = $1 WHERE id = $2 AND tenant_id = $3`,
                 [resolvedLanguage, created.id, tenantId]
-            ).catch(err => console.warn('[public-booking] language backfill failed:', err));
+            ).then(() => logReservationChanged(null, tenantId, created.id))
+                .catch(err => console.warn('[public-booking] language backfill failed:', err));
             created.language = resolvedLanguage;
         }
 
@@ -32662,6 +33300,7 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
                     ]
                 );
                 depositCheckoutUrl = order.checkoutUrl;
+                await logPaymentRequestChanged(null, tenantId, insertedPayment.rows[0]?.id);
                 try { socketService?.broadcastToAll(tenantId, 'paymentRequest:created', insertedPayment.rows[0]); }
                 catch (err) { console.warn('[public-booking] payment socket broadcast failed:', err); }
                 // reservation:created è già partito col row grezzo, senza i
@@ -38479,7 +39118,12 @@ app.post('/print-jobs', authenticate, requirePermission('orders:take'), async (r
         // dell'origine, mai di un URL intero.
         const rawOrigin = typeof req.body?.origin === 'string' ? req.body.origin : '';
         const origin = /^https?:\/\/[a-z0-9.\-:\[\]]+$/i.test(rawOrigin) ? rawOrigin : null;
-        const shareUrl = bill.share_token && origin ? `${origin}/pay/${bill.share_token}` : null;
+        // In isola (nodo senza cloud) niente QR: il conto può essere nato sul
+        // nodo a linea giù, il cloud non lo conosce ancora e l'ospite che lo
+        // inquadra col 4G leggerebbe «conto non trovato». Senza QR paga in
+        // cassa, che è quello che deve fare comunque.
+        const island = isServiceNode && isCloudUplinkDown();
+        const shareUrl = bill.share_token && origin && !island ? `${origin}/pay/${bill.share_token}` : null;
 
         // 'SCONTRINO': la copia di cortesia del documento commerciale già
         // emesso — intestazione, righe dal payload dell'emissione (è ciò che
@@ -38895,6 +39539,15 @@ app.get('/sala-node/credentials', salaNodeAuth, async (req: any, res) => {
             // il tenant pubblico: gli altri usano il token per-tenant a DB,
             // che il nodo ha già dalla riga tenants dello snapshot.
             print_agent_legacy_token: tenantId === PUBLIC_TENANT_ID ? (process.env.PRINT_AGENT_TOKEN || null) : null,
+            // Fase B5: con l'autorità in sala i conti Passepartout si
+            // chiudono sul nodo, che deve chiuderli come il cloud: stesso
+            // tipo pagamento e documento, una sola fonte (Railway). Solo la
+            // configurazione, mai il token dell'agente: quello il nodo lo
+            // riceve dal supervisore, che sul PC lo ha già — il token del
+            // nodo non deve valere anche come agente (stessa regola che ha
+            // tolto JWT_SECRET da qui). Integrazione da env: solo il tenant
+            // pubblico.
+            passepartout_chiusura: tenantId === PUBLIC_TENANT_ID ? getPassepartoutChiusuraConfig() : null,
             jwt_public_keys: publicKeysForNodes(),
             cert: cert
                 ? { cert_pem: cert.cert_pem, key_pem: cert.key_pem, expires_at: cert.expires_at }
@@ -39183,7 +39836,11 @@ app.post('/sala-node/rows', salaNodeAuth, async (req: any, res) => {
         const billIds = ids('bills');
         const cashIds = ids('cashSessions');
         const fiscalIds = ids('fiscalDocs');
+        const paymentRequestIds = ids('paymentRequests');
         const none = { rows: [] as any[] };
+        const paymentRequestsRs = paymentRequestIds.length
+            ? await queryWithRetry(`SELECT * FROM payment_requests WHERE tenant_id = $1 AND id = ANY($2::bigint[])`, [tenantId, paymentRequestIds])
+            : none;
         const [billsRs, billPaymentsRs, billSplitsRs, cashRs, fiscalRs] = await Promise.all([
             billIds.length ? queryWithRetry(`SELECT * FROM table_bills WHERE tenant_id = $1 AND id = ANY($2::bigint[])`, [tenantId, billIds]) : Promise.resolve(none),
             billIds.length ? queryWithRetry(`SELECT * FROM table_bill_payments WHERE tenant_id = $1 AND table_bill_id = ANY($2::bigint[])`, [tenantId, billIds]) : Promise.resolve(none),
@@ -39204,6 +39861,7 @@ app.post('/sala-node/rows', salaNodeAuth, async (req: any, res) => {
             table_bill_splits: billSplitsRs.rows,
             cash_sessions: cashRs.rows,
             fiscal_documents: fiscalRs.rows,
+            payment_requests: paymentRequestsRs.rows,
         });
     } catch (err: any) {
         console.error('POST /sala-node/rows error:', err);
@@ -39382,6 +40040,32 @@ app.post('/sala-node/authority', authenticate, requirePermission('settings:full'
             if (!overview.node_online) return res.status(409).json({ error: 'node_offline', message: 'Il nodo non è collegato' });
             if (!overview.aligned && !force) {
                 return res.status(409).json({ error: 'not_aligned', message: 'Le repliche non sono allineate', detail: overview });
+            }
+            // Fase B3: col servizio in sala il conto e lo scontrino nascono
+            // sul nodo. Lo scontrino deve poter partire dalla LAN (registratore
+            // collegato al CRM): Openapi vive su internet, e il nodo non ha le
+            // credenziali dei provider.
+            const fiscalProvider = await getFiscalProviderSetting(req.tenantId!);
+            if (!['rt-local', 'none', 'mock'].includes(fiscalProvider)) {
+                return res.status(409).json({
+                    error: 'fiscal_needs_cloud',
+                    message: 'Lo scontrino elettronico passa da internet: col servizio in sala serve il registratore collegato al CRM',
+                });
+            }
+            // Un pagamento col QR in corso finirebbe sul conto del cloud
+            // mentre il conto passa al nodo: si aspetta che si chiuda.
+            const liveQr = await queryWithRetry(
+                `SELECT 1 FROM table_bill_splits
+                  WHERE tenant_id = $1 AND status = 'CLAIMED'
+                    AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+                  LIMIT 1`,
+                [req.tenantId!]
+            );
+            if ((liveQr.rowCount ?? 0) > 0 && !force) {
+                return res.status(409).json({
+                    error: 'qr_payments_live',
+                    message: 'C\'è un pagamento col QR in corso: riprova quando si è concluso',
+                });
             }
             await setFlag(true);
             return res.json(await salaNodeAuthorityOverview(req.tenantId!));
@@ -40100,7 +40784,10 @@ bookingTools.configureBookingTools({
     // momento della chiamata, non alla configurazione.
     broadcastReservationCreated: (r: any) => socketService?.broadcastReservationCreated(Number(r.tenant_id) || PUBLIC_TENANT_ID, r),
     broadcastReservationUpdated: (r: any) => socketService?.broadcastReservationUpdated(Number(r.tenant_id) || PUBLIC_TENANT_ID, r),
-    broadcastPaymentRequestCreated: (r: any) => socketService?.broadcastToAll(Number(r.tenant_id) || PUBLIC_TENANT_ID, 'paymentRequest:created', r),
+    broadcastPaymentRequestCreated: (r: any) => {
+        void logPaymentRequestChanged(null, Number(r.tenant_id) || PUBLIC_TENANT_ID, r?.id);
+        socketService?.broadcastToAll(Number(r.tenant_id) || PUBLIC_TENANT_ID, 'paymentRequest:created', r);
+    },
     broadcastReservationsUpdatedByIds,
     suggestTableAssignment: (tenantId: number, reservationId: number) => {
         maybeSuggestTableAssignment(tenantId, reservationId).catch(err =>
@@ -40152,8 +40839,12 @@ const startServer = async () => {
                 setNotificationPersistListener((tenantId, userIds) => {
                     socketService?.broadcastToUsers(tenantId, userIds, 'notification:new', {});
                 });
-                if (isPassepartoutAgentConfigured() && !isServiceNode) {
+                // Sul nodo sempre (fase B5): il token arriva dalle credenziali
+                // del cloud anche dopo l'avvio, e il namespace lo rilegge a
+                // ogni handshake.
+                if (isServiceNode || isPassepartoutAgentConfigured()) {
                     setupPassepartoutBridge(socketService.getIO());
+                    startPassepartoutCloseSweeper();
                     console.log('✅ Passepartout agent bridge attivo su /pp-agent');
                 }
                 // Sempre attivo (a differenza del pp-agent non dipende da un
@@ -40259,21 +40950,32 @@ const startServer = async () => {
                         // dispatcher SOLO per gli importati — sui 'local' il
                         // broadcast l'ha già fatto la route, e raddoppiarlo
                         // significherebbe doppi toast sui client.
+                        // Tappa C: righe arricchite (VIP, tavolo preferito,
+                        // ultimo pagamento) — il client sostituisce la riga, e
+                        // una riga nuda spegneva i badge fino al ricaricamento.
                         outboxRegister('reservation:created', async (tenantId, payload, meta) => {
                             if (meta?.origin !== 'replica') return;
                             const id = Number(payload?.reservation_id);
                             if (!Number.isFinite(id)) return;
-                            const rs = await queryWithRetry('SELECT * FROM reservations WHERE id = $1 AND tenant_id = $2', [id, tenantId]);
-                            if (rs.rows[0]) socketService?.broadcastReservationCreated(tenantId, rs.rows[0]);
+                            const [row] = await selectEnrichedReservations([id]);
+                            if (!row) return;
+                            socketService?.broadcastReservationCreated(tenantId, row);
+                            // Un walk-in nato in sala: la scheda in rubrica la
+                            // apre il cloud, che della rubrica è il padrone.
+                            if (!isServiceNode && row.phone) {
+                                await upsertCustomerFromReservation(tenantId, row.customer_name, row.phone, row.email ?? null, null)
+                                    .catch(err => console.warn('[replica] rubrica dal walk-in non aggiornata:', err?.message || err));
+                            }
                         });
                         const rebroadcastReservationUpdate = async (tenantId: number, payload: any, meta?: { origin: string }) => {
                             if (meta?.origin !== 'replica') return;
                             const id = Number(payload?.reservation_id);
                             if (!Number.isFinite(id)) return;
-                            const rs = await queryWithRetry('SELECT * FROM reservations WHERE id = $1 AND tenant_id = $2', [id, tenantId]);
-                            if (rs.rows[0]) socketService?.broadcastReservationUpdated(tenantId, rs.rows[0]);
+                            const [row] = await selectEnrichedReservations([id]);
+                            if (row) socketService?.broadcastReservationUpdated(tenantId, row);
                         };
                         outboxRegister('reservation:updated', rebroadcastReservationUpdate);
+                        outboxRegister('reservation:service-updated', rebroadcastReservationUpdate);
                         outboxRegister('reservation:deleted', async (tenantId, payload, meta) => {
                             if (meta?.origin !== 'replica') return;
                             const id = Number(payload?.reservation_id);
@@ -40479,6 +41181,33 @@ const startServer = async () => {
                             } catch { /* mai rompere il giro */ }
                         },
                         onCloudEvent: kickConfigSync,
+                        onApplied: applyCloudEffectsOnNode,
+                        // Fase B3b: la quota del QR su un conto del nodo.
+                        rpc: {
+                            // rls-bypass: solo nodo, chiamata del cloud senza sessione: il conto si risolve dal token come nella rotta pubblica
+                            'pay:claim': (payload: any) => runAsPlatform(async () => {
+                                const outcome = await claimSplitLocally(String(payload?.token || ''), payload?.body ?? {});
+                                if ('claim' in outcome) {
+                                    const c = outcome.claim;
+                                    // La riga intera viaggia col risultato: il cloud la deve
+                                    // avere PRIMA di crearci sopra la richiesta di pagamento
+                                    // (FK viva), e la replica arriverebbe un istante dopo.
+                                    const row = await queryWithRetry('SELECT * FROM table_bill_splits WHERE id = $1', [c.split_id]);
+                                    c.split_row = row.rows[0] ?? null;
+                                    await logBillChanged(null, c.tenant_id, c.bill_id);
+                                    try {
+                                        socketService?.broadcastToAll(c.tenant_id, 'bill:split-claimed', {
+                                            bill_id: c.bill_id, split_id: c.split_id, kind: c.kind,
+                                            amount_cents: c.amount, claimant_label: c.claimant_label,
+                                        });
+                                    } catch (_) {}
+                                }
+                                return outcome;
+                            }),
+                            // rls-bypass: solo nodo, chiamata del cloud senza sessione: come la rotta pubblica di rilascio
+                            'pay:release': (payload: any) => runAsPlatform(() =>
+                                releaseSplitLocally(String(payload?.token || ''), Number(payload?.split_id))),
+                        },
                     });
                     // Fase A2, solo nodo: la configurazione (menu, utenti,
                     // stampanti, impostazioni) resta allineata al cloud, e il
@@ -40487,6 +41216,8 @@ const startServer = async () => {
                     if (isServiceNode) {
                         startSalaNodeAccess();
                         startSalaNodeConfigSync();
+                        const claimSweep = setInterval(() => { void sweepStaleNodeClaims().catch(() => {}); }, 60_000);
+                        if (typeof claimSweep.unref === 'function') claimSweep.unref();
                     }
                     // Il cane da guardia dell'uplink (no-op sul nodo): push a
                     // OWNER/GM se un nodo con l'ibrido acceso tace oltre soglia.

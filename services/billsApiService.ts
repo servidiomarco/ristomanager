@@ -2,7 +2,7 @@ import { authApiService } from './authApiService';
 import { socketClient } from './socketClient';
 import type { BillPaymentMethod, CashClosureReport, CustomerBilling, FiscalDocument, FiscalProviderSetting, TableBill, TableBillWithSplits, TipMethod } from '../types';
 import { buildApiError } from './apiError';
-import { routedGetUrl, cloudFallbackUrl, noteRoutedResponse, fetchNodeAware } from './apiRouting';
+import { routedGetUrl, cloudFallbackUrl, noteRoutedResponse, fetchNodeAware, routeServiceUrl } from './apiRouting';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';
 
@@ -63,6 +63,10 @@ const getHeaders = (): HeadersInit => {
 };
 
 const fetchWithAuth = async (url: string, options: RequestInit = {}, retried = false): Promise<Response> => {
+  // Fase B3: con l'autorità in sala conti e incassi nascono sul nodo — le
+  // scritture vanno lì, e anche le letture (la copia del cloud arriva dopo,
+  // e a linea giù non arriva). No-op per tutto il resto.
+  url = routeServiceUrl(url, (options.method as string) || 'GET');
   let response: Response;
   try {
     response = await fetchNodeAware(url, options);

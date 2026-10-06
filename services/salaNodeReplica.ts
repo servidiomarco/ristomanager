@@ -57,6 +57,12 @@ const cloudPost = async (path: string, body: any): Promise<any> => {
 const fetchRowsFromCloud = async (wanted: WantedRows): Promise<FetchedRows> =>
     cloudPost('/sala-node/rows', wanted);
 
+// Fase B3: dopo ogni lotto applicato, gli effetti che spettano al nodo
+// (es. la caparra pagata online da accreditare sul conto in sala). Fuori
+// dalla transazione della replica: sono scritture locali vere, con i loro
+// eventi verso il cloud. Iniettato da server.ts.
+let onAppliedHook: ((tenantId: number, events: ReplicaEvent[]) => Promise<void>) | null = null;
+
 /** Un giro di pull dal cloud: torna true se c'era roba (e conviene
  *  rigirare subito — a valle di un outage si drena a batch pieni). */
 // rls-bypass: solo nodo, un tenant: giro di replica senza sessione, il tenant lo dà il cursore locale
@@ -74,6 +80,10 @@ const pullOnce = async (): Promise<boolean> => runAsPlatform(async () => {
     }
     await applyReplicaBatch({ tenantId, events, cursorStream: 'cloud', fetchRows: fetchRowsFromCloud });
     lastCloudPullOkAt = Date.now();
+    if (onAppliedHook) {
+        try { await onAppliedHook(tenantId, events); }
+        catch (err: any) { console.warn('[replica] effetti dopo il lotto non riusciti:', err?.message || err); }
+    }
     console.log(`[replica] applicati ${events.length} eventi, cursore a ${events[events.length - 1].seq}`);
     return true;
 });
@@ -272,10 +282,15 @@ export interface SalaNodeReplicaOpts {
     /** Ogni tipo di evento annunciato dal cloud: la sincronizzazione della
      *  configurazione (salaNodeConfigSync) lo usa come sveglia. */
     onCloudEvent?: (event: string) => void;
+    /** Gli effetti locali dopo un lotto del cloud applicato (fase B3). */
+    onApplied?: (tenantId: number, events: ReplicaEvent[]) => Promise<void>;
+    /** Le chiamate del cloud al nodo (fase B3b), per nome. */
+    rpc?: Record<string, (payload: any) => Promise<any>>;
 }
 
 export const startSalaNodeReplica = (opts?: SalaNodeReplicaOpts): void => {
     if (!isServiceNode) return;
+    onAppliedHook = opts?.onApplied ?? null;
     let running = false;
     let lastErrorLogged = 0;
     const drain = async () => {
@@ -367,6 +382,15 @@ export const startSalaNodeReplica = (opts?: SalaNodeReplicaOpts): void => {
     socket.on('node:pull', (req, ack) => { if (typeof ack === 'function') void serveNodePull(req, ack); });
     socket.on('node:rows', (req, ack) => { if (typeof ack === 'function') void serveNodeRows(req, ack); });
     socket.on('node:status', (req, ack) => { if (typeof ack === 'function') void serveNodeStatus(req, ack); });
+    // Le chiamate del cloud (fase B3b: la quota del QR su un conto del nodo).
+    socket.on('node:rpc', (req: any, ack: any) => {
+        if (typeof ack !== 'function') return;
+        const handler = opts?.rpc?.[String(req?.method)];
+        if (!handler) return ack({ ok: false, error: 'unknown_method' });
+        handler(req?.payload)
+            .then((result) => ack({ ok: true, result }))
+            .catch((err: any) => ack({ ok: false, error: err?.message || String(err) }));
+    });
     let connErrLogged = 0;
     socket.on('connect_error', (err) => {
         if (Date.now() - connErrLogged > 60_000) {
