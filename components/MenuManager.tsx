@@ -4655,7 +4655,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       aside={tableQrSel.size > 0
                         ? t('tableQrSheets', { count: sheets, perSheet })
                         : t('tableQrPerSheet', { count: perSheet })}
-                      hint={t('tableQrCardSize', { w: cm(size.width), h: cm(size.height) })}
+                      hint={t(tableQrHolder ? 'tableQrHolderSize' : 'tableQrCardSize', { w: cm(size.width), h: cm(size.height) })}
                     >
                       <SegmentedControl<QrPaper>
                         value={tableQrPaper}
@@ -4664,8 +4664,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                         options={QR_PAPER_ORDER.map(p => ({ value: p, label: p }))}
                       />
                     </Field>
-                    {/* Il portaQR in plastica del locale: il cartellino esce
-                        alla sua misura, non a divisione del foglio. */}
+                    {/* Il portaQR in plastica del locale: il cavaliere da
+                        piegare esce alla sua misura, non a divisione del foglio. */}
                     <button
                       type="button"
                       role="checkbox"
