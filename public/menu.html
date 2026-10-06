@@ -379,6 +379,14 @@ footer:not(:empty)::before {
     box-shadow: 0 12px 28px -12px rgba(17, 17, 19, 0.45);
 }
 body.con-paga footer { padding-bottom: max(112px, calc(env(safe-area-inset-bottom) + 96px)); }
+.paga a[aria-busy="true"] { opacity: 0.7; pointer-events: none; }
+/* Tavolo con la comanda in cassa: il conto si legge al tocco, e se la cassa
+   non risponde l'ospite deve sapere a chi chiedere. */
+.paga__nota {
+    max-width: 720px; margin: 0 auto 10px; padding: 10px 14px; border-radius: 14px;
+    background: var(--ds-public-canvas); color: inherit; font-size: 14px; text-align: center;
+    box-shadow: 0 8px 20px -14px rgba(17, 17, 19, 0.45);
+}
 
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation: none !important; transition: none !important; }
@@ -417,7 +425,7 @@ body.con-paga footer { padding-bottom: max(112px, calc(env(safe-area-inset-botto
 
 <footer id="footer"></footer>
 
-<div class="paga" id="paga" hidden><a id="paga-link" class="tnum" href="#"></a></div>
+<div class="paga" id="paga" hidden><p class="paga__nota" id="paga-nota" role="status" hidden></p><a id="paga-link" class="tnum" href="#"></a></div>
 
 <script>
 'use strict';
@@ -425,10 +433,10 @@ body.con-paga footer { padding-bottom: max(112px, calc(env(safe-area-inset-botto
     /* Testi della pagina nelle quattro lingue del menu. I piatti usano le
        traduzioni del CRM quando ci sono, altrimenti restano in italiano. */
     var UI = {
-        it: { tavolo: 'Tavolo', paga: 'Paga il conto', lingua: 'Lingua', categorie: 'Categorie', foto: 'Foto', chiudi: 'Chiudi', allergeni: 'Allergeni', abbinati: 'Si abbina con', altro: 'Leggi tutto', meno: 'Riduci', vuoto: 'Il menu non è al momento disponibile.', errore: 'Non riusciamo a caricare il menu. Riprova tra poco.' },
-        en: { tavolo: 'Table', paga: 'Pay the bill', lingua: 'Language', categorie: 'Categories', foto: 'Photo', chiudi: 'Close', allergeni: 'Allergens', abbinati: 'Pairs with', altro: 'Read more', meno: 'Show less', vuoto: 'The menu is not available right now.', errore: 'We could not load the menu. Please try again shortly.' },
-        fr: { tavolo: 'Table', paga: 'Payer l’addition', lingua: 'Langue', categorie: 'Catégories', foto: 'Photo', chiudi: 'Fermer', allergeni: 'Allergènes', abbinati: 'S’accorde avec', altro: 'Lire la suite', meno: 'Réduire', vuoto: 'Le menu n’est pas disponible pour le moment.', errore: 'Impossible de charger le menu. Réessayez dans un instant.' },
-        de: { tavolo: 'Tisch', paga: 'Rechnung bezahlen', lingua: 'Sprache', categorie: 'Kategorien', foto: 'Foto', chiudi: 'Schließen', allergeni: 'Allergene', abbinati: 'Passt zu', altro: 'Weiterlesen', meno: 'Weniger', vuoto: 'Die Speisekarte ist derzeit nicht verfügbar.', errore: 'Die Speisekarte konnte nicht geladen werden. Bitte versuche es gleich noch einmal.' }
+        it: { tavolo: 'Tavolo', paga: 'Paga il conto', attesa: 'Un attimo…', cassaKo: 'Non riusciamo a leggere il conto adesso: chiedi al personale.', pagato: 'Il conto risulta già pagato.', lingua: 'Lingua', categorie: 'Categorie', foto: 'Foto', chiudi: 'Chiudi', allergeni: 'Allergeni', abbinati: 'Si abbina con', altro: 'Leggi tutto', meno: 'Riduci', vuoto: 'Il menu non è al momento disponibile.', errore: 'Non riusciamo a caricare il menu. Riprova tra poco.' },
+        en: { tavolo: 'Table', paga: 'Pay the bill', attesa: 'One moment…', cassaKo: 'We can’t load the bill right now: please ask the staff.', pagato: 'This bill has already been paid.', lingua: 'Language', categorie: 'Categories', foto: 'Photo', chiudi: 'Close', allergeni: 'Allergens', abbinati: 'Pairs with', altro: 'Read more', meno: 'Show less', vuoto: 'The menu is not available right now.', errore: 'We could not load the menu. Please try again shortly.' },
+        fr: { tavolo: 'Table', paga: 'Payer l’addition', attesa: 'Un instant…', cassaKo: 'Impossible de charger l’addition pour le moment : demandez au personnel.', pagato: 'Cette addition est déjà réglée.', lingua: 'Langue', categorie: 'Catégories', foto: 'Photo', chiudi: 'Fermer', allergeni: 'Allergènes', abbinati: 'S’accorde avec', altro: 'Lire la suite', meno: 'Réduire', vuoto: 'Le menu n’est pas disponible pour le moment.', errore: 'Impossible de charger le menu. Réessayez dans un instant.' },
+        de: { tavolo: 'Tisch', paga: 'Rechnung bezahlen', attesa: 'Einen Moment…', cassaKo: 'Die Rechnung kann gerade nicht geladen werden: Bitte frag das Personal.', pagato: 'Diese Rechnung ist bereits bezahlt.', lingua: 'Sprache', categorie: 'Kategorien', foto: 'Foto', chiudi: 'Schließen', allergeni: 'Allergene', abbinati: 'Passt zu', altro: 'Weiterlesen', meno: 'Weniger', vuoto: 'Die Speisekarte ist derzeit nicht verfügbar.', errore: 'Die Speisekarte konnte nicht geladen werden. Bitte versuche es gleich noch einmal.' }
     };
     // Ogni lingua col suo nome: chi cerca la propria la riconosce così.
     var NOME_LINGUA = { it: 'Italiano', en: 'English', fr: 'Français', de: 'Deutsch' };
@@ -477,7 +485,8 @@ body.con-paga footer { padding-bottom: max(112px, calc(env(safe-area-inset-botto
     var apiPath = tavoloToken ? '/public/table/' + tavoloToken
         : (slugMatch ? '/public/' + slugMatch[1] + '/menu' : '/public/menu');
     var tavolo = null;  // nome del tavolo, solo in modalità tavolo
-    var conto = null;   // { open, url, residual_cents, currency }
+    var conto = null;   // { open, url, residual_cents, currency, cassa }
+    var inCassa = false; // tocco in corso: il conto si sta leggendo dalla cassa
 
     var lang = null;
     try { lang = localStorage.getItem('menu_lang'); } catch (e) { /* storage bloccato: si va col browser */ }
@@ -565,15 +574,54 @@ body.con-paga footer { padding-bottom: max(112px, calc(env(safe-area-inset-botto
         tav.hidden = !tavolo;
         if (tavolo) tav.textContent = t('tavolo') + ' ' + tavolo;
         var box = document.getElementById('paga');
-        var aperto = !!(conto && conto.open && conto.url);
+        // `cassa`: la comanda è nella cassa Passepartout e il conto si
+        // prende al tocco (vedi vaiAPagare); prima l'url può non esserci.
+        var aperto = !!(conto && conto.open && (conto.url || conto.cassa));
         box.hidden = !aperto;
         document.body.classList.toggle('con-paga', aperto);
         if (!aperto) return;
         var link = document.getElementById('paga-link');
-        // La pagina di pagamento parla italiano e inglese: le altre lingue
-        // del menu ci arrivano in inglese, non nel suo fallback italiano.
-        link.href = conto.url + (conto.url.indexOf('?') === -1 ? '?' : '&') + 'lng=' + (lang === 'it' ? 'it' : 'en');
-        link.textContent = t('paga') + (conto.residual_cents > 0 ? ' · ' + soldi(conto.residual_cents, conto.currency) : '');
+        link.href = conto.url ? conLingua(conto.url) : '#';
+        link.textContent = inCassa ? t('attesa')
+            : t('paga') + (conto.residual_cents > 0 ? ' · ' + soldi(conto.residual_cents, conto.currency) : '');
+        if (inCassa) link.setAttribute('aria-busy', 'true'); else link.removeAttribute('aria-busy');
+    }
+
+    // La pagina di pagamento parla italiano e inglese: le altre lingue del
+    // menu ci arrivano in inglese, non nel suo fallback italiano.
+    function conLingua(url) {
+        return url + (url.indexOf('?') === -1 ? '?' : '&') + 'lng=' + (lang === 'it' ? 'it' : 'en');
+    }
+
+    function notaPaga(testo) {
+        var nota = document.getElementById('paga-nota');
+        nota.textContent = testo || '';
+        nota.hidden = !testo;
+    }
+
+    /* Tavolo con la comanda in cassa: il conto si legge adesso dalla cassa
+       (o si riallinea, se nessuno ha ancora pagato) e poi si va a pagare. */
+    function vaiAPagare(ev) {
+        if (!conto || !conto.cassa) return; // conto del CRM: basta il link
+        ev.preventDefault();
+        if (inCassa) return;
+        inCassa = true;
+        notaPaga('');
+        renderPaga();
+        fetch('/public/table/' + tavoloToken + '/conto/cassa', { method: 'POST', headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, j: j }; }); })
+            .then(function (esito) {
+                if (esito.ok && esito.j.url) { location.assign(conLingua(esito.j.url)); return; }
+                inCassa = false;
+                notaPaga(esito.j && esito.j.error === 'chiuso' ? t('pagato') : t('cassaKo'));
+                aggiornaConto();
+                renderPaga();
+            })
+            .catch(function () {
+                inCassa = false;
+                notaPaga(t('cassaKo'));
+                renderPaga();
+            });
     }
 
     /* Ricontrollo del conto ogni 30 s, solo a pagina visibile, e al ritorno
@@ -908,6 +956,12 @@ body.con-paga footer { padding-bottom: max(112px, calc(env(safe-area-inset-botto
                 tavolo = json.table && json.table.name ? json.table.name : null;
                 conto = json.pay || null;
                 dati = json.menu || null;
+                document.getElementById('paga-link').addEventListener('click', vaiAPagare);
+                // Tornando indietro dal pagamento la pagina può riaprirsi
+                // dalla cache del browser col tasto ancora in attesa.
+                window.addEventListener('pageshow', function (e) {
+                    if (e.persisted && inCassa) { inCassa = false; renderPaga(); aggiornaConto(); }
+                });
                 setInterval(aggiornaConto, 30000);
                 document.addEventListener('visibilitychange', aggiornaConto);
             } else {

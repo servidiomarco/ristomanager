@@ -214,3 +214,22 @@ export const setTavoliApertiConfig = (input: { enabled?: boolean; disponibilita?
 
 export const aggiornaTavoliAperti = (): Promise<{ tavoli: TavoloApertoInCassa[] }> =>
   apiRequest(`${API_URL}/passepartout/tavoli-aperti/aggiorna`, { method: 'POST', headers: getHeaders() });
+
+// --- Pagamento dal QR delle comande della cassa ------------------------------
+
+export interface PpQrPagamentoConfig {
+  enabled: boolean;
+  /** Cosa serve per accenderlo: il conto al tavolo e il tipo di pagamento
+   *  con cui la cassa chiude il tavolo pagato. Con i conti in sala (nodo)
+   *  il cloud non apre conti: resta spento. */
+  requisiti: { conto_al_tavolo: boolean; tipo_pagamento: string | null; conti_in_sala: boolean };
+  /** Tavoli con una comanda aperta in cassa all'ultima lettura. */
+  aperti: number;
+  agente: { collegato: boolean; aggiornato: boolean };
+}
+
+export const getQrPagamentoConfig = (): Promise<PpQrPagamentoConfig> =>
+  apiRequest(`${API_URL}/passepartout/qr-pagamento/config`, { headers: getHeaders(false), cache: 'no-store' });
+
+export const setQrPagamentoConfig = (input: { enabled: boolean }): Promise<{ ok: true }> =>
+  apiRequest(`${API_URL}/passepartout/qr-pagamento/config`, { method: 'PUT', headers: getHeaders(), body: JSON.stringify(input) });

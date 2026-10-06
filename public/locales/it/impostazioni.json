@@ -359,6 +359,16 @@
     "apertiNow_other": "{{count}} tavoli aperti adesso",
     "apertiRefresh": "Aggiorna adesso",
     "apertiDone_one": "{{count}} tavolo aperto in cassa",
-    "apertiDone_other": "{{count}} tavoli aperti in cassa"
+    "apertiDone_other": "{{count}} tavoli aperti in cassa",
+    "qrTitle": "Pagamento dal QR",
+    "qrSubtitle": "I tavoli aperti in cassa si pagano dal telefono",
+    "qrSend": "Paga dal QR anche i tavoli aperti in cassa",
+    "qrHint": "Il QR del tavolo mostra «Paga il conto» anche quando la comanda è solo in cassa. Al tocco il CRM legge la comanda, l'ospite paga (tutto, alla romana o per piatti, caparra già scalata) e al saldo la cassa chiude il tavolo con {{tipo}}. Se dopo il pagamento in cassa si aggiunge qualcosa, il tavolo non si chiude da solo e la cassa riceve un avviso con la differenza.",
+    "qrHintNoType": "Il QR del tavolo mostra «Paga il conto» anche quando la comanda è solo in cassa, e al saldo la cassa chiude il tavolo da sola.",
+    "qrNeedPay": "Serve il conto al tavolo acceso: Impostazioni → Conto al tavolo.",
+    "qrNeedType": "Serve il tipo di pagamento in cassa, qui sopra in «Collegamento e chiusura in cassa»: è quello con cui la cassa chiude il tavolo pagato dal QR.",
+    "qrNodo": "Con il servizio completo sul nodo di sala i conti li apre il nodo: il pagamento dal QR delle comande della cassa resta spento.",
+    "qrNow_one": "{{count}} tavolo aperto in cassa adesso",
+    "qrNow_other": "{{count}} tavoli aperti in cassa adesso"
   }
 }
