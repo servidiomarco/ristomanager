@@ -42,6 +42,7 @@ import {
     getPiantaSale,
     getContiCassaGiorno,
     getComandeAperte,
+    precontoUnaVolta,
     isPassepartoutConfigured,
     PassepartoutError,
     type TipoDocumentoConto,
@@ -54,8 +55,10 @@ const TOKEN = (process.env.PP_AGENT_TOKEN || '').trim();
 // Cosa sa fare questo agente, annunciato nell'agent:hello: il server
 // riprova da solo una chiusura solo con un agente che sa riprenderla, e
 // manda prenotazioni solo a un agente che sa scriverle, e chiede i conti
-// del giorno solo a uno che sa leggerli.
-const CAPABILITIES = ['chiudi-riprendi', 'prenotazioni', 'conti', 'tavoli-aperti'];
+// del giorno solo a uno che sa leggerli. 'chiudi-preconto': la chiusura
+// regge una comanda col preconto stampato; 'preconto': sa stamparlo (il
+// tavolo che vuole pagare dal QR diventa blu in cassa).
+const CAPABILITIES = ['chiudi-riprendi', 'prenotazioni', 'conti', 'tavoli-aperti', 'chiudi-preconto', 'preconto'];
 
 if (!SERVER_URL || !TOKEN) {
     console.error('Config mancante: servono PP_AGENT_SERVER_URL e PP_AGENT_TOKEN.');
@@ -142,6 +145,13 @@ const handlers: Record<string, Handler> = {
     },
     // Comande ancora aperte sui tavoli: sala e disponibilità del CRM.
     comandeAperte: () => getComandeAperte(),
+    preconto: (p) => {
+        const id = Number(p?.idComanda);
+        if (!Number.isFinite(id)) throw new Error('Parametro "idComanda" non valido');
+        // In fila con la chiusura della stessa comanda: un preconto che
+        // arriva mentre la si chiude troverebbe il conto a metà.
+        return unaAllaVolta(id, () => precontoUnaVolta(id));
+    },
     // Catalogo articoli per l'import menu del CRM (senza immagini: il payload
     // deve stare nel buffer del socket).
     articoli: (p) => getArticoliMenu(typeof p?.ultimaModifica === 'string' ? p.ultimaModifica : undefined),

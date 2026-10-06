@@ -10625,6 +10625,46 @@ async function riallineaContoAllaComanda(tenantId: number, billId: number, coman
     try { socketService?.broadcastToAll(tenantId, 'bill:updated', { id: billId, reservation_id: bill.reservation_id }); } catch (_) {}
 }
 
+/** «Il tavolo ha toccato Paga il conto» (una volta per conto, quando nasce
+ *  dalla comanda della cassa):
+ *  - in cassa il preconto, come lo stampa il cameriere: il tavolo diventa
+ *    blu e il foglio esce alla cassa. Solo con un agente che lo sa fare e
+ *    che sa poi chiudere una comanda col preconto (stesso pacchetto);
+ *  - una push alla cassa e ai camerieri, con il tag di «sta pagando dal
+ *    QR»: quando l'ospite inizia a pagare la sostituisce, al saldo sparisce.
+ *  I camerieri sono tutti: la cassa non dice quale utente del CRM ha
+ *  aperto la comanda. */
+async function segnalaRichiestaContoQr(
+    tenantId: number,
+    billId: number,
+    idComanda: number,
+    tableId: number,
+    totalCents: number,
+): Promise<void> {
+    if (passepartoutAgentSupports(tenantId, 'preconto')) {
+        try {
+            await callPassepartout(tenantId, 'preconto', { idComanda }, 30_000);
+        } catch (err: any) {
+            console.warn('[passepartout] preconto dal QR non stampato per la comanda', idComanda, err?.message ?? err);
+        }
+    }
+    try {
+        const t = await queryWithRetry(`SELECT name FROM tables WHERE id = $1 AND tenant_id = $2`, [tableId, tenantId]);
+        const tavolo = t.rows[0]?.name ? String(t.rows[0].name) : null;
+        const currency = (await getTenantLocale(tenantId)).currency;
+        const payload = {
+            category: 'payment',
+            title: tavolo ? `Tavolo ${tavolo} vuole pagare dal QR` : `Conto #${billId}: il tavolo vuole pagare dal QR`,
+            body: `Conto letto dalla cassa: ${formatMoneyMinor(totalCents, currency)}`,
+            tag: billPayingTag(billId),
+        };
+        await pushSendToRoles(tenantId, await ruoliCassa(tenantId), { ...payload, url: '/?view=CASSA' });
+        await pushSendToRoles(tenantId, ['WAITER'], { ...payload, url: '/?view=COMANDE' });
+    } catch (err: any) {
+        console.warn('[passepartout] avviso «vuole pagare dal QR» non inviato per il conto', billId, err?.message ?? err);
+    }
+}
+
 type EsitoQrCassa = { url: string } | { status: number; error: 'non_disponibile' | 'nessuna_comanda' | 'chiuso' };
 
 /** Il conto da pagare dal QR del tavolo, preso dalla cassa: quello già
@@ -10706,6 +10746,10 @@ async function contoDalQrCassa(tenantId: number, tableId: number): Promise<Esito
     }
     await logBillChanged(null, tenantId, bill.id);
     try { socketService?.broadcastToAll(tenantId, 'bill:opened', bill); } catch (_) {}
+    // Il tavolo vuole pagare: lo sanno la cassa Passepartout (preconto,
+    // tavolo blu) e il personale (push). Fuori dalla risposta: l'ospite va
+    // al pagamento senza aspettare la stampa.
+    void segnalaRichiestaContoQr(tenantId, Number(bill.id), aperta.pp_comanda_id, aperta.table_id, payload.total_cents);
     if (reservationId != null) {
         const credit = await creditPaidDepositsToBill(tenantId, bill.id).catch(() => ({ credited: 0, settled: false }));
         if (credit.credited > 0) {

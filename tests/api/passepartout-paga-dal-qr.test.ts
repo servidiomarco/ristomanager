@@ -123,6 +123,7 @@ describe('pagamento dal QR delle comande della cassa Passepartout', () => {
                 });
             }
             if (payload?.op === 'comanda') return ack({ ok: true, result: comande.get(Number(payload.params?.idGestionale)) ?? null });
+            if (payload?.op === 'preconto') return ack({ ok: true, result: { emesso: true } });
             if (payload?.op === 'chiudi') {
                 const c = comande.get(Number(payload.params?.idComanda));
                 if (c) c.isPagato = true;
@@ -135,7 +136,7 @@ describe('pagamento dal QR delle comande della cassa Passepartout', () => {
             socket!.on('connect', () => resolve());
             socket!.on('connect_error', reject);
         });
-        socket.emit('agent:hello', { hostname: 'agente-qr', capabilities: ['chiudi-riprendi', 'tavoli-aperti'] });
+        socket.emit('agent:hello', { hostname: 'agente-qr', capabilities: ['chiudi-riprendi', 'tavoli-aperti', 'chiudi-preconto', 'preconto'] });
         await finoA(async () => ((await api().get('/passepartout/status').set(bearer(token))).body.capabilities ?? []).includes('tavoli-aperti'),
             'agente annunciato');
     });
@@ -171,6 +172,13 @@ describe('pagamento dal QR delle comande della cassa Passepartout', () => {
         expect(bill).toMatchObject({ status: 'OPEN', total_cents: 2400, opened_by_user_id: null });
         expect(bill.items).toHaveLength(1);
 
+        // Il tavolo vuole pagare: preconto in cassa (tavolo blu) e push alla
+        // cassa e ai camerieri, col tag di «sta pagando dal QR».
+        await finoA(async () => chiamate.some(c => c.op === 'preconto' && c.params?.idComanda === 8801), 'preconto chiesto alla cassa');
+        await finoA(async () => (await db.query(
+            `SELECT 1 FROM notifications WHERE tag = $1 AND title LIKE '%vuole pagare dal QR%'`, [`bill-paying-${bill.id}`]
+        )).rows.length > 0, 'avviso «vuole pagare»');
+
         // Ora c'è il conto: il tasto porta al pagamento, passando ancora
         // dalla cassa finché nessuno paga.
         expect(await statoQr()).toMatchObject({ open: true, cassa: true, residual_cents: 2400 });
@@ -189,6 +197,8 @@ describe('pagamento dal QR delle comande della cassa Passepartout', () => {
         const bill = await conto(8801);
         expect(bill.total_cents).toBe(2550);
         expect(bill.items).toHaveLength(2);
+        // Il preconto si chiede una volta sola, quando il conto nasce.
+        expect(chiamate.filter(c => c.op === 'preconto')).toHaveLength(1);
         // Un conto solo, anche con due telefoni che toccano insieme.
         const [a, b] = await Promise.all([
             api().post(`/public/table/${qr}/conto/cassa`),
