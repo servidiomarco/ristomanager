@@ -31,6 +31,13 @@ export type PassepartoutOp =
     | 'invia'
     /** Sequenza di chiusura completa (chiudiComandaCompleta): azione FISCALE. */
     | 'chiudi'
+    /** Scrive o annulla una prenotazione nel planning della cassa
+     *  (capacità 'prenotazioni'). */
+    | 'prenotazione'
+    /** Prenotazioni della cassa di un giorno: da qui tornano gli arrivi. */
+    | 'prenotazioniGiorno'
+    /** Sale e tavoli coi nomi della cassa, per abbinare i tavoli del CRM. */
+    | 'piantaSale'
     /** Introspezione del contratto WCF (?wsdl): elenco operazioni, per
      *  scoprire da remoto se esiste la scrittura comande (comanda specchio)
      *  senza documentazione del concessionario. Sola lettura. */

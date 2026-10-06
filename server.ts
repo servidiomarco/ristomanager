@@ -79,6 +79,9 @@ import {
 } from './services/passepartoutBridge.js';
 import { setupSalaNodeBridge, getSalaNodeStatus, disconnectSalaNode, askNodeStatus, askNode } from './services/salaNodeBridge.js';
 import {
+    abbinaTavoli, sincronizzaPrenotazioniCassa, startPassepartoutPrenotazioniSync, type TavoloCrm,
+} from './services/passepartoutPrenotazioni.js';
+import {
     SUPPORT_CATEGORIES, SUPPORT_STATUSES, SUPPORT_SUBJECT_MAX, SUPPORT_BODY_MAX, SUPPORT_ATTACHMENTS_MAX, SUPPORT_RATING_COMMENT_MAX,
     sanitizeClientContext, supportTenantTag, supportPlatformTag,
     type SupportAttachment, type SupportCategory, type SupportPriority, type SupportStatus,
@@ -4025,6 +4028,263 @@ app.get('/passepartout/tavolo/:nome', authenticate, requirePermission('payments:
     } catch (err: any) {
         if (sendPassepartoutError(res, err)) return;
         console.error('GET /passepartout/tavolo error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// --- Prenotazioni nel planning della cassa ----------------------------------
+// L'andata (prenotazioni del CRM nel planning) e il ritorno (arrivi) vivono
+// in services/passepartoutPrenotazioni.ts. Qui la scheda di Impostazioni →
+// Prenotazioni: interruttore, abbinamento dei tavoli, «Sincronizza ora».
+// settings:full: decide cosa finisce nella cassa del locale.
+
+// L'arrivo che torna dalla cassa: lo stesso effetto del tocco «Arrivato» in
+// reception (colonna del servizio, evento service-updated), ma solo su una
+// prenotazione ancora confermata e in attesa — non si torna mai indietro.
+// Col servizio sul nodo l'arrivo è suo: il cloud non lo scrive.
+async function segnaArrivoDaCassa(tenantId: number, reservationId: number): Promise<boolean> {
+    if (await getFeatureFlag(tenantId, 'sala_node_authority_enabled', false)) return false;
+    const nome = await runWithOutboxTx(async (tx) => {
+        const upd = await tx.query(
+            `UPDATE reservations SET arrival_status = 'ARRIVED'
+              WHERE id = $1 AND tenant_id = $2
+                AND COALESCE(arrival_status, 'WAITING') = 'WAITING'
+                AND COALESCE(reservation_status, 'CONFIRMED') = 'CONFIRMED'
+              RETURNING customer_name`,
+            [reservationId, tenantId]
+        );
+        if (!upd.rows[0]) return null;
+        await outboxEnqueueInTx(tx, tenantId, 'reservation:service-updated', `reservation:${reservationId}`,
+            { reservation_id: reservationId }, { actor: { channel: 'passepartout' } });
+        return String(upd.rows[0].customer_name ?? '');
+    });
+    if (nome == null) return false;
+    outboxKick();
+    const [row] = await selectEnrichedReservations([reservationId]);
+    if (socketService && row) socketService.broadcastReservationUpdated(tenantId, row);
+    LogService.logActivity(
+        tenantId, null, 'passepartout', 'Cassa Passepartout',
+        ActivityAction.UPDATE, ResourceType.RESERVATION, reservationId, nome,
+        { arrival_status: 'ARRIVED', via: 'passepartout' }
+    );
+    return true;
+}
+
+async function caricaTavoliPassepartout(tenantId: number) {
+    const [cfg, rows] = await Promise.all([
+        queryWithRetry(`SELECT pianta, pianta_at FROM passepartout_config WHERE tenant_id = $1`, [tenantId]),
+        queryWithRetry(
+            `SELECT t.id AS table_id, t.name AS table_name, r.name AS room_name,
+                    pt.pp_sala, pt.pp_tavolo, pt.origine, COALESCE(pt.confermato, false) AS confermato
+               FROM tables t
+               LEFT JOIN rooms r ON r.id = t.room_id AND r.tenant_id = t.tenant_id
+               LEFT JOIN passepartout_tavoli pt ON pt.table_id = t.id AND pt.tenant_id = t.tenant_id
+              WHERE t.tenant_id = $1
+              ORDER BY r.name NULLS LAST, t.id`,
+            [tenantId]
+        ),
+    ]);
+    return {
+        pianta: cfg.rows[0]?.pianta ?? null,
+        pianta_at: cfg.rows[0]?.pianta_at ?? null,
+        tavoli: rows.rows,
+    };
+}
+
+app.get('/passepartout/prenotazioni', authenticate, requirePermission('settings:full'), requireFeature('passepartout'), async (req, res) => {
+    try {
+        const tenantId = req.tenantId!;
+        const [cfg, tavoli, invio, errori] = await Promise.all([
+            queryWithRetry(`SELECT prenotazioni_enabled FROM passepartout_config WHERE tenant_id = $1`, [tenantId]),
+            queryWithRetry(
+                `SELECT COUNT(*)::int AS totali,
+                        COUNT(pt.table_id) FILTER (WHERE pt.confermato)::int AS abbinati,
+                        COUNT(pt.table_id) FILTER (WHERE NOT pt.confermato)::int AS da_confermare
+                   FROM tables t
+                   LEFT JOIN passepartout_tavoli pt ON pt.table_id = t.id AND pt.tenant_id = t.tenant_id
+                  WHERE t.tenant_id = $1`,
+                [tenantId]
+            ),
+            queryWithRetry(
+                `SELECT COUNT(*) FILTER (WHERE pp_id IS NOT NULL AND stato_scritto = 'Confermata' AND NOT gestita_in_cassa)::int AS in_cassa,
+                        COUNT(*) FILTER (WHERE arrivo_riportato_at >= date_trunc('day', now() AT TIME ZONE 'Europe/Rome') AT TIME ZONE 'Europe/Rome')::int AS arrivi_oggi,
+                        MAX(synced_at) AS ultimo_invio
+                   FROM passepartout_prenotazioni
+                  WHERE tenant_id = $1 AND (pp_giorno IS NULL OR pp_giorno >= (now() AT TIME ZONE 'Europe/Rome')::date)`,
+                [tenantId]
+            ),
+            queryWithRetry(
+                `SELECT l.reservation_id, r.customer_name, r.reservation_time, l.last_error, l.attempts
+                   FROM passepartout_prenotazioni l
+                   LEFT JOIN reservations r ON r.id = l.reservation_id AND r.tenant_id = l.tenant_id
+                  WHERE l.tenant_id = $1 AND l.last_error IS NOT NULL
+                  ORDER BY l.next_at NULLS LAST
+                  LIMIT 5`,
+                [tenantId]
+            ),
+        ]);
+        const agente = getPassepartoutAgentStatus();
+        res.json({
+            enabled: cfg.rows[0]?.prenotazioni_enabled === true,
+            agente: { collegato: agente.connected, aggiornato: passepartoutAgentSupports('prenotazioni') },
+            tavoli: tavoli.rows[0],
+            invio: invio.rows[0],
+            errori: errori.rows,
+        });
+    } catch (err: any) {
+        console.error('GET /passepartout/prenotazioni error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+app.put('/passepartout/prenotazioni', authenticate, requirePermission('settings:full'), requireFeature('passepartout'), async (req, res) => {
+    try {
+        const enabled = req.body?.enabled;
+        if (typeof enabled !== 'boolean') return res.status(400).json({ error: 'enabled deve essere true o false' });
+        await queryWithRetry(
+            `INSERT INTO passepartout_config (tenant_id, prenotazioni_enabled, updated_at)
+             VALUES ($1, $2, now())
+             ON CONFLICT (tenant_id) DO UPDATE SET prenotazioni_enabled = EXCLUDED.prenotazioni_enabled, updated_at = now()`,
+            [req.tenantId!, enabled]
+        );
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!, req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.SETTINGS, undefined, 'Prenotazioni in cassa Passepartout',
+                { enabled }
+            );
+        }
+        res.json({ enabled });
+    } catch (err: any) {
+        console.error('PUT /passepartout/prenotazioni error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// «Sincronizza ora»: un giro subito, senza aspettare il timer e le attese
+// fra un tentativo fallito e l'altro.
+app.post('/passepartout/prenotazioni/sincronizza', authenticate, requirePermission('settings:full'), requireFeature('passepartout'), async (req, res) => {
+    try {
+        if (!getPassepartoutAgentStatus().connected) {
+            return res.status(503).json({ error: 'passepartout_agent_offline', message: 'Agente Passepartout non collegato: il PC di sala è acceso?' });
+        }
+        if (!passepartoutAgentSupports('prenotazioni')) {
+            return res.status(409).json({ error: 'agente_da_aggiornare', message: "L'agente sul PC di sala va aggiornato per scrivere le prenotazioni." });
+        }
+        res.json(await sincronizzaPrenotazioniCassa(req.tenantId!, { forza: true }));
+    } catch (err: any) {
+        if (sendPassepartoutError(res, err)) return;
+        console.error('POST /passepartout/prenotazioni/sincronizza error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+app.get('/passepartout/tavoli', authenticate, requirePermission('settings:full'), requireFeature('passepartout'), async (req, res) => {
+    try {
+        res.json(await caricaTavoliPassepartout(req.tenantId!));
+    } catch (err: any) {
+        console.error('GET /passepartout/tavoli error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Abbinamento automatico: legge sale e tavoli dalla cassa e propone il
+// tavolo della cassa per ogni tavolo del CRM. Il nome identico nella sala
+// giusta vale subito; la somiglianza aspetta una conferma. Gli abbinamenti
+// fatti a mano non si toccano.
+app.post('/passepartout/tavoli/abbina', authenticate, requirePermission('settings:full'), requireFeature('passepartout'), async (req, res) => {
+    try {
+        const tenantId = req.tenantId!;
+        if (!passepartoutAgentSupports('prenotazioni')) {
+            return res.status(getPassepartoutAgentStatus().connected ? 409 : 503).json({
+                error: getPassepartoutAgentStatus().connected ? 'agente_da_aggiornare' : 'passepartout_agent_offline',
+                message: getPassepartoutAgentStatus().connected
+                    ? "L'agente sul PC di sala va aggiornato per leggere i tavoli della cassa."
+                    : 'Agente Passepartout non collegato: il PC di sala è acceso?',
+            });
+        }
+        const pianta = await callPassepartout<Array<{ sala: string; tavoli: Array<{ nome: string; coperti: number | null }> }>>('piantaSale', {}, 90_000);
+        await queryWithRetry(
+            `INSERT INTO passepartout_config (tenant_id, pianta, pianta_at, updated_at)
+             VALUES ($1, $2::jsonb, now(), now())
+             ON CONFLICT (tenant_id) DO UPDATE SET pianta = EXCLUDED.pianta, pianta_at = now(), updated_at = now()`,
+            [tenantId, JSON.stringify(pianta)]
+        );
+        const crm = await queryWithRetry(
+            `SELECT t.id, t.name, r.name AS room
+               FROM tables t LEFT JOIN rooms r ON r.id = t.room_id AND r.tenant_id = t.tenant_id
+              WHERE t.tenant_id = $1`,
+            [tenantId]
+        );
+        const proposte = abbinaTavoli(crm.rows.map((t): TavoloCrm => ({ id: Number(t.id), name: String(t.name), room: t.room ?? null })), pianta);
+        for (const p of proposte) {
+            if (p.certezza == null) {
+                await queryWithRetry(
+                    `DELETE FROM passepartout_tavoli WHERE table_id = $1 AND tenant_id = $2 AND origine = 'auto'`,
+                    [p.table_id, tenantId]
+                );
+                continue;
+            }
+            // Una conferma già data alla stessa coppia resta.
+            await queryWithRetry(
+                `INSERT INTO passepartout_tavoli (table_id, tenant_id, pp_sala, pp_tavolo, origine, confermato, updated_at)
+                 VALUES ($1, $2, $3, $4, 'auto', $5, now())
+                 ON CONFLICT (table_id) DO UPDATE
+                    SET pp_sala = EXCLUDED.pp_sala, pp_tavolo = EXCLUDED.pp_tavolo,
+                        confermato = EXCLUDED.confermato
+                            OR (passepartout_tavoli.confermato
+                                AND passepartout_tavoli.pp_sala = EXCLUDED.pp_sala
+                                AND passepartout_tavoli.pp_tavolo = EXCLUDED.pp_tavolo),
+                        updated_at = now()
+                  WHERE passepartout_tavoli.origine = 'auto' AND passepartout_tavoli.tenant_id = EXCLUDED.tenant_id`,
+                [p.table_id, tenantId, p.pp_sala, p.pp_tavolo, p.certezza === 'sicuro']
+            );
+        }
+        res.json(await caricaTavoliPassepartout(tenantId));
+    } catch (err: any) {
+        if (sendPassepartoutError(res, err)) return;
+        console.error('POST /passepartout/tavoli/abbina error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Abbinamento a mano (o conferma di uno proposto): pp_sala + pp_tavolo, o
+// null per togliere il tavolo dall'invio.
+app.put('/passepartout/tavoli/:tableId', authenticate, requirePermission('settings:full'), requireFeature('passepartout'), async (req, res) => {
+    try {
+        const tenantId = req.tenantId!;
+        const tableId = Number(req.params.tableId);
+        if (!Number.isInteger(tableId) || tableId <= 0) return res.status(400).json({ error: 'id tavolo non valido' });
+        const tbl = await queryWithRetry(`SELECT id FROM tables WHERE id = $1 AND tenant_id = $2`, [tableId, tenantId]);
+        if (tbl.rows.length === 0) return res.status(404).json({ error: 'Tavolo non trovato' });
+        const sala = typeof req.body?.pp_sala === 'string' ? req.body.pp_sala.trim() : '';
+        const tavolo = typeof req.body?.pp_tavolo === 'string' ? req.body.pp_tavolo.trim() : '';
+        if (!sala && !tavolo) {
+            await queryWithRetry(`DELETE FROM passepartout_tavoli WHERE table_id = $1 AND tenant_id = $2`, [tableId, tenantId]);
+            return res.json({ table_id: tableId, pp_sala: null, pp_tavolo: null, origine: null, confermato: false });
+        }
+        if (!sala || !tavolo || sala.length > 100 || tavolo.length > 100) {
+            return res.status(400).json({ error: 'Servono sala e tavolo della cassa' });
+        }
+        // Con la pianta letta, solo tavoli che in cassa esistono davvero:
+        // un nome sbagliato manderebbe la prenotazione su un tavolo fantasma.
+        const cfg = await queryWithRetry(`SELECT pianta FROM passepartout_config WHERE tenant_id = $1`, [tenantId]);
+        const pianta: Array<{ sala: string; tavoli: Array<{ nome: string }> }> | null = cfg.rows[0]?.pianta ?? null;
+        if (pianta && !pianta.some(s => s.sala === sala && s.tavoli.some(t => t.nome === tavolo))) {
+            return res.status(400).json({ error: `In cassa non c'è il tavolo «${tavolo}» nella sala ${sala}` });
+        }
+        const rs = await queryWithRetry(
+            `INSERT INTO passepartout_tavoli (table_id, tenant_id, pp_sala, pp_tavolo, origine, confermato, updated_at)
+             VALUES ($1, $2, $3, $4, 'manuale', true, now())
+             ON CONFLICT (table_id) DO UPDATE
+                SET pp_sala = EXCLUDED.pp_sala, pp_tavolo = EXCLUDED.pp_tavolo, origine = 'manuale', confermato = true, updated_at = now()
+              WHERE passepartout_tavoli.tenant_id = EXCLUDED.tenant_id
+             RETURNING table_id, pp_sala, pp_tavolo, origine, confermato`,
+            [tableId, tenantId, sala, tavolo]
+        );
+        res.json(rs.rows[0]);
+    } catch (err: any) {
+        console.error('PUT /passepartout/tavoli/:tableId error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
     }
 });
@@ -41237,6 +41497,9 @@ const startServer = async () => {
                 if (isServiceNode || isPassepartoutAgentConfigured()) {
                     setupPassepartoutBridge(socketService.getIO());
                     startPassepartoutCloseSweeper();
+                    // Le prenotazioni sono del cloud: il planning della cassa
+                    // lo scrive lui, e da lui tornano gli arrivi.
+                    if (!isServiceNode) startPassepartoutPrenotazioniSync({ segnaArrivo: segnaArrivoDaCassa });
                     console.log('✅ Passepartout agent bridge attivo su /pp-agent');
                 }
                 // Sempre attivo (a differenza del pp-agent non dipende da un

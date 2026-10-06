@@ -143,7 +143,7 @@ const parser = new XMLParser({
     attributeNamePrefix: '@_',
     parseTagValue: false, // i numeri li convertiamo noi, campo per campo
     isArray: (name) => name === 'PMBRigaComanda' || name === 'PMBRigaConto' || name === 'PMBTipoPagamento'
-        || name === 'ContrattoArticolo',
+        || name === 'ContrattoArticolo' || name === 'ContrattoPrenotazioneMenu' || name === 'PMBTavolo',
 });
 
 /**
@@ -670,4 +670,280 @@ async function completaChiusura(
         totaleDaPagare: asNumber(conto.TotaleDaPagare),
         avviso,
     };
+}
+
+// ---------------------------------------------------------------------------
+// Prenotazioni (modulo «Planning prenotazioni» di Menù)
+// ---------------------------------------------------------------------------
+//
+// Contratto letto dal WSDL il 06/10 (ContrattoPrenotazioneMenu) e provato
+// sulla cassa vera lo stesso giorno, prenotazione 94 sul tavolo 40 di DENTRO:
+// - la Put accetta la prenotazione anche con la sala in modalità
+//   «Disabilitata», e in cassa compare nel planning come «Nome X coperti
+//   [inizio-fine]», col telefono e la nota nel riquadro;
+// - la RISPOSTA della Put porta solo IdGestionale (il resto è «!--NP--!»):
+//   quello che il gestionale ha salvato si rilegge con GetPrenotazioneMenu;
+// - la Put con lo stesso IdGestionale (e IDDati) aggiorna la stessa
+//   prenotazione, niente duplicati;
+// - non esiste un'operazione per cancellare: lo stato «Mancata» libera il
+//   tavolo, ed è l'annullo che abbiamo;
+// - aprendo il tavolo dalla prenotazione la cassa crea la comanda già
+//   intestata e coi coperti, e la prenotazione passa a «Chiusa»: è l'arrivo.
+
+const NS_CONTRACT = 'http://schemas.datacontract.org/2004/07/PMessageBox.Contract';
+const NS_PRENOTAZIONE = 'http://schemas.datacontract.org/2004/07/PMessageBox.Contract.PrenotazioneMenu';
+const NS_ARRAYS = 'http://schemas.microsoft.com/2003/10/Serialization/Arrays';
+
+/** EnumStatoPrenotazione del gestionale. */
+export type StatoPrenotazioneCassa = 'Confermata' | 'Mancata' | 'Chiusa' | 'Preventivo' | 'ListaAttesa';
+
+export interface PassepartoutPrenotazione {
+    idGestionale: number;
+    /** Chiave del contratto («ContrattoPrenotazioneMenu|<guid>»): torna nella Put di aggiornamento. */
+    idDati: string | null;
+    /** Così come la rende il gestionale, con l'offset (es. 2026-10-06T15:30:00+02:00). */
+    dataOra: string | null;
+    durata: number | null;
+    sala: string | null;
+    tavoli: string[];
+    intestazione: string | null;
+    telefono: string | null;
+    note: string | null;
+    numeroPersone: number | null;
+    adulti: number | null;
+    bambini: number | null;
+    stato: string | null;
+    tag: string | null;
+}
+
+/** Quello che il CRM scrive. `dataOra` è l'ora LOCALE del locale, senza
+ *  offset (YYYY-MM-DDTHH:mm:ss): il gestionale la legge come ora di sala. */
+export interface PrenotazioneCassaInput {
+    idGestionale?: number | null;
+    idDati?: string | null;
+    dataOra: string;
+    durata: number;
+    sala: string;
+    tavoli: string[];
+    intestazione: string;
+    telefono?: string | null;
+    note?: string | null;
+    numeroPersone: number;
+    adulti: number;
+    bambini: number;
+    stato: StatoPrenotazioneCassa;
+    /** «sympotia:<id prenotazione>»: ritrova la prenotazione anche se la
+     *  risposta della Put è andata persa. */
+    tag: string;
+}
+
+/** Il gestionale è un programma Windows: i caratteri oltre Latin-1 (emoji,
+ *  alfabeti non latini) non hanno dove stare. Si tengono le lettere
+ *  accentate, si tolgono i segni che non hanno corrispondenza. */
+export function testoPerCassa(value: string | null | undefined, max: number): string {
+    return String(value ?? '')
+        .normalize('NFC')
+        .replace(/[^\u0000-ÿ]/g, (ch) => ch.normalize('NFD').replace(/[^\u0000-ÿ]/g, ''))
+        .replace(/[\u0000-\u001f\u007f]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, max);
+}
+
+function stringhe(v: unknown): string[] {
+    if (v == null || isNil(v)) return [];
+    const raw = (v as Record<string, unknown>).string;
+    if (raw == null) return [];
+    return (Array.isArray(raw) ? raw : [raw]).map((s) => asString(s) ?? '').filter((s) => s !== '');
+}
+
+function mapPrenotazione(p: Record<string, any>): PassepartoutPrenotazione | null {
+    const id = asNumber(p?.IdGestionale);
+    if (id == null || id <= 0) return null;
+    return {
+        idGestionale: id,
+        idDati: asString(p.IDDati),
+        dataOra: asString(p.DataOra),
+        durata: asNumber(p.Durata),
+        sala: asString(p.Sala),
+        tavoli: stringhe(p.Tavoli),
+        intestazione: asString(p.Intestazione),
+        telefono: asString(p.Telefono),
+        note: asString(p.Note),
+        numeroPersone: asNumber(p.NumeroPersone),
+        adulti: asNumber(p.Adulti),
+        bambini: asNumber(p.Bambini),
+        stato: asString(p.StatoEnum),
+        tag: asString(p.Tag),
+    };
+}
+
+export async function getPrenotazioneMenu(idGestionale: number): Promise<PassepartoutPrenotazione | null> {
+    const result = await soapCall('GetPrenotazioneMenu', `<idGestionale>${idGestionale}</idGestionale>`);
+    if (result == null || isNil(result)) return null;
+    return mapPrenotazione(result as Record<string, any>);
+}
+
+/** Prenotazioni del giorno (YYYY-MM-DD), di qualunque stato. */
+export async function getPrenotazioniMenuGiorno(giorno: string): Promise<PassepartoutPrenotazione[]> {
+    const result = (await soapCall(
+        'GetPrenotazioniMenuGiorno',
+        `<giorno>${xmlEscape(giorno)}T00:00:00</giorno><ultimaModifica>2000-01-01T00:00:00</ultimaModifica>`,
+    )) as Record<string, any> | null;
+    if (!result || isNil(result)) return [];
+    const entries: Record<string, any>[] = result.ContrattoPrenotazioneMenu ?? [];
+    return entries.map(mapPrenotazione).filter((p): p is PassepartoutPrenotazione => p != null);
+}
+
+/**
+ * Scrive la prenotazione (nuova senza idGestionale, aggiornamento con) e
+ * restituisce l'IdGestionale. L'ordine dei campi è quello dello schema
+ * (DataContract WCF: prima i membri della base Contratto, poi gli altri in
+ * ordine alfabetico); un campo fuori posto viene ignorato in silenzio.
+ */
+async function putPrenotazioneMenu(p: PrenotazioneCassaInput): Promise<number> {
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?([+-]\d{2}:\d{2})?$/.test(p.dataOra)) {
+        throw new PassepartoutError(`Data e ora non valide: ${p.dataOra}`, 'PutPrenotazioneMenu');
+    }
+    const campo = (nome: string, valore: string | number | null | undefined) =>
+        valore == null || valore === '' ? '' : `<p:${nome}>${xmlEscape(String(valore))}</p:${nome}>`;
+    const xml =
+        `<prenotazione xmlns:b="${NS_CONTRACT}" xmlns:p="${NS_PRENOTAZIONE}" xmlns:a="${NS_ARRAYS}">` +
+        (p.idDati ? `<b:IDDati>${xmlEscape(p.idDati)}</b:IDDati>` : '') +
+        campo('Adulti', Math.max(0, Math.round(p.adulti))) +
+        campo('Bambini', Math.max(0, Math.round(p.bambini))) +
+        campo('DataOra', p.dataOra) +
+        campo('Durata', Math.max(15, Math.round(p.durata))) +
+        campo('IdGestionale', p.idGestionale ?? null) +
+        campo('Intestazione', testoPerCassa(p.intestazione, 60) || 'Prenotazione') +
+        campo('Note', testoPerCassa(p.note, 500)) +
+        campo('NumeroPersone', Math.max(1, Math.round(p.numeroPersone))) +
+        campo('OrigineEnum', 'WebBooking') +
+        campo('Sala', p.sala) +
+        campo('StatoEnum', p.stato) +
+        campo('Tag', p.tag) +
+        `<p:Tavoli>${p.tavoli.map((t) => `<a:string>${xmlEscape(t)}</a:string>`).join('')}</p:Tavoli>` +
+        campo('Telefono', testoPerCassa(p.telefono, 30)) +
+        `</prenotazione>`;
+    const result = (await soapCall('PutPrenotazioneMenu', xml)) as Record<string, any> | null;
+    const id = asNumber(result?.IdGestionale);
+    if (id == null || id <= 0) {
+        throw new PassepartoutError('Il gestionale non ha restituito il numero della prenotazione', 'PutPrenotazioneMenu');
+    }
+    return id;
+}
+
+export interface EsitoPrenotazioneCassa {
+    /** scritta = il gestionale ha la versione del CRM; cambiata_in_cassa =
+     *  lo stato non è più quello che il CRM aveva scritto (la cassa l'ha
+     *  aperta, segnata mancata, …) e non si è toccato niente; mancante = la
+     *  prenotazione non c'è più sul gestionale. */
+    esito: 'scritta' | 'cambiata_in_cassa' | 'mancante';
+    prenotazione: PassepartoutPrenotazione | null;
+}
+
+/**
+ * Scrive la prenotazione del CRM senza calpestare la cassa: se esiste già
+ * e il suo stato non è `statoAtteso` (l'ultimo che il CRM ha scritto), la
+ * cassa l'ha presa in mano e si lascia com'è. Senza idGestionale cerca
+ * prima il tag nel giorno: una Put la cui risposta è andata persa ha già
+ * creato la prenotazione, e rifarla la duplicherebbe.
+ */
+export async function sincronizzaPrenotazione(
+    input: PrenotazioneCassaInput & { statoAtteso?: string | null },
+): Promise<EsitoPrenotazioneCassa> {
+    let id = input.idGestionale ?? null;
+    let statoAtteso = input.statoAtteso ?? null;
+    if (id == null) {
+        const gia = (await getPrenotazioniMenuGiorno(input.dataOra.slice(0, 10))).find((p) => p.tag === input.tag);
+        if (gia) {
+            id = gia.idGestionale;
+            statoAtteso = 'Confermata';
+        }
+    }
+    let idDati = input.idDati ?? null;
+    if (id != null) {
+        const attuale = await getPrenotazioneMenu(id);
+        if (!attuale) return { esito: 'mancante', prenotazione: null };
+        if (statoAtteso && attuale.stato !== statoAtteso) return { esito: 'cambiata_in_cassa', prenotazione: attuale };
+        idDati = attuale.idDati ?? idDati;
+    }
+    const scritta = await putPrenotazioneMenu({ ...input, idGestionale: id, idDati });
+    const salvata = await getPrenotazioneMenu(scritta);
+    if (!salvata) {
+        throw new PassepartoutError(`Prenotazione ${scritta} non rileggibile dopo la scrittura`, 'PutPrenotazioneMenu');
+    }
+    return { esito: 'scritta', prenotazione: salvata };
+}
+
+/**
+ * Annulla una prenotazione scritta dal CRM portandola a «Mancata», l'unico
+ * stato che libera il tavolo (il WS non cancella). Si riscrive il record
+ * com'è sul gestionale, cambiando solo lo stato. Senza idGestionale la si
+ * cerca per tag nel giorno (risposta persa alla creazione).
+ */
+export async function annullaPrenotazione(params: {
+    idGestionale?: number | null;
+    tag: string;
+    giorno: string;
+    statoAtteso?: string | null;
+}): Promise<EsitoPrenotazioneCassa> {
+    let attuale: PassepartoutPrenotazione | null = null;
+    let statoAtteso = params.statoAtteso ?? null;
+    if (params.idGestionale != null) {
+        attuale = await getPrenotazioneMenu(params.idGestionale);
+    } else {
+        attuale = (await getPrenotazioniMenuGiorno(params.giorno)).find((p) => p.tag === params.tag) ?? null;
+        statoAtteso = 'Confermata';
+    }
+    if (!attuale) return { esito: 'mancante', prenotazione: null };
+    if (attuale.stato === 'Mancata') return { esito: 'scritta', prenotazione: attuale };
+    if (statoAtteso && attuale.stato !== statoAtteso) return { esito: 'cambiata_in_cassa', prenotazione: attuale };
+    await putPrenotazioneMenu({
+        idGestionale: attuale.idGestionale,
+        idDati: attuale.idDati,
+        dataOra: attuale.dataOra ?? `${params.giorno}T00:00:00`,
+        durata: attuale.durata ?? 60,
+        sala: attuale.sala ?? '',
+        tavoli: attuale.tavoli,
+        intestazione: attuale.intestazione ?? '',
+        telefono: attuale.telefono,
+        note: attuale.note,
+        numeroPersone: attuale.numeroPersone ?? 1,
+        adulti: attuale.adulti ?? attuale.numeroPersone ?? 1,
+        bambini: attuale.bambini ?? 0,
+        stato: 'Mancata',
+        tag: attuale.tag ?? params.tag,
+    });
+    return { esito: 'scritta', prenotazione: await getPrenotazioneMenu(attuale.idGestionale) };
+}
+
+export interface PassepartoutSalaPianta {
+    sala: string;
+    tavoli: Array<{ nome: string; coperti: number | null }>;
+}
+
+/** Le sale coi loro tavoli, così come li chiama la cassa: serve ad
+ *  abbinare i tavoli del CRM. Senza l'immagine della piantina, e senza gli
+ *  ingombri (pareti, piante: tipo Ingombro*, spesso senza nome). */
+export async function getPiantaSale(): Promise<PassepartoutSalaPianta[]> {
+    const sale = await getSaleMenu();
+    // Una data qualunque basta per i nomi; oggi è quella già provata sulla
+    // cassa vera (06/10).
+    const oggi = new Date().toISOString().slice(0, 10);
+    const out: PassepartoutSalaPianta[] = [];
+    for (const sala of sale) {
+        const result = (await soapCall(
+            'GetDisponibilitaTavoliMenu',
+            `<sala>${xmlEscape(sala)}</sala><inizioPrenotazione>${oggi}T12:00:00</inizioPrenotazione>`,
+            60_000,
+        )) as Record<string, any> | null;
+        const tavoliRaw: Record<string, any>[] = result?.Tavoli?.PMBTavolo ?? [];
+        const tavoli = tavoliRaw
+            .filter((t) => !/^Ingombro/i.test(asString(t.Tipo) ?? ''))
+            .map((t) => ({ nome: (asString(t.Nome) ?? '').trim(), coperti: asNumber(t.Coperti) }))
+            .filter((t) => t.nome !== '' && t.nome.toLowerCase() !== 'null');
+        out.push({ sala, tavoli });
+    }
+    return out;
 }

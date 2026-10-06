@@ -70,6 +70,7 @@ import { RevolutIntegrationCard } from './components/RevolutIntegrationCard';
 import { SumUpIntegrationCard } from './components/SumUpIntegrationCard';
 import { SmtpIntegrationCard } from './components/SmtpIntegrationCard';
 import { ImapIntegrationCard } from './components/ImapIntegrationCard';
+import { PassepartoutPrenotazioniCard } from './components/PassepartoutPrenotazioniCard';
 import { CardErrorBoundary } from './components/CardErrorBoundary';
 import { LegalSettingsCard } from './components/LegalSettingsCard';
 import { TableAssignmentAiPromptCard } from './components/TableAssignmentAiPromptCard';
@@ -3566,6 +3567,15 @@ const App: React.FC = () => {
                 >
                   <BlacklistPolicyManager showToast={addToast} />
                 </SettingsDisclosure>
+
+                {/* Prenotazioni nel planning della cassa Passepartout e arrivi
+                    di ritorno: solo con l'add-on, e solo per chi decide cosa
+                    finisce nella cassa del locale (le route sono settings:full). */}
+                {hasFeature('passepartout') && hasPermission('settings:full') && (
+                  <CardErrorBoundary label="Passepartout">
+                    <PassepartoutPrenotazioniCard showToast={addToast} />
+                  </CardErrorBoundary>
+                )}
               </div>
             </SettingsSection>
 

@@ -133,6 +133,9 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
             PASSEPARTOUT_TIPO_PAGAMENTO: 'ESTERNO',
             PASSEPARTOUT_CLOSE_SWEEP_MS: '300',
             PASSEPARTOUT_CLOSE_RETRY_UNIT_MS: '300',
+            // Il giro delle prenotazioni in cassa lo lanciano i test con
+            // «Sincronizza ora»: quello periodico non deve intromettersi.
+            PASSEPARTOUT_PREN_SWEEP_MS: '3600000',
         },
         stdio: ['ignore', 'pipe', 'pipe'],
     });

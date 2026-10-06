@@ -35,17 +35,23 @@ import {
     getArticoliMenu,
     inviaProduzioneComanda,
     chiudiComandaCompleta,
+    sincronizzaPrenotazione,
+    annullaPrenotazione,
+    getPrenotazioniMenuGiorno,
+    getPiantaSale,
     isPassepartoutConfigured,
     PassepartoutError,
     type TipoDocumentoConto,
+    type StatoPrenotazioneCassa,
 } from '../services/passepartoutService.js';
 
 const SERVER_URL = (process.env.PP_AGENT_SERVER_URL || '').trim();
 const NODE_URL = (process.env.PP_AGENT_NODE_URL || '').trim().replace(/\/+$/, '');
 const TOKEN = (process.env.PP_AGENT_TOKEN || '').trim();
 // Cosa sa fare questo agente, annunciato nell'agent:hello: il server
-// riprova da solo una chiusura solo con un agente che sa riprenderla.
-const CAPABILITIES = ['chiudi-riprendi'];
+// riprova da solo una chiusura solo con un agente che sa riprenderla, e
+// manda prenotazioni solo a un agente che sa scriverle.
+const CAPABILITIES = ['chiudi-riprendi', 'prenotazioni'];
 
 if (!SERVER_URL || !TOKEN) {
     console.error('Config mancante: servono PP_AGENT_SERVER_URL e PP_AGENT_TOKEN.');
@@ -81,6 +87,48 @@ const handlers: Record<string, Handler> = {
         if (!Number.isFinite(id)) throw new Error('Parametro "idComanda" non valido');
         return inviaProduzioneComanda({ idComanda: id, inviaTutto: true });
     },
+    // Prenotazioni del CRM nel planning della cassa. Una alla volta per
+    // prenotazione, come le chiusure: due giri ravvicinati del server non
+    // devono creare due volte la stessa.
+    prenotazione: (p) => {
+        const tag = typeof p?.tag === 'string' ? p.tag : '';
+        if (!/^sympotia:\d+$/.test(tag)) throw new Error('Parametro "tag" non valido');
+        const idGestionale = p?.idGestionale != null && Number.isFinite(Number(p.idGestionale)) ? Number(p.idGestionale) : null;
+        const statoAtteso = typeof p?.statoAtteso === 'string' ? p.statoAtteso : null;
+        if (p?.azione === 'annulla') {
+            const giorno = typeof p?.giorno === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(p.giorno) ? p.giorno : '';
+            // Senza numero si cerca per tag nel giorno: lì il giorno serve.
+            if (!giorno && idGestionale == null) throw new Error('Parametro "giorno" non valido');
+            return unaAllaVolta(tag, () => annullaPrenotazione({ idGestionale, tag, giorno, statoAtteso }));
+        }
+        const tavoli = Array.isArray(p?.tavoli) ? p.tavoli.filter((t: unknown): t is string => typeof t === 'string' && t !== '') : [];
+        if (typeof p?.sala !== 'string' || !p.sala || tavoli.length === 0) throw new Error('Sala e tavoli obbligatori');
+        if (typeof p?.dataOra !== 'string') throw new Error('Parametro "dataOra" mancante');
+        return unaAllaVolta(tag, () => sincronizzaPrenotazione({
+            idGestionale,
+            idDati: typeof p?.idDati === 'string' ? p.idDati : null,
+            dataOra: p.dataOra,
+            durata: Number(p?.durata) || 60,
+            sala: p.sala,
+            tavoli,
+            intestazione: String(p?.intestazione ?? ''),
+            telefono: typeof p?.telefono === 'string' ? p.telefono : null,
+            note: typeof p?.note === 'string' ? p.note : null,
+            numeroPersone: Number(p?.numeroPersone) || 1,
+            adulti: Number(p?.adulti) || 0,
+            bambini: Number(p?.bambini) || 0,
+            stato: (typeof p?.stato === 'string' ? p.stato : 'Confermata') as StatoPrenotazioneCassa,
+            tag,
+            statoAtteso,
+        }));
+    },
+    prenotazioniGiorno: (p) => {
+        const giorno = typeof p?.giorno === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(p.giorno) ? p.giorno : '';
+        if (!giorno) throw new Error('Parametro "giorno" non valido');
+        return getPrenotazioniMenuGiorno(giorno);
+    },
+    // Sale e tavoli coi nomi della cassa, per abbinare i tavoli del CRM.
+    piantaSale: () => getPiantaSale(),
     // Catalogo articoli per l'import menu del CRM (senza immagini: il payload
     // deve stare nel buffer del socket).
     articoli: (p) => getArticoliMenu(typeof p?.ultimaModifica === 'string' ? p.ultimaModifica : undefined),
@@ -142,12 +190,13 @@ const handlers: Record<string, Handler> = {
     },
 };
 
-// Una chiusura alla volta per comanda: due richieste ravvicinate (un
+// Una chiusura alla volta per comanda (e una scrittura alla volta per
+// prenotazione, chiave il tag): due richieste ravvicinate (un
 // ritentativo dello spazzino mentre la prima è ancora in corso, o i due
 // server) si mettono in fila, e la seconda — con riprendi — trova il conto
 // già in archivio invece di farne un altro.
-const inCorso = new Map<number, Promise<unknown>>();
-function unaAllaVolta<T>(idComanda: number, fn: () => Promise<T>): Promise<T> {
+const inCorso = new Map<number | string, Promise<unknown>>();
+function unaAllaVolta<T>(idComanda: number | string, fn: () => Promise<T>): Promise<T> {
     const prima = inCorso.get(idComanda) ?? Promise.resolve();
     const questa = prima.catch(() => undefined).then(fn);
     inCorso.set(idComanda, questa);
