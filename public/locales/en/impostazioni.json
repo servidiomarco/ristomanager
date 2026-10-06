@@ -327,6 +327,7 @@
     "capRiprendi": "Resumable closing",
     "capPrenotazioni": "Bookings",
     "capConti": "Bills",
+    "capAperti": "Open tables",
     "payType": "Payment type on the till",
     "payTypeHint": "A dedicated type, for example ESTERNO, so the till doesn't count the takings twice. None = tables are closed on the till by hand.",
     "payTypeFromServer": "Using {{tipo}}, set on the server. Pick it here to manage it from this section.",
@@ -345,6 +346,15 @@
     "contiStoricoInArrivo": "Last 30 days of history on the way",
     "contiLast": "last read {{when}}",
     "contiImport": "Read now",
-    "contiDone": "Read {{count}} bills from today"
+    "contiDone": "Read {{count}} bills from today",
+    "apertiTitle": "Tables open on the till",
+    "apertiSubtitle": "Walk-ins and open tables: busy in the CRM too",
+    "apertiSend": "Show tables open on the till",
+    "apertiHint": "Every minute the CRM reads the till's open orders: those tables show as busy on the floor plan, at reception and on the bookings map, even without a booking.",
+    "apertiDisp": "Count them for availability",
+    "apertiDispHint": "Sofia and online booking don't offer a table open on the till until it frees up (estimate: opening plus the shift length). Staff assigning by hand see the table busy and decide.",
+    "apertiNow": "{{count}} tables open now",
+    "apertiRefresh": "Refresh now",
+    "apertiDone": "{{count}} tables open on the till"
   }
 }

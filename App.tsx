@@ -73,6 +73,7 @@ import { ImapIntegrationCard } from './components/ImapIntegrationCard';
 import { PrenotazioniInCassa } from './components/passepartout/PrenotazioniInCassa';
 import { CollegamentoCassa } from './components/passepartout/CollegamentoCassa';
 import { ContiCassa } from './components/passepartout/ContiCassa';
+import { TavoliApertiInCassa } from './components/passepartout/TavoliApertiInCassa';
 import { CardErrorBoundary } from './components/CardErrorBoundary';
 import { LegalSettingsCard } from './components/LegalSettingsCard';
 import { TableAssignmentAiPromptCard } from './components/TableAssignmentAiPromptCard';
@@ -3677,6 +3678,9 @@ const App: React.FC = () => {
                   </CardErrorBoundary>
                   <CardErrorBoundary label="Passepartout">
                     <ContiCassa showToast={addToast} />
+                  </CardErrorBoundary>
+                  <CardErrorBoundary label="Passepartout">
+                    <TavoliApertiInCassa showToast={addToast} />
                   </CardErrorBoundary>
                 </div>
               </SettingsSection>

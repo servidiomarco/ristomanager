@@ -1057,3 +1057,45 @@ export async function getContiCassaGiorno(giorno: string): Promise<PassepartoutC
         })
         .filter((c): c is PassepartoutContoCassa => c != null);
 }
+
+// ---------------------------------------------------------------------------
+// Tavoli aperti adesso (per sala e disponibilità del CRM)
+// ---------------------------------------------------------------------------
+
+export interface PassepartoutComandaAperta {
+    idComanda: number;
+    tavolo: string;
+    sala: string | null;
+    coperti: number | null;
+    idPrenotazione: number | null;
+    /** Apertura, come la rende il gestionale (ora di sala). */
+    aperta: string | null;
+    /** Somma delle righe battute finora. */
+    totale: number;
+}
+
+/** Le comande ancora aperte sui tavoli (asporto escluso). Fino alle 5 si
+ *  guarda anche il giorno prima: i tavoli aperti prima di mezzanotte
+ *  restano sul giorno di gestione precedente. */
+export async function getComandeAperte(): Promise<PassepartoutComandaAperta[]> {
+    const fmt = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Rome' });
+    const ora = new Intl.DateTimeFormat('it-IT', { timeZone: 'Europe/Rome', hour: '2-digit', hour12: false }).format(new Date());
+    const oggi = fmt.format(new Date());
+    const giorni = Number(ora) < 5 ? [fmt.format(new Date(Date.now() - 86_400_000)), oggi] : [oggi];
+    const viste = new Map<number, PassepartoutComandaAperta>();
+    for (const giorno of giorni) {
+        for (const c of await getComandeGiorno(giorno)) {
+            if (c.idGestionale == null || c.isPagato || !c.tavolo) continue;
+            viste.set(c.idGestionale, {
+                idComanda: c.idGestionale,
+                tavolo: c.tavolo,
+                sala: c.sala,
+                coperti: c.coperti,
+                idPrenotazione: c.idPrenotazione ?? null,
+                aperta: c.dataCreazione ?? null,
+                totale: c.righe.reduce((s, r) => s + (r.totale ?? 0), 0),
+            });
+        }
+    }
+    return [...viste.values()];
+}

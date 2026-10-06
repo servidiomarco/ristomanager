@@ -86,6 +86,9 @@ import {
     incassiCassa, riscontroGiorno,
 } from './services/passepartoutConti.js';
 import {
+    startPassepartoutTavoliApertiSync, elencoTavoliAperti, aggiornaTavoliAperti,
+} from './services/passepartoutTavoliAperti.js';
+import {
     SUPPORT_CATEGORIES, SUPPORT_STATUSES, SUPPORT_SUBJECT_MAX, SUPPORT_BODY_MAX, SUPPORT_ATTACHMENTS_MAX, SUPPORT_RATING_COMMENT_MAX,
     sanitizeClientContext, supportTenantTag, supportPlatformTag,
     type SupportAttachment, type SupportCategory, type SupportPriority, type SupportStatus,
@@ -4502,6 +4505,89 @@ app.get('/reports/riscontro-cassa', authenticate, requirePermission('payments:vi
         res.json(await riscontroGiorno(req.tenantId!, giorno));
     } catch (err: any) {
         console.error('GET /reports/riscontro-cassa error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// --- Tavoli aperti in cassa (sola lettura) -----------------------------------
+// Un walk-in aperto in cassa occupava un tavolo che per il CRM era libero.
+// Lettura e regole in services/passepartoutTavoliAperti.ts e
+// services/apertiInCassaSql.ts; qui l'elenco per la sala e la scheda della
+// sezione.
+
+app.get('/passepartout/tavoli-aperti', authenticate, requireAnyPermission('reservations:view', 'floorplan:update_status'), async (req, res) => {
+    try {
+        if (!(await isFeatureEnabledForTenant(req.tenantId!, 'passepartout'))) return res.json({ tavoli: [] });
+        res.json({ tavoli: await elencoTavoliAperti(req.tenantId!) });
+    } catch (err: any) {
+        console.error('GET /passepartout/tavoli-aperti error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+app.get('/passepartout/tavoli-aperti/config', authenticate, requirePermission('settings:full'), requireFeature('passepartout'), async (req, res) => {
+    try {
+        const tenantId = req.tenantId!;
+        const cfg = await queryWithRetry(
+            `SELECT tavoli_aperti_enabled, tavoli_aperti_disponibilita FROM passepartout_config WHERE tenant_id = $1`,
+            [tenantId]
+        );
+        res.json({
+            enabled: cfg.rows[0]?.tavoli_aperti_enabled === true,
+            disponibilita: cfg.rows[0]?.tavoli_aperti_disponibilita !== false,
+            aperti: (await elencoTavoliAperti(tenantId)).length,
+            agente: {
+                collegato: getPassepartoutAgentStatus(tenantId).connected,
+                aggiornato: passepartoutAgentSupports(tenantId, 'tavoli-aperti'),
+            },
+        });
+    } catch (err: any) {
+        console.error('GET /passepartout/tavoli-aperti/config error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+app.put('/passepartout/tavoli-aperti/config', authenticate, requirePermission('settings:full'), requireFeature('passepartout'), async (req, res) => {
+    try {
+        const tenantId = req.tenantId!;
+        const body = req.body ?? {};
+        const enabled = typeof body.enabled === 'boolean' ? body.enabled : null;
+        const disponibilita = typeof body.disponibilita === 'boolean' ? body.disponibilita : null;
+        if (enabled == null && disponibilita == null) return res.status(400).json({ error: 'Niente da salvare' });
+        await queryWithRetry(
+            `INSERT INTO passepartout_config (tenant_id, tavoli_aperti_enabled, tavoli_aperti_disponibilita, updated_at)
+             VALUES ($1, COALESCE($2, false), COALESCE($3, true), now())
+             ON CONFLICT (tenant_id) DO UPDATE SET
+                tavoli_aperti_enabled = COALESCE($2, passepartout_config.tavoli_aperti_enabled),
+                tavoli_aperti_disponibilita = COALESCE($3, passepartout_config.tavoli_aperti_disponibilita),
+                updated_at = now()`,
+            [tenantId, enabled, disponibilita]
+        );
+        // Spento: la sala smette subito di vedere i tavoli della cassa.
+        if (enabled === false) socketService?.broadcastToAll(tenantId, 'passepartout:tavoli-aperti', { tavoli: [] });
+        if (req.user) {
+            LogService.logActivity(
+                tenantId, req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.SETTINGS, undefined, 'Passepartout: tavoli aperti in cassa',
+                { ...(enabled != null ? { enabled } : {}), ...(disponibilita != null ? { disponibilita } : {}) }
+            );
+        }
+        res.json({ ok: true });
+    } catch (err: any) {
+        console.error('PUT /passepartout/tavoli-aperti/config error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// «Aggiorna adesso»: una lettura subito, senza aspettare il minuto.
+app.post('/passepartout/tavoli-aperti/aggiorna', authenticate, requirePermission('settings:full'), requireFeature('passepartout'), async (req, res) => {
+    try {
+        const tavoli = await aggiornaTavoliAperti(req.tenantId!);
+        if (tavoli == null) return res.status(409).json({ error: 'non_disponibile', message: 'Tavoli aperti spenti, o agente non collegato o da aggiornare' });
+        res.json({ tavoli });
+    } catch (err: any) {
+        if (sendPassepartoutError(res, err)) return;
+        console.error('POST /passepartout/tavoli-aperti/aggiorna error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
     }
 });
@@ -41766,6 +41852,11 @@ const startServer = async () => {
                     if (!isServiceNode) {
                         startPassepartoutContiSync({
                             tipoPagamentoEsterno: async (t) => (await getPassepartoutChiusuraConfig(t))?.tipoPagamento ?? null,
+                        });
+                        // I tavoli aperti in cassa: la sala li riceve via
+                        // socket, la disponibilità automatica li esclude.
+                        startPassepartoutTavoliApertiSync({
+                            broadcast: (t, tavoli) => socketService?.broadcastToAll(t, 'passepartout:tavoli-aperti', { tavoli }),
                         });
                     }
                     console.log('✅ Passepartout agent bridge attivo su /pp-agent');

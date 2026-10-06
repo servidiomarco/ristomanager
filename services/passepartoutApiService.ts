@@ -185,3 +185,32 @@ export interface RiscontroCassa {
 
 export const getRiscontroCassa = (date: string): Promise<RiscontroCassa> =>
   apiRequest(`${API_URL}/reports/riscontro-cassa?date=${encodeURIComponent(date)}`, { headers: getHeaders(false), cache: 'no-store' });
+
+/* ── Tavoli aperti in cassa (fase 2) ─────────────────────────────────────── */
+
+export interface TavoloApertoInCassa {
+  table_id: number;
+  coperti: number | null;
+  totale_cents: number;
+  aperta_da: string | null;
+  libero_previsto_at: string;
+}
+
+export interface PpTavoliApertiConfig {
+  enabled: boolean;
+  disponibilita: boolean;
+  aperti: number;
+  agente: { collegato: boolean; aggiornato: boolean };
+}
+
+export const getTavoliAperti = (): Promise<{ tavoli: TavoloApertoInCassa[] }> =>
+  apiRequest(`${API_URL}/passepartout/tavoli-aperti`, { headers: getHeaders(false), cache: 'no-store' });
+
+export const getTavoliApertiConfig = (): Promise<PpTavoliApertiConfig> =>
+  apiRequest(`${API_URL}/passepartout/tavoli-aperti/config`, { headers: getHeaders(false), cache: 'no-store' });
+
+export const setTavoliApertiConfig = (input: { enabled?: boolean; disponibilita?: boolean }): Promise<{ ok: true }> =>
+  apiRequest(`${API_URL}/passepartout/tavoli-aperti/config`, { method: 'PUT', headers: getHeaders(), body: JSON.stringify(input) });
+
+export const aggiornaTavoliAperti = (): Promise<{ tavoli: TavoloApertoInCassa[] }> =>
+  apiRequest(`${API_URL}/passepartout/tavoli-aperti/aggiorna`, { method: 'POST', headers: getHeaders() });

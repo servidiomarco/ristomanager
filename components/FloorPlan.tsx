@@ -20,6 +20,8 @@ import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { DateNavigator } from './DateNavigator';
 import { SegmentedControl, Callout, ModalShell, FormCard, Field, dsInput, dsTextarea, dsButton, dsIconButton } from './ds';
 import { sessionTimeZone } from '../utils/displayTime';
+import { useAuth } from '../contexts/AuthContext';
+import { useTavoliApertiInCassa } from '../hooks/useTavoliApertiInCassa';
 
 console.log('🔥🔥🔥 FLOORPLAN MODULE LOADED - NEW VERSION WITH MERGE FILTER DEBUG 🔥🔥🔥');
 
@@ -134,6 +136,11 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   const [selectedDate, setSelectedDate] = useState<string>(() =>
     globalDate ? formatLocalDate(globalDate) : formatLocalDate(new Date())
   );
+  // Tavoli aperti nella cassa Passepartout: contano solo per la serata di
+  // oggi (la cassa dice cosa succede adesso).
+  const { hasFeature } = useAuth();
+  const apertiInCassa = useTavoliApertiInCassa(hasFeature('passepartout'));
+  const oggiInSala = selectedDate === formatLocalDate(new Date());
   const [selectedShift, setSelectedShift] = useState<Shift>(() => {
     if (globalShiftFilterProp === 'LUNCH') return Shift.LUNCH;
     if (globalShiftFilterProp === 'DINNER') return Shift.DINNER;
@@ -1073,6 +1080,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       banquet: !!banquet,
       tempLocked: isTempLocked,
       now: nowTick,
+      inCassa: oggiInSala && apertiInCassa.has(table.id),
     });
 
     const dims = getGlyphDimensions(table.shape, table.seats);

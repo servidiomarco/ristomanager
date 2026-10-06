@@ -215,6 +215,9 @@ export const DOMAIN_EVENTS: Record<string, DomainEventSpec> = {
     'unsubscribe:room': spec('transient'),
     'subscribe:station': spec('transient'),
     'unsubscribe:station': spec('transient'),
+    // I tavoli aperti nella cassa Passepartout: una proiezione della cassa
+    // riletta ogni minuto, non un fatto del CRM.
+    'passepartout:tavoli-aperti': spec('transient'),
 };
 
 export const eventSpec = (type: string): DomainEventSpec | undefined => DOMAIN_EVENTS[type];

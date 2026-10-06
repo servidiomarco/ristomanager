@@ -136,6 +136,8 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
             // Il giro delle prenotazioni in cassa lo lanciano i test con
             // «Sincronizza ora»: quello periodico non deve intromettersi.
             PASSEPARTOUT_PREN_SWEEP_MS: '3600000',
+            PASSEPARTOUT_CONTI_SWEEP_MS: '3600000',
+            PASSEPARTOUT_TAVOLI_SWEEP_MS: '3600000',
         },
         stdio: ['ignore', 'pipe', 'pipe'],
     });

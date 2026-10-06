@@ -294,13 +294,28 @@ export const useTableStatusLabel = (): ((status: TableDisplayStatus) => string) 
 
 export function deriveTableDisplayStatus(
   reservation: Reservation | null | undefined,
-  opts: { banquet?: boolean; tempLocked?: boolean; now?: number } = {},
+  opts: {
+    banquet?: boolean;
+    tempLocked?: boolean;
+    now?: number;
+    /** Il tavolo è aperto adesso nella cassa Passepartout (walk-in o gruppo
+     *  di prima ancora al tavolo): è occupato, qualunque cosa dica la
+     *  prenotazione — a meno che la prenotazione non sia già seduta. Solo
+     *  per la serata di oggi: lo decide il chiamante. */
+    inCassa?: boolean;
+  } = {},
 ): TableDisplayStatus {
   if (opts.banquet) return 'attesa';
   if (opts.tempLocked) return 'attesa';
+  const status = statusFromReservation(reservation, opts.now);
+  if (opts.inCassa && status !== 'arrivato' && status !== 'uscita') return 'arrivato';
+  return status;
+}
+
+function statusFromReservation(reservation: Reservation | null | undefined, now?: number): TableDisplayStatus {
   if (!reservation) return 'libera';
-  const state = opts.now != null
-    ? getTimedReservationState(reservation, opts.now)
+  const state = now != null
+    ? getTimedReservationState(reservation, now)
     : getReservationState(reservation);
   switch (state) {
     case 'noshow':    return 'noshow';

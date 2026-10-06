@@ -8,6 +8,7 @@ import {
 } from './ds';
 import type { SectionTone, Stat } from './ds';
 import { ContoCassaPrenotazione } from './passepartout/ContoCassaPrenotazione';
+import { useTavoliApertiInCassa } from '../hooks/useTavoliApertiInCassa';
 import { BillSheet } from './pagamenti/BillSheet';
 import { BillFigures, billStateLabel } from './prenotazione/BillFigures';
 import { PaymentRequestRow } from './prenotazione/PaymentRequestRow';
@@ -593,8 +594,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     icon: p.icon,
   })), [tv]);
   const stateLabel = useReservationStateLabel();
-  const { hasPermission } = useAuth();
+  const { hasPermission, hasFeature } = useAuth();
   const canViewBanquetPrice = hasPermission('banquet:view_price');
+  // Tavoli aperti nella cassa Passepartout, per la mappa di oggi.
+  const apertiInCassa = useTavoliApertiInCassa(hasFeature('passepartout'));
   // Main View State
   const [viewMode, setViewMode] = useState<'LIST' | 'MAP'>('LIST');
   const [selectedDate, setSelectedDateLocal] = useState<string>(() => {
@@ -3164,6 +3167,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       const displayStatus: TableDisplayStatus = deriveTableDisplayStatus(reservation, {
           banquet: !reservation && !!banquet,
           now: isViewingToday ? nowTick : undefined,
+          inCassa: isViewingToday && apertiInCassa.has(table.id),
       });
       const reservationTime = reservation
           ? (timePart(reservation.reservation_time) || null)

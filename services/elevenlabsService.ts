@@ -8,6 +8,7 @@ import { getTenantLocale } from './tenantLocale.js';
 import { spokenFirstName, phoneLast10Variants } from '../utils/text.js';
 import { getAvailableSlots } from '../utils/slots.js';
 import { getCappedRoomIds, pickSelfServiceTable, isTableStillAssignable } from './roomOccupancyService.js';
+import { nonApertoInCassaSql } from './apertiInCassaSql.js';
 
 // ============================================
 // HMAC SIGNATURE VERIFICATION
@@ -671,7 +672,11 @@ export async function findAvailability(tenantId: number, input: AvailabilityInpu
                           AND DATE(res.reservation_time) = $2
                           AND res.shift = $3
                           AND COALESCE(res.reservation_status, 'CONFIRMED') <> 'CANCELLED'
-                    )) AS is_free
+                    )
+                    -- Oggi, un tavolo aperto nella cassa Passepartout non è
+                    -- libero: Sofia non lo deve contare (stessa regola della
+                    -- scelta del tavolo, services/apertiInCassaSql.ts).
+                    AND ${nonApertoInCassaSql('t', '$5', '$2', '$3')}) AS is_free
             FROM tables t
             JOIN rooms r ON t.room_id = r.id AND r.tenant_id = t.tenant_id
             WHERE t.tenant_id = $5
