@@ -118,6 +118,9 @@ export interface RigaPrenotazione {
     duration_minutes: number | null;
     notes: string | null;
     phone: string | null;
+    /** Caparre pagate online e non rimborsate: chi chiude il tavolo in
+     *  cassa deve saperlo, o non le scala. */
+    caparra_cents?: number | null;
 }
 
 export interface PrenotazionePerCassa {
@@ -142,8 +145,14 @@ export function prenotazionePerCassa(r: RigaPrenotazione, sala: string, tavolo: 
     const bambini = Math.max(0, Math.min(Math.round(Number(r.children) || 0), persone));
     // Solo la nota della prenotazione (dove la sala scrive allergie e
     // richieste): la scheda in rubrica costerebbe un aggancio per telefono
-    // su ogni riga a ogni giro.
-    const note = (r.notes ?? '').trim();
+    // su ogni riga a ogni giro. In coda la caparra pagata online: chi chiude
+    // il tavolo in cassa la vede nel planning e la scala. «euro» e non il
+    // simbolo, che non è Latin-1 e la cassa perderebbe.
+    const caparra = Math.round(Number(r.caparra_cents) || 0);
+    const note = [
+        (r.notes ?? '').trim(),
+        caparra > 0 ? `Caparra pagata ${(caparra / 100).toFixed(2).replace('.', ',')} euro` : '',
+    ].filter(Boolean).join(' · ');
     return {
         tag: tagPrenotazione(r.id),
         dataOra: `${getDatePartInTz(r.reservation_time, TZ_CASSA)}T${getTimePartInTz(r.reservation_time, TZ_CASSA)}:00`,
@@ -305,6 +314,10 @@ async function andata(tenantId: number, riepilogo: RiepilogoGiro, forza: boolean
     const rs = await queryWithRetry(
         `SELECT r.id, r.customer_name, r.reservation_time, r.shift, r.guests, r.children, r.duration_minutes,
                 r.table_id, r.notes, r.phone,
+                (SELECT COALESCE(SUM(pr.amount_cents), 0)::int FROM payment_requests pr
+                  WHERE pr.reservation_id = r.id AND pr.tenant_id = r.tenant_id
+                    AND pr.table_bill_split_id IS NULL
+                    AND UPPER(pr.status) IN ('COMPLETED', 'PAID')) AS caparra_cents,
                 COALESCE(r.reservation_status, 'CONFIRMED') AS reservation_status,
                 COALESCE(r.arrival_status, 'WAITING') AS arrival_status,
                 (r.reservation_time >= now() - interval '1 hour') AS creabile,
