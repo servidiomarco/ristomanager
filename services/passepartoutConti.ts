@@ -83,11 +83,24 @@ export async function importaContiGiorno(tenantId: number, giorno: string): Prom
         )
         : { rows: [] as any[] };
     const bills = new Map<string, number>(billRs.rows.map((r: any) => [String(r.external_ref), Number(r.id)]));
+    // Le comande specchio (conti del CRM copiati in cassa): il loro conto
+    // in cassa è del CRM, non un tavolo chiuso solo in cassa.
+    const idComande = conti.map((c) => c.idComanda).filter((x): x is number => x != null);
+    const specchioRs = idComande.length
+        ? await queryWithRetry(
+            `SELECT pp_comanda_id, table_bill_id FROM passepartout_specchio
+              WHERE tenant_id = $1 AND pp_comanda_id = ANY($2::int[])`,
+            [tenantId, idComande]
+        )
+        : { rows: [] as any[] };
+    const specchio = new Map<number, number>(specchioRs.rows.map((r: any) => [Number(r.pp_comanda_id), Number(r.table_bill_id)]));
 
     let collegati = 0;
     let crm = 0;
     for (const c of conti) {
-        const billId = c.idComanda != null ? bills.get(`pp:comanda:${c.idComanda}`) ?? null : null;
+        const billId = c.idComanda != null
+            ? bills.get(`pp:comanda:${c.idComanda}`) ?? specchio.get(c.idComanda) ?? null
+            : null;
         const pagatoEsterno = esterno != null && c.pagamenti.some((p) => p.codice === esterno);
         const origine = billId != null || pagatoEsterno ? 'crm' : 'cassa';
         if (origine === 'crm') crm++;

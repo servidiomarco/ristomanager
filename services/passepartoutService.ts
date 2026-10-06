@@ -803,6 +803,178 @@ export async function precontoUnaVolta(idComanda: number): Promise<{ emesso: boo
     return { emesso: true };
 }
 
+// ---------------------------------------------------------------------------
+// Comanda specchio (fase 4): un conto chiuso nel CRM copiato in cassa
+// ---------------------------------------------------------------------------
+//
+// Provato sulla cassa vera il 06/10 sera (comande 78531 e 78533 sul tavolo
+// 88, 78532 sul 29):
+// - PutComanda con Tool_EseguiInvio=false: niente stampato in cucina né al
+//   bar, numeroInvii 0. Lo stato «Fatto» delle righe la cassa lo ignora (le
+//   righe restano «Nuovo»), quindi la chiusura NON passa da
+//   chiudiComandaCompleta, che le manderebbe in produzione;
+// - con Coperti = n la cassa aggiunge da sé la riga coperto al suo prezzo,
+//   a meno che non ci sia già la nostra (TipoEnum Coperto, articolo del
+//   coperto): allora tiene quella, prezzo del CRM compreso;
+// - ContoComanda Proforma col tipo esterno chiude in un colpo (Pagato,
+//   nessun documento fiscale, tavolo libero) e stampa la proforma in cassa.
+
+/** Una riga del conto del CRM per la cassa: prezzi in centesimi, già
+ *  riproporzionati allo sconto del conto (la somma è il totale). */
+export interface RigaSpecchio {
+    /** Id dell'articolo nel catalogo della cassa (piatto importato dalla
+     *  cassa); null = piatto del CRM o servizio, sull'articolo generico. */
+    idArticolo: number | null;
+    descrizione: string;
+    pezzi: number;
+    prezzoCents: number;
+    /** La riga coperto: va con TipoEnum Coperto sull'articolo del coperto. */
+    coperto?: boolean;
+}
+
+export interface ParametriSpecchio {
+    /** «sympotia-conto:<id>»: in nota alla comanda, per ritrovarla. */
+    tag: string;
+    sala: string;
+    tavolo: string;
+    coperti: number;
+    righe: RigaSpecchio[];
+    idArticoloGenerico: number | null;
+    tipoPagamento: string;
+    totaleCents: number;
+}
+
+export interface EsitoSpecchio {
+    idComanda: number;
+    idConto: number | null;
+    stato: string | null;
+    totaleCassaCents: number;
+    /** true se la comanda c'era già (nuovo tentativo dopo una risposta persa). */
+    ripresa: boolean;
+    avviso: string | null;
+}
+
+/** Errore che non è un guasto: il tavolo della comanda specchio ha una
+ *  comanda vera aperta. Il server riprova più tardi, senza contarlo. */
+export const SPECCHIO_TAVOLO_OCCUPATO = 'tavolo_specchio_occupato';
+
+// Il catalogo articoli pesa (un minuto a leggerlo): una lettura l'ora basta
+// per tradurre id → codice.
+let catalogo: { letto: number; articoli: Map<number, PassepartoutArticolo> } | null = null;
+async function articoliPerId(): Promise<Map<number, PassepartoutArticolo>> {
+    if (!catalogo || Date.now() - catalogo.letto > 60 * 60_000) {
+        catalogo = { letto: Date.now(), articoli: new Map((await getArticoliMenu()).map((a) => [a.idGestionale, a])) };
+    }
+    return catalogo.articoli;
+}
+
+const euro = (cents: number) => (cents / 100).toFixed(2);
+
+export async function specchioComanda(p: ParametriSpecchio): Promise<EsitoSpecchio> {
+    const oggi = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Rome' }).format(new Date());
+    const ieri = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Rome' }).format(new Date(Date.now() - 86_400_000));
+    const conTag = (c: PassepartoutComanda) => (c.note ?? '').includes(p.tag);
+
+    // 1. Già scritta da un tentativo precedente?
+    let comanda: PassepartoutComanda | null = null;
+    for (const giorno of [oggi, ieri]) {
+        comanda = (await getComandeGiorno(giorno)).find(conTag) ?? null;
+        if (comanda) break;
+    }
+    const ripresa = comanda != null;
+    if (comanda?.isPagato) {
+        const conto = (await getContiGiorno()).filter((c) => asNumber(c.IdComanda) === comanda!.idGestionale).pop() as any;
+        return {
+            idComanda: comanda.idGestionale!,
+            idConto: asNumber(conto?.IdGestionale),
+            stato: asString(conto?.StatoEnum),
+            totaleCassaCents: Math.round((asNumber(conto?.TotaleDaPagare) ?? 0) * 100),
+            ripresa: true,
+            avviso: null,
+        };
+    }
+
+    // 2. Il tavolo: una comanda vera aperta lì non si tocca.
+    if (!comanda) {
+        const sulTavolo = await getComandaTavolo(p.tavolo);
+        if (sulTavolo && !conTag(sulTavolo)) {
+            throw new PassepartoutError(`${SPECCHIO_TAVOLO_OCCUPATO}: il tavolo ${p.tavolo} ha una comanda aperta in cassa`, 'PutComanda');
+        }
+        comanda = sulTavolo;
+    }
+
+    // 3. Scrittura, se non c'è.
+    if (!comanda) {
+        const articoli = await articoliPerId();
+        const generico = p.idArticoloGenerico != null ? articoli.get(p.idArticoloGenerico) : undefined;
+        const coperto = [...articoli.values()].find((a) => /^copert/i.test(a.codice ?? '') || /^copert/i.test(a.descrizione ?? ''));
+        const righe: string[] = [];
+        for (const r of p.righe) {
+            const art = r.coperto ? coperto : (r.idArticolo != null ? articoli.get(r.idArticolo) : undefined) ?? generico;
+            if (!art?.codice && !r.coperto) {
+                throw new PassepartoutError(
+                    `«${r.descrizione}» non ha un articolo in cassa: scegli l'articolo per i piatti del CRM nella sezione Passepartout`,
+                    'PutComanda',
+                );
+            }
+            righe.push(
+                `<c:PMBRigaComanda>` +
+                (art?.codice ? `<c:Articolo>${xmlEscape(art.codice)}</c:Articolo>` : '') +
+                `<c:Descrizione>${xmlEscape(testoPerCassa(r.coperto ? 'Coperto' : r.descrizione, 60) || 'Voce')}</c:Descrizione>` +
+                `<c:Pezzi>${Math.max(1, Math.round(r.pezzi))}</c:Pezzi>` +
+                `<c:Prezzo>${euro(r.prezzoCents)}</c:Prezzo>` +
+                (r.coperto ? `<c:TipoEnum>Coperto</c:TipoEnum>` : '') +
+                `<c:Tool_EseguiInvio>false</c:Tool_EseguiInvio>` +
+                `<c:Totale>${euro(r.prezzoCents * Math.max(1, Math.round(r.pezzi)))}</c:Totale>` +
+                `</c:PMBRigaComanda>`,
+            );
+        }
+        const xml =
+            `<comanda xmlns:c="http://schemas.datacontract.org/2004/07/PMessageBox.Contract.Comanda">` +
+            `<c:Coperti>${Math.max(0, Math.round(p.coperti))}</c:Coperti>` +
+            `<c:Note>${xmlEscape(`Conto Sympotia ${p.tag}`)}</c:Note>` +
+            `<c:Righe>${righe.join('')}</c:Righe>` +
+            `<c:Sala>${xmlEscape(p.sala)}</c:Sala>` +
+            `<c:Tavolo>${xmlEscape(p.tavolo)}</c:Tavolo>` +
+            `</comanda>`;
+        const risposta = (await soapCall('PutComanda', xml, 30_000)) as Record<string, any> | null;
+        const id = asNumber(risposta?.IdGestionale);
+        comanda = id != null ? await getComanda(id) : await getComandaTavolo(p.tavolo);
+        if (!comanda || !conTag(comanda)) {
+            throw new PassepartoutError('Comanda specchio non ritrovata dopo la scrittura', 'PutComanda');
+        }
+    }
+
+    // 4. Il totale della cassa contro quello del CRM: in statistiche si
+    //    chiude lo stesso, la differenza resta come avviso.
+    const totaleCassaCents = Math.round(comanda.righe.reduce((s, r) => s + (r.totale ?? 0), 0) * 100);
+    let avviso = totaleCassaCents !== p.totaleCents
+        ? `In cassa ${euro(totaleCassaCents)}, nel CRM ${euro(p.totaleCents)}`
+        : null;
+
+    // 5. Chiusura senza invio in produzione: ContoComanda (noInvio) come
+    //    proforma col tipo esterno, poi il verdetto dall'archivio.
+    try {
+        await contoComanda({ idComanda: comanda.idGestionale!, tipoDocumento: 'Proforma', tipoPagamento: p.tipoPagamento });
+    } catch (err) {
+        if (!(err instanceof PassepartoutError)) throw err;
+        avviso = [avviso, err.message].filter(Boolean).join(' | ');
+    }
+    const conto = (await getContiGiorno()).filter((c) => asNumber(c.IdComanda) === comanda!.idGestionale).pop();
+    if (!conto) {
+        throw new PassepartoutError(avviso ?? `Conto della comanda specchio ${comanda.idGestionale} non trovato in archivio`, 'ContoComanda');
+    }
+    const esito = await completaChiusura({ idComanda: comanda.idGestionale!, tipoPagamento: p.tipoPagamento }, conto, avviso);
+    return {
+        idComanda: comanda.idGestionale!,
+        idConto: asNumber((conto as any).IdGestionale),
+        stato: esito.stato,
+        totaleCassaCents,
+        ripresa,
+        avviso: esito.avviso,
+    };
+}
+
 /** Passo 4 della chiusura (saldo del sospeso) e l'esito: in comune fra la
  *  chiusura piena e la ripresa di un conto già in archivio. */
 async function completaChiusura(

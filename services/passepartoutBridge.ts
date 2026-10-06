@@ -47,6 +47,10 @@ export type PassepartoutOp =
     /** Stampa il preconto della comanda, una volta sola (capacità
      *  'preconto'): in cassa il tavolo diventa «vuole pagare». */
     | 'preconto'
+    /** Copia in cassa un conto chiuso nel CRM: comanda sul tavolo scelto,
+     *  senza invio in produzione, chiusa come proforma col tipo esterno
+     *  (capacità 'specchio'). */
+    | 'specchio'
     /** Introspezione del contratto WCF (?wsdl): elenco operazioni, per
      *  scoprire da remoto se esiste la scrittura comande (comanda specchio)
      *  senza documentazione del concessionario. Sola lettura. */

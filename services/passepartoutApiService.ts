@@ -233,3 +233,30 @@ export const getQrPagamentoConfig = (): Promise<PpQrPagamentoConfig> =>
 
 export const setQrPagamentoConfig = (input: { enabled: boolean }): Promise<{ ok: true }> =>
   apiRequest(`${API_URL}/passepartout/qr-pagamento/config`, { method: 'PUT', headers: getHeaders(), body: JSON.stringify(input) });
+
+// --- Conti del CRM in cassa (comanda specchio) -------------------------------
+
+export interface PpSpecchioConfig {
+  mode: 'off' | 'statistiche';
+  sala: string | null;
+  tavolo: string | null;
+  /** Articolo della cassa per i piatti nati solo nel CRM e per il servizio. */
+  articolo_generico_id: number | null;
+  /** Sale e tavoli della cassa (dall'ultima lettura della pianta). */
+  pianta: { sala: string; tavoli: string[] }[];
+  /** I piatti del CRM importati dalla cassa: fra questi si sceglie il generico. */
+  piatti: { pp_id: number; name: string }[];
+  tipo_pagamento: string | null;
+  stato: { confermati_oggi: number; in_coda: number; falliti: number };
+  falliti: { table_bill_id: number; error: string | null; updated_at: string }[];
+  agente: { collegato: boolean; aggiornato: boolean };
+}
+
+export const getSpecchioConfig = (): Promise<PpSpecchioConfig> =>
+  apiRequest(`${API_URL}/passepartout/specchio/config`, { headers: getHeaders(false), cache: 'no-store' });
+
+export const setSpecchioConfig = (input: { mode?: 'off' | 'statistiche'; sala?: string | null; tavolo?: string | null; articolo_generico_id?: number | null }): Promise<{ ok: true }> =>
+  apiRequest(`${API_URL}/passepartout/specchio/config`, { method: 'PUT', headers: getHeaders(), body: JSON.stringify(input) });
+
+export const riprovaSpecchio = (): Promise<{ rimessi: number }> =>
+  apiRequest(`${API_URL}/passepartout/specchio/riprova`, { method: 'POST', headers: getHeaders() });

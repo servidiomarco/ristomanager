@@ -88,6 +88,7 @@ import {
 import {
     startPassepartoutTavoliApertiSync, elencoTavoliAperti, aggiornaTavoliAperti, comandaApertaSuiTavoli,
 } from './services/passepartoutTavoliAperti.js';
+import { accodaSpecchio, avviaSpecchio, startPassepartoutSpecchioSync } from './services/passepartoutSpecchio.js';
 import {
     SUPPORT_CATEGORIES, SUPPORT_STATUSES, SUPPORT_SUBJECT_MAX, SUPPORT_BODY_MAX, SUPPORT_ATTACHMENTS_MAX, SUPPORT_RATING_COMMENT_MAX,
     sanitizeClientContext, supportTenantTag, supportPlatformTag,
@@ -4658,6 +4659,138 @@ app.put('/passepartout/qr-pagamento/config', authenticate, requirePermission('se
     }
 });
 
+// --- Conti del CRM in cassa (comanda specchio) -------------------------------
+// I conti chiusi nel CRM copiati in cassa sul tavolo scelto, come proforma
+// col tipo esterno, per le statistiche e il magazzino della cassa
+// (services/passepartoutSpecchio.ts). Servono il tipo di pagamento in cassa
+// e il tavolo; l'articolo generico serve ai piatti nati solo nel CRM.
+const PP_MODI_SPECCHIO = new Set(['off', 'statistiche']);
+
+app.get('/passepartout/specchio/config', authenticate, requirePermission('settings:full'), requireFeature('passepartout'), async (req, res) => {
+    try {
+        const tenantId = req.tenantId!;
+        const cfg = await queryWithRetry(
+            `SELECT conti_crm_mode, specchio_sala, specchio_tavolo, articolo_generico_id, pianta
+               FROM passepartout_config WHERE tenant_id = $1`,
+            [tenantId]
+        );
+        const c = cfg.rows[0] ?? {};
+        const pianta = Array.isArray(c.pianta) ? c.pianta : [];
+        const piatti = await queryWithRetry(
+            `SELECT substring(external_ref from 'pp:articolo:(\\d+)')::int AS pp_id, name
+               FROM dishes
+              WHERE tenant_id = $1 AND external_ref LIKE 'pp:articolo:%'
+              ORDER BY name`,
+            [tenantId]
+        );
+        const stato = await queryWithRetry(
+            `SELECT COUNT(*) FILTER (WHERE stato = 'CONFIRMED' AND updated_at >= date_trunc('day', now() AT TIME ZONE 'Europe/Rome') AT TIME ZONE 'Europe/Rome')::int AS confermati_oggi,
+                    COUNT(*) FILTER (WHERE stato = 'PENDING')::int AS in_coda,
+                    COUNT(*) FILTER (WHERE stato = 'FAILED')::int AS falliti
+               FROM passepartout_specchio WHERE tenant_id = $1`,
+            [tenantId]
+        );
+        const falliti = await queryWithRetry(
+            `SELECT table_bill_id, error, updated_at FROM passepartout_specchio
+              WHERE tenant_id = $1 AND stato = 'FAILED' ORDER BY updated_at DESC LIMIT 10`,
+            [tenantId]
+        );
+        res.json({
+            mode: c.conti_crm_mode ?? 'off',
+            sala: c.specchio_sala ?? null,
+            tavolo: c.specchio_tavolo ?? null,
+            articolo_generico_id: c.articolo_generico_id ?? null,
+            pianta: pianta.map((sl: any) => ({
+                sala: String(sl?.sala ?? ''),
+                tavoli: (Array.isArray(sl?.tavoli) ? sl.tavoli : []).map((t: any) => String(t?.nome ?? '')).filter(Boolean),
+            })),
+            piatti: piatti.rows.map((r: any) => ({ pp_id: Number(r.pp_id), name: String(r.name) })),
+            tipo_pagamento: (await getPassepartoutChiusuraConfig(tenantId))?.tipoPagamento ?? null,
+            stato: stato.rows[0],
+            falliti: falliti.rows.map((r: any) => ({ table_bill_id: Number(r.table_bill_id), error: r.error, updated_at: r.updated_at })),
+            agente: {
+                collegato: getPassepartoutAgentStatus(tenantId).connected,
+                aggiornato: passepartoutAgentSupports(tenantId, 'specchio'),
+            },
+        });
+    } catch (err: any) {
+        console.error('GET /passepartout/specchio/config error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+app.put('/passepartout/specchio/config', authenticate, requirePermission('settings:full'), requireFeature('passepartout'), async (req, res) => {
+    try {
+        const tenantId = req.tenantId!;
+        const body = req.body ?? {};
+        const has = (k: string) => Object.prototype.hasOwnProperty.call(body, k);
+        const testo = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, 100) : null);
+        if (has('mode') && !PP_MODI_SPECCHIO.has(String(body.mode))) {
+            return res.status(400).json({ error: 'modo_non_valido' });
+        }
+        const generico = has('articolo_generico_id')
+            ? (body.articolo_generico_id == null || body.articolo_generico_id === '' ? null : Number(body.articolo_generico_id))
+            : undefined;
+        if (generico !== undefined && generico !== null && !Number.isInteger(generico)) {
+            return res.status(400).json({ error: 'articolo_non_valido' });
+        }
+        const prima = (await queryWithRetry(
+            `SELECT conti_crm_mode, specchio_sala, specchio_tavolo FROM passepartout_config WHERE tenant_id = $1`,
+            [tenantId]
+        )).rows[0] ?? {};
+        const mode = has('mode') ? String(body.mode) : (prima.conti_crm_mode ?? 'off');
+        const sala = has('sala') ? testo(body.sala) : (prima.specchio_sala ?? null);
+        const tavolo = has('tavolo') ? testo(body.tavolo) : (prima.specchio_tavolo ?? null);
+        if (mode === 'statistiche') {
+            if (!sala || !tavolo) {
+                return res.status(409).json({ error: 'tavolo_mancante', message: 'Prima scegli il tavolo della cassa su cui scrivere i conti del CRM.' });
+            }
+            if (!(await getPassepartoutChiusuraConfig(tenantId))) {
+                return res.status(409).json({ error: 'tipo_pagamento_mancante', message: 'Prima scegli il tipo di pagamento in cassa, qui sopra in «Collegamento e chiusura in cassa».' });
+            }
+        }
+        await queryWithRetry(
+            `INSERT INTO passepartout_config (tenant_id, conti_crm_mode, specchio_sala, specchio_tavolo, articolo_generico_id, updated_at)
+             VALUES ($1, $2, $3, $4, $5, now())
+             ON CONFLICT (tenant_id) DO UPDATE SET
+                conti_crm_mode = $2, specchio_sala = $3, specchio_tavolo = $4,
+                articolo_generico_id = CASE WHEN $6::boolean THEN $5 ELSE passepartout_config.articolo_generico_id END,
+                updated_at = now()`,
+            [tenantId, mode, sala, tavolo, generico ?? null, generico !== undefined]
+        );
+        if (req.user) {
+            LogService.logActivity(
+                tenantId, req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.SETTINGS, undefined, 'Passepartout: conti del CRM in cassa',
+                { mode, sala, tavolo, ...(generico !== undefined ? { articolo_generico_id: generico } : {}) }
+            );
+        }
+        res.json({ ok: true });
+    } catch (err: any) {
+        console.error('PUT /passepartout/specchio/config error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// «Riprova»: i conti finiti in FAILED tornano in coda, da capo.
+app.post('/passepartout/specchio/riprova', authenticate, requirePermission('settings:full'), requireFeature('passepartout'), async (req, res) => {
+    try {
+        const tenantId = req.tenantId!;
+        const rs = await queryWithRetry(
+            `UPDATE passepartout_specchio
+                SET stato = 'PENDING', attempts = 0, next_at = now(), error = NULL, created_at = now(), updated_at = now()
+              WHERE tenant_id = $1 AND stato = 'FAILED'
+              RETURNING table_bill_id`,
+            [tenantId]
+        );
+        if ((rs.rowCount ?? 0) > 0) avviaSpecchio(tenantId);
+        res.json({ rimessi: rs.rowCount ?? 0 });
+    } catch (err: any) {
+        console.error('POST /passepartout/specchio/riprova error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
 // --- Chiusura comanda in cassa al saldo del conto CRM ------------------------
 // Quando un conto nato da una comanda Passepartout (external_ref
 // "pp:comanda:<id>") viene CHIUSO saldato per intero, il gestionale chiude il
@@ -7330,6 +7463,7 @@ app.post('/bills/:id/close', authenticate, requirePermission('payments:full'), a
         // race us and flip status underneath.
         const client = await pool.connect();
         let updatedRow: any = null;
+        let specchioAccodato = false;
         try {
             await client.query('BEGIN');
             const billRs = await client.query(
@@ -7442,6 +7576,12 @@ app.post('/bills/:id/close', authenticate, requirePermission('payments:full'), a
                 await insertPendingPassepartoutClose(client, req.tenantId!, id,
                     req.body?.passepartout_documento === 'Proforma' ? 'Proforma' : undefined);
             }
+            // Conto del CRM: in coda per la cassa, se il ristorante la vuole
+            // (comanda specchio). Nella stessa transazione, come la chiusura
+            // in cassa: un processo che muore dopo il COMMIT non la perde.
+            if (finalStatus === 'CLOSED' && passepartoutComandaIdFromRef(updatedRow?.external_ref) == null) {
+                specchioAccodato = await accodaSpecchio(client, req.tenantId!, id);
+            }
             await logBillChanged(client, req.tenantId!, id);
             await client.query('COMMIT');
         } catch (txErr) {
@@ -7453,6 +7593,7 @@ app.post('/bills/:id/close', authenticate, requirePermission('payments:full'), a
 
         try { socketService?.broadcastToAll(req.tenantId!, 'bill:closed', updatedRow); } catch (_) {}
         closeBillPayingNotification(req.tenantId!, id);
+        if (specchioAccodato) avviaSpecchio(req.tenantId!);
 
         // Documento commerciale: parte in automatico sui conti saldati per
         // intero, fuori dalla risposta — la chiusura non aspetta il fisco.
@@ -13163,6 +13304,7 @@ async function autoCloseSettledBill(tenantId: number, billId: number): Promise<a
     const ppDocumento = ppConfig?.tipoDocumento === 'Proforma' ? 'Proforma' as const : undefined;
     const client = await pool.connect();
     let row: any = null;
+    let specchioAccodato = false;
     try {
         await client.query('BEGIN');
         const cur = await client.query(
@@ -13196,6 +13338,7 @@ async function autoCloseSettledBill(tenantId: number, billId: number): Promise<a
         // «Chiudi» dalla Cassa: un processo che muore dopo il COMMIT la
         // lascia PENDING e la riprende lo spazzino.
         if (row && ppConfig) await insertPendingPassepartoutClose(client, tenantId, billId, ppDocumento);
+        if (row && ppComandaId == null) specchioAccodato = await accodaSpecchio(client, tenantId, billId);
         if (row) await logBillChanged(client, tenantId, billId);
         await client.query('COMMIT');
     } catch (err) {
@@ -13206,6 +13349,7 @@ async function autoCloseSettledBill(tenantId: number, billId: number): Promise<a
     }
     if (!row) return null;
     try { socketService?.broadcastToAll(tenantId, 'bill:closed', row); } catch (_) {}
+    if (specchioAccodato) avviaSpecchio(tenantId);
     if (ppComandaId != null && ppConfig) {
         chiudiComandaPassepartoutPerBill(tenantId, billId, ppComandaId, ppConfig, ppDocumento)
             .catch(err => console.error('[passepartout] chiusura in cassa dopo il saldo dal QR fallita per conto', billId, err?.message));
@@ -42301,6 +42445,10 @@ const startServer = async () => {
                         // socket, la disponibilità automatica li esclude.
                         startPassepartoutTavoliApertiSync({
                             broadcast: (t, tavoli) => socketService?.broadcastToAll(t, 'passepartout:tavoli-aperti', { tavoli }),
+                        });
+                        // I conti del CRM copiati in cassa (comanda specchio).
+                        startPassepartoutSpecchioSync({
+                            tipoPagamentoEsterno: async (t) => (await getPassepartoutChiusuraConfig(t))?.tipoPagamento ?? null,
                         });
                     }
                     console.log('✅ Passepartout agent bridge attivo su /pp-agent');

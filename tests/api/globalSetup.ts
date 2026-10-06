@@ -138,6 +138,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
             PASSEPARTOUT_PREN_SWEEP_MS: '3600000',
             PASSEPARTOUT_CONTI_SWEEP_MS: '3600000',
             PASSEPARTOUT_TAVOLI_SWEEP_MS: '3600000',
+            PASSEPARTOUT_SPECCHIO_SWEEP_MS: '3600000',
         },
         stdio: ['ignore', 'pipe', 'pipe'],
     });
