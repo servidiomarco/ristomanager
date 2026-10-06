@@ -594,6 +594,8 @@ export const rotateTableQrToken = async (tableId: number): Promise<{ table_id: n
 export interface TableQrPrintSettings {
   paper: 'A3' | 'A4' | 'A5';
   text: string;
+  /** Cartellini alla misura del portaQR in plastica (9,3 × 12 cm). */
+  holder: boolean;
 }
 
 export const getTableQrPrint = async (): Promise<TableQrPrintSettings & { restaurant: string }> => {

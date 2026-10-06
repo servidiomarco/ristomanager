@@ -14,6 +14,10 @@ import { printHtmlDocument, PRINT_TOKENS_CSS } from './printDocument';
  *   A5 → 1 per foglio, 148×210 mm: il cartello per l'espositore da tavolo
  *   A4 → 4 per foglio, 105×148 mm: il formato A6 degli espositori piccoli
  *   A3 → 9 per foglio,  99×140 mm: quasi A6, per chi stampa in copisteria
+ *
+ * Con «supporto» il cartellino ha invece la misura fissa del portaQR in
+ * plastica del locale (9,3 × 12 cm): il foglio decide solo quanti ne
+ * stanno, centrati, ciascuno col suo tratteggio da ritagliare.
  */
 
 export type QrPaper = 'A3' | 'A4' | 'A5';
@@ -34,13 +38,47 @@ export const QR_PAPERS: Record<QrPaper, PaperLayout> = {
 
 export const QR_PAPER_ORDER: QrPaper[] = ['A3', 'A4', 'A5'];
 
-export const cardsPerSheet = (paper: QrPaper): number => QR_PAPERS[paper].cols * QR_PAPERS[paper].rows;
+/** Il portaQR in plastica da tavolo: il cartellino tagliato entra nella
+ *  tasca di questa misura, in mm. */
+export const QR_HOLDER_MM = { width: 93, height: 120 };
+// Dal bordo del foglio: la fascia che la stampante non raggiunge. Fra un
+// cartellino e l'altro: ognuno ha il suo tratteggio, e le forbici ci passano.
+const HOLDER_MARGIN_MM = 5;
+const HOLDER_GAP_MM = 3;
+
+export interface SheetLayout extends PaperLayout {
+  /** Il cartellino, in mm. */
+  cardWidth: number;
+  cardHeight: number;
+  holder: boolean;
+}
+
+export const sheetLayout = (paper: QrPaper, holder = false): SheetLayout => {
+  const p = QR_PAPERS[paper];
+  if (!holder) return { ...p, cardWidth: p.width / p.cols, cardHeight: p.height / p.rows, holder: false };
+  const fit = (sheet: number, card: number): number =>
+    Math.max(1, Math.floor((sheet - 2 * HOLDER_MARGIN_MM + HOLDER_GAP_MM) / (card + HOLDER_GAP_MM)));
+  return {
+    width: p.width,
+    height: p.height,
+    cols: fit(p.width, QR_HOLDER_MM.width),
+    rows: fit(p.height, QR_HOLDER_MM.height),
+    cardWidth: QR_HOLDER_MM.width,
+    cardHeight: QR_HOLDER_MM.height,
+    holder: true,
+  };
+};
+
+export const cardsPerSheet = (paper: QrPaper, holder = false): number => {
+  const l = sheetLayout(paper, holder);
+  return l.cols * l.rows;
+};
 
 /** Misura del cartellino in cm, al millimetro per difetto: l'A6 si scrive
  *  10,5 × 14,8, non 14,9. */
-export const cardSizeCm = (paper: QrPaper): { width: number; height: number } => {
-  const p = QR_PAPERS[paper];
-  return { width: Math.floor(p.width / p.cols) / 10, height: Math.floor(p.height / p.rows) / 10 };
+export const cardSizeCm = (paper: QrPaper, holder = false): { width: number; height: number } => {
+  const l = sheetLayout(paper, holder);
+  return { width: Math.floor(l.cardWidth) / 10, height: Math.floor(l.cardHeight) / 10 };
 };
 
 /** La frase sotto il QR: la scrive il ristoratore, una per tutti i tavoli.
@@ -70,6 +108,8 @@ export interface TableQrSheetOptions {
   cards: TableQrCard[];
   paper: QrPaper;
   text: string;
+  /** Cartellini alla misura del portaQR in plastica (QR_HOLDER_MM). */
+  holder?: boolean;
   /** Anteprima a schermo: solo il primo foglio, su fondo grigio. */
   preview?: boolean;
 }
@@ -80,11 +120,11 @@ const escapeHtml = (s: string): string =>
   }[ch]!));
 
 // Il cartellino di riferimento è l'A6 del foglio A4 (105 mm di larghezza):
-// le misure del CSS sono le sue, e --k le porta alla cella del foglio scelto.
+// le misure del CSS sono le sue, e --k le porta al cartellino scelto.
 const BASE_CARD_WIDTH_MM = 105;
 
-export const buildTableQrSheetHtml = async ({ restaurant, cards, paper, text, preview = false }: TableQrSheetOptions): Promise<string> => {
-  const layout = QR_PAPERS[paper];
+export const buildTableQrSheetHtml = async ({ restaurant, cards, paper, text, holder = false, preview = false }: TableQrSheetOptions): Promise<string> => {
+  const layout = sheetLayout(paper, holder);
   const perSheet = layout.cols * layout.rows;
   const shown = preview ? cards.slice(0, perSheet) : cards;
 
@@ -99,8 +139,10 @@ export const buildTableQrSheetHtml = async ({ restaurant, cards, paper, text, pr
     const col = i % layout.cols;
     const row = Math.floor(i / layout.cols) % layout.rows;
     // Il filetto da tagliare solo fra le celle: sul bordo del foglio c'è già
-    // la carta.
-    const cut = [col < layout.cols - 1 ? 'cut-r' : '', row < layout.rows - 1 ? 'cut-b' : ''].filter(Boolean).join(' ');
+    // la carta. Il cartellino del supporto ce l'ha tutto intorno.
+    const cut = layout.holder
+      ? 'cut-all'
+      : [col < layout.cols - 1 ? 'cut-r' : '', row < layout.rows - 1 ? 'cut-b' : ''].filter(Boolean).join(' ');
     return `
       <section class="card ${cut}">
         ${restaurant ? `<div class="restaurant">${escapeHtml(restaurant)}</div>` : ''}
@@ -114,10 +156,10 @@ export const buildTableQrSheetHtml = async ({ restaurant, cards, paper, text, pr
   const sheets: string[] = [];
   for (let start = 0; start < shown.length; start += perSheet) {
     const slice = shown.slice(start, start + perSheet);
-    sheets.push(`<div class="sheet">${slice.map((c, j) => cardHtml(c, start + j)).join('')}</div>`);
+    sheets.push(`<div class="sheet${layout.holder ? ' is-holder' : ''}">${slice.map((c, j) => cardHtml(c, start + j)).join('')}</div>`);
   }
 
-  const k = (layout.width / layout.cols) / BASE_CARD_WIDTH_MM;
+  const k = layout.cardWidth / BASE_CARD_WIDTH_MM;
 
   return `<!doctype html>
 <html lang="it">
@@ -151,6 +193,15 @@ export const buildTableQrSheetHtml = async ({ restaurant, cards, paper, text, pr
     background: #ffffff;
   }
   .sheet:last-child { break-after: auto; page-break-after: auto; }
+  /* Misura fissa del portaQR: colonne e righe in mm esatti, il blocco al
+     centro del foglio. Stampato al 100% il cartellino esce di ${layout.cardWidth}×${layout.cardHeight} mm. */
+  .sheet.is-holder {
+    grid-template-columns: repeat(${layout.cols}, ${layout.cardWidth}mm);
+    grid-template-rows: repeat(${layout.rows}, ${layout.cardHeight}mm);
+    gap: ${HOLDER_GAP_MM}mm;
+    justify-content: center;
+    align-content: center;
+  }
   .card {
     min-width: 0; min-height: 0;
     padding: calc(9mm * var(--k)) calc(8mm * var(--k));
@@ -158,6 +209,7 @@ export const buildTableQrSheetHtml = async ({ restaurant, cards, paper, text, pr
   }
   .cut-r { border-right: 0.3mm dashed var(--ds-print-rule-strong); }
   .cut-b { border-bottom: 0.3mm dashed var(--ds-print-rule-strong); }
+  .cut-all { border: 0.3mm dashed var(--ds-print-rule-strong); }
   .restaurant {
     font-size: calc(10pt * var(--k)); color: var(--ds-print-ink-secondary);
     max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;

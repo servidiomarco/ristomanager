@@ -19,7 +19,7 @@ import { MenuVariantsModal } from './MenuVariantsModal';
 import { billsApiService } from '../services/billsApiService';
 import { QRCodeSVG } from 'qrcode.react';
 import { useAuth } from '../contexts/AuthContext';
-import { printTableQrSheet, buildTableQrSheetHtml, cardsPerSheet, cardSizeCm, QR_PAPERS, QR_PAPER_ORDER, TABLE_QR_TEXT_MAX, cleanTableQrText, type QrPaper } from '../utils/printTableQr';
+import { printTableQrSheet, buildTableQrSheetHtml, cardsPerSheet, cardSizeCm, QR_PAPERS, QR_HOLDER_MM, QR_PAPER_ORDER, TABLE_QR_TEXT_MAX, cleanTableQrText, type QrPaper } from '../utils/printTableQr';
 import { saveDraft, loadDraft, clearDraft, DRAFT_KEYS } from '../services/draftService';
 import {
   SegmentedControl, SearchField, SectionHeader, StatusPill, Callout, EmptyState,
@@ -534,6 +534,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const [rotateConfirmId, setRotateConfirmId] = useState<number | null>(null);
   const [tableQrPaper, setTableQrPaper] = useState<QrPaper>('A4');
   const [tableQrText, setTableQrText] = useState('');
+  // Cartellini alla misura del portaQR in plastica (9,3 × 12 cm).
+  const [tableQrHolder, setTableQrHolder] = useState(false);
   // L'ultima versione salvata: la frase si salva all'uscita dal campo solo
   // se è cambiata davvero.
   const tableQrSaved = useRef<TableQrPrintSettings | null>(null);
@@ -568,8 +570,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         if (cancelled) return;
         setTableQrPaper(s.paper);
         setTableQrText(s.text);
+        setTableQrHolder(s.holder === true);
         setTableQrRestaurant(s.restaurant);
-        tableQrSaved.current = { paper: s.paper, text: s.text };
+        tableQrSaved.current = { paper: s.paper, text: s.text, holder: s.holder === true };
       })
       .catch(() => { if (!cancelled) setTableQrRestaurant(user?.tenant?.name ?? ''); });
     return () => { cancelled = true; };
@@ -610,17 +613,17 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         ? tableQrCards
         : [{ tableName: '1', roomName: null, url: tableQrUrl('esempio', tableQrBase) }];
       const paper = tableQrPaper;
-      buildTableQrSheetHtml({ restaurant: tableQrRestaurant, cards, paper, text: tableQrText, preview: true })
+      buildTableQrSheetHtml({ restaurant: tableQrRestaurant, cards, paper, text: tableQrText, holder: tableQrHolder, preview: true })
         .then(html => { if (!cancelled) setTableQrPreview({ html, paper }); })
         .catch(() => { if (!cancelled) setTableQrPreview(null); });
     }, 200);
     return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [tableQrOpen, tableQrs, tableQrCards, tableQrPaper, tableQrText, tableQrRestaurant, tableQrBase]);
+  }, [tableQrOpen, tableQrs, tableQrCards, tableQrPaper, tableQrText, tableQrHolder, tableQrRestaurant, tableQrBase]);
 
   const salvaStampaTableQr = async (raw: TableQrPrintSettings): Promise<void> => {
-    const next = { paper: raw.paper, text: cleanTableQrText(raw.text) };
+    const next = { paper: raw.paper, text: cleanTableQrText(raw.text), holder: raw.holder };
     const prima = tableQrSaved.current;
-    if (prima && prima.paper === next.paper && prima.text === next.text) return;
+    if (prima && prima.paper === next.paper && prima.text === next.text && prima.holder === next.holder) return;
     try {
       const saved = await saveTableQrPrint(next);
       tableQrSaved.current = saved;
@@ -631,7 +634,13 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
   const cambiaFoglioTableQr = (paper: QrPaper) => {
     setTableQrPaper(paper);
-    void salvaStampaTableQr({ paper, text: tableQrText });
+    void salvaStampaTableQr({ paper, text: tableQrText, holder: tableQrHolder });
+  };
+
+  const cambiaSupportoTableQr = () => {
+    const holder = !tableQrHolder;
+    setTableQrHolder(holder);
+    void salvaStampaTableQr({ paper: tableQrPaper, text: tableQrText, holder });
   };
 
   const toggleTableQr = (id: number) => setTableQrSel(prev => {
@@ -664,8 +673,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       // La frase scritta e non ancora uscita dal campo: si salva ora, così
       // la prossima ristampa la ritrova. Un salvataggio fallito non ferma la
       // stampa — l'errore resta a vista.
-      await salvaStampaTableQr({ paper: tableQrPaper, text: tableQrText });
-      await printTableQrSheet({ restaurant: tableQrRestaurant, cards: tableQrCards, paper: tableQrPaper, text: tableQrText });
+      await salvaStampaTableQr({ paper: tableQrPaper, text: tableQrText, holder: tableQrHolder });
+      await printTableQrSheet({ restaurant: tableQrRestaurant, cards: tableQrCards, paper: tableQrPaper, text: tableQrText, holder: tableQrHolder });
     } catch (err: any) {
       setTableQrError(err?.message ?? t('err.tableQrPrint'));
     } finally {
@@ -4610,8 +4619,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           )}
           {tableQrs != null && tableQrs.length > 0 && (() => {
             const paper = QR_PAPERS[tableQrPaper];
-            const size = cardSizeCm(tableQrPaper);
-            const perSheet = cardsPerSheet(tableQrPaper);
+            const size = cardSizeCm(tableQrPaper, tableQrHolder);
+            const perSheet = cardsPerSheet(tableQrPaper, tableQrHolder);
             const sheets = Math.ceil(tableQrSel.size / perSheet);
             const cm = (n: number) => n.toLocaleString(displayLocale(), { maximumFractionDigits: 1 });
             // Il foglio vero in mm, rimpicciolito: stessa larghezza a schermo
@@ -4655,6 +4664,30 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                         options={QR_PAPER_ORDER.map(p => ({ value: p, label: p }))}
                       />
                     </Field>
+                    {/* Il portaQR in plastica del locale: il cartellino esce
+                        alla sua misura, non a divisione del foglio. */}
+                    <button
+                      type="button"
+                      role="checkbox"
+                      aria-checked={tableQrHolder}
+                      onClick={cambiaSupportoTableQr}
+                      className="flex min-h-[44px] w-full items-start gap-3 text-left"
+                    >
+                      <span
+                        aria-hidden
+                        className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-sm)] ${
+                          tableQrHolder ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]' : 'border border-[var(--ds-border-strong)] bg-[var(--ds-surface)]'
+                        }`}
+                      >
+                        {tableQrHolder && <Check className="h-3.5 w-3.5" />}
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-[15px] font-medium text-[var(--ds-text-primary)]">
+                          {t('tableQrHolder', { w: cm(QR_HOLDER_MM.width / 10), h: cm(QR_HOLDER_MM.height / 10) })}
+                        </span>
+                        <span className="mt-0.5 block text-[13px] text-[var(--ds-text-muted)]">{t('tableQrHolderHint')}</span>
+                      </span>
+                    </button>
                     <Field
                       label={t('tableQrText')}
                       htmlFor="table-qr-text"
@@ -4669,7 +4702,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                         value={tableQrText}
                         placeholder={t('tableQrTextPlaceholder')}
                         onChange={e => setTableQrText(e.target.value)}
-                        onBlur={() => { void salvaStampaTableQr({ paper: tableQrPaper, text: tableQrText }); }}
+                        onBlur={() => { void salvaStampaTableQr({ paper: tableQrPaper, text: tableQrText, holder: tableQrHolder }); }}
                       />
                     </Field>
                   </div>
