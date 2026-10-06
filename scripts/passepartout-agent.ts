@@ -43,6 +43,7 @@ import {
     getContiCassaGiorno,
     getComandeAperte,
     precontoUnaVolta,
+    specchioComanda,
     isPassepartoutConfigured,
     PassepartoutError,
     type TipoDocumentoConto,
@@ -57,8 +58,9 @@ const TOKEN = (process.env.PP_AGENT_TOKEN || '').trim();
 // manda prenotazioni solo a un agente che sa scriverle, e chiede i conti
 // del giorno solo a uno che sa leggerli. 'chiudi-preconto': la chiusura
 // regge una comanda col preconto stampato; 'preconto': sa stamparlo (il
-// tavolo che vuole pagare dal QR diventa blu in cassa).
-const CAPABILITIES = ['chiudi-riprendi', 'prenotazioni', 'conti', 'tavoli-aperti', 'chiudi-preconto', 'preconto'];
+// tavolo che vuole pagare dal QR diventa blu in cassa). 'specchio': copia
+// in cassa i conti chiusi nel CRM (comanda specchio, fase 4).
+const CAPABILITIES = ['chiudi-riprendi', 'prenotazioni', 'conti', 'tavoli-aperti', 'chiudi-preconto', 'preconto', 'specchio'];
 
 if (!SERVER_URL || !TOKEN) {
     console.error('Config mancante: servono PP_AGENT_SERVER_URL e PP_AGENT_TOKEN.');
@@ -145,6 +147,29 @@ const handlers: Record<string, Handler> = {
     },
     // Comande ancora aperte sui tavoli: sala e disponibilità del CRM.
     comandeAperte: () => getComandeAperte(),
+    specchio: (p) => {
+        if (typeof p?.tag !== 'string' || !p.tag || typeof p?.tavolo !== 'string' || !p.tavolo || !Array.isArray(p?.righe)) {
+            throw new Error('Parametri della comanda specchio non validi');
+        }
+        // In fila per tavolo: due conti del CRM chiusi insieme non si
+        // contendono il tavolo della comanda specchio.
+        return unaAllaVolta(`specchio:${p.tavolo}`, () => specchioComanda({
+            tag: p.tag,
+            sala: String(p.sala ?? ''),
+            tavolo: p.tavolo,
+            coperti: Number(p.coperti) || 0,
+            righe: p.righe.map((r: any) => ({
+                idArticolo: r?.idArticolo != null && Number.isFinite(Number(r.idArticolo)) ? Number(r.idArticolo) : null,
+                descrizione: String(r?.descrizione ?? ''),
+                pezzi: Number(r?.pezzi) || 1,
+                prezzoCents: Math.round(Number(r?.prezzoCents) || 0),
+                coperto: r?.coperto === true,
+            })),
+            idArticoloGenerico: p.idArticoloGenerico != null && Number.isFinite(Number(p.idArticoloGenerico)) ? Number(p.idArticoloGenerico) : null,
+            tipoPagamento: String(p.tipoPagamento ?? ''),
+            totaleCents: Math.round(Number(p.totaleCents) || 0),
+        }));
+    },
     preconto: (p) => {
         const id = Number(p?.idComanda);
         if (!Number.isFinite(id)) throw new Error('Parametro "idComanda" non valido');
