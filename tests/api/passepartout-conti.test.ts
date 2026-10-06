@@ -125,6 +125,12 @@ describe('conti della cassa Passepartout nel CRM', () => {
     afterAll(async () => {
         await api().put('/passepartout/conti').set(bearer(token)).send({ enabled: false });
         socket?.close();
+        // Niente resti per i file dopo: la prenotazione su un tavolo abbinato
+        // e col suo collegamento verrebbe presa dal giro delle prenotazioni.
+        await db.query(`DELETE FROM passepartout_conti WHERE tenant_id = 1`);
+        await db.query(`DELETE FROM passepartout_prenotazioni WHERE reservation_id = $1`, [reservationId]);
+        await db.query(`DELETE FROM passepartout_tavoli WHERE table_id = $1`, [tableId]);
+        await api().delete(`/reservations/${reservationId}`).set(bearer(token));
         await db.end();
     });
 
