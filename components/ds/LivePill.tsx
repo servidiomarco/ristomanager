@@ -33,7 +33,7 @@ interface LivePillProps {
   variant?: 'pill' | 'dot';
   /** Da dove lavora il dispositivo (useLinkRoutes). Null o assente = modalità
    *  ibrida spenta: niente icone. Le mostra solo la variante 'pill'. */
-  routes?: { node: boolean; cloud: boolean } | null;
+  routes?: { node: boolean; cloud: boolean; islandSince?: number | null } | null;
   /** Classi del gruppo icone, per nasconderlo dove la chrome non ha posto.
    *  Il gruppo porta `flex`: serve una utility CON variante (`max-xl:hidden`),
    *  come per la pastiglia intera. */
@@ -50,7 +50,13 @@ export const LivePill: React.FC<LivePillProps> = ({ connected, time, variant = '
     : routes.node ? t('live.routes.nodeOnly', 'Solo nodo')
     : routes.cloud ? t('live.routes.cloudOnly', 'Solo online')
     : null;
-  const pillLabel = routesLabel ? `${label} · ${routesLabel}` : label;
+  // Fase A3: il nodo dice da quando non sente il cloud. Lo si scrive accanto
+  // all'icona barrata: «isola» senza un'ora non dice se è un minuto o tre ore.
+  const islandAt = routes?.islandSince
+    ? new Date(routes.islandSince).toLocaleTimeString(displayLocale(), { hour: '2-digit', minute: '2-digit' })
+    : null;
+  const islandLabel = islandAt ? t('live.island', 'Linea giù dalle {{ora}}', { ora: islandAt }) : null;
+  const pillLabel = [label, routesLabel, islandLabel].filter(Boolean).join(' · ');
 
   if (variant === 'dot') {
     return (
@@ -100,8 +106,11 @@ export const LivePill: React.FC<LivePillProps> = ({ connected, time, variant = '
           <span className="flex" title={routes.node ? t('live.node.on', 'Lavora col nodo di sala') : t('live.node.off', 'Nodo di sala non raggiungibile')}>
             {routes.node ? <Server size={16} /> : <ServerOff size={16} className="opacity-60" />}
           </span>
-          <span className="flex" title={routes.cloud ? t('live.cloud.on', 'Lavora online') : t('live.cloud.off', 'Online non raggiungibile')}>
-            {routes.cloud ? <Cloud size={16} /> : <CloudOff size={16} className="opacity-60" />}
+          <span className="flex items-center gap-1" title={islandLabel ?? (routes.cloud ? t('live.cloud.on', 'Lavora online') : t('live.cloud.off', 'Online non raggiungibile'))}>
+            {routes.cloud && !islandAt ? <Cloud size={16} /> : <CloudOff size={16} className="opacity-60" />}
+            {islandAt && (
+              <span className="text-[13px] tabular-nums whitespace-nowrap">{t('live.islandShort', 'dalle {{ora}}', { ora: islandAt })}</span>
+            )}
           </span>
         </span>
       )}

@@ -27,7 +27,12 @@ export interface ApiError extends Error {
  */
 export function buildApiError(status: number, body: any, fallback?: string): ApiError {
     const data = body && typeof body === 'object' ? body : {};
-    const base = data.error || fallback || `Request failed with status ${status}`;
+    // Molte risposte portano un codice in `error` (per chi ci ramifica) e la
+    // frase in `message`: a schermo va la frase. Il cameriere che vedeva
+    // «authority_on_node» non sapeva che la cucina non aveva ricevuto niente.
+    const coded = typeof data.error === 'string' && /^[a-z][a-z0-9_]*$/.test(data.error)
+        && typeof data.message === 'string' && data.message.trim() !== '';
+    const base = (coded ? data.message.trim() : data.error) || fallback || `Request failed with status ${status}`;
     // `detail` is optional and often absent; only append when it adds something
     // and isn't just a repeat of the headline.
     const detail = typeof data.detail === 'string' ? data.detail.trim() : '';

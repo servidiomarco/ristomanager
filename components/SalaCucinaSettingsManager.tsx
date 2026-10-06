@@ -14,6 +14,7 @@ import {
   type SalaConfig, type FireMode, type SalaProfile, type SalaNodeAuthority,
 } from '../services/salaApiService';
 import { useAuth } from '../contexts/AuthContext';
+import { fetchNodeLocalStatus, type SalaNodeLocalStatus } from '../services/apiRouting';
 import { UserRole } from '../types';
 
 interface Props {
@@ -58,6 +59,13 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
   // dalla sua route coi cancelli — la card lo mostra, non lo decide.
   const [authority, setAuthority] = useState<SalaNodeAuthority | null>(null);
   const [authBusy, setAuthBusy] = useState(false);
+  // Fase A3: se il cloud non risponde, lo stato lo chiediamo al nodo in LAN —
+  // a linea giù è proprio quando la card serve.
+  const [nodeLocal, setNodeLocal] = useState<SalaNodeLocalStatus | null>(null);
+
+  // Un ritardo in parole corte: secondi, minuti, ore.
+  const fmtLag = (s: number): string =>
+    s < 60 ? t('lagSeconds', { n: s }) : s < 3600 ? t('lagMinutes', { n: Math.round(s / 60) }) : t('lagHours', { n: Math.round(s / 3600) });
 
   const showToastRef = useRef(showToast);
   useEffect(() => { showToastRef.current = showToast; });
@@ -87,8 +95,11 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
       setConfig(c);
       setProfiles(p.profiles);
       setActiveProfile(p.active_profile);
+      setNodeLocal(null);
     } catch (err: any) {
-      showToastRef.current(err?.message || t('loadError'), 'error');
+      const local = hasFeature('sala_node') ? await fetchNodeLocalStatus() : null;
+      setNodeLocal(local);
+      if (!local) showToastRef.current(err?.message || t('loadError'), 'error');
     } finally {
       setLoading(false);
     }
@@ -155,6 +166,29 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
       setSaving(false);
     }
   };
+
+  // Cloud muto, nodo raggiungibile: la sola cosa utile da dire è come sta
+  // il nodo — in isola da quando, e cosa ha ancora da mandare.
+  if (!loading && (!flags || !config) && nodeLocal) {
+    const since = nodeLocal.uplink_down_since
+      ? new Date(nodeLocal.uplink_down_since).toLocaleTimeString(displayLocale(), { hour: '2-digit', minute: '2-digit' })
+      : null;
+    return (
+      <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] px-4 py-3 space-y-1">
+        <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">{t('cardTitle')}</h4>
+        <p className="flex items-center gap-2 text-[13px] font-medium text-[var(--ds-pending-text)]">
+          <WifiOff size={14} />
+          {since ? t('nodeIslandSince', { ora: since }) : t('nodeIsland')}
+        </p>
+        <p className="text-[12px] text-[var(--ds-text-muted)]">
+          {nodeLocal.pending_up > 0
+            ? t('nodePendingUp', { n: nodeLocal.pending_up, eta: fmtLag(nodeLocal.lag_up_s) })
+            : t('nodeNothingPending')}
+          {' · '}{t('nodeVersion', { v: nodeLocal.version })}
+        </p>
+      </div>
+    );
+  }
 
   if (loading || !flags || !config) {
     return (
@@ -600,7 +634,7 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
                   : config.sala_node.last_seen_seconds != null
                     ? t('nodeOffline', { secondi: config.sala_node.last_seen_seconds })
                     : t('nodeNeverSeen')}
-                {config.sala_node.online && config.sala_node.clients != null && ` · ${config.sala_node.clients} dispositivi`}
+                {config.sala_node.online && config.sala_node.clients != null && ` · ${t('devicesCount', { n: config.sala_node.clients })}`}
               </span>
             </div>
             <div className="rounded-md border border-[var(--ds-border)] divide-y divide-[var(--ds-border)]">
@@ -645,17 +679,17 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
                     ) : authority == null ? (
                       <span className="text-[var(--ds-text-muted)]">{t('checking')}</span>
                     ) : authority.enabled ? (
-                      <span className="text-[var(--ds-seated-text)]">{t('authorityOnSite')}{authority.aligned ? ' · repliche allineate' : ' · riallineamento in corso'}</span>
+                      <span className="text-[var(--ds-seated-text)]">{t('authorityOnSite')} · {authority.aligned ? t('replicasAligned') : t('replicasRealigning')}</span>
                     ) : !authority.node_online ? (
                       <span className="text-[var(--ds-critical-text)]">{t('nodeOfflineFrozen')}</span>
                     ) : authority.aligned ? (
                       <span className="text-[var(--ds-seated-text)]">{t('readyAligned')}</span>
                     ) : (
                       <span className="text-[var(--ds-pending-text)]">
-                        repliche in ritardo di {Math.max(
+                        {t('replicasBehind', { n: Math.max(
                           authority.cloud_head - (authority.node_applied_cloud_seq ?? 0),
                           (authority.node_local_head ?? 0) - authority.cloud_applied_node_seq,
-                        )} {t('eventsWord')}
+                        ) })}
                       </span>
                     )}
                   </p>
@@ -671,7 +705,7 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
                     || (!authority.enabled && !(authority.node_online && authority.aligned))
                     || (authority.enabled && !authority.node_online)
                   }
-                  title={authority && !authority.node_online ? "{t('authorityFrozenTitle')}" : undefined}
+                  title={authority && !authority.node_online ? t('authorityFrozenTitle') : undefined}
                   onClick={async () => {
                     if (!authority) return;
                     setAuthBusy(true);
@@ -698,6 +732,28 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
                   />
                 </button>
               </div>
+              {/* Fase A3: i ritardi in secondi nei due versi e la versione
+                  che gira sul PC. Solo a nodo online: da offline i numeri
+                  sarebbero di un battito vecchio. */}
+              {config.sala_node.online && typeof config.sala_node.lag_up_s === 'number' && (
+                <div className="px-3 py-2 text-[13px]">
+                  <span className="font-medium text-[var(--ds-text-primary)]">{t('syncHeading')}</span>
+                  <p className="text-[12px] text-[var(--ds-text-muted)]">
+                    {t('lagUp', { t: fmtLag(config.sala_node.lag_up_s) })}
+                    {typeof config.sala_node.lag_down_s === 'number' && <> · {t('lagDown', { t: fmtLag(config.sala_node.lag_down_s) })}</>}
+                    {typeof config.sala_node.pending_up === 'number' && config.sala_node.pending_up > 0 && (
+                      <> · <span className="text-[var(--ds-pending-text)]">{t('pendingUp', { n: config.sala_node.pending_up })}</span></>
+                    )}
+                  </p>
+                  {config.sala_node.version && (
+                    <p className={`text-[12px] ${config.sala_node.cloud_version && config.sala_node.version !== config.sala_node.cloud_version ? 'text-[var(--ds-pending-text)]' : 'text-[var(--ds-text-muted)]'}`}>
+                      {config.sala_node.cloud_version && config.sala_node.version !== config.sala_node.cloud_version
+                        ? t('nodeVersionDiffers', { v: config.sala_node.version, cloud: config.sala_node.cloud_version })
+                        : t('nodeVersion', { v: config.sala_node.version })}
+                    </p>
+                  )}
+                </div>
+              )}
               <div className="flex items-center gap-3 px-3 py-2">
                 <div className="flex-1 min-w-0 text-[13px]">
                   <span className="font-medium text-[var(--ds-text-primary)]">{t('tlsCertificate')}</span>

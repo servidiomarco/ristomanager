@@ -28,7 +28,13 @@ interface NodeStats {
     cache_entries: number;
     oldest_cache_age_s: number | null;
     version: string | null;
+    // Fase A3: i ritardi visti dal nodo (null da un nodo più vecchio).
+    lag_up_s: number | null;
+    lag_down_s: number | null;
+    pending_up: number | null;
 }
+
+const numOrNull = (v: any): number | null => (Number.isFinite(Number(v)) && v !== null && v !== undefined ? Number(v) : null);
 
 interface NodeConnection {
     socket: Socket;
@@ -101,6 +107,9 @@ export function setupSalaNodeBridge(io: SocketIOServer, resolveToken: TokenResol
                 cache_entries: Number(stats?.cache_entries) || 0,
                 oldest_cache_age_s: Number.isFinite(Number(stats?.oldest_cache_age_s)) ? Number(stats.oldest_cache_age_s) : null,
                 version: typeof stats?.version === 'string' ? stats.version : null,
+                lag_up_s: numOrNull(stats?.lag_up_s),
+                lag_down_s: numOrNull(stats?.lag_down_s),
+                pending_up: numOrNull(stats?.pending_up),
             };
         });
 
@@ -176,12 +185,32 @@ export async function askNodeStatus(tenantId: number): Promise<{ applied_cloud_s
     }
 }
 
+/** Una chiamata del cloud al nodo (fase B3b): il pagamento col QR passa
+ *  dal nodo quando il conto è suo. null = nodo non collegato, o che non
+ *  risponde entro il tempo: chi chiama decide il ripiego («paga in cassa»).
+ *  Il nodo risponde { ok: true, result } o { ok: false, error }. */
+export async function askNode(tenantId: number, method: string, payload: unknown, timeoutMs = 8_000): Promise<{ ok: boolean; result?: any; error?: string } | null> {
+    const entry = nodesByTenant.get(tenantId);
+    if (!entry || !entry.socket.connected) return null;
+    try {
+        const res: any = await entry.socket.timeout(timeoutMs).emitWithAck('node:rpc', { method, payload });
+        if (!res || typeof res.ok !== 'boolean') return null;
+        return res;
+    } catch {
+        return null;
+    }
+}
+
 const NODE_ONLINE_WINDOW_MS = 30_000;
 
 export function getSalaNodeStatus(tenantId: number) {
     const entry = nodesByTenant.get(tenantId);
     if (!entry) {
-        return { online: false, last_seen_seconds: null as number | null, connected_at: null as string | null, clients: null as number | null, cache_entries: null as number | null };
+        return {
+            online: false, last_seen_seconds: null as number | null, connected_at: null as string | null,
+            clients: null as number | null, cache_entries: null as number | null,
+            version: null as string | null, lag_up_s: null as number | null, lag_down_s: null as number | null, pending_up: null as number | null,
+        };
     }
     return {
         online: Date.now() - entry.lastSeen < NODE_ONLINE_WINDOW_MS,
@@ -189,5 +218,10 @@ export function getSalaNodeStatus(tenantId: number) {
         connected_at: entry.connectedAt.toISOString(),
         clients: entry.stats?.clients ?? null,
         cache_entries: entry.stats?.cache_entries ?? null,
+        // La versione che gira sul PC e i ritardi del battito (fase A3).
+        version: entry.stats?.version ?? null,
+        lag_up_s: entry.stats?.lag_up_s ?? null,
+        lag_down_s: entry.stats?.lag_down_s ?? null,
+        pending_up: entry.stats?.pending_up ?? null,
     };
 }

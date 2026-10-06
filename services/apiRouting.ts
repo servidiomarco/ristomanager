@@ -20,6 +20,7 @@
 // cache — riparte già puntato al nodo).
 
 import { authApiService } from './authApiService';
+import { isServiceWrite } from './serviceWrites';
 
 export const CLOUD_API_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';
 
@@ -134,40 +135,80 @@ export const routedGetUrl = (path: string): string => {
 // letture: nodo che non risponde → cloudFallbackUrl ritenta sul cloud e il
 // circuito si apre — «il downgrade è il failover», e resta convergente
 // perché anche la scrittura sul cloud riscende in replica.
-const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
-const WRITE_ROUTABLE: Array<{ path: RegExp; method?: RegExp }> = [
-    // Comande e cucina: il cuore dell'autorità di servizio.
-    { path: /^\/orders(\/.*)?$/ },
-    { path: /^\/kds\/.+$/ },
-    // Stato del tavolo: SOLO il PUT — la DELETE è pianta (autorità cloud).
-    { path: /^\/tables\/\d+$/, method: /^PUT$/ },
-    { path: /^\/table-merges$/ },
-    { path: /^\/table-hidden$/ },
-    { path: /^\/room-closed$/ },
-    // Asporto: la board (stato, lancio, righe) è servizio; la nascita resta
-    // al cloud (tipo split, arriva online e al telefono).
-    { path: /^\/takeaway\/orders\/\d+$/, method: /^PATCH$/ },
-    { path: /^\/takeaway\/orders\/\d+\/(status|fire)$/ },
-];
-// La chiusura comanda apre e salda il CONTO: i conti sono autorità cloud
-// fino alla fase 5 — una chiusura battuta sul nodo creerebbe un incasso
-// che il protocollo non sa ancora riportare su.
-const WRITE_EXCLUDED = [/^\/orders\/\d+\/close$/];
-
+// L'elenco vive in services/serviceWrites.ts: lo stesso che il cloud usa
+// per il suo recinto (fase B1), così i due lati non possono divergere.
 /** Riscrive un URL di SCRITTURA verso il nodo quando l'autorità è in sala.
  *  Chiamata in testa ai fetchWithAuth dei servizi: per le URL del cloud non
  *  whitelisted (o a autorità spenta) è un no-op puro. */
 export const routeWriteUrl = (url: string, method?: string): string => {
-    const m = (method || 'GET').toUpperCase();
-    if (!WRITE_METHODS.has(m)) return url;
     if (!config.authority_enabled || !nodeActive()) return url;
     if (!url.startsWith(CLOUD_API_URL)) return url;
     const rest = url.slice(CLOUD_API_URL.length);
     const pathname = rest.split('?')[0];
-    if (WRITE_EXCLUDED.some(r => r.test(pathname))) return url;
-    const hit = WRITE_ROUTABLE.some(r => r.path.test(pathname) && (!r.method || r.method.test(m)));
-    return hit ? `${config.node_url}${rest}` : url;
+    return isServiceWrite(method || 'GET', pathname) ? `${config.node_url}${rest}` : url;
 };
+
+// --- Le LETTURE del dominio servizio con l'autorità in sala (fase B3) -----
+// Conti, cassa e comande nascono sul nodo: chi li rilegge dal cloud vede
+// una copia che arriva in replica qualche istante dopo (e, a linea giù, non
+// arriva affatto). Con l'autorità in sala anche le letture di questi
+// domini vanno al nodo. Il resto (CRM, report, fiscalità di back-office)
+// resta al cloud.
+const AUTHORITY_READS: RegExp[] = [
+    /^\/bills(\/.*)?$/,
+    /^\/cash(\/.*)?$/,
+    /^\/tables\/\d+\/bill$/,
+    /^\/reservations\/\d+\/bill$/,
+    /^\/orders(\/.*)?$/,
+    /^\/kds(\/.*)?$/,
+    // Fase B4: quello che l'app carica all'avvio per la sala. A linea giù
+    // un ricaricamento chiedeva tutto al cloud e apriva una pianta vuota,
+    // col nodo acceso a due metri. Il nodo li ha tutti: pianta e menu dalla
+    // sincronizzazione della configurazione, unioni e stati del giorno
+    // perché nascono lì, prenotazioni dalla replica.
+    /^\/tables$/,
+    /^\/rooms$/,
+    /^\/dishes$/,
+    /^\/menus$/,
+    /^\/banquet-menus$/,
+    /^\/table-merges$/,
+    /^\/table-hidden$/,
+    /^\/room-closed$/,
+    /^\/takeaway\/orders$/,
+];
+
+// Le prenotazioni solo a finestra: il nodo ne tiene 60 giorni (snapshot +
+// replica), l'archivio resta una lettura del cloud.
+const NODE_RESERVATIONS_DAYS = 55;
+const isNodeReservationsWindow = (pathname: string, query: string): boolean => {
+    if (pathname !== '/reservations') return false;
+    const params = new URLSearchParams(query);
+    const from = params.get('from');
+    if (!from || params.has('to')) return false;
+    const since = Date.parse(`${from}T00:00:00Z`);
+    return Number.isFinite(since) && Date.now() - since <= NODE_RESERVATIONS_DAYS * 86_400_000;
+};
+
+/** Instradamento di una richiesta del dominio servizio: le scritture come
+ *  routeWriteUrl, le letture dei conti, della cassa, delle comande e della
+ *  sala al nodo quando l'autorità è in sala. No-op per tutto il resto. */
+export const routeServiceUrl = (url: string, method?: string): string => {
+    const m = (method || 'GET').toUpperCase();
+    if (m !== 'GET' && m !== 'HEAD') return routeWriteUrl(url, m);
+    if (!config.authority_enabled || !nodeActive()) return url;
+    if (!url.startsWith(CLOUD_API_URL)) return url;
+    const rest = url.slice(CLOUD_API_URL.length);
+    const [pathname, query = ''] = rest.split('?');
+    return AUTHORITY_READS.some(r => r.test(pathname)) || isNodeReservationsWindow(pathname, query)
+        ? `${config.node_url}${rest}`
+        : url;
+};
+
+/** Il cloud ha risposto che l'autorità è sul nodo: questo dispositivo non
+ *  raggiunge il nodo (Wi-Fi caduto, telefono sul 4G, circuito aperto) e la
+ *  battitura non è stata registrata da nessuna parte. */
+export const isAuthorityOnNodeRefusal = (status: number, body: any): boolean =>
+    status === 409 && body?.error === 'authority_on_node';
 
 /** URL del socket: nodo se attivo, altrimenti cloud. */
 export const serviceSocketUrl = (): string =>
@@ -176,6 +217,24 @@ export const serviceSocketUrl = (): string =>
 export const isNodeUrl = (url: string): boolean =>
     Boolean(config.node_url) && url.startsWith(config.node_url as string);
 
+// A circuito aperto il probe parte anche da solo. Prima lo innescava solo
+// una lettura instradata: con l'app ferma su una schermata senza polling il
+// nodo poteva tornare e il dispositivo restare sul cloud — e la coda
+// offline, che si svuota al riattacco del socket, restava piena (visto
+// nella verifica della fase B4).
+let probeTimer: ReturnType<typeof setInterval> | null = null;
+const ensureProbeTimer = (): void => {
+    if (probeTimer) return;
+    probeTimer = setInterval(() => {
+        if (!circuitOpen || !config.enabled) {
+            if (probeTimer) clearInterval(probeTimer);
+            probeTimer = null;
+            return;
+        }
+        if (Date.now() >= nextProbeAt) probeNode();
+    }, 5_000);
+};
+
 /** Il nodo non ha risposto (errore di rete o timeout): circuito aperto,
  *  tutto al cloud finché un probe /healthz non lo richiude. */
 export const noteNodeFailure = (): void => {
@@ -183,6 +242,17 @@ export const noteNodeFailure = (): void => {
     circuitOpen = true;
     nextProbeAt = Date.now() + PROBE_EVERY_MS;
     console.warn('[sala-node] nodo non raggiungibile: si torna al cloud (probe fra 30s)');
+    ensureProbeTimer();
+    notifyStatus();
+};
+
+/** Il socket si è appena collegato al nodo: è una prova di vita migliore
+ *  del probe. Si richiude il circuito senza notifyChange — il socket è già
+ *  dalla parte giusta, riattaccarlo sarebbe un giro a vuoto. */
+export const noteNodeReachable = (): void => {
+    if (!circuitOpen) return;
+    circuitOpen = false;
+    console.info('[sala-node] socket collegato al nodo: si torna a instradare in LAN');
     notifyStatus();
 };
 
@@ -255,6 +325,43 @@ export const onRoutingChange = (cb: RoutingChangeCallback): (() => void) => {
 const notifyChange = () => changeCallbacks.forEach(cb => cb());
 
 export const isHybridActive = (): boolean => config.enabled && Boolean(config.node_url);
+
+// --- Lo stato del nodo visto dal nodo (fase A3) ----------------------------
+// GET /sala-node/local-status vive solo sul nodo e risponde in LAN anche a
+// linea giù: uplink, ritardi nei due versi, battiture che il cloud non ha.
+export interface SalaNodeLocalStatus {
+    version: string;
+    uplink_connected: boolean;
+    uplink_down_since: string | null;
+    lag_down_s: number | null;
+    lag_up_s: number;
+    pending_up: number;
+}
+
+const LOCAL_STATUS_TIMEOUT_MS = 3_000;
+
+/** null = nodo non configurato, irraggiungibile o risposta inattesa. */
+export const fetchNodeLocalStatus = async (): Promise<SalaNodeLocalStatus | null> => {
+    if (!config.enabled || !config.node_url) return null;
+    const token = authApiService.getAccessToken();
+    if (!token) return null;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), LOCAL_STATUS_TIMEOUT_MS);
+    try {
+        const res = await fetch(`${config.node_url}/sala-node/local-status`, {
+            headers: { Authorization: `Bearer ${token}` },
+            signal: controller.signal,
+            cache: 'no-store',
+        });
+        if (!res.ok) return null;
+        const body = await res.json();
+        return typeof body?.uplink_connected === 'boolean' ? body as SalaNodeLocalStatus : null;
+    } catch {
+        return null;
+    } finally {
+        clearTimeout(timer);
+    }
+};
 
 /** Il nodo per l'accesso col PIN di sala (fase A2): solo con l'autorità in
  *  sala, perché una sessione del PIN vale solo sul nodo e le scritture

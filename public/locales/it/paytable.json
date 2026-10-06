@@ -95,6 +95,7 @@
     "releaseFailed": "Errore durante l'annullamento",
     "billFullyClaimed": "Il conto è già stato tutto assegnato ad altri ospiti.",
     "itemsAlreadyClaimed": "Uno dei piatti scelti è già stato preso da un altro ospite. Aggiorna la pagina e riprova.",
-    "perItemUnavailable": "Non è possibile pagare per piatto su questo conto: scegli un'altra opzione."
+    "perItemUnavailable": "Non è possibile pagare per piatto su questo conto: scegli un'altra opzione.",
+    "payAtCounter": "Il pagamento dal telefono non è disponibile adesso: paga in cassa."
   }
 }
