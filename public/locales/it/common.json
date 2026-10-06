@@ -278,7 +278,9 @@
     "cloud": {
       "on": "Lavora online",
       "off": "Online non raggiungibile"
-    }
+    },
+    "island": "Linea giù dalle {{ora}}",
+    "islandShort": "dalle {{ora}}"
   },
   "palette": {
     "aria": "Ricerca globale",

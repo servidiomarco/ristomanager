@@ -6,7 +6,7 @@ import { setSessionCurrency } from '../utils/displayMoney';
 import { completeOnboarding as apiCompleteOnboarding } from '../services/apiService';
 import { socketClient } from '../services/socketClient';
 import { syncPushSubscription, detachPushSubscription } from '../services/pushClient';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, WifiOff } from 'lucide-react';
 
 // Permission type (must match backend)
 type Permission = string;
@@ -85,6 +85,11 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (credentials: LoginCredentials) => Promise<void>;
+  /** Accesso col PIN di sala sul nodo (fase A2): a linea caduta, solo il
+   *  servizio. */
+  loginWithPin: (nodeUrl: string, userId: number, pin: string) => Promise<void>;
+  /** La sessione corrente è quella del PIN di sala. */
+  isPinSession: boolean;
   logout: () => Promise<void>;
   hasPermission: (permission: string) => boolean;
   /** Entitlement commerciale del tenant. `features` assente (sessione nata
@@ -125,6 +130,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [permissions, setPermissions] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showSessionExpiredModal, setShowSessionExpiredModal] = useState(false);
+  // Fase A2: il nodo di sala ha rifiutato il token perché, a linea giù, la
+  // proroga è finita. Non è un logout: i token restano, e appena torna la
+  // linea il refresh rimette tutto in piedi da solo.
+  const [offlineSessionExpired, setOfflineSessionExpired] = useState(false);
 
   // Login, «Entra» del platform admin, logout: fuso e valuta seguono l'utente.
   useEffect(() => {
@@ -151,6 +160,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             // La subscription push del browser deve appartenere a CHI è
             // loggato, non a chi la registrò: il re-claim è silenzioso.
             syncPushSubscription();
+          } else if (authApiService.isPinSession()) {
+            // Sessione del PIN di sala: vive sul nodo, il cloud (giù, o
+            // che non la riconosce) non ha niente da dire. Se il cloud è
+            // tornato, getCurrentUser l'ha già chiusa (refreshToken).
+            setUser(storedUser);
+            setPermissions(storedPermissions);
+            socketClient.connect();
           } else if (authApiService.getRefreshToken()) {
             // /auth/me fallito ma il refresh token è ancora in storage: il
             // server è irraggiungibile (WiFi, deploy), NON una revoca — le
@@ -190,6 +206,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return unsubscribe;
   }, []);
 
+  useEffect(() => {
+    const onExpired = () => setOfflineSessionExpired(true);
+    window.addEventListener('sala-node:session-expired-offline', onExpired);
+    return () => window.removeEventListener('sala-node:session-expired-offline', onExpired);
+  }, []);
+
+  const retryOfflineSession = useCallback(async () => {
+    const tokens = await authApiService.refreshToken();
+    if (!tokens) return;
+    setOfflineSessionExpired(false);
+    socketClient.reconnectWithToken();
+  }, []);
+
+  // Mentre l'avviso è aperto si riprova da soli: la linea torna senza che
+  // nessuno tocchi il palmare.
+  useEffect(() => {
+    if (!offlineSessionExpired) return;
+    const interval = window.setInterval(() => { void retryOfflineSession(); }, 30 * 1000);
+    window.addEventListener('online', retryOfflineSession);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('online', retryOfflineSession);
+    };
+  }, [offlineSessionExpired, retryOfflineSession]);
+
   // Session keeper: finché c'è un utente, l'access token si rinnova PRIMA
   // di scadere (timer + risveglio del dispositivo). Senza, la scadenza
   // cadeva nel mezzo del servizio: il 401+retry copriva le fetch ma il
@@ -208,6 +249,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // L'endpoint push del browser passa di proprietà all'utente appena
     // entrato (fire-and-forget: il login non dipende dalle notifiche).
     syncPushSubscription();
+  }, []);
+
+  const loginWithPin = useCallback(async (nodeUrl: string, userId: number, pin: string) => {
+    const response = await authApiService.pinLogin(nodeUrl, userId, pin);
+    setUser(response.user);
+    setPermissions(response.permissions || []);
+    socketClient.reconnectWithToken();
   }, []);
 
   const logout = useCallback(async () => {
@@ -335,6 +383,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     isAuthenticated: !!user,
     isLoading,
     login,
+    loginWithPin,
+    isPinSession: Boolean(user) && authApiService.isPinSession(),
     logout,
     hasPermission,
     hasFeature,
@@ -353,6 +403,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   return (
     <AuthContext.Provider value={value}>
       {children}
+
+      {offlineSessionExpired && !showSessionExpiredModal && (
+        <div className="fixed inset-0 bg-[var(--ds-backdrop)] flex items-center justify-center z-[100] p-4">
+          <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-raised)] w-full max-w-sm overflow-hidden">
+            <div className="p-6 text-center">
+              {/* Come la sessione scaduta: chiede un'azione, famiglia pending. */}
+              <div className="mx-auto w-16 h-16 bg-[var(--ds-pending-tint)] rounded-full flex items-center justify-center mb-4">
+                <WifiOff className="h-8 w-8 text-[var(--ds-pending-text)]" />
+              </div>
+              <h3 className="text-xl font-semibold text-[var(--ds-text-primary)] mb-2">Accesso scaduto senza linea</h3>
+              <p className="text-[var(--ds-text-secondary)] mb-6">
+                Internet è giù da troppo tempo. L'app riparte da sola quando torna la linea.
+              </p>
+              <button
+                onClick={() => { void retryOfflineSession(); }}
+                className="w-full px-4 py-3 bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] rounded-[var(--ds-radius-control)] hover:bg-[var(--ds-action-bg-hover)] transition-colors font-medium"
+              >
+                Riprova
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Session Expired Modal */}
       {showSessionExpiredModal && (

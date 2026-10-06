@@ -2,7 +2,7 @@ import { authApiService } from './authApiService';
 import { socketClient } from './socketClient';
 import type { BillPaymentMethod, CashClosureReport, CustomerBilling, FiscalDocument, FiscalProviderSetting, TableBill, TableBillWithSplits, TipMethod } from '../types';
 import { buildApiError } from './apiError';
-import { routedGetUrl, cloudFallbackUrl, noteRoutedResponse, fetchNodeAware } from './apiRouting';
+import { routedGetUrl, cloudFallbackUrl, noteRoutedResponse, fetchNodeAware, routeServiceUrl } from './apiRouting';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';
 
@@ -50,6 +50,9 @@ export interface VoidBillPayload {
   notes?: string;
 }
 
+const newPaymentKey = (): string =>
+  `pay-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+
 const getHeaders = (): HeadersInit => {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const socketId = socketClient.getSocket()?.id;
@@ -60,6 +63,10 @@ const getHeaders = (): HeadersInit => {
 };
 
 const fetchWithAuth = async (url: string, options: RequestInit = {}, retried = false): Promise<Response> => {
+  // Fase B3: con l'autorità in sala conti e incassi nascono sul nodo — le
+  // scritture vanno lì, e anche le letture (la copia del cloud arriva dopo,
+  // e a linea giù non arriva). No-op per tutto il resto.
+  url = routeServiceUrl(url, (options.method as string) || 'GET');
   let response: Response;
   try {
     response = await fetchNodeAware(url, options);
@@ -138,11 +145,13 @@ class BillsApiService {
     });
   }
 
-  /** Registra un incasso a conto ancora aperto (contanti/POS a metà servizio). */
-  async recordPayment(billId: number, payload: BillPaymentInput): Promise<TableBillWithSplits> {
+  /** Registra un incasso a conto ancora aperto (contanti/POS a metà servizio).
+   *  La chiave di idempotenza (fase B2) è una per tocco: il ritentativo dopo
+   *  un 401 o un timeout la riusa, e il server non incassa due volte. */
+  async recordPayment(billId: number, payload: BillPaymentInput, idempotencyKey: string = newPaymentKey()): Promise<TableBillWithSplits> {
     return apiRequest<TableBillWithSplits>(`${API_URL}/bills/${billId}/payments`, {
       method: 'POST',
-      headers: getHeaders(),
+      headers: { ...getHeaders(), 'Idempotency-Key': idempotencyKey },
       body: JSON.stringify(payload),
     });
   }

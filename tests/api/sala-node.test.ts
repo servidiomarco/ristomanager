@@ -27,7 +27,8 @@ describe('nodo di sala — fondazioni cloud', () => {
     // com'era (flag spento, entitlement acceso, config nodo azzerata).
     afterAll(async () => {
         const owner = await ownerToken();
-        await api().put('/settings/entitlements').set(bearer(owner)).send({ sala_node: true });
+        // L'add-on lo riaccende solo la piattaforma (audit H-06).
+        await api().put('/settings/entitlements').set(bearer(await platformSessionFor(1))).send({ sala_node: true });
         await api().put('/settings/features').set(bearer(owner)).send({ sala_node_enabled: false });
         // Il dominio lo toglie solo la piattaforma (audit H-05).
         await api().put('/sala-node/settings').set(bearer(await platformSessionFor(1))).send({ domain: null, lan_ip: null, port: null });
@@ -54,7 +55,7 @@ describe('nodo di sala — fondazioni cloud', () => {
         expect(finto.status).toBe(401);
     });
 
-    it('/sala-node/credentials: col token vero consegna allowlist, MAI il segreto JWT', async () => {
+    it('/sala-node/credentials: col token vero consegna allowlist e chiavi pubbliche, MAI un segreto JWT', async () => {
         const token = await salaNodeToken();
         const res = await api().get('/sala-node/credentials').set('x-sala-node-token', token);
         expect(res.status).toBe(200);
@@ -62,6 +63,15 @@ describe('nodo di sala — fondazioni cloud', () => {
         // Il segreto firma i token di ogni tenant e della piattaforma: chi
         // aveva il token del nodo poteva firmarsi un PLATFORM_ADMIN.
         expect(res.body).not.toHaveProperty('jwt_secret');
+        // Con le chiavi PUBBLICHE ES256 il nodo verifica i palmari ma non
+        // conia token (fase A1). Mai la privata.
+        expect(Array.isArray(res.body.jwt_public_keys)).toBe(true);
+        expect(res.body.jwt_public_keys.length).toBeGreaterThan(0);
+        for (const k of res.body.jwt_public_keys) {
+            expect(typeof k.kid).toBe('string');
+            expect(k.pem).toContain('BEGIN PUBLIC KEY');
+        }
+        expect(JSON.stringify(res.body)).not.toContain('PRIVATE KEY');
         expect(Array.isArray(res.body.allowed_origins)).toBe(true);
         // Senza dominio configurato: niente certificato, dominio null.
         expect(res.body.domain).toBeNull();
@@ -116,9 +126,22 @@ describe('nodo di sala — fondazioni cloud', () => {
 
     it("senza l'entitlement il flag si maschera e client-config spegne", async () => {
         const owner = await ownerToken();
+        const platform = await platformSessionFor(1);
 
-        const off = await api().put('/settings/entitlements').set(bearer(owner)).send({ sala_node: false });
+        // L'add-on ha hardware in comodato dietro: l'owner non lo cambia da
+        // solo (audit H-06). Rimandare il valore attuale invece è un no-op.
+        const daOwner = await api().put('/settings/entitlements').set(bearer(owner)).send({ sala_node: false });
+        expect(daOwner.status).toBe(403);
+        expect(daOwner.body.error).toBe('platform_only');
+        const noop = await api().put('/settings/entitlements').set(bearer(owner)).send({ sala_node: true });
+        expect(noop.status).toBe(200);
+        expect(noop.body.sala_node).toBe(true);
+
+        const off = await api().put('/settings/entitlements').set(bearer(platform)).send({ sala_node: false });
         expect(off.status).toBe(200);
+        expect(off.body.sala_node).toBe(false);
+        const daOwnerOn = await api().put('/settings/entitlements').set(bearer(owner)).send({ sala_node: true });
+        expect(daOwnerOn.status).toBe(403);
 
         // Il flag operativo resta true a DB ma la lettura lo maschera.
         const flags = await api().get('/settings/features').set(bearer(owner));
@@ -136,7 +159,8 @@ describe('nodo di sala — fondazioni cloud', () => {
         expect(creds.status).toBe(403);
         expect(creds.body.error).toBe('tenant_suspended_or_module_off');
 
-        await api().put('/settings/entitlements').set(bearer(owner)).send({ sala_node: true });
+        const on = await api().put('/settings/entitlements').set(bearer(platform)).send({ sala_node: true });
+        expect(on.status).toBe(200);
     });
 
     it('/sala/config espone il blocco sala_node accanto ad agent', async () => {

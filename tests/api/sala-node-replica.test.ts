@@ -33,6 +33,20 @@ const freePort = (): Promise<number> => new Promise((resolve, reject) => {
 
 const NODE_DB = 'ristotest_node_replica';
 
+// Una sessione di cassa su un servizio futuro, tutta di questo file: quella
+// del servizio in corso può essere già aperta (o chiusa) da un test
+// precedente, e una per servizio è la regola.
+const touchCashSession = async (token: string, _db: Client, floatCents: number): Promise<number> => {
+    const open = await api().post('/cash/session').set(bearer(token)).send({ opening_float_cents: floatCents, date: '2031-03-15', shift: 'DINNER' });
+    if (open.status === 200 || open.status === 201) return Number(open.body?.session?.id ?? open.body?.id);
+    const cur = await _db.query(`SELECT id FROM cash_sessions WHERE tenant_id = 1 AND service_date = '2031-03-15' AND shift = 'DINNER'`);
+    const id = Number(cur.rows[0]?.id);
+    const patch = await api().patch(`/cash/session/${id}`).set(bearer(token)).send({ opening_float_cents: floatCents });
+    expect(patch.status).toBe(200);
+    return id;
+};
+
+
 describe('replica cloud→nodo', () => {
     let token: string;
     let child: ChildProcess | null = null;
@@ -91,8 +105,11 @@ describe('replica cloud→nodo', () => {
                 SALA_NODE_TOKEN: nodeToken,
                 SALA_NODE_PULL_INTERVAL_MS: '1000',
                 SALA_NODE_STATE_DIR: stateDir,
-                JWT_SECRET: 'test-jwt-secret',
-                JWT_REFRESH_SECRET: 'test-jwt-refresh-secret',
+                // Nessun segreto JWT sul nodo (fase A1): i token del cloud li
+                // verifica con le chiavi pubbliche ricevute dalle credenziali.
+                // Stringa vuota e non assente, così nemmeno la shell lo passa.
+                JWT_SECRET: '',
+                JWT_REFRESH_SECRET: '',
             },
             stdio: ['ignore', 'pipe', 'pipe'],
         });
@@ -294,6 +311,48 @@ describe('replica cloud→nodo', () => {
             }
         } finally {
             socket.close();
+        }
+    });
+
+    it('conti, pagamenti e sessioni di cassa scendono sul nodo (fase B2)', async () => {
+        // Prima il nodo serviva /bills/open dalla foto del bootstrap: un conto
+        // aperto dopo non c'era. Ora conto, incasso e chiusura convergono.
+        const room = await api().post('/rooms').set(bearer(token)).send({ name: 'Sala Conti Replica', width: 400, height: 300 });
+        const table = await api().post('/tables').set(bearer(token)).send({
+            name: 'CR1', shape: 'SQUARE', seats: 2, x: 40, y: 40, room_id: room.body.id, status: 'FREE',
+        });
+        const bill = await api().post(`/tables/${table.body.id}/bill`).set(bearer(token)).send({ total_cents: 3000, covers: 2 });
+        expect(bill.status).toBe(201);
+        const billId = bill.body.bill.id;
+        await finoA(async () => {
+            const r = await nodeDb!.query('SELECT status FROM table_bills WHERE id = $1', [billId]);
+            return r.rows[0]?.status === 'OPEN';
+        }, 'conto aperto sul nodo');
+
+        const pay = await api().post(`/bills/${billId}/payments`).set(bearer(token)).send({ method: 'CONTANTI', amount_cents: 1000 });
+        expect(pay.status).toBe(201);
+        await finoA(async () => {
+            const r = await nodeDb!.query('SELECT COUNT(*)::int AS n FROM table_bill_payments WHERE table_bill_id = $1', [billId]);
+            return r.rows[0].n === 1;
+        }, 'incasso sul nodo');
+
+        const close = await api().post(`/bills/${billId}/close`).set(bearer(token)).send({ payments: [{ method: 'CONTANTI', amount_cents: 2000 }] });
+        expect(close.status).toBe(200);
+        await finoA(async () => {
+            const r = await nodeDb!.query('SELECT status, (SELECT COUNT(*)::int FROM table_bill_payments WHERE table_bill_id = $1) AS n FROM table_bills WHERE id = $1', [billId]);
+            return r.rows[0]?.status === 'CLOSED' && r.rows[0]?.n === 2;
+        }, 'conto chiuso sul nodo coi suoi due incassi');
+
+        const cloudDb = new Client({ connectionString: process.env.DATABASE_URL || 'postgresql://localhost/ristotest_api' });
+        await cloudDb.connect();
+        try {
+            const sessionId = await touchCashSession(token, cloudDb, 5100);
+            await finoA(async () => {
+                const r = await nodeDb!.query('SELECT opening_float_cents FROM cash_sessions WHERE id = $1', [sessionId]);
+                return r.rows[0]?.opening_float_cents === 5100;
+            }, 'sessione di cassa sul nodo');
+        } finally {
+            await cloudDb.end();
         }
     });
 

@@ -4,17 +4,28 @@ import jwt from 'jsonwebtoken';
 import { queryWithRetry } from '../db.js';
 import { User, UserRole } from '../types.js';
 import { getAssignableRoles } from './permissions.js';
+import { getEs256SigningKey, getTrustedPublicKey, hs256Accepted, notifyUnknownKid, getNodeSessionKey, NODE_SESSION_AUDIENCE } from './jwtKeys.js';
+import { isServiceNode } from '../services/topology.js';
 
 // In produzione i segreti DEVONO arrivare dall'ambiente: per mesi Railway è
 // andato in produzione senza JWT_SECRET e i token erano firmati col fallback
 // committato qui sotto — chiunque leggesse il sorgente poteva coniarsi un
 // token OWNER valido (scoperto e sanato il 2026-08-22). Il boot fallisce
 // piuttosto che ripetere quella condizione.
-if (process.env.NODE_ENV === 'production' && (!process.env.JWT_SECRET || !process.env.JWT_REFRESH_SECRET)) {
+// Il nodo di sala è escluso: non firma niente e verifica con le chiavi
+// pubbliche del cloud (auth/jwtKeys.ts).
+if (process.env.NODE_ENV === 'production' && !isServiceNode && (!process.env.JWT_SECRET || !process.env.JWT_REFRESH_SECRET)) {
   throw new Error('JWT_SECRET e JWT_REFRESH_SECRET sono obbligatori in produzione');
 }
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
-const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'dev-refresh-secret-change-in-production';
+// Sul nodo di sala nessun ripiego: il nodo gira senza NODE_ENV=production e
+// col segreto di sviluppo (pubblicato qui sopra) chiunque in LAN potrebbe
+// firmarsi un token che il nodo accetta. Senza JWT_SECRET esplicito il nodo
+// verifica solo ES256 (fase A1, auth/jwtKeys.ts).
+const JWT_SECRET: string | null = process.env.JWT_SECRET
+  || (isServiceNode ? null : 'dev-secret-change-in-production');
+// Login e refresh vivono solo nel cloud: sul nodo niente ripiego nemmeno qui.
+const JWT_REFRESH_SECRET: string | null = process.env.JWT_REFRESH_SECRET
+  || (isServiceNode ? null : 'dev-refresh-secret-change-in-production');
 const JWT_EXPIRES_IN = '6h';
 const JWT_REFRESH_EXPIRES_IN = '7d';
 // Vita della riga in user_sessions: DEVE rispecchiare JWT_REFRESH_EXPIRES_IN
@@ -44,6 +55,10 @@ export interface TokenPayload {
   // bypassa la matrice permessi del tenant — un token di piattaforma senza
   // scope resta confinato al pannello, come prima.
   scopedTenantId?: number;
+  // Sessione aperta col PIN di sala sul nodo (fase A2): firmata dal nodo,
+  // valida solo lì e solo per i permessi di servizio (SERVICE_PERMISSIONS in
+  // auth/permissions.ts). authorize() e i gate di ruolo la rifiutano.
+  scope?: 'service';
 }
 
 // Vero solo per una sessione di piattaforma entrata in un tenant. Ogni
@@ -53,6 +68,20 @@ export const isPlatformScopedSession = (payload: TokenPayload): boolean =>
   payload.role === UserRole.PLATFORM_ADMIN
   && Number.isInteger(payload.scopedTenantId)
   && (payload.scopedTenantId as number) > 0;
+
+const requireHsSecret = (): string => {
+  if (!JWT_SECRET) throw new Error('JWT_SECRET assente: questo processo non firma token HS256');
+  return JWT_SECRET;
+};
+
+// Gli access token (e quelli di impersonation, che sono access token corti)
+// escono ES256 quando la transizione è al passo 2 (JWT_SIGN_ES256=1, vedi
+// auth/jwtKeys.ts), altrimenti HS256 come sempre.
+const signAccessToken = (payload: object, expiresIn: jwt.SignOptions['expiresIn']): string => {
+  const es = getEs256SigningKey();
+  if (es) return jwt.sign(payload, es.key, { algorithm: 'ES256', keyid: es.kid, expiresIn });
+  return jwt.sign(payload, requireHsSecret(), { algorithm: 'HS256', expiresIn });
+};
 
 export interface AuthTokens {
   accessToken: string;
@@ -102,11 +131,13 @@ export class AuthService {
 
   // Generate access and refresh tokens
   static generateTokens(payload: TokenPayload): AuthTokens {
-    const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+    const accessToken = signAccessToken(payload, JWT_EXPIRES_IN);
     // jti casuale: due login dello stesso utente nello stesso secondo
     // producono altrimenti JWT byte-identici (stesso iat), stesso digest, e
     // l'INSERT in user_sessions viola la UNIQUE su token_digest.
+    if (!JWT_REFRESH_SECRET) throw new Error('JWT_REFRESH_SECRET assente: questo processo non emette sessioni');
     const refreshToken = jwt.sign(payload, JWT_REFRESH_SECRET, {
+      algorithm: 'HS256',
       expiresIn: JWT_REFRESH_EXPIRES_IN,
       jwtid: randomUUID()
     });
@@ -122,10 +153,9 @@ export class AuthService {
   static readonly IMPERSONATION_TTL_SECONDS = 15 * 60;
 
   static generateImpersonationToken(payload: TokenPayload, impersonatedBy: string): string {
-    return jwt.sign(
+    return signAccessToken(
       { ...payload, impersonated_by: impersonatedBy },
-      JWT_SECRET,
-      { expiresIn: AuthService.IMPERSONATION_TTL_SECONDS }
+      AuthService.IMPERSONATION_TTL_SECONDS
     );
   }
 
@@ -142,14 +172,15 @@ export class AuthService {
   static generateStepUpToken(userId: number, tenantId: number, scope: string): string {
     return jwt.sign(
       { purpose: 'step_up', scope, userId, tenantId },
-      JWT_SECRET,
-      { expiresIn: AuthService.STEP_UP_TTL_SECONDS, jwtid: randomUUID() }
+      requireHsSecret(),
+      { algorithm: 'HS256', expiresIn: AuthService.STEP_UP_TTL_SECONDS, jwtid: randomUUID() }
     );
   }
 
   static verifyStepUpToken(token: string, scope: string): { userId: number; tenantId: number } | null {
     try {
-      const payload = jwt.verify(token, JWT_SECRET) as { purpose?: string; scope?: string; userId?: number; tenantId?: number };
+      if (!JWT_SECRET) return null;
+      const payload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }) as { purpose?: string; scope?: string; userId?: number; tenantId?: number };
       if (payload.purpose !== 'step_up' || payload.scope !== scope) {
         return null;
       }
@@ -193,19 +224,82 @@ export class AuthService {
     return { tokens, email: row.email };
   }
 
-  // Verify access token
+  // Verify access token. L'algoritmo si legge dall'intestazione ma la chiave
+  // la sceglie il server, e ogni verify fissa `algorithms`: un token HS256
+  // firmato usando come segreto la chiave PUBBLICA (che il nodo e chiunque
+  // la riceva conoscono) non passa — è l'«algorithm confusion».
   static verifyAccessToken(token: string): TokenPayload | null {
+    return AuthService.verifyWithKnownKeys(token, false);
+  }
+
+  // Il cuore delle due verifiche. Tre famiglie di token:
+  // - ES256 del cloud (kid fra le chiavi pubbliche fidate);
+  // - ES256 del NODO (kid «node-…», solo sul nodo, audience sala-node): le
+  //   sessioni aperte col PIN di sala;
+  // - HS256 del cloud, finché la transizione lo accetta.
+  private static verifyWithKnownKeys(token: string, ignoreExpiration: boolean): TokenPayload | null {
     try {
-      return jwt.verify(token, JWT_SECRET) as TokenPayload;
+      const header = (jwt.decode(token, { complete: true }) as jwt.Jwt | null)?.header;
+      if (header?.alg === 'ES256' && typeof header.kid === 'string') {
+        if (header.kid.startsWith('node-')) {
+          const node = getNodeSessionKey();
+          if (!node || node.kid !== header.kid) return null;
+          const payload = jwt.verify(token, node.publicKey, { algorithms: ['ES256'], audience: NODE_SESSION_AUDIENCE, ignoreExpiration }) as TokenPayload;
+          // Una sessione del nodo è sempre di servizio, qualunque cosa dica.
+          return { ...payload, scope: 'service' };
+        }
+        const key = getTrustedPublicKey(header.kid);
+        if (!key) {
+          notifyUnknownKid();
+          return null;
+        }
+        const payload = jwt.verify(token, key, { algorithms: ['ES256'], ignoreExpiration }) as TokenPayload;
+        // Il claim scope lo mette solo il nodo: in un token del cloud non
+        // deve esserci, e se c'è il token non è nostro.
+        return (payload as any).scope === undefined ? payload : null;
+      }
+      if (header?.alg === 'HS256' && JWT_SECRET && hs256Accepted()) {
+        return jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'], ignoreExpiration }) as TokenPayload;
+      }
+      return null;
     } catch {
       return null;
     }
   }
 
+  // La sessione del PIN di sala: solo sul nodo, firmata con la sua chiave.
+  static generateNodeServiceToken(payload: TokenPayload, ttlSeconds: number): string {
+    const node = getNodeSessionKey();
+    if (!node) throw new Error('chiave di sessione del nodo assente: il PIN di sala vive solo sul nodo');
+    const { scope: _scope, scopedTenantId: _scoped, ...base } = payload;
+    return jwt.sign(
+      { ...base, scope: 'service' },
+      node.key,
+      { algorithm: 'ES256', keyid: node.kid, audience: NODE_SESSION_AUDIENCE, expiresIn: ttlSeconds }
+    );
+  }
+
+  // Come verifyAccessToken, ma un token SCADUTO con firma valida non è null:
+  // torna con expired=true e la scadenza. Serve al nodo di sala, che a linea
+  // giù concede una proroga (auth/authMiddleware.ts, salaNodeAccess). La
+  // firma si verifica comunque per intero: si ignora solo exp.
+  static inspectAccessToken(token: string): { payload: TokenPayload; expired: boolean; expiresAtMs: number | null } | null {
+    const valid = AuthService.verifyWithKnownKeys(token, false);
+    if (valid) {
+      const exp = (valid as any).exp;
+      return { payload: valid, expired: false, expiresAtMs: typeof exp === 'number' ? exp * 1000 : null };
+    }
+    const expired = AuthService.verifyWithKnownKeys(token, true);
+    const exp = (expired as any)?.exp;
+    if (!expired || typeof exp !== 'number') return null;
+    return { payload: expired, expired: true, expiresAtMs: exp * 1000 };
+  }
+
   // Verify refresh token
   static verifyRefreshToken(token: string): TokenPayload | null {
     try {
-      return jwt.verify(token, JWT_REFRESH_SECRET) as TokenPayload;
+      if (!JWT_REFRESH_SECRET) return null;
+      return jwt.verify(token, JWT_REFRESH_SECRET, { algorithms: ['HS256'] }) as TokenPayload;
     } catch {
       return null;
     }
@@ -439,6 +533,7 @@ export class AuthService {
       `SELECT u.id, u.email, u.full_name, u.phone, u.role, u.is_active, u.created_at,
               u.updated_at, u.last_login, u.preferred_landing_view, u.preferred_orderpad_layout,
               u.preferred_design_style, u.language,
+              u.service_pin_hash IS NOT NULL AS has_service_pin,
               u.tenant_id, t.slug AS tenant_slug, t.name AS tenant_name,
               t.default_language AS tenant_default_language,
               t.currency AS tenant_currency, t.timezone AS tenant_timezone,
@@ -469,6 +564,7 @@ export class AuthService {
       preferred_orderpad_layout: row.preferred_orderpad_layout ?? null,
       preferred_design_style: row.preferred_design_style ?? null,
       language: row.language ?? null,
+      has_service_pin: row.has_service_pin === true,
       tenant: {
         id: Number(row.tenant_id),
         slug: row.tenant_slug,
@@ -480,6 +576,22 @@ export class AuthService {
         needs_onboarding: row.tenant_needs_onboarding === true
       }
     };
+  }
+
+  // PIN di sala (fase A2): 4–6 cifre, bcrypt come le password. null lo
+  // toglie. Scende al nodo con la configurazione.
+  static async setServicePin(userId: number, tenantId: number, pin: string | null): Promise<boolean> {
+    const hash = pin === null ? null : await bcrypt.hash(pin, 10);
+    const result = await queryWithRetry(
+      `UPDATE users
+          SET service_pin_hash = $1,
+              service_pin_updated_at = CASE WHEN $1::text IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END,
+              updated_at = CURRENT_TIMESTAMP
+        WHERE id = $2 AND tenant_id = $3
+        RETURNING id`,
+      [hash, userId, tenantId]
+    );
+    return result.rows.length > 0;
   }
 
   // Get all users

@@ -3,7 +3,7 @@ import { socketClient } from './socketClient';
 import { authApiService } from './authApiService';
 import { buildApiError } from './apiError';
 import { offlineQueue } from './offlineQueue';
-import { routedGetUrl, routeWriteUrl, cloudFallbackUrl, noteRoutedResponse, fetchNodeAware } from './apiRouting';
+import { routedGetUrl, routeServiceUrl, cloudFallbackUrl, noteRoutedResponse, fetchNodeAware, isAuthorityOnNodeRefusal } from './apiRouting';
 
 // Use import.meta.env for Vite frontend environment variables
 const API_URL = import.meta.env.VITE_API_URL || "https://ristomanager-production.up.railway.app";
@@ -38,14 +38,15 @@ const fetchWithAuth = async (
   retried = false
 ): Promise<Response> => {
   // Fase 4c: con l'autorità in sala le scritture whitelisted (tavoli,
-  // unioni, chiusure) vanno al nodo — no-op per tutto il resto del file.
-  url = routeWriteUrl(url, (options.method as string) || 'GET');
+  // unioni, chiusure) vanno al nodo. Fase B4: anche le letture con cui
+  // l'app apre la sala (pianta, menu, prenotazioni a finestra) — no-op per
+  // tutto il resto del file.
+  url = routeServiceUrl(url, (options.method as string) || 'GET');
   let response: Response;
   try {
     response = await fetchNodeAware(url, options);
   } catch (err) {
-    // Nodo di sala non raggiungibile (il riepilogo cucina è l'unica GET di
-    // questo file instradata in LAN) → retry immediato sul cloud, come nei
+    // Nodo di sala non raggiungibile → retry immediato sul cloud, come nei
     // servizi sala; errori verso il cloud si propagano com'è sempre stato.
     const cloudUrl = cloudFallbackUrl(url);
     if (!cloudUrl) throw err;
@@ -76,7 +77,8 @@ const fetchWithAuth = async (
 // Scritture che possono aspettare la rete: chi passa `offline` accetta che,
 // se il server non è mai stato raggiunto, la richiesta finisca in coda e
 // venga rigiocata al riconnettersi. Va passato SOLO su richieste sicure da
-// rigiocare: PUT e DELETE, o POST con chiave di idempotenza nel body.
+// rigiocare: PUT e DELETE, PATCH a valori assoluti, o POST con chiave di
+// idempotenza nel body.
 type OfflineSpec = { description: string };
 
 // Helper to make authenticated requests with error handling
@@ -97,9 +99,9 @@ const apiRequest = async <T>(
     // l'unico caso in cui accodare è onesto — su una risposta HTTP il
     // server ha già deciso e la coda non deve ricontestarla.
     const method = (init.method ?? 'GET').toUpperCase();
-    if (offline && (method === 'PUT' || method === 'DELETE' || method === 'POST')) {
+    if (offline && (method === 'PUT' || method === 'DELETE' || method === 'POST' || method === 'PATCH')) {
       offlineQueue.enqueue({
-        method: method as 'PUT' | 'DELETE' | 'POST',
+        method: method as 'PUT' | 'DELETE' | 'POST' | 'PATCH',
         url,
         body: typeof init.body === 'string' ? init.body : null,
         description: offline.description,
@@ -114,6 +116,24 @@ const apiRequest = async <T>(
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({ error: 'Request failed' }));
+    // Fase B4: il cloud rifiuta perché l'autorità è sul nodo e da qui il
+    // nodo non si raggiunge. La scrittura non è stata decisa da nessuno:
+    // come un errore di rete, va in coda e partirà verso il nodo appena
+    // torna raggiungibile.
+    const method = (init.method ?? 'GET').toUpperCase();
+    if (offline && isAuthorityOnNodeRefusal(response.status, errorData)
+        && (method === 'PUT' || method === 'DELETE' || method === 'POST' || method === 'PATCH')) {
+      offlineQueue.enqueue({
+        method: method as 'PUT' | 'DELETE' | 'POST' | 'PATCH',
+        url,
+        body: typeof init.body === 'string' ? init.body : null,
+        description: offline.description,
+      });
+      throw buildApiError(409, {
+        error: `Nodo di sala non raggiungibile: «${offline.description}» è in coda e partirà appena torna`,
+        queued: true,
+      });
+    }
     throw buildApiError(response.status, errorData);
   }
 
@@ -149,9 +169,36 @@ export const updateReservation = async (id: number, reservation: Partial<Reserva
     method: 'PUT',
     headers: getHeaders(),
     body: JSON.stringify(reservation),
-    // Check-in, cambio stato, assegnazione tavolo: il flusso della reception
-    // durante il servizio. PUT idempotente → sicuro da rigiocare.
+    // Modifiche della prenotazione (cloud). Check-in e tavolo passano da
+    // updateReservationService. PUT idempotente → sicuro da rigiocare.
     offline: { description: `aggiornamento della prenotazione ${id}` },
+  });
+};
+
+/** Le due colonne del servizio (tappa C): dove siede l'ospite e a che punto
+ *  è. Col servizio in sala va al nodo e funziona a linea caduta; il resto
+ *  della prenotazione passa da updateReservation (cloud). Valori assoluti:
+ *  rigiocarla è sicuro, quindi a nodo irraggiungibile va in coda. */
+export type ReservationServicePatch = { table_id?: number | null; arrival_status?: Reservation['arrival_status'] };
+
+export const updateReservationService = async (id: number, patch: ReservationServicePatch): Promise<Reservation> => {
+  return apiRequest<Reservation>(`${API_URL}/reservations/${id}/service`, {
+    method: 'PATCH',
+    headers: getHeaders(),
+    body: JSON.stringify(patch),
+    offline: { description: `accoglienza della prenotazione ${id}` },
+  });
+};
+
+/** Le chiavi che updateReservationService sa scrivere. */
+export const RESERVATION_SERVICE_KEYS = ['table_id', 'arrival_status'] as const;
+
+/** Walk-in: nasce dove sta il servizio (col servizio in sala sul nodo). */
+export const createWalkIn = async (input: { customer_name: string; guests: number; phone?: string; notes?: string }): Promise<Reservation> => {
+  return apiRequest<Reservation>(`${API_URL}/reservations/walk-in`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(input),
   });
 };
 

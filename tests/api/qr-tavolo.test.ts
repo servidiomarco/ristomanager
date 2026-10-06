@@ -25,6 +25,9 @@ describe('QR unico al tavolo', () => {
     let billId = 0;
     let shareToken = '';
     let db: Client;
+    // I flag com'erano prima del file: i test che vengono dopo (il nodo di
+    // sala) li trovano accesi dai file precedenti, e qui si rimettono così.
+    let flagsPrima: Record<string, boolean> = {};
 
     const notificheConto = async () =>
         (await db.query(
@@ -47,6 +50,12 @@ describe('QR unico al tavolo', () => {
         db = new Client({ connectionString: dbUrl });
         await db.connect();
 
+        const prima = await api().get('/settings/features').set(bearer(owner));
+        flagsPrima = {
+            table_orders_enabled: prima.body.table_orders_enabled === true,
+            pay_at_table_enabled: prima.body.pay_at_table_enabled === true,
+            digital_menu_enabled: prima.body.digital_menu_enabled === true,
+        };
         await api().put('/settings/features').set(bearer(owner)).send({
             table_orders_enabled: true,
             pay_at_table_enabled: true,
@@ -78,12 +87,7 @@ describe('QR unico al tavolo', () => {
     });
 
     afterAll(async () => {
-        // orders-bills e gli altri file partono coi flag spenti.
-        await api().put('/settings/features').set(bearer(owner)).send({
-            table_orders_enabled: false,
-            pay_at_table_enabled: false,
-            digital_menu_enabled: false,
-        });
+        await api().put('/settings/features').set(bearer(owner)).send(flagsPrima);
         await db.query(`DELETE FROM table_merges WHERE primary_id = $1`, [tavolo1]);
         await db.query(`DELETE FROM notifications WHERE tag LIKE 'bill-paying-%'`);
         await db.query(`DELETE FROM users WHERE email = ANY($1)`, [[WAITER_EMAIL, CASSA_EMAIL]]);
