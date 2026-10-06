@@ -11,7 +11,8 @@
 //   PASSEPARTOUT_WS_URL=http://192.168.1.10:7606/AdapterWS \
 //   PASSEPARTOUT_WS_USER=... PASSEPARTOUT_WS_PASSWORD=... \
 //   PP_AGENT_SERVER_URL=https://prenotazioni.vecchiofrantoio.com \
-//   PP_AGENT_TOKEN=<stesso valore di PASSEPARTOUT_AGENT_TOKEN su Railway> \
+//   PP_AGENT_TOKEN=<tenants.passepartout_agent_token del ristorante; per il
+//                   ristorante 1 vale anche PASSEPARTOUT_AGENT_TOKEN su Railway> \
 //   node --loader ts-node/esm scripts/passepartout-agent.ts
 //
 // Su Windows conviene registrarlo come servizio (nssm) o operazione

@@ -41,6 +41,11 @@ const loadNodeTenant = async (): Promise<number | null> => runAsPlatform(async (
     return nodeTenantId;
 });
 
+/** Il ristorante servito da questo nodo (null finché il bootstrap non
+ *  l'ha scritto): lo usa il ponte Passepartout per dare un ristorante al
+ *  token che il supervisore passa all'agente del PC. */
+export const getSalaNodeTenantId = (): Promise<number | null> => loadNodeTenant();
+
 const userActive = new Map<string, { active: boolean; at: number }>();
 
 const isUserActiveLocally = async (tenantId: number, userId: number): Promise<boolean> => {

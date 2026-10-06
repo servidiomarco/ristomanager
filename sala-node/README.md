@@ -505,9 +505,15 @@ cassa avvengono sul nodo, anche a linea caduta.
   `set PASSEPARTOUT_AGENT_TOKEN=…` al nodo e `set PP_AGENT_NODE_URL=https://sala.<slug>.sympotia.com:8443`
   all'agente. Il supervisore usa di default l'indirizzo dell'agente di
   stampa (`passepartout_agent.node_url` per cambiarlo).
-- **Tipo pagamento e documento** (`PASSEPARTOUT_TIPO_PAGAMENTO`,
-  `PASSEPARTOUT_TIPO_DOCUMENTO`) arrivano al nodo con le credenziali, una
-  sola fonte (Railway). Sul disco del nodo (`sala-node-agenti.json`, insieme
+- **Il token dell'agente verso il cloud** è quello del ristorante:
+  `SELECT passepartout_agent_token FROM tenants WHERE id = <ristorante>`
+  (lo genera la migrazione, per tutti). Il ristorante 1 può continuare a
+  usare il token storico `PASSEPARTOUT_AGENT_TOKEN` di Railway. Agenti di
+  ristoranti diversi convivono: ognuno scalza solo il proprio.
+- **Tipo pagamento e documento** si impostano in Impostazioni → Passepartout
+  (per il ristorante 1 `PASSEPARTOUT_TIPO_PAGAMENTO` /
+  `PASSEPARTOUT_TIPO_DOCUMENTO` restano il ripiego) e arrivano al nodo con
+  le credenziali, una sola fonte (il cloud). Sul disco del nodo (`sala-node-agenti.json`, insieme
   al token legacy dell'agente di stampa): un nodo riavviato a linea giù li
   ha ancora. Prima il token legacy viveva solo in memoria, e un riavvio a
   linea giù lasciava l'agente di stampa a 401.

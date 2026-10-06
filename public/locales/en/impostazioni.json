@@ -320,6 +320,20 @@
     "syncAgent": "The floor PC agent isn't ready",
     "syncBusy": "A sync is already running",
     "saved": "Saved",
-    "saveFailed": "Operation failed"
+    "saveFailed": "Operation failed",
+    "connTitle": "Connection and till closing",
+    "connSubtitle": "Floor PC and how the till closes CRM bills",
+    "connDetail": "PC {{pc}} · till software {{versione}} · connected since {{when}}",
+    "capRiprendi": "Resumable closing",
+    "capPrenotazioni": "Bookings",
+    "payType": "Payment type on the till",
+    "payTypeHint": "A dedicated type, for example ESTERNO, so the till doesn't count the takings twice. None = tables are closed on the till by hand.",
+    "payTypeFromServer": "Using {{tipo}}, set on the server. Pick it here to manage it from this section.",
+    "payTypeNone": "None (close by hand)",
+    "payTypeNeedsAgent": "With the floor PC connected, the list shows the till's types.",
+    "docType": "Document",
+    "docTypeHint": "The document the till issues when the bill is closed from the CRM.",
+    "docReceipt": "Receipt",
+    "docProforma": "Proforma"
   }
 }

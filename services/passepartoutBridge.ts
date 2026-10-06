@@ -4,16 +4,18 @@
 // Il gestionale vive sulla rete del locale e non è raggiungibile dal cloud:
 // l'agente (scripts/passepartout-agent.ts) apre LUI una connessione socket.io
 // in uscita verso questo server, sul namespace dedicato `/pp-agent`,
-// autenticandosi con il segreto condiviso PASSEPARTOUT_AGENT_TOKEN. Da quel
-// momento il backend può eseguire chiamate RPC verso il gestionale con
-// `callPassepartout(op, params)` — request/response via ack socket.io con
-// timeout, nessuna coda e nessun polling (a differenza del print-agent, qui
-// il cameriere sta aspettando la risposta a schermo).
+// autenticandosi col token del SUO ristorante (tenants.passepartout_agent_token;
+// il token storico PASSEPARTOUT_AGENT_TOKEN vale per il ristorante 1). Da quel
+// momento il backend può eseguire chiamate RPC verso il gestionale di quel
+// ristorante con `callPassepartout(tenantId, op, params)` — request/response
+// via ack socket.io con timeout, nessuna coda e nessun polling (a differenza
+// del print-agent, qui il cameriere sta aspettando la risposta a schermo).
 //
 // Il namespace è separato dal default "/" di proposito: il middleware JWT
 // degli utenti resta intatto, e un token agente non può ricevere i broadcast
-// del CRM né viceversa. Un solo agente alla volta: una nuova connessione
-// valida scalza la precedente (riavvio dell'agente = riconnessione pulita).
+// del CRM né viceversa. Un agente alla volta PER RISTORANTE: una nuova
+// connessione valida scalza la precedente dello stesso ristorante (riavvio
+// dell'agente = riconnessione pulita) e non tocca quelle degli altri.
 
 import type { Server as SocketIOServer, Socket } from 'socket.io';
 import type { PassepartoutComanda } from './passepartoutService.js';
@@ -54,56 +56,72 @@ export class PassepartoutBridgeError extends Error {
     }
 }
 
-let agentSocket: Socket | null = null;
-let connectedAt: Date | null = null;
-let agentHello: { hostname?: string; versioneGestionale?: string; capabilities?: string[] } = {};
-
-export function isPassepartoutAgentConfigured(): boolean {
-    return Boolean((process.env.PASSEPARTOUT_AGENT_TOKEN || '').trim());
+interface AgentConn {
+    socket: Socket;
+    connectedAt: Date;
+    hello: { hostname?: string; versioneGestionale?: string; capabilities?: string[] };
 }
 
-export function getPassepartoutAgentStatus() {
+const agents = new Map<number, AgentConn>();
+
+/** Dal token dell'handshake al ristorante; null = token sconosciuto. Lo
+ *  fornisce server.ts, che conosce il token storico e la colonna dei
+ *  token per ristorante. */
+export type PassepartoutTenantResolver = (token: string) => Promise<number | null>;
+
+export function getPassepartoutAgentStatus(tenantId: number) {
+    const conn = agents.get(tenantId);
     return {
-        configured: isPassepartoutAgentConfigured(),
-        connected: agentSocket != null,
-        connected_at: connectedAt?.toISOString() ?? null,
-        hostname: agentHello.hostname ?? null,
-        versione_gestionale: agentHello.versioneGestionale ?? null,
-        capabilities: agentHello.capabilities ?? [],
+        connected: conn != null,
+        connected_at: conn?.connectedAt.toISOString() ?? null,
+        hostname: conn?.hello.hostname ?? null,
+        versione_gestionale: conn?.hello.versioneGestionale ?? null,
+        capabilities: conn?.hello.capabilities ?? [],
     };
 }
 
-/** L'agente collegato dichiara di saper fare `cap` (nel suo agent:hello).
- *  'chiudi-riprendi' (fase B5): prima di chiudere guarda nell'archivio del
- *  giorno se il conto della comanda c'è già, così un nuovo tentativo dopo
- *  una risposta persa non rifà lo scontrino. Un agente vecchio non lo dice,
- *  e con lui i tentativi automatici non partono. */
-export function passepartoutAgentSupports(cap: string): boolean {
-    return agentSocket != null && (agentHello.capabilities ?? []).includes(cap);
+/** I ristoranti con un agente collegato adesso: i giri periodici lavorano
+ *  solo su questi. */
+export function connectedPassepartoutTenants(): number[] {
+    return [...agents.keys()];
 }
 
-export function setupPassepartoutBridge(io: SocketIOServer) {
+/** L'agente collegato del ristorante dichiara di saper fare `cap` (nel suo
+ *  agent:hello). 'chiudi-riprendi' (fase B5): prima di chiudere guarda
+ *  nell'archivio del giorno se il conto della comanda c'è già, così un
+ *  nuovo tentativo dopo una risposta persa non rifà lo scontrino. Un agente
+ *  vecchio non lo dice, e con lui i tentativi automatici non partono. */
+export function passepartoutAgentSupports(tenantId: number, cap: string): boolean {
+    const conn = agents.get(tenantId);
+    return conn != null && (conn.hello.capabilities ?? []).includes(cap);
+}
+
+export function setupPassepartoutBridge(io: SocketIOServer, resolveTenant: PassepartoutTenantResolver) {
     const nsp = io.of('/pp-agent');
 
     nsp.use((socket, next) => {
-        const expected = (process.env.PASSEPARTOUT_AGENT_TOKEN || '').trim();
-        if (!expected) return next(new Error('Agente Passepartout non configurato'));
         const provided = String(socket.handshake.auth?.token || '');
-        if (provided !== expected) return next(new Error('Token agente non valido'));
-        next();
+        resolveTenant(provided)
+            .then((tenantId) => {
+                if (tenantId == null) return next(new Error('Token agente non valido'));
+                socket.data.tenantId = tenantId;
+                next();
+            })
+            .catch(() => next(new Error('Token agente non verificabile')));
     });
 
     nsp.on('connection', (socket) => {
-        if (agentSocket && agentSocket.id !== socket.id) {
-            try { agentSocket.disconnect(true); } catch (_) {}
+        const tenantId = Number(socket.data.tenantId);
+        const prima = agents.get(tenantId);
+        if (prima && prima.socket.id !== socket.id) {
+            try { prima.socket.disconnect(true); } catch (_) {}
         }
-        agentSocket = socket;
-        connectedAt = new Date();
-        agentHello = {};
-        console.log(`[pp-agent] agente connesso: ${socket.id}`);
+        const conn: AgentConn = { socket, connectedAt: new Date(), hello: {} };
+        agents.set(tenantId, conn);
+        console.log(`[pp-agent] agente connesso: ${socket.id} (ristorante ${tenantId})`);
 
         socket.on('agent:hello', (info: any) => {
-            agentHello = {
+            conn.hello = {
                 hostname: typeof info?.hostname === 'string' ? info.hostname : undefined,
                 versioneGestionale: typeof info?.versioneGestionale === 'string' ? info.versioneGestionale : undefined,
                 capabilities: Array.isArray(info?.capabilities)
@@ -113,30 +131,27 @@ export function setupPassepartoutBridge(io: SocketIOServer) {
         });
 
         socket.on('disconnect', (reason) => {
-            if (agentSocket?.id === socket.id) {
-                agentSocket = null;
-                connectedAt = null;
-                agentHello = {};
-            }
-            console.log(`[pp-agent] agente disconnesso (${reason})`);
+            if (agents.get(tenantId)?.socket.id === socket.id) agents.delete(tenantId);
+            console.log(`[pp-agent] agente disconnesso (${reason}, ristorante ${tenantId})`);
         });
     });
 }
 
 /**
- * Esegue un'operazione sul gestionale attraverso l'agente LAN.
- * Rilancia PassepartoutBridgeError con kind:
- *  - 'agent_offline' se nessun agente è collegato (→ 503 lato API)
+ * Esegue un'operazione sul gestionale del ristorante attraverso il suo
+ * agente LAN. Rilancia PassepartoutBridgeError con kind:
+ *  - 'agent_offline' se il ristorante non ha un agente collegato (→ 503 lato API)
  *  - 'timeout' se l'agente non risponde in tempo
  *  - 'gestionale' se il gestionale ha risposto con un errore applicativo
  *  - 'agent' per errori interni dell'agente
  */
 export async function callPassepartout<T = unknown>(
+    tenantId: number,
     op: PassepartoutOp,
     params: Record<string, unknown> = {},
     timeoutMs = 20_000,
 ): Promise<T> {
-    const socket = agentSocket;
+    const socket = agents.get(tenantId)?.socket;
     if (!socket) {
         throw new PassepartoutBridgeError(
             'Agente Passepartout non collegato: il ristorante è offline?',
