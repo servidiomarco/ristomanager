@@ -1076,6 +1076,9 @@ export interface User {
   // Reportistica anche senza reports:view in matrice. Serve al lancio
   // ristretto — i permessi di ruolo restano la via ordinaria.
   is_reports_admin?: boolean;
+  // Ha impostato il PIN di sala (fase A2): con quello entra sul nodo a
+  // linea caduta. Al browser arriva solo questo flag, mai il PIN o il suo hash.
+  has_service_pin?: boolean;
   // Ristorante di appartenenza (Fase B2). Opzionale: gli elenchi utenti
   // non lo caricano, login e /auth/me sì. `features` sono gli entitlements
   // commerciali (Fase C1): quali add-on il ristorante ha comprato. Il

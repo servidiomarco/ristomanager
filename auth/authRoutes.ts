@@ -9,7 +9,10 @@ import { LogService, ActivityAction, ResourceType } from '../activityLogs/logSer
 import { getTenantFeatures } from '../services/entitlements.js';
 import { isSmtpConfigured, sendMail, isPlatformMailConfigured, sendPlatformMail } from '../services/smtpService.js';
 import { PLATFORM_NAME } from '../platform.js';
-import { queryWithRetry, runAsPlatform } from '../db.js';
+import { queryWithRetry, runAsPlatform, runWithTenantContext } from '../db.js';
+import { isServiceNode } from '../services/topology.js';
+import { salaNodeAccessPolicy } from '../services/salaNodeAccess.js';
+import { SERVICE_PERMISSIONS } from './permissions.js';
 
 const router = Router();
 
@@ -192,8 +195,12 @@ router.get('/me', authenticate, async (req: Request, res: Response) => {
       });
     }
 
-    // Get user's permissions from database
-    const permissions = await RolePermissionService.getPermissionsForRole(req.user.tenantId, user.role);
+    // Get user's permissions from database. Una sessione col PIN di sala
+    // vede solo quelli di servizio, come al login col PIN.
+    const rolePermissions = await RolePermissionService.getPermissionsForRole(req.user.tenantId, user.role);
+    const permissions = req.user.scope === 'service'
+      ? rolePermissions.filter(p => SERVICE_PERMISSIONS.has(p))
+      : rolePermissions;
 
     // Entitlements commerciali (C1) — stessa forma della risposta di login.
     const features = await getTenantFeatures(req.user.tenantId);
@@ -420,6 +427,146 @@ router.post('/me/email', authenticate, async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('Change email error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ============================================
+// PIN DI SALA (fase A2 del piano «sala, comande e conto sul nodo»)
+// ============================================
+// Con la linea caduta il login con email e password non si può fare (lo
+// verifica il cloud). Sul nodo si entra col PIN, come col codice operatore
+// dei palmari Passepartout: nome dall'elenco + 4–6 cifre. La sessione la
+// conia il nodo con la sua chiave, vale solo lì e solo per il servizio.
+
+const PIN_RE = /^\d{4,6}$/;
+// Niente PIN banali: tutte cifre uguali o una scala (1234, 9876).
+const isTrivialPin = (pin: string): boolean => {
+  if (/^(\d)\1+$/.test(pin)) return true;
+  const digits = pin.split('').map(Number);
+  const step = digits[1] - digits[0];
+  return (step === 1 || step === -1) && digits.every((d, i) => i === 0 || d - digits[i - 1] === step);
+};
+
+// PUT /auth/me/service-pin - Imposta il proprio PIN di sala (solo cloud)
+router.put('/me/service-pin', authenticate, async (req: Request, res: Response) => {
+  if (isServiceNode) return res.status(503).json({ error: 'profile_not_served' });
+  if (!req.user || req.user.scope === 'service') return res.status(403).json({ error: 'Insufficient permissions' });
+  const pin = typeof req.body?.pin === 'string' ? req.body.pin.trim() : '';
+  if (!PIN_RE.test(pin)) {
+    return res.status(400).json({ error: 'invalid_pin', message: 'Il PIN è di 4–6 cifre.' });
+  }
+  if (isTrivialPin(pin)) {
+    return res.status(400).json({ error: 'trivial_pin', message: 'Scegli un PIN meno prevedibile.' });
+  }
+  try {
+    const ok = await AuthService.setServicePin(req.user.userId, req.user.tenantId, pin);
+    if (!ok) return res.status(404).json({ error: 'User not found' });
+    res.json({ has_service_pin: true });
+  } catch (error) {
+    console.error('Set service PIN error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// DELETE /auth/me/service-pin - Toglie il proprio PIN di sala (solo cloud)
+router.delete('/me/service-pin', authenticate, async (req: Request, res: Response) => {
+  if (isServiceNode) return res.status(503).json({ error: 'profile_not_served' });
+  if (!req.user || req.user.scope === 'service') return res.status(403).json({ error: 'Insufficient permissions' });
+  try {
+    await AuthService.setServicePin(req.user.userId, req.user.tenantId, null);
+    res.json({ has_service_pin: false });
+  } catch (error) {
+    console.error('Clear service PIN error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Contro il brute-force: 5 PIN sbagliati bloccano QUELL'utente per 5
+// minuti (10^4 combinazioni non reggono altrimenti), e un dispositivo non
+// prova più di 30 volte in 5 minuti su tutti gli utenti insieme.
+const PIN_MAX_FAILURES = 5;
+const PIN_LOCK_MS = 5 * 60 * 1000;
+const pinFailures = new Map<number, { count: number; lockedUntil: number }>();
+const pinLoginLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  limit: 30,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'rate_limited', message: 'Troppi tentativi, riprova tra qualche minuto.' },
+});
+const PIN_SESSION_SECONDS = Math.max(1, Number(process.env.SALA_NODE_PIN_SESSION_HOURS ?? 12)) * 60 * 60;
+
+// GET /auth/pin-users - Chi può entrare col PIN su questo nodo (solo nodo)
+router.get('/pin-users', async (_req: Request, res: Response) => {
+  if (!isServiceNode) return res.status(404).json({ error: 'Not found' });
+  try {
+    const tenantId = await salaNodeAccessPolicy.loadNodeTenant();
+    if (tenantId === null) return res.status(503).json({ error: 'node_not_ready' });
+    const rs = await runWithTenantContext(tenantId, () => queryWithRetry(
+      `SELECT id, full_name, role FROM users
+        WHERE tenant_id = $1 AND is_active AND service_pin_hash IS NOT NULL AND role <> 'PLATFORM_ADMIN'
+        ORDER BY full_name`,
+      [tenantId]
+    ));
+    res.json({ users: rs.rows.map((r: any) => ({ id: Number(r.id), full_name: r.full_name, role: r.role })) });
+  } catch (error) {
+    console.error('PIN users error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /auth/pin-login - Entra col PIN di sala (solo nodo)
+router.post('/pin-login', pinLoginLimiter, async (req: Request, res: Response) => {
+  if (!isServiceNode) return res.status(404).json({ error: 'Not found' });
+  const userId = Number(req.body?.user_id);
+  const pin = typeof req.body?.pin === 'string' ? req.body.pin.trim() : '';
+  if (!Number.isInteger(userId) || userId <= 0 || !PIN_RE.test(pin)) {
+    return res.status(400).json({ error: 'invalid_pin' });
+  }
+  const failures = pinFailures.get(userId);
+  if (failures && failures.lockedUntil > Date.now()) {
+    return res.status(429).json({ error: 'pin_locked', retry_after_s: Math.ceil((failures.lockedUntil - Date.now()) / 1000) });
+  }
+  try {
+    const tenantId = await salaNodeAccessPolicy.loadNodeTenant();
+    if (tenantId === null) return res.status(503).json({ error: 'node_not_ready' });
+    const rs = await runWithTenantContext(tenantId, () => queryWithRetry(
+      `SELECT id, email, role, is_active, service_pin_hash FROM users WHERE id = $1 AND tenant_id = $2`,
+      [userId, tenantId]
+    ));
+    const row = rs.rows[0];
+    const valid = Boolean(row && row.is_active && row.service_pin_hash && row.role !== UserRole.PLATFORM_ADMIN
+      && await AuthService.verifyPassword(pin, row.service_pin_hash));
+    if (!valid) {
+      const next = { count: (failures?.count ?? 0) + 1, lockedUntil: 0 };
+      if (next.count >= PIN_MAX_FAILURES) {
+        next.count = 0;
+        next.lockedUntil = Date.now() + PIN_LOCK_MS;
+      }
+      pinFailures.set(userId, next);
+      return res.status(401).json({ error: 'invalid_pin' });
+    }
+    pinFailures.delete(userId);
+    const accessToken = AuthService.generateNodeServiceToken(
+      { userId: row.id, email: row.email, role: row.role as UserRole, tenantId },
+      PIN_SESSION_SECONDS
+    );
+    const user = await AuthService.getUserById(row.id);
+    const rolePermissions = await RolePermissionService.getPermissionsForRole(tenantId, row.role as UserRole);
+    const features = await getTenantFeatures(tenantId);
+    console.log(`[pin] accesso di sala: utente ${row.id} (${row.role})`);
+    res.json({
+      user: { ...user, is_reports_admin: false, tenant: { ...user!.tenant!, features, public_base_url: publicBaseUrl() } },
+      // Solo il servizio, e solo quello che il ruolo ha già.
+      permissions: rolePermissions.filter(p => SERVICE_PERMISSIONS.has(p)),
+      accessToken,
+      refreshToken: null,
+      session: 'pin',
+      expires_in: PIN_SESSION_SECONDS,
+    });
+  } catch (error) {
+    console.error('PIN login error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

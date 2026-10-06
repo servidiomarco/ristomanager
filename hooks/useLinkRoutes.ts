@@ -12,7 +12,7 @@
 // e Comande una terza, e le sonde non devono moltiplicarsi.
 
 import { useSyncExternalStore } from 'react';
-import { CLOUD_API_URL, isHybridActive, isNodeInUse, onRoutingStatus } from '../services/apiRouting';
+import { CLOUD_API_URL, isHybridActive, isNodeInUse, onRoutingStatus, fetchNodeLocalStatus } from '../services/apiRouting';
 
 const CLOUD_PROBE_EVERY_MS = 30_000;
 // Come il CLOUD_TIMEOUT_MS del nodo: a WAN staccata la sonda non deve restare
@@ -24,12 +24,16 @@ interface Snapshot {
     nodeInUse: boolean;
     /** Esito dell'ultima sonda (o dell'ultimo segnale) verso il cloud. */
     cloudOk: boolean;
+    /** Da quando il NODO non sente il cloud (ms epoch), null = collegato o
+     *  non noto. Fase A3: la sala deve sapere di essere in isola, e da
+     *  quando — l'ha detto il nodo stesso, non la rete del dispositivo. */
+    islandSince: number | null;
 }
 
 const initialOnline = (): boolean =>
     typeof navigator === 'undefined' || navigator.onLine !== false;
 
-let snapshot: Snapshot = { hybrid: false, nodeInUse: false, cloudOk: initialOnline() };
+let snapshot: Snapshot = { hybrid: false, nodeInUse: false, cloudOk: initialOnline(), islandSince: null };
 const listeners = new Set<() => void>();
 let stopWatching: (() => void) | null = null;
 let probeTimer: ReturnType<typeof setInterval> | null = null;
@@ -38,7 +42,7 @@ let probeInFlight = false;
 const setSnapshot = (next: Partial<Snapshot>): void => {
     const merged = { ...snapshot, ...next };
     if (merged.hybrid === snapshot.hybrid && merged.nodeInUse === snapshot.nodeInUse
-        && merged.cloudOk === snapshot.cloudOk) return;
+        && merged.cloudOk === snapshot.cloudOk && merged.islandSince === snapshot.islandSince) return;
     snapshot = merged;
     listeners.forEach(l => l());
 };
@@ -52,6 +56,14 @@ const probeCloud = (): void => {
         .then(res => setSnapshot({ cloudOk: res.ok }))
         .catch(() => setSnapshot({ cloudOk: false }))
         .finally(() => { clearTimeout(timer); probeInFlight = false; });
+    // Nello stesso giro, il nodo dice se LUI sente il cloud: un telefono col
+    // 4G vede il cloud anche quando il locale è isolato.
+    void fetchNodeLocalStatus().then((local) => {
+        const since = local && !local.uplink_connected && local.uplink_down_since
+            ? Date.parse(local.uplink_down_since)
+            : null;
+        setSnapshot({ islandSince: Number.isFinite(since) ? since : null });
+    });
 };
 
 /** La sonda gira solo col nodo in gioco: a socket sul cloud lo stato del
@@ -63,6 +75,7 @@ const syncProbe = (): void => {
     } else if (!snapshot.nodeInUse && probeTimer) {
         clearInterval(probeTimer);
         probeTimer = null;
+        setSnapshot({ islandSince: null });
     }
 };
 
@@ -111,6 +124,8 @@ export interface LinkRoutes {
     node: boolean;
     /** Il dispositivo raggiunge il cloud. */
     cloud: boolean;
+    /** Il nodo lavora in isola da quest'istante (ms epoch), null = no. */
+    islandSince: number | null;
 }
 
 /** `connected` è lo stato del socket (useSocket): a nodo in gioco il socket è
@@ -119,6 +134,6 @@ export interface LinkRoutes {
 export function useLinkRoutes(connected: boolean): LinkRoutes | null {
     const s = useSyncExternalStore(subscribe, getSnapshot);
     if (!s.hybrid) return null;
-    if (!s.nodeInUse) return { node: false, cloud: connected };
-    return { node: connected, cloud: s.cloudOk };
+    if (!s.nodeInUse) return { node: false, cloud: connected, islandSince: null };
+    return { node: connected, cloud: s.cloudOk, islandSince: s.islandSince };
 }

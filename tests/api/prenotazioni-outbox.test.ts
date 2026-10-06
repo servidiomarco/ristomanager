@@ -82,6 +82,8 @@ describe('prenotazioni nel log di replica', () => {
         expect(rows.rows[0].event_id).toMatch(/^[0-9a-f-]{36}$/);
     });
 
+    // Tappa C: lo scambio tocca solo il tavolo, una colonna del servizio —
+    // va nel log come reservation:service-updated.
     it('lo scambio tavoli logga entrambe le prenotazioni nella stessa transazione', async () => {
         const t1 = await creaTavolo('SW1', 100);
         const t2 = await creaTavolo('SW2', 300);
@@ -94,7 +96,7 @@ describe('prenotazioni nel log di replica', () => {
 
         const rows = await db.query(
             `SELECT aggregate FROM outbox_events
-             WHERE event = 'reservation:updated' AND aggregate = ANY($1) ORDER BY id`,
+             WHERE event = 'reservation:service-updated' AND aggregate = ANY($1) ORDER BY id`,
             [[`reservation:${a.id}`, `reservation:${b.id}`]]
         );
         expect(rows.rows.map((r: any) => r.aggregate).sort()).toEqual(

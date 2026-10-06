@@ -85,6 +85,11 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (credentials: LoginCredentials) => Promise<void>;
+  /** Accesso col PIN di sala sul nodo (fase A2): a linea caduta, solo il
+   *  servizio. */
+  loginWithPin: (nodeUrl: string, userId: number, pin: string) => Promise<void>;
+  /** La sessione corrente è quella del PIN di sala. */
+  isPinSession: boolean;
   logout: () => Promise<void>;
   hasPermission: (permission: string) => boolean;
   /** Entitlement commerciale del tenant. `features` assente (sessione nata
@@ -155,6 +160,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             // La subscription push del browser deve appartenere a CHI è
             // loggato, non a chi la registrò: il re-claim è silenzioso.
             syncPushSubscription();
+          } else if (authApiService.isPinSession()) {
+            // Sessione del PIN di sala: vive sul nodo, il cloud (giù, o
+            // che non la riconosce) non ha niente da dire. Se il cloud è
+            // tornato, getCurrentUser l'ha già chiusa (refreshToken).
+            setUser(storedUser);
+            setPermissions(storedPermissions);
+            socketClient.connect();
           } else if (authApiService.getRefreshToken()) {
             // /auth/me fallito ma il refresh token è ancora in storage: il
             // server è irraggiungibile (WiFi, deploy), NON una revoca — le
@@ -237,6 +249,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // L'endpoint push del browser passa di proprietà all'utente appena
     // entrato (fire-and-forget: il login non dipende dalle notifiche).
     syncPushSubscription();
+  }, []);
+
+  const loginWithPin = useCallback(async (nodeUrl: string, userId: number, pin: string) => {
+    const response = await authApiService.pinLogin(nodeUrl, userId, pin);
+    setUser(response.user);
+    setPermissions(response.permissions || []);
+    socketClient.reconnectWithToken();
   }, []);
 
   const logout = useCallback(async () => {
@@ -364,6 +383,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     isAuthenticated: !!user,
     isLoading,
     login,
+    loginWithPin,
+    isPinSession: Boolean(user) && authApiService.isPinSession(),
     logout,
     hasPermission,
     hasFeature,
