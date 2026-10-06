@@ -11,7 +11,8 @@
 //   decisione non va ricontestata in coda. L'unica eccezione è il 409
 //   authority_on_node: il cloud non decide, rimanda al nodo di sala;
 // - solo richieste sicure da rigiocare: PUT e DELETE (idempotenti per
-//   semantica) o POST con chiave di idempotenza nel body;
+//   semantica), PATCH che scrive valori assoluti (l'accoglienza, tappa C)
+//   o POST con chiave di idempotenza nel body;
 // - le voci scadono: rigiocare lo stato di un tavolo di ieri sera non è
 //   sincronizzare, è corrompere il servizio di oggi.
 //
@@ -28,7 +29,7 @@ import { routeWriteUrl, fetchNodeAware, cloudFallbackUrl, isAuthorityOnNodeRefus
 
 export type QueuedRequest = {
   id: string;
-  method: 'PUT' | 'DELETE' | 'POST';
+  method: 'PUT' | 'DELETE' | 'POST' | 'PATCH';
   url: string;
   /** Body già serializzato in JSON, o null per le richieste senza corpo. */
   body: string | null;

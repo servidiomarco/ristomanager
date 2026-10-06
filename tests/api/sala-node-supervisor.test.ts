@@ -40,7 +40,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 const state = process.env.SALA_NODE_STATE_DIR;
-fs.writeFileSync(path.join(state, 'stub-nodo.json'), JSON.stringify({ pid: process.pid, sha: process.env.BUILD_SHA }));
+fs.writeFileSync(path.join(state, 'stub-nodo.json'), JSON.stringify({ pid: process.pid, sha: process.env.BUILD_SHA, pp: process.env.PASSEPARTOUT_AGENT_TOKEN ?? null }));
 const healthy = ${healthy};
 http.createServer((req, res) => {
     if (req.url === '/ready') { res.writeHead(healthy ? 200 : 503); return res.end(); }
@@ -55,6 +55,13 @@ http.createServer((req, res) => {
 import fs from 'node:fs';
 import path from 'node:path';
 fs.writeFileSync(path.join(process.env.STUB_STATE, 'stub-stampa.json'), JSON.stringify({ pid: process.pid, token: process.env.PRINT_AGENT_TOKEN }));
+setInterval(() => {}, 1000);
+`);
+    fs.mkdirSync(path.join(dir, 'dist', 'scripts'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'dist', 'scripts', 'passepartout-agent.js'), `
+import fs from 'node:fs';
+import path from 'node:path';
+fs.writeFileSync(path.join(process.env.STUB_STATE, 'stub-pp.json'), JSON.stringify({ pid: process.pid, nodeUrl: process.env.PP_AGENT_NODE_URL, token: process.env.PP_AGENT_TOKEN }));
 setInterval(() => {}, 1000);
 `);
 };
@@ -100,7 +107,8 @@ describe('supervisore del nodo di sala', () => {
             database_url: 'postgresql://localhost/nessuno',
             port,
             update_window: { from: '00:00', to: '24:00' },
-            print_agent: { enabled: true, token: 'token-stampa' },
+            print_agent: { enabled: true, token: 'token-stampa', node_url: 'https://sala.prova.sympotia.com:8443' },
+            passepartout_agent: { enabled: true, env: { PP_AGENT_TOKEN: 'token-pp' } },
         }));
         sup = spawn('node', [supervisorPath, 'run'], { env: env(), stdio: ['ignore', 'pipe', 'pipe'] });
         sup.stdout?.on('data', (d) => { supLog += String(d); });
@@ -110,9 +118,10 @@ describe('supervisore del nodo di sala', () => {
     afterAll(async () => {
         const nodo = readJson(path.join(state, 'stub-nodo.json'));
         const stampa = readJson(path.join(state, 'stub-stampa.json'));
+        const pp = readJson(path.join(state, 'stub-pp.json'));
         sup?.kill('SIGTERM');
         await sleep(1_500);
-        for (const pid of [nodo?.pid, stampa?.pid]) if (pid && isAlive(pid)) process.kill(pid, 'SIGKILL');
+        for (const pid of [nodo?.pid, stampa?.pid, pp?.pid]) if (pid && isAlive(pid)) process.kill(pid, 'SIGKILL');
         fs.rmSync(root, { recursive: true, force: true });
     });
 
@@ -120,6 +129,11 @@ describe('supervisore del nodo di sala', () => {
         await finoA(() => Boolean(readJson(path.join(state, 'stub-nodo.json')) && readJson(path.join(state, 'stub-stampa.json'))), 'figli avviati');
         expect(readJson(path.join(state, 'stub-nodo.json')).sha).toBe('aaaaaaa');
         expect(readJson(path.join(state, 'stub-stampa.json')).token).toBe('token-stampa');
+        // Fase B5: l'agente Passepartout si collega anche al nodo (di default
+        // all'indirizzo dell'agente di stampa), e il nodo ne riceve il token.
+        await finoA(() => Boolean(readJson(path.join(state, 'stub-pp.json'))), 'agente Passepartout avviato');
+        expect(readJson(path.join(state, 'stub-pp.json'))).toMatchObject({ nodeUrl: 'https://sala.prova.sympotia.com:8443', token: 'token-pp' });
+        expect(readJson(path.join(state, 'stub-nodo.json')).pp).toBe('token-pp');
         expect(fs.readFileSync(path.join(root, 'current.txt'), 'utf8')).toBe('aaaaaaa');
         expect(fs.existsSync(path.join(root, 'logs', 'supervisor.log'))).toBe(true);
     });

@@ -16,6 +16,12 @@
 //
 // Su Windows conviene registrarlo come servizio (nssm) o operazione
 // pianificata all'avvio. La riconnessione è automatica (socket.io).
+//
+// Fase B5: con PP_AGENT_NODE_URL l'agente si collega ANCHE al nodo di sala
+// (stesso PC), con lo stesso token: con l'autorità in sala i conti nascono
+// e si chiudono lì, e a linea caduta il cloud non c'è. Ognuno dei due
+// server chiama l'agente per i conti che possiede; l'agente fa una
+// chiusura alla volta per comanda.
 
 import os from 'os';
 import { io } from 'socket.io-client';
@@ -35,7 +41,11 @@ import {
 } from '../services/passepartoutService.js';
 
 const SERVER_URL = (process.env.PP_AGENT_SERVER_URL || '').trim();
+const NODE_URL = (process.env.PP_AGENT_NODE_URL || '').trim().replace(/\/+$/, '');
 const TOKEN = (process.env.PP_AGENT_TOKEN || '').trim();
+// Cosa sa fare questo agente, annunciato nell'agent:hello: il server
+// riprova da solo una chiusura solo con un agente che sa riprenderla.
+const CAPABILITIES = ['chiudi-riprendi'];
 
 if (!SERVER_URL || !TOKEN) {
     console.error('Config mancante: servono PP_AGENT_SERVER_URL e PP_AGENT_TOKEN.');
@@ -103,7 +113,7 @@ const handlers: Record<string, Handler> = {
     chiudi: (p) => {
         const id = Number(p?.idComanda);
         if (!Number.isFinite(id)) throw new Error('Parametro "idComanda" non valido');
-        return chiudiComandaCompleta({
+        return unaAllaVolta(id, () => chiudiComandaCompleta({
             idComanda: id,
             tipoPagamento: typeof p?.tipoPagamento === 'string' && p.tipoPagamento ? p.tipoPagamento : undefined,
             tipoDocumento: typeof p?.tipoDocumento === 'string' && p.tipoDocumento
@@ -111,49 +121,68 @@ const handlers: Record<string, Handler> = {
             importoPagato: p?.importoPagato != null && Number.isFinite(Number(p.importoPagato))
                 ? Number(p.importoPagato) : undefined,
             proforma: p?.proforma === true,
-        });
+            riprendi: p?.riprendi === true,
+        }));
     },
 };
 
-const socket = io(`${SERVER_URL}/pp-agent`, {
-    auth: { token: TOKEN },
-    transports: ['websocket', 'polling'],
-    reconnectionDelay: 2_000,
-    reconnectionDelayMax: 30_000,
-});
+// Una chiusura alla volta per comanda: due richieste ravvicinate (un
+// ritentativo dello spazzino mentre la prima è ancora in corso, o i due
+// server) si mettono in fila, e la seconda — con riprendi — trova il conto
+// già in archivio invece di farne un altro.
+const inCorso = new Map<number, Promise<unknown>>();
+function unaAllaVolta<T>(idComanda: number, fn: () => Promise<T>): Promise<T> {
+    const prima = inCorso.get(idComanda) ?? Promise.resolve();
+    const questa = prima.catch(() => undefined).then(fn);
+    inCorso.set(idComanda, questa);
+    void questa.finally(() => { if (inCorso.get(idComanda) === questa) inCorso.delete(idComanda); }).catch(() => undefined);
+    return questa;
+}
 
-socket.on('connect', async () => {
-    console.log(`[agent] connesso a ${SERVER_URL} come ${socket.id}`);
-    let versioneGestionale: string | undefined;
-    try {
-        versioneGestionale = (await getVersioneGestionale()) ?? undefined;
-        console.log(`[agent] gestionale raggiungibile, versione ${versioneGestionale}`);
-    } catch (err) {
-        console.warn('[agent] gestionale non raggiungibile al momento:', (err as Error).message);
-    }
-    socket.emit('agent:hello', { hostname: os.hostname(), versioneGestionale });
-});
+const collega = (nome: string, base: string) => {
+    const socket = io(`${base}/pp-agent`, {
+        auth: { token: TOKEN },
+        transports: ['websocket', 'polling'],
+        reconnectionDelay: 2_000,
+        reconnectionDelayMax: 30_000,
+    });
 
-socket.on('connect_error', (err) => {
-    console.warn('[agent] connessione rifiutata:', err.message);
-});
+    socket.on('connect', async () => {
+        console.log(`[agent:${nome}] connesso a ${base} come ${socket.id}`);
+        let versioneGestionale: string | undefined;
+        try {
+            versioneGestionale = (await getVersioneGestionale()) ?? undefined;
+            console.log(`[agent:${nome}] gestionale raggiungibile, versione ${versioneGestionale}`);
+        } catch (err) {
+            console.warn(`[agent:${nome}] gestionale non raggiungibile al momento:`, (err as Error).message);
+        }
+        socket.emit('agent:hello', { hostname: os.hostname(), versioneGestionale, capabilities: CAPABILITIES });
+    });
 
-socket.on('disconnect', (reason) => {
-    console.log(`[agent] disconnesso (${reason}), riconnessione automatica...`);
-});
+    socket.on('connect_error', (err) => {
+        console.warn(`[agent:${nome}] connessione rifiutata:`, err.message);
+    });
 
-socket.on('pp:call', async (payload: any, ack: (r: unknown) => void) => {
-    const op = String(payload?.op || '');
-    const started = Date.now();
-    try {
-        const handler = handlers[op];
-        if (!handler) throw new Error(`Operazione sconosciuta: ${op}`);
-        const result = await handler(payload?.params ?? {});
-        console.log(`[agent] ${op} ok in ${Date.now() - started}ms`);
-        ack({ ok: true, result });
-    } catch (err) {
-        const isGestionale = err instanceof PassepartoutError;
-        console.warn(`[agent] ${op} errore (${isGestionale ? 'gestionale' : 'agent'}):`, (err as Error).message);
-        ack({ ok: false, error: (err as Error).message, kind: isGestionale ? 'gestionale' : 'agent' });
-    }
-});
+    socket.on('disconnect', (reason) => {
+        console.log(`[agent:${nome}] disconnesso (${reason}), riconnessione automatica...`);
+    });
+
+    socket.on('pp:call', async (payload: any, ack: (r: unknown) => void) => {
+        const op = String(payload?.op || '');
+        const started = Date.now();
+        try {
+            const handler = handlers[op];
+            if (!handler) throw new Error(`Operazione sconosciuta: ${op}`);
+            const result = await handler(payload?.params ?? {});
+            console.log(`[agent:${nome}] ${op} ok in ${Date.now() - started}ms`);
+            ack({ ok: true, result });
+        } catch (err) {
+            const isGestionale = err instanceof PassepartoutError;
+            console.warn(`[agent:${nome}] ${op} errore (${isGestionale ? 'gestionale' : 'agent'}):`, (err as Error).message);
+            ack({ ok: false, error: (err as Error).message, kind: isGestionale ? 'gestionale' : 'agent' });
+        }
+    });
+};
+
+collega('cloud', SERVER_URL);
+if (NODE_URL) collega('nodo', NODE_URL);
