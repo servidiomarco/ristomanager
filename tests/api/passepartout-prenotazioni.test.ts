@@ -223,6 +223,32 @@ describe('prenotazioni in cassa Passepartout', () => {
         expect(cassa.size).toBe(1);
     });
 
+    it('la caparra pagata online finisce nella nota in cassa; rimborsata, sparisce', async () => {
+        const resv = await creaPrenotazione({
+            customer_name: 'Caparra Cassa', reservation_time: fraGiorni(7, 18), table_id: tavoli.PP40, notes: 'Compleanno',
+        });
+        const pr = await db.query(
+            `INSERT INTO payment_requests (tenant_id, reservation_id, amount_cents, status, provider, completed_at)
+             VALUES (1, $1, 4000, 'COMPLETED', 'revolut', now()) RETURNING id`,
+            [resv.id]
+        );
+        // Una richiesta non pagata non conta.
+        await db.query(
+            `INSERT INTO payment_requests (tenant_id, reservation_id, amount_cents, status, provider) VALUES (1, $1, 999, 'PENDING', 'revolut')`,
+            [resv.id]
+        );
+        await sincronizza();
+        const scritta = chiamate('prenotazione').filter(c => c.params.tag === `sympotia:${resv.id}`).pop();
+        expect(scritta?.params.note).toBe('Compleanno · Caparra pagata 40,00 euro');
+
+        await db.query(`UPDATE payment_requests SET status = 'REFUNDED' WHERE id = $1`, [pr.rows[0].id]);
+        await sincronizza();
+        const dopo = chiamate('prenotazione').filter(c => c.params.tag === `sympotia:${resv.id}`).pop();
+        expect(dopo?.params.note).toBe('Compleanno');
+        await api().delete(`/reservations/${resv.id}`).set(bearer(token));
+        await sincronizza();
+    });
+
     it('annullata nel CRM → «Mancata» in cassa; cancellata → «Mancata» anche senza la prenotazione', async () => {
         const annullata = await creaPrenotazione({ customer_name: 'Verdi Annulla', reservation_time: fraGiorni(3, 18), table_id: tavoli.PP40 });
         const cancellata = await creaPrenotazione({ customer_name: 'Neri Cancella', reservation_time: fraGiorni(4, 18), table_id: tavoli.PP40 });
