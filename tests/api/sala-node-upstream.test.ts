@@ -519,6 +519,97 @@ describe('stream inverso nodo→cloud', () => {
         }
     }, 90_000);
 
+    it("col servizio in sala l'accoglienza vive sul nodo: tavolo e arrivo lì, il resto nel cloud, e sopravvivono tutti e due (tappa C)", async () => {
+        const nodeFetch = (p: string, method: string, body?: any) => fetch(`${nodeBase}${p}`, {
+            method,
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: body === undefined ? undefined : JSON.stringify(body),
+        });
+        const flags = await api().get('/settings/features').set(bearer(token));
+        const hybridPrima = flags.body.sala_node_enabled === true;
+        await api().put('/settings/features').set(bearer(token)).send({ sala_node_enabled: true });
+        await api().put('/settings/fiscal').set(bearer(token)).send({ provider: 'none' });
+        try {
+            const created = await api().post('/reservations').set(bearer(token)).send({
+                customer_name: 'Ospite Colonne', phone: '+393339990001',
+                reservation_time: '2031-06-01T19:00:00.000Z', shift: 'DINNER', guests: 2,
+            });
+            expect(created.status).toBe(201);
+            const id = Number(created.body.id);
+            await finoA(async () => (await nodeDb!.query('SELECT 1 FROM reservations WHERE id = $1', [id])).rows.length === 1,
+                'prenotazione sul nodo');
+
+            await finoA(async () => {
+                const o = await api().get('/sala-node/authority').set(bearer(token));
+                return o.body.node_online === true && o.body.aligned === true;
+            }, 'repliche allineate');
+            await cloudDb!.query(`UPDATE table_bill_splits SET status = 'RELEASED', released_at = CURRENT_TIMESTAMP WHERE status = 'CLAIMED'`);
+            const on = await api().post('/sala-node/authority').set(bearer(token)).send({ enabled: true });
+            expect(on.status).toBe(200);
+            await finoA(async () => {
+                const r = await nodeDb!.query(`SELECT value FROM app_settings WHERE key = 'sala_node_authority_enabled'`);
+                return r.rows[0]?.value === true;
+            }, 'interruttore sul nodo');
+
+            // In sala: l'ospite arriva e si siede.
+            const seat = await nodeFetch(`/reservations/${id}/service`, 'PATCH', { table_id: tableId, arrival_status: 'ARRIVED' });
+            expect(seat.status).toBe(200);
+            // Nel cloud, nello stesso momento, si corregge il nome partendo
+            // da una copia vecchia: senza tavolo, ancora in attesa.
+            const cloudRow = (await cloudDb!.query('SELECT * FROM reservations WHERE id = $1', [id])).rows[0];
+            const put = await api().put(`/reservations/${id}`).set(bearer(token)).send({
+                customer_name: 'Ospite Rinominato', reservation_time: cloudRow.reservation_time, shift: cloudRow.shift,
+                guests: cloudRow.guests, phone: cloudRow.phone, payment_status: cloudRow.payment_status,
+                reservation_status: cloudRow.reservation_status, table_id: null, arrival_status: 'WAITING',
+            });
+            expect(put.status).toBe(200);
+            const both = async (db: Client) => (await db.query(
+                'SELECT customer_name, table_id, arrival_status FROM reservations WHERE id = $1', [id])).rows[0];
+            await finoA(async () => {
+                const [c, n] = [await both(cloudDb!), await both(nodeDb!)];
+                const ok = (r: any) => r?.customer_name === 'Ospite Rinominato' && Number(r?.table_id) === tableId && r?.arrival_status === 'ARRIVED';
+                return ok(c) && ok(n);
+            }, 'nome dal cloud e tavolo dalla sala, su tutti e due i lati', 30_000);
+
+            // I recinti, nei due sensi.
+            const cloudSeat = await api().patch(`/reservations/${id}/service`).set(bearer(token)).send({ arrival_status: 'DEPARTING' });
+            expect(cloudSeat.status).toBe(409);
+            expect(cloudSeat.body.error).toBe('authority_on_node');
+            const nodePut = await nodeFetch(`/reservations/${id}`, 'PUT', { customer_name: 'Dal nodo' });
+            expect(nodePut.status).toBe(409);
+            expect((await nodePut.json()).error).toBe('cloud_authority');
+
+            // Il walk-in nasce in sala, e la rubrica la aggiorna il cloud.
+            const walk = await nodeFetch('/reservations/walk-in', 'POST', { customer_name: 'Passante Nodo', guests: 2, phone: '+393339990002' });
+            expect(walk.status).toBe(201);
+            const walkIn = await walk.json();
+            expect(Number(walkIn.id)).toBeGreaterThanOrEqual(1_000_000_000);
+            await finoA(async () => {
+                const r = await cloudDb!.query('SELECT arrival_status FROM reservations WHERE id = $1', [walkIn.id]);
+                const c = await cloudDb!.query(`SELECT 1 FROM customers WHERE tenant_id = 1 AND regexp_replace(phone, '\\D', '', 'g') = '393339990002'`);
+                return r.rows[0]?.arrival_status === 'ARRIVED' && c.rows.length === 1;
+            }, 'walk-in e rubrica sul cloud');
+
+            // Annullata nel cloud: il tavolo si libera anche in sala.
+            const cancel = await api().put(`/reservations/${id}`).set(bearer(token)).send({
+                customer_name: 'Ospite Rinominato', reservation_time: cloudRow.reservation_time, shift: cloudRow.shift,
+                guests: cloudRow.guests, phone: cloudRow.phone, payment_status: cloudRow.payment_status,
+                reservation_status: 'CANCELLED', table_id: tableId, arrival_status: 'ARRIVED',
+            });
+            expect(cancel.status).toBe(200);
+            await finoA(async () => {
+                const [c, n] = [await both(cloudDb!), await both(nodeDb!)];
+                return c?.table_id == null && n?.table_id == null;
+            }, 'tavolo libero sui due lati');
+
+            const off = await api().post('/sala-node/authority').set(bearer(token)).send({ enabled: false });
+            expect(off.status).toBe(200);
+        } finally {
+            await api().post('/sala-node/authority').set(bearer(token)).send({ enabled: false, force: true });
+            await api().put('/settings/features').set(bearer(token)).send({ sala_node_enabled: hybridPrima });
+        }
+    }, 90_000);
+
     it("niente eco: l'evento importato dal nodo non riscende al nodo come nuovo", async () => {
         // Lo stream in discesa manda solo origin='local': l'evento del
         // tavolo (nato sul nodo, importato dal cloud) non deve tornare.

@@ -1,5 +1,8 @@
 # Nodo di sala — installazione e gestione
 
+> Il collaudo a linea staccata, da fare a locale chiuso prima della prima
+> serata con «Servizio completo sul nodo»: [docs/collaudo-nodo-linea-giu.md](../docs/collaudo-nodo-linea-giu.md).
+
 Il nodo di sala vive sul PC Windows del ristorante, accanto a print agent e
 agente Passepartout. Due generazioni:
 
@@ -340,7 +343,12 @@ Sono i guasti che nessun programma risolve:
 
 ### Il pacchetto
 
-Sul Mac, dal repo: `npm run package:node -- --zip` costruisce
+Lo costruisce la CI a ogni push su main (fase A4b): nella run, fra gli
+artefatti, `sympotia-nodo-<sha>` contiene lo zip pronto per `inbox\`
+(tenuto 30 giorni). La distribuzione automatica dal cloud al PC non c'è
+ancora: servirebbe un token GitHub su Railway.
+
+A mano, sul Mac, dal repo: `npm run package:node -- --zip` costruisce
 `build/nodo/sympotia-nodo-<sha>.zip`, una cartella autosufficiente con
 server, agente di stampa, agente Passepartout compilato, `node_modules` di
 produzione e la versione in `build-info.json`. Sul PC serve solo Node ≥ 20.
@@ -431,7 +439,8 @@ un miliardo in su.
   la quota pagata, salda e (con `rt-local`) chiude il conto e fa lo
   scontrino. Nodo irraggiungibile dal cloud: `pay_unavailable_on_node`,
   l'ospite legge «paga in cassa». Una quota senza ordine scaduta da 10
-  minuti la libera il nodo da solo.
+  minuti la libera il nodo da solo. In isola il preconto esce senza QR: un
+  conto nato sul nodo a linea giù il cloud non lo conosce ancora.
 - **Caparre**: le richieste di pagamento scendono al nodo
   (`paymentRequest:changed`), che accredita la caparra pagata sul conto
   aperto della prenotazione.
@@ -512,3 +521,46 @@ cassa avvengono sul nodo, anche a linea caduta.
   - L'agente fa una chiusura alla volta per comanda.
 - **Aggiornare l'agente insieme al nodo**: finché l'agente sul PC è quello
   vecchio, le chiusure fallite tornano a mano come prima.
+
+## L'accoglienza sul nodo (tappa C)
+
+La prenotazione è del cloud, ma due sue colonne sono del servizio:
+`table_id` e `arrival_status` (`RESERVATION_SERVICE_COLUMNS` in
+`services/replicaApply.ts`).
+
+- **Il comando di servizio**: `PATCH /reservations/:id/service` scrive solo
+  quelle due colonne, con le regole del `PUT` per un tavolo nuovo (del
+  ristorante, sala aperta salvo banchetti, nessun conflitto nella finestra).
+  Va nel log come `reservation:service-updated` (autorità `service`). Lo
+  scambio tavoli (`POST /reservations/:id/swap-table`) e il walk-in
+  (`POST /reservations/walk-in`, arrivato e confermato, adesso) sono
+  battiture di servizio come le comande: con l'interruttore acceso nascono
+  sul nodo e il cloud risponde 409. Permesso: `reservations:full` oppure
+  `floorplan:update_status` — gli stessi ruoli di prima, più la sessione
+  del PIN di sala.
+- **Replica per colonne**:
+  - `reservation:updated` (ora autorità `cloud`) porta la riga del cloud.
+    Sul nodo, con l'autorità in sala, si applica tutto tranne tavolo e
+    arrivo; se la prenotazione è annullata o rifiutata, il tavolo si
+    libera anche lì.
+  - `reservation:service-updated` porta solo le due colonne, in tutti e due
+    i versi.
+  - Sul cloud gli eventi di autorità `cloud` arrivati dal nodo si
+    registrano ma non si applicano, e le prenotazioni si aggiornano sul
+    posto (prima: cancella e reinserisci, che sul cloud si sarebbe portato
+    via i conti a cascata).
+- **Il `PUT` del cloud**, con l'autorità in sala, lascia tavolo e arrivo
+  come sono (la copia del client può essere vecchia) e salta i controlli
+  sul tavolo. Il client manda tavolo e arrivo col comando di servizio: la
+  reception sempre; il modulo di modifica e la pianta col `PUT` per il
+  resto più il comando se tavolo o arrivo cambiano.
+- **Il recinto rovescio**: sul nodo, le scritture su `/reservations` che non
+  sono di servizio rispondono 409 `cloud_authority`.
+- **Tutto nel log**: ogni modifica del cloud a una prenotazione ora va nel
+  log (`logReservationChanged`): conferma dopo la caparra, rifiuto per
+  caparra scaduta, esito dei messaggi di conferma, promemoria, lingua,
+  rinomina a cascata dalla rubrica, anonimizzazione, conferma del
+  suggerimento di tavolo (questa come evento di servizio). Prima erano
+  solo broadcast, e il nodo non li vedeva.
+- **Rubrica**: un walk-in nato sul nodo apre la scheda cliente quando arriva
+  al cloud (il nodo ha solo una copia della rubrica).

@@ -36,12 +36,18 @@ export interface DomainEventSpec {
 const spec = (authority: EventAuthority, schema_ver = 1): DomainEventSpec => ({ authority, schema_ver });
 
 export const DOMAIN_EVENTS: Record<string, DomainEventSpec> = {
-    // --- Prenotazioni: inbound (cloud) E arrivi/assegnazione (servizio)
-    //     passano oggi dagli stessi tipi → split, da sdoppiare in fase 4.
+    // --- Prenotazioni, sdoppiate per colonna (tappa C del piano «sala,
+    //     comande e conto sul nodo»). Il cloud possiede la prenotazione
+    //     (ospite, orario, stato, contatti, conferme): reservation:updated
+    //     porta la riga e chi la riceve NON tocca tavolo e arrivo. Tavolo e
+    //     arrivo sono del servizio: reservation:service-updated porta solo
+    //     quelle due colonne. La nascita resta split: prenotazioni dal cloud,
+    //     walk-in dalla sala.
     'reservation:created': spec('split'),
-    'reservation:updated': spec('split'),
-    'reservation:deleted': spec('split'),
-    'reservation:synced': spec('split'),
+    'reservation:updated': spec('cloud'),
+    'reservation:service-updated': spec('service'),
+    'reservation:deleted': spec('cloud'),
+    'reservation:synced': spec('cloud'),
     'tableAssignmentSuggestion:created': spec('service'),
     'tableAssignmentSuggestion:resolved': spec('service'),
 

@@ -77,7 +77,8 @@ const fetchWithAuth = async (
 // Scritture che possono aspettare la rete: chi passa `offline` accetta che,
 // se il server non è mai stato raggiunto, la richiesta finisca in coda e
 // venga rigiocata al riconnettersi. Va passato SOLO su richieste sicure da
-// rigiocare: PUT e DELETE, o POST con chiave di idempotenza nel body.
+// rigiocare: PUT e DELETE, PATCH a valori assoluti, o POST con chiave di
+// idempotenza nel body.
 type OfflineSpec = { description: string };
 
 // Helper to make authenticated requests with error handling
@@ -98,9 +99,9 @@ const apiRequest = async <T>(
     // l'unico caso in cui accodare è onesto — su una risposta HTTP il
     // server ha già deciso e la coda non deve ricontestarla.
     const method = (init.method ?? 'GET').toUpperCase();
-    if (offline && (method === 'PUT' || method === 'DELETE' || method === 'POST')) {
+    if (offline && (method === 'PUT' || method === 'DELETE' || method === 'POST' || method === 'PATCH')) {
       offlineQueue.enqueue({
-        method: method as 'PUT' | 'DELETE' | 'POST',
+        method: method as 'PUT' | 'DELETE' | 'POST' | 'PATCH',
         url,
         body: typeof init.body === 'string' ? init.body : null,
         description: offline.description,
@@ -121,9 +122,9 @@ const apiRequest = async <T>(
     // torna raggiungibile.
     const method = (init.method ?? 'GET').toUpperCase();
     if (offline && isAuthorityOnNodeRefusal(response.status, errorData)
-        && (method === 'PUT' || method === 'DELETE' || method === 'POST')) {
+        && (method === 'PUT' || method === 'DELETE' || method === 'POST' || method === 'PATCH')) {
       offlineQueue.enqueue({
-        method: method as 'PUT' | 'DELETE' | 'POST',
+        method: method as 'PUT' | 'DELETE' | 'POST' | 'PATCH',
         url,
         body: typeof init.body === 'string' ? init.body : null,
         description: offline.description,
@@ -168,9 +169,36 @@ export const updateReservation = async (id: number, reservation: Partial<Reserva
     method: 'PUT',
     headers: getHeaders(),
     body: JSON.stringify(reservation),
-    // Check-in, cambio stato, assegnazione tavolo: il flusso della reception
-    // durante il servizio. PUT idempotente → sicuro da rigiocare.
+    // Modifiche della prenotazione (cloud). Check-in e tavolo passano da
+    // updateReservationService. PUT idempotente → sicuro da rigiocare.
     offline: { description: `aggiornamento della prenotazione ${id}` },
+  });
+};
+
+/** Le due colonne del servizio (tappa C): dove siede l'ospite e a che punto
+ *  è. Col servizio in sala va al nodo e funziona a linea caduta; il resto
+ *  della prenotazione passa da updateReservation (cloud). Valori assoluti:
+ *  rigiocarla è sicuro, quindi a nodo irraggiungibile va in coda. */
+export type ReservationServicePatch = { table_id?: number | null; arrival_status?: Reservation['arrival_status'] };
+
+export const updateReservationService = async (id: number, patch: ReservationServicePatch): Promise<Reservation> => {
+  return apiRequest<Reservation>(`${API_URL}/reservations/${id}/service`, {
+    method: 'PATCH',
+    headers: getHeaders(),
+    body: JSON.stringify(patch),
+    offline: { description: `accoglienza della prenotazione ${id}` },
+  });
+};
+
+/** Le chiavi che updateReservationService sa scrivere. */
+export const RESERVATION_SERVICE_KEYS = ['table_id', 'arrival_status'] as const;
+
+/** Walk-in: nasce dove sta il servizio (col servizio in sala sul nodo). */
+export const createWalkIn = async (input: { customer_name: string; guests: number; phone?: string; notes?: string }): Promise<Reservation> => {
+  return apiRequest<Reservation>(`${API_URL}/reservations/walk-in`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(input),
   });
 };
 

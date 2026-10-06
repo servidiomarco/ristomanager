@@ -124,6 +124,7 @@ import {
   getReservations,
   createReservation,
   updateReservation,
+  updateReservationService,
   deleteReservation,
   getTables,
   createTable,
@@ -2063,7 +2064,28 @@ const App: React.FC = () => {
 
   const handleUpdateReservation = async (updatedRes: Reservation) => {
     try {
-      const returnedRes = await updateReservation(updatedRes.id as number, updatedRes);
+      const id = updatedRes.id as number;
+      const current = reservationsRef.current.find(r => r.id === id);
+      // Tappa C: tavolo e arrivo hanno il loro comando, che col servizio in
+      // sala va al nodo (e lì il PUT del cloud non li tocca). Cambiano solo
+      // loro → solo il comando; cambia anche il resto → prima il PUT, poi
+      // il comando. Senza modifiche visibili si manda il PUT come sempre.
+      const tableChanged = Boolean(current) && (current!.table_id ?? null) !== (updatedRes.table_id ?? null);
+      const arrivalChanged = Boolean(current) && (current!.arrival_status ?? null) !== (updatedRes.arrival_status ?? null);
+      const serviceChanged = tableChanged || arrivalChanged;
+      const otherChanged = !current || (Object.keys(updatedRes) as Array<keyof Reservation>).some(k =>
+        k !== 'table_id' && k !== 'arrival_status' && JSON.stringify(updatedRes[k] ?? null) !== JSON.stringify(current[k] ?? null));
+      let returnedRes: Reservation = current ?? updatedRes;
+      if (otherChanged || !serviceChanged) returnedRes = await updateReservation(id, updatedRes);
+      if (serviceChanged) {
+        returnedRes = {
+          ...returnedRes,
+          ...(await updateReservationService(id, {
+            ...(tableChanged ? { table_id: updatedRes.table_id ?? null } : {}),
+            ...(arrivalChanged ? { arrival_status: updatedRes.arrival_status } : {}),
+          })),
+        };
+      }
       setReservations(prev => prev.map(r => r.id === returnedRes.id ? returnedRes : r));
       // Il toast arriva dall'eco socket reservation:updated (anche al
       // mittente): niente doppione qui.

@@ -43,6 +43,11 @@ export const SERVICE_WRITE_ROUTES: ServiceWriteRoute[] = [
     { path: /^\/print-jobs$/, method: /^POST$/ },
     // Il conto dell'asporto è un conto come gli altri.
     { path: /^\/takeaway\/orders\/\d+\/bill$/, method: /^POST$/ },
+    // Tappa C — l'accoglienza: dove siede l'ospite e a che punto è, lo
+    // scambio di tavolo, il walk-in. Il resto della prenotazione è del cloud.
+    { path: /^\/reservations\/\d+\/service$/, method: /^PATCH$/ },
+    { path: /^\/reservations\/\d+\/swap-table$/, method: /^POST$/ },
+    { path: /^\/reservations\/walk-in$/, method: /^POST$/ },
 ];
 
 // Restano al cloud anche con l'autorità in sala: la fattura elettronica e
