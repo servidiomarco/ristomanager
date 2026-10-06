@@ -232,6 +232,7 @@ describe('QR unico al tavolo', () => {
         expect(first.status).toBe(200);
         expect(first.body.paper).toBe('A4');
         expect(first.body.text).toMatch(/menu/i);
+        expect(first.body.holder).toBe(false);
         expect(typeof first.body.restaurant).toBe('string');
 
         // Righe vuote e spazi in più via, al massimo quattro righe.
@@ -239,7 +240,7 @@ describe('QR unico al tavolo', () => {
             paper: 'A3', text: '  Inquadra   il QR\r\n\nScan me\nuno\ndue\ntre  ',
         });
         expect(saved.status).toBe(200);
-        expect(saved.body).toEqual({ paper: 'A3', text: 'Inquadra il QR\nScan me\nuno\ndue' });
+        expect(saved.body).toEqual({ paper: 'A3', text: 'Inquadra il QR\nScan me\nuno\ndue', holder: false });
         const again = await api().get('/tables/qr-print').set(bearer(owner));
         expect(again.body.paper).toBe('A3');
         expect(again.body.text).toBe('Inquadra il QR\nScan me\nuno\ndue');
@@ -247,6 +248,13 @@ describe('QR unico al tavolo', () => {
         // La frase vuota è una scelta, non un ritorno al suggerimento.
         await api().put('/tables/qr-print').set(bearer(owner)).send({ paper: 'A5', text: '' });
         expect((await api().get('/tables/qr-print').set(bearer(owner))).body).toMatchObject({ paper: 'A5', text: '' });
+
+        // Il portaQR in plastica: si accende, resta, e senza il campo si spegne.
+        await api().put('/tables/qr-print').set(bearer(owner)).send({ paper: 'A4', text: 'x', holder: true });
+        expect((await api().get('/tables/qr-print').set(bearer(owner))).body).toMatchObject({ paper: 'A4', holder: true });
+        await api().put('/tables/qr-print').set(bearer(owner)).send({ paper: 'A4', text: 'x' });
+        expect((await api().get('/tables/qr-print').set(bearer(owner))).body.holder).toBe(false);
+        expect((await api().put('/tables/qr-print').set(bearer(owner)).send({ paper: 'A4', text: 'x', holder: 'si' })).status).toBe(400);
 
         expect((await api().put('/tables/qr-print').set(bearer(owner)).send({ paper: 'A6', text: 'x' })).status).toBe(400);
         expect((await api().put('/tables/qr-print').set(bearer(owner)).send({ paper: 'A4' })).status).toBe(400);

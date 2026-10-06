@@ -13050,7 +13050,9 @@ const TABLE_QR_PAPERS = ['A3', 'A4', 'A5'] as const;
 type TableQrPaper = typeof TABLE_QR_PAPERS[number];
 const TABLE_QR_TEXT_MAX = 160;
 const TABLE_QR_TEXT_MAX_LINES = 4;
-const TABLE_QR_DEFAULT = { paper: 'A4' as TableQrPaper, text: 'Inquadra il QR per vedere il menu e pagare il conto' };
+// holder: i cartellini alla misura del portaQR in plastica (9,3 × 12 cm)
+// invece che a divisione del foglio.
+const TABLE_QR_DEFAULT = { paper: 'A4' as TableQrPaper, text: 'Inquadra il QR per vedere il menu e pagare il conto', holder: false };
 
 /** La frase com'è stampabile: righe vuote e spazi in coda via, al massimo
  *  quattro righe e 160 caratteri — oltre, il cartellino A3 non la contiene. */
@@ -13065,7 +13067,7 @@ function cleanTableQrText(raw: unknown): string {
         .slice(0, TABLE_QR_TEXT_MAX);
 }
 
-async function getTableQrPrint(tenantId: number): Promise<{ paper: TableQrPaper; text: string }> {
+async function getTableQrPrint(tenantId: number): Promise<{ paper: TableQrPaper; text: string; holder: boolean }> {
     const rs = await queryWithRetry(
         'SELECT text_value FROM app_settings WHERE tenant_id = $1 AND key = $2',
         [tenantId, TABLE_QR_PRINT_KEY]
@@ -13077,6 +13079,7 @@ async function getTableQrPrint(tenantId: number): Promise<{ paper: TableQrPaper;
             paper: TABLE_QR_PAPERS.includes(saved.paper) ? saved.paper : TABLE_QR_DEFAULT.paper,
             // Stringa vuota è una scelta: il cartellino senza frase.
             text: typeof saved.text === 'string' ? cleanTableQrText(saved.text) : TABLE_QR_DEFAULT.text,
+            holder: saved.holder === true,
         };
     } catch {
         return TABLE_QR_DEFAULT;
@@ -13103,7 +13106,10 @@ app.put('/tables/qr-print', authenticate, requirePermission('floorplan:full'), a
         const paper = req.body?.paper;
         if (!TABLE_QR_PAPERS.includes(paper)) return res.status(400).json({ error: 'Formato del foglio non valido' });
         if (typeof req.body?.text !== 'string') return res.status(400).json({ error: 'Frase non valida' });
-        const settings = { paper: paper as TableQrPaper, text: cleanTableQrText(req.body.text) };
+        // Assente = spento: un frontend di prima del supporto non lo manda.
+        const holder = req.body?.holder ?? false;
+        if (typeof holder !== 'boolean') return res.status(400).json({ error: 'Opzione supporto non valida' });
+        const settings = { paper: paper as TableQrPaper, text: cleanTableQrText(req.body.text), holder };
         await queryWithRetry(
             `INSERT INTO app_settings (tenant_id, key, text_value, updated_at)
              VALUES ($1, $2, $3, CURRENT_TIMESTAMP)

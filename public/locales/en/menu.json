@@ -193,6 +193,8 @@
   "tableQrSheets_one": "{{count}} sheet of {{perSheet}}",
   "tableQrSheets_other": "{{count}} sheets of {{perSheet}}",
   "tableQrCardSize": "Cards of {{w}} × {{h}} cm, to cut along the dashed line.",
+  "tableQrHolder": "Plastic holder size ({{w}} × {{h}} cm)",
+  "tableQrHolderHint": "Each QR code prints on a card to cut out that fits the holder. Print at 100% (actual size), not «Fit to page».",
   "tableQrText": "Line under the QR code",
   "tableQrTextHint": "Same on every card, up to four lines. Leave it empty for just table and QR code.",
   "tableQrTextPlaceholder": "Scan the QR code to see the menu and pay the bill",
