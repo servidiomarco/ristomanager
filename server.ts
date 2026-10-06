@@ -4145,29 +4145,29 @@ async function chiudiComandaPassepartoutPerBill(
      *  Scelta del cameriere nel dialog di chiusura, non un'euristica. */
     documento?: 'Scontrino' | 'Proforma',
 ): Promise<EsitoChiusuraComanda> {
+    // La riga viva: quella nata con la chiusura del conto, o una nuova
+    // (conto chiuso prima della fase B5, o dopo un FAILED).
+    const readLive = () => queryWithRetry(
+        `SELECT id, status, provider, doc_type, attempts, response FROM fiscal_documents
+          WHERE table_bill_id = $1 AND tenant_id = $2 AND status IN ('PENDING', 'CONFIRMED')
+            AND table_bill_split_id IS NULL AND doc_type <> 'CREDIT_NOTE'
+          LIMIT 1`,
+        [billId, tenantId]
+    );
+    let live = await readLive();
+    // Già chiuso in cassa: si risponde con l'esito, anche se lo spazzino sta
+    // ancora uscendo dal suo giro. Prima il controllo «in corso» veniva
+    // prima di questo, e un «Chiudi in cassa» toccato in quell'istante
+    // riceveva 409 invece dell'esito (visto nella suite con RLS rigida).
+    if (live.rows[0]?.status === 'CONFIRMED') return live.rows[0].response as EsitoChiusuraComanda;
     if (ppCloseInFlight.has(billId)) {
         throw new PassepartoutBridgeError('Chiusura in cassa già in corso per questo conto', 'busy');
     }
     ppCloseInFlight.add(billId);
     try {
-        // La riga viva: quella nata con la chiusura del conto, o una nuova
-        // (conto chiuso prima della fase B5, o dopo un FAILED).
-        let live = await queryWithRetry(
-            `SELECT id, status, provider, doc_type, attempts, response FROM fiscal_documents
-              WHERE table_bill_id = $1 AND tenant_id = $2 AND status IN ('PENDING', 'CONFIRMED')
-                AND table_bill_split_id IS NULL AND doc_type <> 'CREDIT_NOTE'
-              LIMIT 1`,
-            [billId, tenantId]
-        );
         if (!live.rows[0]) {
             await runWithOutboxTx(client => insertPendingPassepartoutClose(client, tenantId, billId, documento));
-            live = await queryWithRetry(
-                `SELECT id, status, provider, doc_type, attempts, response FROM fiscal_documents
-                  WHERE table_bill_id = $1 AND tenant_id = $2 AND status IN ('PENDING', 'CONFIRMED')
-                    AND table_bill_split_id IS NULL AND doc_type <> 'CREDIT_NOTE'
-                  LIMIT 1`,
-                [billId, tenantId]
-            );
+            live = await readLive();
         }
         const doc = live.rows[0];
         if (!doc) throw new PassepartoutBridgeError('Documento della chiusura non creato', 'agent');
