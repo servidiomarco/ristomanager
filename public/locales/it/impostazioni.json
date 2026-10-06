@@ -320,6 +320,20 @@
     "syncAgent": "L'agente del PC di sala non è pronto",
     "syncBusy": "Un invio è già in corso",
     "saved": "Salvato",
-    "saveFailed": "Operazione non riuscita"
+    "saveFailed": "Operazione non riuscita",
+    "connTitle": "Collegamento e chiusura in cassa",
+    "connSubtitle": "PC di sala e come la cassa chiude i conti del CRM",
+    "connDetail": "PC {{pc}} · gestionale {{versione}} · collegato dal {{when}}",
+    "capRiprendi": "Chiusura ripresa",
+    "capPrenotazioni": "Prenotazioni",
+    "payType": "Tipo di pagamento in cassa",
+    "payTypeHint": "Un tipo dedicato, per esempio ESTERNO: così la cassa non conta due volte l'incasso. Nessuno = i tavoli si chiudono in cassa a mano.",
+    "payTypeFromServer": "In uso {{tipo}}, impostato sul server. Sceglilo qui per gestirlo da questa sezione.",
+    "payTypeNone": "Nessuno (chiusura a mano)",
+    "payTypeNeedsAgent": "Con il PC di sala collegato la tendina mostra i tipi della cassa.",
+    "docType": "Documento",
+    "docTypeHint": "Il documento che la cassa emette quando il conto si chiude dal CRM.",
+    "docReceipt": "Scontrino",
+    "docProforma": "Proforma"
   }
 }

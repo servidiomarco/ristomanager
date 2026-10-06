@@ -93,3 +93,33 @@ export const setPpTavolo = (tableId: number, ppSala: string | null, ppTavolo: st
   apiRequest(`${API_URL}/passepartout/tavoli/${tableId}`, {
     method: 'PUT', headers: getHeaders(), body: JSON.stringify({ pp_sala: ppSala, pp_tavolo: ppTavolo }),
   });
+
+/* ── Sezione Passepartout: collegamento e chiusura in cassa ─────────────── */
+
+export interface PpAgente {
+  connected: boolean;
+  connected_at: string | null;
+  hostname: string | null;
+  versione_gestionale: string | null;
+  capabilities: string[];
+}
+
+export interface PpConfig {
+  /** Salvati nella sezione (null = non impostato). */
+  tipo_pagamento_esterno: string | null;
+  tipo_documento: 'Scontrino' | 'Proforma' | null;
+  /** Quelli che la chiusura usa davvero (il ristorante 1 eredita l'env). */
+  effettivo: { tipo_pagamento: string | null; tipo_documento: string };
+  agente: PpAgente;
+}
+
+export const getPpConfig = (): Promise<PpConfig> =>
+  apiRequest(`${API_URL}/passepartout/config`, { headers: getHeaders(false), cache: 'no-store' });
+
+export const setPpConfig = (input: { tipo_pagamento_esterno?: string | null; tipo_documento?: 'Scontrino' | 'Proforma' | null }): Promise<{ effettivo: PpConfig['effettivo'] }> =>
+  apiRequest(`${API_URL}/passepartout/config`, {
+    method: 'PUT', headers: getHeaders(), body: JSON.stringify(input),
+  });
+
+export const getPpTipiPagamento = (): Promise<Array<{ codice: string; categoria: string | null }>> =>
+  apiRequest(`${API_URL}/passepartout/tipi-pagamento`, { headers: getHeaders(false), cache: 'no-store' });

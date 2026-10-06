@@ -24,7 +24,7 @@
 import crypto from 'crypto';
 import { queryWithRetry, runAsPlatform, runWithTenantContext } from '../db.js';
 import { isFeatureEnabledForTenant } from './entitlements.js';
-import { callPassepartout, passepartoutAgentSupports, PassepartoutBridgeError } from './passepartoutBridge.js';
+import { callPassepartout, connectedPassepartoutTenants, passepartoutAgentSupports, PassepartoutBridgeError } from './passepartoutBridge.js';
 import type { EsitoPrenotazioneCassa, PassepartoutPrenotazione, PassepartoutSalaPianta } from './passepartoutService.js';
 import { getDatePartInTz, getTimePartInTz } from '../utils/reservationTime.js';
 
@@ -283,7 +283,7 @@ export async function sincronizzaPrenotazioniCassa(tenantId: number, opts: { for
     const riepilogo = vuoto();
     if (!(await prenotazioniCassaAccese(tenantId))) return { ...riepilogo, saltato: 'spento' };
     if (!(await isFeatureEnabledForTenant(tenantId, 'passepartout'))) return { ...riepilogo, saltato: 'non_venduto' };
-    if (!passepartoutAgentSupports(CAPACITA)) return { ...riepilogo, saltato: 'agente' };
+    if (!passepartoutAgentSupports(tenantId, CAPACITA)) return { ...riepilogo, saltato: 'agente' };
     if (tenantInCorso.has(tenantId)) return { ...riepilogo, saltato: 'in_corso' };
     tenantInCorso.add(tenantId);
     try {
@@ -340,7 +340,7 @@ async function andata(tenantId: number, riepilogo: RiepilogoGiro, forza: boolean
 
     const annulla = async (row: any, reservationId: number | null) => {
         try {
-            const esito = await callPassepartout<EsitoPrenotazioneCassa>('prenotazione', {
+            const esito = await callPassepartout<EsitoPrenotazioneCassa>(tenantId, 'prenotazione', {
                 azione: 'annulla', tag: row.tag ?? tagPrenotazione(reservationId!), giorno: row.pp_giorno,
                 idGestionale: row.pp_id ?? null, statoAtteso: row.stato_scritto ?? null,
             });
@@ -391,7 +391,7 @@ async function andata(tenantId: number, riepilogo: RiepilogoGiro, forza: boolean
 
             scritture++;
             try {
-                const esito = await callPassepartout<EsitoPrenotazioneCassa>('prenotazione', {
+                const esito = await callPassepartout<EsitoPrenotazioneCassa>(tenantId, 'prenotazione', {
                     ...payload, idGestionale: r.pp_id ?? null, statoAtteso: r.pp_id != null ? r.stato_scritto : null,
                 });
                 if (esito.esito === 'scritta') {
@@ -451,7 +451,7 @@ async function ritorno(tenantId: number, riepilogo: RiepilogoGiro, forza: boolea
     ultimiArrivi.set(tenantId, Date.now());
     let cassa: PassepartoutPrenotazione[];
     try {
-        cassa = await callPassepartout<PassepartoutPrenotazione[]>('prenotazioniGiorno', { giorno: oggi }, 30_000);
+        cassa = await callPassepartout<PassepartoutPrenotazione[]>(tenantId, 'prenotazioniGiorno', { giorno: oggi }, 30_000);
     } catch (err) {
         if (!(err instanceof PassepartoutBridgeError)) throw err;
         return;
@@ -491,12 +491,16 @@ export function startPassepartoutPrenotazioniSync(d: PrenotazioniCassaDeps): voi
 }
 
 async function giro(): Promise<void> {
-    if (giroInCorso || !passepartoutAgentSupports(CAPACITA)) return;
+    // Solo i ristoranti col loro agente collegato e capace: gli altri non
+    // hanno niente da scrivere, e la query sui config non serve.
+    const pronti = connectedPassepartoutTenants().filter((t) => passepartoutAgentSupports(t, CAPACITA));
+    if (giroInCorso || pronti.length === 0) return;
     giroInCorso = true;
     try {
         // rls-bypass: solo l'elenco dei ristoranti con l'invio acceso; ognuno si lavora nel suo contesto tenant
         const rs = await runAsPlatform(() => queryWithRetry(
-            `SELECT tenant_id FROM passepartout_config WHERE prenotazioni_enabled`
+            `SELECT tenant_id FROM passepartout_config WHERE prenotazioni_enabled AND tenant_id = ANY($1::bigint[])`,
+            [pronti]
         ));
         for (const row of rs.rows) {
             const tenantId = Number(row.tenant_id);

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChevronUp, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, AlertTriangle, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator, BarChart3, Star, ShoppingBag, LifeBuoy } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChevronUp, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, AlertTriangle, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator, BarChart3, Star, ShoppingBag, LifeBuoy, PlugZap } from 'lucide-react';
 import { ViewState, Room, Table, Dish, RestaurantMenu, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Shift, UserRole, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -70,7 +70,8 @@ import { RevolutIntegrationCard } from './components/RevolutIntegrationCard';
 import { SumUpIntegrationCard } from './components/SumUpIntegrationCard';
 import { SmtpIntegrationCard } from './components/SmtpIntegrationCard';
 import { ImapIntegrationCard } from './components/ImapIntegrationCard';
-import { PassepartoutPrenotazioniCard } from './components/PassepartoutPrenotazioniCard';
+import { PrenotazioniInCassa } from './components/passepartout/PrenotazioniInCassa';
+import { CollegamentoCassa } from './components/passepartout/CollegamentoCassa';
 import { CardErrorBoundary } from './components/CardErrorBoundary';
 import { LegalSettingsCard } from './components/LegalSettingsCard';
 import { TableAssignmentAiPromptCard } from './components/TableAssignmentAiPromptCard';
@@ -344,7 +345,7 @@ const SETTINGS_GROUPS: {
   labelKey: string;
   label: string;
   Icon: React.ComponentType<{ size?: number; className?: string }>;
-  guard?: 'admin' | 'pay_at_table' | 'reviews' | 'takeaway';
+  guard?: 'admin' | 'pay_at_table' | 'reviews' | 'takeaway' | 'passepartout';
 }[] = [
   { id: 'imp-profilo', labelKey: 'settings.tabProfile', label: 'Profilo', Icon: UserCheck },
   { id: 'imp-ristorante', labelKey: 'settings.tabRestaurant', label: 'Ristorante', Icon: Clock },
@@ -352,6 +353,7 @@ const SETTINGS_GROUPS: {
   { id: 'imp-asporto', labelKey: 'nav.items.takeaway', label: 'Asporto', Icon: ShoppingBag, guard: 'takeaway' },
   { id: 'imp-pagamenti', labelKey: 'nav.items.payments', label: 'Pagamenti', Icon: CreditCard },
   { id: 'imp-fiscalita', labelKey: 'nav.items.fiscal', label: 'Fiscalità', Icon: Landmark, guard: 'pay_at_table' },
+  { id: 'imp-passepartout', labelKey: 'settings.tabPassepartout', label: 'Passepartout', Icon: PlugZap, guard: 'passepartout' },
   { id: 'imp-comunicazioni', labelKey: 'nav.groups.communications', label: 'Comunicazioni', Icon: MessagesSquare },
   { id: 'imp-recensioni', labelKey: 'nav.items.reviews', label: 'Recensioni', Icon: Star, guard: 'reviews' },
   { id: 'imp-ai', labelKey: 'settings.tabAi', label: 'AI', Icon: Sparkles },
@@ -2262,6 +2264,7 @@ const App: React.FC = () => {
     : g.guard === 'pay_at_table' ? hasFeature('pay_at_table')
     : g.guard === 'reviews' ? hasFeature('reviews')
     : g.guard === 'takeaway' ? hasFeature('takeaway')
+    : g.guard === 'passepartout' ? (hasFeature('passepartout') && hasPermission('settings:full'))
     : true
   );
 
@@ -3567,15 +3570,6 @@ const App: React.FC = () => {
                 >
                   <BlacklistPolicyManager showToast={addToast} />
                 </SettingsDisclosure>
-
-                {/* Prenotazioni nel planning della cassa Passepartout e arrivi
-                    di ritorno: solo con l'add-on, e solo per chi decide cosa
-                    finisce nella cassa del locale (le route sono settings:full). */}
-                {hasFeature('passepartout') && hasPermission('settings:full') && (
-                  <CardErrorBoundary label="Passepartout">
-                    <PassepartoutPrenotazioniCard showToast={addToast} />
-                  </CardErrorBoundary>
-                )}
               </div>
             </SettingsSection>
 
@@ -3663,6 +3657,23 @@ const App: React.FC = () => {
                       onClick={() => setView(ViewState.MENU)}
                     />
                   )}
+                </div>
+              </SettingsSection>
+            )}
+
+            {/* Tutto quello che il CRM fa con la cassa Passepartout, in un
+                posto solo: ogni ristorante con l'add-on decide da sé. Solo
+                per chi decide cosa finisce nella cassa del locale (le route
+                sono settings:full). */}
+            {hasFeature('passepartout') && hasPermission('settings:full') && (
+              <SettingsSection id="imp-passepartout" label={t('settings.tabPassepartout', 'Passepartout')}>
+                <div className="space-y-3">
+                  <CardErrorBoundary label="Passepartout">
+                    <CollegamentoCassa showToast={addToast} />
+                  </CardErrorBoundary>
+                  <CardErrorBoundary label="Passepartout">
+                    <PrenotazioniInCassa showToast={addToast} />
+                  </CardErrorBoundary>
                 </div>
               </SettingsSection>
             )}

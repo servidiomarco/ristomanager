@@ -39,7 +39,7 @@ import { initSalaNodeFileLog } from './services/salaNodeLog.js';
 import { startSalaNodeWatchdog } from './services/salaNodeWatchdog.js';
 import { createServer as createHttpsServer, type Server as HttpsServer } from 'https';
 import { startSalaNodeReplica, getSalaNodeLocalStatus, isCloudUplinkDown } from './services/salaNodeReplica.js';
-import { salaNodeAccessPolicy, startSalaNodeAccess } from './services/salaNodeAccess.js';
+import { salaNodeAccessPolicy, startSalaNodeAccess, getSalaNodeTenantId } from './services/salaNodeAccess.js';
 import { startSalaNodeConfigSync, kickConfigSync } from './services/salaNodeConfigSync.js';
 import { VOICE_CHANNEL, WHATSAPP_CHANNEL, type ToolOutcome } from './services/bookingTools.js';
 import { TENANT_FEATURES, getTenantFeatures, isFeatureEnabledForTenant, invalidateTenantFeaturesCache, clearTenantFeaturesCache, type TenantFeature } from './services/entitlements.js';
@@ -70,8 +70,8 @@ import {
 } from './services/aiEmailBookingService.js';
 import {
     setupPassepartoutBridge,
-    isPassepartoutAgentConfigured,
     getPassepartoutAgentStatus,
+    connectedPassepartoutTenants,
     passepartoutAgentSupports,
     callPassepartout,
     comandaToBillPayload,
@@ -457,7 +457,7 @@ const tenantTokenCache = new Map<string, { tenantId: number; refreshedAt: number
 const TENANT_TOKEN_TTL_MS = 60_000;
 
 async function resolveTenantByTokenColumn(
-    column: 'webhook_token' | 'print_agent_token' | 'sala_node_token',
+    column: 'webhook_token' | 'print_agent_token' | 'sala_node_token' | 'passepartout_agent_token',
     token: string
 ): Promise<number | null> {
     // Forma dei token generati (hex di gen_random_bytes): tutto il resto si
@@ -488,6 +488,18 @@ async function resolveTenantByTokenColumn(
         return cached ? cached.tenantId : null;
     }
 }
+
+// L'agente Passepartout del PC di sala: dal token dell'handshake al
+// ristorante. Il token storico in env vale per il ristorante 1 (il Frantoio,
+// che lo usava prima dei token per ristorante: il suo PC non si riconfigura)
+// e, sul nodo, per l'unico ristorante del nodo — è quello che il supervisore
+// passa al nodo. Sul nodo nessun altro token: lì il token del cloud non c'è.
+const resolvePassepartoutAgentTenant = async (token: string): Promise<number | null> => {
+    const storico = (process.env.PASSEPARTOUT_AGENT_TOKEN || '').trim();
+    if (storico && token === storico) return isServiceNode ? getSalaNodeTenantId() : PUBLIC_TENANT_ID;
+    if (isServiceNode) return null;
+    return resolveTenantByTokenColumn('passepartout_agent_token', token);
+};
 
 const resolveTenantByWebhookToken = (token: string): Promise<number | null> =>
     resolveTenantByTokenColumn('webhook_token', token);
@@ -3976,7 +3988,7 @@ function sendPassepartoutError(res: any, err: unknown): boolean {
 // Il nome tavolo in Passepartout deve combaciare ESATTAMENTE, e in sala i
 // nomi hanno varianti tipografiche ("204.", "23 "): il CRM manda il proprio
 // nome tavolo, qui si prova anche con le varianti note prima di arrendersi.
-async function findComandaTavolo(tavolo: string): Promise<{ comanda: PassepartoutComanda; tavolo: string } | null> {
+async function findComandaTavolo(tenantId: number, tavolo: string): Promise<{ comanda: PassepartoutComanda; tavolo: string } | null> {
     const base = tavolo.trim();
     const variants = [...new Set([
         base,
@@ -3986,14 +3998,102 @@ async function findComandaTavolo(tavolo: string): Promise<{ comanda: Passepartou
         base.toLowerCase(),
     ])].filter(v => v.length > 0);
     for (const v of variants) {
-        const comanda = await callPassepartout<PassepartoutComanda | null>('comandaTavolo', { tavolo: v });
+        const comanda = await callPassepartout<PassepartoutComanda | null>(tenantId, 'comandaTavolo', { tavolo: v });
         if (comanda) return { comanda, tavolo: v };
     }
     return null;
 }
 
-app.get('/passepartout/status', authenticate, requirePermission('payments:full'), (_req, res) => {
-    res.json(getPassepartoutAgentStatus());
+app.get('/passepartout/status', authenticate, requirePermission('payments:full'), (req, res) => {
+    res.json(getPassepartoutAgentStatus(req.tenantId!));
+});
+
+// --- Impostazioni → Passepartout ----------------------------------------------
+// La sezione del ristorante con la cassa: stato dell'agente del suo PC e
+// come la cassa chiude i conti saldati nel CRM. settings:full + add-on:
+// decide cosa finisce nella cassa del locale. Il token dell'agente non passa
+// di qui: è un segreto di macchina, come quello del nodo.
+const PP_TIPI_DOCUMENTO = new Set(['Scontrino', 'Proforma']);
+
+app.get('/passepartout/config', authenticate, requirePermission('settings:full'), requireFeature('passepartout'), async (req, res) => {
+    try {
+        const tenantId = req.tenantId!;
+        const rs = await queryWithRetry(
+            `SELECT tipo_pagamento_esterno, tipo_documento FROM passepartout_config WHERE tenant_id = $1`,
+            [tenantId]
+        );
+        const effettivo = await getPassepartoutChiusuraConfig(tenantId);
+        const salvato = rs.rows[0] ?? {};
+        res.json({
+            tipo_pagamento_esterno: salvato.tipo_pagamento_esterno ?? null,
+            tipo_documento: salvato.tipo_documento ?? null,
+            // Quello che la chiusura usa davvero: il ristorante 1 eredita le
+            // variabili d'ambiente finché la sezione non le sostituisce.
+            effettivo: {
+                tipo_pagamento: effettivo?.tipoPagamento ?? null,
+                tipo_documento: effettivo?.tipoDocumento ?? 'Scontrino',
+            },
+            agente: getPassepartoutAgentStatus(tenantId),
+        });
+    } catch (err: any) {
+        console.error('GET /passepartout/config error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+app.put('/passepartout/config', authenticate, requirePermission('settings:full'), requireFeature('passepartout'), async (req, res) => {
+    try {
+        const tenantId = req.tenantId!;
+        const body = req.body ?? {};
+        const has = (k: string) => Object.prototype.hasOwnProperty.call(body, k);
+        const testo = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+        const tipoPagamento = has('tipo_pagamento_esterno') ? testo(body.tipo_pagamento_esterno) : undefined;
+        const tipoDocumento = has('tipo_documento') ? testo(body.tipo_documento) : undefined;
+        if (tipoPagamento !== undefined && tipoPagamento != null && tipoPagamento.length > 100) {
+            return res.status(400).json({ error: 'Tipo di pagamento troppo lungo' });
+        }
+        if (tipoDocumento !== undefined && tipoDocumento != null && !PP_TIPI_DOCUMENTO.has(tipoDocumento)) {
+            return res.status(400).json({ error: 'Documento non valido: Scontrino o Proforma' });
+        }
+        if (tipoPagamento === undefined && tipoDocumento === undefined) {
+            return res.status(400).json({ error: 'Niente da salvare' });
+        }
+        await queryWithRetry(
+            `INSERT INTO passepartout_config (tenant_id, tipo_pagamento_esterno, tipo_documento, updated_at)
+             VALUES ($1, $2, $3, now())
+             ON CONFLICT (tenant_id) DO UPDATE
+                SET tipo_pagamento_esterno = CASE WHEN $4 THEN EXCLUDED.tipo_pagamento_esterno ELSE passepartout_config.tipo_pagamento_esterno END,
+                    tipo_documento = CASE WHEN $5 THEN EXCLUDED.tipo_documento ELSE passepartout_config.tipo_documento END,
+                    updated_at = now()`,
+            [tenantId, tipoPagamento ?? null, tipoDocumento ?? null, tipoPagamento !== undefined, tipoDocumento !== undefined]
+        );
+        if (req.user) {
+            LogService.logActivity(
+                tenantId, req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.SETTINGS, undefined, 'Passepartout: chiusura in cassa',
+                { ...(tipoPagamento !== undefined ? { tipo_pagamento_esterno: tipoPagamento } : {}), ...(tipoDocumento !== undefined ? { tipo_documento: tipoDocumento } : {}) }
+            );
+        }
+        const effettivo = await getPassepartoutChiusuraConfig(tenantId);
+        res.json({
+            effettivo: { tipo_pagamento: effettivo?.tipoPagamento ?? null, tipo_documento: effettivo?.tipoDocumento ?? 'Scontrino' },
+        });
+    } catch (err: any) {
+        console.error('PUT /passepartout/config error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// I tipi di pagamento configurati nella cassa: le tendine della sezione
+// scelgono fra quelli veri, un nome sbagliato lascerebbe i conti a sospeso.
+app.get('/passepartout/tipi-pagamento', authenticate, requirePermission('settings:full'), requireFeature('passepartout'), async (req, res) => {
+    try {
+        res.json(await callPassepartout<Array<{ codice: string; categoria: string | null }>>(req.tenantId!, 'tipiPagamento'));
+    } catch (err: any) {
+        if (sendPassepartoutError(res, err)) return;
+        console.error('GET /passepartout/tipi-pagamento error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
 });
 
 // Anteprima della comanda attiva su un tavolo del gestionale, già mappata
@@ -4005,7 +4105,7 @@ app.get('/passepartout/status', authenticate, requirePermission('payments:full')
 // lo scontrino dall'RT. settings:full: è diagnostica di piattaforma.
 app.get('/passepartout/ws-operations', authenticate, requirePermission('settings:full'), async (req, res) => {
     try {
-        const result = await callPassepartout('wsdl', {}, 30_000);
+        const result = await callPassepartout(req.tenantId!, 'wsdl', {}, 30_000);
         res.json(result);
     } catch (err: any) {
         if (sendPassepartoutError(res, err)) return;
@@ -4017,7 +4117,7 @@ app.get('/passepartout/tavolo/:nome', authenticate, requirePermission('payments:
     try {
         const nome = String(req.params.nome || '').trim();
         if (!nome) return res.status(400).json({ error: 'Nome tavolo mancante' });
-        const found = await findComandaTavolo(nome);
+        const found = await findComandaTavolo(req.tenantId!, nome);
         if (!found) {
             return res.status(404).json({
                 error: 'no_comanda',
@@ -4123,10 +4223,10 @@ app.get('/passepartout/prenotazioni', authenticate, requirePermission('settings:
                 [tenantId]
             ),
         ]);
-        const agente = getPassepartoutAgentStatus();
+        const agente = getPassepartoutAgentStatus(tenantId);
         res.json({
             enabled: cfg.rows[0]?.prenotazioni_enabled === true,
-            agente: { collegato: agente.connected, aggiornato: passepartoutAgentSupports('prenotazioni') },
+            agente: { collegato: agente.connected, aggiornato: passepartoutAgentSupports(tenantId, 'prenotazioni') },
             tavoli: tavoli.rows[0],
             invio: invio.rows[0],
             errori: errori.rows,
@@ -4165,10 +4265,10 @@ app.put('/passepartout/prenotazioni', authenticate, requirePermission('settings:
 // fra un tentativo fallito e l'altro.
 app.post('/passepartout/prenotazioni/sincronizza', authenticate, requirePermission('settings:full'), requireFeature('passepartout'), async (req, res) => {
     try {
-        if (!getPassepartoutAgentStatus().connected) {
+        if (!getPassepartoutAgentStatus(req.tenantId!).connected) {
             return res.status(503).json({ error: 'passepartout_agent_offline', message: 'Agente Passepartout non collegato: il PC di sala è acceso?' });
         }
-        if (!passepartoutAgentSupports('prenotazioni')) {
+        if (!passepartoutAgentSupports(req.tenantId!, 'prenotazioni')) {
             return res.status(409).json({ error: 'agente_da_aggiornare', message: "L'agente sul PC di sala va aggiornato per scrivere le prenotazioni." });
         }
         res.json(await sincronizzaPrenotazioniCassa(req.tenantId!, { forza: true }));
@@ -4195,15 +4295,16 @@ app.get('/passepartout/tavoli', authenticate, requirePermission('settings:full')
 app.post('/passepartout/tavoli/abbina', authenticate, requirePermission('settings:full'), requireFeature('passepartout'), async (req, res) => {
     try {
         const tenantId = req.tenantId!;
-        if (!passepartoutAgentSupports('prenotazioni')) {
-            return res.status(getPassepartoutAgentStatus().connected ? 409 : 503).json({
-                error: getPassepartoutAgentStatus().connected ? 'agente_da_aggiornare' : 'passepartout_agent_offline',
-                message: getPassepartoutAgentStatus().connected
+        if (!passepartoutAgentSupports(tenantId, 'prenotazioni')) {
+            const collegato = getPassepartoutAgentStatus(tenantId).connected;
+            return res.status(collegato ? 409 : 503).json({
+                error: collegato ? 'agente_da_aggiornare' : 'passepartout_agent_offline',
+                message: collegato
                     ? "L'agente sul PC di sala va aggiornato per leggere i tavoli della cassa."
                     : 'Agente Passepartout non collegato: il PC di sala è acceso?',
             });
         }
-        const pianta = await callPassepartout<Array<{ sala: string; tavoli: Array<{ nome: string; coperti: number | null }> }>>('piantaSale', {}, 90_000);
+        const pianta = await callPassepartout<Array<{ sala: string; tavoli: Array<{ nome: string; coperti: number | null }> }>>(tenantId, 'piantaSale', {}, 90_000);
         await queryWithRetry(
             `INSERT INTO passepartout_config (tenant_id, pianta, pianta_at, updated_at)
              VALUES ($1, $2::jsonb, now(), now())
@@ -4294,24 +4395,47 @@ app.put('/passepartout/tavoli/:tableId', authenticate, requirePermission('settin
 // "pp:comanda:<id>") viene CHIUSO saldato per intero, il gestionale chiude il
 // tavolo ed emette LUI il documento fiscale (RT di cassa) — per questi conti
 // l'emissione Openapi del CRM viene saltata, altrimenti due documenti per lo
-// stesso incasso. Config da env come il resto dell'integrazione:
-// - PASSEPARTOUT_TIPO_PAGAMENTO: tipo pagamento di cassa sotto cui registrare
-//   l'incasso (un tipo DEDICATO, es. "ESTERNO" — mai "Contanti", che
-//   conteggerebbe due volte l'incasso nei report di cassa). Vuoto = chiusura
-//   automatica spenta: il tavolo si chiude in cassa a mano come prima.
-// - PASSEPARTOUT_TIPO_DOCUMENTO: default "Scontrino".
+// stesso incasso. Config per ristorante, da Impostazioni → Passepartout
+// (passepartout_config), con le variabili d'ambiente come ripiego del
+// ristorante 1, che le usava prima che la sezione esistesse:
+// - tipo pagamento (PASSEPARTOUT_TIPO_PAGAMENTO): tipo di cassa sotto cui
+//   registrare l'incasso (un tipo DEDICATO, es. "ESTERNO" — mai "Contanti",
+//   che conteggerebbe due volte l'incasso nei report di cassa). Vuoto =
+//   chiusura automatica spenta: il tavolo si chiude in cassa a mano.
+// - tipo documento (PASSEPARTOUT_TIPO_DOCUMENTO): default "Scontrino".
 
 function passepartoutComandaIdFromRef(externalRef: unknown): number | null {
     const m = /^pp:comanda:(\d+)$/.exec(String(externalRef ?? ''));
     return m ? Number(m[1]) : null;
 }
 
-function getPassepartoutChiusuraConfig(): { tipoPagamento: string; tipoDocumento: string } | null {
+interface PassepartoutChiusuraConfig { tipoPagamento: string; tipoDocumento: string }
+
+// Sul nodo la configurazione arriva con le credenziali del cloud, nelle
+// stesse variabili d'ambiente (services/salaNodeLocalTls.ts): il nodo serve
+// un solo ristorante e passepartout_config non gli viene replicata.
+function chiusuraConfigDaEnv(): PassepartoutChiusuraConfig | null {
     const tipoPagamento = (process.env.PASSEPARTOUT_TIPO_PAGAMENTO || '').trim();
     if (!tipoPagamento) return null;
     return {
         tipoPagamento,
         tipoDocumento: (process.env.PASSEPARTOUT_TIPO_DOCUMENTO || 'Scontrino').trim(),
+    };
+}
+
+async function getPassepartoutChiusuraConfig(tenantId: number): Promise<PassepartoutChiusuraConfig | null> {
+    if (isServiceNode) return chiusuraConfigDaEnv();
+    const rs = await queryWithRetry(
+        `SELECT tipo_pagamento_esterno, tipo_documento FROM passepartout_config WHERE tenant_id = $1`,
+        [tenantId]
+    );
+    const row = rs.rows[0];
+    const env = tenantId === PUBLIC_TENANT_ID ? chiusuraConfigDaEnv() : null;
+    const tipoPagamento = (row?.tipo_pagamento_esterno ?? '').trim() || env?.tipoPagamento || '';
+    if (!tipoPagamento) return null;
+    return {
+        tipoPagamento,
+        tipoDocumento: (row?.tipo_documento ?? '').trim() || env?.tipoDocumento || 'Scontrino',
     };
 }
 
@@ -4379,7 +4503,7 @@ async function notePassepartoutCloseFailure(tenantId: number, docId: number, err
     let failReason: string | null = null;
     if (Number(row.attempts) >= PP_CLOSE_MAX_ATTEMPTS || expired) {
         failReason = `Chiusura in cassa non riuscita dopo ${row.attempts} tentativi: ${message}`;
-    } else if (reached && !passepartoutAgentSupports('chiudi-riprendi')) {
+    } else if (reached && !passepartoutAgentSupports(tenantId, 'chiudi-riprendi')) {
         failReason = `Chiusura in cassa non riuscita: ${message}. Controlla in cassa se il conto c'è già prima di riprovare.`;
     }
     // Attesa crescente: 1, 2, 4, 8, 15 minuti.
@@ -4461,7 +4585,7 @@ async function chiudiComandaPassepartoutPerBill(
         try {
             // Timeout largo: la sequenza sull'agente può includere invio in
             // produzione, attesa e saldo del sospeso (vedi chiudiComandaCompleta).
-            esito = await callPassepartout<EsitoChiusuraComanda>('chiudi', {
+            esito = await callPassepartout<EsitoChiusuraComanda>(tenantId, 'chiudi', {
                 idComanda,
                 tipoPagamento: config.tipoPagamento,
                 tipoDocumento: proforma ? 'Proforma' : config.tipoDocumento,
@@ -4497,9 +4621,10 @@ async function chiudiComandaPassepartoutPerBill(
  *  l'autorità in sala, il nodo). */
 function startPassepartoutCloseSweeper(): void {
     const sweep = async (): Promise<void> => {
-        if (!getPassepartoutAgentStatus().connected) return;
-        const config = getPassepartoutChiusuraConfig();
-        if (!config) return;
+        // Solo i ristoranti con l'agente collegato adesso: per gli altri il
+        // tentativo finirebbe comunque in agent_offline.
+        const collegati = connectedPassepartoutTenants();
+        if (collegati.length === 0) return;
         // queryWithRetry e non pool.query: solo lui porta il contesto sul
         // client (db.ts), e sotto RLS rigida — come gira Railway — un
         // pool.query nudo vede zero righe anche dentro runAsPlatform.
@@ -4509,7 +4634,9 @@ function startPassepartoutCloseSweeper(): void {
                     COALESCE(fd.response, '{}'::jsonb) AS response, b.external_ref
                FROM fiscal_documents fd JOIN table_bills b ON b.id = fd.table_bill_id
               WHERE fd.provider = 'passepartout' AND fd.status = 'PENDING' AND b.status = 'CLOSED'
-              ORDER BY fd.id LIMIT 20`
+                AND fd.tenant_id = ANY($1::bigint[])
+              ORDER BY fd.id LIMIT 20`,
+            [collegati]
         ));
         for (const row of rs.rows) {
             const tenantId = Number(row.tenant_id);
@@ -4522,10 +4649,12 @@ function startPassepartoutCloseSweeper(): void {
                 // Dentro il contesto: fuori, sotto RLS rigida, il flag si
                 // leggerebbe come spento.
                 if (!isServiceNode && await nodeOwnsBills(tenantId)) return;
+                const config = await getPassepartoutChiusuraConfig(tenantId);
+                if (!config) return;
                 const offline = Number(row.response?.offline_attempts ?? 0);
                 const reached = Number(row.attempts) > offline;
                 const expired = Date.now() - new Date(row.created_at).getTime() > PP_CLOSE_WINDOW_MS;
-                if (expired || Number(row.attempts) >= PP_CLOSE_MAX_ATTEMPTS || (reached && !passepartoutAgentSupports('chiudi-riprendi'))) {
+                if (expired || Number(row.attempts) >= PP_CLOSE_MAX_ATTEMPTS || (reached && !passepartoutAgentSupports(tenantId, 'chiudi-riprendi'))) {
                     await queryWithRetry(
                         `UPDATE fiscal_documents SET status = 'FAILED',
                                 error = COALESCE(error, 'Chiusura in cassa non riuscita: controlla in cassa e chiudi a mano')
@@ -4568,9 +4697,9 @@ app.post('/bills/:id/passepartout-close', authenticate, requirePermission('payme
         if (bill.status !== 'CLOSED') {
             return res.status(409).json({ error: 'bill_not_closed', message: 'Il conto va prima chiuso saldato per intero' });
         }
-        const config = getPassepartoutChiusuraConfig();
+        const config = await getPassepartoutChiusuraConfig(req.tenantId!);
         if (!config) {
-            return res.status(409).json({ error: 'passepartout_non_configurato', message: 'PASSEPARTOUT_TIPO_PAGAMENTO non configurato sul server' });
+            return res.status(409).json({ error: 'passepartout_non_configurato', message: 'Tipo di pagamento della cassa non impostato: Impostazioni → Passepartout' });
         }
         const documento = req.body?.documento === 'Proforma' ? 'Proforma' as const : undefined;
         const esito = await chiudiComandaPassepartoutPerBill(req.tenantId!, id, idComanda, config, documento);
@@ -4598,7 +4727,7 @@ app.post('/menu/import/passepartout', authenticate, requirePermission('menu:full
     try {
         // Timeout largo: il gestionale serializza ~14MB di catalogo (immagini
         // incluse) prima che l'agente lo riduca agli ~85KB che viaggiano qui.
-        const articoli = await callPassepartout<PassepartoutArticolo[]>('articoli', {}, 150_000);
+        const articoli = await callPassepartout<PassepartoutArticolo[]>(req.tenantId!, 'articoli', {}, 150_000);
         // Solo le voci di menu vere: le varianti di battitura, il coperto e
         // gli acconti non sono piatti. E solo le voci ACCESE: in Passepartout
         // un articolo o una categoria con storico non si può eliminare, si
@@ -6551,7 +6680,7 @@ app.post('/reservations/:id/bill', authenticate, requirePermission('payments:ful
         if (fromPassepartout) {
             const tavolo = String(req.body?.pp_tavolo || '').trim();
             if (!tavolo) return res.status(400).json({ error: 'pp_tavolo mancante per source=passepartout' });
-            let found = await findComandaTavolo(tavolo);
+            let found = await findComandaTavolo(req.tenantId!, tavolo);
             // Tavoli uniti: in sala la comanda può essere stata aperta su uno
             // qualsiasi dei tavoli dell'unione (25/08: 45+47 uniti, comanda
             // battuta sul 47, prenotazione sul 45 → import a vuoto). Se il
@@ -6570,7 +6699,7 @@ app.post('/reservations/:id/bill', authenticate, requirePermission('payments:ful
                     [req.tenantId!, mergeDate, resRow.rows[0].shift, resRow.rows[0].table_id]
                 );
                 for (const s of siblings.rows) {
-                    found = await findComandaTavolo(String(s.name));
+                    found = await findComandaTavolo(req.tenantId!, String(s.name));
                     if (found) break;
                 }
             }
@@ -6968,7 +7097,7 @@ app.post('/bills/:id/close', authenticate, requirePermission('payments:full'), a
             // il COMMIT la lascia PENDING e la riprende lo spazzino, invece
             // di perderla.
             if (finalStatus === 'CLOSED' && passepartoutComandaIdFromRef(updatedRow?.external_ref) != null
-                && getPassepartoutChiusuraConfig()) {
+                && await getPassepartoutChiusuraConfig(req.tenantId!)) {
                 await insertPendingPassepartoutClose(client, req.tenantId!, id,
                     req.body?.passepartout_documento === 'Proforma' ? 'Proforma' : undefined);
             }
@@ -6994,7 +7123,7 @@ app.post('/bills/:id/close', authenticate, requirePermission('payments:full'), a
         if (updatedRow.status === 'CLOSED') {
             const ppComandaId = passepartoutComandaIdFromRef(updatedRow.external_ref);
             if (ppComandaId != null) {
-                const ppConfig = getPassepartoutChiusuraConfig();
+                const ppConfig = await getPassepartoutChiusuraConfig(req.tenantId!);
                 // Documento scelto dal cameriere nel dialog di chiusura:
                 // Proforma = la chiusura senza scontrino usata di routine in
                 // cassa. Assente o non valido → Scontrino.
@@ -37866,7 +37995,7 @@ app.post('/tables/:id/bill', authenticate, requirePermission('payments:full'), a
         if (fromPassepartout) {
             const tavolo = String(req.body?.pp_tavolo || tbl.rows[0].name || '').trim();
             if (!tavolo) return res.status(400).json({ error: 'pp_tavolo mancante per source=passepartout' });
-            const found = await findComandaTavolo(tavolo);
+            const found = await findComandaTavolo(req.tenantId!, tavolo);
             if (!found) {
                 return res.status(404).json({ error: 'no_comanda', message: `Nessuna comanda attiva sul tavolo "${tavolo}" nel gestionale. Il nome deve combaciare con quello di Passepartout (punto e spazi compresi).` });
             }
@@ -40197,9 +40326,9 @@ app.get('/sala-node/credentials', salaNodeAuth, async (req: any, res) => {
             // configurazione, mai il token dell'agente: quello il nodo lo
             // riceve dal supervisore, che sul PC lo ha già — il token del
             // nodo non deve valere anche come agente (stessa regola che ha
-            // tolto JWT_SECRET da qui). Integrazione da env: solo il tenant
-            // pubblico.
-            passepartout_chiusura: tenantId === PUBLIC_TENANT_ID ? getPassepartoutChiusuraConfig() : null,
+            // tolto JWT_SECRET da qui). Dalla sezione Passepartout del
+            // ristorante, con l'env come ripiego del ristorante 1.
+            passepartout_chiusura: await getPassepartoutChiusuraConfig(tenantId),
             jwt_public_keys: publicKeysForNodes(),
             cert: cert
                 ? { cert_pem: cert.cert_pem, key_pem: cert.key_pem, expires_at: cert.expires_at }
@@ -40266,7 +40395,10 @@ const SNAPSHOT_TABLES: SnapshotTableSpec[] = [
     // La riga del ristorante stesso: il nodo deve riconoscere i token degli
     // agenti LAN (print agent in testa — fase stampe-dal-nodo). La tabella
     // non ha tenant_id: la sua chiave è id (special-case qui e nel loader).
-    { name: 'tenants' },
+    // Mai il token dell'agente Passepartout: l'agente del PC si collega al
+    // nodo col token che gli passa il supervisore, e quello del cloud non
+    // deve stare su una macchina che non lo usa.
+    { name: 'tenants', dropColumns: ['passepartout_agent_token'] },
     // Gli add-on del ristorante: sul nodo li leggono i gate dei moduli
     // (asporto, Passepartout…) e la risposta del PIN di sala. Senza, il nodo
     // li avrebbe solo dai seed delle migration — giusti per il tenant 1,
@@ -40339,7 +40471,9 @@ const SNAPSHOT_TABLES: SnapshotTableSpec[] = [
 app.get('/sala-node/tenant', salaNodeAuth, async (req: any, res) => {
     try {
         const rs = await queryWithRetry(`SELECT * FROM tenants WHERE id = $1`, [req.salaNodeTenantId]);
-        res.json({ tenant: rs.rows[0] ?? null });
+        const tenant = rs.rows[0] ?? null;
+        if (tenant) delete tenant.passepartout_agent_token;
+        res.json({ tenant });
     } catch (err: any) {
         console.error('GET /sala-node/tenant error:', err);
         res.status(500).json({ error: 'Internal server error' });
@@ -41491,20 +41625,21 @@ const startServer = async () => {
                 setNotificationPersistListener((tenantId, userIds) => {
                     socketService?.broadcastToUsers(tenantId, userIds, 'notification:new', {});
                 });
-                // Sul nodo sempre (fase B5): il token arriva dalle credenziali
-                // del cloud anche dopo l'avvio, e il namespace lo rilegge a
-                // ogni handshake.
-                if (isServiceNode || isPassepartoutAgentConfigured()) {
-                    setupPassepartoutBridge(socketService.getIO());
+                // Sempre attivo: ogni ristorante con la cassa Passepartout ha
+                // il suo token a DB, e senza agenti collegati gli spazzini
+                // non fanno niente. Sul nodo vale solo il token che il
+                // supervisore gli passa (fase B5), riletto a ogni handshake.
+                {
+                    setupPassepartoutBridge(socketService.getIO(), resolvePassepartoutAgentTenant);
                     startPassepartoutCloseSweeper();
                     // Le prenotazioni sono del cloud: il planning della cassa
                     // lo scrive lui, e da lui tornano gli arrivi.
                     if (!isServiceNode) startPassepartoutPrenotazioniSync({ segnaArrivo: segnaArrivoDaCassa });
                     console.log('✅ Passepartout agent bridge attivo su /pp-agent');
                 }
-                // Sempre attivo (a differenza del pp-agent non dipende da un
-                // env): il token è per-tenant a DB, e senza nodo collegato il
-                // mirror costa una lookup su una Map vuota.
+                // Sempre attivo, come il pp-agent: il token è per-tenant a DB,
+                // e senza nodo collegato il mirror costa una lookup su una
+                // Map vuota.
                 if (!isServiceNode) {
                     setupSalaNodeBridge(
                         socketService.getIO(),
