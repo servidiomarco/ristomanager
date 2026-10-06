@@ -48,7 +48,12 @@ i18n
             loadPath: '/locales/{{lng}}/{{ns}}.json',
         },
         detection: {
-            order: ['localStorage', 'navigator'],
+            // ?lng= prima di tutto: il menu del QR del tavolo (servito dal
+            // backend, altro dominio) porta l'ospite a /pay/<token> nella
+            // lingua che ha già scelto — col solo navigator un ospite tedesco
+            // finiva in italiano, che è il fallback. Nell'app nessun URL lo usa.
+            order: ['querystring', 'localStorage', 'navigator'],
+            lookupQuerystring: 'lng',
             caches: ['localStorage'],
         },
         interpolation: {

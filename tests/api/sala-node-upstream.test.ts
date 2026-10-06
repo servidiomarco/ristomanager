@@ -169,6 +169,37 @@ describe('stream inverso nodo→cloud', () => {
         expect(Number(cur.rows[0]?.applied_seq ?? 0)).toBeGreaterThan(0);
     });
 
+    it('il tavolo risalito dal nodo non tocca il token del QR al tavolo', async () => {
+        // Il token è del cloud: la copia del nodo può essere di prima di un
+        // «Rigenera» non ancora sceso, e non deve rimettere il vecchio.
+        await cloudDb!.query(`UPDATE tables SET public_token = 'TokenDelCloudQrTavolo1' WHERE id = $1`, [tableId]);
+        await nodeDb!.query(`UPDATE tables SET public_token = 'TokenVecchioDelNodo001' WHERE id = $1`, [tableId]);
+        const ancora = await fetch(`${nodeBase}/tables/${tableId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ status: 'FREE' }),
+        });
+        expect(ancora.status).toBe(200);
+        await finoA(async () => {
+            const r = await cloudDb!.query('SELECT status FROM tables WHERE id = $1', [tableId]);
+            return r.rows[0]?.status === 'FREE';
+        }, 'tavolo FREE risalito sul cloud');
+        // Lo stato torna com'era per i test che seguono: è un secondo giro
+        // di replica, e il token va controllato anche dopo quello.
+        const dinuovo = await fetch(`${nodeBase}/tables/${tableId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ status: 'OCCUPIED' }),
+        });
+        expect(dinuovo.status).toBe(200);
+        await finoA(async () => {
+            const r = await cloudDb!.query('SELECT status FROM tables WHERE id = $1', [tableId]);
+            return r.rows[0]?.status === 'OCCUPIED';
+        }, 'tavolo di nuovo OCCUPIED sul cloud');
+        const tok = await cloudDb!.query('SELECT public_token FROM tables WHERE id = $1', [tableId]);
+        expect(tok.rows[0].public_token).toBe('TokenDelCloudQrTavolo1');
+    });
+
     it("un'unione fatta sul nodo appare sul cloud (payload-snapshot risalito)", async () => {
         const t2cloud = await api().post('/tables').set(bearer(token)).send({
             name: 'INV2', shape: 'SQUARE', seats: 2, x: 300, y: 80,

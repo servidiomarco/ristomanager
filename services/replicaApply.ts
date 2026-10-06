@@ -479,10 +479,19 @@ export const applyReplicaBatch = async (opts: {
                 continue;
             }
             const table = conv.kind; // 'tables' | 'reservations': nome tabella = kind
-            const row = fetched[conv.kind].get(id);
+            let row = fetched[conv.kind].get(id);
             if (!row) {
                 await client.query(`DELETE FROM ${table} WHERE id = $1`, [id]);
                 continue;
+            }
+            if (table === 'tables' && cursorStream === 'node') {
+                // Il token del QR al tavolo è del cloud: lo assegna e lo
+                // rigenera solo lui. La copia del nodo può essere di prima di
+                // un «Rigenera», o non averlo affatto se il nodo gira una
+                // versione vecchia — e il cartellino stampato smetterebbe di
+                // funzionare. Sul cloud resta quello che c'è.
+                const local = await client.query(`SELECT public_token FROM tables WHERE id = $1`, [id]);
+                row = { ...row, public_token: local.rows[0]?.public_token ?? null };
             }
             await upsertRow(client, table, row);
             touched.add(table);

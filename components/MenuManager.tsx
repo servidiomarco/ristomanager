@@ -12,13 +12,14 @@ import { BanquetCompositionModal } from './BanquetCompositionModal';
 import { BanquetPaymentsModal } from './BanquetPaymentsModal';
 import { DishDetailModal } from './DishDetailModal';
 import { CustomerPickerModal } from './CustomerPickerModal';
-import { getCustomers, getTableMerges, getRoomClosed, importMenuPassepartout, translateMenu, digitalMenuUrl, getFeatureFlags, updateFeatureFlags, getDigitalMenu, setDigitalMenu, getMenuCategories, saveMenuCategories, saveDishOrder, setDishEnabled, createMenu, renameMenu, deleteMenu, setBanquetStatus, setCategoryMenu, setCategoryBar, setCategoryDessert, setCategoryWine, suggestDishWinePairings, pairMenuWines, createMenuCategory, renameMenuCategory, deleteMenuCategory, getBanquetShareLink, sendBanquetQuoteEmail, sendBanquetQuoteWhatsApp, getModifierGroups, getDishComponents, type AdminModifierGroup, type MenuImportResult, type MenuTranslateResult, type PairWinesResult, type MenuCategory } from '../services/apiService';
+import { getCustomers, getTableMerges, getRoomClosed, importMenuPassepartout, translateMenu, digitalMenuUrl, tableQrUrl, isTechnicalPublicHost, getTableQrTokens, rotateTableQrToken, getTableQrPrint, saveTableQrPrint, type TableQrToken, type TableQrPrintSettings, getFeatureFlags, updateFeatureFlags, getDigitalMenu, setDigitalMenu, getMenuCategories, saveMenuCategories, saveDishOrder, setDishEnabled, createMenu, renameMenu, deleteMenu, setBanquetStatus, setCategoryMenu, setCategoryBar, setCategoryDessert, setCategoryWine, suggestDishWinePairings, pairMenuWines, createMenuCategory, renameMenuCategory, deleteMenuCategory, getBanquetShareLink, sendBanquetQuoteEmail, sendBanquetQuoteWhatsApp, getModifierGroups, getDishComponents, type AdminModifierGroup, type MenuImportResult, type MenuTranslateResult, type PairWinesResult, type MenuCategory } from '../services/apiService';
 import { socketClient } from '../services/socketClient';
 import { getSalaConfig, type SalaStation } from '../services/salaApiService';
 import { MenuVariantsModal } from './MenuVariantsModal';
 import { billsApiService } from '../services/billsApiService';
 import { QRCodeSVG } from 'qrcode.react';
 import { useAuth } from '../contexts/AuthContext';
+import { printTableQrSheet, buildTableQrSheetHtml, cardsPerSheet, cardSizeCm, QR_PAPERS, QR_PAPER_ORDER, TABLE_QR_TEXT_MAX, cleanTableQrText, type QrPaper } from '../utils/printTableQr';
 import { saveDraft, loadDraft, clearDraft, DRAFT_KEYS } from '../services/draftService';
 import {
   SegmentedControl, SearchField, SectionHeader, StatusPill, Callout, EmptyState,
@@ -517,6 +518,158 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         : err?.data?.message ?? err?.data?.error ?? err?.message ?? t('err.pairing'));
     } finally {
       setPairingWines(false);
+    }
+  };
+
+  // QR unico al tavolo: un cartellino per tavolo con menu e «Paga il conto».
+  // I token li assegna il server all'apertura del foglio. Foglio (A3/A4/A5) e
+  // frase sotto il QR sono del ristorante e restano salvati per la ristampa.
+  // Le rotte sono della gestione sale, come la piantina.
+  const canManageTableQr = hasPermission('floorplan:full');
+  const [tableQrOpen, setTableQrOpen] = useState(false);
+  const [tableQrs, setTableQrs] = useState<TableQrToken[] | null>(null);
+  const [tableQrSel, setTableQrSel] = useState<Set<number>>(new Set());
+  const [tableQrError, setTableQrError] = useState<string | null>(null);
+  const [tableQrBusy, setTableQrBusy] = useState(false);
+  const [rotateConfirmId, setRotateConfirmId] = useState<number | null>(null);
+  const [tableQrPaper, setTableQrPaper] = useState<QrPaper>('A4');
+  const [tableQrText, setTableQrText] = useState('');
+  // L'ultima versione salvata: la frase si salva all'uscita dal campo solo
+  // se è cambiata davvero.
+  const tableQrSaved = useRef<TableQrPrintSettings | null>(null);
+  const [tableQrRestaurant, setTableQrRestaurant] = useState('');
+  // L'anteprima ricorda per quale foglio è nata: cambiando formato la
+  // vecchia resta con la sua scala finché arriva la nuova.
+  const [tableQrPreview, setTableQrPreview] = useState<{ html: string; paper: QrPaper } | null>(null);
+  const tableQrBase = user?.tenant?.public_base_url;
+  const tableQrHost = (() => {
+    try { return new URL(tableQrUrl('x', tableQrBase)).host; } catch { return ''; }
+  })();
+  // Un adesivo resta sul tavolo per anni: con l'host tecnico del backend
+  // smetterebbe di funzionare al primo cambio di infrastruttura.
+  const tableQrHostTecnico = isTechnicalPublicHost(tableQrUrl('x', tableQrBase));
+
+  useEffect(() => {
+    if (!tableQrOpen) return;
+    let cancelled = false;
+    setTableQrs(null);
+    setTableQrError(null);
+    setRotateConfirmId(null);
+    getTableQrTokens()
+      .then(list => {
+        if (cancelled) return;
+        setTableQrs(list);
+        setTableQrSel(new Set(list.map(r => r.table_id)));
+      })
+      .catch((err: any) => { if (!cancelled) setTableQrError(err?.data?.error ?? err?.message ?? t('err.tableQrLoad')); });
+    // Senza le impostazioni salvate si stampa lo stesso: A4 e frase vuota.
+    getTableQrPrint()
+      .then(s => {
+        if (cancelled) return;
+        setTableQrPaper(s.paper);
+        setTableQrText(s.text);
+        setTableQrRestaurant(s.restaurant);
+        tableQrSaved.current = { paper: s.paper, text: s.text };
+      })
+      .catch(() => { if (!cancelled) setTableQrRestaurant(user?.tenant?.name ?? ''); });
+    return () => { cancelled = true; };
+  }, [tableQrOpen]);
+
+  // Ordine naturale («Tavolo 2» prima di «Tavolo 10»), sale in ordine di nome
+  // e i tavoli senza sala in fondo: è anche l'ordine dei cartellini stampati.
+  const tableQrOrdered = useMemo(() => {
+    const natural = (a: string, b: string) => a.localeCompare(b, 'it', { numeric: true, sensitivity: 'base' });
+    return [...(tableQrs ?? [])].sort((a, b) => {
+      if ((a.room_name == null) !== (b.room_name == null)) return a.room_name == null ? 1 : -1;
+      return natural(a.room_name ?? '', b.room_name ?? '') || natural(a.name, b.name);
+    });
+  }, [tableQrs]);
+
+  const tableQrGroups = useMemo(() => {
+    const groups = new Map<string, TableQrToken[]>();
+    for (const r of tableQrOrdered) {
+      const key = r.room_name ?? '';
+      groups.set(key, [...(groups.get(key) ?? []), r]);
+    }
+    return [...groups.entries()];
+  }, [tableQrOrdered]);
+
+  const tableQrCards = useMemo(() => tableQrOrdered
+    .filter(r => tableQrSel.has(r.table_id))
+    .map(r => ({ tableName: r.name, roomName: r.room_name, url: tableQrUrl(r.public_token, tableQrBase) })),
+  [tableQrOrdered, tableQrSel, tableQrBase]);
+
+  // L'anteprima è il primo foglio vero, dallo stesso HTML della stampa: con
+  // nessun tavolo spuntato mostra un cartellino d'esempio. Il QR si rigenera
+  // a ogni lettera, quindi aspetta che la frase si fermi.
+  useEffect(() => {
+    if (!tableQrOpen || !tableQrs) return;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      const cards = tableQrCards.length > 0
+        ? tableQrCards
+        : [{ tableName: '1', roomName: null, url: tableQrUrl('esempio', tableQrBase) }];
+      const paper = tableQrPaper;
+      buildTableQrSheetHtml({ restaurant: tableQrRestaurant, cards, paper, text: tableQrText, preview: true })
+        .then(html => { if (!cancelled) setTableQrPreview({ html, paper }); })
+        .catch(() => { if (!cancelled) setTableQrPreview(null); });
+    }, 200);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [tableQrOpen, tableQrs, tableQrCards, tableQrPaper, tableQrText, tableQrRestaurant, tableQrBase]);
+
+  const salvaStampaTableQr = async (raw: TableQrPrintSettings): Promise<void> => {
+    const next = { paper: raw.paper, text: cleanTableQrText(raw.text) };
+    const prima = tableQrSaved.current;
+    if (prima && prima.paper === next.paper && prima.text === next.text) return;
+    try {
+      const saved = await saveTableQrPrint(next);
+      tableQrSaved.current = saved;
+    } catch (err: any) {
+      setTableQrError(err?.data?.error ?? err?.message ?? t('err.save'));
+    }
+  };
+
+  const cambiaFoglioTableQr = (paper: QrPaper) => {
+    setTableQrPaper(paper);
+    void salvaStampaTableQr({ paper, text: tableQrText });
+  };
+
+  const toggleTableQr = (id: number) => setTableQrSel(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+
+  const ruotaTableQr = async (tableId: number) => {
+    setTableQrBusy(true);
+    setTableQrError(null);
+    try {
+      const r = await rotateTableQrToken(tableId);
+      setTableQrs(prev => prev?.map(x => x.table_id === tableId ? { ...x, public_token: r.public_token } : x) ?? prev);
+      // Il tavolo appena rigenerato va ristampato: lo si lascia spuntato.
+      setTableQrSel(prev => new Set(prev).add(tableId));
+    } catch (err: any) {
+      setTableQrError(err?.data?.error ?? err?.message ?? t('err.save'));
+    } finally {
+      setTableQrBusy(false);
+      setRotateConfirmId(null);
+    }
+  };
+
+  const stampaTableQr = async () => {
+    if (!tableQrs || tableQrHostTecnico || tableQrBusy || tableQrCards.length === 0) return;
+    setTableQrBusy(true);
+    setTableQrError(null);
+    try {
+      // La frase scritta e non ancora uscita dal campo: si salva ora, così
+      // la prossima ristampa la ritrova. Un salvataggio fallito non ferma la
+      // stampa — l'errore resta a vista.
+      await salvaStampaTableQr({ paper: tableQrPaper, text: tableQrText });
+      await printTableQrSheet({ restaurant: tableQrRestaurant, cards: tableQrCards, paper: tableQrPaper, text: tableQrText });
+    } catch (err: any) {
+      setTableQrError(err?.message ?? t('err.tableQrPrint'));
+    } finally {
+      setTableQrBusy(false);
     }
   };
 
@@ -4390,6 +4543,201 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               {pairError && <p className="mt-2 text-[13px] text-[var(--ds-critical-text)]">{pairError}</p>}
             </FormCard>
           )}
+
+          {canManageTableQr && (
+            <FormCard>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+                <div className="min-w-0">
+                  <p className="text-[15px] font-medium text-[var(--ds-text-primary)]">{t('tableQrTitle')}</p>
+                  <p className="mt-0.5 text-[13px] text-[var(--ds-text-muted)]">{t('tableQrHint')}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => { setQrOpen(false); setTableQrOpen(true); }}
+                  className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 self-start rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)] sm:self-center"
+                >
+                  <Printer className="h-4 w-4" />
+                  {t('tableQrOpen')}
+                </button>
+              </div>
+            </FormCard>
+          )}
+        </div>
+      </ModalShell>
+
+      {/* QR unico al tavolo: elenco dei tavoli per sala, spunte per scegliere
+          cosa stampare, «Rigenera» per l'adesivo perso. La stampa esce sul
+          foglio scelto, con i cartellini da ritagliare (utils/printTableQr.ts). */}
+      <ModalShell
+        open={tableQrOpen}
+        onClose={() => setTableQrOpen(false)}
+        title={t('tableQrTitle')}
+        subtitle={t('tableQrSubtitle')}
+        bodyClassName="p-5 sm:p-6"
+        footerStart={tableQrs && tableQrs.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => setTableQrSel(tableQrSel.size === tableQrs.length ? new Set() : new Set(tableQrs.map(r => r.table_id)))}
+            className="text-[14px] font-medium text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]"
+          >
+            {t(tableQrSel.size === tableQrs.length ? 'tableQrSelectNone' : 'tableQrSelectAll')}
+          </button>
+        ) : undefined}
+        footer={
+          <button
+            type="button"
+            onClick={stampaTableQr}
+            disabled={!tableQrs || tableQrSel.size === 0 || tableQrHostTecnico || tableQrBusy}
+            className={dsButton.primary}
+          >
+            {tableQrBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+            {t('tableQrPrint', { count: tableQrSel.size })}
+          </button>
+        }
+      >
+        <div className="space-y-4">
+          {tableQrHostTecnico ? (
+            <Callout tone="pending" icon={Info}>{t('tableQrTechnicalHost', { host: tableQrHost })}</Callout>
+          ) : (
+            <p className="text-[13px] text-[var(--ds-text-muted)]">{t('tableQrAddress', { host: tableQrHost })}</p>
+          )}
+          {tableQrError && <Callout tone="critical">{tableQrError}</Callout>}
+          {tableQrs == null && !tableQrError && (
+            <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-[var(--ds-text-muted)]" /></div>
+          )}
+          {tableQrs != null && tableQrs.length === 0 && (
+            <p className="text-[14px] text-[var(--ds-text-muted)]">{t('tableQrNoTables')}</p>
+          )}
+          {tableQrs != null && tableQrs.length > 0 && (() => {
+            const paper = QR_PAPERS[tableQrPaper];
+            const size = cardSizeCm(tableQrPaper);
+            const perSheet = cardsPerSheet(tableQrPaper);
+            const sheets = Math.ceil(tableQrSel.size / perSheet);
+            const cm = (n: number) => n.toLocaleString(displayLocale(), { maximumFractionDigits: 1 });
+            // Il foglio vero in mm, rimpicciolito: stessa larghezza a schermo
+            // per i tre formati, così si vede quanti cartellini ci stanno.
+            const previewWidth = 168;
+            const shown = tableQrPreview ? QR_PAPERS[tableQrPreview.paper] : paper;
+            const scale = previewWidth / (shown.width * 96 / 25.4);
+            return (
+              <FormCard>
+                {/* Anteprima a sinistra e scelte accanto, come la carta del
+                    menu digitale; sul telefono in colonna. */}
+                <div className="flex flex-col items-center gap-5 sm:flex-row sm:items-start sm:gap-6">
+                  <div
+                    className="flex-shrink-0 overflow-hidden rounded-[var(--ds-radius-sm)] bg-[#ffffff] ring-1 ring-inset ring-[var(--ds-border)]"
+                    style={{ width: previewWidth, height: Math.round(previewWidth * paper.height / paper.width) }}
+                  >
+                    {tableQrPreview && (
+                      <iframe
+                        title={t('tableQrPreview')}
+                        srcDoc={tableQrPreview.html}
+                        sandbox=""
+                        tabIndex={-1}
+                        aria-hidden
+                        className="pointer-events-none block border-0"
+                        style={{ width: `${shown.width}mm`, height: `${shown.height}mm`, transform: `scale(${scale})`, transformOrigin: '0 0' }}
+                      />
+                    )}
+                  </div>
+                  <div className="w-full min-w-0 flex-1 space-y-4">
+                    <Field
+                      label={t('tableQrPaper')}
+                      aside={tableQrSel.size > 0
+                        ? t('tableQrSheets', { count: sheets, perSheet })
+                        : t('tableQrPerSheet', { count: perSheet })}
+                      hint={t('tableQrCardSize', { w: cm(size.width), h: cm(size.height) })}
+                    >
+                      <SegmentedControl<QrPaper>
+                        value={tableQrPaper}
+                        onChange={cambiaFoglioTableQr}
+                        ariaLabel={t('tableQrPaper')}
+                        options={QR_PAPER_ORDER.map(p => ({ value: p, label: p }))}
+                      />
+                    </Field>
+                    <Field
+                      label={t('tableQrText')}
+                      htmlFor="table-qr-text"
+                      aside={`${tableQrText.length}/${TABLE_QR_TEXT_MAX}`}
+                      hint={t('tableQrTextHint')}
+                    >
+                      <textarea
+                        id="table-qr-text"
+                        className={`${dsTextarea} resize-none`}
+                        rows={3}
+                        maxLength={TABLE_QR_TEXT_MAX}
+                        value={tableQrText}
+                        placeholder={t('tableQrTextPlaceholder')}
+                        onChange={e => setTableQrText(e.target.value)}
+                        onBlur={() => { void salvaStampaTableQr({ paper: tableQrPaper, text: tableQrText }); }}
+                      />
+                    </Field>
+                  </div>
+                </div>
+              </FormCard>
+            );
+          })()}
+          {tableQrGroups.map(([room, rows]) => (
+            <FormCard key={room || '—'} title={room || t('tableQrNoRoom')}>
+              <div className="-mx-2 -my-1">
+                {rows.map(r => {
+                  const on = tableQrSel.has(r.table_id);
+                  const confirming = rotateConfirmId === r.table_id;
+                  return (
+                    <div key={r.table_id} className="flex min-h-[44px] items-center gap-3 rounded-[var(--ds-radius-sm)] px-2">
+                      <button
+                        type="button"
+                        role="checkbox"
+                        aria-checked={on}
+                        onClick={() => toggleTableQr(r.table_id)}
+                        className="flex min-h-[44px] min-w-0 flex-1 items-center gap-3 text-left"
+                      >
+                        <span
+                          aria-hidden
+                          className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-sm)] ${
+                            on ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]' : 'border border-[var(--ds-border-strong)] bg-[var(--ds-surface)]'
+                          }`}
+                        >
+                          {on && <Check className="h-3.5 w-3.5" />}
+                        </span>
+                        <span className="truncate text-[15px] text-[var(--ds-text-primary)]">{t('tableQrTable', { nome: r.name })}</span>
+                      </button>
+                      {confirming ? (
+                        <span className="flex flex-shrink-0 items-center gap-2">
+                          <span className="hidden text-[13px] text-[var(--ds-text-muted)] sm:inline">{t('tableQrRotateWarn')}</span>
+                          <button
+                            type="button"
+                            onClick={() => setRotateConfirmId(null)}
+                            className="inline-flex h-9 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3 text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]"
+                          >
+                            {t('cancel')}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={tableQrBusy}
+                            onClick={() => ruotaTableQr(r.table_id)}
+                            className="inline-flex h-9 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-critical-tint)] px-3 text-[13px] font-semibold text-[var(--ds-critical-text)] disabled:opacity-40"
+                          >
+                            {t('tableQrRotate')}
+                          </button>
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setRotateConfirmId(r.table_id)}
+                          title={t('tableQrRotateWarn')}
+                          className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-3 text-[13px] font-medium text-[var(--ds-text-secondary)] hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]"
+                        >
+                          <RefreshCw className="h-4 w-4" />
+                          {t('tableQrRotate')}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </FormCard>
+          ))}
         </div>
       </ModalShell>
 
