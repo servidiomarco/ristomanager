@@ -87,5 +87,8 @@
     "name": "Nome",
     "phone": "Telefono",
     "email": "Email"
-  }
+  },
+  "spendTotal": "speso",
+  "spendVisits": "visite con conto",
+  "spendPerCover": "medio a coperto"
 }

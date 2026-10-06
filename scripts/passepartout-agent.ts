@@ -40,6 +40,7 @@ import {
     annullaPrenotazione,
     getPrenotazioniMenuGiorno,
     getPiantaSale,
+    getContiCassaGiorno,
     isPassepartoutConfigured,
     PassepartoutError,
     type TipoDocumentoConto,
@@ -51,8 +52,9 @@ const NODE_URL = (process.env.PP_AGENT_NODE_URL || '').trim().replace(/\/+$/, ''
 const TOKEN = (process.env.PP_AGENT_TOKEN || '').trim();
 // Cosa sa fare questo agente, annunciato nell'agent:hello: il server
 // riprova da solo una chiusura solo con un agente che sa riprenderla, e
-// manda prenotazioni solo a un agente che sa scriverle.
-const CAPABILITIES = ['chiudi-riprendi', 'prenotazioni'];
+// manda prenotazioni solo a un agente che sa scriverle, e chiede i conti
+// del giorno solo a uno che sa leggerli.
+const CAPABILITIES = ['chiudi-riprendi', 'prenotazioni', 'conti'];
 
 if (!SERVER_URL || !TOKEN) {
     console.error('Config mancante: servono PP_AGENT_SERVER_URL e PP_AGENT_TOKEN.');
@@ -130,6 +132,13 @@ const handlers: Record<string, Handler> = {
     },
     // Sale e tavoli coi nomi della cassa, per abbinare i tavoli del CRM.
     piantaSale: () => getPiantaSale(),
+    // Conti chiusi del giorno con tavolo e prenotazione: report, spesa per
+    // cliente e riscontro nel CRM. Sola lettura.
+    contiGiorno: (p) => {
+        const giorno = typeof p?.giorno === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(p.giorno) ? p.giorno : '';
+        if (!giorno) throw new Error('Parametro "giorno" non valido');
+        return getContiCassaGiorno(giorno);
+    },
     // Catalogo articoli per l'import menu del CRM (senza immagini: il payload
     // deve stare nel buffer del socket).
     articoli: (p) => getArticoliMenu(typeof p?.ultimaModifica === 'string' ? p.ultimaModifica : undefined),

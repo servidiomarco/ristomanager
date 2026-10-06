@@ -5,6 +5,7 @@ import type { CashClosureBillRow, CashClosureReport } from '../../types';
 import { Callout, FormCard, StatusPill } from '../ds';
 import { formatEuro } from './paymentsView';
 import { methodLabel } from './settleView';
+import { RiscontroCassa } from './RiscontroCassa';
 
 /* ── Chiusura di cassa ────────────────────────────────────────────────────
    I totali del giorno per metodo di incasso, dal libro cassa
@@ -209,6 +210,8 @@ export const ChiusuraCassa: React.FC<{
           </p>
         )}
       </FormCard>
+
+      <RiscontroCassa date={report.date} />
 
       <FormCard
         title={shift ? `Conti chiusi · ${shift === 'LUNCH' ? 'pranzo' : 'cena'}` : 'Conti chiusi'}

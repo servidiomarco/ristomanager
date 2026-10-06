@@ -326,6 +326,7 @@
     "connDetail": "PC {{pc}} · till software {{versione}} · connected since {{when}}",
     "capRiprendi": "Resumable closing",
     "capPrenotazioni": "Bookings",
+    "capConti": "Bills",
     "payType": "Payment type on the till",
     "payTypeHint": "A dedicated type, for example ESTERNO, so the till doesn't count the takings twice. None = tables are closed on the till by hand.",
     "payTypeFromServer": "Using {{tipo}}, set on the server. Pick it here to manage it from this section.",
@@ -334,6 +335,16 @@
     "docType": "Document",
     "docTypeHint": "The document the till issues when the bill is closed from the CRM.",
     "docReceipt": "Receipt",
-    "docProforma": "Proforma"
+    "docProforma": "Proforma",
+    "contiTitle": "Till bills",
+    "contiSubtitle": "Tables closed on the till: reports, guests and reconciliation",
+    "contiSend": "Read the till's bills",
+    "contiHint": "Every 10 minutes the CRM reads the bills closed on the till: they feed the revenue report, guest spending, booking details and the cash-up reconciliation. When first switched on it fetches the last 30 days.",
+    "contiToday": "Today: {{count}} bills closed on the till · {{totale}}",
+    "contiStorico": "History complete up to {{giorno}}",
+    "contiStoricoInArrivo": "Last 30 days of history on the way",
+    "contiLast": "last read {{when}}",
+    "contiImport": "Read now",
+    "contiDone": "Read {{count}} bills from today"
   }
 }

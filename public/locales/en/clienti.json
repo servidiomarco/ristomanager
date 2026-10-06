@@ -87,5 +87,8 @@
     "name": "Name",
     "phone": "Phone",
     "email": "Email"
-  }
+  },
+  "spendTotal": "spent",
+  "spendVisits": "visits with a bill",
+  "spendPerCover": "average per cover"
 }

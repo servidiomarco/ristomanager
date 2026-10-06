@@ -479,5 +479,11 @@
     "arrivedCount": "({{count}} arrived)",
     "banquets": "The day's events",
     "printedOn": "Printed on {{quando}}"
+  },
+  "contoCassa": {
+    "title": "Bill on the till",
+    "table": "Table {{tavolo}}",
+    "covers": "{{count}} covers",
+    "receipt": "receipt {{numero}}"
   }
 }

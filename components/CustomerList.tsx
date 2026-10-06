@@ -7,6 +7,7 @@ import { swrConfig } from '../services/configCache';
 import { useAuth } from '../contexts/AuthContext';
 import { Search, Plus, Pencil, Trash2, Phone, Mail, MapPin, BookUser, History, UtensilsCrossed, Calendar, Sun, Moon, Users as UsersIcon, Loader2, Star, Armchair, AlertTriangle, Ban, GitMerge, Download, MessageCircle, User as UserIcon, MoreVertical, ArrowLeft } from 'lucide-react';
 import { toTitleCase } from '../utils/text';
+import { SpesaCliente } from './SpesaCliente';
 import { datePart, timePart } from '../utils/displayTime';
 import {
   SplitPane, PanePlaceholder, SearchField, StatusPill, StatStrip, CountBadge,
@@ -590,11 +591,12 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
 
   /* ── Cifre della scheda ─────────────────────────────────────────────────
      Prenotazioni, media coperti e no-show: le tre che il dato regge davvero.
-     "Speso totale" del mockup resta fuori — reservation.total_amount esiste
-     in types.ts e in db.ts ma in tutta l'applicazione non lo scrive e non lo
-     legge nessuno, quindi la card avrebbe mostrato € 0,00 a ogni cliente, che
-     è peggio di una card in meno. Stessa ragione per la colonna € nello
-     storico e per la riga "Conto aperto". */
+     "Speso totale" del mockup non viene da reservation.total_amount — esiste
+     in types.ts e in db.ts ma non lo scrive e non lo legge nessuno — ma dai
+     conti veri, nella striscia SpesaCliente sotto questa: conti CRM chiusi
+     più i tavoli chiusi solo nella cassa Passepartout, e solo quando ce n'è
+     almeno uno. La colonna € nello storico e la riga "Conto aperto" restano
+     fuori per la stessa ragione di prima. */
   const figuresFor = (c: Customer) => {
     const s = stats.get(c.id);
     const list = s?.reservations ?? [];
@@ -1300,6 +1302,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
               { value: f.noShow, label: 'no-show', tone: f.noShow > 0 ? 'critical' : 'neutral' },
             ]}
           />
+          <SpesaCliente customerId={c.id} />
 
           {(c.email || hasAddress || c.notes) && (
             <div className="space-y-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
