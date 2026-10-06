@@ -483,7 +483,8 @@
   "contoCassa": {
     "title": "Bill on the till",
     "table": "Table {{tavolo}}",
-    "covers": "{{count}} covers",
+    "covers_one": "{{count}} cover",
+    "covers_other": "{{count}} covers",
     "receipt": "receipt {{numero}}"
   }
 }

@@ -341,20 +341,24 @@
     "contiSubtitle": "Tables closed on the till: reports, guests and reconciliation",
     "contiSend": "Read the till's bills",
     "contiHint": "Every 10 minutes the CRM reads the bills closed on the till: they feed the revenue report, guest spending, booking details and the cash-up reconciliation. When first switched on it fetches the last 30 days.",
-    "contiToday": "Today: {{count}} bills closed on the till · {{totale}}",
+    "contiToday_one": "Today: {{count}} bill closed on the till · {{totale}}",
+    "contiToday_other": "Today: {{count}} bills closed on the till · {{totale}}",
     "contiStorico": "History complete up to {{giorno}}",
     "contiStoricoInArrivo": "Last 30 days of history on the way",
     "contiLast": "last read {{when}}",
     "contiImport": "Read now",
-    "contiDone": "Read {{count}} bills from today",
+    "contiDone_one": "Read {{count}} bill from today",
+    "contiDone_other": "Read {{count}} bills from today",
     "apertiTitle": "Tables open on the till",
     "apertiSubtitle": "Walk-ins and open tables: busy in the CRM too",
     "apertiSend": "Show tables open on the till",
     "apertiHint": "Every minute the CRM reads the till's open orders: those tables show as busy on the floor plan, at reception and on the bookings map, even without a booking.",
     "apertiDisp": "Count them for availability",
     "apertiDispHint": "Sofia and online booking don't offer a table open on the till until it frees up (estimate: opening plus the shift length). Staff assigning by hand see the table busy and decide.",
-    "apertiNow": "{{count}} tables open now",
+    "apertiNow_one": "{{count}} table open now",
+    "apertiNow_other": "{{count}} tables open now",
     "apertiRefresh": "Refresh now",
-    "apertiDone": "{{count}} tables open on the till"
+    "apertiDone_one": "{{count}} table open on the till",
+    "apertiDone_other": "{{count}} tables open on the till"
   }
 }

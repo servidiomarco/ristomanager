@@ -4102,7 +4102,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       ))
       .filter(t => showHidden || !hiddenTableIds.has(t.id));
 
-    const occupiedTablesCount = tablesInRoom.filter(t => getOccupierForTable(t.id)).length;
+    // Occupato = prenotazione o banchetto, oppure (oggi) aperto nella cassa
+    // Passepartout: la striscia deve dire quello che la mappa mostra.
+    const occupiedTablesCount = tablesInRoom.filter(t =>
+      getOccupierForTable(t.id) || (isViewingToday && apertiInCassa.has(t.id))
+    ).length;
     const totalTablesInRoom = tablesInRoom.length;
     const occupancyPercentage = totalTablesInRoom > 0 ? Math.round((occupiedTablesCount / totalTablesInRoom) * 100) : 0;
 

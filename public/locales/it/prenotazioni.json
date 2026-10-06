@@ -483,7 +483,8 @@
   "contoCassa": {
     "title": "Conto in cassa",
     "table": "Tavolo {{tavolo}}",
-    "covers": "{{count}} coperti",
+    "covers_one": "{{count}} coperto",
+    "covers_other": "{{count}} coperti",
     "receipt": "scontrino {{numero}}"
   }
 }
