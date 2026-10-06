@@ -519,13 +519,20 @@ export async function saldaConto(params: {
     idConto: number;
     idComanda: number;
     pagamento?: { importo: number; tipo: PassepartoutTipoPagamento };
+    /** Il documento con cui chiudere un conto che non l'ha ancora emesso
+     *  (il conto di un preconto). Assente: resta quello del conto. */
+    tipoDocumento?: TipoDocumentoConto;
+    /** «ChiudiEStampa» emette e stampa il documento: serve allo scontrino
+     *  di un conto di preconto. Default «Chiudi», senza stampa. */
+    comando?: 'Chiudi' | 'ChiudiEStampa';
 }): Promise<Record<string, unknown> | null> {
     const NS_CONTO = 'http://schemas.datacontract.org/2004/07/PMessageBox.Contract.Conto';
     const NS_COMMON = 'http://schemas.datacontract.org/2004/07/PMessageBox.Contract.Common';
     // ContrattoConto è tutto minOccurs=0, ma l'ordine dei membri è quello
     // alfabetico del data contract WCF: ComandoEnum, IdComanda, IdGestionale,
-    // Pagamenti. Dentro PMBRigaPagamento: Importo prima di Tipo; dentro
-    // PMBTipoPagamento (namespace Common): Categoria prima di Codice.
+    // Pagamenti, TipoDocumentoEnum. Dentro PMBRigaPagamento: Importo prima
+    // di Tipo; dentro PMBTipoPagamento (namespace Common): Categoria prima
+    // di Codice.
     const pagamentiXml = params.pagamento
         ? `<c:Pagamenti><c:PMBRigaPagamento>` +
           `<c:Importo>${params.pagamento.importo.toFixed(2)}</c:Importo>` +
@@ -537,10 +544,11 @@ export async function saldaConto(params: {
         : '';
     const contoXml =
         `<conto xmlns:c="${NS_CONTO}" xmlns:cm="${NS_COMMON}">` +
-        `<c:ComandoEnum>Chiudi</c:ComandoEnum>` +
+        `<c:ComandoEnum>${params.comando ?? 'Chiudi'}</c:ComandoEnum>` +
         `<c:IdComanda>${params.idComanda}</c:IdComanda>` +
         `<c:IdGestionale>${params.idConto}</c:IdGestionale>` +
         pagamentiXml +
+        (params.tipoDocumento ? `<c:TipoDocumentoEnum>${params.tipoDocumento}</c:TipoDocumentoEnum>` : '') +
         `</conto>`;
     const result = await soapCall('PutConto', contoXml);
     return result == null || isNil(result) ? null : (result as Record<string, unknown>);
@@ -586,6 +594,13 @@ export interface EsitoChiusuraComanda {
  * al primo colpo: niente conflitto di timeStmp, saldaConto non interviene.
  * ATTENZIONE: senza tipoPagamento il gestionale registra l'incasso in
  * Contanti (default) — passare sempre il tipo dedicato (ESTERNO).
+ *
+ * Comanda col PRECONTO stampato (al Frantoio 111 comande su 122, e il
+ * pagamento dal QR lo stampa da sé): il preconto lascia un conto Aperto con
+ * il pagamento precompilato in contanti, e ContoComanda prova a cancellarlo
+ * andando in errore dentro Passepartout (Comanda.CancellaConti →
+ * PagamentoFBO.IsCancellabile, NullReferenceException — prove del 06/10).
+ * Quel conto si chiude allora direttamente: vedi chiudiContoDelPreconto.
  */
 export async function chiudiComandaCompleta(params: {
     idComanda: number;
@@ -600,8 +615,10 @@ export async function chiudiComandaCompleta(params: {
      *  secondo tentativo rifarebbe lo scontrino. */
     riprendi?: boolean;
 }): Promise<EsitoChiusuraComanda> {
-    if (params.riprendi) {
-        const esistente = (await getContiGiorno())
+    const contiPrima = await getContiGiorno();
+    const preconto = contoDelPreconto(contiPrima, params.idComanda);
+    if (params.riprendi && !preconto) {
+        const esistente = contiPrima
             .filter((c) => asNumber(c.IdComanda ?? (c as any).idComanda) === params.idComanda).pop();
         if (esistente) return completaChiusura(params, esistente, 'Conto già presente in cassa: ripreso senza nuovo documento');
     }
@@ -609,6 +626,7 @@ export async function chiudiComandaCompleta(params: {
     if (!comanda) {
         throw new PassepartoutError(`Comanda ${params.idComanda} non trovata sul gestionale`, 'ContoComanda');
     }
+    if (preconto) return chiudiContoDelPreconto(params, preconto, comanda);
     const daInviare = comanda.stato === '0' || comanda.righe.some((r) => r.stato === '0');
     if (daInviare) {
         await inviaProduzioneComanda({ idComanda: params.idComanda, inviaTutto: true });
@@ -638,6 +656,151 @@ export async function chiudiComandaCompleta(params: {
         );
     }
     return completaChiusura(params, conto, avviso);
+}
+
+/** Il conto che un preconto lascia sulla comanda: Aperto, già coperto dal
+ *  pagamento precompilato (sospeso zero). Un conto Aperto CON sospeso è
+ *  invece quello di una nostra chiusura a metà, che il saldo completa. */
+function contoDelPreconto(conti: Record<string, unknown>[], idComanda: number): Record<string, unknown> | null {
+    return conti.filter((c) =>
+        asNumber(c.IdComanda ?? (c as any).idComanda) === idComanda
+        && asString(c.StatoEnum) === 'Aperto'
+        && (asNumber(c.Sospeso) ?? 0) === 0,
+    ).pop() ?? null;
+}
+
+/**
+ * Chiusura di una comanda col preconto, provata sulla cassa vera il 06/10
+ * (conto 82583): PutConto sul conto del preconto, con il pagamento del tipo
+ * dedicato per il totale del conto. Il pagamento precompilato in contanti
+ * viene SOSTITUITO (stesso pagamento, nuovo tipo), non affiancato; con la
+ * Proforma e «Chiudi» non si stampa niente e il tavolo si libera. Lo
+ * scontrino vuole «ChiudiEStampa» (non ancora provato sulla cassa vera: se
+ * la cassa rifiuta, l'errore torna su e la chiusura va fatta a mano).
+ */
+async function chiudiContoDelPreconto(
+    params: { idComanda: number; tipoDocumento?: TipoDocumentoConto; tipoPagamento?: string; importoPagato?: number; proforma?: boolean },
+    preconto: Record<string, unknown>,
+    comanda: PassepartoutComanda,
+): Promise<EsitoChiusuraComanda> {
+    if (params.importoPagato != null) {
+        throw new PassepartoutError('Comanda col preconto: un pagamento parziale va chiuso in cassa', 'PutConto');
+    }
+    const tipo = params.tipoPagamento
+        ? (await getTipiPagamento()).find((t) => t.codice === params.tipoPagamento)
+        : undefined;
+    if (!tipo) {
+        throw new PassepartoutError(
+            `Tipo pagamento "${params.tipoPagamento ?? ''}" non trovato in cassa: comanda col preconto lasciata aperta`,
+            'PutConto',
+        );
+    }
+    const idConto = asNumber(preconto.IdGestionale ?? (preconto as any).idGestionale);
+    const daPagare = asNumber(preconto.TotaleDaPagare) ?? 0;
+    if (idConto == null || !(daPagare > 0)) {
+        throw new PassepartoutError(`Conto del preconto della comanda ${params.idComanda} senza importo`, 'PutConto');
+    }
+    // Un piatto aggiunto dopo il preconto può non essere nel suo conto: lo
+    // si segnala, il conto chiuso è comunque quello della cassa.
+    const totaleRighe = Math.round(comanda.righe.reduce((s, r) => s + (r.totale ?? 0), 0) * 100) / 100;
+    const avviso = Math.abs(totaleRighe - daPagare) > 0.005
+        ? `Preconto da ${daPagare.toFixed(2)} su una comanda da ${totaleRighe.toFixed(2)}`
+        : null;
+    const proforma = params.proforma === true || params.tipoDocumento === 'Proforma';
+    await saldaConto({
+        idConto,
+        idComanda: params.idComanda,
+        pagamento: { importo: daPagare, tipo },
+        tipoDocumento: proforma ? 'Proforma' : (params.tipoDocumento ?? 'Scontrino'),
+        comando: proforma ? 'Chiudi' : 'ChiudiEStampa',
+    });
+    const conto = (await getContiGiorno())
+        .filter((c) => asNumber(c.IdComanda ?? (c as any).idComanda) === params.idComanda).pop() as any;
+    if (!conto || asString(conto.StatoEnum) !== 'Pagato') {
+        throw new PassepartoutError(
+            `Conto del preconto ${idConto} non chiuso dalla cassa (stato ${asString(conto?.StatoEnum) ?? 'sconosciuto'})`,
+            'PutConto',
+        );
+    }
+    return {
+        chiuso: true,
+        importoSospeso: asNumber(conto.Sospeso) ?? 0,
+        stato: asString(conto.StatoEnum),
+        numeroScontrino: asString(conto.NumeroScontrinoFiscale),
+        totalePagato: asNumber(conto.TotalePagato),
+        totaleDaPagare: asNumber(conto.TotaleDaPagare),
+        avviso,
+    };
+}
+
+/**
+ * Il preconto della comanda, come lo stampa il cameriere: la cassa lo
+ * stampa e il tavolo cambia colore in pianta (blu al Frantoio). È il
+ * segnale nativo della cassa per «il tavolo vuole pagare».
+ *
+ * Non c'è un'operazione dell'AdapterWS per farlo: è un ComandoImmediato
+ * «ComandoComanda / Preconto» sul bus della MessageBox (RiceviMessaggio
+ * dell'interfaccia IAdapter, endpoint /Adapter dello stesso servizio), con
+ * le credenziali dentro il messaggio. Le Put dell'AdapterWS passano dallo
+ * stesso ingresso (lo dice il log della cassa). Provato sulla cassa vera
+ * il 06/10 (comanda 78532): preconto stampato, tavolo blu, nessun invio in
+ * produzione. Lascia sulla comanda il conto del preconto, che la chiusura
+ * gestisce (chiudiContoDelPreconto). EventoCliente = «Conto» via PutComanda,
+ * invece, la cassa lo ignora.
+ */
+export async function emettiPreconto(idComanda: number): Promise<void> {
+    const config = getPassepartoutConfig();
+    if (!config.url) throw new PassepartoutError('PASSEPARTOUT_WS_URL non configurato', 'RiceviMessaggio');
+    const url = config.url.trim().replace(/\/$/, '').replace(/\/AdapterWS$/i, '') + '/Adapter';
+    // Membri del data contract in ordine alfabetico, base Contract prima.
+    const messaggio =
+        `<messaggio xmlns:b="${NS_CONTRACT}" xmlns:c="http://schemas.datacontract.org/2004/07/PMessageBox.Contract.Comanda" ` +
+        `xmlns:i="http://www.w3.org/2001/XMLSchema-instance">` +
+        `<b:ComandoEnum>ComandoImmediato</b:ComandoEnum>` +
+        `<b:ComandoImmediato i:type="c:ComandoComanda">` +
+        `<c:Comando>Preconto</c:Comando>` +
+        `<c:IDGestionale>${idComanda}</c:IDGestionale>` +
+        `</b:ComandoImmediato>` +
+        `<b:ModalitaInvioEnum>Immediata</b:ModalitaInvioEnum>` +
+        `<b:Password>${xmlEscape(config.password)}</b:Password>` +
+        `<b:TipoEnum>Ingresso</b:TipoEnum>` +
+        `<b:Utente>${xmlEscape(config.utente)}</b:Utente>` +
+        `</messaggio>`;
+    const envelope =
+        `<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body>` +
+        `<RiceviMessaggio xmlns="${TEMPURI}">${messaggio}</RiceviMessaggio>` +
+        `</s:Body></s:Envelope>`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 20_000);
+    let text: string;
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/xml; charset=utf-8', SOAPAction: `"${TEMPURI}IAdapter/RiceviMessaggio"` },
+            body: envelope,
+            signal: controller.signal,
+        });
+        text = await response.text();
+    } catch (err) {
+        throw new PassepartoutError(`Gestionale non raggiungibile (${(err as Error).message})`, 'RiceviMessaggio');
+    } finally {
+        clearTimeout(timer);
+    }
+    const fault = text.match(/<faultstring[^>]*>([\s\S]*?)<\/faultstring>/i);
+    if (fault) throw new PassepartoutError(fault[1].replace(/\s+/g, ' ').trim().slice(0, 500), 'RiceviMessaggio');
+    // La risposta è un Messaggio: gli errori stanno in Errori (ArrayOfstring).
+    const errori = text.match(/<(?:\w+:)?Errori(?:\s[^>]*)?>([\s\S]*?)<\/(?:\w+:)?Errori>/);
+    const elenco = errori ? [...errori[1].matchAll(/<(?:\w+:)?string>([\s\S]*?)<\/(?:\w+:)?string>/g)].map((m) => m[1].trim()) : [];
+    if (elenco.length > 0) throw new PassepartoutError(elenco.join(' | ').slice(0, 500), 'RiceviMessaggio');
+}
+
+/** Il preconto, una volta sola: se la comanda ha già il conto di un
+ *  preconto (stampato dal cameriere, o da un tocco precedente) non se ne
+ *  stampa un altro. */
+export async function precontoUnaVolta(idComanda: number): Promise<{ emesso: boolean }> {
+    if (contoDelPreconto(await getContiGiorno(), idComanda)) return { emesso: false };
+    await emettiPreconto(idComanda);
+    return { emesso: true };
 }
 
 /** Passo 4 della chiusura (saldo del sospeso) e l'esito: in comune fra la

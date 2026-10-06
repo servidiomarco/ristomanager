@@ -44,6 +44,9 @@ export type PassepartoutOp =
     | 'contiGiorno'
     /** Comande aperte adesso sui tavoli (capacità 'tavoli-aperti'). */
     | 'comandeAperte'
+    /** Stampa il preconto della comanda, una volta sola (capacità
+     *  'preconto'): in cassa il tavolo diventa «vuole pagare». */
+    | 'preconto'
     /** Introspezione del contratto WCF (?wsdl): elenco operazioni, per
      *  scoprire da remoto se esiste la scrittura comande (comanda specchio)
      *  senza documentazione del concessionario. Sola lettura. */
