@@ -178,7 +178,16 @@ describe('orders & bills', () => {
         expect(chiuso.status).toBe(200);
         expect(chiuso.body.status).toBe('CLOSED');
         expect(chiuso.body.cash_settled_cents).toBe(5000);
-        expect(chiuso.body.share_token).toBeNull();
+        // Il link del conto resta, in sola lettura: chi ce l'ha vede il conto
+        // saldato (e lo scontrino) per 24 ore, ma non può più pagare.
+        const shareToken = bill.body.bill.share_token as string;
+        expect(chiuso.body.share_token).toBe(shareToken);
+        const pagina = await api().get(`/pay/${shareToken}`);
+        expect(pagina.status).toBe(200);
+        expect(pagina.body.bill.status).toBe('CLOSED');
+        expect(pagina.body.residual_cents).toBe(0);
+        const claim = await api().post(`/pay/${shareToken}/claim`).send({ kind: 'full_bill' });
+        expect([404, 409]).toContain(claim.status);
     });
 
     // «Paga tutto il conto» dal QR: kind full_bill, importo deciso dal server

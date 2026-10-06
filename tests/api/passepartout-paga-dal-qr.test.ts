@@ -221,6 +221,29 @@ describe('pagamento dal QR delle comande della cassa Passepartout', () => {
         const chiusura = chiamate.filter(c => c.op === 'chiudi').at(-1)!;
         expect(chiusura.params).toMatchObject({ idComanda: 8801, tipoPagamento: 'ESTERNO' });
 
+        // Uno scontrino per il tavolo, e la sua copia digitale su ogni
+        // telefono che ha pagato: la pagina di pagamento resta leggibile e
+        // porta allo scontrino della cassa.
+        const doc = (await db.query(
+            `SELECT public_token FROM fiscal_documents WHERE table_bill_id = $1 AND provider = 'passepartout'`, [bill.id]
+        )).rows[0];
+        expect(doc.public_token).toMatch(/^[0-9a-f]{64}$/);
+        const pagina = await api().get(`/pay/${bill.share_token}`);
+        expect(pagina.status).toBe(200);
+        expect(pagina.body.bill.status).toBe('CLOSED');
+        expect(pagina.body.residual_cents).toBe(0);
+        expect(pagina.body.receipt_url).toMatch(new RegExp(`/scontrino/${doc.public_token}$`));
+        const copia = await api().get(`/scontrino/${doc.public_token}`);
+        expect(copia.status).toBe(200);
+        expect(copia.body.receipt).toMatchObject({
+            doc_number: '0001-0042', issuer: 'cassa', total_cents: 2550, electronic_cents: 2550, cash_cents: 0,
+            paid_by: [{ label: 'Ospite', amount_cents: 2550 }],
+        });
+        expect(copia.body.receipt.items.map((i: any) => i.description)).toEqual(['Tagliatelle', 'Caffè']);
+        // Saldato, il conto non si paga più.
+        const ancora = await api().post(`/pay/${bill.share_token}/claim`).send({ kind: 'full_bill', claimant_label: 'Altro' });
+        expect([404, 409]).toContain(ancora.status);
+
         // Chiusa in cassa: alla lettura dopo, il QR non propone più niente.
         await aggiornaLettura();
         expect((await statoQr()).open).toBe(false);

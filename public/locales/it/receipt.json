@@ -26,7 +26,12 @@
   "table": "Tavolo {{name}}",
   "footer": {
     "proforma": "Proforma: non sostituisce lo scontrino o la fattura.",
-    "copy": "Copia informativa: il documento fiscale è il corrispettivo trasmesso telematicamente all'Agenzia delle Entrate."
+    "copy": "Copia informativa: il documento fiscale è il corrispettivo trasmesso telematicamente all'Agenzia delle Entrate.",
+    "copyCassa": "Copia informativa del documento emesso dal registratore di cassa del ristorante, che lo trasmette all'Agenzia delle Entrate."
   },
-  "print": "Stampa o salva"
+  "print": "Stampa o salva",
+  "share": "Condividi con il tavolo",
+  "copied": "Link copiato",
+  "paidBy": "Pagato da",
+  "guest": "Ospite {{n}}"
 }

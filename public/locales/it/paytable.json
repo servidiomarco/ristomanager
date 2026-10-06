@@ -69,7 +69,8 @@
   "paidInFull": {
     "title": "Conto saldato",
     "text": "Il tavolo è stato pagato per intero.",
-    "takeawayText": "L'ordine è stato pagato per intero."
+    "takeawayText": "L'ordine è stato pagato per intero.",
+    "receipt": "Vedi lo scontrino"
   },
   "claimed": {
     "yourShare": "La tua quota",
