@@ -15,11 +15,13 @@
   "title": {
     "forgot": "Recover your password",
     "reset": "Choose a new password",
-    "login": "Sign in to your restaurant"
+    "login": "Sign in to your restaurant",
+    "pin": "Floor access"
   },
   "sub": {
     "forgot": "We will send you a link to choose a new one.",
-    "reset": "At least 8 characters."
+    "reset": "At least 8 characters.",
+    "pin": "For when the line is down: pick your name and type your PIN."
   },
   "resetSent": "If the address exists, you will get an email with the link to reset the password. The link lasts 1 hour.",
   "backToLogin": "Back to sign in",
@@ -36,5 +38,19 @@
   "rememberMe": "Remember my credentials",
   "signingIn": "Signing in...",
   "signIn": "Sign in",
-  "forgotPassword": "Forgotten your password?"
+  "forgotPassword": "Forgotten your password?",
+  "pin": {
+    "enter": "Sign in with floor PIN",
+    "label": "PIN",
+    "signIn": "Sign in",
+    "changeUser": "Change name",
+    "loading": "Looking for the floor node...",
+    "none": "Nobody has a floor PIN yet. Set it from your profile while the line is up.",
+    "err": {
+      "invalid": "Wrong PIN.",
+      "locked": "Too many attempts: try again in a few minutes.",
+      "unreachable": "The floor node is not responding.",
+      "format": "The PIN has 4–6 digits."
+    }
+  }
 }

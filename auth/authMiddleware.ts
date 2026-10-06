@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { AuthService, TokenPayload, isPlatformScopedSession } from './authService.js';
-import { Permission } from './permissions.js';
+import { Permission, SERVICE_PERMISSIONS } from './permissions.js';
 import { RolePermissionService } from './permissionService.js';
 import { UserRole } from '../types.js';
 import { runWithTenantContext } from '../db.js';
@@ -24,6 +24,62 @@ declare global {
 const normalizeTenantId = (payload: TokenPayload): number =>
   Number.isInteger(payload.tenantId) && payload.tenantId > 0 ? payload.tenantId : 1;
 
+// La politica d'accesso del nodo di sala (fase A2 del piano «sala, comande e
+// conto sul nodo»), iniettata da server.ts solo col profilo service-node
+// (services/salaNodeAccess.ts). Sul cloud resta null e non cambia niente.
+// - nodeTenant/loadNodeTenant: il nodo serve UN ristorante; il token di un
+//   altro tenant, pur firmato dal cloud, qui non apre niente. Prima del
+//   bootstrap il nodo non sa chi serve (e non ha dati): rifiuta tutto.
+// - offlineGrace: a linea giù il cameriere non può rinnovare il token (il
+//   refresh vive nel cloud). Un token scaduto da poco, di un utente attivo,
+//   vale ancora: altrimenti dopo qualche ora di guasto tutti i palmari
+//   cadrebbero insieme, in pieno servizio.
+export type OfflineGraceVerdict = 'ok' | 'expired_offline' | 'not_offline' | 'invalid';
+export interface NodeAccessPolicy {
+  nodeTenant: () => number | null;
+  loadNodeTenant: () => Promise<number | null>;
+  offlineGrace: (payload: TokenPayload, expiresAtMs: number | null) => Promise<OfflineGraceVerdict>;
+}
+let nodeAccessPolicy: NodeAccessPolicy | null = null;
+export const setNodeAccessPolicy = (policy: NodeAccessPolicy | null): void => {
+  nodeAccessPolicy = policy;
+};
+
+export type AccessTokenResolution =
+  | { ok: true; payload: TokenPayload }
+  | { ok: false; error: 'Invalid or expired token' | 'session_expired_offline' };
+
+const INVALID: AccessTokenResolution = { ok: false, error: 'Invalid or expired token' };
+
+/** L'access token di una richiesta o di un handshake socket, con la
+ *  politica del nodo applicata. Sincrona nel caso comune; sul nodo passa da
+ *  una promessa per un token scaduto o finché il tenant non è letto. */
+export const resolveAccessToken = (token: string): AccessTokenResolution | Promise<AccessTokenResolution> => {
+  const inspected = AuthService.inspectAccessToken(token);
+  if (!inspected) return INVALID;
+  const payload: TokenPayload = { ...inspected.payload, tenantId: normalizeTenantId(inspected.payload) };
+  const policy = nodeAccessPolicy;
+  if (!policy) return inspected.expired ? INVALID : { ok: true, payload };
+  const decide = (nodeTenant: number | null): AccessTokenResolution | Promise<AccessTokenResolution> => {
+    if (nodeTenant === null || payload.tenantId !== nodeTenant) return INVALID;
+    if (!inspected.expired) return { ok: true, payload };
+    return offlineGraceFor(policy, payload, inspected.expiresAtMs);
+  };
+  const known = policy.nodeTenant();
+  if (known !== null) return decide(known);
+  return policy.loadNodeTenant().then(decide).catch(() => INVALID);
+};
+
+const offlineGraceFor = (policy: NodeAccessPolicy, payload: TokenPayload, expiresAtMs: number | null): Promise<AccessTokenResolution> =>
+  policy.offlineGrace(payload, expiresAtMs).then((verdict): AccessTokenResolution => {
+    if (verdict === 'ok') return { ok: true, payload };
+    // Proroga finita (o utente disattivato) a linea giù: un codice a parte,
+    // così il client mostra «sessione scaduta senza linea» invece di
+    // sembrare collegato. A linea su resta il 401 di sempre e il client
+    // rinnova il token col cloud.
+    return verdict === 'expired_offline' ? { ok: false, error: 'session_expired_offline' } : INVALID;
+  }).catch(() => INVALID);
+
 // Authentication middleware - verifies JWT token
 export const authenticate = (req: Request, res: Response, next: NextFunction) => {
   const authHeader = req.headers.authorization;
@@ -34,11 +90,21 @@ export const authenticate = (req: Request, res: Response, next: NextFunction) =>
 
   const token = authHeader.substring(7); // Remove 'Bearer ' prefix
 
-  const payload = AuthService.verifyAccessToken(token);
-  if (!payload) {
-    return res.status(401).json({ error: 'Invalid or expired token' });
+  const resolution = resolveAccessToken(token);
+  if (resolution instanceof Promise) {
+    resolution.then((r) => admit(req, res, next, r)).catch(() => {
+      if (!res.headersSent) res.status(401).json({ error: 'Invalid or expired token' });
+    });
+    return;
   }
+  return admit(req, res, next, resolution);
+};
 
+const admit = (req: Request, res: Response, next: NextFunction, resolution: AccessTokenResolution) => {
+  if ('error' in resolution) {
+    return res.status(401).json({ error: resolution.error });
+  }
+  const payload = resolution.payload;
   req.user = { ...payload, tenantId: normalizeTenantId(payload) };
   req.tenantId = req.user.tenantId;
   // Il resto della richiesta gira nel contesto del tenant: da qui in giù
@@ -61,6 +127,13 @@ export const authorize = (...allowedRoles: UserRole[]) => {
   return (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) {
       return res.status(401).json({ error: 'Not authenticated' });
+    }
+
+    // I gate di ruolo proteggono amministrazione (utenti, permessi,
+    // onboarding): una sessione col PIN di sala non ci entra mai, nemmeno
+    // quella di un titolare.
+    if (req.user.scope === 'service') {
+      return res.status(403).json({ error: 'Insufficient permissions' });
     }
 
     // Layer di piattaforma: una sessione scopata su un tenant passa ogni
@@ -90,6 +163,11 @@ export const requirePermission = (permission: Permission) => {
     // PLATFORM_ADMIN non ha righe in role_permissions e non deve averne.
     if (isPlatformScopedSession(req.user)) {
       return next();
+    }
+
+    // Sessione col PIN di sala: solo i permessi di servizio.
+    if (req.user.scope === 'service' && !SERVICE_PERMISSIONS.has(permission)) {
+      return res.status(403).json({ error: 'Insufficient permissions' });
     }
 
     try {
@@ -146,6 +224,8 @@ export const requireAnyPermission = (...permissions: Permission[]) => {
 
     try {
       for (const permission of permissions) {
+        // Sessione col PIN di sala: contano solo i permessi di servizio.
+        if (req.user.scope === 'service' && !SERVICE_PERMISSIONS.has(permission)) continue;
         if (await RolePermissionService.hasPermission(req.user.tenantId, req.user.role, permission)) {
           return next();
         }

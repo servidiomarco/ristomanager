@@ -6,16 +6,23 @@
 // con le credenziali, come faceva il relay della tappa 3. Qui il full-server
 // fa lo stesso: al boot chiede cert+chiave a GET /sala-node/credentials, li
 // tiene in cache SU DISCO (un riavvio durante un outage deve ripartire in
-// HTTPS comunque), e li rinfresca ogni 12h con setSecureContext — il
+// HTTPS comunque), e li rinfresca ogni 10 minuti con setSecureContext — il
 // rinnovo del certificato non richiede riavvii.
 //
 // Senza materiale (primo avvio a linea giù, o dominio mai configurato) si
 // parte in HTTP col warn: utile solo in laboratorio, i client veri non
 // arriverebbero comunque.
+//
+// Con le stesse credenziali arrivano le chiavi PUBBLICHE con cui il nodo
+// verifica i token dei palmari (fase A1, auth/jwtKeys.ts). Anche quelle
+// stanno su disco, per lo stesso motivo del certificato. Il giro era di
+// 12 ore quando portava solo il certificato: dopo un cambio di chiave il
+// nodo non può aspettare tanto.
 
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import type { Server as HttpsServer } from 'node:https';
+import { setTrustedPublicKeys, setUnknownKidHandler } from '../auth/jwtKeys.js';
 
 export interface NodeTlsMaterial {
     cert_pem: string;
@@ -23,12 +30,84 @@ export interface NodeTlsMaterial {
     expires_at?: string | null;
 }
 
-const REFRESH_MS = 12 * 60 * 60 * 1000;
+const REFRESH_MS = 10 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 8_000;
 
-const cachePath = (): string => {
+const stateFile = (name: string): string => {
     const dir = process.env.SALA_NODE_STATE_DIR || process.cwd();
-    return path.join(dir, 'sala-node-tls.json');
+    return path.join(dir, name);
+};
+const cachePath = (): string => stateFile('sala-node-tls.json');
+const keysCachePath = (): string => stateFile('sala-node-jwt-keys.json');
+const agentsCachePath = (): string => stateFile('sala-node-agenti.json');
+
+// Le chiavi ricevute: in memoria subito, su disco per il prossimo avvio.
+// Il log solo quando l'insieme cambia: è la riga che il runbook fa cercare
+// dopo aver impostato la chiave su Railway.
+let lastKids = '';
+const applyJwtKeys = (keys: unknown, persist: boolean): void => {
+    if (!Array.isArray(keys) || keys.length === 0) return;
+    if (setTrustedPublicKeys(keys) === 0) return;
+    const kids = keys.map((k: any) => String(k?.kid)).sort().join(',');
+    if (kids !== lastKids) {
+        lastKids = kids;
+        console.log(`[node-tls] chiavi JWT ${persist ? 'dal cloud' : 'dalla cache su disco'}: ${kids}`);
+    }
+    if (!persist) return;
+    try {
+        mkdirSync(path.dirname(keysCachePath()), { recursive: true });
+        writeFileSync(keysCachePath(), JSON.stringify(keys), { mode: 0o600 });
+    } catch (err: any) {
+        console.warn('[node-tls] chiavi JWT non scritte su disco:', err?.message || err);
+    }
+};
+
+const loadJwtKeysFromDisk = (): void => {
+    try {
+        applyJwtKeys(JSON.parse(readFileSync(keysCachePath(), 'utf8')), false);
+    } catch { /* assente o corrotta: il nodo accetta solo HS256, se ha JWT_SECRET */ }
+};
+
+// Quello che serve agli agenti del PC, ricevuto con le credenziali: il
+// token legacy dell'agente di stampa e (fase B5) la configurazione di
+// chiusura dei conti Passepartout. Su disco anche questi: un nodo riavviato
+// a linea giù li perdeva, e l'agente di stampa col token legacy prendeva
+// 401 proprio quando le comande battute al buio dovevano uscire. Un valore
+// messo a mano nell'env del nodo vince sempre.
+interface AgentCredentials {
+    print_agent_legacy_token?: string | null;
+    passepartout_chiusura?: { tipoPagamento?: string | null; tipoDocumento?: string | null } | null;
+}
+const ownEnv = {
+    PRINT_AGENT_TOKEN: Boolean(process.env.PRINT_AGENT_TOKEN),
+    PASSEPARTOUT_TIPO_PAGAMENTO: Boolean(process.env.PASSEPARTOUT_TIPO_PAGAMENTO),
+    PASSEPARTOUT_TIPO_DOCUMENTO: Boolean(process.env.PASSEPARTOUT_TIPO_DOCUMENTO),
+};
+const inherit = (name: keyof typeof ownEnv, value: unknown, label: string): void => {
+    if (ownEnv[name] || typeof value !== 'string' || !value || process.env[name] === value) return;
+    process.env[name] = value;
+    console.log(`[node-tls] ${label} ereditato dal cloud`);
+};
+const applyAgentCredentials = (body: AgentCredentials, persist: boolean): void => {
+    inherit('PRINT_AGENT_TOKEN', body?.print_agent_legacy_token, 'token legacy agente di stampa');
+    const pp = body?.passepartout_chiusura;
+    inherit('PASSEPARTOUT_TIPO_PAGAMENTO', pp?.tipoPagamento, 'tipo pagamento Passepartout');
+    inherit('PASSEPARTOUT_TIPO_DOCUMENTO', pp?.tipoDocumento, 'tipo documento Passepartout');
+    if (!persist) return;
+    try {
+        mkdirSync(path.dirname(agentsCachePath()), { recursive: true });
+        writeFileSync(agentsCachePath(), JSON.stringify({
+            print_agent_legacy_token: body?.print_agent_legacy_token ?? null,
+            passepartout_chiusura: pp ?? null,
+        }), { mode: 0o600 });
+    } catch (err: any) {
+        console.warn('[node-tls] token degli agenti non scritti su disco:', err?.message || err);
+    }
+};
+const loadAgentCredentialsFromDisk = (): void => {
+    try {
+        applyAgentCredentials(JSON.parse(readFileSync(agentsCachePath(), 'utf8')), false);
+    } catch { /* assente: si aspetta il cloud */ }
 };
 
 const readCache = (): NodeTlsMaterial | null => {
@@ -61,15 +140,14 @@ const fetchFromCloud = async (): Promise<NodeTlsMaterial | null> => {
         });
         if (!res.ok) return null;
         const body: any = await res.json();
+        applyJwtKeys(body?.jwt_public_keys, true);
         // Il token legacy dell'agente di stampa arriva qui (fix del 24/09):
         // il nodo lo mette nel PROPRIO env, così il suo printAgentAuth
         // accetta l'agente che lo usa — senza copiarlo a mano nel .cmd.
         // Anche a cert assente (HTTP locale): l'agente stampa comunque.
-        if (typeof body?.print_agent_legacy_token === 'string' && body.print_agent_legacy_token
-            && process.env.PRINT_AGENT_TOKEN !== body.print_agent_legacy_token) {
-            process.env.PRINT_AGENT_TOKEN = body.print_agent_legacy_token;
-            console.log('[node-tls] token legacy agente di stampa ereditato dal cloud');
-        }
+        // Dalla fase B5 anche la configurazione di chiusura dei conti
+        // Passepartout (il token dell'agente lo dà il supervisore).
+        applyAgentCredentials(body, true);
         const cert = body?.cert;
         if (typeof cert?.cert_pem === 'string' && typeof cert?.key_pem === 'string') {
             return { cert_pem: cert.cert_pem, key_pem: cert.key_pem, expires_at: cert.expires_at ?? null };
@@ -85,6 +163,10 @@ const fetchFromCloud = async (): Promise<NodeTlsMaterial | null> => {
 /** Il materiale TLS per il listener del nodo: prima il cloud (e si
  *  aggiorna la cache), a cloud muto la copia su disco. null = HTTP. */
 export const loadNodeTlsMaterial = async (): Promise<NodeTlsMaterial | null> => {
+    // Prima la copia su disco delle chiavi: se il cloud risponde, la
+    // risposta la sostituisce subito dopo.
+    loadJwtKeysFromDisk();
+    loadAgentCredentialsFromDisk();
     const fresh = await fetchFromCloud();
     if (fresh) {
         writeCache(fresh);
@@ -95,23 +177,25 @@ export const loadNodeTlsMaterial = async (): Promise<NodeTlsMaterial | null> => 
     return cached;
 };
 
-/** Rinfresco periodico: il cloud rinnova il certificato ~30 giorni prima
- *  della scadenza, il nodo lo monta a caldo senza riavvii. */
-export const startNodeTlsRefresh = (server: HttpsServer, current: NodeTlsMaterial): void => {
+/** Rinfresco periodico delle credenziali: le chiavi JWT a ogni giro; il
+ *  certificato (il cloud lo rinnova ~30 giorni prima della scadenza) si
+ *  monta a caldo senza riavvii quando il nodo parla HTTPS. Un token con kid
+ *  sconosciuto anticipa il giro (auth/jwtKeys.ts). */
+export const startNodeCredentialsRefresh = (server: HttpsServer | null, current: NodeTlsMaterial | null): void => {
     let active = current;
-    const timer = setInterval(async () => {
+    const refresh = async (): Promise<void> => {
         const fresh = await fetchFromCloud();
-        if (!fresh) return;
-        if (fresh.cert_pem !== active.cert_pem) {
-            try {
-                server.setSecureContext({ cert: fresh.cert_pem, key: fresh.key_pem });
-                active = fresh;
-                writeCache(fresh);
-                console.log('[node-tls] certificato aggiornato a caldo');
-            } catch (err: any) {
-                console.error('[node-tls] setSecureContext fallito:', err?.message || err);
-            }
+        if (!fresh || !server || !active || fresh.cert_pem === active.cert_pem) return;
+        try {
+            server.setSecureContext({ cert: fresh.cert_pem, key: fresh.key_pem });
+            active = fresh;
+            writeCache(fresh);
+            console.log('[node-tls] certificato aggiornato a caldo');
+        } catch (err: any) {
+            console.error('[node-tls] setSecureContext fallito:', err?.message || err);
         }
-    }, REFRESH_MS);
+    };
+    setUnknownKidHandler(() => { void refresh(); });
+    const timer = setInterval(() => { void refresh(); }, REFRESH_MS);
     if (typeof timer.unref === 'function') timer.unref();
 };

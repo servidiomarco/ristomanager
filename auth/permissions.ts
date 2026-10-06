@@ -77,6 +77,30 @@ export type Permission =
   | 'haccp:manage';
 
 // Role-permission mapping
+// I permessi di una sessione aperta col PIN di sala sul nodo (fase A2): solo
+// il servizio — sala, comande, cucina, passe, conti, cassa, asporto. Il PIN è
+// una credenziale debole di proposito (4–6 cifre, buona dentro il locale):
+// impostazioni, utenti, report, CRM restano al login vero. Sempre in
+// intersezione con quelli del ruolo: un cameriere col PIN non diventa cassa.
+export const SERVICE_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
+  'dashboard:view',
+  'floorplan:view',
+  'floorplan:update_status',
+  'menu:view',
+  'reservations:view',
+  'reception:view',
+  'payments:view',
+  'orders:view',
+  'orders:take',
+  'orders:kds',
+  'orders:expedite',
+  'orders:void',
+  'cash:operate',
+  'cash:void_payment',
+  'takeaway:view',
+  'takeaway:manage',
+]);
+
 const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   // Il platform admin opera i tenant (lista, sospensione, impersonation),
   // non ha una matrice per-tenant propria: la lista rispecchia quella di

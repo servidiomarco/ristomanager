@@ -8,6 +8,9 @@ const ACCESS_TOKEN_KEY = 'ristomanager_access_token';
 const REFRESH_TOKEN_KEY = 'ristomanager_refresh_token';
 const USER_KEY = 'ristomanager_user';
 const PERMISSIONS_KEY = 'ristomanager_permissions';
+// 'pin' = sessione aperta col PIN di sala sul nodo (fase A2): niente refresh
+// token, vale solo sul nodo. Assente = sessione normale del cloud.
+const SESSION_KIND_KEY = 'ristomanager_session_kind';
 
 // Session expired callback type
 type SessionExpiredCallback = () => void;
@@ -17,6 +20,12 @@ export interface AuthResponse {
   permissions: string[];
   accessToken: string;
   refreshToken: string;
+}
+
+export interface PinUser {
+  id: number;
+  full_name: string;
+  role: UserRole;
 }
 
 export interface RefreshResponse {
@@ -67,6 +76,8 @@ class AuthApiService {
     localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
     localStorage.setItem(USER_KEY, JSON.stringify(user));
     localStorage.setItem(PERMISSIONS_KEY, JSON.stringify(permissions));
+    // Una sessione col refresh token è del cloud: chiude un eventuale PIN.
+    localStorage.removeItem(SESSION_KIND_KEY);
   }
 
   // Clear stored auth data
@@ -75,6 +86,63 @@ class AuthApiService {
     localStorage.removeItem(REFRESH_TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
     localStorage.removeItem(PERMISSIONS_KEY);
+    localStorage.removeItem(SESSION_KIND_KEY);
+  }
+
+  isPinSession(): boolean {
+    return localStorage.getItem(SESSION_KIND_KEY) === 'pin';
+  }
+
+  // --- PIN di sala (fase A2) ----------------------------------------------
+  // Si parla col NODO, non col cloud: è la strada per entrare quando la
+  // linea è giù. nodeUrl lo passa chi chiama (apiRouting conosce il nodo,
+  // ma importa questo modulo: niente import circolare).
+  async getPinUsers(nodeUrl: string): Promise<PinUser[]> {
+    const response = await fetch(`${nodeUrl}/auth/pin-users`);
+    if (!response.ok) throw new Error('pin_users_unavailable');
+    const data = await response.json();
+    return Array.isArray(data?.users) ? data.users : [];
+  }
+
+  async pinLogin(nodeUrl: string, userId: number, pin: string): Promise<AuthResponse> {
+    let response: Response;
+    try {
+      response = await fetch(`${nodeUrl}/auth/pin-login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: userId, pin }),
+      });
+    } catch {
+      throw new Error('node_unreachable');
+    }
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(typeof body?.error === 'string' ? body.error : 'pin_login_failed');
+    }
+    const data = await response.json();
+    // Nessun refresh token: la sessione del PIN si rifà col PIN.
+    localStorage.setItem(ACCESS_TOKEN_KEY, data.accessToken);
+    localStorage.removeItem(REFRESH_TOKEN_KEY);
+    localStorage.setItem(USER_KEY, JSON.stringify(data.user));
+    localStorage.setItem(PERMISSIONS_KEY, JSON.stringify(data.permissions || []));
+    localStorage.setItem(SESSION_KIND_KEY, 'pin');
+    return data;
+  }
+
+  // Il PIN si imposta nel cloud, dal proprio profilo.
+  async setServicePin(pin: string | null): Promise<void> {
+    const token = this.getAccessToken();
+    const response = await fetch(`${API_URL}/auth/me/service-pin`, {
+      method: pin === null ? 'DELETE' : 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: pin === null ? undefined : JSON.stringify({ pin }),
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(typeof body?.error === 'string' ? body.error : 'pin_save_failed');
+    }
+    const user = this.getUser();
+    if (user) localStorage.setItem(USER_KEY, JSON.stringify({ ...user, has_service_pin: pin !== null }));
   }
 
   // Get stored permissions
@@ -145,6 +213,13 @@ class AuthApiService {
     const refreshToken = this.getRefreshToken();
 
     if (!refreshToken) {
+      // Sessione del PIN di sala: non si rinnova. Un 401 qui vuol dire che
+      // il cloud è tornato e non riconosce il token del nodo, oppure che la
+      // sessione è scaduta: in tutti e due i casi si rientra dal login.
+      if (this.isPinSession()) {
+        this.clearAuth();
+        this.triggerSessionExpired();
+      }
       return null;
     }
 
@@ -228,10 +303,14 @@ class AuthApiService {
   // session keeper: rinnovare in anticipo evita che la scadenza cada nel
   // mezzo di un'azione (il 401+retry funziona, ma il socket resta giù
   // finché qualcuno non rifà una richiesta).
+  // La soglia è metà della vita del token (6h): se la linea cade, il
+  // palmare ha sempre almeno 3 ore di token buono, più la proroga del nodo
+  // di sala (12h dopo la scadenza). Con 30 minuti un guasto lungo poteva
+  // cominciare con il token già agli sgoccioli.
   async refreshIfExpiring(): Promise<void> {
     if (!this.getRefreshToken()) return;
     const expiry = this.accessTokenExpiryMs();
-    if (expiry !== null && expiry - Date.now() > 30 * 60 * 1000) return;
+    if (expiry !== null && expiry - Date.now() > 3 * 60 * 60 * 1000) return;
     await this.refreshToken();
   }
 

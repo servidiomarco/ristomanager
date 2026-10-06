@@ -95,6 +95,7 @@
     "releaseFailed": "Something went wrong while cancelling",
     "billFullyClaimed": "The bill has already been fully claimed by other guests.",
     "itemsAlreadyClaimed": "One of the dishes you picked was already claimed by someone else. Refresh the page and try again.",
-    "perItemUnavailable": "Paying per dish isn't available for this bill: choose another option."
+    "perItemUnavailable": "Paying per dish isn't available for this bill: choose another option.",
+    "payAtCounter": "Paying from your phone is not available right now: please pay at the counter."
   }
 }

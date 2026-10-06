@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Loader2, Eye, EyeOff } from 'lucide-react';
 import { Sheet, FormCard, Field, dsInput, dsButton } from './ds';
 import { useAuth } from '../contexts/AuthContext';
+import { authApiService } from '../services/authApiService';
 import { LeMieFerieCard } from './LeMieFerieCard';
 
 /**
@@ -37,7 +38,7 @@ const Note: React.FC<{ tone: 'ok' | 'error'; children: React.ReactNode }> = ({ t
 
 export const ProfiloSheet: React.FC<ProfiloSheetProps> = ({ open, onClose, roleLabel }) => {
   const { t } = useTranslation('profilo', { useSuspense: false });
-  const { user, updateProfile, changePassword, changeEmail } = useAuth();
+  const { user, updateProfile, changePassword, changeEmail, isPinSession } = useAuth();
 
   // ── Profilo (nome + telefono) ──
   const [fullName, setFullName] = useState('');
@@ -59,6 +60,12 @@ export const ProfiloSheet: React.FC<ProfiloSheetProps> = ({ open, onClose, roleL
   const [emailBusy, setEmailBusy] = useState(false);
   const [emailNote, setEmailNote] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
 
+  // ── PIN di sala (fase A2) ──
+  const [hasPin, setHasPin] = useState(false);
+  const [newPin, setNewPin] = useState('');
+  const [pinBusy, setPinBusy] = useState(false);
+  const [pinNote, setPinNote] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
+
   // Ripopola dai dati correnti a ogni apertura, e azzera i campi sensibili:
   // password scritte a metà non devono sopravvivere a un chiudi-e-riapri.
   useEffect(() => {
@@ -73,7 +80,32 @@ export const ProfiloSheet: React.FC<ProfiloSheetProps> = ({ open, onClose, roleL
     setNewEmail('');
     setEmailPassword('');
     setEmailNote(null);
-  }, [open, user?.full_name, user?.phone]);
+    // Dallo storage e non dal contesto: savePin aggiorna lì il flag, e il
+    // contesto lo rivede solo al prossimo /auth/me.
+    setHasPin(authApiService.getUser()?.has_service_pin === true);
+    setNewPin('');
+    setPinNote(null);
+  }, [open, user?.full_name, user?.phone, user?.has_service_pin]);
+
+  const savePin = async (pin: string | null) => {
+    setPinNote(null);
+    if (pin !== null && !/^\d{4,6}$/.test(pin)) {
+      setPinNote({ tone: 'error', text: t('pinInvalid') });
+      return;
+    }
+    setPinBusy(true);
+    try {
+      await authApiService.setServicePin(pin);
+      setHasPin(pin !== null);
+      setNewPin('');
+      setPinNote({ tone: 'ok', text: t(pin === null ? 'pinRemoved' : 'pinSaved') });
+    } catch (err: any) {
+      const code = err?.message;
+      setPinNote({ tone: 'error', text: t(code === 'trivial_pin' ? 'pinTrivial' : code === 'invalid_pin' ? 'pinInvalid' : 'saveFailed') });
+    } finally {
+      setPinBusy(false);
+    }
+  };
 
   const profileDirty = fullName.trim() !== (user?.full_name || '') || phone.trim() !== (user?.phone || '');
 
@@ -259,6 +291,53 @@ export const ProfiloSheet: React.FC<ProfiloSheetProps> = ({ open, onClose, roleL
           </button>
         </form>
       </FormCard>
+
+      {/* Il PIN si imposta col cloud: in una sessione aperta col PIN (linea
+          giù) la card non c'è. */}
+      {!isPinSession && (
+        <FormCard title={t('pinTitle')}>
+          <form
+            onSubmit={(e) => { e.preventDefault(); void savePin(newPin); }}
+            className="space-y-4"
+          >
+            <Field label={t('pinNew')} htmlFor="profilo-pin" hint={t('pinHint')}>
+              <input
+                id="profilo-pin"
+                type="password"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                autoComplete="off"
+                maxLength={6}
+                value={newPin}
+                onChange={e => setNewPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                disabled={pinBusy}
+                className={`${dsInput} tracking-[0.3em]`}
+              />
+            </Field>
+            {pinNote && <Note tone={pinNote.tone}>{pinNote.text}</Note>}
+            <div className="flex gap-2">
+              <button
+                type="submit"
+                disabled={pinBusy || newPin.length < 4}
+                className={`${dsButton.primary} flex-1`}
+              >
+                {pinBusy && <Loader2 className="h-4 w-4 animate-spin" />}
+                {t(hasPin ? 'pinChange' : 'pinSet')}
+              </button>
+              {hasPin && (
+                <button
+                  type="button"
+                  onClick={() => { void savePin(null); }}
+                  disabled={pinBusy}
+                  className={dsButton.quiet}
+                >
+                  {t('pinRemove')}
+                </button>
+              )}
+            </div>
+          </form>
+        </FormCard>
+      )}
 
       <FormCard title="Email">
         <form onSubmit={handleEmailSubmit} className="space-y-4">
