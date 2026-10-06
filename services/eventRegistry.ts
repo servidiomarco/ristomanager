@@ -36,12 +36,18 @@ export interface DomainEventSpec {
 const spec = (authority: EventAuthority, schema_ver = 1): DomainEventSpec => ({ authority, schema_ver });
 
 export const DOMAIN_EVENTS: Record<string, DomainEventSpec> = {
-    // --- Prenotazioni: inbound (cloud) E arrivi/assegnazione (servizio)
-    //     passano oggi dagli stessi tipi → split, da sdoppiare in fase 4.
+    // --- Prenotazioni, sdoppiate per colonna (tappa C del piano «sala,
+    //     comande e conto sul nodo»). Il cloud possiede la prenotazione
+    //     (ospite, orario, stato, contatti, conferme): reservation:updated
+    //     porta la riga e chi la riceve NON tocca tavolo e arrivo. Tavolo e
+    //     arrivo sono del servizio: reservation:service-updated porta solo
+    //     quelle due colonne. La nascita resta split: prenotazioni dal cloud,
+    //     walk-in dalla sala.
     'reservation:created': spec('split'),
-    'reservation:updated': spec('split'),
-    'reservation:deleted': spec('split'),
-    'reservation:synced': spec('split'),
+    'reservation:updated': spec('cloud'),
+    'reservation:service-updated': spec('service'),
+    'reservation:deleted': spec('cloud'),
+    'reservation:synced': spec('cloud'),
     'tableAssignmentSuggestion:created': spec('service'),
     'tableAssignmentSuggestion:resolved': spec('service'),
 
@@ -103,6 +109,21 @@ export const DOMAIN_EVENTS: Record<string, DomainEventSpec> = {
     'paymentRequest:updated': spec('cloud'),
     'payments:seen': spec('cloud'),
     'fiscal:updated': spec('cloud'),
+    // Fase B2: gli eventi DI REPLICA di conti, cassa e documenti fiscali.
+    // Portano solo il riferimento e convergono per rifetch (replicaApply);
+    // i client continuano ad ascoltare i nomi qui sopra, che le route
+    // trasmettono come prima. bill:changed copre l'aggregato intero (conto,
+    // pagamenti, quote): la fase B3 separerà le quote, che restano al cloud.
+    // fiscalDoc:changed copre scontrini, proforma E fatture: le fatture
+    // restano al cloud anche dopo la B3, quindi è split finché non si
+    // sdoppia.
+    'bill:changed': spec('service'),
+    'cash:changed': spec('service'),
+    'fiscalDoc:changed': spec('split'),
+    // Fase B3: le richieste di pagamento (caparre, link, quote) restano del
+    // cloud — i gateway parlano con lui — ma scendono al nodo, che con il
+    // servizio in sala accredita le caparre sul conto.
+    'paymentRequest:changed': spec('cloud'),
 
     // --- Asporto: nasce online o al telefono (cloud), avanza in cucina e
     //     al ritiro (servizio) → split finché la fase 4 non li separa.

@@ -1,5 +1,8 @@
 # Nodo di sala — installazione e gestione
 
+> Il collaudo a linea staccata, da fare a locale chiuso prima della prima
+> serata con «Servizio completo sul nodo»: [docs/collaudo-nodo-linea-giu.md](../docs/collaudo-nodo-linea-giu.md).
+
 Il nodo di sala vive sul PC Windows del ristorante, accanto a print agent e
 agente Passepartout. Due generazioni:
 
@@ -318,3 +321,246 @@ passo 3 già fatto, rimettere anche `JWT_HS256_ACCEPT` e il segreto nel
   della fase A4 non la scrive da sé: la card la confronta con quella del
   cloud e la mostra in giallo se diversa.
 
+## Un servizio solo: il supervisore (fase A4)
+
+Al posto delle tre attività pianificate e dei tre `.cmd` (nodo, stampa,
+Passepartout) c'è UN servizio di sistema che lancia
+`sala-node/supervisor.mjs`. Il supervisore tiene in vita i tre processi
+(riavvio con attesa crescente fino a 1 minuto), scrive i log a rotazione in
+`logs\` (5 MB × 3 per processo), impedisce che ne partano due copie e
+installa le versioni nuove da solo.
+
+### Fase 0: il PC, prima del software
+
+Sono i guasti che nessun programma risolve:
+
+- Risparmio energia: **mai** sospensione né ibernazione (incidente del 17/09).
+- Windows Update: orario di attività 10:00–02:00, oppure riavvii solo
+  manuali. Un riavvio a metà servizio spegne nodo, stampe e Passepartout.
+- BIOS: «riaccendi al ritorno della corrente» (Restore on AC power loss).
+- Un UPS per PC, switch e registratore telematico.
+- IP fisso o prenotazione DHCP per il PC (il record DNS punta lì).
+
+### Il pacchetto
+
+Lo costruisce la CI a ogni push su main (fase A4b): nella run, fra gli
+artefatti, `sympotia-nodo-<sha>` contiene lo zip pronto per `inbox\`
+(tenuto 30 giorni). La distribuzione automatica dal cloud al PC non c'è
+ancora: servirebbe un token GitHub su Railway.
+
+A mano, sul Mac, dal repo: `npm run package:node -- --zip` costruisce
+`build/nodo/sympotia-nodo-<sha>.zip`, una cartella autosufficiente con
+server, agente di stampa, agente Passepartout compilato, `node_modules` di
+produzione e la versione in `build-info.json`. Sul PC serve solo Node ≥ 20.
+
+### Prima installazione (fuori servizio)
+
+1. Cartella `C:\ProgramData\Sympotia\nodo\` (leggibile solo da SYSTEM e
+   Administrators). Dentro: `versions\<sha>\` = il pacchetto scompattato, e
+   `supervisor.mjs` copiato da `versions\<sha>\sala-node\`.
+2. `nodo.json` nella stessa cartella. È l'unico posto con dei segreti:
+
+   ```json
+   {
+     "cloud_url": "https://ristomanager-production.up.railway.app",
+     "node_token": "<tenants.sala_node_token>",
+     "database_url": "postgresql://postgres:<password>@localhost:5432/ristonodo",
+     "port": 8443,
+     "print_agent": {
+       "enabled": true,
+       "api_url": "https://prenotazioni.vecchiofrantoio.com",
+       "token": "<PRINT_AGENT_TOKEN>",
+       "node_url": "https://sala.<slug>.sympotia.com:8443",
+       "env": { "RT_FISCAL_HOST": "192.168.1.201", "RT_FISCAL_REPARTI": "22=1,10=2" }
+     },
+     "passepartout_agent": {
+       "enabled": true,
+       "env": {
+         "PASSEPARTOUT_WS_URL": "http://192.168.1.10:7606/AdapterWS",
+         "PASSEPARTOUT_WS_USER": "…", "PASSEPARTOUT_WS_PASSWORD": "…",
+         "PP_AGENT_SERVER_URL": "https://prenotazioni.vecchiofrantoio.com",
+         "PP_AGENT_TOKEN": "…"
+       }
+     },
+     "update_window": { "from": "04:00", "to": "10:00" }
+   }
+   ```
+
+   Durante la transizione ES256 (sopra) si può aggiungere
+   `"node_env": { "JWT_SECRET": "…" }`; finita la transizione si toglie.
+3. `node supervisor.mjs check` (controlla configurazione e versione), poi
+   `node supervisor.mjs install` e i passi che stampa: su Windows serve
+   WinSW-x64.exe rinominato `sympotia-nodo.exe` accanto all'XML.
+4. Disattivare (non cancellare) le tre attività pianificate vecchie, poi
+   `sympotia-nodo.exe start`. Tornare indietro = `sympotia-nodo.exe stop` e
+   riattivare le attività.
+
+Prima di riavviare a mano: `logs\supervisor.log` dice cosa è partito, con
+quale versione e perché un processo è ripartito.
+
+### Aggiornare
+
+Si appoggia lo zip (o la cartella) in `inbox\`. Il supervisore lo installa:
+
+- solo nella finestra `update_window` (ora di Roma, 04:00–10:00 di default);
+- solo senza comande aperte né conti aperti nelle ultime 12 ore (lo chiede
+  al nodo su `/sala-node/maintenance-check`, che risponde solo da
+  127.0.0.1);
+- se la versione nuova non risponde a `/ready` entro 3 minuti torna da solo
+  a quella di prima (`current.txt` / `previous.txt`) e sposta il pacchetto
+  in `inbox\rejected\`; se va bene finisce in `inbox\done\`.
+
+Restano le ultime tre versioni in `versions\`. Il supervisore stesso non si
+aggiorna da solo: se cambia, si ricopia `supervisor.mjs` e si riavvia il
+servizio.
+
+## Il conto sul nodo (fase B3)
+
+Con «Servizio completo sul nodo» acceso, oltre alle comande nascono sul nodo
+anche conti, incassi, sconti, storni, chiusure, preconto, scontrino sul
+registratore (`rt-local`, job nella coda del nodo: l'agente di stampa con
+`NODE_URL` lo stampa) e sessione di cassa. Tutto risale al cloud con id da
+un miliardo in su.
+
+- **Il recinto del cloud** rifiuta (409 `authority_on_node`) ogni battitura
+  di servizio finché l'interruttore è acceso, anche a nodo muto: non c'è
+  più ripiego automatico sul cloud per comande e conti. Col PC morto si
+  spegne l'interruttore con `force`: `POST /sala-node/authority
+  {"enabled": false, "force": true}` da una sessione con settings:full (la
+  card non ha ancora il bottone: si possono perdere le battiture non
+  replicate).
+- **Cancelli dell'accensione**: provider fiscale `rt-local` (o nessuno), e
+  nessun pagamento col QR in corso (`fiscal_needs_cloud`,
+  `qr_payments_live`).
+- **Pagamento col QR dal nodo** (fase B3b): l'ospite parla col cloud, che
+  chiede la quota al nodo (`node:rpc` `pay:claim`/`pay:release` sul canale
+  /sala-node), crea l'ordine col gateway (le credenziali restano nel cloud)
+  e manda giù la richiesta di pagamento. A pagamento concluso il nodo segna
+  la quota pagata, salda e (con `rt-local`) chiude il conto e fa lo
+  scontrino. Nodo irraggiungibile dal cloud: `pay_unavailable_on_node`,
+  l'ospite legge «paga in cassa». Una quota senza ordine scaduta da 10
+  minuti la libera il nodo da solo. In isola il preconto esce senza QR: un
+  conto nato sul nodo a linea giù il cloud non lo conosce ancora.
+- **Caparre**: le richieste di pagamento scendono al nodo
+  (`paymentRequest:changed`), che accredita la caparra pagata sul conto
+  aperto della prenotazione.
+- **Restano al cloud**: fattura elettronica e nota di credito (SDI), rimborso
+  di una quota o di una caparra accreditata (a servizio chiuso: con
+  l'interruttore acceso rispondono 409 `refund_needs_cloud_authority`). La
+  chiusura su Passepartout dal nodo è arrivata con la fase B5 (sotto).
+
+
+## L'app dal nodo e la coda dei palmari (fase B4)
+
+Con «Servizio completo sul nodo» acceso il client legge dal nodo, oltre a
+comande, conti e cassa, tutto quello con cui apre la sala: `/tables`,
+`/rooms`, `/dishes`, `/menus`, `/banquet-menus`, `/table-merges`,
+`/table-hidden`, `/room-closed`, `/takeaway/orders` e `/reservations?from=`
+fino a 55 giorni indietro (il nodo ne tiene 60; l'archivio con `to=` resta
+una lettura del cloud). Un ricaricamento a linea caduta riapre la sala com'è.
+Nodo muto → stesso circuito di sempre: un tentativo sul cloud e probe ogni
+30 s. Il probe ora parte da solo a circuito aperto (prima lo innescava solo
+una lettura instradata: con l'app ferma il dispositivo restava sul cloud a
+nodo tornato), e un socket che si ricollega al nodo richiude il circuito
+subito.
+
+- **Il 409 del recinto è leggibile**: `buildApiError` mostra `message`
+  quando `error` è un codice, e il recinto dice «Nodo di sala non
+  raggiungibile da qui: niente registrato».
+- **La coda offline** (`services/offlineQueue.ts`) tiene l'URL del cloud e
+  decide la destinazione al replay (`routeWriteUrl`): una voce nata a nodo
+  spento parte verso il nodo se nel frattempo l'autorità è in sala. Si
+  accoda su errore di rete e sul 409 `authority_on_node`; 401, 502–504 e
+  quel 409 non chiudono la voce, fermano il giro.
+- **Cosa NON va in coda**: comande, conti, incassi, chiusure. La comanda
+  vuole una risposta viva (una comanda in cucina venti minuti dopo, quando
+  il cameriere l'ha già gridata, è un doppio), l'incasso e la chiusura
+  vogliono l'RT. Il palmare tiene il carrello con le chiavi per riga e
+  l'Invia si ripete senza doppi.
+- **Il doppio ack del piano non c'è**, di proposito: una copia sul palmare
+  delle battiture accettate dal nodo servirebbe solo se il disco del PC
+  morisse a linea giù, e rigiocarla altrove ristamperebbe in cucina piatti
+  già serviti (o rifarebbe scontrini). Contro quel guasto: UPS, memoria
+  dell'RT, e la riga «Sincronizzazione» della card che dice quante
+  battiture il cloud non ha ancora.
+
+## Passepartout dal nodo e chiusura in cassa durevole (fase B5)
+
+L'agente Passepartout si collega al cloud E al nodo (`PP_AGENT_NODE_URL`),
+come l'agente di stampa con le sue due fonti. Ogni server chiama l'agente per
+i conti che possiede: con «Servizio completo sul nodo» acceso import della
+comanda (`POST /tables/:id/bill` con `source=passepartout`) e chiusura in
+cassa avvengono sul nodo, anche a linea caduta.
+
+- **Il token dell'agente sul nodo** lo passa il supervisore
+  (`passepartout_agent.env.PP_AGENT_TOKEN` → `PASSEPARTOUT_AGENT_TOKEN` del
+  nodo). Dal cloud NON arriva: il token del nodo non deve valere anche come
+  agente. Senza supervisore (vecchi `.cmd`): aggiungere
+  `set PASSEPARTOUT_AGENT_TOKEN=…` al nodo e `set PP_AGENT_NODE_URL=https://sala.<slug>.sympotia.com:8443`
+  all'agente. Il supervisore usa di default l'indirizzo dell'agente di
+  stampa (`passepartout_agent.node_url` per cambiarlo).
+- **Tipo pagamento e documento** (`PASSEPARTOUT_TIPO_PAGAMENTO`,
+  `PASSEPARTOUT_TIPO_DOCUMENTO`) arrivano al nodo con le credenziali, una
+  sola fonte (Railway). Sul disco del nodo (`sala-node-agenti.json`, insieme
+  al token legacy dell'agente di stampa): un nodo riavviato a linea giù li
+  ha ancora. Prima il token legacy viveva solo in memoria, e un riavvio a
+  linea giù lasciava l'agente di stampa a 401.
+- **Chiusura durevole**: la chiusura del conto scrive nella stessa
+  transazione una riga `fiscal_documents` PENDING (provider `passepartout`).
+  - Riuscita → CONFIRMED col numero dell'RT.
+  - Agente spento → resta PENDING, lo spazzino (ogni minuto) riparte
+    appena l'agente si ricollega.
+  - Errore dopo che la richiesta è arrivata all'agente → con un agente
+    che dichiara `chiudi-riprendi` resta PENDING e si riprova con attese
+    di 1, 2, 4, 8, 15 minuti (massimo 6 tentativi, 12 ore); il nuovo
+    tentativo porta `riprendi` e l'agente guarda prima in
+    `GetContiGiorno`: se il conto della comanda c'è già, niente nuovo
+    `ContoComanda` (niente secondo scontrino), solo il saldo del sospeso.
+  - Con un agente vecchio (senza `chiudi-riprendi`) → FAILED subito: la
+    card mostra l'errore e «Chiudi in cassa». È il comportamento di prima.
+  - L'agente fa una chiusura alla volta per comanda.
+- **Aggiornare l'agente insieme al nodo**: finché l'agente sul PC è quello
+  vecchio, le chiusure fallite tornano a mano come prima.
+
+## L'accoglienza sul nodo (tappa C)
+
+La prenotazione è del cloud, ma due sue colonne sono del servizio:
+`table_id` e `arrival_status` (`RESERVATION_SERVICE_COLUMNS` in
+`services/replicaApply.ts`).
+
+- **Il comando di servizio**: `PATCH /reservations/:id/service` scrive solo
+  quelle due colonne, con le regole del `PUT` per un tavolo nuovo (del
+  ristorante, sala aperta salvo banchetti, nessun conflitto nella finestra).
+  Va nel log come `reservation:service-updated` (autorità `service`). Lo
+  scambio tavoli (`POST /reservations/:id/swap-table`) e il walk-in
+  (`POST /reservations/walk-in`, arrivato e confermato, adesso) sono
+  battiture di servizio come le comande: con l'interruttore acceso nascono
+  sul nodo e il cloud risponde 409. Permesso: `reservations:full` oppure
+  `floorplan:update_status` — gli stessi ruoli di prima, più la sessione
+  del PIN di sala.
+- **Replica per colonne**:
+  - `reservation:updated` (ora autorità `cloud`) porta la riga del cloud.
+    Sul nodo, con l'autorità in sala, si applica tutto tranne tavolo e
+    arrivo; se la prenotazione è annullata o rifiutata, il tavolo si
+    libera anche lì.
+  - `reservation:service-updated` porta solo le due colonne, in tutti e due
+    i versi.
+  - Sul cloud gli eventi di autorità `cloud` arrivati dal nodo si
+    registrano ma non si applicano, e le prenotazioni si aggiornano sul
+    posto (prima: cancella e reinserisci, che sul cloud si sarebbe portato
+    via i conti a cascata).
+- **Il `PUT` del cloud**, con l'autorità in sala, lascia tavolo e arrivo
+  come sono (la copia del client può essere vecchia) e salta i controlli
+  sul tavolo. Il client manda tavolo e arrivo col comando di servizio: la
+  reception sempre; il modulo di modifica e la pianta col `PUT` per il
+  resto più il comando se tavolo o arrivo cambiano.
+- **Il recinto rovescio**: sul nodo, le scritture su `/reservations` che non
+  sono di servizio rispondono 409 `cloud_authority`.
+- **Tutto nel log**: ogni modifica del cloud a una prenotazione ora va nel
+  log (`logReservationChanged`): conferma dopo la caparra, rifiuto per
+  caparra scaduta, esito dei messaggi di conferma, promemoria, lingua,
+  rinomina a cascata dalla rubrica, anonimizzazione, conferma del
+  suggerimento di tavolo (questa come evento di servizio). Prima erano
+  solo broadcast, e il nodo non li vedeva.
+- **Rubrica**: un walk-in nato sul nodo apre la scheda cliente quando arriva
+  al cloud (il nodo ha solo una copia della rubrica).

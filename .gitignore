@@ -54,3 +54,6 @@ sala-node-jwt-keys.json
 sala-node-tls.json
 sala-node.log
 sala-node.log.old
+
+# Pacchetti del nodo di sala (npm run package:node)
+/build/

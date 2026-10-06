@@ -25,6 +25,7 @@
 
 import pool, { runAsPlatform } from '../db.js';
 import { isServiceNode } from './topology.js';
+import { syncIdSequence } from './idSpace.js';
 
 const FAST_MS = Math.max(1_000, Number(process.env.SALA_NODE_CONFIG_SYNC_MS) || 120_000);
 const SLOW_EVERY = 7; // la rubrica un giro su 7: ~15 minuti col passo di default
@@ -102,24 +103,6 @@ const applyTable = async (client: any, tenantId: number, table: string, rows: an
     await insertRows(client, table, rows);
 };
 
-// Le sequence locali oltre gli id arrivati, come nel bootstrap.
-const bumpSequence = async (client: any, table: string): Promise<void> => {
-    const seq = await client.query(
-        `SELECT pg_get_serial_sequence($1, 'id') AS s
-         WHERE EXISTS (
-            SELECT 1 FROM information_schema.columns
-            WHERE table_schema = 'public' AND table_name = $1 AND column_name = 'id'
-         )`,
-        [table]
-    );
-    if (seq.rows[0]?.s) {
-        await client.query(
-            `SELECT setval($1, GREATEST((SELECT last_value FROM ${seq.rows[0].s}), (SELECT COALESCE(MAX(id), 0) FROM ${table}), 1))`,
-            [seq.rows[0].s]
-        );
-    }
-};
-
 /** Un giro: chiede le tabelle, applica le cambiate. Torna i nomi applicati. */
 // rls-bypass: solo nodo, giro di sistema senza sessione: il tenant è quello del cursore di replica
 export const syncConfigOnce = async (opts: { includeSlow: boolean }): Promise<string[]> => runAsPlatform(async () => {
@@ -138,7 +121,7 @@ export const syncConfigOnce = async (opts: { includeSlow: boolean }): Promise<st
         await client.query(`SET LOCAL session_replication_role = replica`);
         for (const name of names) {
             await applyTable(client, tenantId, name, changed[name].rows);
-            await bumpSequence(client, name);
+            await syncIdSequence(client, name);
         }
         await client.query('COMMIT');
     } catch (err) {

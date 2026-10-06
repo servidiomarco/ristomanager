@@ -2,6 +2,7 @@ import { authApiService } from './authApiService';
 import { socketClient } from './socketClient';
 import type { CashSessionView, CashTransactionsView } from '../types';
 import { buildApiError } from './apiError';
+import { routeServiceUrl, fetchNodeAware, cloudFallbackUrl, noteRoutedResponse } from './apiRouting';
 
 // Cassa — la sessione del cassetto (docs/cassa-plan.md §3.1, §6).
 //
@@ -21,7 +22,18 @@ const getHeaders = (): HeadersInit => {
 };
 
 const fetchWithAuth = async (url: string, options: RequestInit = {}, retried = false): Promise<Response> => {
-  const response = await fetch(url, options);
+  // Fase B3: con l'autorità in sala la cassa vive sul nodo (scritture e
+  // letture). Nodo che non risponde → stesso URL sul cloud, come per i conti.
+  url = routeServiceUrl(url, (options.method as string) || 'GET');
+  let response: Response;
+  try {
+    response = await fetchNodeAware(url, options);
+  } catch (err) {
+    const cloudUrl = cloudFallbackUrl(url);
+    if (!cloudUrl) throw err;
+    return fetchWithAuth(cloudUrl, options, retried);
+  }
+  noteRoutedResponse(url, response);
   if (response.status === 401 && !retried) {
     const refreshed = await authApiService.refreshToken();
     if (refreshed) {

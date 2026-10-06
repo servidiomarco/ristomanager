@@ -7,7 +7,7 @@
 // degli script in scripts/ (dev-comande.sh, test-locale.sh).
 import { generateKeyPairSync } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, createWriteStream } from 'node:fs';
 import path from 'node:path';
 import { Client } from 'pg';
 
@@ -126,12 +126,26 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
             // Coda di stampa: il legacy token fa da alias del tenant 1, così
             // i test possono ritirare i job (RT fiscale incluso) e ackarli.
             PRINT_AGENT_TOKEN: 'test-print-agent-token',
+            // Agente Passepartout (fase B5): il ponte acceso, chiusura in
+            // cassa configurata e spazzino veloce. Senza agente collegato le
+            // rotte che lo usano rispondono 503 come prima.
+            PASSEPARTOUT_AGENT_TOKEN: 'test-pp-agent-token',
+            PASSEPARTOUT_TIPO_PAGAMENTO: 'ESTERNO',
+            PASSEPARTOUT_CLOSE_SWEEP_MS: '300',
+            PASSEPARTOUT_CLOSE_RETRY_UNIT_MS: '300',
         },
         stdio: ['ignore', 'pipe', 'pipe'],
     });
     let bootLog = '';
     child.stdout?.on('data', d => { bootLog += d; });
     child.stderr?.on('data', d => { bootLog += d; });
+    // TEST_SERVER_LOG=<file>: tutto il log del server su file, per capire un
+    // test che fallisce lato cloud (senza, si vede solo il log di boot).
+    if (process.env.TEST_SERVER_LOG) {
+        const out = createWriteStream(process.env.TEST_SERVER_LOG);
+        child.stdout?.pipe(out);
+        child.stderr?.pipe(out);
+    }
 
     // /health risponde 200 prima ancora che lo schema esista (createSchema gira
     // in background dopo la listen), quindi non è un readiness probe. Il login
