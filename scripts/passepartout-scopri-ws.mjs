@@ -16,7 +16,7 @@
 //   wsdl               scarica ?wsdl / ?singleWsdl, elenca TUTTE le
 //                      operazioni, evidenzia le candidate di scrittura e
 //                      salva il contratto in adapterws.wsdl (da passare a
-//                      Claude per progettare la comanda specchio).
+//                      chi progetta la comanda specchio).
 //   probe [nomi...]    fallback se i metadati sono spenti: chiama i nomi
 //                      candidati con i soli datiLogin e classifica il SOAP
 //                      fault — "azione sconosciuta" = non esiste,
@@ -98,7 +98,7 @@ async function wsdl() {
         }
         const hot = ops.filter(op => WRITE_HINT.test(op) && DOMAIN_HINT.test(op));
         console.log(hot.length
-            ? `\nCandidate di scrittura: ${hot.join(', ')}\nPassa adapterws.wsdl a Claude per il passo successivo.`
+            ? `\nCandidate di scrittura: ${hot.join(', ')}\nIl contratto completo è in adapterws.wsdl.`
             : '\nNessuna candidata di scrittura su comande, conti o prenotazioni.');
         return;
     }
