@@ -1,5 +1,8 @@
 # Nodo di sala — installazione e gestione
 
+> Il collaudo a linea staccata, da fare a locale chiuso prima della prima
+> serata con «Servizio completo sul nodo»: [docs/collaudo-nodo-linea-giu.md](../docs/collaudo-nodo-linea-giu.md).
+
 Il nodo di sala vive sul PC Windows del ristorante, accanto a print agent e
 agente Passepartout. Due generazioni:
 
@@ -340,7 +343,12 @@ Sono i guasti che nessun programma risolve:
 
 ### Il pacchetto
 
-Sul Mac, dal repo: `npm run package:node -- --zip` costruisce
+Lo costruisce la CI a ogni push su main (fase A4b): nella run, fra gli
+artefatti, `sympotia-nodo-<sha>` contiene lo zip pronto per `inbox\`
+(tenuto 30 giorni). La distribuzione automatica dal cloud al PC non c'è
+ancora: servirebbe un token GitHub su Railway.
+
+A mano, sul Mac, dal repo: `npm run package:node -- --zip` costruisce
 `build/nodo/sympotia-nodo-<sha>.zip`, una cartella autosufficiente con
 server, agente di stampa, agente Passepartout compilato, `node_modules` di
 produzione e la versione in `build-info.json`. Sul PC serve solo Node ≥ 20.
@@ -431,7 +439,8 @@ un miliardo in su.
   la quota pagata, salda e (con `rt-local`) chiude il conto e fa lo
   scontrino. Nodo irraggiungibile dal cloud: `pay_unavailable_on_node`,
   l'ospite legge «paga in cassa». Una quota senza ordine scaduta da 10
-  minuti la libera il nodo da solo.
+  minuti la libera il nodo da solo. In isola il preconto esce senza QR: un
+  conto nato sul nodo a linea giù il cloud non lo conosce ancora.
 - **Caparre**: le richieste di pagamento scendono al nodo
   (`paymentRequest:changed`), che accredita la caparra pagata sul conto
   aperto della prenotazione.

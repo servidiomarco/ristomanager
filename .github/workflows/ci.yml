@@ -40,6 +40,35 @@ jobs:
       - name: Build server
         run: npm run build:server
 
+  # Il pacchetto del nodo di sala (fase A4b del piano «sala, comande e conto
+  # sul nodo»): a ogni push su main la CI costruisce lo zip da appoggiare
+  # nella inbox del supervisore sul PC del locale — niente da compilare sul
+  # Mac, si scarica dagli artefatti della run. Le dipendenze di produzione
+  # sono tutte JavaScript (bcryptjs, pg…): lo zip fatto qui su Linux gira
+  # uguale su Windows e Mac. Non sulle PR: è un minuto in più per niente.
+  node-package:
+    name: Pacchetto del nodo di sala
+    if: github.event_name != 'pull_request'
+    needs: typecheck-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Costruisci lo zip
+        run: npm run package:node -- --zip
+        env:
+          BUILD_SHA: ${{ github.sha }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sympotia-nodo-${{ github.sha }}
+          path: build/nodo/sympotia-nodo-*.zip
+          if-no-files-found: error
+          retention-days: 30
+
   # Il report AI (POST /reports/ai-summary) nella suite ordinaria risponde
   # 503 prima di leggere il DB, perché non c'è la chiave. Qui gira il solo
   # file che lo copre, con uno stub locale di Anthropic avviato dal test

@@ -38,7 +38,7 @@ import { loadNodeTlsMaterial, startNodeCredentialsRefresh } from './services/sal
 import { initSalaNodeFileLog } from './services/salaNodeLog.js';
 import { startSalaNodeWatchdog } from './services/salaNodeWatchdog.js';
 import { createServer as createHttpsServer, type Server as HttpsServer } from 'https';
-import { startSalaNodeReplica, getSalaNodeLocalStatus } from './services/salaNodeReplica.js';
+import { startSalaNodeReplica, getSalaNodeLocalStatus, isCloudUplinkDown } from './services/salaNodeReplica.js';
 import { salaNodeAccessPolicy, startSalaNodeAccess } from './services/salaNodeAccess.js';
 import { startSalaNodeConfigSync, kickConfigSync } from './services/salaNodeConfigSync.js';
 import { VOICE_CHANNEL, WHATSAPP_CHANNEL, type ToolOutcome } from './services/bookingTools.js';
@@ -39118,7 +39118,12 @@ app.post('/print-jobs', authenticate, requirePermission('orders:take'), async (r
         // dell'origine, mai di un URL intero.
         const rawOrigin = typeof req.body?.origin === 'string' ? req.body.origin : '';
         const origin = /^https?:\/\/[a-z0-9.\-:\[\]]+$/i.test(rawOrigin) ? rawOrigin : null;
-        const shareUrl = bill.share_token && origin ? `${origin}/pay/${bill.share_token}` : null;
+        // In isola (nodo senza cloud) niente QR: il conto può essere nato sul
+        // nodo a linea giù, il cloud non lo conosce ancora e l'ospite che lo
+        // inquadra col 4G leggerebbe «conto non trovato». Senza QR paga in
+        // cassa, che è quello che deve fare comunque.
+        const island = isServiceNode && isCloudUplinkDown();
+        const shareUrl = bill.share_token && origin && !island ? `${origin}/pay/${bill.share_token}` : null;
 
         // 'SCONTRINO': la copia di cortesia del documento commerciale già
         // emesso — intestazione, righe dal payload dell'emissione (è ciò che
