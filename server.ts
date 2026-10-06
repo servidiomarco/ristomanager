@@ -10711,6 +10711,22 @@ async function tablePayState(tenantId: number, tableId: number): Promise<{ open:
     const riallinea = passepartoutComandaIdFromRef(bill.external_ref) != null
         && Number(claimedRs.rows[0]?.ospiti || 0) === 0 && staffPaid === 0
         && await qrCassaAttivo(tenantId);
+    // Conto mai pagato di una comanda che in cassa non è più aperta (con la
+    // lettura viva): non si mostra il suo importo. Se sul tavolo c'è una
+    // comanda nuova, il tocco annulla il vecchio e importa quella.
+    if (riallinea && passepartoutAgentSupports(tenantId, 'tavoli-aperti')) {
+        const aperte = await queryWithRetry(
+            `SELECT pp_comanda_id FROM passepartout_tavoli_aperti
+              WHERE tenant_id = $1 AND table_id = ANY($2::int[]) AND visto_at > now() - interval '5 minutes'`,
+            [tenantId, await tavoliDelQr(tenantId, tableId)]
+        );
+        const ids = aperte.rows.map((r: any) => Number(r.pp_comanda_id));
+        if (!ids.includes(passepartoutComandaIdFromRef(bill.external_ref)!)) {
+            return ids.length > 0
+                ? { open: true, cassa: true, currency: (await getTenantLocale(tenantId)).currency }
+                : { open: false };
+        }
+    }
     return {
         open: true,
         url: `${payAtTableBaseUrl()}/pay/${bill.share_token}`,
@@ -10806,6 +10822,60 @@ async function segnalaRichiestaContoQr(
     }
 }
 
+/** Un conto del CRM legato a una comanda della cassa che in cassa è già
+ *  chiusa (pagata lì, o chiusa a mano) e su cui nel CRM nessuno ha pagato
+ *  niente: è vecchio. Restava aperto sul tavolo e il QR, alla comanda
+ *  successiva sullo stesso tavolo, rispondeva «già pagato» (06/10, tavolo
+ *  29). Si annulla; l'eventuale acconto torna libero per un altro conto.
+ *  Con un pagamento iniziato non si tocca: serve qualcuno in cassa. */
+async function annullaContoQrStantio(tenantId: number, billId: number): Promise<boolean> {
+    const client = await pool.connect();
+    let annullato: any = null;
+    try {
+        await client.query('BEGIN');
+        const cur = await client.query(
+            `SELECT status, external_ref FROM table_bills WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
+            [billId, tenantId]
+        );
+        const b = cur.rows[0];
+        const pagando = await client.query(
+            `SELECT 1 FROM table_bill_splits
+              WHERE table_bill_id = $1 AND status IN ('CLAIMED','PAID') AND kind <> 'deposit' LIMIT 1`,
+            [billId]
+        );
+        if (!b || !['OPEN', 'LOCKED'].includes(b.status) || passepartoutComandaIdFromRef(b.external_ref) == null
+            || pagando.rows.length > 0 || (await staffPaidCentsForBill(billId, client)) > 0) {
+            await client.query('ROLLBACK');
+            return false;
+        }
+        await client.query(`DELETE FROM table_bill_splits WHERE table_bill_id = $1 AND kind = 'deposit'`, [billId]);
+        const upd = await client.query(
+            `UPDATE table_bills
+                SET status = 'VOIDED', closed_at = CURRENT_TIMESTAMP, share_token = NULL,
+                    notes = COALESCE(notes || ' ', '') || '[comanda chiusa in cassa]'
+              WHERE id = $1 AND tenant_id = $2
+              RETURNING id, reservation_id, table_id, total_cents, covers, currency,
+                        items, status, share_token, opened_at, closed_at,
+                        opened_by_user_id, closed_by_user_id, external_ref,
+                        cash_settled_cents, tip_cents, notes`,
+            [billId, tenantId]
+        );
+        annullato = upd.rows[0] ?? null;
+        await logBillChanged(client, tenantId, billId);
+        await client.query('COMMIT');
+    } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw err;
+    } finally {
+        client.release();
+    }
+    if (annullato) {
+        try { socketService?.broadcastToAll(tenantId, 'bill:voided', annullato); } catch (_) {}
+        closeBillPayingNotification(tenantId, billId);
+    }
+    return annullato != null;
+}
+
 type EsitoQrCassa = { url: string } | { status: number; error: 'non_disponibile' | 'nessuna_comanda' | 'chiuso' };
 
 /** Il conto da pagare dal QR del tavolo, preso dalla cassa: quello già
@@ -10819,23 +10889,39 @@ async function contoDalQrCassa(tenantId: number, tableId: number): Promise<Esito
     const leggiComanda = (idGestionale: number) =>
         callPassepartout<PassepartoutComanda | null>(tenantId, 'comanda', { idGestionale }, 20_000);
 
+    const tavoli = await tavoliDelQr(tenantId, tableId);
     const esistente = await findOpenBillForTable(tenantId, tableId);
     if (esistente) {
         const idComanda = passepartoutComandaIdFromRef(esistente.external_ref);
         // Un conto del CRM sul tavolo: si paga quello, la cassa non c'entra.
         if (idComanda == null) return { url: urlDi(esistente.share_token) };
         const comanda = await leggiComanda(idComanda);
-        if (!comanda || comanda.isPagato) return { status: 409, error: 'chiuso' };
-        await riallineaContoAllaComanda(tenantId, esistente.id, comanda);
-        return { url: urlDi(esistente.share_token) };
+        if (comanda && !comanda.isPagato) {
+            await riallineaContoAllaComanda(tenantId, esistente.id, comanda);
+            return { url: urlDi(esistente.share_token) };
+        }
+        // La comanda del conto è chiusa in cassa: un conto mai pagato nel
+        // CRM è vecchio e lascia il posto alla comanda aperta adesso; uno
+        // con un pagamento iniziato no.
+        if (!(await annullaContoQrStantio(tenantId, esistente.id))) return { status: 409, error: 'chiuso' };
+        await aggiornaTavoliAperti(tenantId).catch(() => null);
     }
 
-    const aperta = await comandaApertaSuiTavoli(tenantId, await tavoliDelQr(tenantId, tableId));
-    if (!aperta) return { status: 409, error: 'nessuna_comanda' };
+    // La comanda aperta sul tavolo, dall'ultima lettura; se quella è già
+    // chiusa in cassa, una lettura nuova e un secondo giro.
+    let aperta: { pp_comanda_id: number; table_id: number } | null = null;
+    let comanda: PassepartoutComanda | null = null;
+    for (let giro = 0; giro < 2; giro++) {
+        aperta = await comandaApertaSuiTavoli(tenantId, tavoli);
+        if (!aperta) return { status: 409, error: 'nessuna_comanda' };
+        if (await comandaGiaIncassata(tenantId, aperta.pp_comanda_id)) return { status: 409, error: 'chiuso' };
+        comanda = await leggiComanda(aperta.pp_comanda_id);
+        if (comanda && !comanda.isPagato) break;
+        comanda = null;
+        if (giro === 0) await aggiornaTavoliAperti(tenantId).catch(() => null);
+    }
+    if (!aperta || !comanda) return { status: 409, error: 'chiuso' };
     const externalRef = `pp:comanda:${aperta.pp_comanda_id}`;
-    if (await comandaGiaIncassata(tenantId, aperta.pp_comanda_id)) return { status: 409, error: 'chiuso' };
-    const comanda = await leggiComanda(aperta.pp_comanda_id);
-    if (!comanda || comanda.isPagato) return { status: 409, error: 'chiuso' };
     const payload = comandaToBillPayload(comanda);
     if (payload.total_cents <= 0) return { status: 409, error: 'nessuna_comanda' };
 
@@ -42445,6 +42531,17 @@ const startServer = async () => {
                         // socket, la disponibilità automatica li esclude.
                         startPassepartoutTavoliApertiSync({
                             broadcast: (t, tavoli) => socketService?.broadcastToAll(t, 'passepartout:tavoli-aperti', { tavoli }),
+                            // Comanda chiusa in cassa: il conto che il QR le
+                            // aveva aperto, se nessuno l'ha pagato, si annulla.
+                            comandeChiuse: async (t, idComande) => {
+                                const rs = await queryWithRetry(
+                                    `SELECT id FROM table_bills
+                                      WHERE tenant_id = $1 AND status IN ('OPEN','LOCKED') AND opened_by_user_id IS NULL
+                                        AND external_ref = ANY($2::text[])`,
+                                    [t, idComande.map((id) => `pp:comanda:${id}`)]
+                                );
+                                for (const r of rs.rows) await annullaContoQrStantio(t, Number(r.id));
+                            },
                         });
                         // I conti del CRM copiati in cassa (comanda specchio).
                         startPassepartoutSpecchioSync({

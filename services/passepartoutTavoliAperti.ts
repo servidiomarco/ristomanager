@@ -35,6 +35,10 @@ export interface TavoloApertoInCassa {
 export interface TavoliApertiDeps {
     /** Avvisa i client del ristorante (evento 'passepartout:tavoli-aperti'). */
     broadcast: (tenantId: number, tavoli: TavoloApertoInCassa[]) => void;
+    /** Le comande che erano aperte e alla lettura buona non lo sono più
+     *  (chiuse in cassa): i conti nati dal QR su quelle e mai pagati nel
+     *  CRM vanno annullati, o restano appesi al tavolo. */
+    comandeChiuse?: (tenantId: number, idComande: number[]) => Promise<void>;
 }
 
 let deps: TavoliApertiDeps | null = null;
@@ -152,10 +156,15 @@ export async function aggiornaTavoliAperti(tenantId: number): Promise<TavoloAper
         [tenantId]
     );
     // Chiuse in cassa da una lettura all'altra.
-    await queryWithRetry(
-        `DELETE FROM passepartout_tavoli_aperti WHERE tenant_id = $1 AND NOT (pp_comanda_id = ANY($2::int[]))`,
+    const chiuse = await queryWithRetry(
+        `DELETE FROM passepartout_tavoli_aperti WHERE tenant_id = $1 AND NOT (pp_comanda_id = ANY($2::int[]))
+         RETURNING pp_comanda_id`,
         [tenantId, viste]
     );
+    if ((chiuse.rowCount ?? 0) > 0 && deps?.comandeChiuse) {
+        await deps.comandeChiuse(tenantId, chiuse.rows.map((r: any) => Number(r.pp_comanda_id)))
+            .catch((err) => console.error('[passepartout] conti del QR su comande chiuse:', err?.message || err));
+    }
     const elenco = await elencoTavoliAperti(tenantId);
     const imp = impronta(elenco);
     if (ultimeImpronte.get(tenantId) !== imp) {
