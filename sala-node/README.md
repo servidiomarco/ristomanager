@@ -111,6 +111,12 @@ scriverla in card.
   guardare nei log Railway `[sala-node] nodo connesso/disconnesso`; se non
   ci sono tentativi, sul PC il processo non gira (l'auto-reconnect è
   infinito: se girasse si ricollegherebbe da solo).
+- **`[bootstrap] tentativo fallito … pg_statistic` ogni minuto** (versioni
+  fino a 61188b6, con PostgreSQL 18 sul PC): la query che porta le sequenze
+  nello spazio del nodo moriva, e le sequenze restavano sotto il miliardo.
+  Corretto il 06/10; dopo l'aggiornamento il log dice `[bootstrap]
+  sequenze nello spazio del nodo: N`. Il PC del Frantoio ha PostgreSQL 18,
+  il cloud 17: la CI fa girare i test del nodo anche sulla 18.
 
 
 ## Tappa 4 — il full-server al posto del relay
