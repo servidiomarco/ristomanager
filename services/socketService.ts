@@ -1,7 +1,8 @@
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import { Server as HTTPServer } from 'http';
 import type { Reservation, Table, Room, Dish, BanquetMenu, UserRole, TableMerge, TableHiddenOverride, RoomClosedOverride } from '../types.js';
-import { AuthService, TokenPayload, isPlatformScopedSession } from '../auth/authService.js';
+import { TokenPayload, isPlatformScopedSession } from '../auth/authService.js';
+import { resolveAccessToken, type AccessTokenResolution } from '../auth/authMiddleware.js';
 import { isAllowedOrigin } from './corsAllowlist.js';
 import { queryWithRetry, runWithTenantContext, runAsPlatform } from '../db.js';
 import { mirrorToSalaNode } from './salaNodeBridge.js';
@@ -72,18 +73,26 @@ export class SocketService {
         return next(new Error('Authentication required'));
       }
 
-      const payload = AuthService.verifyAccessToken(token as string);
-      if (!payload) {
-        return next(new Error('Invalid or expired token'));
-      }
-
-      // Attach user data to socket. Il tenant serve alla Fase B5 (room
-      // per tenant); i token pre-B2 non hanno il claim → fallback 1.
-      socket.user = {
-        ...payload,
-        tenantId: Number.isInteger(payload.tenantId) && payload.tenantId > 0 ? payload.tenantId : 1,
+      // Stessa politica delle route (tenant del nodo, proroga a linea giù):
+      // un palmare con il token scaduto durante il guasto deve poter
+      // riattaccare il socket al nodo, o la sala smette di aggiornarsi.
+      const admitSocket = (resolution: AccessTokenResolution) => {
+        if ('error' in resolution) return next(new Error(resolution.error));
+        const payload = resolution.payload;
+        // Attach user data to socket. Il tenant serve alla Fase B5 (room
+        // per tenant); i token pre-B2 non hanno il claim → fallback 1.
+        socket.user = {
+          ...payload,
+          tenantId: Number.isInteger(payload.tenantId) && payload.tenantId > 0 ? payload.tenantId : 1,
+        };
+        next();
       };
-      next();
+      const resolution = resolveAccessToken(token as string);
+      if (resolution instanceof Promise) {
+        resolution.then(admitSocket).catch(() => next(new Error('Invalid or expired token')));
+        return;
+      }
+      admitSocket(resolution);
     });
   }
 

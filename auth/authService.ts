@@ -4,7 +4,7 @@ import jwt from 'jsonwebtoken';
 import { queryWithRetry } from '../db.js';
 import { User, UserRole } from '../types.js';
 import { getAssignableRoles } from './permissions.js';
-import { getEs256SigningKey, getTrustedPublicKey, hs256Accepted, notifyUnknownKid } from './jwtKeys.js';
+import { getEs256SigningKey, getTrustedPublicKey, hs256Accepted, notifyUnknownKid, getNodeSessionKey, NODE_SESSION_AUDIENCE } from './jwtKeys.js';
 import { isServiceNode } from '../services/topology.js';
 
 // In produzione i segreti DEVONO arrivare dall'ambiente: per mesi Railway è
@@ -55,6 +55,10 @@ export interface TokenPayload {
   // bypassa la matrice permessi del tenant — un token di piattaforma senza
   // scope resta confinato al pannello, come prima.
   scopedTenantId?: number;
+  // Sessione aperta col PIN di sala sul nodo (fase A2): firmata dal nodo,
+  // valida solo lì e solo per i permessi di servizio (SERVICE_PERMISSIONS in
+  // auth/permissions.ts). authorize() e i gate di ruolo la rifiutano.
+  scope?: 'service';
 }
 
 // Vero solo per una sessione di piattaforma entrata in un tenant. Ogni
@@ -225,23 +229,70 @@ export class AuthService {
   // firmato usando come segreto la chiave PUBBLICA (che il nodo e chiunque
   // la riceva conoscono) non passa — è l'«algorithm confusion».
   static verifyAccessToken(token: string): TokenPayload | null {
+    return AuthService.verifyWithKnownKeys(token, false);
+  }
+
+  // Il cuore delle due verifiche. Tre famiglie di token:
+  // - ES256 del cloud (kid fra le chiavi pubbliche fidate);
+  // - ES256 del NODO (kid «node-…», solo sul nodo, audience sala-node): le
+  //   sessioni aperte col PIN di sala;
+  // - HS256 del cloud, finché la transizione lo accetta.
+  private static verifyWithKnownKeys(token: string, ignoreExpiration: boolean): TokenPayload | null {
     try {
       const header = (jwt.decode(token, { complete: true }) as jwt.Jwt | null)?.header;
-      if (header?.alg === 'ES256') {
-        const key = typeof header.kid === 'string' ? getTrustedPublicKey(header.kid) : null;
+      if (header?.alg === 'ES256' && typeof header.kid === 'string') {
+        if (header.kid.startsWith('node-')) {
+          const node = getNodeSessionKey();
+          if (!node || node.kid !== header.kid) return null;
+          const payload = jwt.verify(token, node.publicKey, { algorithms: ['ES256'], audience: NODE_SESSION_AUDIENCE, ignoreExpiration }) as TokenPayload;
+          // Una sessione del nodo è sempre di servizio, qualunque cosa dica.
+          return { ...payload, scope: 'service' };
+        }
+        const key = getTrustedPublicKey(header.kid);
         if (!key) {
           notifyUnknownKid();
           return null;
         }
-        return jwt.verify(token, key, { algorithms: ['ES256'] }) as TokenPayload;
+        const payload = jwt.verify(token, key, { algorithms: ['ES256'], ignoreExpiration }) as TokenPayload;
+        // Il claim scope lo mette solo il nodo: in un token del cloud non
+        // deve esserci, e se c'è il token non è nostro.
+        return (payload as any).scope === undefined ? payload : null;
       }
       if (header?.alg === 'HS256' && JWT_SECRET && hs256Accepted()) {
-        return jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }) as TokenPayload;
+        return jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'], ignoreExpiration }) as TokenPayload;
       }
       return null;
     } catch {
       return null;
     }
+  }
+
+  // La sessione del PIN di sala: solo sul nodo, firmata con la sua chiave.
+  static generateNodeServiceToken(payload: TokenPayload, ttlSeconds: number): string {
+    const node = getNodeSessionKey();
+    if (!node) throw new Error('chiave di sessione del nodo assente: il PIN di sala vive solo sul nodo');
+    const { scope: _scope, scopedTenantId: _scoped, ...base } = payload;
+    return jwt.sign(
+      { ...base, scope: 'service' },
+      node.key,
+      { algorithm: 'ES256', keyid: node.kid, audience: NODE_SESSION_AUDIENCE, expiresIn: ttlSeconds }
+    );
+  }
+
+  // Come verifyAccessToken, ma un token SCADUTO con firma valida non è null:
+  // torna con expired=true e la scadenza. Serve al nodo di sala, che a linea
+  // giù concede una proroga (auth/authMiddleware.ts, salaNodeAccess). La
+  // firma si verifica comunque per intero: si ignora solo exp.
+  static inspectAccessToken(token: string): { payload: TokenPayload; expired: boolean; expiresAtMs: number | null } | null {
+    const valid = AuthService.verifyWithKnownKeys(token, false);
+    if (valid) {
+      const exp = (valid as any).exp;
+      return { payload: valid, expired: false, expiresAtMs: typeof exp === 'number' ? exp * 1000 : null };
+    }
+    const expired = AuthService.verifyWithKnownKeys(token, true);
+    const exp = (expired as any)?.exp;
+    if (!expired || typeof exp !== 'number') return null;
+    return { payload: expired, expired: true, expiresAtMs: exp * 1000 };
   }
 
   // Verify refresh token
@@ -482,6 +533,7 @@ export class AuthService {
       `SELECT u.id, u.email, u.full_name, u.phone, u.role, u.is_active, u.created_at,
               u.updated_at, u.last_login, u.preferred_landing_view, u.preferred_orderpad_layout,
               u.preferred_design_style, u.language,
+              u.service_pin_hash IS NOT NULL AS has_service_pin,
               u.tenant_id, t.slug AS tenant_slug, t.name AS tenant_name,
               t.default_language AS tenant_default_language,
               t.currency AS tenant_currency, t.timezone AS tenant_timezone,
@@ -512,6 +564,7 @@ export class AuthService {
       preferred_orderpad_layout: row.preferred_orderpad_layout ?? null,
       preferred_design_style: row.preferred_design_style ?? null,
       language: row.language ?? null,
+      has_service_pin: row.has_service_pin === true,
       tenant: {
         id: Number(row.tenant_id),
         slug: row.tenant_slug,
@@ -523,6 +576,22 @@ export class AuthService {
         needs_onboarding: row.tenant_needs_onboarding === true
       }
     };
+  }
+
+  // PIN di sala (fase A2): 4–6 cifre, bcrypt come le password. null lo
+  // toglie. Scende al nodo con la configurazione.
+  static async setServicePin(userId: number, tenantId: number, pin: string | null): Promise<boolean> {
+    const hash = pin === null ? null : await bcrypt.hash(pin, 10);
+    const result = await queryWithRetry(
+      `UPDATE users
+          SET service_pin_hash = $1,
+              service_pin_updated_at = CASE WHEN $1::text IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END,
+              updated_at = CURRENT_TIMESTAMP
+        WHERE id = $2 AND tenant_id = $3
+        RETURNING id`,
+      [hash, userId, tenantId]
+    );
+    return result.rows.length > 0;
   }
 
   // Get all users

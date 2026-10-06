@@ -2,7 +2,8 @@ import { useTranslation } from 'react-i18next';
 import React, { useState, useEffect } from 'react';
 import { AlertCircle, Loader2, Eye, EyeOff, Check, CheckCircle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { authApiService } from '../services/authApiService';
+import { authApiService, type PinUser } from '../services/authApiService';
+import { pinLoginNodeUrl } from '../services/apiRouting';
 import { PLATFORM_NAME, PLATFORM_TAGLINE } from '../platform';
 import { dsInput, dsInputError, dsButton, Callout, Field, fieldErrorId } from './ds';
 
@@ -47,9 +48,12 @@ const validateConfirmPassword = (value: string, against: string, t: TFunc): stri
   return '';
 };
 
-// La pagina ha tre facce: login, richiesta reset (email) e nuova password
-// (arrivando dal link `?reset=<token>` dell'email).
-type LoginMode = 'login' | 'forgot' | 'reset';
+// La pagina ha quattro facce: login, richiesta reset (email), nuova password
+// (arrivando dal link `?reset=<token>` dell'email) e accesso col PIN di sala
+// (fase A2: a linea caduta, sul nodo, solo dove il nodo ha l'autorità).
+type LoginMode = 'login' | 'forgot' | 'reset' | 'pin';
+
+const PIN_RE = /^\d{4,6}$/;
 
 // Il submit è l'unica azione piena della pagina: primary a tutta larghezza.
 const submitClass = `${dsButton.primary} mt-3 w-full`;
@@ -64,7 +68,7 @@ const revealClass =
 
 export const LoginPage: React.FC = () => {
   const { t } = useTranslation('login', { useSuspense: false });
-  const { login } = useAuth();
+  const { login, loginWithPin } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -92,6 +96,13 @@ export const LoginPage: React.FC = () => {
 
   // Nota verde sopra il form di login (es. "password aggiornata").
   const [info, setInfo] = useState('');
+
+  // PIN di sala: il nodo lo sa questo dispositivo dalla configurazione
+  // salvata (l'ultima sessione col nodo acceso). Senza, niente PIN.
+  const [pinNodeUrl] = useState(() => pinLoginNodeUrl());
+  const [pinUsers, setPinUsers] = useState<PinUser[] | null>(null);
+  const [pinUser, setPinUser] = useState<PinUser | null>(null);
+  const [pin, setPin] = useState('');
 
   useEffect(() => {
     try {
@@ -148,6 +159,44 @@ export const LoginPage: React.FC = () => {
       setMode('login');
     } catch (err: any) {
       setError(err?.data?.message || t('err.linkExpired'));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const openPin = async () => {
+    if (!pinNodeUrl) return;
+    setMode('pin');
+    setError('');
+    setInfo('');
+    setPinUser(null);
+    setPin('');
+    setPinUsers(null);
+    try {
+      setPinUsers(await authApiService.getPinUsers(pinNodeUrl));
+    } catch {
+      setPinUsers([]);
+      setError(t('pin.err.unreachable'));
+    }
+  };
+
+  const handlePinSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pinNodeUrl || !pinUser) return;
+    if (!PIN_RE.test(pin)) {
+      setError(t('pin.err.format'));
+      return;
+    }
+    setError('');
+    setIsLoading(true);
+    try {
+      await loginWithPin(pinNodeUrl, pinUser.id, pin);
+    } catch (err: any) {
+      const code = err?.message;
+      setPin('');
+      if (code === 'pin_locked') setError(t('pin.err.locked'));
+      else if (code === 'node_unreachable') setError(t('pin.err.unreachable'));
+      else setError(t('pin.err.invalid'));
     } finally {
       setIsLoading(false);
     }
@@ -252,12 +301,81 @@ export const LoginPage: React.FC = () => {
                 ? 'sr-only'
                 : 'mt-10 text-[26px] leading-[32px] font-semibold tracking-tight text-[var(--ds-text-primary)] text-center mb-1.5'}
             >
-              {t(mode === 'forgot' ? 'title.forgot' : mode === 'reset' ? 'title.reset' : 'title.login')}
+              {t(mode === 'forgot' ? 'title.forgot' : mode === 'reset' ? 'title.reset' : mode === 'pin' ? 'title.pin' : 'title.login')}
             </h1>
             {mode !== 'login' && (
               <p className="text-[15px] leading-[22px] text-[var(--ds-text-secondary)] text-center mb-8">
-                {t(mode === 'forgot' ? 'sub.forgot' : 'sub.reset')}
+                {t(mode === 'forgot' ? 'sub.forgot' : mode === 'pin' ? 'sub.pin' : 'sub.reset')}
               </p>
+            )}
+
+            {mode === 'pin' && (
+              <div className="flex flex-col gap-3">
+                {errorCallout}
+                {pinUsers === null && (
+                  <p className="flex items-center justify-center gap-2 text-[13px] text-[var(--ds-text-secondary)]">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    {t('pin.loading')}
+                  </p>
+                )}
+                {pinUsers !== null && pinUsers.length === 0 && !error && (
+                  <Callout tone="info" icon={AlertCircle}>{t('pin.none')}</Callout>
+                )}
+                {/* Prima il nome: un elenco a bersagli pieni, come i tasti
+                    operatore dei palmari. */}
+                {pinUsers !== null && pinUsers.length > 0 && !pinUser && (
+                  <ul className="flex flex-col gap-2">
+                    {pinUsers.map((u) => (
+                      <li key={u.id}>
+                        <button
+                          type="button"
+                          onClick={() => { setPinUser(u); setPin(''); setError(''); }}
+                          className={`${dsButton.secondary} w-full min-h-11 justify-start`}
+                        >
+                          {u.full_name}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {pinUser && (
+                  <form onSubmit={handlePinSubmit} noValidate className="flex flex-col gap-3">
+                    <p className="text-center text-[15px] leading-[22px] font-medium text-[var(--ds-text-primary)]">
+                      {pinUser.full_name}
+                    </p>
+                    <Field htmlFor="service-pin" error="">
+                      <label htmlFor="service-pin" className="sr-only">{t('pin.label')}</label>
+                      <input
+                        id="service-pin"
+                        type="password"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        autoComplete="off"
+                        maxLength={6}
+                        value={pin}
+                        onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                        placeholder={t('pin.label')}
+                        className={`${dsInput} text-center tracking-[0.4em]`}
+                        disabled={isLoading}
+                        autoFocus
+                      />
+                    </Field>
+                    <button type="submit" disabled={isLoading || !PIN_RE.test(pin)} className={submitClass}>
+                      {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : t('pin.signIn')}
+                    </button>
+                    <div className="text-center mt-1">
+                      <button type="button" onClick={() => { setPinUser(null); setPin(''); setError(''); }} disabled={isLoading} className={linkClass}>
+                        {t('pin.changeUser')}
+                      </button>
+                    </div>
+                  </form>
+                )}
+                <div className="text-center mt-2">
+                  <button type="button" onClick={goToLogin} disabled={isLoading} className={linkClass}>
+                    {t('backToLogin')}
+                  </button>
+                </div>
+              </div>
             )}
             {mode === 'login' && <div className="mb-10" />}
 
@@ -524,6 +642,16 @@ export const LoginPage: React.FC = () => {
                   {t('forgotPassword')}
                 </button>
               </div>
+
+              {/* Solo dove il nodo ha l'autorità in sala: a linea caduta è
+                  l'unico modo di entrare, e il nodo è qui accanto. */}
+              {pinNodeUrl && (
+                <div className="text-center">
+                  <button type="button" disabled={isLoading} onClick={() => { void openPin(); }} className={linkClass}>
+                    {t('pin.enter')}
+                  </button>
+                </div>
+              )}
             </form>
             )}
           </div>

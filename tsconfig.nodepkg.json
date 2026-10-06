@@ -1,0 +1,12 @@
+{
+  // Il pacchetto del nodo di sala (fase A4): il server più l'agente
+  // Passepartout, compilato invece di girare con ts-node. Separato da
+  // tsconfig.server.json perché l'immagine Docker del cloud non copia
+  // scripts/ e non deve compilarlo.
+  "extends": "./tsconfig.server.json",
+  "include": [
+    "server.ts", "db.ts", "types.ts", "auth/**/*.ts", "services/socketService.ts",
+    "utils/text.ts", "utils/modifierScale.ts", "utils/courses.ts",
+    "scripts/passepartout-agent.ts"
+  ]
+}

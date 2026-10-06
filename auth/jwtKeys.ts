@@ -24,6 +24,8 @@
 // getta al boot: la suite e gli stack locali provano ES256 senza segreti.
 
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, KeyObject } from 'node:crypto';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import path from 'node:path';
 import { isServiceNode } from '../services/topology.js';
 
 export interface PublicJwtKey {
@@ -80,6 +82,38 @@ export const getEs256SigningKey = (): { kid: string; key: KeyObject } | null =>
   signEs256 ? signing : null;
 
 export const getTrustedPublicKey = (kid: string): KeyObject | null => trusted.get(kid) ?? null;
+
+// --- La chiave di sessione del NODO (PIN di sala, fase A2) -----------------
+// A linea giù il nodo conia lui le sessioni di chi entra col PIN. Chiave sua,
+// generata alla prima accensione e tenuta su disco (0600): non lascia mai il
+// PC e il cloud non la conosce, quindi un token del nodo non apre niente nel
+// cloud. Il kid comincia per «node-»: due mondi che non si confondono.
+export const NODE_SESSION_AUDIENCE = 'sala-node';
+let nodeSession: { kid: string; key: KeyObject; publicKey: KeyObject } | null = null;
+
+export const getNodeSessionKey = (): { kid: string; key: KeyObject; publicKey: KeyObject } | null => {
+  if (!isServiceNode) return null;
+  if (nodeSession) return nodeSession;
+  const file = path.join(process.env.SALA_NODE_STATE_DIR || process.cwd(), 'sala-node-session-key.pem');
+  let key: KeyObject;
+  try {
+    key = createPrivateKey(readFileSync(file, 'utf8'));
+    if (!isP256(key)) throw new Error('curva inattesa');
+  } catch {
+    key = generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).privateKey;
+    try {
+      mkdirSync(path.dirname(file), { recursive: true });
+      writeFileSync(file, key.export({ type: 'pkcs8', format: 'pem' }) as string, { mode: 0o600 });
+    } catch (err: any) {
+      // Senza disco la chiave vive in memoria: le sessioni PIN cadono al
+      // riavvio del nodo, nient'altro.
+      console.warn('[pin] chiave di sessione del nodo non scritta su disco:', err?.message || err);
+    }
+  }
+  const publicKey = createPublicKey(key);
+  nodeSession = { kid: `node-${kidOf(publicKey)}`, key, publicKey };
+  return nodeSession;
+};
 
 /** Le chiavi pubbliche che il cloud consegna ai nodi. */
 export const publicKeysForNodes = (): PublicJwtKey[] =>

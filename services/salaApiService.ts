@@ -66,6 +66,14 @@ export interface SalaConfig {
     clients: number | null;
     cache_entries: number | null;
     cert_expires_at: string | null;
+    // Fase A3, dal battito del nodo: versione che gira sul PC, ritardi nei due
+    // versi (secondi) e battiture che il cloud non ha ancora. Assenti con un
+    // server o un nodo più vecchi.
+    version?: string | null;
+    cloud_version?: string;
+    lag_up_s?: number | null;
+    lag_down_s?: number | null;
+    pending_up?: number | null;
   };
   pending_jobs: number;
   failed_jobs: number;

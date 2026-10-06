@@ -15,11 +15,13 @@
   "title": {
     "forgot": "Recupera la password",
     "reset": "Scegli una nuova password",
-    "login": "Accedi al tuo ristorante"
+    "login": "Accedi al tuo ristorante",
+    "pin": "Accesso di sala"
   },
   "sub": {
     "forgot": "Ti mandiamo un link per sceglierne una nuova.",
-    "reset": "Minimo 8 caratteri."
+    "reset": "Minimo 8 caratteri.",
+    "pin": "Per quando manca la linea: scegli il tuo nome e digita il PIN."
   },
   "resetSent": "Se l'indirizzo esiste, riceverai un'email con il link per reimpostare la password. Il link vale 1 ora.",
   "backToLogin": "Torna al login",
@@ -36,5 +38,19 @@
   "rememberMe": "Ricorda le mie credenziali",
   "signingIn": "Accesso in corso...",
   "signIn": "Accedi",
-  "forgotPassword": "Password dimenticata?"
+  "forgotPassword": "Password dimenticata?",
+  "pin": {
+    "enter": "Entra col PIN di sala",
+    "label": "PIN",
+    "signIn": "Entra",
+    "changeUser": "Cambia nome",
+    "loading": "Cerco il nodo di sala...",
+    "none": "Nessuno ha ancora un PIN di sala. Si imposta dal proprio profilo, con la linea attiva.",
+    "err": {
+      "invalid": "PIN non corretto.",
+      "locked": "Troppi tentativi: riprova fra qualche minuto.",
+      "unreachable": "Il nodo di sala non risponde.",
+      "format": "Il PIN è di 4–6 cifre."
+    }
+  }
 }
