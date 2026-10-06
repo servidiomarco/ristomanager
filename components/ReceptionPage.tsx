@@ -44,6 +44,8 @@ import {
 } from './ds';
 import type { PillTone } from './ds';
 import type { SectionTone } from './ds';
+import { useAuth } from '../contexts/AuthContext';
+import { useTavoliApertiInCassa } from '../hooks/useTavoliApertiInCassa';
 
 // Local-date helper (avoid UTC drift)
 const formatLocalDate = (d: Date): string => {
@@ -133,6 +135,10 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
   // In uscita) on cards and the room map.
   const nowTick = useNow(60_000);
   const isViewingToday = formatLocalDate(globalDate) === formatLocalDate(new Date(nowTick));
+  // Tavoli aperti nella cassa Passepartout (solo oggi): occupati anche se
+  // la prenotazione non lo dice — un walk-in mai passato dal CRM.
+  const { hasFeature } = useAuth();
+  const apertiInCassa = useTavoliApertiInCassa(hasFeature('passepartout'));
 
   // Bookings for the date+shift chosen in the global top-bar control.
   // 'ALL' shows both shifts; any other value filters to that shift.
@@ -950,6 +956,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
             setSelectedReservationId(id);
             setViewMode('list');
           }}
+          apertiInCassa={isViewingToday ? apertiInCassa : undefined}
           now={isViewingToday ? nowTick : undefined}
         />
       )}
@@ -1817,6 +1824,8 @@ interface RoomMapProps {
   onPickReservation: (id: number) => void;
   /** Epoch ms for time-derived states; undefined = not viewing today. */
   now?: number;
+  /** Tavoli aperti nella cassa Passepartout (solo se si guarda oggi). */
+  apertiInCassa?: ReadonlyMap<number, unknown>;
 }
 
 // Full-viewport live room map — shares the visual shell with the assign-table
@@ -1833,6 +1842,7 @@ const RoomMap: React.FC<RoomMapProps> = ({
   onClose,
   onPickReservation,
   now,
+  apertiInCassa,
 }) => {
   // RoomMap è un componente a sé: ha i suoi agganci.
   const { t } = useTranslation('reception', { useSuspense: false });
@@ -1965,7 +1975,10 @@ const RoomMap: React.FC<RoomMapProps> = ({
 
               // Shared, time-aware derivation so the room reads exactly like
               // the floor plan view (In arrivo pulses, In uscita reads cyan).
-              const status: TableDisplayStatus = deriveTableDisplayStatus(res, { now });
+              const status: TableDisplayStatus = deriveTableDisplayStatus(res, {
+                now,
+                inCassa: apertiInCassa?.has(tav.id) ?? false,
+              });
               let haloClass = '';
               let caption: string | null = null;
 

@@ -27,6 +27,7 @@ const CAPACITA: Record<string, string> = {
   'chiudi-riprendi': 'pp.capRiprendi',
   prenotazioni: 'pp.capPrenotazioni',
   conti: 'pp.capConti',
+  'tavoli-aperti': 'pp.capAperti',
 };
 
 export const CollegamentoCassa: React.FC<Props> = ({ showToast }) => {

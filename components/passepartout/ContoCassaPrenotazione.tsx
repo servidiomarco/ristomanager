@@ -37,7 +37,7 @@ export const ContoCassaPrenotazione: React.FC<{ reservationId: number }> = ({ re
             <li key={c.pp_conto_id} className="text-[13px] text-[var(--ds-text-muted)]">
               {[
                 c.tavolo ? t('contoCassa.table', { tavolo: c.tavolo, defaultValue: 'Tavolo {{tavolo}}' }) : null,
-                c.coperti ? t('contoCassa.covers', { count: c.coperti, defaultValue: '{{count}} coperti' }) : null,
+                c.coperti ? t('contoCassa.covers', { count: c.coperti }) : null,
                 formatMoneyMinor(c.totale_cents),
                 c.numero_scontrino
                   ? t('contoCassa.receipt', { numero: c.numero_scontrino, defaultValue: 'scontrino {{numero}}' })

@@ -1,5 +1,6 @@
 import { queryWithRetry } from '../db.js';
 import { Shift } from '../types.js';
+import { nonApertoInCassaSql } from './apertiInCassaSql.js';
 
 // ============================================
 // PER-ROOM OCCUPANCY CAPS
@@ -249,7 +250,9 @@ export interface SelfServiceTablePick {
 
 /**
  * Cosa rende un tavolo davvero assegnabile per un (data, turno): non nascosto,
- * senza prenotazioni vive, non accorpato e non tenuto da un banchetto.
+ * senza prenotazioni vive, non accorpato, non tenuto da un banchetto e — oggi,
+ * col ristorante che lo chiede — non aperto nella cassa Passepartout
+ * (services/apertiInCassaSql.ts).
  *
  * Vive qui in un pezzo solo perché la usano sia chi elenca le sale prenotabili
  * sia chi sceglie il tavolo. Quando erano due query separate divergevano: la
@@ -301,7 +304,8 @@ function assignableTableSql(alias: string, dateParam: number, shiftParam: number
               AND NOT EXISTS (
                   SELECT 1 FROM banquet_menus b
                   WHERE b.event_date = ${d} AND b.shift = ${s} AND b.tenant_id = ${tn} AND ${alias}.id = ANY(b.table_ids)
-              )`;
+              )
+              AND ${nonApertoInCassaSql(alias, tn, d, s, overlapStartParam ? `$${overlapStartParam}` : undefined)}`;
 }
 
 /**

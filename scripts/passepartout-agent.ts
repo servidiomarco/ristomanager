@@ -41,6 +41,7 @@ import {
     getPrenotazioniMenuGiorno,
     getPiantaSale,
     getContiCassaGiorno,
+    getComandeAperte,
     isPassepartoutConfigured,
     PassepartoutError,
     type TipoDocumentoConto,
@@ -54,7 +55,7 @@ const TOKEN = (process.env.PP_AGENT_TOKEN || '').trim();
 // riprova da solo una chiusura solo con un agente che sa riprenderla, e
 // manda prenotazioni solo a un agente che sa scriverle, e chiede i conti
 // del giorno solo a uno che sa leggerli.
-const CAPABILITIES = ['chiudi-riprendi', 'prenotazioni', 'conti'];
+const CAPABILITIES = ['chiudi-riprendi', 'prenotazioni', 'conti', 'tavoli-aperti'];
 
 if (!SERVER_URL || !TOKEN) {
     console.error('Config mancante: servono PP_AGENT_SERVER_URL e PP_AGENT_TOKEN.');
@@ -139,6 +140,8 @@ const handlers: Record<string, Handler> = {
         if (!giorno) throw new Error('Parametro "giorno" non valido');
         return getContiCassaGiorno(giorno);
     },
+    // Comande ancora aperte sui tavoli: sala e disponibilità del CRM.
+    comandeAperte: () => getComandeAperte(),
     // Catalogo articoli per l'import menu del CRM (senza immagini: il payload
     // deve stare nel buffer del socket).
     articoli: (p) => getArticoliMenu(typeof p?.ultimaModifica === 'string' ? p.ultimaModifica : undefined),

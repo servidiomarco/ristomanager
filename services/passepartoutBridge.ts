@@ -42,6 +42,8 @@ export type PassepartoutOp =
     | 'piantaSale'
     /** Conti chiusi del giorno con tavolo e prenotazione (capacità 'conti'). */
     | 'contiGiorno'
+    /** Comande aperte adesso sui tavoli (capacità 'tavoli-aperti'). */
+    | 'comandeAperte'
     /** Introspezione del contratto WCF (?wsdl): elenco operazioni, per
      *  scoprire da remoto se esiste la scrittura comande (comanda specchio)
      *  senza documentazione del concessionario. Sola lettura. */
