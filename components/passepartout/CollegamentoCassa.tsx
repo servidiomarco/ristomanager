@@ -26,6 +26,7 @@ interface Props {
 const CAPACITA: Record<string, string> = {
   'chiudi-riprendi': 'pp.capRiprendi',
   prenotazioni: 'pp.capPrenotazioni',
+  conti: 'pp.capConti',
 };
 
 export const CollegamentoCassa: React.FC<Props> = ({ showToast }) => {

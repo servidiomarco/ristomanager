@@ -105,6 +105,9 @@ export interface PassepartoutComanda {
     listino: number | null;
     note: string | null;
     righe: PassepartoutRigaComanda[];
+    /** La prenotazione del planning da cui il tavolo è stato aperto, se c'è. */
+    idPrenotazione?: number | null;
+    dataCreazione?: string | null;
 }
 
 export interface PassepartoutTipoPagamento {
@@ -143,7 +146,8 @@ const parser = new XMLParser({
     attributeNamePrefix: '@_',
     parseTagValue: false, // i numeri li convertiamo noi, campo per campo
     isArray: (name) => name === 'PMBRigaComanda' || name === 'PMBRigaConto' || name === 'PMBTipoPagamento'
-        || name === 'ContrattoArticolo' || name === 'ContrattoPrenotazioneMenu' || name === 'PMBTavolo',
+        || name === 'ContrattoArticolo' || name === 'ContrattoPrenotazioneMenu' || name === 'PMBTavolo'
+        || name === 'ContrattoConto' || name === 'ContrattoComanda' || name === 'PMBRigaPagamento',
 });
 
 /**
@@ -266,6 +270,8 @@ function mapComanda(c: Record<string, any>): PassepartoutComanda {
         listino: asNumber(c.Listino),
         note: asString(c.Note),
         righe: righeRaw.map(mapRigaComanda),
+        idPrenotazione: asNumber(c.IdPrenotazione) || null,
+        dataCreazione: asString(c.DataCreazioneSistema),
     };
 }
 
@@ -946,4 +952,108 @@ export async function getPiantaSale(): Promise<PassepartoutSalaPianta[]> {
         out.push({ sala, tavoli });
     }
     return out;
+}
+
+// ---------------------------------------------------------------------------
+// Conti del giorno, per il CRM (report, spesa per cliente, riscontro)
+// ---------------------------------------------------------------------------
+
+/** Comande del giorno (YYYY-MM-DD), aperte e chiuse: tavolo, sala, coperti e
+ *  la prenotazione da cui il tavolo è nato. Le righe ci sono ma qui servono
+ *  solo per i tavoli aperti. */
+export async function getComandeGiorno(giorno: string, asporto = false): Promise<PassepartoutComanda[]> {
+    const result = (await soapCall(
+        'GetComandeGiorno',
+        `<asporto>${asporto ? 'true' : 'false'}</asporto><giorno>${xmlEscape(giorno)}T00:00:00</giorno>` +
+        `<ultimaModifica>2000-01-01T00:00:00</ultimaModifica>`,
+        60_000,
+    )) as Record<string, any> | null;
+    if (!result || isNil(result)) return [];
+    const entries: Record<string, any>[] = result.ContrattoComanda ?? [];
+    return entries.map(mapComanda);
+}
+
+export interface PassepartoutContoCassa {
+    idConto: number;
+    idComanda: number | null;
+    /** Come la rende il gestionale (ora di sala, a volte con l'offset). */
+    chiusoAt: string | null;
+    coperti: number | null;
+    totaleDocumento: number | null;
+    totalePagato: number | null;
+    sospeso: number | null;
+    /** EnumStatoConto: Aperto, Pagato, Sospeso, Annullato, Emesso… */
+    stato: string | null;
+    /** EnumTipoConto: Unico, Reso, Annullo, Acconto… */
+    tipoConto: string | null;
+    /** EnumTipoDocumentoConto: Scontrino, Proforma, Fattura… */
+    tipoDocumento: string | null;
+    numeroScontrino: string | null;
+    pagamenti: Array<{ codice: string | null; categoria: string | null; importo: number | null }>;
+    tavolo: string | null;
+    sala: string | null;
+    idPrenotazione: number | null;
+}
+
+/** Tetto alle letture comanda per comanda: un giorno con l'elenco comande
+ *  vuoto non deve diventare cento chiamate alla cassa. */
+const COMANDE_SINGOLE_MAX = 40;
+
+/**
+ * I conti chiusi del giorno con tavolo, sala e prenotazione della loro
+ * comanda. Due letture (conti + comande del giorno); le comande che non
+ * compaiono nell'elenco si leggono una per una, fino al tetto.
+ */
+export async function getContiCassaGiorno(giorno: string): Promise<PassepartoutContoCassa[]> {
+    const conti = await getContiGiorno(giorno);
+    let comande: PassepartoutComanda[] = [];
+    try {
+        comande = await getComandeGiorno(giorno);
+    } catch (err) {
+        if (!(err instanceof PassepartoutError)) throw err;
+    }
+    const perId = new Map<number, PassepartoutComanda>();
+    for (const c of comande) if (c.idGestionale != null) perId.set(c.idGestionale, c);
+    const mancanti = [...new Set(conti
+        .map((c) => asNumber(c.IdComanda))
+        .filter((id): id is number => id != null && id > 0 && !perId.has(id)))].slice(0, COMANDE_SINGOLE_MAX);
+    for (const id of mancanti) {
+        try {
+            const c = await getComanda(id);
+            if (c) perId.set(id, c);
+        } catch (err) {
+            if (!(err instanceof PassepartoutError)) throw err;
+        }
+    }
+    return conti
+        .map((c: Record<string, any>) => {
+            const idConto = asNumber(c.IdGestionale);
+            if (idConto == null) return null;
+            const idComanda = asNumber(c.IdComanda) || null;
+            const comanda = idComanda != null ? perId.get(idComanda) : undefined;
+            const pagRaw = c.Pagamenti?.PMBRigaPagamento ?? [];
+            const pagamenti = (Array.isArray(pagRaw) ? pagRaw : [pagRaw]).map((p: Record<string, any>) => ({
+                codice: asString(p?.Tipo?.Codice),
+                categoria: asString(p?.Tipo?.Categoria),
+                importo: asNumber(p?.Importo),
+            }));
+            return {
+                idConto,
+                idComanda,
+                chiusoAt: asString(c.DataChiusura),
+                coperti: asNumber(c.NumeroCoperti) ?? comanda?.coperti ?? null,
+                totaleDocumento: asNumber(c.TotaleDocumento),
+                totalePagato: asNumber(c.TotalePagato),
+                sospeso: asNumber(c.Sospeso),
+                stato: asString(c.StatoEnum),
+                tipoConto: asString(c.TipoContoEnum),
+                tipoDocumento: asString(c.TipoDocumentoEnum),
+                numeroScontrino: asString(c.NumeroScontrinoFiscale),
+                pagamenti,
+                tavolo: comanda?.tavolo ?? null,
+                sala: comanda?.sala ?? null,
+                idPrenotazione: comanda?.idPrenotazione ?? null,
+            } satisfies PassepartoutContoCassa;
+        })
+        .filter((c): c is PassepartoutContoCassa => c != null);
 }

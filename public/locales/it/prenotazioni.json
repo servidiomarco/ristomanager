@@ -479,5 +479,11 @@
     "arrivedCount": "({{count}} arrivati)",
     "banquets": "Banchetti del giorno",
     "printedOn": "Stampato il {{quando}}"
+  },
+  "contoCassa": {
+    "title": "Conto in cassa",
+    "table": "Tavolo {{tavolo}}",
+    "covers": "{{count}} coperti",
+    "receipt": "scontrino {{numero}}"
   }
 }

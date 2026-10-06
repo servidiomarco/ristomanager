@@ -326,6 +326,7 @@
     "connDetail": "PC {{pc}} · gestionale {{versione}} · collegato dal {{when}}",
     "capRiprendi": "Chiusura ripresa",
     "capPrenotazioni": "Prenotazioni",
+    "capConti": "Conti",
     "payType": "Tipo di pagamento in cassa",
     "payTypeHint": "Un tipo dedicato, per esempio ESTERNO: così la cassa non conta due volte l'incasso. Nessuno = i tavoli si chiudono in cassa a mano.",
     "payTypeFromServer": "In uso {{tipo}}, impostato sul server. Sceglilo qui per gestirlo da questa sezione.",
@@ -334,6 +335,16 @@
     "docType": "Documento",
     "docTypeHint": "Il documento che la cassa emette quando il conto si chiude dal CRM.",
     "docReceipt": "Scontrino",
-    "docProforma": "Proforma"
+    "docProforma": "Proforma",
+    "contiTitle": "Conti della cassa",
+    "contiSubtitle": "Tavoli chiusi in cassa: report, clienti e riscontro",
+    "contiSend": "Leggi i conti della cassa",
+    "contiHint": "Ogni 10 minuti il CRM legge i conti chiusi in cassa: entrano nei report incassi, nella spesa dei clienti, nel dettaglio delle prenotazioni e nel riscontro della chiusura di cassa. Alla prima accensione recupera gli ultimi 30 giorni.",
+    "contiToday": "Oggi: {{count}} conti chiusi in cassa · {{totale}}",
+    "contiStorico": "Storico completo fino al {{giorno}}",
+    "contiStoricoInArrivo": "Storico degli ultimi 30 giorni in arrivo",
+    "contiLast": "ultima lettura {{when}}",
+    "contiImport": "Leggi adesso",
+    "contiDone": "Letti {{count}} conti di oggi"
   }
 }

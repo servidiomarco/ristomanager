@@ -53,6 +53,14 @@ export interface RevenueReport {
   per_metodo: { metodo: string; amount_cents: number; movimenti: number; non_cash: boolean }[];
   casse: { sessioni: number; chiuse: number; differenza_totale_cents: number };
   differenze: { giorno: string; turno: string; differenza_cents: number; note: string | null }[];
+  /** Tavoli chiusi solo nella cassa Passepartout, fuori dai totali (che sono
+   *  i conti del CRM). null o assente = niente cassa o niente conti importati. */
+  cassa_passepartout?: {
+    totale_cents: number;
+    conti: number;
+    coperti: number;
+    per_metodo: { codice: string; importo_cents: number }[];
+  } | null;
 }
 
 export interface DishesReport {

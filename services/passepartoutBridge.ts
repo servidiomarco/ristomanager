@@ -40,6 +40,8 @@ export type PassepartoutOp =
     | 'prenotazioniGiorno'
     /** Sale e tavoli coi nomi della cassa, per abbinare i tavoli del CRM. */
     | 'piantaSale'
+    /** Conti chiusi del giorno con tavolo e prenotazione (capacità 'conti'). */
+    | 'contiGiorno'
     /** Introspezione del contratto WCF (?wsdl): elenco operazioni, per
      *  scoprire da remoto se esiste la scrittura comande (comanda specchio)
      *  senza documentazione del concessionario. Sola lettura. */

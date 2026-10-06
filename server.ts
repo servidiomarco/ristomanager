@@ -82,6 +82,10 @@ import {
     abbinaTavoli, sincronizzaPrenotazioniCassa, startPassepartoutPrenotazioniSync, type TavoloCrm,
 } from './services/passepartoutPrenotazioni.js';
 import {
+    startPassepartoutContiSync, giroContiCassa, contiCassaAccesi, contiCassaPrenotazione, spesaCliente,
+    incassiCassa, riscontroGiorno,
+} from './services/passepartoutConti.js';
+import {
     SUPPORT_CATEGORIES, SUPPORT_STATUSES, SUPPORT_SUBJECT_MAX, SUPPORT_BODY_MAX, SUPPORT_ATTACHMENTS_MAX, SUPPORT_RATING_COMMENT_MAX,
     sanitizeClientContext, supportTenantTag, supportPlatformTag,
     type SupportAttachment, type SupportCategory, type SupportPriority, type SupportStatus,
@@ -4386,6 +4390,118 @@ app.put('/passepartout/tavoli/:tableId', authenticate, requirePermission('settin
         res.json(rs.rows[0]);
     } catch (err: any) {
         console.error('PUT /passepartout/tavoli/:tableId error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// --- Conti della cassa nel CRM (sola lettura) ---------------------------------
+// I tavoli chiusi solo in cassa entrano nei report, nella spesa per cliente
+// e nel riscontro di fine giornata. Import e letture in
+// services/passepartoutConti.ts; qui la scheda della sezione e le letture
+// per prenotazione, cliente e chiusura di cassa.
+
+app.get('/passepartout/conti', authenticate, requirePermission('settings:full'), requireFeature('passepartout'), async (req, res) => {
+    try {
+        const tenantId = req.tenantId!;
+        const cfg = await queryWithRetry(
+            `SELECT conti_enabled, conti_completo_fino::text AS completo_fino, conti_importati_at FROM passepartout_config WHERE tenant_id = $1`,
+            [tenantId]
+        );
+        const oggi = getDatePartInTz(new Date(), 'Europe/Rome');
+        const giorno = await incassiCassa(tenantId, oggi, oggi);
+        res.json({
+            enabled: cfg.rows[0]?.conti_enabled === true,
+            completo_fino: cfg.rows[0]?.completo_fino ?? null,
+            importati_at: cfg.rows[0]?.conti_importati_at ?? null,
+            oggi: { conti: giorno.conti, totale_cents: giorno.totale_cents, coperti: giorno.coperti },
+            agente: {
+                collegato: getPassepartoutAgentStatus(tenantId).connected,
+                aggiornato: passepartoutAgentSupports(tenantId, 'conti'),
+            },
+        });
+    } catch (err: any) {
+        console.error('GET /passepartout/conti error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+app.put('/passepartout/conti', authenticate, requirePermission('settings:full'), requireFeature('passepartout'), async (req, res) => {
+    try {
+        const enabled = req.body?.enabled;
+        if (typeof enabled !== 'boolean') return res.status(400).json({ error: 'enabled deve essere true o false' });
+        await queryWithRetry(
+            `INSERT INTO passepartout_config (tenant_id, conti_enabled, updated_at) VALUES ($1, $2, now())
+             ON CONFLICT (tenant_id) DO UPDATE SET conti_enabled = EXCLUDED.conti_enabled, updated_at = now()`,
+            [req.tenantId!, enabled]
+        );
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!, req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.SETTINGS, undefined, 'Passepartout: conti della cassa', { enabled }
+            );
+        }
+        res.json({ enabled });
+    } catch (err: any) {
+        console.error('PUT /passepartout/conti error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// «Importa adesso»: i conti di oggi subito, senza aspettare il giro.
+app.post('/passepartout/conti/importa', authenticate, requirePermission('settings:full'), requireFeature('passepartout'), async (req, res) => {
+    try {
+        const tenantId = req.tenantId!;
+        if (!(await contiCassaAccesi(tenantId))) return res.status(409).json({ error: 'conti_spenti', message: 'Accendi prima i conti della cassa' });
+        if (!getPassepartoutAgentStatus(tenantId).connected) {
+            return res.status(503).json({ error: 'passepartout_agent_offline', message: 'Agente Passepartout non collegato: il PC di sala è acceso?' });
+        }
+        if (!passepartoutAgentSupports(tenantId, 'conti')) {
+            return res.status(409).json({ error: 'agente_da_aggiornare', message: "L'agente sul PC di sala va aggiornato per leggere i conti." });
+        }
+        res.json({ esiti: await giroContiCassa(tenantId, { soloOggi: true }) });
+    } catch (err: any) {
+        if (sendPassepartoutError(res, err)) return;
+        console.error('POST /passepartout/conti/importa error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+app.get('/reservations/:id/conto-cassa', authenticate, requirePermission('reservations:view'), async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'id non valido' });
+        if (!(await isFeatureEnabledForTenant(req.tenantId!, 'passepartout'))) return res.json({ conti: [] });
+        res.json({ conti: await contiCassaPrenotazione(req.tenantId!, id) });
+    } catch (err: any) {
+        console.error('GET /reservations/:id/conto-cassa error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Spesa del cliente: conti CRM delle sue prenotazioni più i conti chiusi
+// solo in cassa (con l'integrazione accesa). Senza Passepartout restano i
+// soli conti CRM.
+app.get('/customers/:id/spesa', authenticate, requirePermission('customers:view'), async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'id non valido' });
+        const c = await queryWithRetry(`SELECT phone FROM customers WHERE id = $1 AND tenant_id = $2`, [id, req.tenantId!]);
+        if (c.rows.length === 0) return res.status(404).json({ error: 'Cliente non trovato' });
+        res.json(await spesaCliente(req.tenantId!, String(c.rows[0].phone ?? '')));
+    } catch (err: any) {
+        console.error('GET /customers/:id/spesa error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Il riscontro CRM↔cassa del giorno di servizio, per la chiusura di cassa.
+app.get('/reports/riscontro-cassa', authenticate, requirePermission('payments:view'), requireFeature('passepartout'), async (req, res) => {
+    try {
+        const raw = String(req.query.date ?? '');
+        const giorno = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : getDatePartInTz(new Date(), 'Europe/Rome');
+        res.json(await riscontroGiorno(req.tenantId!, giorno));
+    } catch (err: any) {
+        console.error('GET /reports/riscontro-cassa error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
     }
 });
@@ -39719,6 +39835,15 @@ app.get('/reports/revenue', authenticate, requireReportsAccess, async (req, res)
                   ORDER BY ABS(difference_cents) DESC LIMIT 10`, params),
         ]);
 
+        // I tavoli chiusi solo nella cassa Passepartout: fuori dai totali
+        // (che restano i conti del CRM), in un blocco a parte. null = il
+        // ristorante non ha la cassa o non ne ha ancora importato i conti.
+        let cassaPassepartout: Awaited<ReturnType<typeof incassiCassa>> | null = null;
+        if (await isFeatureEnabledForTenant(tenantId, 'passepartout')) {
+            const cp = await incassiCassa(tenantId, range.from, range.to);
+            if (cp.conti > 0 || await contiCassaAccesi(tenantId)) cassaPassepartout = cp;
+        }
+
         res.json({
             from: range.from, to: range.to,
             precedente_range: { from: range.prevFrom, to: range.prevTo },
@@ -39728,6 +39853,7 @@ app.get('/reports/revenue', authenticate, requireReportsAccess, async (req, res)
             per_metodo: perMetodo.rows,
             casse: casse.rows[0],
             differenze: differenze.rows,
+            cassa_passepartout: cassaPassepartout,
         });
     } catch (err: any) {
         console.error('GET /reports/revenue error:', err);
@@ -41635,6 +41761,13 @@ const startServer = async () => {
                     // Le prenotazioni sono del cloud: il planning della cassa
                     // lo scrive lui, e da lui tornano gli arrivi.
                     if (!isServiceNode) startPassepartoutPrenotazioniSync({ segnaArrivo: segnaArrivoDaCassa });
+                    // I conti della cassa nel CRM: anche loro solo sul cloud,
+                    // che ha report e rubrica.
+                    if (!isServiceNode) {
+                        startPassepartoutContiSync({
+                            tipoPagamentoEsterno: async (t) => (await getPassepartoutChiusuraConfig(t))?.tipoPagamento ?? null,
+                        });
+                    }
                     console.log('✅ Passepartout agent bridge attivo su /pp-agent');
                 }
                 // Sempre attivo, come il pp-agent: il token è per-tenant a DB,

@@ -7,6 +7,7 @@ import {
   SearchField, SectionHeader, StatusPill, StatStrip, EmptyState, Callout, dsIconButton, CountBadge, useMediaQuery,
 } from './ds';
 import type { SectionTone, Stat } from './ds';
+import { ContoCassaPrenotazione } from './passepartout/ContoCassaPrenotazione';
 import { BillSheet } from './pagamenti/BillSheet';
 import { BillFigures, billStateLabel } from './prenotazione/BillFigures';
 import { PaymentRequestRow } from './prenotazione/PaymentRequestRow';
@@ -5962,6 +5963,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         request. Both were already edit-only, so this section
                         renders nothing at all on a new booking. */}
                     <section className={!isEditing || formStep === 1 ? 'block' : 'hidden'}>
+                    {/* Il conto chiuso nella cassa Passepartout, se ce n'è uno:
+                        indipendente dal conto al tavolo, che il ristorante con
+                        la cassa può non usare. */}
+                    {isEditing && formData.id && hasPermission('payments:view') && (
+                      <ContoCassaPrenotazione reservationId={formData.id} />
+                    )}
                     {/* Conto al tavolo (pay-at-table + split bill) — edit mode only.
                         Hidden entirely when the feature flag is off; the toggle
                         lives in Settings → Conto al tavolo. */}

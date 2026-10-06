@@ -24,6 +24,7 @@ const euroTick = (v: number): string => {
 export const BloccoIncassi: React.FC<{ data: RevenueReport }> = ({ data }) => {
   const { t } = useTranslation('reportistica', { useSuspense: false });
   const { totali, precedente } = data;
+  const cassa = data.cassa_passepartout ?? null;
 
   const perGiorno = React.useMemo(() => {
     const byDay = new Map<string, { pranzo: number; cena: number }>();
@@ -162,6 +163,31 @@ export const BloccoIncassi: React.FC<{ data: RevenueReport }> = ({ data }) => {
             <div className="py-4 text-center text-[13px] text-[var(--ds-text-muted)]">Nessuna differenza: i cassetti tornano.</div>
           )}
         </div>
+        {/* I tavoli chiusi solo nella cassa Passepartout: fuori dai totali
+            qui sopra, che sono i conti del CRM — sommarli confonderebbe
+            due fonti. Un riquadro a parte, solo col modulo. */}
+        {cassa && (
+          <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3 sm:col-span-2">
+            <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
+              <span className="text-[13px] font-medium text-[var(--ds-text-secondary)]">Chiusi solo in cassa (Passepartout)</span>
+              <span className="tabular text-[15px] font-semibold text-[var(--ds-text-primary)]">{formatEuroCents(cassa.totale_cents)}</span>
+            </div>
+            <div className="mb-2 text-[12px] text-[var(--ds-text-muted)]">
+              {formatInt(cassa.conti)} conti · {formatInt(cassa.coperti)} coperti
+            </div>
+            {cassa.per_metodo.length > 0 ? cassa.per_metodo.map((m, i) => (
+              <ShareRow
+                key={m.codice}
+                colorClass={CAT_DOTS[i % CAT_DOTS.length]}
+                label={m.codice}
+                value={formatEuroCents(m.importo_cents)}
+                share={cassa.totale_cents > 0 ? m.importo_cents / cassa.totale_cents : 0}
+              />
+            )) : (
+              <div className="py-4 text-center text-[13px] text-[var(--ds-text-muted)]">Nessun conto chiuso in cassa nel periodo</div>
+            )}
+          </div>
+        )}
       </div>
     </SectionCard>
   );
