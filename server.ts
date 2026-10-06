@@ -5545,11 +5545,11 @@ app.put('/menu/digital-menu', authenticate, requirePermission('menu:full'), asyn
 });
 
 // Dati del menu per la pagina pubblica: piatti attivi con traduzioni e
-// categorie tradotte. Niente id interni, niente campi gestionali.
-const handlePublicMenu = async (tenantId: number, _req: express.Request, res: express.Response) => {
-    if (!(await getFeatureFlag(tenantId, 'digital_menu_enabled', false))) {
-        return res.status(503).json({ error: 'menu_disabled' });
-    }
+// categorie tradotte. Niente id interni, niente campi gestionali. null se il
+// menu digitale è spento. Condiviso fra /public/menu e la pagina del QR del
+// tavolo (/public/table/:token), che lo riceve insieme allo stato del conto.
+async function buildPublicMenu(tenantId: number): Promise<Record<string, unknown> | null> {
+    if (!(await getFeatureFlag(tenantId, 'digital_menu_enabled', false))) return null;
     // Doppio interruttore: is_active è della cassa, crm_enabled del
     // ristoratore — il menu pubblico mostra solo ciò che entrambi accendono.
     // E solo i piatti del menu scelto per il QR (di default Alla carta): il
@@ -5575,7 +5575,7 @@ const handlePublicMenu = async (tenantId: number, _req: express.Request, res: ex
     // per il tenant 1 — con businessIdentity un tenant senza ragione sociale
     // mostrava «Il Vecchio Frantoio» in testa al SUO menu.
     const identity = await publicBusinessIdentity(tenantId);
-    res.json({
+    return {
         restaurant: identity.name,
         // Il marchio in testata. Il logo è la variante per fondo chiaro: la
         // testata del menu è chiara apposta, perché il logo che c'è sempre è
@@ -5602,7 +5602,13 @@ const handlePublicMenu = async (tenantId: number, _req: express.Request, res: ex
             // quindi niente traduzione.
             abbinati: Array.isArray(d.abbinati) ? d.abbinati : [],
         })),
-    });
+    };
+}
+
+const handlePublicMenu = async (tenantId: number, _req: express.Request, res: express.Response) => {
+    const menu = await buildPublicMenu(tenantId);
+    if (!menu) return res.status(503).json({ error: 'menu_disabled' });
+    res.json(menu);
 };
 app.get(['/public/menu', '/public/:slug/menu'], withPublicTenant(handlePublicMenu));
 
@@ -6283,6 +6289,7 @@ app.post('/bills/:id/close', authenticate, requirePermission('payments:full'), a
         }
 
         try { socketService?.broadcastToAll(req.tenantId!, 'bill:closed', updatedRow); } catch (_) {}
+        closeBillPayingNotification(req.tenantId!, id);
 
         // Documento commerciale: parte in automatico sui conti saldati per
         // intero, fuori dalla risposta — la chiusura non aspetta il fisco.
@@ -6374,6 +6381,7 @@ app.post('/bills/:id/void', authenticate, requirePermission('payments:full'), as
         }
 
         try { socketService?.broadcastToAll(req.tenantId!, 'bill:voided', updated.rows[0]); } catch (_) {}
+        closeBillPayingNotification(req.tenantId!, id);
 
         res.json(updated.rows[0]);
     } catch (err: any) {
@@ -6605,6 +6613,7 @@ app.post('/bills/:id/payments', authenticate, requirePermission('payments:full')
             socketService?.broadcastToAll(req.tenantId!, 'bill:payment-recorded', { bill_id: id, payment });
             if (settledRow) socketService?.broadcastToAll(req.tenantId!, 'bill:settled', settledRow);
         } catch (_) {}
+        if (settledRow) closeBillPayingNotification(req.tenantId!, id);
 
         const view = await loadBillView(req.tenantId!, id);
         res.status(201).json(view ?? { payment });
@@ -8809,7 +8818,7 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
         // the internal id — it feeds the payment descriptions below.
         const billRs = await client.query(
             `SELECT b.id, b.tenant_id, b.total_cents, b.covers, b.status, b.reservation_id, b.items,
-                    t.name AS table_name
+                    b.takeaway_order_id, t.name AS table_name
              FROM table_bills b
              LEFT JOIN tables t ON t.id = b.table_id AND t.tenant_id = b.tenant_id
              WHERE b.share_token = $1
@@ -8944,6 +8953,15 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
         // stale CLAIMED rows to ABANDONED so their capacity is released.
         const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
+        // Prima quota ospite del conto (sotto il lock, quindi esatta anche con
+        // due ospiti che inquadrano insieme): è il momento dell'avviso «il
+        // tavolo sta pagando» a cameriere e cassa. Gli acconti non contano.
+        const priorClaims = await client.query(
+            `SELECT 1 FROM table_bill_splits WHERE table_bill_id = $1 AND kind <> 'deposit' LIMIT 1`,
+            [bill.id]
+        );
+        const firstGuestClaim = (priorClaims.rowCount ?? 0) === 0;
+
         let splitId: number;
         try {
             const ins = await client.query(
@@ -9039,6 +9057,12 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
             });
         } catch (_) {}
 
+        // Anche se il checkout non è partito: l'ospite ci ha provato, e chi
+        // sta in sala può andare ad aiutarlo. L'asporto non ha un tavolo.
+        if (firstGuestClaim && bill.takeaway_order_id == null) {
+            void notifyBillPaying(bill.tenant_id, bill.id, bill.table_name ?? null, claimantLabel, amount, Number(bill.total_cents));
+        }
+
         res.status(201).json({
             split_id: splitId,
             amount_cents: amount,
@@ -9104,6 +9128,214 @@ app.post('/pay/:token/release', publicPayLimiter, async (req, res) => runAsPlatf
         res.status(500).json({ error: 'Internal server error' });
     }
 }));
+
+// ============================================
+// QR UNICO AL TAVOLO (no auth, public_token del tavolo)
+// ============================================
+// L'adesivo sul tavolo porta /t/<public_token>: la pagina (menu.html in
+// modalità tavolo) mostra il menu e, solo mentre il tavolo ha un conto aperto
+// nel servizio in corso, «Paga il conto» verso /pay/<share_token>. Il token del
+// tavolo è un puntatore stabile: la credenziale di pagamento resta lo
+// share_token per-conto, che muore alla chiusura come prima — un adesivo
+// fotografato non apre niente fuori dalla finestra fra chiusura comanda e saldo.
+
+// Limite proprio, più largo di publicPayLimiter: gli ospiti sul Wi-Fi del
+// locale escono tutti dallo stesso IP, e ogni telefono con la pagina aperta
+// ricontrolla il conto ogni 30 s — 60/min per IP non reggerebbe una sala
+// piena. Il token (128 bit) resta impossibile da indovinare anche così.
+const publicTableLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    limit: 300,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    message: { error: 'rate_limited', message: 'Troppe richieste, riprova tra qualche secondo.' },
+});
+
+/** Il tavolo dal token dell'adesivo. Lookup GLOBALE di proposito, come lo
+ *  share_token dei conti: senza JWT è la riga trovata a dire il tenant. */
+async function loadTableByPublicToken(token: string): Promise<{ id: number; tenant_id: number; name: string } | null> {
+    if (!token || token.length < 20 || token.length > 32 || !/^[A-Za-z0-9_-]+$/.test(token)) return null;
+    // rls-bypass: adesivo del tavolo senza JWT, lookup per public_token unico globale; tutto il resto gira nel contesto del tenant trovato
+    const rs = await runAsPlatform(() => queryWithRetry(
+        `SELECT t.id, t.tenant_id, t.name
+         FROM tables t JOIN tenants tn ON tn.id = t.tenant_id AND tn.status = 'active'
+         WHERE t.public_token = $1
+         LIMIT 1`,
+        [token]
+    ));
+    const row = rs.rows[0];
+    return row ? { id: Number(row.id), tenant_id: Number(row.tenant_id), name: String(row.name) } : null;
+}
+
+/** Il conto aperto di un tavolo nel servizio in corso. Unioni comprese:
+ *  l'adesivo del tavolo secondario di un'unione porta al conto del gruppo. Il
+ *  table_id del conto è copiato dalla prenotazione, quindi basta quello; i
+ *  conti d'asporto non hanno tavolo. Il più recente se ce n'è più d'uno.
+ *  Vale anche un conto aperto nelle ultime 3 ore: chiudendo oggi una comanda
+ *  rimasta appesa da un servizio passato, il conto nasce con la data di quel
+ *  servizio — e il tasto non sarebbe mai comparso. Un conto dimenticato
+ *  aperto da giorni, invece, resta fuori: l'ospite di oggi non lo vede. */
+async function findOpenBillForTable(tenantId: number, tableId: number): Promise<{ id: number; share_token: string; total_cents: number } | null> {
+    const service = resolveService(new Date(), (await getTenantLocale(tenantId)).timezone);
+    const merges = await queryWithRetry(
+        `SELECT primary_id, merged_ids FROM table_merges
+         WHERE tenant_id = $1 AND date = $2::date AND shift = $3
+           AND (primary_id = $4 OR $4 = ANY(merged_ids))`,
+        [tenantId, service.service_date, service.shift, tableId]
+    );
+    const ids = new Set<number>([tableId]);
+    for (const row of merges.rows) {
+        ids.add(Number(row.primary_id));
+        for (const m of row.merged_ids || []) ids.add(Number(m));
+    }
+    const rs = await queryWithRetry(
+        `SELECT id, share_token, total_cents FROM table_bills
+         WHERE tenant_id = $1 AND status IN ('OPEN','LOCKED') AND share_token IS NOT NULL
+           AND takeaway_order_id IS NULL
+           AND ((service_date = $2::date AND shift = $3) OR opened_at > NOW() - INTERVAL '3 hours')
+           AND table_id = ANY($4::int[])
+         ORDER BY opened_at DESC
+         LIMIT 1`,
+        [tenantId, service.service_date, service.shift, [...ids]]
+    );
+    const row = rs.rows[0];
+    return row ? { id: Number(row.id), share_token: String(row.share_token), total_cents: Number(row.total_cents) } : null;
+}
+
+/** «Paga il conto» per la pagina del tavolo: aperto solo col pagamento al
+ *  tavolo attivo e un conto con qualcosa ancora da pagare (quote in corso e
+ *  incassi staff contano come a /pay). Niente righe del conto: il dettaglio
+ *  lo dà la pagina di pagamento, come per il QR del preconto. */
+async function tablePayState(tenantId: number, tableId: number): Promise<{ open: boolean; url?: string; residual_cents?: number; currency?: string }> {
+    if (!(await isPayAtTableActive(tenantId))) return { open: false };
+    const bill = await findOpenBillForTable(tenantId, tableId);
+    if (!bill) return { open: false };
+    const claimedRs = await queryWithRetry(
+        `SELECT COALESCE(SUM(amount_cents), 0)::int AS claimed FROM table_bill_splits
+         WHERE table_bill_id = $1 AND status IN ('CLAIMED','PAID')`,
+        [bill.id]
+    );
+    const residual = Math.max(0, bill.total_cents - Number(claimedRs.rows[0]?.claimed || 0) - (await staffPaidCentsForBill(bill.id)));
+    if (residual <= 0) return { open: false };
+    return {
+        open: true,
+        url: `${payAtTableBaseUrl()}/pay/${bill.share_token}`,
+        residual_cents: residual,
+        currency: (await getTenantLocale(tenantId)).currency,
+    };
+}
+
+// GET /public/table/:token — la pagina del tavolo all'avvio: ristorante,
+// tavolo, menu (null se spento) e stato del conto. 404 unico per ogni token
+// che non porta a un tavolo, come le rotte del conto.
+app.get('/public/table/:token', publicTableLimiter, async (req, res) => {
+    try {
+        const table = await loadTableByPublicToken(String(req.params.token || ''));
+        if (!table) return res.status(404).json({ error: 'Not found' });
+        await runWithTenantContext(table.tenant_id, async () => {
+            const [menu, pay, identity] = await Promise.all([
+                buildPublicMenu(table.tenant_id),
+                tablePayState(table.tenant_id, table.id),
+                publicBusinessIdentity(table.tenant_id),
+            ]);
+            // Nome e marchio fuori dal menu: servono alla testata anche a
+            // menu spento, quando dal QR resta solo «Paga il conto».
+            res.json({
+                restaurant: identity.name,
+                branding: {
+                    tagline: identity.tagline || null,
+                    logo_url: identity.logoUrl || null,
+                },
+                table: { name: table.name },
+                menu,
+                pay,
+            });
+        });
+    } catch (err: any) {
+        console.error('GET /public/table/:token error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// GET /public/table/:token/conto — solo lo stato del conto: la pagina lo
+// richiede ogni 30 s mentre è aperta, senza riscaricare il menu, così il
+// tasto compare quando il cameriere chiude la comanda e sparisce al saldo.
+app.get('/public/table/:token/conto', publicTableLimiter, async (req, res) => {
+    try {
+        const table = await loadTableByPublicToken(String(req.params.token || ''));
+        if (!table) return res.status(404).json({ error: 'Not found' });
+        await runWithTenantContext(table.tenant_id, async () => {
+            res.json({ pay: await tablePayState(table.tenant_id, table.id) });
+        });
+    } catch (err: any) {
+        console.error('GET /public/table/:token/conto error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// La pagina: lo stesso menu.html, che riconosce /t/<token> e passa in
+// modalità tavolo. Non /menu/:token — oscurerebbe GET /menu/catalogue.
+app.get('/t/:token', (_req, res) => {
+    res.sendFile(path.join(process.cwd(), 'public', 'menu.html'));
+});
+
+/** «Il tavolo sta pagando dal QR»: alla prima quota di un conto, al cameriere
+ *  che ha aperto la comanda e alla cassa. Una volta per conto — claim e
+ *  release ripetuti non la rimandano (il pushService rispedisce la push a
+ *  ogni invio con lo stesso tag, quindi la dedup sta nel chiamante). Si
+ *  spegne da sola quando il conto si salda, si chiude o si annulla. */
+async function notifyBillPaying(
+    tenantId: number,
+    billId: number,
+    tableName: string | null,
+    claimantLabel: string | null,
+    amountCents: number,
+    totalCents: number,
+): Promise<void> {
+    try {
+        const currency = (await getTenantLocale(tenantId)).currency;
+        const payload = {
+            category: 'payment',
+            title: tableName ? `Tavolo ${tableName} sta pagando dal QR` : `Conto #${billId}: pagamento dal QR`,
+            body: `${claimantLabel || 'Un ospite'} · ${formatMoneyMinor(amountCents, currency)} di ${formatMoneyMinor(totalCents, currency)}`,
+            tag: billPayingTag(billId),
+        };
+        // I camerieri che hanno aperto le comande del conto (anche più d'uno,
+        // se il conto ne raccoglie diverse), se ancora attivi.
+        const waitersRs = await queryWithRetry(
+            `SELECT DISTINCT o.opened_by_user_id AS id
+             FROM orders o JOIN users u ON u.id = o.opened_by_user_id AND u.tenant_id = o.tenant_id AND u.is_active = TRUE
+             WHERE o.tenant_id = $1 AND o.table_bill_id = $2`,
+            [tenantId, billId]
+        );
+        const waiterIds = waitersRs.rows.map((r: any) => Number(r.id)).filter(Number.isInteger);
+        // Il cameriere apre Comande (la Cassa può non vederla), la cassa la Cassa.
+        for (const id of waiterIds) {
+            pushSendToUser(id, { ...payload, url: '/?view=COMANDE' })
+                .catch(err => console.warn('[pay] push cameriere non inviata:', err?.message ?? err));
+        }
+        // La cassa: il ruolo CASSA; dove nessuno ce l'ha, chi apre la cassa
+        // (cash:operate). Chi ha già ricevuto la push da cameriere non la
+        // riceve due volte.
+        const cassaRs = await queryWithRetry(
+            `SELECT 1 FROM users WHERE tenant_id = $1 AND role = 'CASSA' AND is_active = TRUE LIMIT 1`,
+            [tenantId]
+        );
+        const cassaRoles = (cassaRs.rowCount ?? 0) > 0 ? ['CASSA'] : ['OWNER', 'GENERAL_MANAGER', 'MANAGER'];
+        pushSendToRoles(tenantId, cassaRoles, { ...payload, url: '/?view=CASSA' }, { excludeUserIds: waiterIds })
+            .catch(err => console.warn('[pay] push cassa non inviata:', err?.message ?? err));
+    } catch (err: any) {
+        console.warn('[pay] avviso «sta pagando» fallito per il conto', billId, err?.message || err);
+    }
+}
+
+const billPayingTag = (billId: number): string => `bill-paying-${billId}`;
+
+/** Spegne «il tavolo sta pagando» quando non c'è più niente da fare: conto
+ *  saldato, chiuso o annullato. Fire-and-forget come le altre chiusure. */
+function closeBillPayingNotification(tenantId: number, billId: number): void {
+    markSharedNotificationsRead(tenantId, [billPayingTag(billId)]).catch(() => {});
+}
 
 
 // ============================================
@@ -11282,6 +11514,7 @@ async function applyBillSplitTransition(
         );
         if ((settled.rowCount ?? 0) > 0) {
             try { socketService?.broadcastToAll(tenantId, 'bill:settled', settled.rows[0]); } catch (_) {}
+            closeBillPayingNotification(tenantId, billId);
         }
         return;
     }
@@ -11514,6 +11747,7 @@ async function applyPaymentOrderTransition(
                         if (credit.settled) {
                             const v = await loadBillView(prTenantId, billId);
                             if (v?.bill) socketService?.broadcastToAll(prTenantId, 'bill:settled', v.bill);
+                            closeBillPayingNotification(prTenantId, billId);
                         }
                     } catch (_) {}
                 }
@@ -12102,6 +12336,152 @@ const runWithOutboxTx = async <T>(fn: (client: any) => Promise<T>): Promise<T> =
     }
 };
 
+// --- QR unico al tavolo: token pubblici per gli adesivi --------------------
+// Le rotte con un segmento fisso (/tables/qr-print) stanno prima di
+// /tables/:id, che altrimenti le prenderebbe come un id.
+// L'adesivo porta /t/<public_token> (vedi «QR unico al tavolo» fra le rotte
+// pubbliche). 128 bit come base64url: è un puntatore stabile, non una
+// credenziale di pagamento — senza un conto aperto non apre niente — ma resta
+// non indovinabile, perché a conto aperto mostra quel conto.
+const newTablePublicToken = (): string => crypto.randomBytes(16).toString('base64url');
+
+// I token dei tavoli per la stampa degli adesivi: assegna quello che manca
+// (o solo ai tavoli in table_ids) e restituisce l'elenco per sala. Nessun
+// broadcast: il token serve solo alla stampa, nessuna schermata lo mostra.
+app.post('/tables/qr-tokens', authenticate, requirePermission('floorplan:full'), async (req, res) => {
+    try {
+        const onlyIds = Array.isArray(req.body?.table_ids)
+            ? req.body.table_ids.map(Number).filter(Number.isInteger)
+            : null;
+        const missing = await queryWithRetry(
+            `SELECT id FROM tables
+             WHERE tenant_id = $1 AND public_token IS NULL
+               AND ($2::int[] IS NULL OR id = ANY($2::int[]))`,
+            [req.tenantId!, onlyIds]
+        );
+        for (const row of missing.rows) {
+            await queryWithRetry(
+                `UPDATE tables SET public_token = $1 WHERE id = $2 AND tenant_id = $3 AND public_token IS NULL`,
+                [newTablePublicToken(), row.id, req.tenantId!]
+            );
+        }
+        const rs = await queryWithRetry(
+            `SELECT t.id AS table_id, t.name, t.public_token, r.id AS room_id, r.name AS room_name
+             FROM tables t LEFT JOIN rooms r ON r.id = t.room_id AND r.tenant_id = t.tenant_id
+             WHERE t.tenant_id = $1 AND ($2::int[] IS NULL OR t.id = ANY($2::int[]))
+             ORDER BY r.name NULLS LAST, t.name`,
+            [req.tenantId!, onlyIds]
+        );
+        res.json(rs.rows);
+    } catch (err: any) {
+        console.error('POST /tables/qr-tokens error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Come si stampano i cartellini: il foglio (A3, A4, A5 — il foglio decide
+// quanti ne stanno, vedi utils/printTableQr.ts) e la frase sotto il QR, uguale
+// per tutti i tavoli. Una scelta del ristorante, non del dispositivo: chi
+// ristampa il cartellino perso trova le stesse impostazioni del primo giro.
+const TABLE_QR_PRINT_KEY = 'table_qr_print';
+const TABLE_QR_PAPERS = ['A3', 'A4', 'A5'] as const;
+type TableQrPaper = typeof TABLE_QR_PAPERS[number];
+const TABLE_QR_TEXT_MAX = 160;
+const TABLE_QR_TEXT_MAX_LINES = 4;
+const TABLE_QR_DEFAULT = { paper: 'A4' as TableQrPaper, text: 'Inquadra il QR per vedere il menu e pagare il conto' };
+
+/** La frase com'è stampabile: righe vuote e spazi in coda via, al massimo
+ *  quattro righe e 160 caratteri — oltre, il cartellino A3 non la contiene. */
+function cleanTableQrText(raw: unknown): string {
+    return String(raw ?? '')
+        .replace(/\r\n?/g, '\n')
+        .split('\n')
+        .map(l => l.replace(/\s+/g, ' ').trim())
+        .filter(Boolean)
+        .slice(0, TABLE_QR_TEXT_MAX_LINES)
+        .join('\n')
+        .slice(0, TABLE_QR_TEXT_MAX);
+}
+
+async function getTableQrPrint(tenantId: number): Promise<{ paper: TableQrPaper; text: string }> {
+    const rs = await queryWithRetry(
+        'SELECT text_value FROM app_settings WHERE tenant_id = $1 AND key = $2',
+        [tenantId, TABLE_QR_PRINT_KEY]
+    );
+    try {
+        const saved = JSON.parse(rs.rows[0]?.text_value ?? 'null');
+        if (!saved || typeof saved !== 'object') return TABLE_QR_DEFAULT;
+        return {
+            paper: TABLE_QR_PAPERS.includes(saved.paper) ? saved.paper : TABLE_QR_DEFAULT.paper,
+            // Stringa vuota è una scelta: il cartellino senza frase.
+            text: typeof saved.text === 'string' ? cleanTableQrText(saved.text) : TABLE_QR_DEFAULT.text,
+        };
+    } catch {
+        return TABLE_QR_DEFAULT;
+    }
+}
+
+// Il nome in testa ai cartellini è quello del menu pubblico, non la ragione
+// sociale: l'ospite deve leggere lo stesso nome che trova inquadrando.
+app.get('/tables/qr-print', authenticate, requirePermission('floorplan:full'), async (req, res) => {
+    try {
+        const [settings, identity] = await Promise.all([
+            getTableQrPrint(req.tenantId!),
+            publicBusinessIdentity(req.tenantId!),
+        ]);
+        res.json({ ...settings, restaurant: identity.name });
+    } catch (err: any) {
+        console.error('GET /tables/qr-print error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/tables/qr-print', authenticate, requirePermission('floorplan:full'), async (req, res) => {
+    try {
+        const paper = req.body?.paper;
+        if (!TABLE_QR_PAPERS.includes(paper)) return res.status(400).json({ error: 'Formato del foglio non valido' });
+        if (typeof req.body?.text !== 'string') return res.status(400).json({ error: 'Frase non valida' });
+        const settings = { paper: paper as TableQrPaper, text: cleanTableQrText(req.body.text) };
+        await queryWithRetry(
+            `INSERT INTO app_settings (tenant_id, key, text_value, updated_at)
+             VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+             ON CONFLICT (tenant_id, key) DO UPDATE
+               SET text_value = EXCLUDED.text_value, updated_at = CURRENT_TIMESTAMP`,
+            [req.tenantId!, TABLE_QR_PRINT_KEY, JSON.stringify(settings)]
+        );
+        res.json(settings);
+    } catch (err: any) {
+        console.error('PUT /tables/qr-print error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Nuovo token per un tavolo: l'adesivo perso o fotografato troppe volte
+// smette subito di funzionare, e va ristampato.
+app.post('/tables/:id/qr-token/rotate', authenticate, requirePermission('floorplan:full'), async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id)) return res.status(400).json({ error: 'id non valido' });
+        const rs = await queryWithRetry(
+            `UPDATE tables SET public_token = $1 WHERE id = $2 AND tenant_id = $3
+             RETURNING id AS table_id, name, public_token`,
+            [newTablePublicToken(), id, req.tenantId!]
+        );
+        if (!rs.rows[0]) return res.status(404).json({ error: 'Tavolo non trovato' });
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!, req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.TABLE, id,
+                `QR del tavolo ${rs.rows[0].name} rigenerato: il vecchio adesivo non funziona più`
+            ).catch(() => {});
+        }
+        res.json(rs.rows[0]);
+    } catch (err: any) {
+        console.error('POST /tables/:id/qr-token/rotate error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 app.put('/tables/:id', authenticate, requirePermission('floorplan:update_status'), async (req, res) => {
     try {
         const { id } = req.params;
@@ -12240,7 +12620,6 @@ app.delete('/tables/:id', authenticate, requirePermission('floorplan:full'), asy
         res.status(500).json({ error: 'Internal server error' });
     }
 });
-
 
 // ============================================
 // PER-SHIFT TABLE MERGES

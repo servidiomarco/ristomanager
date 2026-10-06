@@ -500,6 +500,69 @@ export const importMenuPassepartout = async (): Promise<MenuImportResult> => {
 export const digitalMenuUrl = (slug?: string, publicBase?: string | null): string =>
   slug ? `${publicBase || API_URL}/m/${slug}` : `${API_URL}/menu`;
 
+/** QR unico al tavolo: l'adesivo porta /t/<token> — menu sempre, «Paga il
+ *  conto» a conto aperto. Il token dice già il tavolo e il ristorante, quindi
+ *  niente slug; la base è la stessa del menu digitale. */
+export const tableQrUrl = (token: string, publicBase?: string | null): string =>
+  `${publicBase || API_URL}/t/${token}`;
+
+/** L'host tecnico del backend: un adesivo che lo porta smetterebbe di
+ *  funzionare al primo cambio di infrastruttura, e si ristampa a mano. */
+export const isTechnicalPublicHost = (url: string): boolean => {
+  try {
+    return /\.up\.railway\.app$/i.test(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+};
+
+export interface TableQrToken {
+  table_id: number;
+  name: string;
+  public_token: string;
+  room_id: number | null;
+  room_name: string | null;
+}
+
+/** Assegna il token ai tavoli che non l'hanno e li restituisce tutti, per sala. */
+export const getTableQrTokens = async (): Promise<TableQrToken[]> => {
+  return apiRequest<TableQrToken[]>(`${API_URL}/tables/qr-tokens`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({}),
+  });
+};
+
+/** Nuovo token per un tavolo: il vecchio adesivo smette subito di funzionare. */
+export const rotateTableQrToken = async (tableId: number): Promise<{ table_id: number; name: string; public_token: string }> => {
+  return apiRequest<{ table_id: number; name: string; public_token: string }>(`${API_URL}/tables/${tableId}/qr-token/rotate`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({}),
+  });
+};
+
+/** Come si stampano i cartellini dei tavoli: foglio e frase sotto il QR,
+ *  salvati per ristorante. `restaurant` è il nome del menu pubblico. */
+export interface TableQrPrintSettings {
+  paper: 'A3' | 'A4' | 'A5';
+  text: string;
+}
+
+export const getTableQrPrint = async (): Promise<TableQrPrintSettings & { restaurant: string }> => {
+  return apiRequest<TableQrPrintSettings & { restaurant: string }>(`${API_URL}/tables/qr-print`, {
+    headers: getHeaders(false)
+  });
+};
+
+export const saveTableQrPrint = async (settings: TableQrPrintSettings): Promise<TableQrPrintSettings> => {
+  return apiRequest<TableQrPrintSettings>(`${API_URL}/tables/qr-print`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify(settings),
+  });
+};
+
 /** Categoria del menu con stato e ordine (le preferenze vivono sul server,
  *  le categorie restano stringhe libere sui piatti). */
 export interface MenuCategory {

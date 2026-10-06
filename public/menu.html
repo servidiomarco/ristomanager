@@ -114,6 +114,12 @@ h2, h3, p { margin: 0; }
     margin-top: 2px; font-size: 12px; letter-spacing: 0.04em; color: var(--ds-text-muted);
     max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+/* Dal QR del tavolo: dice all'ospite dove è seduto, anche col logo — è la
+   conferma che serve prima di pagare. */
+.hero__tavolo {
+    margin-top: 2px; font-size: 13px; font-weight: 600; color: var(--ds-text-secondary);
+    max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 
 /* Lingua: un <select> nativo sotto una pillola. Sul telefono apre il
    selettore di sistema — più grande e più familiare di quattro bottoni. */
@@ -356,6 +362,24 @@ footer:not(:empty)::before {
 @keyframes velo { from { opacity: 0; } to { opacity: 1; } }
 @keyframes foto { from { opacity: 0; transform: scale(0.96) translateY(8px); } to { opacity: 1; transform: none; } }
 
+/* --- QR del tavolo: «Paga il conto» --------------------------------------
+   Barra fissa in basso, solo mentre il conto del tavolo è aperto: compare
+   da sola quando il cameriere chiude la comanda, sparisce al saldo. */
+.paga {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+    padding: 16px 16px 12px;
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+    background: linear-gradient(to top, var(--ds-public-canvas) 65%, transparent);
+}
+.paga a {
+    display: flex; align-items: center; justify-content: center;
+    max-width: 720px; margin: 0 auto; min-height: 52px; padding: 0 20px; border-radius: 999px;
+    background: var(--ds-action-bg); color: var(--ds-action-fg);
+    font-size: 16px; font-weight: 600; text-decoration: none;
+    box-shadow: 0 12px 28px -12px rgba(17, 17, 19, 0.45);
+}
+body.con-paga footer { padding-bottom: max(112px, calc(env(safe-area-inset-bottom) + 96px)); }
+
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation: none !important; transition: none !important; }
 }
@@ -369,6 +393,7 @@ footer:not(:empty)::before {
             <img class="hero__logo" id="logo" alt="" hidden />
             <h1 class="hero__name" id="nome-ristorante">&nbsp;</h1>
             <p class="hero__tagline" id="tagline" hidden></p>
+            <p class="hero__tavolo" id="tavolo" hidden></p>
         </div>
         <label class="lingua">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
@@ -392,16 +417,18 @@ footer:not(:empty)::before {
 
 <footer id="footer"></footer>
 
+<div class="paga" id="paga" hidden><a id="paga-link" class="tnum" href="#"></a></div>
+
 <script>
 'use strict';
 (function () {
     /* Testi della pagina nelle quattro lingue del menu. I piatti usano le
        traduzioni del CRM quando ci sono, altrimenti restano in italiano. */
     var UI = {
-        it: { lingua: 'Lingua', categorie: 'Categorie', foto: 'Foto', chiudi: 'Chiudi', allergeni: 'Allergeni', abbinati: 'Si abbina con', altro: 'Leggi tutto', meno: 'Riduci', vuoto: 'Il menu non è al momento disponibile.', errore: 'Non riusciamo a caricare il menu. Riprova tra poco.' },
-        en: { lingua: 'Language', categorie: 'Categories', foto: 'Photo', chiudi: 'Close', allergeni: 'Allergens', abbinati: 'Pairs with', altro: 'Read more', meno: 'Show less', vuoto: 'The menu is not available right now.', errore: 'We could not load the menu. Please try again shortly.' },
-        fr: { lingua: 'Langue', categorie: 'Catégories', foto: 'Photo', chiudi: 'Fermer', allergeni: 'Allergènes', abbinati: 'S’accorde avec', altro: 'Lire la suite', meno: 'Réduire', vuoto: 'Le menu n’est pas disponible pour le moment.', errore: 'Impossible de charger le menu. Réessayez dans un instant.' },
-        de: { lingua: 'Sprache', categorie: 'Kategorien', foto: 'Foto', chiudi: 'Schließen', allergeni: 'Allergene', abbinati: 'Passt zu', altro: 'Weiterlesen', meno: 'Weniger', vuoto: 'Die Speisekarte ist derzeit nicht verfügbar.', errore: 'Die Speisekarte konnte nicht geladen werden. Bitte versuche es gleich noch einmal.' }
+        it: { tavolo: 'Tavolo', paga: 'Paga il conto', lingua: 'Lingua', categorie: 'Categorie', foto: 'Foto', chiudi: 'Chiudi', allergeni: 'Allergeni', abbinati: 'Si abbina con', altro: 'Leggi tutto', meno: 'Riduci', vuoto: 'Il menu non è al momento disponibile.', errore: 'Non riusciamo a caricare il menu. Riprova tra poco.' },
+        en: { tavolo: 'Table', paga: 'Pay the bill', lingua: 'Language', categorie: 'Categories', foto: 'Photo', chiudi: 'Close', allergeni: 'Allergens', abbinati: 'Pairs with', altro: 'Read more', meno: 'Show less', vuoto: 'The menu is not available right now.', errore: 'We could not load the menu. Please try again shortly.' },
+        fr: { tavolo: 'Table', paga: 'Payer l’addition', lingua: 'Langue', categorie: 'Catégories', foto: 'Photo', chiudi: 'Fermer', allergeni: 'Allergènes', abbinati: 'S’accorde avec', altro: 'Lire la suite', meno: 'Réduire', vuoto: 'Le menu n’est pas disponible pour le moment.', errore: 'Impossible de charger le menu. Réessayez dans un instant.' },
+        de: { tavolo: 'Tisch', paga: 'Rechnung bezahlen', lingua: 'Sprache', categorie: 'Kategorien', foto: 'Foto', chiudi: 'Schließen', allergeni: 'Allergene', abbinati: 'Passt zu', altro: 'Weiterlesen', meno: 'Weniger', vuoto: 'Die Speisekarte ist derzeit nicht verfügbar.', errore: 'Die Speisekarte konnte nicht geladen werden. Bitte versuche es gleich noch einmal.' }
     };
     // Ogni lingua col suo nome: chi cerca la propria la riconosce così.
     var NOME_LINGUA = { it: 'Italiano', en: 'English', fr: 'Français', de: 'Deutsch' };
@@ -442,8 +469,15 @@ footer:not(:empty)::before {
         chiudi: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>'
     };
 
+    /* Tre ingressi: /menu, /m/<slug> e /t/<token> — il QR unico del tavolo,
+       che porta anche il nome del tavolo e, a conto aperto, «Paga il conto». */
+    var tavoloMatch = location.pathname.match(/^\/t\/([A-Za-z0-9_-]+)/);
+    var tavoloToken = tavoloMatch ? tavoloMatch[1] : null;
     var slugMatch = location.pathname.match(/^\/m\/([^/]+)/);
-    var apiPath = slugMatch ? '/public/' + slugMatch[1] + '/menu' : '/public/menu';
+    var apiPath = tavoloToken ? '/public/table/' + tavoloToken
+        : (slugMatch ? '/public/' + slugMatch[1] + '/menu' : '/public/menu');
+    var tavolo = null;  // nome del tavolo, solo in modalità tavolo
+    var conto = null;   // { open, url, residual_cents, currency }
 
     var lang = null;
     try { lang = localStorage.getItem('menu_lang'); } catch (e) { /* storage bloccato: si va col browser */ }
@@ -522,6 +556,36 @@ footer:not(:empty)::before {
         main.innerHTML = '<div class="stato" role="status">' + ICONA.piatto + '<p>' + esc(testo) + '</p></div>';
     }
 
+    function soldi(cents, valuta) {
+        return new Intl.NumberFormat(lang === 'it' ? 'it-IT' : lang, { style: 'currency', currency: valuta || 'EUR' }).format(cents / 100);
+    }
+
+    function renderPaga() {
+        var tav = document.getElementById('tavolo');
+        tav.hidden = !tavolo;
+        if (tavolo) tav.textContent = t('tavolo') + ' ' + tavolo;
+        var box = document.getElementById('paga');
+        var aperto = !!(conto && conto.open && conto.url);
+        box.hidden = !aperto;
+        document.body.classList.toggle('con-paga', aperto);
+        if (!aperto) return;
+        var link = document.getElementById('paga-link');
+        // La pagina di pagamento parla italiano e inglese: le altre lingue
+        // del menu ci arrivano in inglese, non nel suo fallback italiano.
+        link.href = conto.url + (conto.url.indexOf('?') === -1 ? '?' : '&') + 'lng=' + (lang === 'it' ? 'it' : 'en');
+        link.textContent = t('paga') + (conto.residual_cents > 0 ? ' · ' + soldi(conto.residual_cents, conto.currency) : '');
+    }
+
+    /* Ricontrollo del conto ogni 30 s, solo a pagina visibile, e al ritorno
+       sulla pagina: il menu non si riscarica, si chiede solo lo stato. */
+    function aggiornaConto() {
+        if (!tavoloToken || document.visibilityState !== 'visible') return;
+        fetch('/public/table/' + tavoloToken + '/conto', { headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (j) { if (j) { conto = j.pay || null; renderPaga(); } })
+            .catch(function () {});
+    }
+
     function renderLangs() {
         var sel = document.getElementById('lingua');
         if (!sel.options.length) {
@@ -546,6 +610,7 @@ footer:not(:empty)::before {
 
     function render() {
         catnav.setAttribute('aria-label', t('categorie'));
+        renderPaga();
         if (!dati) return;
         var perCat = {};
         dati.piatti.forEach(function (p) { (perCat[p.category] = perCat[p.category] || []).push(p); });
@@ -838,7 +903,16 @@ footer:not(:empty)::before {
             return r.json();
         })
         .then(function (json) {
-            dati = json;
+            if (tavoloToken) {
+                // Modalità tavolo: menu (null se spento) e conto in un colpo.
+                tavolo = json.table && json.table.name ? json.table.name : null;
+                conto = json.pay || null;
+                dati = json.menu || null;
+                setInterval(aggiornaConto, 30000);
+                document.addEventListener('visibilitychange', aggiornaConto);
+            } else {
+                dati = json;
+            }
             var nome = json.restaurant || '';
             // branding manca dal backend di prima del restyling (frontend e
             // backend non escono insieme): senza, la testata resta col nome.
@@ -864,9 +938,12 @@ footer:not(:empty)::before {
                 logo.hidden = false;
             }
             render();
+            // Menu spento: dal QR del tavolo resta comunque «Paga il conto».
+            if (!dati) mostraStato(t('vuoto'));
         })
         .catch(function (err) {
-            mostraStato(err && err.message === '503' ? t('vuoto') : t('errore'));
+            // 503: menu spento; 404: adesivo di un tavolo che non c'è più.
+            mostraStato(err && (err.message === '503' || err.message === '404') ? t('vuoto') : t('errore'));
         });
 })();
 </script>
