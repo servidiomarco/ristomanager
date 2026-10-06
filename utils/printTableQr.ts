@@ -142,32 +142,48 @@ const BASE_CARD_WIDTH_MM = 105;
 // La faccia del cavaliere: metà del foglietto, 120 × 46,5 mm, divisa in
 // due come il cavaliere del locale — il QR al centro della metà sinistra, il
 // tavolo al centro della destra, col numero grande che si legge da lontano.
+// Sopra il numero solo la sala: il nome del locale e la parola «Tavolo» li
+// ha tolti il ristoratore, per lasciare spazio alla frase.
 const TENT_FACE_PAD_MM = 4;
 const TENT_QR_MM = 35;
 const TENT_NUMBER_PT = 56;
 const TENT_NUMBER_MIN_PT = 16;
+// La frase parte da 11 pt e cala fino a 8 solo se, lunga, schiaccerebbe il
+// numero sotto i 36 pt.
+const TENT_PHRASE_PT = 11;
+const TENT_PHRASE_MIN_PT = 8;
+const TENT_NUMBER_KEEP_PT = 36;
 const MM_PER_PT = 25.4 / 72;
 // La colonna del testo (metà faccia meno i margini) e l'altezza utile.
 const TENT_TEXT_W_MM = QR_HOLDER_MM.height / 2 - 2 * TENT_FACE_PAD_MM;
 const TENT_TEXT_H_MM = QR_HOLDER_MM.width / 2 - 2 * TENT_FACE_PAD_MM;
-// Le righe fisse sopra e sotto il numero: luogo (7,5 pt), «Tavolo» (9 pt),
-// le spaziature; la frase a 8 pt con interlinea 1,25.
-const TENT_FIXED_MM = 3.3 + 3.8 + 3;
-const TENT_PHRASE_LINE_MM = 8 * 1.25 * MM_PER_PT;
-// Caratteri per riga della frase a 8 pt nella colonna (≈0,5 em a lettera).
-const TENT_PHRASE_CHARS = Math.floor(TENT_TEXT_W_MM / (8 * 0.5 * MM_PER_PT));
+// La sala sopra il numero, grande abbastanza da trovare il tavolo giusto
+// mentre si distribuiscono i cartellini.
+const TENT_ROOM_PT = 13;
+// Le righe fisse attorno al numero: la sala (interlinea 1,2) e le spaziature.
+const TENT_FIXED_MM = TENT_ROOM_PT * 1.2 * MM_PER_PT + 2;
 
-/** Corpo del numero del tavolo sulla faccia: grande come nella foto del
- *  locale, ma mai più largo della colonna (≈0,62 em a cifra, in grassetto)
- *  né più alto di quello che la frase lascia libero. */
-const tentNumberPt = (name: string, phrase: string): number => {
+/** Altezza della frase al corpo dato: righe stimate a ≈0,5 em per lettera
+ *  nella colonna, interlinea 1,25. */
+const tentPhraseMm = (phrase: string, pt: number): number => {
+  if (!phrase) return 0;
+  const perLine = Math.floor(TENT_TEXT_W_MM / (pt * 0.5 * MM_PER_PT));
+  const lines = phrase.split('\n').reduce((n, l) => n + Math.max(1, Math.ceil(l.length / perLine)), 0);
+  return lines * pt * 1.25 * MM_PER_PT;
+};
+
+/** Corpi della faccia. Il numero è grande come nella foto del locale, ma mai
+ *  più largo della colonna (≈0,62 em a cifra, in grassetto) né più alto di
+ *  quello che la frase lascia libero; la frase scende di mezzo punto alla
+ *  volta finché il numero non resta leggibile da lontano. */
+const tentSizesPt = (name: string, phrase: string): { number: number; phrase: number } => {
   const chars = Math.max(1, [...name].length);
   const byWidth = TENT_TEXT_W_MM / (chars * 0.62) / MM_PER_PT;
-  const lines = phrase
-    ? phrase.split('\n').reduce((n, l) => n + Math.max(1, Math.ceil(l.length / TENT_PHRASE_CHARS)), 0)
-    : 0;
-  const byHeight = (TENT_TEXT_H_MM - TENT_FIXED_MM - lines * TENT_PHRASE_LINE_MM) / MM_PER_PT;
-  return Math.max(TENT_NUMBER_MIN_PT, Math.min(TENT_NUMBER_PT, Math.floor(byWidth), Math.floor(byHeight)));
+  const byHeight = (pt: number): number => (TENT_TEXT_H_MM - TENT_FIXED_MM - tentPhraseMm(phrase, pt)) / MM_PER_PT;
+  let phrasePt = TENT_PHRASE_PT;
+  while (phrasePt > TENT_PHRASE_MIN_PT && byHeight(phrasePt) < TENT_NUMBER_KEEP_PT) phrasePt -= 0.5;
+  const number = Math.max(TENT_NUMBER_MIN_PT, Math.min(TENT_NUMBER_PT, Math.floor(byWidth), Math.floor(byHeight(phrasePt))));
+  return { number, phrase: phrasePt };
 };
 
 export const buildTableQrSheetHtml = async ({ restaurant, cards, paper, text, holder = false, preview = false }: TableQrSheetOptions): Promise<string> => {
@@ -191,9 +207,8 @@ export const buildTableQrSheetHtml = async ({ restaurant, cards, paper, text, ho
     const cut = [col < layout.cols - 1 ? 'cut-r' : '', row < layout.rows - 1 ? 'cut-b' : ''].filter(Boolean).join(' ');
     return `
       <section class="card ${cut}">
-        ${restaurant ? `<div class="restaurant">${escapeHtml(restaurant)}</div>` : ''}
-        <div class="table">Tavolo ${escapeHtml(c.tableName)}</div>
         ${c.roomName ? `<div class="room">${escapeHtml(c.roomName)}</div>` : ''}
+        <div class="table">${escapeHtml(c.tableName)}</div>
         <div class="qr">${svgs[i]}</div>
         ${phrase ? `<div class="phrase">${escapeHtml(phrase)}</div>` : ''}
       </section>`;
@@ -203,14 +218,13 @@ export const buildTableQrSheetHtml = async ({ restaurant, cards, paper, text, ho
   // il bordo comune, segnata da un puntinato leggero che finisce sullo
   // spigolo; il tratteggio da tagliare gira tutto intorno.
   const tentHtml = (c: TableQrCard, i: number): string => {
-    const place = [restaurant, c.roomName].filter(Boolean).join(' · ');
+    const size = tentSizesPt(c.tableName, phrase);
     const face = `
           <div class="face__half"><div class="face__qr">${svgs[i]}</div></div>
           <div class="face__half face__text">
-            ${place ? `<div class="face__place">${escapeHtml(place)}</div>` : ''}
-            <div class="face__label">Tavolo</div>
-            <div class="face__number" style="font-size:${tentNumberPt(c.tableName, phrase)}pt">${escapeHtml(c.tableName)}</div>
-            ${phrase ? `<div class="face__phrase">${escapeHtml(phrase)}</div>` : ''}
+            ${c.roomName ? `<div class="face__room">${escapeHtml(c.roomName)}</div>` : ''}
+            <div class="face__number" style="font-size:${size.number}pt">${escapeHtml(c.tableName)}</div>
+            ${phrase ? `<div class="face__phrase" style="font-size:${size.phrase}pt">${escapeHtml(phrase)}</div>` : ''}
           </div>`;
     return `
       <section class="tent-cell">
@@ -271,16 +285,15 @@ export const buildTableQrSheetHtml = async ({ restaurant, cards, paper, text, ho
   }
   .cut-r { border-right: 0.3mm dashed var(--ds-print-rule-strong); }
   .cut-b { border-bottom: 0.3mm dashed var(--ds-print-rule-strong); }
-  .restaurant {
-    font-size: calc(10pt * var(--k)); color: var(--ds-print-ink-secondary);
+  .room {
+    font-size: calc(16pt * var(--k)); font-weight: 600; color: var(--ds-print-ink-secondary);
     max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  .table { font-size: calc(24pt * var(--k)); font-weight: 700; line-height: 1.1; margin-top: calc(1.5mm * var(--k)); }
-  .room { font-size: calc(9pt * var(--k)); color: var(--ds-print-ink-muted); margin-top: calc(0.5mm * var(--k)); }
+  .table { font-size: calc(36pt * var(--k)); font-weight: 700; line-height: 1; letter-spacing: -0.01em; margin-top: calc(0.5mm * var(--k)); }
   .qr { width: calc(60mm * var(--k)); height: calc(60mm * var(--k)); margin: calc(5mm * var(--k)) 0 calc(4mm * var(--k)); flex: none; }
   .qr svg, .face__qr svg { width: 100%; height: 100%; display: block; }
   .phrase {
-    font-size: calc(11.5pt * var(--k)); font-weight: 600; line-height: 1.3;
+    font-size: calc(15pt * var(--k)); font-weight: 600; line-height: 1.25;
     color: var(--ds-print-ink);
     white-space: pre-line; overflow-wrap: anywhere;
     /* Righe pari invece di una parola sola a capo («…pagare il / conto»). */
@@ -319,18 +332,17 @@ export const buildTableQrSheetHtml = async ({ restaurant, cards, paper, text, ho
      dritta una volta piegato. Il puntinato è la piega. */
   .face--top { transform: rotate(180deg); border-top: 0.3mm dotted var(--ds-print-rule-strong); }
   .face__qr { width: ${TENT_QR_MM}mm; height: ${TENT_QR_MM}mm; flex: none; }
-  .face__place {
-    font-size: 7.5pt; line-height: 1.25; color: var(--ds-print-ink-secondary);
+  .face__room {
+    font-size: ${TENT_ROOM_PT}pt; line-height: 1.2; font-weight: 600; color: var(--ds-print-ink-secondary);
     max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  .face__label { margin-top: 1mm; font-size: 9pt; line-height: 1.2; font-weight: 600; color: var(--ds-print-ink-secondary); }
   .face__number {
     font-weight: 700; line-height: 1; letter-spacing: -0.01em;
     max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .face__phrase {
     margin-top: 1.5mm; max-width: 100%;
-    font-size: 8pt; font-weight: 600; line-height: 1.25;
+    font-weight: 600; line-height: 1.25;
     white-space: pre-line; overflow-wrap: anywhere; text-wrap: balance;
   }
   ${preview ? `
