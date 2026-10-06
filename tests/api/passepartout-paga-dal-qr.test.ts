@@ -41,9 +41,9 @@ describe('pagamento dal QR delle comande della cassa Passepartout', () => {
             await sleep(150);
         }
     };
-    const apriInCassa = (idComanda: number, righe: any[]) => {
+    const apriInCassa = (idComanda: number, righe: any[], tavolo = 'PPQ1') => {
         comande.set(idComanda, {
-            idGestionale: idComanda, tavolo: 'PPQ1', sala: 'TETTOIA', coperti: 2, sconto: null, stato: '1',
+            idGestionale: idComanda, tavolo, sala: 'TETTOIA', coperti: 2, sconto: null, stato: '1',
             isPagato: false, idPrenotazione: null, dataCreazione: oraRoma(), righe,
         });
     };
@@ -147,7 +147,7 @@ describe('pagamento dal QR delle comande della cassa Passepartout', () => {
         await api().put('/settings/integrations/revolut').set(bearer(token)).send({ webhook_secret: '' });
         socket?.close();
         await db.query(`DELETE FROM passepartout_tavoli_aperti WHERE tenant_id = 1`);
-        await db.query(`DELETE FROM passepartout_tavoli WHERE table_id = $1`, [tableId]);
+        await db.query(`DELETE FROM passepartout_tavoli WHERE tenant_id = 1 AND pp_tavolo IN ('PPQ1', 'PPQ2')`);
         await db.query(`DELETE FROM notifications WHERE tag LIKE 'pp-comanda-cambiata-%' OR tag LIKE 'bill-paying-%'`);
         await db.end();
     });
@@ -254,6 +254,44 @@ describe('pagamento dal QR delle comande della cassa Passepartout', () => {
         const tocco = await api().post(`/public/table/${qr}/conto/cassa`);
         expect(tocco.status).toBe(409);
         expect(tocco.body.error).toBe('chiuso');
+    });
+
+    it('comanda chiusa in cassa e una nuova sul tavolo: il conto vecchio lascia il posto (tavolo 29, 06/10)', async () => {
+        // Un secondo tavolo, tutto suo.
+        const room = await db.query(`SELECT room_id FROM tables WHERE id = $1`, [tableId]);
+        const t2 = await api().post('/tables').set(bearer(token)).send({
+            name: 'PPQ2', shape: 'SQUARE', seats: 4, x: 140, y: 40, room_id: room.rows[0].room_id, status: 'FREE',
+        });
+        await db.query(
+            `INSERT INTO passepartout_tavoli (table_id, tenant_id, pp_sala, pp_tavolo, origine, confermato) VALUES ($1, 1, 'TETTOIA', 'PPQ2', 'manuale', true)`,
+            [t2.body.id]
+        );
+        const tokens = await api().post('/tables/qr-tokens').set(bearer(token)).send({});
+        const qr2 = tokens.body.find((r: any) => r.table_id === t2.body.id).public_token;
+
+        apriInCassa(8810, [riga(88101, 'Antipasto', 1, 3)], 'PPQ2');
+        await aggiornaLettura();
+        expect((await api().post(`/public/table/${qr2}/conto/cassa`)).status).toBe(200);
+        const vecchio = await conto(8810);
+        expect(vecchio.status).toBe('OPEN');
+
+        // In cassa la comanda si chiude (pagata lì) e il tavolo si riapre.
+        comande.get(8810).isPagato = true;
+        apriInCassa(8811, [riga(88111, 'Coperto', 1, 2)], 'PPQ2');
+        const tocco = await api().post(`/public/table/${qr2}/conto/cassa`);
+        expect(tocco.status).toBe(200);
+        expect((await conto(8810)).status).toBe('VOIDED');
+        const nuovo = await conto(8811);
+        expect(nuovo).toMatchObject({ status: 'OPEN', total_cents: 200 });
+        expect(tocco.body.url).toMatch(new RegExp(`/pay/${nuovo.share_token}$`));
+
+        // Chiusa in cassa anche la nuova, senza che nessuno paghi dal QR:
+        // alla lettura dopo il conto si annulla da solo.
+        comande.get(8811).isPagato = true;
+        await aggiornaLettura();
+        await finoA(async () => (await conto(8811)).status === 'VOIDED', 'conto del QR annullato con la comanda chiusa');
+        const pay = (await api().get(`/public/table/${qr2}/conto`)).body.pay;
+        expect(pay.open).toBe(false);
     });
 
     it('senza conto al tavolo non si accende', async () => {
