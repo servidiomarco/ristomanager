@@ -126,6 +126,13 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
             // Coda di stampa: il legacy token fa da alias del tenant 1, così
             // i test possono ritirare i job (RT fiscale incluso) e ackarli.
             PRINT_AGENT_TOKEN: 'test-print-agent-token',
+            // Agente Passepartout (fase B5): il ponte acceso, chiusura in
+            // cassa configurata e spazzino veloce. Senza agente collegato le
+            // rotte che lo usano rispondono 503 come prima.
+            PASSEPARTOUT_AGENT_TOKEN: 'test-pp-agent-token',
+            PASSEPARTOUT_TIPO_PAGAMENTO: 'ESTERNO',
+            PASSEPARTOUT_CLOSE_SWEEP_MS: '300',
+            PASSEPARTOUT_CLOSE_RETRY_UNIT_MS: '300',
         },
         stdio: ['ignore', 'pipe', 'pipe'],
     });

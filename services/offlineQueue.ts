@@ -8,17 +8,28 @@
 // Regole d'uso, pensate per non fare danni:
 // - si accoda SOLO su errore di rete (il server non ha mai risposto), mai su
 //   una risposta HTTP: 4xx/5xx significano che il server ha deciso, e la
-//   decisione non va ricontestata in coda;
+//   decisione non va ricontestata in coda. L'unica eccezione è il 409
+//   authority_on_node: il cloud non decide, rimanda al nodo di sala;
 // - solo richieste sicure da rigiocare: PUT e DELETE (idempotenti per
-//   semantica) o POST con chiave di idempotenza nel body;
+//   semantica), PATCH che scrive valori assoluti (l'accoglienza, tappa C)
+//   o POST con chiave di idempotenza nel body;
 // - le voci scadono: rigiocare lo stato di un tavolo di ieri sera non è
 //   sincronizzare, è corrompere il servizio di oggi.
+//
+// Col nodo di sala (fase B4) la voce tiene l'URL del cloud e la
+// destinazione si decide al replay: con l'autorità in sala si rigioca sul
+// nodo, altrimenti sul cloud. Comande, conti e incassi NON passano di qui:
+// una comanda che arriva in cucina venti minuti dopo, quando il cameriere
+// l'ha già gridata, o un incasso rigiocato al buio fanno più danni di un
+// errore visibile — lì il carrello resta sul palmare con le sue chiavi e
+// l'Invia si ripete a mano.
 import { authApiService } from './authApiService';
 import { socketClient } from './socketClient';
+import { routeWriteUrl, fetchNodeAware, cloudFallbackUrl, isAuthorityOnNodeRefusal } from './apiRouting';
 
 export type QueuedRequest = {
   id: string;
-  method: 'PUT' | 'DELETE' | 'POST';
+  method: 'PUT' | 'DELETE' | 'POST' | 'PATCH';
   url: string;
   /** Body già serializzato in JSON, o null per le richieste senza corpo. */
   body: string | null;
@@ -100,6 +111,13 @@ class OfflineQueue {
           break;
         }
 
+        // Risposte che non sono una decisione sulla voce: si resta in coda
+        // e ci si ferma come per la rete giù. 401 = sessione da rinnovare
+        // (a linea giù la proroga del nodo può essere finita), 502–504 = il
+        // proxy davanti a un server che riparte, 409 authority_on_node = il
+        // cloud rimanda al nodo che da qui non si raggiunge.
+        if (await this.notDecided(response)) break;
+
         this.queue.shift();
         // Un DELETE che trova 404 ha già avuto quello che voleva: il primo
         // tentativo era passato e la risposta si era persa per strada.
@@ -129,19 +147,34 @@ class OfflineQueue {
     if (socketId) headers['X-Socket-ID'] = socketId;
     const token = authApiService.getAccessToken();
     if (token) headers['Authorization'] = `Bearer ${token}`;
+    const init: RequestInit = { method: op.method, headers, body: op.body, cache: 'no-store' };
 
-    const response = await fetch(op.url, {
-      method: op.method,
-      headers,
-      body: op.body,
-      cache: 'no-store',
-    });
+    // Dove vive l'autorità ADESSO: la voce può essere nata col nodo spento
+    // e partire col nodo acceso, o viceversa.
+    const url = routeWriteUrl(op.url, op.method);
+    let response: Response;
+    try {
+      response = await fetchNodeAware(url, init);
+    } catch (err) {
+      // Nodo muto: circuito aperto e un tentativo sul cloud (che, con
+      // l'autorità in sala, risponde 409 e la voce resta in coda).
+      const cloudUrl = cloudFallbackUrl(url);
+      if (!cloudUrl) throw err;
+      response = await fetch(cloudUrl, init);
+    }
 
     if (response.status === 401 && !retried) {
       const refreshed = await authApiService.refreshToken();
       if (refreshed) return this.execute(op, true);
     }
     return response;
+  }
+
+  private async notDecided(response: Response): Promise<boolean> {
+    if (response.status === 401 || (response.status >= 502 && response.status <= 504)) return true;
+    if (response.status !== 409) return false;
+    const body = await response.clone().json().catch(() => null);
+    return isAuthorityOnNodeRefusal(response.status, body);
   }
 
   clear(): void {

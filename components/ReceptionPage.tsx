@@ -5,10 +5,7 @@ import {
   Room,
   ArrivalStatus,
   ReservationStatus,
-  ReservationSource,
-  PaymentStatus,
-  TableShape,
-  Shift
+  TableShape
 } from '../types';
 import {
   Users,
@@ -31,7 +28,7 @@ import {
   Shuffle,
   X as XIcon
 } from 'lucide-react';
-import { updateReservation, createReservation, swapReservationTables } from '../services/apiService';
+import { updateReservation, updateReservationService, createWalkIn, swapReservationTables, RESERVATION_SERVICE_KEYS } from '../services/apiService';
 import { datePart, timePart } from '../utils/displayTime';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
 import { useTranslation } from 'react-i18next';
@@ -300,8 +297,17 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
     try {
       const current = reservations.find(r => r.id === id);
       if (!current) throw new Error(t('err.notFound'));
-      const body = { ...current, ...patch };
-      const updated = await updateReservation(id, body);
+      // Tavolo e arrivo hanno il loro comando (tappa C): col servizio in
+      // sala va al nodo e funziona anche a linea caduta. `table_id:
+      // undefined` qui vuol dire «togli il tavolo».
+      const keys = Object.keys(patch);
+      const serviceOnly = keys.length > 0 && keys.every(k => (RESERVATION_SERVICE_KEYS as readonly string[]).includes(k));
+      const updated = serviceOnly
+        ? await updateReservationService(id, {
+            ...('table_id' in patch ? { table_id: patch.table_id ?? null } : {}),
+            ...('arrival_status' in patch ? { arrival_status: patch.arrival_status } : {}),
+          })
+        : await updateReservation(id, { ...current, ...patch });
       // Merge sulla riga corrente: la risposta del PUT non porta i campi di
       // arricchimento (customer_is_vip, latest_payment_*) che la GET aggiunge.
       onReservationChangedLocal({ ...current, ...updated });
@@ -361,22 +367,14 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
     setBusy(true);
     setError(null);
     try {
-      const now = new Date();
-      const pad = (n: number) => String(n).padStart(2, '0');
-      const reservationTime = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
-      const shift = now.getHours() < 16 ? Shift.LUNCH : Shift.DINNER;
-      const created = await createReservation({
+      // Ora e turno li decide il server, col fuso del ristorante; col
+      // servizio in sala il walk-in nasce sul nodo (tappa C).
+      const created = await createWalkIn({
         customer_name: input.name.trim(),
-        reservation_time: reservationTime,
-        shift,
         guests: input.guests,
         phone: input.phone.trim() || undefined,
         notes: input.notes.trim() || undefined,
-        payment_status: PaymentStatus.PENDING,
-        arrival_status: ArrivalStatus.ARRIVED,
-        reservation_status: ReservationStatus.CONFIRMED,
-        source: ReservationSource.MANUAL,
-      } as Omit<Reservation, 'id'>);
+      });
       onReservationChangedLocal(created);
       setSelectedReservationId(created.id);
       setShowWalkIn(false);
