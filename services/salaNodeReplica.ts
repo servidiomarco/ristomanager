@@ -57,6 +57,12 @@ const cloudPost = async (path: string, body: any): Promise<any> => {
 const fetchRowsFromCloud = async (wanted: WantedRows): Promise<FetchedRows> =>
     cloudPost('/sala-node/rows', wanted);
 
+// Fase B3: dopo ogni lotto applicato, gli effetti che spettano al nodo
+// (es. la caparra pagata online da accreditare sul conto in sala). Fuori
+// dalla transazione della replica: sono scritture locali vere, con i loro
+// eventi verso il cloud. Iniettato da server.ts.
+let onAppliedHook: ((tenantId: number, events: ReplicaEvent[]) => Promise<void>) | null = null;
+
 /** Un giro di pull dal cloud: torna true se c'era roba (e conviene
  *  rigirare subito — a valle di un outage si drena a batch pieni). */
 // rls-bypass: solo nodo, un tenant: giro di replica senza sessione, il tenant lo dà il cursore locale
@@ -74,6 +80,10 @@ const pullOnce = async (): Promise<boolean> => runAsPlatform(async () => {
     }
     await applyReplicaBatch({ tenantId, events, cursorStream: 'cloud', fetchRows: fetchRowsFromCloud });
     lastCloudPullOkAt = Date.now();
+    if (onAppliedHook) {
+        try { await onAppliedHook(tenantId, events); }
+        catch (err: any) { console.warn('[replica] effetti dopo il lotto non riusciti:', err?.message || err); }
+    }
     console.log(`[replica] applicati ${events.length} eventi, cursore a ${events[events.length - 1].seq}`);
     return true;
 });
@@ -153,9 +163,20 @@ const serveNodeRows = async (req: any, ack: (res: any) => void): Promise<void> =
             const reservationIds = ids('reservations');
             const orderIds = ids('orders');
             const takeawayIds = ids('takeaways');
+            const billIds = ids('bills');
+            const cashIds = ids('cashSessions');
+            const fiscalIds = ids('fiscalDocs');
             // rls-bypass: solo nodo (superuser locale, un tenant): righe per id, il DB del nodo ha un tenant solo
             const q = (sql: string, params: any[]) => pool.query(sql, params).then(r => r.rows);
             const none: any[] = [];
+            // Fase B2: l'aggregato conto, le sessioni di cassa, i documenti fiscali.
+            const [table_bills, table_bill_payments, table_bill_splits, cash_sessions, fiscal_documents] = await Promise.all([
+                billIds.length ? q(`SELECT * FROM table_bills WHERE id = ANY($1::bigint[])`, [billIds]) : none,
+                billIds.length ? q(`SELECT * FROM table_bill_payments WHERE table_bill_id = ANY($1::bigint[])`, [billIds]) : none,
+                billIds.length ? q(`SELECT * FROM table_bill_splits WHERE table_bill_id = ANY($1::bigint[])`, [billIds]) : none,
+                cashIds.length ? q(`SELECT * FROM cash_sessions WHERE id = ANY($1::bigint[])`, [cashIds]) : none,
+                fiscalIds.length ? q(`SELECT * FROM fiscal_documents WHERE id = ANY($1::bigint[])`, [fiscalIds]) : none,
+            ]);
             const [tables, reservations, orders, order_items, order_revisions, takeaway_orders, takeaway_order_items] = await Promise.all([
                 tableIds.length ? q(`SELECT * FROM tables WHERE id = ANY($1::int[])`, [tableIds]) : none,
                 reservationIds.length ? q(`SELECT * FROM reservations WHERE id = ANY($1::int[])`, [reservationIds]) : none,
@@ -165,7 +186,10 @@ const serveNodeRows = async (req: any, ack: (res: any) => void): Promise<void> =
                 takeawayIds.length ? q(`SELECT * FROM takeaway_orders WHERE id = ANY($1::int[])`, [takeawayIds]) : none,
                 takeawayIds.length ? q(`SELECT * FROM takeaway_order_items WHERE takeaway_order_id = ANY($1::int[])`, [takeawayIds]) : none,
             ]);
-            ack({ tables, reservations, orders, order_items, order_revisions, takeaway_orders, takeaway_order_items });
+            ack({
+                tables, reservations, orders, order_items, order_revisions, takeaway_orders, takeaway_order_items,
+                table_bills, table_bill_payments, table_bill_splits, cash_sessions, fiscal_documents,
+            });
         });
     } catch (err: any) {
         ack({ error: err?.message || String(err) });
@@ -258,10 +282,15 @@ export interface SalaNodeReplicaOpts {
     /** Ogni tipo di evento annunciato dal cloud: la sincronizzazione della
      *  configurazione (salaNodeConfigSync) lo usa come sveglia. */
     onCloudEvent?: (event: string) => void;
+    /** Gli effetti locali dopo un lotto del cloud applicato (fase B3). */
+    onApplied?: (tenantId: number, events: ReplicaEvent[]) => Promise<void>;
+    /** Le chiamate del cloud al nodo (fase B3b), per nome. */
+    rpc?: Record<string, (payload: any) => Promise<any>>;
 }
 
 export const startSalaNodeReplica = (opts?: SalaNodeReplicaOpts): void => {
     if (!isServiceNode) return;
+    onAppliedHook = opts?.onApplied ?? null;
     let running = false;
     let lastErrorLogged = 0;
     const drain = async () => {
@@ -353,6 +382,15 @@ export const startSalaNodeReplica = (opts?: SalaNodeReplicaOpts): void => {
     socket.on('node:pull', (req, ack) => { if (typeof ack === 'function') void serveNodePull(req, ack); });
     socket.on('node:rows', (req, ack) => { if (typeof ack === 'function') void serveNodeRows(req, ack); });
     socket.on('node:status', (req, ack) => { if (typeof ack === 'function') void serveNodeStatus(req, ack); });
+    // Le chiamate del cloud (fase B3b: la quota del QR su un conto del nodo).
+    socket.on('node:rpc', (req: any, ack: any) => {
+        if (typeof ack !== 'function') return;
+        const handler = opts?.rpc?.[String(req?.method)];
+        if (!handler) return ack({ ok: false, error: 'unknown_method' });
+        handler(req?.payload)
+            .then((result) => ack({ ok: true, result }))
+            .catch((err: any) => ack({ ok: false, error: err?.message || String(err) }));
+    });
     let connErrLogged = 0;
     socket.on('connect_error', (err) => {
         if (Date.now() - connErrLogged > 60_000) {

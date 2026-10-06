@@ -39,6 +39,7 @@ const stateFile = (name: string): string => {
 };
 const cachePath = (): string => stateFile('sala-node-tls.json');
 const keysCachePath = (): string => stateFile('sala-node-jwt-keys.json');
+const agentsCachePath = (): string => stateFile('sala-node-agenti.json');
 
 // Le chiavi ricevute: in memoria subito, su disco per il prossimo avvio.
 // Il log solo quando l'insieme cambia: è la riga che il runbook fa cercare
@@ -65,6 +66,48 @@ const loadJwtKeysFromDisk = (): void => {
     try {
         applyJwtKeys(JSON.parse(readFileSync(keysCachePath(), 'utf8')), false);
     } catch { /* assente o corrotta: il nodo accetta solo HS256, se ha JWT_SECRET */ }
+};
+
+// Quello che serve agli agenti del PC, ricevuto con le credenziali: il
+// token legacy dell'agente di stampa e (fase B5) la configurazione di
+// chiusura dei conti Passepartout. Su disco anche questi: un nodo riavviato
+// a linea giù li perdeva, e l'agente di stampa col token legacy prendeva
+// 401 proprio quando le comande battute al buio dovevano uscire. Un valore
+// messo a mano nell'env del nodo vince sempre.
+interface AgentCredentials {
+    print_agent_legacy_token?: string | null;
+    passepartout_chiusura?: { tipoPagamento?: string | null; tipoDocumento?: string | null } | null;
+}
+const ownEnv = {
+    PRINT_AGENT_TOKEN: Boolean(process.env.PRINT_AGENT_TOKEN),
+    PASSEPARTOUT_TIPO_PAGAMENTO: Boolean(process.env.PASSEPARTOUT_TIPO_PAGAMENTO),
+    PASSEPARTOUT_TIPO_DOCUMENTO: Boolean(process.env.PASSEPARTOUT_TIPO_DOCUMENTO),
+};
+const inherit = (name: keyof typeof ownEnv, value: unknown, label: string): void => {
+    if (ownEnv[name] || typeof value !== 'string' || !value || process.env[name] === value) return;
+    process.env[name] = value;
+    console.log(`[node-tls] ${label} ereditato dal cloud`);
+};
+const applyAgentCredentials = (body: AgentCredentials, persist: boolean): void => {
+    inherit('PRINT_AGENT_TOKEN', body?.print_agent_legacy_token, 'token legacy agente di stampa');
+    const pp = body?.passepartout_chiusura;
+    inherit('PASSEPARTOUT_TIPO_PAGAMENTO', pp?.tipoPagamento, 'tipo pagamento Passepartout');
+    inherit('PASSEPARTOUT_TIPO_DOCUMENTO', pp?.tipoDocumento, 'tipo documento Passepartout');
+    if (!persist) return;
+    try {
+        mkdirSync(path.dirname(agentsCachePath()), { recursive: true });
+        writeFileSync(agentsCachePath(), JSON.stringify({
+            print_agent_legacy_token: body?.print_agent_legacy_token ?? null,
+            passepartout_chiusura: pp ?? null,
+        }), { mode: 0o600 });
+    } catch (err: any) {
+        console.warn('[node-tls] token degli agenti non scritti su disco:', err?.message || err);
+    }
+};
+const loadAgentCredentialsFromDisk = (): void => {
+    try {
+        applyAgentCredentials(JSON.parse(readFileSync(agentsCachePath(), 'utf8')), false);
+    } catch { /* assente: si aspetta il cloud */ }
 };
 
 const readCache = (): NodeTlsMaterial | null => {
@@ -102,11 +145,9 @@ const fetchFromCloud = async (): Promise<NodeTlsMaterial | null> => {
         // il nodo lo mette nel PROPRIO env, così il suo printAgentAuth
         // accetta l'agente che lo usa — senza copiarlo a mano nel .cmd.
         // Anche a cert assente (HTTP locale): l'agente stampa comunque.
-        if (typeof body?.print_agent_legacy_token === 'string' && body.print_agent_legacy_token
-            && process.env.PRINT_AGENT_TOKEN !== body.print_agent_legacy_token) {
-            process.env.PRINT_AGENT_TOKEN = body.print_agent_legacy_token;
-            console.log('[node-tls] token legacy agente di stampa ereditato dal cloud');
-        }
+        // Dalla fase B5 anche la configurazione di chiusura dei conti
+        // Passepartout (il token dell'agente lo dà il supervisore).
+        applyAgentCredentials(body, true);
         const cert = body?.cert;
         if (typeof cert?.cert_pem === 'string' && typeof cert?.key_pem === 'string') {
             return { cert_pem: cert.cert_pem, key_pem: cert.key_pem, expires_at: cert.expires_at ?? null };
@@ -125,6 +166,7 @@ export const loadNodeTlsMaterial = async (): Promise<NodeTlsMaterial | null> => 
     // Prima la copia su disco delle chiavi: se il cloud risponde, la
     // risposta la sostituisce subito dopo.
     loadJwtKeysFromDisk();
+    loadAgentCredentialsFromDisk();
     const fresh = await fetchFromCloud();
     if (fresh) {
         writeCache(fresh);

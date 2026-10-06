@@ -1,5 +1,5 @@
 import { io, Socket } from 'socket.io-client';
-import { serviceSocketUrl, isNodeUrl, noteNodeFailure, signalOfflineSessionExpired } from './apiRouting';
+import { serviceSocketUrl, isNodeUrl, noteNodeFailure, noteNodeReachable, signalOfflineSessionExpired } from './apiRouting';
 
 // Token storage key (must match authApiService)
 const ACCESS_TOKEN_KEY = 'ristomanager_access_token';
@@ -84,6 +84,11 @@ class SocketClient {
     this.socket.on('connect', () => {
       console.log('✅ Socket connected:', this.socket?.id);
       this.reconnectAttempts = 0;
+      // Collegato al nodo = nodo vivo: le scritture tornano in LAN subito.
+      // Questo gestore è registrato prima di quello di App, quindi la coda
+      // offline che App svuota al connect parte già verso il nodo.
+      const uri = (this.socket?.io as any)?.uri as string | undefined;
+      if (uri && isNodeUrl(uri)) noteNodeReachable();
       this.notifyChange();
     });
 
