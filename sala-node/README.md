@@ -443,8 +443,86 @@ rimuove il servizio e scollega il PC (`POST /pp-agent/scollega`, col suo token).
 Col nodo di sala (Frantoio): `SYMPOTIA_NODO_URL` aggiunge `PP_AGENT_NODE_URL`.
 
 Serve almeno un rilascio dell'agente nel cloud, cioè `AGENT_RELEASE_TOKEN`
-impostato su Railway e su GitHub. Va provato su una VM Windows, mai sul PC di
-produzione del Frantoio.
+impostato su Railway e su GitHub. Va provato su una VM Windows (vedi sotto),
+mai sul PC di produzione del Frantoio.
+
+### Prova su una VM Windows, con la cassa finta
+
+Serve una VM Windows 10 o 11 (Parallels va bene). Prima di cominciare, fai
+un'istantanea pulita.
+
+`scripts/cassa-finta.ps1` risponde come l'AdapterWS alle chiamate di:
+- installatore;
+- verifica della cassa;
+- import di tavoli e menu;
+- prova di scrittura.
+
+Dati che usa:
+- **Versione:** 2026C1.
+- **Tipi di pagamento:** Contanti, POS, ESTERNO (Varie1).
+- **Sale:** DENTRO con 6 tavoli, FUORI con 3, più un ingombro.
+- **Articoli:** 8.
+- **Prenotazioni:** tenute in memoria.
+- **Comande e conti:** nessuno.
+
+Le altre operazioni rispondono con un errore SOAP. Non va mai lanciata sul PC
+di un ristorante.
+
+1. **Ristorante di prova.** Dal pannello Piattaforma crea un ristorante con
+   «cassa passepartout» accesa. Mai il codice di un ristorante vero: abbinare
+   un PC ruota il token e stacca l'agente che c'è.
+2. **Cassa finta.** Nella VM apri PowerShell come amministratore, in una
+   finestra sua:
+   ```powershell
+   irm https://<server>/installa/cassa-finta.ps1 | iex
+   ```
+   - Ascolta sulla porta 7606, con utente e password `prova` / `prova`.
+   - Ogni chiamata compare nella finestra; le password no.
+   - Se sulla VM c'è un Passepartout vero, la 7606 è sua. In quel caso
+     imposta `$env:CASSA_FINTA_PORTA='7607'` prima della riga, e
+     all'installatore `$env:SYMPOTIA_CASSA_URL='http://localhost:7607/AdapterWS'`.
+3. **Codice.** Nel ristorante di prova apri Impostazioni → Passepartout →
+   «Collega il PC della cassa» e copia la riga.
+4. **Installatore.** In una seconda finestra PowerShell come amministratore
+   incolla la riga. Conferma la cassa trovata su localhost e inserisci
+   `prova` / `prova`.
+5. **Cosa aspettarsi:**
+   - `Get-Service sympotia-cassa` dice `Running`;
+   - in `C:\Sympotia\Cassa\` ci sono `nodo.json`, `versions\` e `logs\`;
+   - la sezione mostra il PC collegato con l'agente del canale.
+6. **Verifica della cassa.**
+   - La versione è 2026C1.
+   - Scegli ESTERNO come tipo di pagamento e conferma che in cassa è
+     elettronico.
+   - Importa la pianta (6 + 3 tavoli) e abbina i tavoli.
+   - Importa il menu (8 articoli).
+   - Fai la prenotazione di prova su un tavolo abbinato. Nella finestra
+     della cassa finta compaiono la scrittura e l'annullamento («Mancata»).
+7. **Tenuta.**
+   - Riavvia la VM: il servizio riparte e il PC si ricollega da solo.
+   - Chiudi la cassa finta: la verifica dice che la cassa non risponde,
+     mentre il PC resta collegato al cloud.
+   - Riaprila: la verifica torna verde. Le prenotazioni in memoria si
+     perdono.
+8. **Disinstallazione.**
+   ```powershell
+   $env:SYMPOTIA_AZIONE='disinstalla'; irm https://<server>/installa/cassa.ps1 | iex
+   ```
+   Il servizio sparisce e la sezione mostra il PC scollegato. Poi torna
+   all'istantanea per ripetere da capo.
+
+**Aggiornamenti dal cloud.** Si provano quando nel canale c'è un rilascio più
+nuovo di quello installato:
+- metti il ristorante di prova su «pilota»;
+- in `nodo.json` scrivi `"update_window": { "from": "00:00", "to": "24:00" }`;
+- lancia `Restart-Service sympotia-cassa`.
+
+Entro un paio di minuti, nei log del supervisore compaiono «scaricato» e poi
+l'installazione.
+
+**Errore «Impossibile creare un canale sicuro SSL/TLS».** Su un Windows
+vecchio `irm` può fallire così. Lancia prima
+`[Net.ServicePointManager]::SecurityProtocol = 'Tls12'` nella stessa finestra.
 
 ### Prima installazione (fuori servizio)
 
