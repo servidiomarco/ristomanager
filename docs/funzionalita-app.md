@@ -820,6 +820,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-07 | Pagamenti | Se il registratore di cassa risponde «PRINTER ERROR», il messaggio ora dice di controllare carta e coperchio e poi ristampare. |
 | 2026-10-07 | Integrazione cassa Passepartout; Impostazioni | Installare il PC della cassa ora è un comando: «Collega il PC della cassa» mostra la riga da incollare in PowerShell, già col codice. L'installatore trova la cassa in rete, prova utente e password prima di abbinare il PC, installa il servizio «sympotia-cassa» che riparte da solo e si aggiorna di notte, e disattiva l'agente installato a mano prima. |
 | 2026-10-07 | Piattaforma; Integrazione cassa Passepartout | Il supervisore del PC della cassa ha un «modo agente» per i ristoranti con la sola cassa: senza nodo di sala né database tiene in vita l'agente della cassa, ogni ora chiede al cloud se c'è una versione nuova per il suo canale, la scarica verificandone lo sha256, la installa di notte a cassa ferma e torna alla precedente se la nuova non si collega. |
 | 2026-10-07 | Piattaforma; Integrazione cassa Passepartout | Agente della cassa leggero e distribuito dal cloud: un solo file da ~470 KB (zip da ~110 KB) invece del pacchetto del nodo da ~40 MB; la CI lo carica nel canale pilota a ogni merge su main, il pannello Piattaforma (tab Salute) lo promuove a stabile e sceglie i ristoranti pilota. Il PC della cassa lo scarica col token dell'agente (`/pp-agent/aggiornamento`, `/pp-agent/rilascio/:sha`). |

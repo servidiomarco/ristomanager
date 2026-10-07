@@ -773,7 +773,12 @@ async function handleRtFiscale(job) {
       const code = text.match(/code\s*=\s*"([^"]*)"/i)?.[1] ?? `HTTP ${res.status}`;
       const status = text.match(/status\s*=\s*"([^"]*)"/i)?.[1] ?? '';
       log(`job ${job.id} [rt]: il registratore ha rifiutato (${code} ${status})`);
-      await api(job.__base, `/print-agent/jobs/${job.id}/ack`, { method: 'POST', body: JSON.stringify({ ok: false, error: `RT: ${code} ${status}`.trim() }) });
+      // «PRINTER ERROR» è la stampante termica dell'RT, non il flusso fiscale:
+      // di solito carta finita, coperchio aperto o inceppamento. Il codice
+      // grezzo non dice nulla a chi è in cassa, quindi si aggiunge cosa
+      // controllare (il codice resta, per il tecnico).
+      const hint = /printer\s*error/i.test(`${code} ${status}`) ? ' — controllare carta e coperchio del registratore, poi ristampare' : '';
+      await api(job.__base, `/print-agent/jobs/${job.id}/ack`, { method: 'POST', body: JSON.stringify({ ok: false, error: `RT: ${code} ${status}`.trim() + hint }) });
       return;
     }
     // addInfo: zRepNumber + fiscalReceiptNumber compongono il numero del
