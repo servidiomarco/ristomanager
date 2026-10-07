@@ -22,10 +22,11 @@
 // Comandi:
 //   articoli <testo>                      cerca nel catalogo (codice, tipo, prezzo, varianti)
 //   leggi [idComanda]                     la comanda di prova (o quella indicata)
-//   crea <codice1> <codice2>              comanda nuova: riga 1 uscita 1, riga 2 uscita 2, senza invio
+//   crea <articolo1> <articolo2>          comanda nuova: riga 1 uscita 1, riga 2 uscita 2, senza invio
 //   adotta                                la comanda aperta sul tavolo diventa quella di prova
-//   aggiungi <codice> [--uscita n]        una riga in più (--modo tutte | parziale)
-//   variante <codice> <codVariante|-> [testo libero]   una riga con varianti
+//   aggiungi <articolo> [--uscita n]      una riga in più (--modo tutte | parziale)
+//   variante <articolo> <variante|-> [testo libero]   una riga con varianti
+//   (articolo e variante col numero che stampa «articoli»: i codici hanno spazi)
 //   invia <uscita>                        InviaProduzioneComanda di quella sola uscita
 //   togli <idRiga>                        la riga con DaCancellare (--modo tutte | parziale)
 //   sposta <tavolo> [--sala S]            la comanda su un altro tavolo
@@ -45,7 +46,7 @@ const NS_CONTRACT = 'http://schemas.datacontract.org/2004/07/PMessageBox.Contrac
 const NS_COMANDA = 'http://schemas.datacontract.org/2004/07/PMessageBox.Contract.Comanda';
 const STATO = path.resolve('prova-comanda-viva.json');
 const LOG = path.resolve('prova-comanda-viva.log');
-const CACHE_ARTICOLI = path.resolve('prova-comanda-viva-articoli.json');
+const CACHE_ARTICOLI = path.resolve('prova-comanda-viva-articoli-v2.json');
 
 // --- argomenti ----------------------------------------------------------------
 const argv = process.argv.slice(2);
@@ -212,25 +213,42 @@ async function scriviSullaComanda(righeNuove, extra = {}) {
     stampa(await leggiComanda(id), 'Dopo');
 }
 
+// --- catalogo ---------------------------------------------------------------------------
+// I codici della cassa hanno spazi («Tagliatelle Silana», «In 2 piatti»), che
+// fra ssh e PowerShell spezzerebbero gli argomenti: nei comandi un articolo
+// o una variante si indica col suo numero (367), il primo campo che stampa
+// «articoli»; un codice senza spazi va bene anche così. Niente «#» davanti:
+// nella riga di comando inizia un commento.
+async function catalogo() {
+    if (fs.existsSync(CACHE_ARTICOLI)) return JSON.parse(fs.readFileSync(CACHE_ARTICOLI, 'utf8'));
+    console.log('Leggo il catalogo (fino a 2 minuti)…');
+    const r = await soap('GetArticoli', '<ultimaModifica>2000-01-01T00:00:00</ultimaModifica>', 180_000);
+    const articoli = (r?.ContrattoArticolo ?? []).map((a) => ({
+        id: n(a.IdGestionale), codice: s(a.Codice), descrizione: s(a.Descrizione), prezzo: n(a.Prezzo), tipo: s(a.TipoEnum),
+        attivo: s(a.IsAttivo), categoria: s(a?.Categoria?.Descrizione),
+        varianti: (a?.Varianti?.string ?? []).map(String),
+        variantiCategoria: (a?.Categoria?.Varianti?.string ?? []).map(String),
+    }));
+    fs.writeFileSync(CACHE_ARTICOLI, JSON.stringify(articoli));
+    return articoli;
+}
+async function codiceDi(arg) {
+    const m = /^#?(\d+)$/.exec(String(arg ?? ''));
+    if (!m) return arg;
+    if (soloXml) return `ART${m[1]}`;
+    const a = (await catalogo()).find((x) => x.id === Number(m[1]));
+    if (!a?.codice) throw new Error(`Nessun articolo #${m[1]} nel catalogo: cercalo con «articoli»`);
+    return a.codice;
+}
+
 // --- comandi --------------------------------------------------------------------------
 async function main() {
     switch (comando) {
         case 'articoli': {
-            let articoli = fs.existsSync(CACHE_ARTICOLI) ? JSON.parse(fs.readFileSync(CACHE_ARTICOLI, 'utf8')) : null;
-            if (!articoli) {
-                console.log('Leggo il catalogo (fino a 2 minuti)…');
-                const r = await soap('GetArticoli', '<ultimaModifica>2000-01-01T00:00:00</ultimaModifica>', 180_000);
-                articoli = (r?.ContrattoArticolo ?? []).map((a) => ({
-                    codice: s(a.Codice), descrizione: s(a.Descrizione), prezzo: n(a.Prezzo), tipo: s(a.TipoEnum),
-                    attivo: s(a.IsAttivo), categoria: s(a?.Categoria?.Descrizione),
-                    varianti: (a?.Varianti?.string ?? []).map(String),
-                    variantiCategoria: (a?.Categoria?.Varianti?.string ?? []).map(String),
-                }));
-                fs.writeFileSync(CACHE_ARTICOLI, JSON.stringify(articoli));
-            }
+            const articoli = await catalogo();
             const cerca = (args.join(' ') || '').toLowerCase();
             for (const a of articoli.filter((x) => `${x.codice} ${x.descrizione} ${x.categoria}`.toLowerCase().includes(cerca)).slice(0, 40)) {
-                console.log(`${a.codice} · «${a.descrizione}» · ${a.tipo} · ${a.prezzo ?? '-'} € · ${a.categoria ?? ''}` +
+                console.log(`${a.id} · ${a.codice} · «${a.descrizione}» · ${a.tipo} · ${a.prezzo ?? '-'} € · ${a.categoria ?? ''}` +
                     (a.attivo === 'false' ? ' · SPENTO' : '') +
                     (a.varianti.length || a.variantiCategoria.length ? ` · varianti: ${[...a.varianti, ...a.variantiCategoria].join(', ')}` : ''));
             }
@@ -247,7 +265,7 @@ async function main() {
             const xml = comandaXml({
                 coperti: 0,
                 note: 'PROVA Sympotia comanda viva',
-                righe: [rigaNuova(args[0], 1), rigaNuova(args[1], 2)],
+                righe: [rigaNuova(await codiceDi(args[0]), 1), rigaNuova(await codiceDi(args[1]), 2)],
                 sala, tavolo,
             });
             const r = await soap('PutComanda', xml);
@@ -266,16 +284,16 @@ async function main() {
         }
         case 'aggiungi': {
             if (!args[0]) throw new Error('aggiungi <codice> [--uscita n]');
-            await scriviSullaComanda([rigaNuova(args[0], Number(opzioni.uscita ?? 1))]);
+            await scriviSullaComanda([rigaNuova(await codiceDi(args[0]), Number(opzioni.uscita ?? 1))]);
             return;
         }
         case 'variante': {
             if (!args[0] || !args[1]) throw new Error('variante <codice> <codVariante|-> [testo libero]');
             const varianti = [];
-            if (args[1] !== '-') varianti.push({ Variante: args[1], InAggiunta: true });
+            if (args[1] !== '-') varianti.push({ Variante: await codiceDi(args[1]), InAggiunta: true });
             const libero = args.slice(2).join(' ');
             if (libero) varianti.push({ Descrizione: libero, InAggiunta: false, Prezzo: 0 });
-            await scriviSullaComanda([rigaNuova(args[0], Number(opzioni.uscita ?? 1), { Varianti: varianti })]);
+            await scriviSullaComanda([rigaNuova(await codiceDi(args[0]), Number(opzioni.uscita ?? 1), { Varianti: varianti })]);
             return;
         }
         case 'invia': {
