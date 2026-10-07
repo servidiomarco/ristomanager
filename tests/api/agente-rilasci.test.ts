@@ -4,7 +4,7 @@ import { Client } from 'pg';
 import { api } from './helpers';
 
 // Rilasci dell'agente della cassa dal cloud (piano «plug and play», punto
-// 3): la CI carica il pacchetto leggero col token di piattaforma, il
+// 3): la CI carica il pacchetto leggero col suo token, il
 // pannello lo promuove a stabile, il supervisore sul PC chiede se c'è una
 // versione nuova per il suo canale e la scarica col token dell'agente.
 
@@ -117,5 +117,18 @@ describe('rilasci dell\'agente della cassa', () => {
         expect(lista.body.rilasci.find((x: any) => x.sha === 'aaa0001')).toMatchObject({ canale: 'stabile', stabile_in_uso: true });
         expect(lista.body.rilasci[0]).toMatchObject({ sha: 'ccc0010', canale: 'pilota' });
         expect(Array.isArray(lista.body.ristoranti)).toBe(true);
+    });
+
+    it('la CI carica col suo token, che non apre altro', async () => {
+        const CI = { 'X-Agent-Release-Token': 'test-agent-release-token' };
+        expect((await carica('ddd0001', 'v-ci', { 'X-Agent-Release-Token': 'sbagliato' })).status).toBe(401);
+        const r = await carica('ddd0001', 'v-ci', CI);
+        expect(r.status).toBe(201);
+        expect(r.body).toMatchObject({ sha: 'ddd0001', canale: 'pilota' });
+        // Lo stesso header non vale per il resto del pannello.
+        expect((await api().get('/admin/agent-releases').set(CI)).status).toBe(401);
+        expect((await api().post('/admin/agent-releases/ddd0001/promuovi').set(CI)).status).toBe(401);
+        expect((await api().delete('/admin/agent-releases/ddd0001').set(CI)).status).toBe(401);
+        expect((await api().put('/admin/tenants/1/agente-canale').set(CI).send({ canale: 'pilota' })).status).toBe(401);
     });
 });
