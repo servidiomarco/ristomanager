@@ -4573,17 +4573,28 @@ app.post('/pp-agent/scollega', agentReleaseLimiter, async (req, res) => {
 // L'installatore Windows del PC della cassa (piano «plug and play», punto
 // 5): `irm <server>/installa/cassa.ps1 | iex` da PowerShell come
 // amministratore. Lo script sta in scripts/installa-cassa.ps1; qui gli si
-// scrive dentro l'indirizzo del server da cui lo si è scaricato.
-let scriptInstallaCassa: string | null = null;
-app.get('/installa/cassa.ps1', async (req, res) => {
+// scrive dentro l'indirizzo del server da cui lo si è scaricato. Accanto,
+// la cassa finta per provarlo su una VM Windows senza Passepartout.
+const SCRIPT_INSTALLA: Record<string, string> = {
+    'cassa.ps1': 'installa-cassa.ps1',
+    'cassa-finta.ps1': 'cassa-finta.ps1',
+};
+const scriptInstalla = new Map<string, string>();
+app.get('/installa/:script', async (req, res, next) => {
+    const file = Object.prototype.hasOwnProperty.call(SCRIPT_INSTALLA, req.params.script) ? SCRIPT_INSTALLA[req.params.script] : null;
+    if (!file) return next();
     try {
-        scriptInstallaCassa ??= await readFileAsync(path.join(process.cwd(), 'scripts', 'installa-cassa.ps1'), 'utf8');
+        let testo = scriptInstalla.get(file);
+        if (testo == null) {
+            testo = await readFileAsync(path.join(process.cwd(), 'scripts', file), 'utf8');
+            scriptInstalla.set(file, testo);
+        }
         const server = `${req.protocol}://${req.get('host')}`;
         res.set({ 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
-        res.send(scriptInstallaCassa.split('__SYMPOTIA_SERVER__').join(server));
+        res.send(testo.split('__SYMPOTIA_SERVER__').join(server));
     } catch (err: any) {
-        console.error('GET /installa/cassa.ps1 error:', err);
-        res.status(404).type('text/plain').send("Write-Host 'Installatore non disponibile su questo server.'");
+        console.error(`GET /installa/${req.params.script} error:`, err);
+        res.status(404).type('text/plain').send("Write-Host 'Script non disponibile su questo server.'");
     }
 });
 

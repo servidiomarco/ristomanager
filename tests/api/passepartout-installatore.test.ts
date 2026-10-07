@@ -49,7 +49,7 @@ describe("installatore del PC della cassa", () => {
     it("l'immagine di produzione lo contiene: il Dockerfile copia solo le cartelle elencate", () => {
         // Il 07/10 la route rispondeva «non disponibile» su Railway: i test
         // girano dal repo, l'immagine no.
-        expect(fs.readFileSync('Dockerfile', 'utf8')).toMatch(/^COPY scripts\/installa-cassa\.ps1 \.\/scripts\/$/m);
+        expect(fs.readFileSync('Dockerfile', 'utf8')).toMatch(/^COPY scripts\/installa-cassa\.ps1 .*\.\/scripts\/$/m);
     });
 
     it.skipIf(!pwsh)('PowerShell lo legge senza errori di sintassi', () => {
