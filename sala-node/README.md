@@ -409,6 +409,42 @@ chiama `sympotia-cassa` (WinSW), `com.sympotia.cassa` (launchd),
 - `"aggiornamenti": "manuali"` spegne lo scaricamento; `inbox\` funziona
   comunque a mano.
 
+### L'installatore (`scripts/installa-cassa.ps1`)
+
+Il server lo serve su `GET /installa/cassa.ps1`, con dentro il proprio
+indirizzo. Dalla sezione Passepartout, «Collega il PC della cassa» dà la riga
+da incollare in PowerShell come amministratore:
+
+```powershell
+$env:SYMPOTIA_CODICE='XXXX-XXXX'; irm https://<server>/installa/cassa.ps1 | iex
+```
+
+Passi:
+1. Controlla amministratore, Windows 10+/Server 2016+ a 64 bit, 500 MB liberi
+   e che `sympotia-cassa` non ci sia già.
+2. Trova la cassa: `http://<localhost o IP del PC>:7606/?wsdl`, oppure chiede
+   l'indirizzo (o `SYMPOTIA_CASSA_URL`).
+3. Prova utente e password con `GetVersioneGestionale` **prima** di abbinare,
+   così un tentativo sbagliato non consuma il codice.
+4. Abbina (`/pp-agent/abbina`) e scarica, con sha256 fissati o annunciati:
+   - Node 22 portatile;
+   - WinSW 2.12;
+   - l'agente del canale del ristorante.
+5. Scrive `C:\Sympotia\Cassa\nodo.json` in modo agente, con permessi solo per
+   Administrators e SYSTEM (per SID).
+6. Installa e avvia il servizio, e propone di disattivare le attività
+   pianificate che lanciavano l'agente a mano.
+7. Aspetta fino a 2 minuti che l'agente scriva di essere collegato.
+
+Disinstallare: `$env:SYMPOTIA_AZIONE='disinstalla'` e la stessa riga. Ferma e
+rimuove il servizio e scollega il PC (`POST /pp-agent/scollega`, col suo token).
+
+Col nodo di sala (Frantoio): `SYMPOTIA_NODO_URL` aggiunge `PP_AGENT_NODE_URL`.
+
+Serve almeno un rilascio dell'agente nel cloud, cioè il segreto GitHub
+`PLATFORM_ADMIN_TOKEN` impostato. Va provato su una VM Windows, mai sul PC di
+produzione del Frantoio.
+
 ### Prima installazione (fuori servizio)
 
 1. Cartella `C:\ProgramData\Sympotia\nodo\` (leggibile solo da SYSTEM e
