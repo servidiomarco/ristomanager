@@ -705,12 +705,14 @@ const xmlAttr = (v) => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').re
 // fiscale Epson. Importi con punto decimale, quantità a 2 decimali.
 function buildRtXml(p) {
   const lines = [];
+  let grossCents = 0;
   for (const i of p.items ?? []) {
     const code = String(i.vat_rate_code ?? '');
     if (!/^\d/.test(code)) throw new Error(`aliquota '${code}': le nature IVA non sono mappabili sui reparti RT`);
     const rep = RT_REPARTI.get(String(parseFloat(code)));
     if (!rep) throw new Error(`aliquota ${code} senza reparto in RT_FISCAL_REPARTI`);
     lines.push(`<printRecItem description="${xmlAttr(String(i.description).slice(0, 38))}" quantity="${xmlAttr(Number(i.quantity).toFixed(2))}" unitPrice="${xmlAttr(Number(i.unit_price).toFixed(2))}" department="${rep}" justification="1" />`);
+    grossCents += Math.round(Number(i.quantity) * Math.round(Number(i.unit_price) * 100));
   }
   const discount = parseFloat(p.discount || '0');
   if (discount > 0) {
@@ -723,6 +725,15 @@ function buildRtXml(p) {
     const a = parseFloat(amount || '0');
     if (a > 0) lines.push(`<printRecTotal payment="${a.toFixed(2)}" paymentType="${type}" index="1" description="${desc}" justification="1" />`);
   };
+  // Documento a zero o senza pagamento: il registratore non lo chiude, lo
+  // stampa come ANNULLO e resta con lo scontrino aperto. Il 07/10 un conto
+  // da 0,01 € tutto omaggio ha bloccato così gli scontrini della cassa per
+  // ore. Si rifiuta qui, prima di toccare l'RT.
+  const paid = [p.cash_payment_amount, p.electronic_payment_amount, p.ticket_restaurant_payment_amount]
+    .some(a => parseFloat(a || '0') > 0);
+  if (!paid || grossCents - Math.round(discount * 100) <= 0) {
+    throw new Error('documento a zero o senza pagamento: il registratore lo lascerebbe aperto');
+  }
   pay(p.cash_payment_amount, 0, 'Contanti');
   pay(p.electronic_payment_amount, 2, 'Elettronico');
   pay(p.ticket_restaurant_payment_amount, 3, 'Buoni pasto');

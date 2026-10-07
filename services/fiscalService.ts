@@ -181,6 +181,17 @@ export function buildEReceiptPayload(input: BuildEReceiptInput): EReceiptPayload
     };
 }
 
+// Il corrispettivo che il documento certifica: incassato + non riscosso
+// (per la quadratura, anche somma righe − sconto). A zero non c'è niente da
+// documentare, e il registratore un documento senza pagamento lo stampa
+// come ANNULLO e resta con lo scontrino aperto: il 07/10 un conto da 0,01 €
+// tutto omaggio ha fermato gli scontrini della cassa per ore.
+export function eReceiptAmountCents(p: EReceiptPayload): number {
+    const cents = (s: string) => Math.round((parseFloat(s) || 0) * 100);
+    return cents(p.cash_payment_amount) + cents(p.electronic_payment_amount)
+        + cents(p.ticket_restaurant_payment_amount) + cents(p.services_uncollected_amount);
+}
+
 // ---------------------------------------------------------------------------
 // Fattura elettronica (FatturaPA 1.2, formato FPR12). Il provider accetta
 // l'XML grezzo: il builder è nostro, e vive qui perché è una funzione pura
