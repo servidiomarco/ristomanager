@@ -68,6 +68,7 @@ Si usa il tavolo 88 TETTOIA, che non è disegnato in pianta (`--tavolo`/`--sala`
 | 4 | `invia 1` | Solo l'uscita 1 in produzione: foglietto sulla stampante di cucina giusta, con variante e testo libero? B1 resta non inviata? |
 | 5a | `togli <idRiga non inviata> --modo parziale` | La riga sparisce? Prova anche `--modo tutte` |
 | 5b | `togli <idRiga inviata>` | Riga già mandata: diventa «Cancellato»? Esce un foglietto di storno in cucina? |
+| 5c | `pezzi <idRiga> 2 --modo nuove` | La quantità di una riga già scritta cambia sul posto, con lo stesso numero di riga? |
 | 6 | `sposta 87` | La comanda passa al tavolo 87, con le stesse righe? |
 | 7 | `crea C1 B1` su un tavolo libero, poi chiusura **dallo schermo della cassa** | Alla chiusura la cassa manda in produzione le righe mai inviate? Cosa chiede al cassiere? |
 | 8 | Aprire un tavolo dal palmare o dalla cassa con una riga, poi `adotta --tavolo N` e `aggiungi C1 --modo parziale` | Le righe del CRM si aggiungono alla comanda del palmare senza toccare le sue? |

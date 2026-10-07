@@ -28,7 +28,8 @@
 //   variante <articolo> <variante|-> [testo libero]   una riga con varianti
 //   (articolo e variante col numero che stampa «articoli»: i codici hanno spazi)
 //   invia <uscita>                        InviaProduzioneComanda di quella sola uscita
-//   togli <idRiga>                        la riga con DaCancellare (--modo tutte | parziale)
+//   togli <idRiga>                        la riga con DaCancellare (--modo tutte | nuove | parziale)
+//   pezzi <idRiga> <n>                    cambia la quantità della riga (--modo tutte | nuove)
 //   sposta <tavolo> [--sala S]            la comanda su un altro tavolo
 //   chiudi [tipoPagamento]                proforma pagata (default ESTERNO), senza invio
 // Opzioni: --tavolo 88 --sala TETTOIA --prezzo 1.00 --modo tutte|nuove|parziale --prova (solo XML)
@@ -325,6 +326,17 @@ async function main() {
                 await soap('PutComanda', comandaXml({ id, righe }));
                 stampa(await leggiComanda(id), 'Dopo');
             }
+            return;
+        }
+        case 'pezzi': {
+            const [idRiga, quanti] = args;
+            if (!idRiga || !Number.isInteger(Number(quanti))) throw new Error('pezzi <idRiga> <n>');
+            const prima = soloXml ? null : await leggiComanda(comandaDiProva());
+            const riga = (prima?.Righe?.PMBRigaComanda ?? []).find((r) => s(r.IdGestionale) === String(idRiga));
+            if (!riga && !soloXml) throw new Error(`La riga ${idRiga} non è nella comanda ${comandaDiProva()}`);
+            const base = riga ? righeEsistenti({ Righe: { PMBRigaComanda: [riga] } })[0] : { IdGestionale: idRiga };
+            const prezzo = Number(base.Prezzo ?? 0);
+            await scriviSullaComanda([{ ...base, Pezzi: Number(quanti), Totale: prezzo * Number(quanti) }]);
             return;
         }
         case 'sposta': {
