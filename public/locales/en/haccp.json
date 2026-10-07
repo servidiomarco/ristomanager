@@ -561,13 +561,41 @@
   "save": "Save",
   "saveCorrection": "Save correction",
   "sensors": {
+    "catalog": {
+      "cloud": "Vendor's cloud",
+      "generic": {
+        "name": "Generic format"
+      },
+      "lawNote": "Freezer rooms need recorders compliant with EN 12830 (Reg. EC 37/2005), checked every year: add the probe to the thermometers to calibrate and record the check there.",
+      "lorawan": {
+        "step1": "Add an HTTP integration to the address above, with the X-Haccp-Sensor-Token header.",
+        "step2": "The sensor is recognised by its DevEUI and shows up below on the first reading.",
+        "summary": "Any LoRaWAN temperature sensor on a network you already have, as long as the decoder returns temperature (or temperature_chn1, temperature_chn2)."
+      },
+      "milesight": {
+        "note": "Gateway without the Metadata option (old firmware): add ?device=$devEUI at the end of the address",
+        "step1": "Connect the gateway to the router with a network cable and open its configuration page.",
+        "step2": "In Network Server, enable the built-in server, EU868 band.",
+        "step3": "Create an application with Metadata on and an HTTP destination: the address above, header X-Haccp-Sensor-Token with the token.",
+        "step4": "Add the sensors with the TS301 or TS302 decoder. DevEUI and AppKey are on the label, or read them with the Milesight ToolBox app by holding the phone close.",
+        "step5": "With ToolBox set uploads every 5–10 minutes. The probe goes inside the room, with the cable through the door seal.",
+        "step6": "On the first reading the sensor shows up below: assign it to its station. A TS302 shows up twice, once per probe.",
+        "summary": "Food probe with display: one probe (TS301) or two (TS302, one sensor for two rooms). Needs a Milesight UG63 or UG65 gateway connected to the router."
+      },
+      "monnit": {
+        "step1": "In the iMonnit portal, create a data webhook to the address above.",
+        "step2": "If the portal does not allow headers, put the token at the end of the address: ?token=…",
+        "step3": "On the first reading the sensors show up below: assign them to their stations.",
+        "summary": "The sensors talk to the Monnit gateway; readings go through the iMonnit portal, which forwards them with a webhook."
+      },
+      "recommended": "Recommended",
+      "title": "Supported sensors and how to connect them"
+    },
     "copied": "Copied",
     "copyToken": "Copy the token",
     "copyUrl": "Copy the address",
     "create": "Create the address",
     "formatGeneric": "JSON with one reading or a list: value in °C, time optional.",
-    "formatMonnit": "The Monnit (iMonnit) gateway webhook works as is. If the gateway cannot send headers, append the token to the address: ?token=…",
-    "formats": "Accepted formats",
     "intro": "With wireless sensors, temperatures record themselves. The sensor gateway needs an address.",
     "name": "Name of sensor {{id}}",
     "none": "No sensors yet: they appear here with their first reading.",

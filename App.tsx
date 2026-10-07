@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChevronUp, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, AlertTriangle, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator, BarChart3, Star, ShoppingBag, LifeBuoy, PlugZap } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChevronUp, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, AlertTriangle, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator, BarChart3, Star, ShoppingBag, LifeBuoy, PlugZap, Radio, Thermometer, SlidersHorizontal, Tag } from 'lucide-react';
 import { ViewState, Room, Table, Dish, RestaurantMenu, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Shift, UserRole, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -25,6 +25,7 @@ import { KitchenDisplay } from './components/KitchenDisplay';
 import { ExpediterDisplay } from './components/ExpediterDisplay';
 import { ShoppingListPage } from './components/ShoppingListPage';
 import { HaccpPage } from './components/HaccpPage';
+import { HaccpSettingsLabels, HaccpSettingsLimits, HaccpSettingsPoints, HaccpSettingsSensors } from './components/haccp/HaccpSettingsPanels';
 import ConversazioniPage from './components/ConversazioniPage';
 import InboxPage from './components/InboxPage';
 import StaffChatPage from './components/StaffChatPage';
@@ -351,7 +352,7 @@ const SETTINGS_GROUPS: {
   labelKey: string;
   label: string;
   Icon: React.ComponentType<{ size?: number; className?: string }>;
-  guard?: 'admin' | 'pay_at_table' | 'reviews' | 'takeaway' | 'passepartout';
+  guard?: 'admin' | 'pay_at_table' | 'reviews' | 'takeaway' | 'passepartout' | 'haccp';
 }[] = [
   { id: 'imp-profilo', labelKey: 'settings.tabProfile', label: 'Profilo', Icon: UserCheck },
   { id: 'imp-ristorante', labelKey: 'settings.tabRestaurant', label: 'Ristorante', Icon: Clock },
@@ -360,6 +361,7 @@ const SETTINGS_GROUPS: {
   { id: 'imp-pagamenti', labelKey: 'nav.items.payments', label: 'Pagamenti', Icon: CreditCard },
   { id: 'imp-fiscalita', labelKey: 'nav.items.fiscal', label: 'Fiscalità', Icon: Landmark, guard: 'pay_at_table' },
   { id: 'imp-passepartout', labelKey: 'settings.tabPassepartout', label: 'Passepartout', Icon: PlugZap, guard: 'passepartout' },
+  { id: 'imp-haccp', labelKey: 'settings.tabHaccp', label: 'HACCP', Icon: ShieldCheck, guard: 'haccp' },
   { id: 'imp-comunicazioni', labelKey: 'nav.groups.communications', label: 'Comunicazioni', Icon: MessagesSquare },
   { id: 'imp-recensioni', labelKey: 'nav.items.reviews', label: 'Recensioni', Icon: Star, guard: 'reviews' },
   { id: 'imp-ai', labelKey: 'settings.tabAi', label: 'AI', Icon: Sparkles },
@@ -2274,6 +2276,7 @@ const App: React.FC = () => {
     : g.guard === 'reviews' ? hasFeature('reviews')
     : g.guard === 'takeaway' ? hasFeature('takeaway')
     : g.guard === 'passepartout' ? (hasFeature('passepartout') && hasPermission('settings:full'))
+    : g.guard === 'haccp' ? hasPermission('haccp:manage')
     : true
   );
 
@@ -3713,6 +3716,53 @@ const App: React.FC = () => {
                   <CardErrorBoundary label="Passepartout">
                     <ContiCrmInCassa showToast={addToast} />
                   </CardErrorBoundary>
+                </div>
+              </SettingsSection>
+            )}
+
+            {/* L'HACCP del locale: sensori di temperatura (con i modelli
+                supportati), postazioni, limiti del manuale ed etichette. Sono
+                le card di HACCP › Configura, che resta per chi gestisce
+                l'HACCP senza le Impostazioni; le route vogliono haccp:manage. */}
+            {hasPermission('haccp:manage') && (
+              <SettingsSection id="imp-haccp" label={t('settings.tabHaccp', 'HACCP')}>
+                <div className="space-y-3">
+                  <SettingsDisclosure
+                    icon={Radio}
+                    title={t('settings.haccpSensors', 'Sensori di temperatura')}
+                    description={t('settings.haccpSensorsHint', 'Collegamento del gateway, sensori supportati e postazioni dei sensori')}
+                  >
+                    <CardErrorBoundary label={t('settings.haccpSensors', 'Sensori di temperatura')}>
+                      <HaccpSettingsSensors />
+                    </CardErrorBoundary>
+                  </SettingsDisclosure>
+                  <SettingsDisclosure
+                    icon={Thermometer}
+                    title={t('settings.haccpPoints', 'Postazioni')}
+                    description={t('settings.haccpPointsHint', 'Celle e frigo, friggitrici, pulizie, termometri e attrezzature')}
+                  >
+                    <CardErrorBoundary label={t('settings.haccpPoints', 'Postazioni')}>
+                      <HaccpSettingsPoints />
+                    </CardErrorBoundary>
+                  </SettingsDisclosure>
+                  <SettingsDisclosure
+                    icon={SlidersHorizontal}
+                    title={t('settings.haccpLimits', 'Limiti del manuale')}
+                    description={t('settings.haccpLimitsHint', 'Abbattimento, cotture, olio, tarature e fasce dei sensori')}
+                  >
+                    <CardErrorBoundary label={t('settings.haccpLimits', 'Limiti del manuale')}>
+                      <HaccpSettingsLimits />
+                    </CardErrorBoundary>
+                  </SettingsDisclosure>
+                  <SettingsDisclosure
+                    icon={Tag}
+                    title={t('settings.haccpLabels', 'Etichette')}
+                    description={t('settings.haccpLabelsHint', 'Prodotti preimpostati con la loro durata')}
+                  >
+                    <CardErrorBoundary label={t('settings.haccpLabels', 'Etichette')}>
+                      <HaccpSettingsLabels />
+                    </CardErrorBoundary>
+                  </SettingsDisclosure>
                 </div>
               </SettingsSection>
             )}

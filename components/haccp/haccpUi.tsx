@@ -105,27 +105,45 @@ export const deleteButton =
 export const chip =
   'inline-flex h-9 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-3 text-[14px] text-[var(--ds-text-secondary)] transition-colors hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
-export const Card: React.FC<{ children: React.ReactNode; className?: string }> = ({ children, className = '' }) => (
-  <section className={`rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)] sm:p-5 ${className}`}>
-    {children}
-  </section>
-);
+/** Le stesse card HACCP dentro un blocco di Impostazioni, che è già una card
+ *  che si apre: `flat` toglie la seconda cornice (card nella card) e
+ *  `hideTitle` il titolo che ripeterebbe quello del blocco — l'azione a
+ *  destra resta. Fuori da Impostazioni nessuno le imposta. */
+export const HaccpCardStyle = React.createContext<{ flat: boolean; hideTitle: boolean }>({ flat: false, hideTitle: false });
+
+export const Card: React.FC<{ children: React.ReactNode; className?: string }> = ({ children, className = '' }) => {
+  const { flat } = React.useContext(HaccpCardStyle);
+  return flat ? (
+    <section className={`border-t border-[var(--ds-border)] pt-4 first:border-t-0 first:pt-0 ${className}`}>{children}</section>
+  ) : (
+    <section className={`rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)] sm:p-5 ${className}`}>
+      {children}
+    </section>
+  );
+};
 
 /** Icona in pastiglia, titolo, e a destra il contatore come pill. */
-export const CardHeader: React.FC<{ title: string; icon: React.ReactNode; status?: string; statusTone?: 'neutral' | 'positive' | 'critical' | 'pending'; aside?: React.ReactNode }> = ({ title, icon, status, statusTone = 'neutral', aside }) => (
-  <div className="mb-3 flex items-center justify-between gap-3">
-    <div className="flex min-w-0 items-center gap-2.5">
-      <span className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]">
-        {icon}
-      </span>
-      <h2 className="truncate text-[15px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">{title}</h2>
-    </div>
+export const CardHeader: React.FC<{ title: string; icon: React.ReactNode; status?: string; statusTone?: 'neutral' | 'positive' | 'critical' | 'pending'; aside?: React.ReactNode }> = ({ title, icon, status, statusTone = 'neutral', aside }) => {
+  const { hideTitle } = React.useContext(HaccpCardStyle);
+  const right = (aside || status) && (
     <div className="flex flex-shrink-0 items-center gap-2">
       {aside}
       {status && <StatusPill tone={statusTone} className="tabular-nums">{status}</StatusPill>}
     </div>
-  </div>
-);
+  );
+  if (hideTitle) return right ? <div className="mb-3 flex justify-end">{right}</div> : null;
+  return (
+    <div className="mb-3 flex items-center justify-between gap-3">
+      <div className="flex min-w-0 items-center gap-2.5">
+        <span className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]">
+          {icon}
+        </span>
+        <h2 className="truncate text-[15px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">{title}</h2>
+      </div>
+      {right}
+    </div>
+  );
+};
 
 // Le azioni nella firma: piccole di testo ma alte 36px, con margine negativo
 // perché non allarghino la riga.

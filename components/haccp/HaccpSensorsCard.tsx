@@ -1,16 +1,57 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, Battery, Copy, Radio, RefreshCw } from 'lucide-react';
+import { AlertTriangle, Battery, ChevronDown, Copy, Radio, RefreshCw } from 'lucide-react';
 import { haccpApiService, HaccpPoint, HaccpSensor } from '../../services/haccpApiService';
 import { HACCP_DEFAULT_LIMITS } from '../../utils/haccp';
 import { Callout, StatusPill, dsButton, dsInput, dsSelect } from '../ds';
-import { Card, CardHeader, emptyNote, formatNumber, formatShortDate, formatTime, quietIconButton, rowList, todayISO } from './haccpUi';
+import { Card, CardHeader, TFunc, emptyNote, formatNumber, formatShortDate, formatTime, quietIconButton, rowList, todayISO } from './haccpUi';
+import { HACCP_SENSOR_CATALOG, HACCP_SENSOR_VENDOR_NAMES } from './haccpSensorCatalog';
 
 /* I sensori wireless: il gateway del produttore manda le letture a un
    indirizzo del locale, con un token. Un sensore mai visto compare qui da
    solo, non assegnato; assegnato a una postazione, compila la rilevazione
    della fascia e apre la non conformità sull'escursione lunga. Il token sta
    solo qui: chi lo vede può scrivere temperature nel registro. */
+
+/** I sensori che il webhook sa leggere, ognuno coi passi per collegarlo.
+ *  Chiusi: chi ha già collegato tutto non li vuole davanti. */
+const SupportedSensors: React.FC<{ t: TFunc }> = ({ t }) => (
+  <details className="mt-3 border-t border-[var(--ds-border)] pt-1 text-[14px] text-[var(--ds-text-secondary)]">
+    <summary className="flex h-11 cursor-pointer items-center text-[var(--ds-text-muted)]">{t('sensors.catalog.title', 'Sensori supportati e come collegarli')}</summary>
+    <ul className={`${rowList} pb-1`}>
+      {HACCP_SENSOR_CATALOG.map(entry => (
+        <li key={entry.id}>
+          {/* Gruppo con nome: il blocco di Impostazioni attorno è già un
+              `group` aperto, e un group-open semplice girerebbe tutte le frecce. */}
+          <details className="group/vendor py-1">
+            <summary className="flex min-h-11 cursor-pointer list-none flex-wrap items-center gap-x-2 gap-y-1 py-1.5 [&::-webkit-details-marker]:hidden">
+              <span className="font-medium text-[var(--ds-text-primary)]">{entry.nameKey ? t(entry.nameKey, entry.name) : entry.name}</span>
+              {entry.recommended && <StatusPill tone="positive">{t('sensors.catalog.recommended', 'Consigliato')}</StatusPill>}
+              {entry.en12830 && <StatusPill>EN 12830</StatusPill>}
+              {entry.cloud && <StatusPill>{t('sensors.catalog.cloud', 'Cloud del produttore')}</StatusPill>}
+              <ChevronDown className="ml-auto h-4 w-4 flex-shrink-0 text-[var(--ds-text-muted)] transition-transform group-open/vendor:rotate-180" aria-hidden />
+            </summary>
+            <div className="space-y-2 pb-2">
+              <p>{t(entry.summary[0], entry.summary[1])}</p>
+              {entry.steps.length > 0 && (
+                <ol className="list-decimal space-y-1 pl-5">
+                  {entry.steps.map(([key, fallback]) => <li key={key}>{t(key, fallback)}</li>)}
+                </ol>
+              )}
+              {entry.note && <p className="text-[13px] text-[var(--ds-text-muted)]">{t(entry.note[0], entry.note[1])}</p>}
+              {entry.sample && (
+                <pre className="overflow-x-auto rounded-[var(--ds-radius-sm)] bg-[var(--ds-surface-row)] p-3 font-mono text-[12px] leading-relaxed">{entry.sample}</pre>
+              )}
+            </div>
+          </details>
+        </li>
+      ))}
+    </ul>
+    <p className="pb-2 text-[13px] text-[var(--ds-text-muted)]">
+      {t('sensors.catalog.lawNote', 'Per le celle dei surgelati servono registratori conformi alla EN 12830 (Reg. CE 37/2005), verificati ogni anno: aggiungi la sonda fra i termometri da tarare e registra lì la verifica.')}
+    </p>
+  </details>
+);
 
 const lastSeen = (iso: string | null): string => {
   if (!iso) return '';
@@ -110,14 +151,6 @@ export const HaccpSensorsCard: React.FC<{ points: HaccpPoint[]; refreshKey: numb
             </div>
           </div>
           {copied && <p className="text-[13px] text-[var(--ds-seated-text)]" role="status">{t('sensors.copied', 'Copiato')}</p>}
-          <details className="text-[14px] text-[var(--ds-text-secondary)]">
-            <summary className="flex h-11 cursor-pointer items-center text-[var(--ds-text-muted)]">{t('sensors.formats', 'Formati accettati')}</summary>
-            <div className="space-y-2 pb-2">
-              <p>{t('sensors.formatGeneric', 'JSON con una lettura o un elenco: valore in °C, ora facoltativa.')}</p>
-              <pre className="overflow-x-auto rounded-[var(--ds-radius-sm)] bg-[var(--ds-surface-row)] p-3 font-mono text-[12px] leading-relaxed">{'{ "readings": [ { "sensor": "cella-01", "value": 3.2, "at": "2026-10-05T09:00:00Z", "battery": 90 } ] }'}</pre>
-              <p>{t('sensors.formatMonnit', 'Il webhook dei gateway Monnit (iMonnit) si incolla così com\'è. Se il gateway non manda intestazioni, il token va in fondo all\'indirizzo: ?token=…')}</p>
-            </div>
-          </details>
           {confirmRegenerate ? (
             <Callout
               tone="pending"
@@ -139,6 +172,8 @@ export const HaccpSensorsCard: React.FC<{ points: HaccpPoint[]; refreshKey: numb
           )}
         </div>
       )}
+
+      <SupportedSensors t={t} />
 
       {token && sensors !== null && (
         sensors.length === 0 ? (
@@ -162,6 +197,7 @@ export const HaccpSensorsCard: React.FC<{ points: HaccpPoint[]; refreshKey: numb
                     />
                     <div className="mt-1 flex flex-wrap items-center gap-x-2 text-[13px] tabular-nums text-[var(--ds-text-muted)]">
                       <span className="font-mono">{s.externalId}</span>
+                      {s.vendor && HACCP_SENSOR_VENDOR_NAMES[s.vendor] && <span>· {HACCP_SENSOR_VENDOR_NAMES[s.vendor]}</span>}
                       {s.lastValue !== null && <span>· {formatNumber(s.lastValue)} °C {lastSeen(s.lastSeenAt)}</span>}
                       {s.battery !== null && (
                         <span className={`inline-flex items-center gap-1 ${s.battery <= 20 ? 'text-[var(--ds-pending-text)]' : ''}`}>

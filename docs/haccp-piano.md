@@ -77,6 +77,14 @@ Da sapere per l'esercizio:
 - La lettura delle bolle usa `claude-opus-5-5` con la chiave Anthropic del servizio: senza chiave valida risponde «non disponibile» (503) e il resto del ricevimento funziona.
 - Sensori: il gateway va configurato col suo indirizzo e il token di Configura; le fasce orarie e le soglie di escursione e silenzio sono nei limiti del manuale. Il controllo dei sensori muti gira ogni 10 minuti sotto lock di scheduler.
 
+## Dopo la Fase 4 — sensori LoRaWAN e Impostazioni › HACCP (07/10)
+
+- **Hardware consigliato**: Milesight TS301/TS302 (EN 12830, sonda alimentare PT100) con gateway Milesight UG63/UG65 col network server integrato, che inoltra in HTTPS al webhook (intestazione `X-Haccp-Sensor-Token`, opzione Metadata accesa per avere `devEUI` e `deviceName` nel messaggio; senza, `?device=$devEUI` nell'indirizzo). Nessun cloud né abbonamento.
+- **Formati letti** (`parseSensorPayload`): generico, Monnit, e le buste LoRaWAN — Milesight piatta, ChirpStack v3/v4, TTN v3. Campi del decoder Milesight: `temperature` (TS301), `temperature_chn1/2` (TS302 → due sensori `DevEUI-1/-2`), `battery`, `history[]` con `timestamp` in secondi Unix. Un messaggio LoRaWAN senza temperature (contatto porta) risponde 200 con zero letture.
+- **Affidabilità**: `UNIQUE (sensor_id, measured_at)` su `haccp_sensor_readings` (i doppioni non si contano né si riapplicano) e trigger in sola aggiunta. L'escursione si ricostruisce dalle letture salvate in ordine di misura (lo storico ritrasmesso apre la non conformità che c'era); `out_since` lo muove solo la lettura più recente. Batteria ≤ 20%: una push, riarmata sopra il 30% (`battery_alerted_at`).
+- **Impostazioni › HACCP**: le card di Configura (sensori con i modelli supportati, postazioni, limiti, etichette) per chi ha `haccp:manage`; Configura resta per chi gestisce l'HACCP senza `settings:view` (di base direttore e responsabile di sala).
+- **Validità**: il software non va certificato (Reg. CE 852/2004: registrazioni proporzionate, anche digitali). Per i surgelati il Reg. CE 37/2005 chiede registratori EN 12830 verificati (EN 13486) e dati per almeno un anno: la sonda si aggiunge fra i termometri da tarare e la verifica annuale si registra lì.
+
 ## Fuori da questo piano
 
 - Generazione automatica del manuale di autocontrollo (resta un documento caricato in archivio).
@@ -84,4 +92,4 @@ Da sapere per l'esercizio:
 
 ## Riferimenti
 
-Reg. CE 852/2004 (art. 5, All. II), Reg. CE 178/2002 (artt. 18–19), D.Lgs. 193/2007 (art. 6), Reg. UE 1169/2011 e D.Lgs. 231/2017 (allergeni), Reg. UE 2021/382 (allergeni nell'autocontrollo, cultura della sicurezza), Reg. CE 853/2004 All. III Sez. VIII (Anisakis), Reg. CE 2073/2005 (criteri microbiologici), Reg. UE 2017/625 art. 15 (accesso ai sistemi informatici durante i controlli), Reg. UE 2017/2158 (acrilammide), Circolare Min. Sanità 1/1991 (composti polari 25%).
+Reg. CE 852/2004 (art. 5, All. II), Reg. CE 178/2002 (artt. 18–19), D.Lgs. 193/2007 (art. 6), Reg. UE 1169/2011 e D.Lgs. 231/2017 (allergeni), Reg. UE 2021/382 (allergeni nell'autocontrollo, cultura della sicurezza), Reg. CE 853/2004 All. III Sez. VIII (Anisakis), Reg. CE 2073/2005 (criteri microbiologici), Reg. UE 2017/625 art. 15 (accesso ai sistemi informatici durante i controlli), Reg. UE 2017/2158 (acrilammide), Circolare Min. Sanità 1/1991 (composti polari 25%), Reg. CE 37/2005 ed EN 12830/13486 (registratori di temperatura dei surgelati).
