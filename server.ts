@@ -275,7 +275,7 @@ import { formatMoneyMinor } from './utils/money.js';
 import { createHaccpRouter, haccpSensorWatchTick, runHaccpExpiryReminder, runHaccpMissingReminder, type HaccpDeps } from './services/haccpRoutes.js';
 import { shoppingReminderBody } from './utils/shoppingReminder.js';
 import { describeShiftChanges, shiftDayLabel, type ShiftDayChange } from './utils/staffShiftChange.js';
-import { buildEReceiptPayload, buildFatturaPaXml, getFiscalDriver, type FiscalSeller, type InvoiceBuyer } from './services/fiscalService.js';
+import { buildEReceiptPayload, buildFatturaPaXml, eReceiptAmountCents, getFiscalDriver, type FiscalSeller, type InvoiceBuyer } from './services/fiscalService.js';
 import {
     getAvailableSlots,
     getAllOpeningHours,
@@ -8171,7 +8171,11 @@ app.post('/bills/:id/close', authenticate, requirePermission('payments:full'), a
                 registerNativeProforma(req.tenantId!, id, req.user?.userId ?? null)
                     .catch(err => console.error('[fiscal] registrazione proforma fallita per conto', id, err?.message));
             } else {
+                // Totale positivo ma incasso a zero (tutto omaggio): stesso
+                // caso del conto a zero, lo scopre l'emissione.
                 emitFiscalDocForBill(req.tenantId!, id, req.user?.userId ?? null)
+                    .then(outcome => outcome.skipped === 'zero_total'
+                        ? registerNativeProforma(req.tenantId!, id, req.user?.userId ?? null) : undefined)
                     .catch(err => console.error('[fiscal] emissione post-chiusura fallita per conto', id, err?.message));
             }
         }
@@ -9305,6 +9309,36 @@ async function emitFiscalDocForBill(tenantId: number, billId: number, userId: nu
     );
     if ((liveInvoices.rowCount ?? 0) > 0) return { skipped: 'invoice_exists' };
 
+    // Incassi attivi (specchi LINK_ONLINE inclusi) + acconto: sono i numeri
+    // che devono quadrare col totale delle righe nel documento.
+    const paymentsRs = await queryWithRetry(
+        `SELECT method, amount_cents, meta FROM table_bill_payments
+         WHERE table_bill_id = $1 AND voided_at IS NULL`,
+        [billId]
+    );
+    const depositRs = await queryWithRetry(
+        `SELECT COALESCE(SUM(amount_cents), 0)::int AS s FROM table_bill_splits
+         WHERE table_bill_id = $1 AND status = 'PAID' AND kind = 'deposit'`,
+        [billId]
+    );
+
+    const payload = buildEReceiptPayload({
+        fiscalId,
+        totalCents: bill.total_cents,
+        items: Array.isArray(bill.items) ? bill.items : null,
+        payments: paymentsRs.rows,
+        depositCreditCents: depositRs.rows[0].s,
+        fallbackVatRate: (await getFiscalVatMap(tenantId)).fallback,
+        lotteryCode: bill.lottery_code ?? null,
+    });
+
+    // Corrispettivo a zero (conto tutto omaggio, o scontato fino a 0):
+    // niente documento, PRIMA di scriverne la riga. Il 07/10 il conto 108
+    // (0,01 € pagato con OMAGGIO) è partito come scontrino senza pagamenti:
+    // il registratore ha stampato ANNULLO, è rimasto con lo scontrino aperto
+    // e la cassa Passepartout non ha più emesso scontrini.
+    if (eReceiptAmountCents(payload) <= 0) return { skipped: 'zero_total' };
+
     // La proforma nativa è un segnaposto: lo scontrino vero la supera.
     await supersedeNativeProforma(tenantId, billId);
 
@@ -9330,29 +9364,6 @@ async function emitFiscalDocForBill(tenantId: number, billId: number, userId: nu
         if (!doc) return { skipped: 'race' };
         if (doc.status === 'CONFIRMED') return { doc };
     }
-
-    // Incassi attivi (specchi LINK_ONLINE inclusi) + acconto: sono i numeri
-    // che devono quadrare col totale delle righe nel documento.
-    const paymentsRs = await queryWithRetry(
-        `SELECT method, amount_cents, meta FROM table_bill_payments
-         WHERE table_bill_id = $1 AND voided_at IS NULL`,
-        [billId]
-    );
-    const depositRs = await queryWithRetry(
-        `SELECT COALESCE(SUM(amount_cents), 0)::int AS s FROM table_bill_splits
-         WHERE table_bill_id = $1 AND status = 'PAID' AND kind = 'deposit'`,
-        [billId]
-    );
-
-    const payload = buildEReceiptPayload({
-        fiscalId,
-        totalCents: bill.total_cents,
-        items: Array.isArray(bill.items) ? bill.items : null,
-        payments: paymentsRs.rows,
-        depositCreditCents: depositRs.rows[0].s,
-        fallbackVatRate: (await getFiscalVatMap(tenantId)).fallback,
-        lotteryCode: bill.lottery_code ?? null,
-    });
 
     // Claim atomico del tentativo: emissione automatica (post-chiusura) e
     // POST manuale possono correre sulla stessa riga PENDING, e senza questo
@@ -9618,6 +9629,7 @@ app.post('/bills/:id/fiscal-docs', authenticate, requirePermission('payments:ful
                 in_progress: 'Emissione già in corso, riprova tra qualche secondo',
                 passepartout: 'Conto del gestionale: lo scontrino lo emette la cassa alla chiusura comanda (POST /bills/:id/passepartout-close)',
                 invoice_exists: 'Il conto ha una fattura: lo scontrino non si emette sullo stesso importo',
+                zero_total: 'Conto a zero: non c\'è uno scontrino da emettere',
             };
             return res.status(409).json({ error: messages[outcome.skipped] ?? outcome.skipped, reason: outcome.skipped });
         }

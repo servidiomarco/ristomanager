@@ -714,4 +714,47 @@ describe('scontrino via registratore locale (rt-local)', () => {
             await db.end();
         }
     });
+
+    it('un conto tutto omaggio non arriva al registratore: proforma in chiusura, 409 a mano', async () => {
+        // L'incidente del 07/10: conto da 0,01 € pagato con OMAGGIO, partito
+        // come scontrino senza pagamenti. L'RT ha stampato ANNULLO ed è
+        // rimasto con lo scontrino aperto, e la cassa non ne ha più emessi.
+        const room = await api().post('/rooms').set(bearer(token)).send({ name: 'Sala Rt OMAGGIO', width: 800, height: 600 });
+        const table = await api().post('/tables').set(bearer(token)).send({
+            name: 'EPSON-OMAGGIO', shape: 'SQUARE', seats: 4, x: 100, y: 700, room_id: room.body.id, status: 'FREE',
+        });
+        const bill = await api().post(`/tables/${table.body.id}/bill`).set(bearer(token)).send({ total_cents: 1, covers: 2 });
+        expect(bill.status, JSON.stringify(bill.body)).toBe(201);
+        const billId = bill.body.bill.id as number;
+        const close = await api().post(`/bills/${billId}/close`).set(bearer(token)).send({
+            payments: [{ method: 'OMAGGIO', amount_cents: 1 }],
+        });
+        expect(close.status, JSON.stringify(close.body)).toBe(200);
+
+        // In chiusura: niente scontrino, la proforma registra la scelta.
+        const row = await waitStatus(billId, 'CONFIRMED');
+        expect(row?.fiscal_doc_type).toBe('PROFORMA');
+
+        // A mano («Emetti scontrino»): 409 con la frase per il cameriere.
+        const manual = await api().post(`/bills/${billId}/fiscal-docs`).set(bearer(token)).send({});
+        expect(manual.status).toBe(409);
+        expect(manual.body.reason).toBe('zero_total');
+        expect(manual.body.error).toContain('Conto a zero');
+
+        // Nessun job per il registratore e nessuno scontrino a registro.
+        const queue = await api().get('/print-agent/jobs').set('x-print-agent-token', 'test-print-agent-token');
+        expect(queue.body.jobs.some((j: any) => j.kind === 'RT_FISCALE' && j.payload?.bill_id === billId)).toBe(false);
+        const db = new Client({ connectionString: process.env.DATABASE_URL || 'postgresql://localhost/ristotest_api' });
+        await db.connect();
+        try {
+            const docs = await db.query(
+                `SELECT doc_type, status FROM fiscal_documents WHERE table_bill_id = $1`, [billId]);
+            expect(docs.rows).toEqual([{ doc_type: 'PROFORMA', status: 'CONFIRMED' }]);
+            const jobs = await db.query(
+                `SELECT count(*)::int AS n FROM print_jobs WHERE kind = 'RT_FISCALE' AND (payload->>'bill_id')::int = $1`, [billId]);
+            expect(jobs.rows[0].n).toBe(0);
+        } finally {
+            await db.end();
+        }
+    });
 });
