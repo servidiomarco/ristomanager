@@ -39,6 +39,7 @@ describe('reportistica fiscale (vista Fiscalità)', () => {
     const docIds: number[] = [];
     let receiptDetailId = 0;
     let stornataInvoiceId = 0;
+    let invoiceId = 0;
 
     let seedTableId = 0;
     let seedRoomId = 0;
@@ -130,9 +131,11 @@ describe('reportistica fiscale (vista Fiscalità)', () => {
             created: '2026-03-10T15:00:00Z',
         });
         // Fattura viva + fattura stornata con la sua nota di credito.
-        await seedDoc({
+        invoiceId = await seedDoc({
             bill: await seedBill(8000), type: 'INVOICE', provider: 'openapi', status: 'CONFIRMED', total: 8000,
             created: '2026-03-11T13:00:00Z', docNumber: '901/2026',
+            // L'intestatario vive nel payload, come lo scrive POST /bills/:id/invoices.
+            request: JSON.stringify({ xml: '<seed/>', buyer: { name: 'Trattoria Esempio Srl', vat_number: '01234567890' } }),
         });
         const stornataBill = await seedBill(2200);
         stornataInvoiceId = await seedDoc({
@@ -193,6 +196,40 @@ describe('reportistica fiscale (vista Fiscalità)', () => {
         expect(soloFatture.body.day_totals).toEqual([{ day: '2026-03-11', count: 2, total_cents: 10200 }]);
         const soloAnnullati = await api().get(`/reports/fiscal-registry?from=${FROM}&to=${TO}&status=VOIDED`).set(bearer(owner));
         expect(soloAnnullati.body.total_count).toBe(2);
+    });
+
+    it('la ricerca trova per numero, tavolo, intestatario e importo, senza toccare KPI e chip', async () => {
+        const cerca = (q: string) =>
+            api().get(`/reports/fiscal-registry?from=${FROM}&to=${TO}&q=${encodeURIComponent(q)}`).set(bearer(owner));
+
+        // Numero del documento (con la barra: un provider_ref uuid non la contiene).
+        const numero = await cerca('901/2026');
+        expect(numero.status).toBe(200);
+        expect(numero.body.documents.map((d: any) => d.doc_number)).toEqual(['901/2026']);
+        expect(numero.body.documents[0].buyer_name).toBe('Trattoria Esempio Srl');
+        expect(numero.body.day_totals).toEqual([{ day: '2026-03-11', count: 1, total_cents: 8000 }]);
+
+        // Tavolo, senza badare alle maiuscole: tutti i conti di seed pendono da FISCSEED.
+        expect((await cerca('fiscseed')).body.total_count).toBe(8);
+
+        // Intestatario della fattura, per nome e per P.IVA.
+        expect((await cerca('trattoria esempio')).body.total_count).toBe(1);
+        expect((await cerca('01234567890')).body.total_count).toBe(1);
+
+        // Importo all'italiana: 50,00 € è il primo scontrino del 10/03.
+        const importo = await cerca('50,00');
+        expect(importo.body.documents.map((d: any) => d.total_cents)).toEqual([5000]);
+
+        // I jolly di LIKE si cercano alla lettera, non pescano tutto.
+        expect((await cerca('%')).body.total_count).toBe(0);
+
+        // KPI e conteggi dei chip restano quelli del periodo intero.
+        expect(numero.body.totals.documented_total_cents).toBe(20700);
+        expect(numero.body.counts.all).toBe(8);
+
+        // La scheda della fattura porta l'intestatario.
+        const scheda = await api().get(`/reports/fiscal-documents/${invoiceId}`).set(bearer(owner));
+        expect(scheda.body.document.buyer).toEqual({ name: 'Trattoria Esempio Srl', vat_number: '01234567890' });
     });
 
     it('la fattura stornata espone il numero della nota di credito', async () => {

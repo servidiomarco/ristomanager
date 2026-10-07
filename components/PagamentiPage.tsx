@@ -17,6 +17,7 @@ import { BillDetail } from './pagamenti/BillSheet';
 import { PaymentDetail } from './pagamenti/PaymentDetail';
 import { PeriodPicker, type Period } from './pagamenti/PeriodPicker';
 import { formatEuro } from './pagamenti/paymentsView';
+import { Kpi, KpiStrip } from './pagamenti/KpiStrip';
 import { useCashClosure } from './pagamenti/useCashClosure';
 import { useOpenBills } from './pagamenti/useOpenBills';
 
@@ -42,27 +43,6 @@ const KPI_LABELS = {
   attesa: 'In attesa',
   residuo: 'Residuo conti',
 } as const;
-
-const Kpi: React.FC<{ label: string; value: string; tone?: 'positive' | 'pending' | 'critical' }> = ({
-  label, value, tone,
-}) => (
-  // flex-1 + min-w-0: on a phone the three share the row evenly and the labels
-  // truncate rather than pushing the third figure onto a line of its own.
-  <div className="flex min-w-0 flex-1 flex-col gap-0.5 px-2.5 py-2 lg:flex-none lg:px-4 lg:py-2.5 lg:first:pl-0 lg:last:pr-0">
-    <span className={`text-[17px] leading-none font-semibold tracking-[-0.02em] tabular-nums sm:text-[20px] ${
-      tone === 'positive' ? 'text-[var(--ds-seated-text)]'
-      : tone === 'pending' ? 'text-[var(--ds-pending-text)]'
-      : tone === 'critical' ? 'text-[var(--ds-critical-text)]'
-      : 'text-[var(--ds-text-primary)]'
-    }`}>
-      {value}
-    </span>
-    {/* Sentence case, not the caps the mockup showed: at 12px capitals lose the
-        word shape that makes a label scannable, and screen readers spell short
-        ones out letter by letter. */}
-    <span className="truncate text-[11px] text-[var(--ds-text-muted)] sm:text-[12px]">{label}</span>
-  </div>
-);
 
 const PagamentiPage: React.FC<{
   globalDate?: Date;
@@ -297,17 +277,13 @@ const PagamentiPage: React.FC<{
           <span className="sm:hidden">In tempo reale</span>
           <span className="hidden sm:inline">Stato aggiornato in tempo reale</span>
         </h1>
-        {/* Hairline-split figures rather than three cards: they are one reading
-            of the same money, and boxing each gave three competing objects.
-            No wrapping either — a third figure dropping to its own line reads
-            as a separate object. They compress instead. */}
-        <div className="flex w-full flex-shrink-0 items-center divide-x divide-[var(--ds-border)] rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-1 py-1 shadow-[var(--ds-shadow-card)] lg:w-auto lg:px-4">
+        <KpiStrip>
           <Kpi label={t('kpi.incassato', KPI_LABELS.incassato)} value={formatEuro(totals.paid)} tone="positive" />
           <Kpi label={t('kpi.attesa', KPI_LABELS.attesa)} value={formatEuro(totals.pending)} tone="pending" />
           {billsAvailable && (
             <Kpi label={t('kpi.residuo', KPI_LABELS.residuo)} value={formatEuro(serviceResidual)} tone="critical" />
           )}
-        </div>
+        </KpiStrip>
       </div>
 
       <div className="min-h-0 flex-1">

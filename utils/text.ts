@@ -171,3 +171,20 @@ export const isoDatesToEuropean = (text: string | null | undefined): string =>
     const dd = Number(d);
     return mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31 ? `${d}/${m}/${y}` : whole;
   });
+
+/** Una ricerca che si legge come un importo in euro, in centesimi: «45»,
+ *  «45,50», «45.5», «1.240,50», «€ 12». Con punto e virgola insieme il punto
+ *  è il separatore delle migliaia, all'italiana; col solo punto è decimale
+ *  se seguito da una o due cifre («45.5»), migliaia se da gruppi di tre
+ *  («1.240»). Tutto il resto — un numero di documento «901/2026», un nome —
+ *  è null. Oltre il milione di euro è null anche lui: una cifra così è un
+ *  codice (una P.IVA, un telefono), e confrontata con una colonna integer
+ *  romperebbe la query. */
+export function euroQueryCents(input: string | null | undefined): number | null {
+  const s = String(input ?? '').replace(/€/g, '').replace(/\s+/g, '');
+  let m = /^(\d{1,3}(?:\.\d{3})+|\d+)(?:,(\d{1,2}))?$/.exec(s);
+  if (!m) m = /^(\d+)\.(\d{1,2})$/.exec(s);
+  if (!m) return null;
+  const cents = Number(m[1].replace(/\./g, '')) * 100 + (m[2] ? Number(m[2].padEnd(2, '0')) : 0);
+  return cents <= 100_000_000 ? cents : null;
+}

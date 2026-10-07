@@ -238,7 +238,7 @@ import {
     type BlacklistPolicyMap,
     type BlacklistSource,
 } from './services/blacklistPolicy.js';
-import { toTitleCase, toMenuTitleCase, phoneMatchKey, phoneDigitsVariants, phoneLast10Variants, PHONE_MATCH_KEY_SQL } from './utils/text.js';
+import { toTitleCase, toMenuTitleCase, phoneMatchKey, phoneDigitsVariants, phoneLast10Variants, PHONE_MATCH_KEY_SQL, euroQueryCents } from './utils/text.js';
 import {
     claimReviewRequest,
     finishReviewRequest,
@@ -8233,6 +8233,32 @@ app.get('/reports/fiscal-registry', authenticate, requirePermission('fiscal:view
         let filters = '';
         if (docType) { params.push(docType); filters += ` AND fd.doc_type = $${params.length}`; }
         if (status) { params.push(status); filters += ` AND fd.status = $${params.length}`; }
+        // Ricerca libera: numero del documento, riferimento del provider,
+        // intestatario della fattura (nome, P.IVA), tavolo e cliente del
+        // conto — più l'importo esatto quando q si legge come una cifra
+        // («45,50»). Tavolo e cliente passano da un EXISTS perché `filters`
+        // lo usano anche il conteggio e i totali per giorno, che i join non
+        // li hanno. KPI e chip restano sul periodo intero: la ricerca serve a
+        // trovare un documento, non a rifare i conti del mese.
+        const search = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 80) : '';
+        if (search) {
+            params.push(`%${search.replace(/[\\%_]/g, m => '\\' + m)}%`);
+            const like = `$${params.length}`;
+            const match = [
+                `fd.doc_number ILIKE ${like}`,
+                `fd.provider_ref ILIKE ${like}`,
+                `fd.request->'buyer'->>'name' ILIKE ${like}`,
+                `fd.request->'buyer'->>'vat_number' ILIKE ${like}`,
+                `EXISTS (SELECT 1 FROM table_bills qb
+                         LEFT JOIN tables qt ON qt.id = qb.table_id AND qt.tenant_id = qb.tenant_id
+                         LEFT JOIN reservations qr ON qr.id = qb.reservation_id AND qr.tenant_id = qb.tenant_id
+                         WHERE qb.id = fd.table_bill_id AND qb.tenant_id = fd.tenant_id
+                           AND (qt.name ILIKE ${like} OR qr.customer_name ILIKE ${like}))`,
+            ];
+            const cents = euroQueryCents(search);
+            if (cents != null) { params.push(cents); match.push(`fd.total_cents = $${params.length}`); }
+            filters += ` AND (${match.join(' OR ')})`;
+        }
 
         // Totali e conteggi sull'INTERO periodo (i KPI e i chip non devono
         // cambiare quando la lista pagina). Semantica — la parte delicata:
@@ -8283,6 +8309,7 @@ app.get('/reports/fiscal-registry', authenticate, requirePermission('fiscal:view
                    fd.related_doc_id, fd.table_bill_id,
                    (fd.created_at AT TIME ZONE 'Europe/Rome')::date AS day,
                    t.name AS table_name, r.customer_name,
+                   fd.request->'buyer'->>'name' AS buyer_name,
                    nc.doc_number AS credit_note_number
             FROM fiscal_documents fd
             LEFT JOIN table_bills b ON b.id = fd.table_bill_id AND b.tenant_id = fd.tenant_id
@@ -8464,6 +8491,10 @@ app.get('/reports/fiscal-documents/:id', authenticate, requirePermission('fiscal
                 table_name: doc.table_name, customer_name: doc.customer_name, bill_closed_at: doc.bill_closed_at,
                 related: doc.related_doc_id ? { id: doc.related_doc_id, doc_type: doc.related_doc_type, doc_number: doc.related_doc_number } : null,
                 credit_note_number: doc.credit_note_number,
+                // Intestatario di fattura e nota di credito, dal payload emesso.
+                buyer: payload.buyer?.name
+                    ? { name: String(payload.buyer.name), vat_number: payload.buyer.vat_number ? String(payload.buyer.vat_number) : null }
+                    : null,
             },
             items: (Array.isArray(payload.items) ? payload.items : []).map((i: any) => ({
                 description: String(i.description ?? ''),
