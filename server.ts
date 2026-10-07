@@ -4865,12 +4865,15 @@ const ppCloseInFlight = new Set<number>();
 /** La riga PENDING della chiusura in cassa, dentro la transazione del
  *  chiamante. L'indice «un documento vivo per conto» assorbe i doppioni. */
 async function insertPendingPassepartoutClose(client: any, tenantId: number, billId: number, documento?: 'Scontrino' | 'Proforma'): Promise<number | null> {
+    // Il token pubblico: lo scontrino della cassa si mostra all'ospite come
+    // copia digitale (/scontrino/<token>), dal telefono con cui ha pagato.
     const ins = await client.query(
-        `INSERT INTO fiscal_documents (tenant_id, table_bill_id, doc_type, provider, status, total_cents)
-         SELECT $1, $2, $3, 'passepartout', 'PENDING', total_cents FROM table_bills WHERE id = $2 AND tenant_id = $1
+        `INSERT INTO fiscal_documents (tenant_id, table_bill_id, doc_type, provider, status, total_cents, public_token, fiscal_id_snapshot)
+         SELECT $1, $2, $3, 'passepartout', 'PENDING', total_cents, $4, $5 FROM table_bills WHERE id = $2 AND tenant_id = $1
          ON CONFLICT (table_bill_id) WHERE status IN ('PENDING', 'CONFIRMED') AND table_bill_split_id IS NULL AND doc_type <> 'CREDIT_NOTE' DO NOTHING
          RETURNING id`,
-        [tenantId, billId, documento === 'Proforma' ? 'PROFORMA' : 'RECEIPT']
+        [tenantId, billId, documento === 'Proforma' ? 'PROFORMA' : 'RECEIPT', newFiscalPublicToken(),
+         (await getFiscalVatNumber(tenantId).catch(() => '')) || null]
     );
     const id = ins.rows[0]?.id ?? null;
     if (id != null) await logFiscalDocChanged(client, tenantId, id);
@@ -7557,8 +7560,9 @@ app.post('/bills/:id/close', authenticate, requirePermission('payments:full'), a
                      tip_cents = $4,
                      tip_method = $8,
                      notes = COALESCE($5, notes),
-                     lottery_code = COALESCE($7, lottery_code),
-                     share_token = NULL
+                     lottery_code = COALESCE($7, lottery_code)
+                 -- share_token resta: la pagina /pay mostra il conto saldato
+                 -- e lo scontrino per 24 ore, senza più azioni possibili.
                  WHERE id = $1 AND tenant_id = $6
                  RETURNING id, reservation_id, table_id, total_cents, covers, currency,
                            items, status, share_token, opened_at, closed_at,
@@ -9891,6 +9895,37 @@ async function loadBillByToken(token: string) {
     return rs.rows[0] || null;
 }
 
+/** Il conto saldato (o chiuso) da meno di 24 ore, per la sola lettura. */
+async function loadBillSaldatoByToken(token: string) {
+    const rs = await queryWithRetry(
+        `SELECT id, tenant_id, reservation_id, table_id, takeaway_order_id, total_cents, covers, currency,
+                items, status, share_token, opened_at, closed_at,
+                opened_by_user_id, closed_by_user_id, external_ref,
+                cash_settled_cents, tip_cents, notes
+         FROM table_bills
+         WHERE share_token = $1
+           AND status IN ('SETTLED','CLOSED')
+           AND COALESCE(closed_at, opened_at) > now() - interval '24 hours'
+         LIMIT 1`,
+        [token]
+    );
+    return rs.rows[0] || null;
+}
+
+/** Il link alla copia digitale dello scontrino del conto, quando c'è. */
+async function receiptUrlForBill(tenantId: number, billId: number): Promise<string | null> {
+    const rs = await queryWithRetry(
+        `SELECT public_token FROM fiscal_documents
+          WHERE tenant_id = $1 AND table_bill_id = $2 AND table_bill_split_id IS NULL
+            AND doc_type IN ('RECEIPT', 'PROFORMA') AND status = 'CONFIRMED'
+            AND provider <> 'external_rt' AND public_token IS NOT NULL
+          ORDER BY (doc_type = 'RECEIPT') DESC, id DESC LIMIT 1`,
+        [tenantId, billId]
+    );
+    const tok = rs.rows[0]?.public_token;
+    return tok ? `${payAtTableBaseUrl()}/scontrino/${tok}` : null;
+}
+
 // GET /pay/:token — the mobile page fetches this on load and after any
 // action. Response mirrors the authenticated GET, minus internal ids on
 // the splits.
@@ -9900,7 +9935,10 @@ app.get('/pay/:token', publicPayLimiter, async (req, res) => runAsPlatform(async
         const token = String(req.params.token || '');
         if (!token || token.length < 20) return res.status(404).json({ error: 'Not found' });
 
-        const bill = await loadBillByToken(token);
+        // Un conto saldato resta leggibile per 24 ore: chi torna sulla pagina
+        // dopo il pagamento vede il saldo e lo scontrino. Le azioni (quote,
+        // rilasci) passano da loadBillByToken, che vuole un conto aperto.
+        const bill = (await loadBillByToken(token)) ?? (await loadBillSaldatoByToken(token));
         if (!bill) return res.status(404).json({ error: 'Not found' });
 
         // When the operator disables the feature mid-service, guests scanning
@@ -9991,6 +10029,9 @@ app.get('/pay/:token', publicPayLimiter, async (req, res) => runAsPlatform(async
             claimed_cents: claimedCents,
             deposit_credit_cents: depositCreditCents,
             residual_cents: residual,
+            // La copia digitale dello scontrino, da quando la cassa (o il CRM)
+            // l'ha emesso: la pagina la propone a ogni telefono che ha pagato.
+            receipt_url: ['SETTLED', 'CLOSED'].includes(bill.status) ? await receiptUrlForBill(bill.tenant_id, bill.id) : null,
             per_item_available: perItemAvailable,
             // Le righe escono SEMPRE quando lo snapshot c'è: l'ospite vede cosa
             // sta pagando anche dove lo split per piatto non è disponibile
@@ -10083,23 +10124,39 @@ app.get('/scontrino/:token', publicPayLimiter, async (req, res) => runAsPlatform
         const token = String(req.params.token || '');
         if (!token || token.length < 32) return res.status(404).json({ error: 'Not found' });
         const rs = await queryWithRetry(
-            // Scontrini nativi + proforma. Quelli Passepartout/RT esterno li
-            // batte la cassa e la riga qui non ha il dettaglio (request NULL)
-            // — la pagina mostrerebbe un documento vuoto. La proforma il
-            // dettaglio non l'ha mai avuto: si ricostruisce dallo snapshot
-            // righe del conto (b.items), lo stesso del preconto.
-            `SELECT fd.tenant_id, fd.status, fd.doc_type, fd.doc_number, fd.total_cents,
+            // Scontrini nativi + proforma. Quelli dell'RT esterno li batte la
+            // cassa e la riga qui non ha il dettaglio (request NULL) — la
+            // pagina mostrerebbe un documento vuoto. La proforma il dettaglio
+            // non l'ha mai avuto: si ricostruisce dallo snapshot righe del
+            // conto (b.items), lo stesso del preconto. Lo scontrino della
+            // cassa Passepartout, emesso al saldo dal QR, pure: le righe del
+            // conto sono quelle della comanda, il numero è quello della cassa.
+            `SELECT fd.tenant_id, fd.table_bill_id, fd.provider, fd.provider_ref, fd.status, fd.doc_type, fd.doc_number, fd.total_cents,
                     fd.fiscal_id_snapshot, fd.request, fd.response, fd.confirmed_at, fd.voided_at,
                     t.name AS table_name, b.items AS bill_items
              FROM fiscal_documents fd
              JOIN table_bills b ON b.id = fd.table_bill_id AND b.tenant_id = fd.tenant_id
              LEFT JOIN tables t ON t.id = b.table_id AND t.tenant_id = b.tenant_id
              WHERE fd.public_token = $1 AND fd.doc_type IN ('RECEIPT', 'PROFORMA')
-               AND fd.provider NOT IN ('passepartout', 'external_rt') AND fd.status IN ('CONFIRMED', 'VOIDED')`,
+               AND fd.provider <> 'external_rt' AND fd.status IN ('CONFIRMED', 'VOIDED')`,
             [token]
         );
         const doc = rs.rows[0];
         if (!doc) return res.status(404).json({ error: 'Not found' });
+        // Chi ha pagato (le quote dal QR, col nome lasciato dall'ospite) e
+        // con che cosa: per la copia da girare agli altri commensali.
+        const quoteRs = await queryWithRetry(
+            `SELECT kind, amount_cents, claimant_label FROM table_bill_splits
+              WHERE table_bill_id = $1 AND tenant_id = $2 AND status = 'PAID' ORDER BY paid_at NULLS LAST, id`,
+            [doc.table_bill_id, doc.tenant_id]
+        );
+        const staffRs = await queryWithRetry(
+            `SELECT method, COALESCE(SUM(amount_cents), 0)::int AS cents FROM table_bill_payments
+              WHERE table_bill_id = $1 AND tenant_id = $2 AND table_bill_split_id IS NULL AND voided_at IS NULL
+              GROUP BY method`,
+            [doc.table_bill_id, doc.tenant_id]
+        );
+        const dallaCassa = doc.provider === 'passepartout';
         const identity = businessIdentity(doc.tenant_id);
         const payload = doc.request ?? {};
         const respData = doc.response?.data ?? {};
@@ -10117,6 +10174,11 @@ app.get('/scontrino/:token', publicPayLimiter, async (req, res) => runAsPlatform
                   unit_price_cents: Number(i.unit_price_cents) || 0,
                   vat_rate_code: '',
               }));
+        // Pagamenti: dal documento per gli scontrini nativi; per quelli della
+        // cassa dalle quote e dagli incassi del conto (contanti a parte).
+        const staffCash = staffRs.rows.filter((r: any) => r.method === 'CONTANTI').reduce((n: number, r: any) => n + Number(r.cents), 0);
+        const staffOther = staffRs.rows.filter((r: any) => r.method !== 'CONTANTI').reduce((n: number, r: any) => n + Number(r.cents), 0);
+        const quote = quoteRs.rows.reduce((n: number, r: any) => n + Number(r.amount_cents || 0), 0);
         res.json({
             business: {
                 name: identity.name,
@@ -10126,15 +10188,19 @@ app.get('/scontrino/:token', publicPayLimiter, async (req, res) => runAsPlatform
             receipt: {
                 status: doc.status,
                 doc_type: doc.doc_type,
-                doc_number: doc.doc_number ?? respData.document_number ?? null,
-                document_date: respData.document_date ?? doc.confirmed_at,
+                doc_number: dallaCassa ? (doc.provider_ref ?? null) : (doc.doc_number ?? respData.document_number ?? null),
+                document_date: dallaCassa ? doc.confirmed_at : (respData.document_date ?? doc.confirmed_at),
                 voided_at: doc.voided_at,
                 table_name: doc.table_name ?? null,
                 total_cents: doc.total_cents,
                 items,
-                cash_cents: euroToCents(payload.cash_payment_amount),
-                electronic_cents: euroToCents(payload.electronic_payment_amount),
-                ticket_cents: euroToCents(payload.ticket_restaurant_payment_amount),
+                cash_cents: dallaCassa ? staffCash : euroToCents(payload.cash_payment_amount),
+                electronic_cents: dallaCassa ? quote + staffOther : euroToCents(payload.electronic_payment_amount),
+                ticket_cents: dallaCassa ? 0 : euroToCents(payload.ticket_restaurant_payment_amount),
+                issuer: dallaCassa ? 'cassa' : 'crm',
+                paid_by: quoteRs.rows
+                    .filter((r: any) => r.kind !== 'deposit')
+                    .map((r: any) => ({ label: r.claimant_label ?? null, amount_cents: Number(r.amount_cents) })),
             },
         });
     } catch (err: any) {
@@ -13410,8 +13476,7 @@ async function autoCloseSettledBill(tenantId: number, billId: number): Promise<a
                      SELECT COALESCE(SUM(amount_cents), 0)::int
                      FROM table_bill_payments
                      WHERE table_bill_id = $1 AND method = 'CONTANTI' AND table_bill_split_id IS NULL AND voided_at IS NULL
-                 ),
-                 share_token = NULL
+                 )
              WHERE id = $1 AND tenant_id = $2 AND status = 'SETTLED'
              RETURNING id, reservation_id, table_id, total_cents, covers, currency,
                        items, status, share_token, opened_at, closed_at,

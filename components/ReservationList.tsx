@@ -6099,7 +6099,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                   opens. One panel for a bill everywhere, and the card
                                   leads with the figures instead of a 128px code. */}
                               <div className="mt-4 flex flex-wrap items-center gap-2">
-                                {bill.bill.share_token && (
+                                {bill.bill.share_token && ['OPEN', 'LOCKED'].includes(bill.bill.status) && (
                                   <button
                                     type="button"
                                     onClick={() => setBillSheetOpen(true)}
@@ -6123,8 +6123,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     <button
                                       type="button"
                                       onClick={() => handlePrintBill('QR')}
-                                      disabled={billActionLoading !== null || !bill.bill.share_token}
-                                      title={!bill.bill.share_token ? tv('bill.closedQrInvalid') : undefined}
+                                      disabled={billActionLoading !== null || !bill.bill.share_token || !['OPEN', 'LOCKED'].includes(bill.bill.status)}
+                                      title={!bill.bill.share_token || !['OPEN', 'LOCKED'].includes(bill.bill.status) ? tv('bill.closedQrInvalid') : undefined}
                                       className={dsButton.secondary}
                                     >
                                       {billActionLoading === 'print-qr' ? <Loader2 className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />}

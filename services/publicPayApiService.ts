@@ -47,7 +47,9 @@ export interface PublicBillView {
     total_cents: number;
     covers: number;
     currency: string;
-    status: 'OPEN' | 'LOCKED';
+    /** SETTLED/CLOSED: conto saldato, la pagina resta in sola lettura per
+     *  24 ore (saldo e scontrino). */
+    status: 'OPEN' | 'LOCKED' | 'SETTLED' | 'CLOSED';
   };
   /** Conto di un asporto: niente coperti né split equo/per piatto in pagina.
    *  Opzionale: il backend deployato può non mandarlo ancora. */
@@ -60,6 +62,8 @@ export interface PublicBillView {
    *  residuo e dalla barra. Mostrato come riga "Acconto −€X". */
   deposit_credit_cents?: number;
   residual_cents: number;
+  /** Copia digitale dello scontrino, a conto saldato e scontrino emesso. */
+  receipt_url?: string | null;
   /** Falso quando il dettaglio manca o c'è uno sconto: in quel caso pagare
    *  "la propria riga" addebiterebbe più del dovuto. */
   per_item_available?: boolean;

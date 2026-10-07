@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { publicPayApiService, PublicBillView, ClaimResponse } from '../services/publicPayApiService';
 import { PAY_NAMESPACE, SUPPORTED_LANGUAGES, SupportedLanguage } from '../i18n/config';
-import { Loader2, Users, CheckCircle2, AlertTriangle, ExternalLink, X, ChevronDown, Minus, Plus } from 'lucide-react';
+import { Loader2, Users, CheckCircle2, AlertTriangle, ExternalLink, X, ChevronDown, Minus, Plus, ReceiptText } from 'lucide-react';
 import { currencySymbol } from '../utils/money';
 
 // Extract the share_token from the current URL. Kept as a plain function
@@ -528,6 +528,17 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
             <CheckCircle2 className="h-6 w-6 mx-auto mb-1" />
             <div className="font-semibold">{t('paidInFull.title')}</div>
             <p className="text-xs mt-1">{t(isTakeaway ? 'paidInFull.takeawayText' : 'paidInFull.text')}</p>
+            {/* Lo scontrino del tavolo, uno per tutti: ogni telefono che ha
+                pagato lo apre da qui e lo può girare agli altri. Compare da
+                solo appena emesso (la pagina si aggiorna ogni 5 secondi). */}
+            {bill.receipt_url && (
+              <a
+                href={bill.receipt_url}
+                className="mt-3 inline-flex h-11 w-full items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[15px] font-semibold text-[var(--ds-action-fg)]"
+              >
+                <ReceiptText className="h-4 w-4" aria-hidden /> {t('paidInFull.receipt')}
+              </a>
+            )}
           </div>
         )}
 

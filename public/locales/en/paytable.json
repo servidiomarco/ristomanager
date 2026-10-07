@@ -69,7 +69,8 @@
   "paidInFull": {
     "title": "Bill settled",
     "text": "The table has been paid in full.",
-    "takeawayText": "The order has been paid in full."
+    "takeawayText": "The order has been paid in full.",
+    "receipt": "View the receipt"
   },
   "claimed": {
     "yourShare": "Your share",

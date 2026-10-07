@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2, Printer } from 'lucide-react';
+import { Check, Loader2, Printer, Share2 } from 'lucide-react';
 import { RECEIPT_NAMESPACE, SupportedLanguage } from '../i18n/config';
 import { PublicLanguageToggle } from './PublicLanguageToggle';
 
@@ -34,6 +34,10 @@ interface ReceiptView {
     cash_cents: number;
     electronic_cents: number;
     ticket_cents: number;
+    /** 'cassa' = emesso dal registratore della cassa (Passepartout). */
+    issuer?: 'cassa' | 'crm';
+    /** Le quote pagate dal telefono, col nome lasciato da ciascuno. */
+    paid_by?: { label: string | null; amount_cents: number }[];
   };
 }
 
@@ -72,6 +76,25 @@ export const PublicReceiptPage: React.FC = () => {
   const lang: SupportedLanguage = (i18n.language || '').toLowerCase().startsWith('en') ? 'en' : 'it';
   const [view, setView] = useState<ReceiptView | null>(null);
   const [notFound, setNotFound] = useState(false);
+  const [copiato, setCopiato] = useState(false);
+
+  // Lo scontrino è uno per il tavolo: chi l'ha sul telefono lo gira agli
+  // altri commensali. Condivisione di sistema dove c'è, altrimenti il link
+  // copiato negli appunti.
+  const condividi = async () => {
+    const url = window.location.href;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: document.title, url });
+        return;
+      }
+      await navigator.clipboard.writeText(url);
+      setCopiato(true);
+      setTimeout(() => setCopiato(false), 2500);
+    } catch {
+      // Condivisione annullata dall'utente: niente da fare.
+    }
+  };
 
   useEffect(() => {
     const token = tokenFromPath();
@@ -159,6 +182,19 @@ export const PublicReceiptPage: React.FC = () => {
               ))}
             </ul>
           )}
+          {receipt.paid_by && receipt.paid_by.length > 1 && (
+            <div className="mt-3 border-t border-[var(--ds-border)] pt-3">
+              <p className="text-[13px] font-medium text-[var(--ds-text-secondary)]">{t('paidBy')}</p>
+              <ul className="mt-1 space-y-1">
+                {receipt.paid_by.map((q, idx) => (
+                  <li key={idx} className="flex items-baseline justify-between text-[13px] text-[var(--ds-text-secondary)]">
+                    <span>{q.label || t('guest', { n: idx + 1 })}</span>
+                    <span className="tabular-nums">{euro(q.amount_cents, lang)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
 
         <div className="mt-4 border-t border-dashed border-[var(--ds-border-strong)] pt-3 text-center text-[13px] text-[var(--ds-text-muted)]">
@@ -166,14 +202,21 @@ export const PublicReceiptPage: React.FC = () => {
           {receipt.document_date && <p>{t('docDate', { date: dateLabel(receipt.document_date, lang) })}</p>}
           {receipt.table_name && <p>{t('table', { name: receipt.table_name })}</p>}
           <p className="mt-2">
-            {receipt.doc_type === 'PROFORMA' ? t('footer.proforma') : t('footer.copy')}
+            {receipt.doc_type === 'PROFORMA' ? t('footer.proforma') : t(receipt.issuer === 'cassa' ? 'footer.copyCassa' : 'footer.copy')}
           </p>
         </div>
 
         <button
           type="button"
-          onClick={() => window.print()}
+          onClick={condividi}
           className="mt-5 inline-flex h-12 w-full items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[15px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] print:hidden"
+        >
+          {copiato ? <Check size={16} aria-hidden /> : <Share2 size={16} aria-hidden />} {copiato ? t('copied') : t('share')}
+        </button>
+        <button
+          type="button"
+          onClick={() => window.print()}
+          className="mt-2 inline-flex h-12 w-full items-center justify-center gap-2 rounded-[var(--ds-radius-control)] border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[15px] font-semibold text-[var(--ds-text-primary)] print:hidden"
         >
           <Printer size={16} aria-hidden /> {t('print')}
         </button>

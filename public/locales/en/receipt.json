@@ -26,7 +26,12 @@
   "table": "Table {{name}}",
   "footer": {
     "proforma": "Proforma: it does not replace the receipt or the invoice.",
-    "copy": "Informative copy: the fiscal document is the record transmitted electronically to the Italian Revenue Agency (Agenzia delle Entrate)."
+    "copy": "Informative copy: the fiscal document is the record transmitted electronically to the Italian Revenue Agency (Agenzia delle Entrate).",
+    "copyCassa": "Informational copy of the documento commerciale issued by the restaurant's till, which transmits it to the Agenzia delle Entrate."
   },
-  "print": "Print or save"
+  "print": "Print or save",
+  "share": "Share with the table",
+  "copied": "Link copied",
+  "paidBy": "Paid by",
+  "guest": "Guest {{n}}"
 }
