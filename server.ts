@@ -32574,7 +32574,25 @@ const stripeDashboardCustomerUrl = (customerId: string | null): string | null =>
 // rilascio nuovo: l'impronta (X-Contenuto-Sha256) uguale all'ultimo basta.
 const MAX_RILASCI_AGENTE = 10;
 
-app.post('/admin/agent-releases', platformAdminAuth, express.raw({ type: 'application/zip', limit: '20mb' }), async (req, res) => {
+// La CI carica con un token suo (AGENT_RELEASE_TOKEN, header
+// X-Agent-Release-Token) che apre solo questa route: un segreto di GitHub
+// non deve valere quanto il pannello di piattaforma. Senza quell'header
+// resta la via del pannello (JWT di piattaforma o PLATFORM_ADMIN_TOKEN).
+const agentReleaseUploadAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const provided = req.header('X-Agent-Release-Token');
+    if (provided === undefined) return platformAdminAuth(req, res, next);
+    const expected = process.env.AGENT_RELEASE_TOKEN || '';
+    if (!expected) {
+        return res.status(401).json({ error: 'agent_release_token_disabled', message: 'AGENT_RELEASE_TOKEN non configurato sul server.' });
+    }
+    const a = crypto.createHash('sha256').update(String(provided)).digest();
+    const b = crypto.createHash('sha256').update(expected).digest();
+    if (!crypto.timingSafeEqual(a, b)) return res.status(401).json({ error: 'invalid_agent_release_token' });
+    // rls-bypass: agent_releases è una tabella di piattaforma senza tenant_id; token dedicato al solo caricamento, confronto timing-safe
+    runAsPlatform(() => next());
+};
+
+app.post('/admin/agent-releases', agentReleaseUploadAuth, express.raw({ type: 'application/zip', limit: '20mb' }), async (req, res) => {
     try {
         const sha = String(req.header('X-Release-Sha') ?? '').trim().toLowerCase();
         const impronta = String(req.header('X-Contenuto-Sha256') ?? '').trim().toLowerCase() || null;

@@ -105,8 +105,9 @@ jobs:
       # ha solo la cassa Passepartout), e il suo caricamento nel canale
       # pilota del cloud: i supervisori dei ristoranti in pilota lo
       # scaricano di notte. Lo stesso codice non diventa un rilascio nuovo
-      # (il server confronta l'impronta). Senza il segreto
-      # PLATFORM_ADMIN_TOKEN il caricamento si salta. Railway costruisce il
+      # (il server confronta l'impronta). Il segreto AGENT_RELEASE_TOKEN è
+      # lo stesso della variabile su Railway e apre solo quel caricamento;
+      # senza, il caricamento si salta. Railway costruisce il
       # server in parallelo: finché la route nuova non risponde (404, 5xx)
       # si riprova, fino a 15 minuti.
       - name: Costruisci l'agente leggero
@@ -122,15 +123,15 @@ jobs:
       - name: Carica l'agente nel canale pilota
         if: github.ref == 'refs/heads/main'
         env:
-          PLATFORM_ADMIN_TOKEN: ${{ secrets.PLATFORM_ADMIN_TOKEN }}
+          AGENT_RELEASE_TOKEN: ${{ secrets.AGENT_RELEASE_TOKEN }}
           API_URL: ${{ vars.SYMPOTIA_API_URL || 'https://ristomanager-production.up.railway.app' }}
         run: |
-          if [ -z "$PLATFORM_ADMIN_TOKEN" ]; then echo "PLATFORM_ADMIN_TOKEN non impostato: caricamento saltato"; exit 0; fi
+          if [ -z "$AGENT_RELEASE_TOKEN" ]; then echo "AGENT_RELEASE_TOKEN non impostato: caricamento saltato"; exit 0; fi
           SHA="${GITHUB_SHA::7}"
           IMPRONTA=$(node -p "require('./build/agente/$SHA/build-info.json').contenuto_sha256")
           for i in $(seq 1 30); do
             CODE=$(curl -sS -o risposta.json -w '%{http_code}' -X POST "$API_URL/admin/agent-releases" \
-              -H "X-Platform-Admin-Token: $PLATFORM_ADMIN_TOKEN" -H "Content-Type: application/zip" \
+              -H "X-Agent-Release-Token: $AGENT_RELEASE_TOKEN" -H "Content-Type: application/zip" \
               -H "X-Release-Sha: $SHA" -H "X-Contenuto-Sha256: $IMPRONTA" \
               --data-binary "@build/agente/sympotia-agente-$SHA.zip" || true)
             case "$CODE" in
