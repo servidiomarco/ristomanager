@@ -367,8 +367,9 @@ con `passepartout-agent.js` (un solo file con le dipendenze dentro, niente
 `node_modules`), `supervisor.mjs` e `build-info.json` (con `contenuto_sha256`,
 l'impronta di agente e supervisore). La CI lo costruisce a ogni push su main
 (artefatto `sympotia-agente-<sha>`) e lo carica nel canale **pilota** del
-cloud con `POST /admin/agent-releases` (segreto GitHub `PLATFORM_ADMIN_TOKEN`;
-senza, il caricamento si salta). Dal pannello Piattaforma, tab Salute, lo si
+cloud con `POST /admin/agent-releases`. Lo fa col segreto GitHub
+`AGENT_RELEASE_TOKEN`, lo stesso valore della variabile su Railway, che apre
+solo quel caricamento; senza, il caricamento si salta. Dal pannello Piattaforma, tab Salute, lo si
 promuove a **stabile**. Il PC lo chiede con `GET /pp-agent/aggiornamento?ho=<sha>`
 e lo scarica da `GET /pp-agent/rilascio/<sha>`, col token dell'agente
 (`Authorization: Bearer`).
@@ -441,8 +442,8 @@ rimuove il servizio e scollega il PC (`POST /pp-agent/scollega`, col suo token).
 
 Col nodo di sala (Frantoio): `SYMPOTIA_NODO_URL` aggiunge `PP_AGENT_NODE_URL`.
 
-Serve almeno un rilascio dell'agente nel cloud, cioè il segreto GitHub
-`PLATFORM_ADMIN_TOKEN` impostato. Va provato su una VM Windows, mai sul PC di
+Serve almeno un rilascio dell'agente nel cloud, cioè `AGENT_RELEASE_TOKEN`
+impostato su Railway e su GitHub. Va provato su una VM Windows, mai sul PC di
 produzione del Frantoio.
 
 ### Prima installazione (fuori servizio)
