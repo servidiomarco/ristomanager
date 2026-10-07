@@ -777,6 +777,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
   - **Avvisi automatici** quando un locale è in difficoltà durante il servizio: stampe che falliscono o restano ferme, scontrini non emessi, tool di Sofia in errore, nodo di sala muto mentre il locale lavora. Push ed email al team una volta sola; l'avviso si chiude da solo quando il problema rientra. «Controlla adesso» rifà il controllo senza aspettare i 3 minuti.
   - **Errori raggruppati** del browser e di Sofia, nelle ultime 24 ore o 7 giorni: quante volte, in quali ristoranti, su che versione, con lo stack dell'ultimo.
   - **Avviso ai ristoranti**: messaggio informativo o critico, per tutti o per un solo ristorante, che compare in app finché non lo si toglie.
+  - **Agente della cassa**: i pacchetti dell'agente Passepartout che la CI carica a ogni merge su main (canale pilota; lo stesso codice non diventa un rilascio nuovo), con «Promuovi a stabile» e «Ritira». Ripromuovere un rilascio vecchio è il modo di tornare indietro. Sotto, i ristoranti con la cassa: canale degli aggiornamenti (stabile o pilota) e versione dell'agente collegato adesso.
 
 ---
 
@@ -819,6 +820,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-07 | Piattaforma; Integrazione cassa Passepartout | Agente della cassa leggero e distribuito dal cloud: un solo file da ~470 KB (zip da ~110 KB) invece del pacchetto del nodo da ~40 MB; la CI lo carica nel canale pilota a ogni merge su main, il pannello Piattaforma (tab Salute) lo promuove a stabile e sceglie i ristoranti pilota. Il PC della cassa lo scarica col token dell'agente (`/pp-agent/aggiornamento`, `/pp-agent/rilascio/:sha`). |
 | 2026-10-07 | Integrazione cassa Passepartout; Impostazioni | Nuova scheda «Verifica della cassa» in Impostazioni → Passepartout: un tasto controlla PC, cassa, versione, tipo di pagamento, tavoli, menu e comande aperte e dice cosa sistemare. A locale chiuso si può provare la scrittura in cassa con una prenotazione di prova annullata subito; in fondo, la lista di cosa chiedere al rivenditore della cassa. |
 | 2026-10-07 | HACCP; Impostazioni | Nuova sezione HACCP in Impostazioni con sensori, postazioni, limiti ed etichette, e l'elenco dei sensori supportati con i passi per collegarli. Si aggiungono i Milesight TS301/TS302 (sonda per alimenti EN 12830, un TS302 segue due celle) e i sensori LoRaWAN su ChirpStack o The Things Network. Dopo un buco di rete le letture perse entrano con la loro ora, una volta sola, e aprono la non conformità se la cella era fuori soglia; con la batteria del sensore sotto il 20% arriva un avviso. |
 | 2026-10-07 | Integrazione cassa Passepartout; Impostazioni | Il PC della cassa si collega con un codice da Impostazioni → Passepartout («Collega il PC della cassa»): valido 15 minuti e una volta sola, senza più bisogno di noi per il token. Collegare un altro PC stacca quello di prima; «Scollega» toglie l'accesso. La scheda mostra il PC collegato e la versione dell'agente. |

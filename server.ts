@@ -4462,6 +4462,80 @@ app.post('/pp-agent/abbina', pairAgentLimiter, async (req, res) => {
     }
 });
 
+// --- Aggiornamenti dell'agente dal cloud (piano «plug and play», punto 3) ---
+// Il supervisore sul PC della cassa chiede ogni ora se per il suo canale
+// c'è un pacchetto più nuovo di quello che ha, col token dell'agente, e lo
+// scarica da qui (la tabella agent_releases, caricata dalla CI). Pilota =
+// l'ultimo caricato; stabile = l'ultimo promosso dal pannello, così
+// ripromuovere un rilascio vecchio è anche il modo di tornare indietro.
+const agentReleaseLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 60,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    message: { error: 'rate_limited', message: 'Troppe richieste: riprova tra qualche minuto.' },
+});
+
+/** Il ristorante dal token dell'agente (Authorization: Bearer), o null. */
+async function tenantDaTokenAgente(req: express.Request): Promise<number | null> {
+    const m = /^Bearer\s+(\S+)$/.exec(String(req.header('Authorization') ?? ''));
+    if (!m) return null;
+    return resolvePassepartoutAgentTenant(m[1]);
+}
+
+/** Il rilascio che un ristorante deve avere, secondo il suo canale. */
+async function rilascioPerCanale(canale: string): Promise<{ sha: string; sha256: string; dimensione: number } | null> {
+    const rs = await queryWithRetry(
+        canale === 'pilota'
+            ? `SELECT sha, sha256, dimensione FROM agent_releases ORDER BY created_at DESC LIMIT 1`
+            : `SELECT sha, sha256, dimensione FROM agent_releases WHERE canale = 'stabile' ORDER BY promosso_at DESC NULLS LAST LIMIT 1`
+    );
+    const r = rs.rows[0];
+    return r ? { sha: r.sha, sha256: String(r.sha256).trim(), dimensione: Number(r.dimensione) } : null;
+}
+
+app.get('/pp-agent/aggiornamento', agentReleaseLimiter, async (req, res) => {
+    try {
+        // rls-bypass: richiesta dell'agente senza contesto; tenants e agent_releases sono di piattaforma
+        await runAsPlatform(async () => {
+            const tenantId = await tenantDaTokenAgente(req);
+            if (tenantId == null) return res.status(401).json({ error: 'token_non_valido' });
+            const canale = (await queryWithRetry(`SELECT agente_canale FROM tenants WHERE id = $1`, [tenantId])).rows[0]?.agente_canale ?? 'stabile';
+            const rilascio = await rilascioPerCanale(canale);
+            // ho = lo sha corto (7) di build-info.json del pacchetto installato.
+            const ho = String(req.query.ho ?? '').trim().toLowerCase().slice(0, 7);
+            if (!rilascio || (ho.length === 7 && rilascio.sha.slice(0, 7) === ho)) return res.status(204).end();
+            res.json({ ...rilascio, canale, url: `/pp-agent/rilascio/${rilascio.sha}` });
+        });
+    } catch (err: any) {
+        console.error('GET /pp-agent/aggiornamento error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.get('/pp-agent/rilascio/:sha', agentReleaseLimiter, async (req, res) => {
+    try {
+        // rls-bypass: download dell'agente senza contesto; agent_releases è di piattaforma
+        await runAsPlatform(async () => {
+            if ((await tenantDaTokenAgente(req)) == null) return res.status(401).json({ error: 'token_non_valido' });
+            const r = (await queryWithRetry(
+                `SELECT contenuto, sha256 FROM agent_releases WHERE sha = $1`, [String(req.params.sha).slice(0, 40)]
+            )).rows[0];
+            if (!r) return res.status(404).json({ error: 'rilascio_non_trovato' });
+            res.set({
+                'Content-Type': 'application/zip',
+                'Content-Length': String(r.contenuto.length),
+                'X-Sha256': String(r.sha256).trim(),
+                'Cache-Control': 'no-store',
+            });
+            res.end(r.contenuto);
+        });
+    } catch (err: any) {
+        console.error('GET /pp-agent/rilascio error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 // «Scollega»: il token ruota e nessuno riceve il nuovo, l'agente si stacca.
 app.post('/passepartout/scollega', authenticate, requirePermission('settings:full'), requireFeature('passepartout'), async (req, res) => {
     try {
@@ -32441,6 +32515,133 @@ const stripeDashboardCustomerUrl = (customerId: string | null): string | null =>
     const testMode = (process.env.STRIPE_SECRET_KEY || '').startsWith('sk_test');
     return `https://dashboard.stripe.com/${testMode ? 'test/' : ''}customers/${customerId}`;
 };
+
+// --- Rilasci dell'agente della cassa (pannello di piattaforma e CI) --------
+// La CI carica il pacchetto leggero a ogni merge su main (canale pilota);
+// dal pannello lo si promuove a stabile, si ritira, e si sceglie quali
+// ristoranti fanno da pilota. Lo stesso codice due volte non diventa un
+// rilascio nuovo: l'impronta (X-Contenuto-Sha256) uguale all'ultimo basta.
+const MAX_RILASCI_AGENTE = 10;
+
+app.post('/admin/agent-releases', platformAdminAuth, express.raw({ type: 'application/zip', limit: '20mb' }), async (req, res) => {
+    try {
+        const sha = String(req.header('X-Release-Sha') ?? '').trim().toLowerCase();
+        const impronta = String(req.header('X-Contenuto-Sha256') ?? '').trim().toLowerCase() || null;
+        const zip = req.body;
+        if (!/^[0-9a-f]{7,40}$/.test(sha)) return res.status(400).json({ error: 'sha_non_valido' });
+        if (impronta && !/^[0-9a-f]{64}$/.test(impronta)) return res.status(400).json({ error: 'impronta_non_valida' });
+        if (!Buffer.isBuffer(zip) || zip.length < 4 || zip.readUInt32LE(0) !== 0x04034b50) {
+            return res.status(400).json({ error: 'zip_non_valido', message: 'Serve lo zip del pacchetto (Content-Type: application/zip).' });
+        }
+        const ultimo = (await queryWithRetry(
+            `SELECT sha, canale, contenuto_sha256 FROM agent_releases ORDER BY created_at DESC LIMIT 1`
+        )).rows[0];
+        if (impronta && ultimo && String(ultimo.contenuto_sha256 ?? '').trim() === impronta) {
+            return res.json({ sha: ultimo.sha, canale: ultimo.canale, invariato: true });
+        }
+        const sha256 = crypto.createHash('sha256').update(zip).digest('hex');
+        const ins = await queryWithRetry(
+            `INSERT INTO agent_releases (sha, contenuto, dimensione, sha256, contenuto_sha256)
+             VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT (sha) DO NOTHING
+             RETURNING sha, canale`,
+            [sha, zip, zip.length, sha256, impronta]
+        );
+        if (!ins.rows[0]) return res.json({ sha, invariato: true });
+        // Gli ultimi dieci, e mai lo stabile in uso.
+        await queryWithRetry(
+            `DELETE FROM agent_releases
+              WHERE sha NOT IN (SELECT sha FROM agent_releases ORDER BY created_at DESC LIMIT $1)
+                AND sha IS DISTINCT FROM (SELECT sha FROM agent_releases WHERE canale = 'stabile' ORDER BY promosso_at DESC NULLS LAST LIMIT 1)`,
+            [MAX_RILASCI_AGENTE]
+        );
+        console.log(`[agent-releases] caricato ${sha} (${Math.round(zip.length / 1024)} KB) nel canale pilota`);
+        res.status(201).json({ sha, canale: 'pilota', sha256, dimensione: zip.length });
+    } catch (err: any) {
+        console.error('POST /admin/agent-releases error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.get('/admin/agent-releases', platformAdminAuth, async (_req, res) => {
+    try {
+        const rilasci = await queryWithRetry(
+            `SELECT sha, canale, dimensione, created_at, promosso_at,
+                    sha = (SELECT sha FROM agent_releases WHERE canale = 'stabile' ORDER BY promosso_at DESC NULLS LAST LIMIT 1) AS stabile_in_uso
+               FROM agent_releases ORDER BY created_at DESC`
+        );
+        // I ristoranti con la cassa: canale e versione dell'agente collegato.
+        const ristoranti = await queryWithRetry(
+            `SELECT t.id, t.name, t.agente_canale
+               FROM tenants t
+               JOIN tenant_features f ON f.tenant_id = t.id AND f.feature = 'passepartout' AND f.enabled
+              ORDER BY t.id`
+        );
+        res.json({
+            rilasci: rilasci.rows.map((r: any) => ({
+                sha: r.sha, canale: r.canale, dimensione: Number(r.dimensione),
+                created_at: r.created_at, promosso_at: r.promosso_at, stabile_in_uso: r.stabile_in_uso === true,
+            })),
+            ristoranti: ristoranti.rows.map((r: any) => {
+                const agente = getPassepartoutAgentStatus(Number(r.id));
+                return {
+                    id: Number(r.id), name: r.name, canale: r.agente_canale,
+                    collegato: agente.connected, versione_agente: agente.versione_agente,
+                };
+            }),
+        });
+    } catch (err: any) {
+        console.error('GET /admin/agent-releases error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/admin/agent-releases/:sha/promuovi', platformAdminAuth, async (req, res) => {
+    try {
+        const r = await queryWithRetry(
+            `UPDATE agent_releases SET canale = 'stabile', promosso_at = now() WHERE sha = $1 RETURNING sha`,
+            [String(req.params.sha)]
+        );
+        if (!r.rows[0]) return res.status(404).json({ error: 'rilascio_non_trovato' });
+        console.log(`[agent-releases] ${req.params.sha} promosso a stabile`);
+        res.json({ ok: true });
+    } catch (err: any) {
+        console.error('POST /admin/agent-releases/:sha/promuovi error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Ritirare un rilascio: chi è sul pilota torna al precedente. Lo stabile
+// in uso non si ritira (prima se ne promuove un altro).
+app.delete('/admin/agent-releases/:sha', platformAdminAuth, async (req, res) => {
+    try {
+        const r = await queryWithRetry(
+            `DELETE FROM agent_releases
+              WHERE sha = $1
+                AND sha IS DISTINCT FROM (SELECT sha FROM agent_releases WHERE canale = 'stabile' ORDER BY promosso_at DESC NULLS LAST LIMIT 1)
+              RETURNING sha`,
+            [String(req.params.sha)]
+        );
+        if (!r.rows[0]) return res.status(409).json({ error: 'non_ritirabile', message: 'Rilascio inesistente o stabile in uso: promuovine prima un altro.' });
+        res.json({ ok: true });
+    } catch (err: any) {
+        console.error('DELETE /admin/agent-releases/:sha error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/admin/tenants/:id/agente-canale', platformAdminAuth, async (req, res) => {
+    try {
+        const canale = req.body?.canale;
+        if (canale !== 'pilota' && canale !== 'stabile') return res.status(400).json({ error: 'canale_non_valido' });
+        const r = await queryWithRetry(`UPDATE tenants SET agente_canale = $2 WHERE id = $1 RETURNING id`, [Number(req.params.id), canale]);
+        if (!r.rows[0]) return res.status(404).json({ error: 'tenant_not_found' });
+        res.json({ ok: true, canale });
+    } catch (err: any) {
+        console.error('PUT /admin/tenants/:id/agente-canale error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
 
 app.get('/admin/tenants', platformAdminAuth, async (_req, res) => {
     try {

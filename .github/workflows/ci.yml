@@ -101,6 +101,45 @@ jobs:
           path: build/nodo/sympotia-nodo-*.zip
           if-no-files-found: error
           retention-days: 30
+      # Il pacchetto leggero dell'agente della cassa (un solo file, per chi
+      # ha solo la cassa Passepartout), e il suo caricamento nel canale
+      # pilota del cloud: i supervisori dei ristoranti in pilota lo
+      # scaricano di notte. Lo stesso codice non diventa un rilascio nuovo
+      # (il server confronta l'impronta). Senza il segreto
+      # PLATFORM_ADMIN_TOKEN il caricamento si salta. Railway costruisce il
+      # server in parallelo: finché la route nuova non risponde (404, 5xx)
+      # si riprova, fino a 15 minuti.
+      - name: Costruisci l'agente leggero
+        run: npm run package:agent -- --zip
+        env:
+          BUILD_SHA: ${{ github.sha }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sympotia-agente-${{ github.sha }}
+          path: build/agente/sympotia-agente-*.zip
+          if-no-files-found: error
+          retention-days: 30
+      - name: Carica l'agente nel canale pilota
+        if: github.ref == 'refs/heads/main'
+        env:
+          PLATFORM_ADMIN_TOKEN: ${{ secrets.PLATFORM_ADMIN_TOKEN }}
+          API_URL: ${{ vars.SYMPOTIA_API_URL || 'https://ristomanager-production.up.railway.app' }}
+        run: |
+          if [ -z "$PLATFORM_ADMIN_TOKEN" ]; then echo "PLATFORM_ADMIN_TOKEN non impostato: caricamento saltato"; exit 0; fi
+          SHA="${GITHUB_SHA::7}"
+          IMPRONTA=$(node -p "require('./build/agente/$SHA/build-info.json').contenuto_sha256")
+          for i in $(seq 1 30); do
+            CODE=$(curl -sS -o risposta.json -w '%{http_code}' -X POST "$API_URL/admin/agent-releases" \
+              -H "X-Platform-Admin-Token: $PLATFORM_ADMIN_TOKEN" -H "Content-Type: application/zip" \
+              -H "X-Release-Sha: $SHA" -H "X-Contenuto-Sha256: $IMPRONTA" \
+              --data-binary "@build/agente/sympotia-agente-$SHA.zip" || true)
+            case "$CODE" in
+              200|201) cat risposta.json; echo; exit 0 ;;
+              000|404|502|503|504) echo "tentativo $i: HTTP $CODE, riprovo"; sleep 30 ;;
+              *) echo "caricamento rifiutato: HTTP $CODE"; cat risposta.json; echo; exit 1 ;;
+            esac
+          done
+          echo "il server non ha accettato il pacchetto in 15 minuti"; exit 1
 
   # Il report AI (POST /reports/ai-summary) nella suite ordinaria risponde
   # 503 prima di leggere il DB, perché non c'è la chiave. Qui gira il solo
