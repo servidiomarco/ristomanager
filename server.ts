@@ -76,6 +76,7 @@ import {
     callPassepartout,
     comandaToBillPayload,
     PassepartoutBridgeError,
+    scollegaAgentePassepartout,
 } from './services/passepartoutBridge.js';
 import { setupSalaNodeBridge, getSalaNodeStatus, disconnectSalaNode, askNodeStatus, askNode } from './services/salaNodeBridge.js';
 import {
@@ -502,12 +503,37 @@ async function resolveTenantByTokenColumn(
 // che lo usava prima dei token per ristorante: il suo PC non si riconfigura)
 // e, sul nodo, per l'unico ristorante del nodo — è quello che il supervisore
 // passa al nodo. Sul nodo nessun altro token: lì il token del cloud non c'è.
+//
+// Il token storico smette di valere quando il ristorante 1 abbina un PC col
+// codice o lo scollega (passepartout_config.token_storico_spento): da lì
+// conta solo quello del database, che l'abbinamento ruota.
 const resolvePassepartoutAgentTenant = async (token: string): Promise<number | null> => {
     const storico = (process.env.PASSEPARTOUT_AGENT_TOKEN || '').trim();
-    if (storico && token === storico) return isServiceNode ? getSalaNodeTenantId() : PUBLIC_TENANT_ID;
+    if (storico && token === storico) {
+        if (isServiceNode) return getSalaNodeTenantId();
+        return (await tokenStoricoAgenteAttivo()) ? PUBLIC_TENANT_ID : null;
+    }
     if (isServiceNode) return null;
     return resolveTenantByTokenColumn('passepartout_agent_token', token);
 };
+
+let tokenStoricoAgente: { spento: boolean; letto: number } | null = null;
+const TOKEN_STORICO_TTL_MS = Number(process.env.PP_TOKEN_STORICO_TTL_MS ?? 30_000);
+async function tokenStoricoAgenteAttivo(): Promise<boolean> {
+    if (tokenStoricoAgente && Date.now() - tokenStoricoAgente.letto < TOKEN_STORICO_TTL_MS) return !tokenStoricoAgente.spento;
+    try {
+        // rls-bypass: handshake dell'agente senza contesto; si legge un solo flag del ristorante 1
+        const rs = await runAsPlatform(() => queryWithRetry(
+            `SELECT token_storico_spento FROM passepartout_config WHERE tenant_id = $1`,
+            [PUBLIC_TENANT_ID]
+        ));
+        tokenStoricoAgente = { spento: rs.rows[0]?.token_storico_spento === true, letto: Date.now() };
+    } catch (err: any) {
+        console.error('[pp-agent] lettura del token storico fallita:', err?.message || err);
+        if (!tokenStoricoAgente) return true;
+    }
+    return !tokenStoricoAgente.spento;
+}
 
 const resolveTenantByWebhookToken = (token: string): Promise<number | null> =>
     resolveTenantByTokenColumn('webhook_token', token);
@@ -4027,7 +4053,13 @@ app.get('/passepartout/config', authenticate, requirePermission('settings:full')
     try {
         const tenantId = req.tenantId!;
         const rs = await queryWithRetry(
-            `SELECT tipo_pagamento_esterno, tipo_documento FROM passepartout_config WHERE tenant_id = $1`,
+            `SELECT tipo_pagamento_esterno, tipo_documento, abbinato_at, abbinato_hostname, token_storico_spento
+               FROM passepartout_config WHERE tenant_id = $1`,
+            [tenantId]
+        );
+        const codiceAttivo = await queryWithRetry(
+            `SELECT scade_at FROM passepartout_abbinamenti
+              WHERE tenant_id = $1 AND usato_at IS NULL AND scade_at > now() ORDER BY creato_at DESC LIMIT 1`,
             [tenantId]
         );
         const effettivo = await getPassepartoutChiusuraConfig(tenantId);
@@ -4042,6 +4074,17 @@ app.get('/passepartout/config', authenticate, requirePermission('settings:full')
                 tipo_documento: effettivo?.tipoDocumento ?? 'Scontrino',
             },
             agente: getPassepartoutAgentStatus(tenantId),
+            abbinamento: {
+                abbinato_at: salvato.abbinato_at ?? null,
+                hostname: salvato.abbinato_hostname ?? null,
+                // Un codice generato e non ancora usato: la scheda lo ricorda,
+                // ma il codice in chiaro non c'è più (solo l'hash).
+                codice_scade_at: codiceAttivo.rows[0]?.scade_at ?? null,
+                // Il ristorante 1 col token in env del Frantoio, finché non
+                // abbina un PC col codice.
+                token_storico: tenantId === PUBLIC_TENANT_ID && !!(process.env.PASSEPARTOUT_AGENT_TOKEN || '').trim()
+                    && salvato.token_storico_spento !== true,
+            },
         });
     } catch (err: any) {
         console.error('GET /passepartout/config error:', err);
@@ -4094,6 +4137,176 @@ app.put('/passepartout/config', authenticate, requirePermission('settings:full')
 
 // I tipi di pagamento configurati nella cassa: le tendine della sezione
 // scelgono fra quelli veri, un nome sbagliato lascerebbe i conti a sospeso.
+// --- Abbinamento del PC della cassa con un codice -----------------------------
+// Il token dell'agente non si mostra (è un segreto di macchina): dalla
+// sezione si genera un codice breve, valido 15 minuti e una volta sola, e
+// l'agente sul PC lo scambia col token (POST /pp-agent/abbina). Lo scambio
+// ruota il token: l'agente di prima perde l'accesso e si stacca, così due
+// PC dello stesso ristorante non si scavalcano.
+const ALFABETO_CODICE_AGENTE = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // niente 0/O, 1/I/L
+const CODICE_AGENTE_MINUTI = 15;
+const nuovoCodiceAgente = (): string => {
+    let s = '';
+    for (let i = 0; i < 8; i++) s += ALFABETO_CODICE_AGENTE[crypto.randomInt(ALFABETO_CODICE_AGENTE.length)];
+    return `${s.slice(0, 4)}-${s.slice(4)}`;
+};
+const hashCodiceAgente = (codice: string): string =>
+    crypto.createHash('sha256').update(String(codice).toUpperCase().replace(/[^A-Z0-9]/g, '')).digest('hex');
+
+/** Nuovo token per l'agente del ristorante, dentro la transazione del
+ *  chiamante. Il ristorante 1 spegne anche il token storico in env. */
+async function ruotaTokenAgentePassepartout(client: any, tenantId: number): Promise<{ nuovo: string; vecchio: string | null }> {
+    const prima = await client.query(`SELECT passepartout_agent_token FROM tenants WHERE id = $1 FOR UPDATE`, [tenantId]);
+    const upd = await client.query(
+        `UPDATE tenants SET passepartout_agent_token = encode(gen_random_bytes(24), 'hex') WHERE id = $1
+         RETURNING passepartout_agent_token`,
+        [tenantId]
+    );
+    if (tenantId === PUBLIC_TENANT_ID) {
+        await client.query(
+            `INSERT INTO passepartout_config (tenant_id, token_storico_spento, updated_at) VALUES ($1, true, now())
+             ON CONFLICT (tenant_id) DO UPDATE SET token_storico_spento = true, updated_at = now()`,
+            [tenantId]
+        );
+    }
+    return { nuovo: String(upd.rows[0].passepartout_agent_token), vecchio: prima.rows[0]?.passepartout_agent_token ?? null };
+}
+
+/** Dopo il COMMIT di una rotazione: il token vecchio esce dalla cache, il
+ *  flag del token storico si rilegge, l'agente collegato si stacca. */
+function dopoRotazioneAgente(tenantId: number, vecchio: string | null): void {
+    if (vecchio) tenantTokenCache.delete(`passepartout_agent_token:${vecchio}`);
+    tokenStoricoAgente = null;
+    scollegaAgentePassepartout(tenantId);
+}
+
+app.post('/passepartout/abbinamento', authenticate, requirePermission('settings:full'), requireFeature('passepartout'), async (req, res) => {
+    try {
+        const tenantId = req.tenantId!;
+        const codice = nuovoCodiceAgente();
+        // Un codice valido alla volta: quelli non usati prima non valgono più.
+        await queryWithRetry(`DELETE FROM passepartout_abbinamenti WHERE tenant_id = $1 AND usato_at IS NULL`, [tenantId]);
+        const ins = await queryWithRetry(
+            `INSERT INTO passepartout_abbinamenti (tenant_id, codice_hash, scade_at, creato_da)
+             VALUES ($1, $2, now() + make_interval(mins => ${CODICE_AGENTE_MINUTI}), $3)
+             RETURNING scade_at`,
+            [tenantId, hashCodiceAgente(codice), req.user?.userId ?? null]
+        );
+        if (req.user) {
+            LogService.logActivity(
+                tenantId, req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.SETTINGS, undefined, 'Passepartout: codice per collegare il PC della cassa', {}
+            );
+        }
+        res.json({ codice, scade_at: ins.rows[0].scade_at });
+    } catch (err: any) {
+        console.error('POST /passepartout/abbinamento error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Lo scambio codice → token, chiamato dall'agente (o dall'installatore) sul
+// PC della cassa: pubblico, con un limite per indirizzo. Il codice ha circa
+// 40 bit e dura 15 minuti: a questo ritmo indovinarlo non è un'opzione.
+const pairAgentLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 10,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    message: { error: 'rate_limited', message: 'Troppi tentativi: riprova tra qualche minuto.' },
+});
+
+app.post('/pp-agent/abbina', pairAgentLimiter, async (req, res) => {
+    try {
+        const codice = typeof req.body?.codice === 'string' ? req.body.codice : '';
+        const hostname = typeof req.body?.hostname === 'string' ? req.body.hostname.trim().slice(0, 255) : null;
+        const versione = typeof req.body?.versione === 'string' ? req.body.versione.trim().slice(0, 40) : null;
+        if (codice.replace(/[^A-Za-z0-9]/g, '').length !== 8) return res.status(400).json({ error: 'codice_non_valido' });
+        // rls-bypass: codice senza JWT, lookup per hash unico globale; tutto il resto nel contesto del ristorante trovato
+        const trovato = await runAsPlatform(() => queryWithRetry(
+            `SELECT a.id, a.tenant_id, t.name
+               FROM passepartout_abbinamenti a JOIN tenants t ON t.id = a.tenant_id AND t.status = 'active'
+              WHERE a.codice_hash = $1 AND a.usato_at IS NULL AND a.scade_at > now()
+              LIMIT 1`,
+            [hashCodiceAgente(codice)]
+        ));
+        const riga = trovato.rows[0];
+        if (!riga) return res.status(404).json({ error: 'codice_non_valido', message: 'Codice sbagliato, scaduto o già usato: generane uno nuovo nella sezione Passepartout.' });
+        const tenantId = Number(riga.tenant_id);
+        if (!(await isFeatureEnabledForTenant(tenantId, 'passepartout'))) {
+            return res.status(403).json({ error: 'feature_not_enabled' });
+        }
+        const esito = await runWithTenantContext(tenantId, async () => {
+            const client = await pool.connect();
+            try {
+                await client.query('BEGIN');
+                // Una volta sola: chi arriva secondo trova il codice già usato.
+                const uso = await client.query(
+                    `UPDATE passepartout_abbinamenti SET usato_at = now(), hostname = $2, versione_agente = $3
+                      WHERE id = $1 AND usato_at IS NULL AND scade_at > now() RETURNING id`,
+                    [riga.id, hostname, versione]
+                );
+                if ((uso.rowCount ?? 0) === 0) { await client.query('ROLLBACK'); return null; }
+                const token = await ruotaTokenAgentePassepartout(client, tenantId);
+                await client.query(
+                    `INSERT INTO passepartout_config (tenant_id, abbinato_at, abbinato_hostname, updated_at) VALUES ($1, now(), $2, now())
+                     ON CONFLICT (tenant_id) DO UPDATE SET abbinato_at = now(), abbinato_hostname = $2, updated_at = now()`,
+                    [tenantId, hostname]
+                );
+                await client.query('COMMIT');
+                return token;
+            } catch (err) {
+                await client.query('ROLLBACK').catch(() => {});
+                throw err;
+            } finally {
+                client.release();
+            }
+        });
+        if (!esito) return res.status(404).json({ error: 'codice_non_valido', message: 'Codice già usato: generane uno nuovo nella sezione Passepartout.' });
+        dopoRotazioneAgente(tenantId, esito.vecchio);
+        console.log(`[pp-agent] PC abbinato col codice: ${hostname ?? '?'} (ristorante ${tenantId})`);
+        res.json({ token: esito.nuovo, ristorante: riga.name ?? null });
+    } catch (err: any) {
+        console.error('POST /pp-agent/abbina error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// «Scollega»: il token ruota e nessuno riceve il nuovo, l'agente si stacca.
+app.post('/passepartout/scollega', authenticate, requirePermission('settings:full'), requireFeature('passepartout'), async (req, res) => {
+    try {
+        const tenantId = req.tenantId!;
+        const client = await pool.connect();
+        let vecchio: string | null = null;
+        try {
+            await client.query('BEGIN');
+            vecchio = (await ruotaTokenAgentePassepartout(client, tenantId)).vecchio;
+            await client.query(
+                `UPDATE passepartout_config SET abbinato_at = NULL, abbinato_hostname = NULL, updated_at = now() WHERE tenant_id = $1`,
+                [tenantId]
+            );
+            await client.query(`DELETE FROM passepartout_abbinamenti WHERE tenant_id = $1 AND usato_at IS NULL`, [tenantId]);
+            await client.query('COMMIT');
+        } catch (err) {
+            await client.query('ROLLBACK').catch(() => {});
+            throw err;
+        } finally {
+            client.release();
+        }
+        dopoRotazioneAgente(tenantId, vecchio);
+        if (req.user) {
+            LogService.logActivity(
+                tenantId, req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.SETTINGS, undefined, 'Passepartout: PC della cassa scollegato', {}
+            );
+        }
+        res.json({ ok: true });
+    } catch (err: any) {
+        console.error('POST /passepartout/scollega error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
 app.get('/passepartout/tipi-pagamento', authenticate, requirePermission('settings:full'), requireFeature('passepartout'), async (req, res) => {
     try {
         res.json(await callPassepartout<Array<{ codice: string; categoria: string | null }>>(req.tenantId!, 'tipiPagamento'));
