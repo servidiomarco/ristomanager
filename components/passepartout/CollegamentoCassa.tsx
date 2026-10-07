@@ -121,6 +121,11 @@ export const CollegamentoCassa: React.FC<Props> = ({ showToast }) => {
     }
   };
 
+  // PC nuovo: l'installatore (PowerShell da amministratore). Agente già
+  // installato a mano: lo scambio del codice dalla sua cartella.
+  const comandoInstalla = codice
+    ? `$env:SYMPOTIA_CODICE='${codice.codice}'; irm ${PP_SERVER_URL}/installa/cassa.ps1 | iex`
+    : '';
   const comandoAbbina = codice
     ? `node passepartout-agent.js --abbina ${codice.codice} --server ${PP_SERVER_URL}`
     : '';
@@ -192,13 +197,20 @@ export const CollegamentoCassa: React.FC<Props> = ({ showToast }) => {
               <div className="rounded-[var(--ds-radius)] border border-[var(--ds-border)] p-3 space-y-2">
                 <p className="text-[13px] text-[var(--ds-text-secondary)]">{t('pp.pairCodeLabel', { ora: oraBreve(codice.scade_at) })}</p>
                 <p className="font-mono text-[24px] font-semibold tracking-[0.12em] text-[var(--ds-text-primary)]">{codice.codice}</p>
-                <p className="text-[13px] text-[var(--ds-text-secondary)]">{t('pp.pairHowTo')}</p>
-                <div className="flex items-start gap-2">
-                  <code className="min-w-0 flex-1 break-all rounded-[var(--ds-radius-control)] bg-[var(--ds-canvas)] px-2 py-1.5 text-[12px] text-[var(--ds-text-primary)]">{comandoAbbina}</code>
-                  <button type="button" className={dsButton.secondary} onClick={() => copia(comandoAbbina)} aria-label={t('pp.pairCopy')}>
-                    <Copy className="h-4 w-4" aria-hidden />
-                  </button>
-                </div>
+                {[
+                  { testo: t('pp.pairInstallHowTo'), comando: comandoInstalla },
+                  { testo: t('pp.pairHowTo'), comando: comandoAbbina },
+                ].map(({ testo, comando }) => (
+                  <div key={comando} className="space-y-1.5">
+                    <p className="text-[13px] text-[var(--ds-text-secondary)]">{testo}</p>
+                    <div className="flex items-start gap-2">
+                      <code className="min-w-0 flex-1 break-all rounded-[var(--ds-radius-control)] bg-[var(--ds-canvas)] px-2 py-1.5 text-[12px] text-[var(--ds-text-primary)]">{comando}</code>
+                      <button type="button" className={dsButton.secondary} onClick={() => copia(comando)} aria-label={t('pp.pairCopy')}>
+                        <Copy className="h-4 w-4" aria-hidden />
+                      </button>
+                    </div>
+                  </div>
+                ))}
                 <p className="text-[12px] text-[var(--ds-text-muted)]">{t('pp.pairReplaces')}</p>
               </div>
             )}

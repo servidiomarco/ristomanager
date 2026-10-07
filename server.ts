@@ -4536,6 +4536,57 @@ app.get('/pp-agent/rilascio/:sha', agentReleaseLimiter, async (req, res) => {
     }
 });
 
+// La disinstallazione dal PC della cassa (installatore, «disinstalla»): il
+// PC rinuncia al suo token, che ruota come con «Scollega» nella sezione.
+app.post('/pp-agent/scollega', agentReleaseLimiter, async (req, res) => {
+    try {
+        // rls-bypass: richiesta dell'agente senza JWT; il token risolve il ristorante, la rotazione gira nel suo contesto
+        const tenantId = await runAsPlatform(() => tenantDaTokenAgente(req));
+        if (tenantId == null) return res.status(401).json({ error: 'token_non_valido' });
+        const vecchio = await runWithTenantContext(tenantId, async () => {
+            const client = await pool.connect();
+            try {
+                await client.query('BEGIN');
+                const { vecchio } = await ruotaTokenAgentePassepartout(client, tenantId);
+                await client.query(
+                    `UPDATE passepartout_config SET abbinato_at = NULL, abbinato_hostname = NULL, updated_at = now() WHERE tenant_id = $1`,
+                    [tenantId]
+                );
+                await client.query('COMMIT');
+                return vecchio;
+            } catch (err) {
+                await client.query('ROLLBACK').catch(() => {});
+                throw err;
+            } finally {
+                client.release();
+            }
+        });
+        dopoRotazioneAgente(tenantId, vecchio);
+        console.log(`[pp-agent] PC della cassa scollegato dal PC stesso (ristorante ${tenantId})`);
+        res.json({ ok: true });
+    } catch (err: any) {
+        console.error('POST /pp-agent/scollega error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// L'installatore Windows del PC della cassa (piano «plug and play», punto
+// 5): `irm <server>/installa/cassa.ps1 | iex` da PowerShell come
+// amministratore. Lo script sta in scripts/installa-cassa.ps1; qui gli si
+// scrive dentro l'indirizzo del server da cui lo si è scaricato.
+let scriptInstallaCassa: string | null = null;
+app.get('/installa/cassa.ps1', async (req, res) => {
+    try {
+        scriptInstallaCassa ??= await readFileAsync(path.join(process.cwd(), 'scripts', 'installa-cassa.ps1'), 'utf8');
+        const server = `${req.protocol}://${req.get('host')}`;
+        res.set({ 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+        res.send(scriptInstallaCassa.split('__SYMPOTIA_SERVER__').join(server));
+    } catch (err: any) {
+        console.error('GET /installa/cassa.ps1 error:', err);
+        res.status(404).type('text/plain').send("Write-Host 'Installatore non disponibile su questo server.'");
+    }
+});
+
 // «Scollega»: il token ruota e nessuno riceve il nuovo, l'agente si stacca.
 app.post('/passepartout/scollega', authenticate, requirePermission('settings:full'), requireFeature('passepartout'), async (req, res) => {
     try {
