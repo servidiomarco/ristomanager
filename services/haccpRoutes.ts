@@ -304,6 +304,11 @@ const SENSOR_COLUMNS = `
     last_value::float8 AS "lastValue", last_seen_at AS "lastSeenAt", battery, out_since AS "outSince",
     created_at AS "createdAt"`;
 
+/** Batteria del sensore: sotto LOW parte l'avviso (la scheda la segna già in
+ *  ambra dal 20%), sopra REARM si riarma — la batteria è stata cambiata. */
+const SENSOR_BATTERY_LOW = 20;
+const SENSOR_BATTERY_REARM = 30;
+
 const LABEL_COLUMNS = `
     id, kind, TO_CHAR(label_date, 'YYYY-MM-DD') AS "labelDate", product, prepared_at AS "preparedAt",
     TO_CHAR(expiry_date, 'YYYY-MM-DD') AS "expiryDate", lot, storage, allergens, note, copies, printer,
@@ -573,9 +578,9 @@ const DOCUMENT_MAX_BYTES = 5 * 1024 * 1024;
 
 // ---- Sensori: il formato delle letture ------------------------------------------------------
 // Il fornitore non è scelto: si accetta un formato generico, documentato in
-// Configura, più quello del webhook dei gateway Monnit (iMonnit), il più
-// diffuso fra i sensori wireless da cucina. Un altro fornitore si aggiunge
-// qui, con un ramo.
+// Configura, quello del webhook dei gateway Monnit (iMonnit) e le buste delle
+// reti LoRaWAN (il network server dei gateway Milesight, ChirpStack, The
+// Things Network). Un altro fornitore si aggiunge qui, con un ramo.
 
 interface SensorReadingIn {
     externalId: string;
@@ -588,13 +593,49 @@ interface SensorReadingIn {
 
 const parseSensorTime = (v: unknown): Date | null => {
     if (typeof v !== 'string' && typeof v !== 'number') return null;
+    // Un numero piccolo è in secondi Unix (lo storico dei Milesight TS30x),
+    // non in millisecondi: letto come millisecondi cadrebbe nel 1970 e
+    // diventerebbe «adesso» senza dirlo.
+    if (typeof v === 'number') return Number.isFinite(v) ? new Date(v < 1e11 ? v * 1000 : v) : null;
     // iMonnit manda «2026-10-05 12:00:00» in UTC, senza fuso.
-    const s = typeof v === 'string' && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?$/.test(v) ? `${v.replace(' ', 'T')}Z` : v;
+    const s = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?$/.test(v) ? `${v.replace(' ', 'T')}Z` : v;
     const d = new Date(s);
     return Number.isNaN(d.getTime()) ? null : d;
 };
 
-const parseSensorPayload = (body: any): SensorReadingIn[] => {
+/** I prefissi dei DevEUI di Milesight (OUI 24:E1:24): il sensore si
+ *  riconosce anche quando arriva da una rete LoRaWAN che non è la loro. */
+const MILESIGHT_EUI = /^24e124/;
+
+/** Una busta LoRaWAN: il DevEUI dice il sensore, l'oggetto decodificato le
+ *  temperature. Le forme note:
+ *  - gateway Milesight col network server integrato e «Metadata» acceso: il
+ *    risultato del decoder, piatto, con devEUI e deviceName accanto (senza
+ *    Metadata il DevEUI arriva dall'indirizzo, ?device=$devEUI);
+ *  - ChirpStack v3 (devEUI + object) e v4 (deviceInfo.devEui + object);
+ *  - The Things Network v3 (end_device_ids.dev_eui + uplink_message.decoded_payload).
+ *  I decoder Milesight chiamano la temperatura `temperature` sui TS301 e
+ *  `temperature_chn1`/`temperature_chn2` sui TS302 a due sonde: ogni sonda è
+ *  un sensore a sé (DevEUI-1, DevEUI-2), da assegnare alla sua cella. */
+const parseLorawanEnvelope = (body: any, device: string | null): {
+    eui: string; name: string | null; decoded: Record<string, unknown>; time: unknown;
+} | null => {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+    const rawEui = body.devEUI ?? body.devEui ?? body.deveui ?? body.dev_eui
+        ?? body.deviceInfo?.devEui ?? body.end_device_ids?.dev_eui ?? device;
+    if (typeof rawEui !== 'string' || !/^[0-9a-fA-F]{16}$/.test(rawEui.trim())) return null;
+    const decoded = [body.object, body.decoded, body.uplink_message?.decoded_payload, body.decoded_payload]
+        .find(o => o && typeof o === 'object' && !Array.isArray(o)) ?? body;
+    // L'ora della busta vale solo col fuso: il gateway Milesight manda
+    // «2025-04-12T02:56:19» nell'ora del gateway, che non sappiamo. Senza,
+    // vale l'arrivo — l'inoltro è di pochi secondi.
+    const time = [body.time, body.received_at, body.uplink_message?.received_at]
+        .find(t => typeof t === 'string' && /(Z|[+-]\d{2}:?\d{2})$/.test(t));
+    const name = body.deviceName ?? body.deviceInfo?.deviceName ?? body.end_device_ids?.device_id ?? null;
+    return { eui: rawEui.trim().toLowerCase(), name: typeof name === 'string' ? name : null, decoded, time };
+};
+
+const parseSensorPayload = (body: any, device: string | null = null): SensorReadingIn[] => {
     const now = Date.now();
     // Un orario assurdo (orologio del gateway sbagliato) vale «adesso»: la
     // lettura conta, l'orario no.
@@ -621,9 +662,32 @@ const parseSensorPayload = (body: any): SensorReadingIn[] => {
             vendor: r.vendor,
         });
     };
+    const lorawan = Array.isArray(body?.sensorMessages) ? null : parseLorawanEnvelope(body, device);
     if (Array.isArray(body?.sensorMessages)) {
         for (const m of body.sensorMessages) {
             push({ id: m?.sensorID, name: m?.sensorName, value: m?.dataValue ?? m?.plotValues, at: m?.messageDate, battery: m?.batteryLevel, vendor: 'monnit' });
+        }
+    } else if (lorawan) {
+        const vendor = MILESIGHT_EUI.test(lorawan.eui) ? 'milesight' : 'lorawan';
+        // Le temperature di una misura: `temperature` → il DevEUI,
+        // `temperature_chnN` → DevEUI-N. Allarmi e scarti del decoder
+        // (`temperature_chn1_alarm`, `_mutation`) non sono letture.
+        const channels = (o: Record<string, unknown>) => Object.entries(o).flatMap(([key, value]) => {
+            const m = /^temperature(?:_chn(\d))?$/.exec(key);
+            return m ? [{ id: m[1] ? `${lorawan.eui}-${m[1]}` : lorawan.eui, probe: m[1] ?? null, value }] : [];
+        });
+        const label = (probe: string | null) =>
+            lorawan.name && probe ? `${lorawan.name} sonda ${probe}` : lorawan.name;
+        const battery = lorawan.decoded.battery;
+        for (const c of channels(lorawan.decoded)) {
+            push({ id: c.id, name: label(c.probe), value: c.value, at: lorawan.time, battery, vendor });
+        }
+        // Lo storico che il sensore ritrasmette dopo un buco di rete: ogni
+        // riga con la sua ora (secondi Unix), così il registro non ha buchi.
+        const history = Array.isArray(lorawan.decoded.history) ? lorawan.decoded.history : [];
+        for (const h of history) {
+            if (!h || typeof h !== 'object') continue;
+            for (const c of channels(h)) push({ id: c.id, name: label(c.probe), value: c.value, at: h.timestamp, battery: null, vendor });
         }
     } else {
         const list = Array.isArray(body?.readings) ? body.readings : body ? [body] : [];
@@ -2221,10 +2285,34 @@ export function createHaccpRouter(deps: HaccpDeps): express.Router {
         }
     });
 
+    /** Batteria scarica su un sensore assegnato: una push sola, finché la
+     *  batteria non torna sopra la soglia di riarmo (cambiata). La riga
+     *  `battery_alerted_at IS NULL` è il gettone: due invii insieme non
+     *  avvisano due volte. */
+    const alertSensorBattery = async (tenantId: number, sensor: any, battery: number): Promise<void> => {
+        const claim = await queryWithRetry(
+            `UPDATE haccp_sensors s SET battery_alerted_at = now()
+               FROM haccp_points p
+              WHERE s.id = $1 AND s.tenant_id = $2 AND s.active AND s.battery_alerted_at IS NULL
+                AND p.id = s.point_id AND p.tenant_id = s.tenant_id AND p.active
+              RETURNING p.label AS point_label`,
+            [sensor.id, tenantId],
+        );
+        if (!claim.rows[0]) return;
+        await deps.pushToRoles(tenantId, HACCP_ALERT_ROLES, {
+            category: 'system',
+            title: 'Batteria del sensore scarica',
+            body: `${claim.rows[0].point_label} · ${sensor.label || sensor.externalId}: batteria al ${battery}%`,
+            url: '/?view=HACCP',
+            tag: `haccp-sensor-battery-${sensor.id}`,
+        }).catch(err => console.error('[haccp] avviso batteria del sensore fallito:', err));
+    };
+
     /** Una lettura di sensore su una postazione: compila la rilevazione del
      *  giorno se è la sua fascia e la riga è vuota (mai sopra a quella di una
-     *  persona), e segue l'escursione fuori soglia. */
-    const applySensorReading = async (tenantId: number, sensor: any, reading: SensorReadingIn, limits: HaccpLimits): Promise<void> => {
+     *  persona), e segue l'escursione fuori soglia. `latest`: è la misura più
+     *  recente del sensore (non storico ritrasmesso o arrivato in ritardo). */
+    const applySensorReading = async (tenantId: number, sensor: any, reading: SensorReadingIn, limits: HaccpLimits, latest: boolean): Promise<void> => {
         const pointRes = await queryWithRetry(`SELECT ${POINT_COLUMNS} FROM haccp_points WHERE tenant_id = $1 AND id = $2 AND active`, [tenantId, sensor.pointId]);
         const point = pointRes.rows[0] as PointRow | undefined;
         if (!point) return;
@@ -2274,22 +2362,56 @@ export function createHaccpRouter(deps: HaccpDeps): express.Router {
         // Escursione: fuori soglia da più di N minuti → non conformità e avviso,
         // una per escursione. Rientrata, la non conformità resta da chiudere:
         // l'escursione c'è stata, e la merce dentro va valutata.
+        //
+        // L'escursione si ricostruisce dalle letture salvate in ordine di
+        // misura, non di arrivo: dopo un buco di rete il TS30x ritrasmette lo
+        // storico dopo la lettura di adesso, e una cella rimasta calda in
+        // quelle ore deve aprire la sua non conformità lo stesso. `out_since`
+        // (lo stato «fuori soglia» della scheda) lo muove solo la lettura più
+        // recente.
         const out = isOutOfRange(reading.value, point.minTemp, point.maxTemp);
         if (!out) {
-            if (sensor.outSince) await queryWithRetry(`UPDATE haccp_sensors SET out_since = NULL WHERE id = $1 AND tenant_id = $2`, [sensor.id, tenantId]);
+            if (latest && sensor.outSince) await queryWithRetry(`UPDATE haccp_sensors SET out_since = NULL WHERE id = $1 AND tenant_id = $2`, [sensor.id, tenantId]);
             return;
         }
-        const outSince: Date = sensor.outSince ? new Date(sensor.outSince) : reading.at;
-        if (!sensor.outSince) await queryWithRetry(`UPDATE haccp_sensors SET out_since = $1 WHERE id = $2 AND tenant_id = $3`, [reading.at.toISOString(), sensor.id, tenantId]);
-        const minutes = Math.round((reading.at.getTime() - outSince.getTime()) / 60000);
+        // La corsa fuori soglia che contiene questa lettura: fra l'ultima
+        // lettura in soglia prima e la prima dopo, nei due giorni attorno.
+        const run = await queryWithRetry(
+            `WITH r AS (
+                 SELECT measured_at,
+                        (($3::numeric IS NOT NULL AND value > $3::numeric) OR ($4::numeric IS NOT NULL AND value < $4::numeric)) AS out
+                   FROM haccp_sensor_readings
+                  WHERE tenant_id = $5 AND sensor_id = $1
+                    AND measured_at BETWEEN $2::timestamptz - interval '2 days' AND $2::timestamptz + interval '2 days'
+             ),
+             prev_in AS (SELECT max(measured_at) AS at FROM r WHERE NOT out AND measured_at < $2::timestamptz),
+             next_in AS (SELECT min(measured_at) AS at FROM r WHERE NOT out AND measured_at > $2::timestamptz)
+             SELECT min(r.measured_at) AS start, max(r.measured_at) AS "end"
+               FROM r, prev_in, next_in
+              WHERE r.measured_at > COALESCE(prev_in.at, '-infinity') AND r.measured_at < COALESCE(next_in.at, 'infinity')`,
+            [sensor.id, reading.at.toISOString(), point.maxTemp, point.minTemp, tenantId],
+        );
+        const outSince: Date = run.rows[0]?.start ? new Date(run.rows[0].start) : reading.at;
+        const outUntil: Date = run.rows[0]?.end ? new Date(run.rows[0].end) : reading.at;
+        if (latest && (!sensor.outSince || new Date(sensor.outSince).getTime() !== outSince.getTime())) {
+            await queryWithRetry(`UPDATE haccp_sensors SET out_since = $1 WHERE id = $2 AND tenant_id = $3`, [outSince.toISOString(), sensor.id, tenantId]);
+        }
+        const minutes = Math.round((outUntil.getTime() - outSince.getTime()) / 60000);
         if (minutes < limits.sensors.outMinutes) return;
         const sourceId = `${sensor.id}@${outSince.toISOString()}`;
         const opened = await withTenant(tenantId, async client => {
-            const exists = await client.query(
-                `SELECT 1 FROM haccp_nonconformities WHERE tenant_id = $1 AND source = 'SENSOR' AND source_id = $2`,
-                [tenantId, sourceId],
+            // Una per escursione anche quando lo storico arrivato dopo ne
+            // anticipa l'inizio: vale ogni non conformità del sensore che
+            // parte dentro questa corsa.
+            const existing = await client.query(
+                `SELECT source_id FROM haccp_nonconformities WHERE tenant_id = $1 AND source = 'SENSOR' AND source_id LIKE $2`,
+                [tenantId, `${sensor.id}@%`],
             );
-            if (exists.rows[0]) return false;
+            const overlaps = existing.rows.some((row: { source_id: string }) => {
+                const at = Date.parse(row.source_id.slice(String(sensor.id).length + 1));
+                return Number.isFinite(at) && at >= outSince.getTime() && at <= outUntil.getTime();
+            });
+            if (overlaps) return false;
             const since = await deps.localDateTime(tenantId, outSince);
             await syncSourceNc(client, tenantId, {
                 source: 'SENSOR',
@@ -2324,11 +2446,20 @@ export function createHaccpRouter(deps: HaccpDeps): express.Router {
             const token = String(req.headers['x-haccp-sensor-token'] ?? req.query.token ?? '');
             const tenantId = await tenantBySensorToken(token);
             if (!tenantId) return res.status(401).json({ error: 'Token dei sensori non valido' });
-            const readings = parseSensorPayload(req.body);
-            if (readings.length === 0) return res.status(400).json({ error: 'Nessuna lettura riconosciuta' });
+            const device = typeof req.query.device === 'string' ? req.query.device : null;
+            const readings = parseSensorPayload(req.body, device);
+            if (readings.length === 0) {
+                // Un messaggio LoRaWAN senza temperature (il contatto della
+                // porta di un TS302, una risposta di configurazione) è
+                // riconosciuto, non sbagliato: un 400 farebbe ritentare il
+                // gateway per niente.
+                if (parseLorawanEnvelope(req.body, device)) return res.json({ accepted: 0, duplicates: 0, sensors: 0 });
+                return res.status(400).json({ error: 'Nessuna lettura riconosciuta' });
+            }
             const result = await runWithTenantContext(tenantId, async () => {
                 const limits = await loadLimits(tenantId);
                 let accepted = 0;
+                let duplicates = 0;
                 const sensors = new Map<string, any>();
                 for (const r of readings) {
                     let sensor = sensors.get(r.externalId);
@@ -2348,15 +2479,29 @@ export function createHaccpRouter(deps: HaccpDeps): express.Router {
                         sensors.set(r.externalId, sensor);
                     }
                     if (!sensor.active) continue;
-                    await queryWithRetry(
-                        `INSERT INTO haccp_sensor_readings (tenant_id, sensor_id, measured_at, value) VALUES ($1, $2, $3, $4)`,
+                    // La stessa misura due volte (il gateway ritenta, il
+                    // sensore ritrasmette lo storico) resta una riga sola, e
+                    // non si riapplica al registro.
+                    const ins = await queryWithRetry(
+                        `INSERT INTO haccp_sensor_readings (tenant_id, sensor_id, measured_at, value) VALUES ($1, $2, $3, $4)
+                         ON CONFLICT (sensor_id, measured_at) DO NOTHING RETURNING id`,
                         [tenantId, sensor.id, r.at.toISOString(), r.value],
                     );
+                    if (!ins.rows[0]) {
+                        duplicates++;
+                        continue;
+                    }
+                    const latest = !sensor.lastSeenAt || r.at.getTime() >= new Date(sensor.lastSeenAt).getTime();
+                    // Batteria: l'avviso parte una volta sotto il 20% e si
+                    // riarma sopra il 30%, cioè a batteria cambiata — non a
+                    // ogni lettura che oscilla sul 20.
                     const upd = await queryWithRetry(
                         `UPDATE haccp_sensors
                             SET last_value = CASE WHEN last_seen_at IS NULL OR $1 >= last_seen_at THEN $2 ELSE last_value END,
                                 last_seen_at = GREATEST(COALESCE(last_seen_at, $1), $1),
-                                battery = COALESCE($3, battery), updated_at = now()
+                                battery = COALESCE($3, battery),
+                                battery_alerted_at = CASE WHEN COALESCE($3, battery) > ${SENSOR_BATTERY_REARM} THEN NULL ELSE battery_alerted_at END,
+                                updated_at = now()
                           WHERE id = $4 AND tenant_id = $5 RETURNING ${SENSOR_COLUMNS}`,
                         [r.at.toISOString(), r.value, r.battery, sensor.id, tenantId],
                     );
@@ -2364,12 +2509,13 @@ export function createHaccpRouter(deps: HaccpDeps): express.Router {
                     sensors.set(r.externalId, sensor);
                     accepted++;
                     if (sensor.pointId) {
-                        await applySensorReading(tenantId, sensor, r, limits);
+                        await applySensorReading(tenantId, sensor, r, limits, latest);
+                        if (r.battery !== null && r.battery <= SENSOR_BATTERY_LOW) await alertSensorBattery(tenantId, sensor, r.battery);
                         const fresh = await queryWithRetry(`SELECT ${SENSOR_COLUMNS} FROM haccp_sensors WHERE id = $1 AND tenant_id = $2`, [sensor.id, tenantId]);
                         sensors.set(r.externalId, fresh.rows[0]);
                     }
                 }
-                return { accepted, sensors: sensors.size };
+                return { accepted, duplicates, sensors: sensors.size };
             });
             res.json(result);
         } catch (err) {
