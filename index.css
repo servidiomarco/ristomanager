@@ -1308,10 +1308,15 @@ body {
 @media (max-width: 420px) { .ds-date-input { font-size: 14px; } }
 
 /* The Stepper's value is a real number input so it stays typeable, but the
-   native spinners would collide with the − / + buttons flanking it. */
+   native spinners would collide with the − / + buttons flanking it.
+   Gli importi (.ds-money-input) li perdono per un'altra ragione: con step 0.01
+   le freccine salgono di un centesimo, e nessuno scrive un prezzo così. */
 .ds-stepper-input::-webkit-outer-spin-button,
-.ds-stepper-input::-webkit-inner-spin-button {
+.ds-stepper-input::-webkit-inner-spin-button,
+.ds-money-input::-webkit-outer-spin-button,
+.ds-money-input::-webkit-inner-spin-button {
   -webkit-appearance: none;
   margin: 0;
 }
-.ds-stepper-input { -moz-appearance: textfield; appearance: textfield; }
+.ds-stepper-input,
+.ds-money-input { -moz-appearance: textfield; appearance: textfield; }
