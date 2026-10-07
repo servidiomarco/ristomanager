@@ -521,6 +521,8 @@ export interface FiscalRegistryRow {
   day: string;
   table_name: string | null;
   customer_name: string | null;
+  /** Intestatario di fattura e nota di credito. Assente sul backend vecchio. */
+  buyer_name?: string | null;
   /** Fattura stornata: numero della nota di credito che la punta. */
   credit_note_number: string | null;
 }
@@ -576,6 +578,8 @@ export interface FiscalDocumentDetail {
     table_name: string | null; customer_name: string | null; bill_closed_at: string | null;
     related: { id: number; doc_type: FiscalRegistryDocType; doc_number: string | null } | null;
     credit_note_number: string | null;
+    /** Intestatario di fattura e nota di credito. Assente sul backend vecchio. */
+    buyer?: { name: string; vat_number: string | null } | null;
   };
   items: { description: string; quantity: number; unit_price_cents: number; vat_rate_code: string }[];
   payments: { cash_cents: number; electronic_cents: number; ticket_cents: number; uncollected_cents: number; discount_cents: number };
@@ -586,6 +590,8 @@ export interface FiscalRegistryQuery {
   to: string;
   doc_type?: FiscalRegistryDocType;
   status?: FiscalRegistryStatus;
+  /** Ricerca libera: numero, tavolo, cliente, intestatario, importo. */
+  q?: string;
   limit?: number;
   offset?: number;
 }
@@ -594,6 +600,7 @@ const fiscalRegistryQs = (q: FiscalRegistryQuery): string => {
   const qs = new URLSearchParams({ from: q.from, to: q.to });
   if (q.doc_type) qs.set('doc_type', q.doc_type);
   if (q.status) qs.set('status', q.status);
+  if (q.q) qs.set('q', q.q);
   if (q.limit != null) qs.set('limit', String(q.limit));
   if (q.offset != null) qs.set('offset', String(q.offset));
   return qs.toString();
