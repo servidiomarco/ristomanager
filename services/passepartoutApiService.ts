@@ -311,3 +311,30 @@ export const setSpecchioConfig = (input: { mode?: 'off' | 'statistiche'; sala?: 
 
 export const riprovaSpecchio = (): Promise<{ rimessi: number }> =>
   apiRequest(`${API_URL}/passepartout/specchio/riprova`, { method: 'POST', headers: getHeaders() });
+
+// --- Comande del CRM in cassa, dal vivo («comanda viva») ---------------------
+
+export type PpChi = 'cassa' | 'crm';
+
+export interface PpComandeViveConfig {
+  enabled: boolean;
+  /** Chi stampa in cucina e al bar per le comande del CRM. */
+  stampa: PpChi;
+  /** Chi fa il conto dei tavoli presi dal CRM. */
+  conto: PpChi;
+  requisiti: {
+    /** Il modulo comande del CRM è acceso. */
+    comande: boolean;
+    tavoli_abbinati: number;
+    tipo_pagamento: string | null;
+    /** C'è l'articolo per i piatti nati solo nel CRM. */
+    articolo_generico: boolean;
+  };
+  agente: { collegato: boolean; aggiornato: boolean };
+}
+
+export const getComandeViveConfig = (): Promise<PpComandeViveConfig> =>
+  apiRequest(`${API_URL}/passepartout/comande-vive/config`, { headers: getHeaders(false), cache: 'no-store' });
+
+export const setComandeViveConfig = (input: { enabled?: boolean; stampa?: PpChi; conto?: PpChi }): Promise<{ ok: true }> =>
+  apiRequest(`${API_URL}/passepartout/comande-vive/config`, { method: 'PUT', headers: getHeaders(), body: JSON.stringify(input) });
