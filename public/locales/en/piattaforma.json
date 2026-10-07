@@ -92,5 +92,22 @@
     "suspendedCount": "suspended",
     "trialing": "on trial",
     "noBilling": "no billing"
+  },
+  "agentReleases": {
+    "title": "Till agent",
+    "empty": "No releases: CI uploads one on every merge to main.",
+    "stableNow": "stable in use",
+    "promote": "Promote to stable",
+    "promoted": "Promoted to stable",
+    "withdraw": "Withdraw",
+    "withdrawConfirm": "Tap again",
+    "withdrawn": "Release withdrawn",
+    "restaurants": "Restaurants with the till",
+    "running": "agent {{v}}",
+    "offline": "PC not connected",
+    "channelSaved": "Channel saved",
+    "channelAria": "Update channel for {{name}}",
+    "stable": "Stable",
+    "pilot": "Pilot"
   }
 }

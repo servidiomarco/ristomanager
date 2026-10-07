@@ -359,6 +359,92 @@ A mano, sul Mac, dal repo: `npm run package:node -- --zip` costruisce
 server, agente di stampa, agente Passepartout compilato, `node_modules` di
 produzione e la versione in `build-info.json`. Sul PC serve solo Node ≥ 20.
 
+### Il pacchetto leggero dell'agente della cassa
+
+Per i ristoranti che hanno solo la cassa Passepartout, senza nodo:
+`npm run package:agent -- --zip` costruisce `build/agente/sympotia-agente-<sha>.zip`
+con `passepartout-agent.js` (un solo file con le dipendenze dentro, niente
+`node_modules`), `supervisor.mjs` e `build-info.json` (con `contenuto_sha256`,
+l'impronta di agente e supervisore). La CI lo costruisce a ogni push su main
+(artefatto `sympotia-agente-<sha>`) e lo carica nel canale **pilota** del
+cloud con `POST /admin/agent-releases` (segreto GitHub `PLATFORM_ADMIN_TOKEN`;
+senza, il caricamento si salta). Dal pannello Piattaforma, tab Salute, lo si
+promuove a **stabile**. Il PC lo chiede con `GET /pp-agent/aggiornamento?ho=<sha>`
+e lo scarica da `GET /pp-agent/rilascio/<sha>`, col token dell'agente
+(`Authorization: Bearer`).
+
+### Supervisore in «modo agente» (solo cassa, senza nodo)
+
+Con `"modo": "agente"` in `nodo.json` il supervisore non vuole né database
+né token del nodo e tiene in vita un figlio solo, l'agente della cassa (dal
+pacchetto leggero, o da `dist/scripts/` di quello del nodo). Il servizio si
+chiama `sympotia-cassa` (WinSW), `com.sympotia.cassa` (launchd),
+`sympotia-cassa.service` (systemd).
+
+```json
+{
+  "modo": "agente",
+  "cloud_url": "https://ristomanager-production.up.railway.app",
+  "update_window": { "from": "04:00", "to": "10:00" },
+  "passepartout_agent": {
+    "env": {
+      "PP_AGENT_TOKEN": "<token dell'agente, dall'abbinamento col codice>",
+      "PASSEPARTOUT_WS_URL": "http://192.168.1.10:7606/AdapterWS",
+      "PASSEPARTOUT_WS_USER": "…",
+      "PASSEPARTOUT_WS_PASSWORD": "…"
+    }
+  }
+}
+```
+
+- L'agente scrive ogni 10 s `state/agente.json`: `ok` (collegato al cloud),
+  `in_corso` (chiamate della cassa in corso), `versione`.
+- Ogni ora il supervisore chiede al cloud se per il canale del ristorante c'è
+  una versione diversa. Lo zip si scarica in `inbox\` solo se lo sha256 torna
+  con quello annunciato.
+- Si installa nella finestra, e solo se l'agente non dichiara chiamate in corso.
+  La nuova è sana quando scrive di essere collegata entro 3 minuti; se no,
+  torna la precedente e lo zip va in `inbox\rejected\`. Quella versione non
+  si riscarica: si aspetta la successiva.
+- `"aggiornamenti": "manuali"` spegne lo scaricamento; `inbox\` funziona
+  comunque a mano.
+
+### L'installatore (`scripts/installa-cassa.ps1`)
+
+Il server lo serve su `GET /installa/cassa.ps1`, con dentro il proprio
+indirizzo. Dalla sezione Passepartout, «Collega il PC della cassa» dà la riga
+da incollare in PowerShell come amministratore:
+
+```powershell
+$env:SYMPOTIA_CODICE='XXXX-XXXX'; irm https://<server>/installa/cassa.ps1 | iex
+```
+
+Passi:
+1. Controlla amministratore, Windows 10+/Server 2016+ a 64 bit, 500 MB liberi
+   e che `sympotia-cassa` non ci sia già.
+2. Trova la cassa: `http://<localhost o IP del PC>:7606/?wsdl`, oppure chiede
+   l'indirizzo (o `SYMPOTIA_CASSA_URL`).
+3. Prova utente e password con `GetVersioneGestionale` **prima** di abbinare,
+   così un tentativo sbagliato non consuma il codice.
+4. Abbina (`/pp-agent/abbina`) e scarica, con sha256 fissati o annunciati:
+   - Node 22 portatile;
+   - WinSW 2.12;
+   - l'agente del canale del ristorante.
+5. Scrive `C:\Sympotia\Cassa\nodo.json` in modo agente, con permessi solo per
+   Administrators e SYSTEM (per SID).
+6. Installa e avvia il servizio, e propone di disattivare le attività
+   pianificate che lanciavano l'agente a mano.
+7. Aspetta fino a 2 minuti che l'agente scriva di essere collegato.
+
+Disinstallare: `$env:SYMPOTIA_AZIONE='disinstalla'` e la stessa riga. Ferma e
+rimuove il servizio e scollega il PC (`POST /pp-agent/scollega`, col suo token).
+
+Col nodo di sala (Frantoio): `SYMPOTIA_NODO_URL` aggiunge `PP_AGENT_NODE_URL`.
+
+Serve almeno un rilascio dell'agente nel cloud, cioè il segreto GitHub
+`PLATFORM_ADMIN_TOKEN` impostato. Va provato su una VM Windows, mai sul PC di
+produzione del Frantoio.
+
 ### Prima installazione (fuori servizio)
 
 1. Cartella `C:\ProgramData\Sympotia\nodo\` (leggibile solo da SYSTEM e

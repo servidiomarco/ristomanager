@@ -2109,6 +2109,34 @@ export const adminUpdateVoicePlan = async (
   });
 };
 
+// Rilasci dell'agente della cassa: la CI li carica nel canale pilota, il
+// pannello li promuove a stabile e sceglie i ristoranti pilota.
+export interface AdminAgentReleases {
+  rilasci: Array<{
+    sha: string;
+    canale: 'pilota' | 'stabile';
+    dimensione: number;
+    created_at: string;
+    promosso_at: string | null;
+    /** Quello che ricevono i ristoranti sul canale stabile. */
+    stabile_in_uso: boolean;
+  }>;
+  /** I ristoranti con la cassa: canale e versione dell'agente collegato. */
+  ristoranti: Array<{ id: number; name: string; canale: 'pilota' | 'stabile'; collegato: boolean; versione_agente: string | null }>;
+}
+
+export const adminListAgentReleases = async (): Promise<AdminAgentReleases> =>
+  apiRequest<AdminAgentReleases>(`${API_URL}/admin/agent-releases`, { headers: getHeaders(false) });
+
+export const adminPromoteAgentRelease = async (sha: string): Promise<{ ok: true }> =>
+  apiRequest(`${API_URL}/admin/agent-releases/${encodeURIComponent(sha)}/promuovi`, { method: 'POST', headers: getHeaders() });
+
+export const adminWithdrawAgentRelease = async (sha: string): Promise<{ ok: true }> =>
+  apiRequest(`${API_URL}/admin/agent-releases/${encodeURIComponent(sha)}`, { method: 'DELETE', headers: getHeaders() });
+
+export const adminSetAgentChannel = async (tenantId: number, canale: 'pilota' | 'stabile'): Promise<{ ok: true }> =>
+  apiRequest(`${API_URL}/admin/tenants/${tenantId}/agente-canale`, { method: 'PUT', headers: getHeaders(), body: JSON.stringify({ canale }) });
+
 export const adminListTenants = async (): Promise<AdminTenant[]> => {
   return apiRequest<AdminTenant[]>(`${API_URL}/admin/tenants`, {
     headers: getHeaders(false),

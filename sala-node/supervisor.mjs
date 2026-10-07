@@ -24,12 +24,22 @@
 //   logs/                un file per processo, a rotazione (5 MB × 3)
 //   state/               stato del nodo (certificato, chiavi, lucchetto)
 //
+// «modo agente» ("modo": "agente" in nodo.json, piano «Passepartout plug
+// and play»): per i ristoranti con la sola cassa Passepartout, senza nodo.
+// Niente database né token del nodo: un figlio solo, l'agente della cassa
+// (pacchetto leggero, scripts/build-agent-bundle.mjs), che scrive il suo
+// stato in state/agente.json. Il supervisore chiede al cloud ogni ora se
+// c'è una versione nuova per il canale del ristorante, la scarica in inbox/
+// verificandone lo sha256 e la installa nella finestra, a cassa ferma;
+// se la nuova non si collega al cloud entro 3 minuti torna alla precedente.
+//
 // Comandi:
 //   node supervisor.mjs run            il servizio (default)
 //   node supervisor.mjs install        scrive la definizione del servizio
 //   node supervisor.mjs check          controlla nodo.json e la versione
 
 import { spawn, execFileSync } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -43,6 +53,9 @@ const LOG_DIR = path.join(ROOT, 'logs');
 const VERSIONS_DIR = path.join(ROOT, 'versions');
 const INBOX_DIR = path.join(ROOT, 'inbox');
 const LOCK_FILE = path.join(STATE_DIR, 'supervisor.lock');
+// Lo scrive l'agente della cassa (PP_AGENT_STATE_FILE): collegato o no,
+// chiamate in corso, versione.
+const AGENT_STATE_FILE = path.join(STATE_DIR, 'agente.json');
 
 const LOG_MAX_BYTES = 5 * 1024 * 1024;
 const LOG_KEEP = 3;
@@ -51,6 +64,8 @@ const HEALTHY_AFTER_MS = 5 * 60_000;
 const UPDATE_CHECK_MS = Math.max(1_000, Number(process.env.SYMPOTIA_UPDATE_CHECK_MS) || 60_000);
 const READY_TIMEOUT_MS = Math.max(5_000, Number(process.env.SYMPOTIA_READY_TIMEOUT_MS) || 180_000);
 const KEEP_VERSIONS = 3;
+// Modo agente: ogni quanto chiedere al cloud se c'è una versione nuova.
+const DOWNLOAD_CHECK_MS = Math.max(1_000, Number(process.env.SYMPOTIA_DOWNLOAD_CHECK_MS) || 60 * 60_000);
 
 // --- Log a rotazione ----------------------------------------------------------
 
@@ -92,11 +107,19 @@ const readConfig = () => {
     } catch (err) {
         throw new Error(`configurazione illeggibile (${CONFIG_PATH}): ${err.message}`);
     }
-    for (const key of ['cloud_url', 'node_token', 'database_url']) {
+    const modo = raw.modo === 'agente' ? 'agente' : 'nodo';
+    for (const key of modo === 'agente' ? ['cloud_url'] : ['cloud_url', 'node_token', 'database_url']) {
         if (typeof raw[key] !== 'string' || !raw[key].trim()) throw new Error(`nodo.json: manca ${key}`);
+    }
+    if (modo === 'agente' && !raw.passepartout_agent?.env?.PP_AGENT_TOKEN) {
+        throw new Error('nodo.json: manca passepartout_agent.env.PP_AGENT_TOKEN (il token dell\'agente)');
     }
     return {
         ...raw,
+        modo,
+        cloud_url: raw.cloud_url.trim().replace(/\/+$/, ''),
+        // In modo agente l'agente della cassa È il servizio.
+        passepartout_agent: modo === 'agente' ? { ...raw.passepartout_agent, enabled: true } : raw.passepartout_agent,
         port: Number(raw.port) || 8443,
         update_window: raw.update_window || { from: '04:00', to: '10:00' },
     };
@@ -106,16 +129,29 @@ const readConfig = () => {
 
 const readText = (file) => { try { return fs.readFileSync(file, 'utf8').trim(); } catch { return ''; } };
 
-const isAppDir = (dir) => fs.existsSync(path.join(dir, 'dist', 'server.js'));
+/** Lo script dell'agente della cassa in un pacchetto: quello leggero ce
+ *  l'ha alla radice, quello del nodo compilato in dist/scripts. */
+const agentScript = (dir) => {
+    const leggero = path.join(dir, 'passepartout-agent.js');
+    return fs.existsSync(leggero) ? leggero : path.join(dir, 'dist', 'scripts', 'passepartout-agent.js');
+};
+
+/** Una cartella che il supervisore sa lanciare: col nodo serve il server,
+ *  in modo agente basta l'agente della cassa (anche dal pacchetto del nodo). */
+const isAppDir = (dir, modo = 'nodo') => (modo === 'agente'
+    ? fs.existsSync(agentScript(dir))
+    : fs.existsSync(path.join(dir, 'dist', 'server.js')));
 
 /** La cartella dell'app da lanciare. app_dir in nodo.json vince (un checkout
  *  del repo, come prima dei pacchetti); altrimenti versions/<current>. */
 const currentAppDir = (cfg) => {
     if (cfg.app_dir) return path.resolve(cfg.app_dir);
     const sha = readText(path.join(ROOT, 'current.txt'));
-    if (sha && isAppDir(path.join(VERSIONS_DIR, sha))) return path.join(VERSIONS_DIR, sha);
+    if (sha && isAppDir(path.join(VERSIONS_DIR, sha), cfg.modo)) return path.join(VERSIONS_DIR, sha);
     // Prima installazione: se c'è una versione sola, è quella.
-    const all = fs.existsSync(VERSIONS_DIR) ? fs.readdirSync(VERSIONS_DIR).filter(d => isAppDir(path.join(VERSIONS_DIR, d))) : [];
+    const all = fs.existsSync(VERSIONS_DIR)
+        ? fs.readdirSync(VERSIONS_DIR).filter(d => !d.startsWith('_') && isAppDir(path.join(VERSIONS_DIR, d), cfg.modo))
+        : [];
     if (all.length === 1) {
         fs.writeFileSync(path.join(ROOT, 'current.txt'), all[0]);
         return path.join(VERSIONS_DIR, all[0]);
@@ -134,6 +170,7 @@ const versionOf = (appDir) => {
 // --- I figli ------------------------------------------------------------------
 
 const childSpecs = (cfg, appDir) => {
+    if (cfg.modo === 'agente') return agentChildSpecs(cfg, appDir);
     const version = cfg.build_sha || versionOf(appDir);
     const pp = cfg.passepartout_agent?.enabled ? cfg.passepartout_agent : null;
     const specs = [{
@@ -175,8 +212,32 @@ const childSpecs = (cfg, appDir) => {
                 // con l'autorità in sala. Di default lo stesso indirizzo
                 // che usa l'agente di stampa.
                 PP_AGENT_NODE_URL: pp.node_url || cfg.print_agent?.node_url || '',
+                PP_AGENT_STATE_FILE: AGENT_STATE_FILE,
                 ...(pp.env || {}),
             },
+        });
+    }
+    return specs.map(s => ({ ...s, cwd: appDir }));
+};
+
+/** Modo agente: l'agente della cassa verso il cloud, e l'agente di stampa
+ *  solo se il pacchetto ce l'ha (quello leggero no). */
+const agentChildSpecs = (cfg, appDir) => {
+    const specs = [{
+        name: 'passepartout',
+        args: [agentScript(appDir)],
+        env: {
+            PP_AGENT_SERVER_URL: cfg.cloud_url,
+            PP_AGENT_STATE_FILE: AGENT_STATE_FILE,
+            ...(cfg.passepartout_agent.env || {}),
+        },
+    }];
+    const stampa = path.join(appDir, 'scripts', 'print-agent.mjs');
+    if (cfg.print_agent?.enabled && fs.existsSync(stampa)) {
+        specs.push({
+            name: 'stampa',
+            args: [stampa],
+            env: { API_URL: cfg.print_agent.api_url || cfg.cloud_url, PRINT_AGENT_TOKEN: cfg.print_agent.token || '', ...(cfg.print_agent.env || {}) },
         });
     }
     return specs.map(s => ({ ...s, cwd: appDir }));
@@ -289,11 +350,20 @@ const localGet = async (cfg, pathname) => {
     return { status: 0, body: '' };
 };
 
-const waitReady = async (cfg, timeoutMs) => {
+const readAgentState = () => {
+    try { return JSON.parse(fs.readFileSync(AGENT_STATE_FILE, 'utf8')); } catch { return null; }
+};
+
+/** Col nodo: /ready risponde. In modo agente: la versione `sha` scrive di
+ *  essere collegata al cloud, dopo `since`. */
+const waitReady = async (cfg, timeoutMs, sha = null, since = Date.now()) => {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-        if ((await localGet(cfg, '/ready')).status === 200) return true;
-        await new Promise(r => setTimeout(r, 2_000));
+        if (cfg.modo === 'agente') {
+            const st = readAgentState();
+            if (st?.ok === true && (!sha || st.versione === sha) && Date.parse(st.scritto_at) >= since) return true;
+        } else if ((await localGet(cfg, '/ready')).status === 200) return true;
+        await new Promise(r => setTimeout(r, cfg.modo === 'agente' ? 1_000 : 2_000));
     }
     return false;
 };
@@ -324,7 +394,17 @@ const inWindow = (win) => {
     return from <= to ? now >= from && now < to : now >= from || now < to;
 };
 
+const windowLabel = (win) => `${win.from}–${win.to}`;
+
 const serviceIsQuiet = async (cfg) => {
+    if (cfg.modo === 'agente') {
+        // Solo una chiamata della cassa in corso, dichiarata da un agente
+        // vivo, ferma l'aggiornamento: un agente che non scrive (caduto, in
+        // loop) non sta lavorando, e la versione nuova potrebbe sistemarlo.
+        const st = readAgentState();
+        const fresco = st && Date.now() - Date.parse(st.scritto_at) < 60_000;
+        return !fresco || st.in_corso === 0;
+    }
     const r = await localGet(cfg, '/sala-node/maintenance-check');
     if (r.status !== 200) return false;
     try {
@@ -353,14 +433,14 @@ const extractZip = (zip, dest) => {
 };
 
 /** Porta il pacchetto in versions/<sha>; torna lo sha. */
-const stagePackage = (item) => {
+const stagePackage = (item, modo = 'nodo') => {
     fs.mkdirSync(VERSIONS_DIR, { recursive: true });
     const incoming = path.join(VERSIONS_DIR, `_incoming-${Date.now()}`);
     if (item.endsWith('.zip')) extractZip(item, incoming);
     else fs.cpSync(item, incoming, { recursive: true });
-    if (!isAppDir(incoming)) {
+    if (!isAppDir(incoming, modo)) {
         fs.rmSync(incoming, { recursive: true, force: true });
-        throw new Error('pacchetto senza dist/server.js');
+        throw new Error(modo === 'agente' ? 'pacchetto senza l\'agente della cassa' : 'pacchetto senza dist/server.js');
     }
     const sha = versionOf(incoming);
     const target = path.join(VERSIONS_DIR, sha);
@@ -400,11 +480,13 @@ const tryUpdate = async (cfg) => {
             log(`aggiornamento in attesa (${path.basename(item)}): ${why}`);
         }
     };
-    if (!inWindow(cfg.update_window)) return skip(`fuori finestra ${cfg.update_window.from}–${cfg.update_window.to}`);
-    if (!(await serviceIsQuiet(cfg))) return skip('comande o conti aperti (o nodo che non risponde)');
+    if (!inWindow(cfg.update_window)) return skip(`fuori finestra ${windowLabel(cfg.update_window)}`);
+    if (!(await serviceIsQuiet(cfg))) {
+        return skip(cfg.modo === 'agente' ? 'operazioni in corso sulla cassa' : 'comande o conti aperti (o nodo che non risponde)');
+    }
     updating = true;
     try {
-        const sha = stagePackage(item);
+        const sha = stagePackage(item, cfg.modo);
         const previous = readText(path.join(ROOT, 'current.txt'));
         if (sha === previous) {
             log(`aggiornamento: ${sha} è già in uso`);
@@ -415,14 +497,15 @@ const tryUpdate = async (cfg) => {
         fs.writeFileSync(path.join(ROOT, 'previous.txt'), previous);
         fs.writeFileSync(path.join(ROOT, 'current.txt'), sha);
         await stopAll();
+        const avvio = Date.now();
         startAll(cfg);
-        if (await waitReady(cfg, READY_TIMEOUT_MS)) {
+        if (await waitReady(cfg, READY_TIMEOUT_MS, sha, avvio)) {
             log(`aggiornamento riuscito: ${sha} risponde`);
             archiveInboxItem(item, 'done');
             pruneVersions();
             return;
         }
-        log(`aggiornamento FALLITO: ${sha} non risponde a /ready, si torna a ${previous}`);
+        log(`aggiornamento FALLITO: ${sha} ${cfg.modo === 'agente' ? 'non si collega al cloud' : 'non risponde a /ready'}, si torna a ${previous}`);
         fs.writeFileSync(path.join(ROOT, 'current.txt'), previous);
         await stopAll();
         startAll(cfg);
@@ -435,17 +518,84 @@ const tryUpdate = async (cfg) => {
     }
 };
 
+// --- Aggiornamenti dal cloud (modo agente, fase A4b) ---------------------------
+// Ogni ora si chiede al cloud, col token dell'agente, se per il canale del
+// ristorante c'è una versione diversa da quella in uso. Lo zip si scarica
+// in inbox/ (prima in un .part nascosto, che pendingPackages ignora) solo
+// se lo sha256 torna con quello annunciato; da lì lo installa tryUpdate,
+// nella finestra. Una versione già rifiutata (inbox/rejected) non si
+// riscarica: si aspetta la successiva.
+
+let downloading = false;
+const refusedLogged = new Set();
+
+const agentToken = (cfg) => String(cfg.passepartout_agent?.env?.PP_AGENT_TOKEN || '').trim();
+
+const wasRejected = (sha) => {
+    const dir = path.join(INBOX_DIR, 'rejected');
+    return fs.existsSync(dir) && fs.readdirSync(dir).some(n => n.endsWith(`-sympotia-agente-${sha}.zip`));
+};
+
+const checkCloudUpdate = async (cfg) => {
+    if (downloading || cfg.app_dir || cfg.aggiornamenti === 'manuali') return;
+    downloading = true;
+    try {
+        const auth = { Authorization: `Bearer ${agentToken(cfg)}` };
+        const current = readText(path.join(ROOT, 'current.txt'));
+        const res = await fetch(`${cfg.cloud_url}/pp-agent/aggiornamento?ho=${encodeURIComponent(current)}`, {
+            headers: auth, signal: AbortSignal.timeout(30_000),
+        });
+        if (res.status === 204) return;
+        if (!res.ok) { log(`controllo aggiornamenti: HTTP ${res.status}`); return; }
+        const rel = await res.json();
+        if (!/^[0-9a-f]{7,40}$/.test(String(rel?.sha)) || !/^[0-9a-f]{64}$/.test(String(rel?.sha256)) || typeof rel?.url !== 'string') {
+            log('controllo aggiornamenti: risposta non valida');
+            return;
+        }
+        const name = `sympotia-agente-${rel.sha}.zip`;
+        if (rel.sha === current || fs.existsSync(path.join(INBOX_DIR, name))) return;
+        if (wasRejected(rel.sha)) {
+            if (!refusedLogged.has(rel.sha)) { refusedLogged.add(rel.sha); log(`aggiornamento ${rel.sha} già rifiutato una volta: non lo riscarico`); }
+            return;
+        }
+        const dl = await fetch(new URL(rel.url, `${cfg.cloud_url}/`), { headers: auth, signal: AbortSignal.timeout(5 * 60_000) });
+        if (!dl.ok) { log(`scaricamento di ${rel.sha}: HTTP ${dl.status}`); return; }
+        const bytes = Buffer.from(await dl.arrayBuffer());
+        const sha256 = crypto.createHash('sha256').update(bytes).digest('hex');
+        if (sha256 !== rel.sha256) {
+            log(`scaricamento di ${rel.sha}: sha256 diverso da quello annunciato, scartato`);
+            return;
+        }
+        fs.mkdirSync(INBOX_DIR, { recursive: true });
+        const part = path.join(INBOX_DIR, `.${name}.part`);
+        fs.writeFileSync(part, bytes);
+        fs.renameSync(part, path.join(INBOX_DIR, name));
+        log(`scaricato ${rel.sha} (${Math.round(bytes.length / 1024)} KB, canale ${rel.canale ?? '?'}): si installa nella finestra ${windowLabel(cfg.update_window)}`);
+    } catch (err) {
+        log(`controllo aggiornamenti non riuscito: ${err.message}`);
+    } finally {
+        downloading = false;
+    }
+};
+
 // --- Comandi ----------------------------------------------------------------------
 
 const run = async () => {
     const cfg = readConfig();
     acquireLock();
-    log(`supervisore avviato (pid ${process.pid}, cartella ${ROOT})`);
+    log(`supervisore avviato (pid ${process.pid}, cartella ${ROOT}, modo ${cfg.modo})`);
     startAll(cfg);
     const timer = setInterval(() => { void tryUpdate(cfg); }, UPDATE_CHECK_MS);
+    // Il primo controllo poco dopo l'avvio, poi ogni ora.
+    const cloudTimers = [];
+    if (cfg.modo === 'agente') {
+        cloudTimers.push(setTimeout(() => { void checkCloudUpdate(cfg); }, Math.min(60_000, DOWNLOAD_CHECK_MS)));
+        cloudTimers.push(setInterval(() => { void checkCloudUpdate(cfg); }, DOWNLOAD_CHECK_MS));
+    }
     const shutdown = async (signal) => {
         log(`arresto (${signal})`);
         clearInterval(timer);
+        for (const t of cloudTimers) clearTimeout(t);
         await stopAll();
         process.exit(0);
     };
@@ -453,17 +603,28 @@ const run = async () => {
     process.on('SIGINT', () => void shutdown('SIGINT'));
 };
 
+// Il servizio ha un nome suo in modo agente: sullo stesso PC non si
+// confonde col nodo di sala.
+const serviceNames = () => {
+    let modo = 'nodo';
+    try { modo = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'))?.modo === 'agente' ? 'agente' : 'nodo'; } catch { /* senza config: nodo */ }
+    return modo === 'agente'
+        ? { modo, id: 'sympotia-cassa', label: 'com.sympotia.cassa', name: 'Sympotia - agente della cassa', description: 'Agente della cassa Passepartout, con aggiornamenti dal cloud (supervisore).' }
+        : { modo, id: 'sympotia-nodo', label: 'com.sympotia.nodo', name: 'Sympotia - nodo di sala', description: 'Nodo di sala, agente di stampa e agente Passepartout (supervisore unico).' };
+};
+
 const install = () => {
     const node = process.execPath;
     const self = path.join(ROOT, 'supervisor.mjs');
+    const svc = serviceNames();
     if (path.resolve(fileURLToPath(import.meta.url)) !== self) {
         fs.copyFileSync(fileURLToPath(import.meta.url), self);
     }
     if (process.platform === 'win32') {
         const xml = `<service>
-  <id>sympotia-nodo</id>
-  <name>Sympotia - nodo di sala</name>
-  <description>Nodo di sala, agente di stampa e agente Passepartout (supervisore unico).</description>
+  <id>${svc.id}</id>
+  <name>${svc.name}</name>
+  <description>${svc.description}</description>
   <executable>${node}</executable>
   <arguments>"${self}" run</arguments>
   <workingdirectory>${ROOT}</workingdirectory>
@@ -477,15 +638,15 @@ const install = () => {
   <env name="SYMPOTIA_NODE_ROOT" value="${ROOT}"/>
 </service>
 `;
-        fs.writeFileSync(path.join(ROOT, 'sympotia-nodo.xml'), xml);
-        console.log(`Scritto ${path.join(ROOT, 'sympotia-nodo.xml')}.
+        fs.writeFileSync(path.join(ROOT, `${svc.id}.xml`), xml);
+        console.log(`Scritto ${path.join(ROOT, `${svc.id}.xml`)}.
 1. Scarica WinSW-x64.exe (github.com/winsw/winsw/releases) e salvalo come
-   ${path.join(ROOT, 'sympotia-nodo.exe')}
+   ${path.join(ROOT, `${svc.id}.exe`)}
 2. PowerShell da amministratore:
    cd "${ROOT}"
-   .\\sympotia-nodo.exe install
-   .\\sympotia-nodo.exe start
-3. Disattiva le vecchie attività pianificate (nodo, stampa, Passepartout).`);
+   .\\${svc.id}.exe install
+   .\\${svc.id}.exe start
+3. ${svc.modo === 'agente' ? 'Disattiva la vecchia attività pianificata dell\'agente Passepartout.' : 'Disattiva le vecchie attività pianificate (nodo, stampa, Passepartout).'}`);
         return;
     }
     if (process.platform === 'darwin') {
@@ -493,7 +654,7 @@ const install = () => {
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>com.sympotia.nodo</string>
+  <key>Label</key><string>${svc.label}</string>
   <key>ProgramArguments</key><array><string>${node}</string><string>${self}</string><string>run</string></array>
   <key>WorkingDirectory</key><string>${ROOT}</string>
   <key>EnvironmentVariables</key><dict><key>SYMPOTIA_NODE_ROOT</key><string>${ROOT}</string></dict>
@@ -502,16 +663,16 @@ const install = () => {
 </dict>
 </plist>
 `;
-        fs.writeFileSync(path.join(ROOT, 'com.sympotia.nodo.plist'), plist);
-        console.log(`Scritto ${path.join(ROOT, 'com.sympotia.nodo.plist')}.
-  sudo cp "${path.join(ROOT, 'com.sympotia.nodo.plist')}" /Library/LaunchDaemons/
-  sudo launchctl bootstrap system /Library/LaunchDaemons/com.sympotia.nodo.plist
+        fs.writeFileSync(path.join(ROOT, `${svc.label}.plist`), plist);
+        console.log(`Scritto ${path.join(ROOT, `${svc.label}.plist`)}.
+  sudo cp "${path.join(ROOT, `${svc.label}.plist`)}" /Library/LaunchDaemons/
+  sudo launchctl bootstrap system /Library/LaunchDaemons/${svc.label}.plist
   sudo pmset -a sleep 0 autorestart 1`);
         return;
     }
     const unit = `[Unit]
-Description=Sympotia - nodo di sala (supervisore)
-After=network-online.target postgresql.service
+Description=${svc.name} (supervisore)
+After=network-online.target${svc.modo === 'agente' ? '' : ' postgresql.service'}
 Wants=network-online.target
 
 [Service]
@@ -526,19 +687,20 @@ TimeoutStopSec=20
 [Install]
 WantedBy=multi-user.target
 `;
-    fs.writeFileSync(path.join(ROOT, 'sympotia-nodo.service'), unit);
-    console.log(`Scritto ${path.join(ROOT, 'sympotia-nodo.service')}.
-  sudo cp "${path.join(ROOT, 'sympotia-nodo.service')}" /etc/systemd/system/
-  sudo systemctl daemon-reload && sudo systemctl enable --now sympotia-nodo`);
+    fs.writeFileSync(path.join(ROOT, `${svc.id}.service`), unit);
+    console.log(`Scritto ${path.join(ROOT, `${svc.id}.service`)}.
+  sudo cp "${path.join(ROOT, `${svc.id}.service`)}" /etc/systemd/system/
+  sudo systemctl daemon-reload && sudo systemctl enable --now ${svc.id}`);
 };
 
 const check = () => {
     const cfg = readConfig();
     const appDir = currentAppDir(cfg);
-    console.log(`configurazione ok (${CONFIG_PATH})`);
+    console.log(`configurazione ok (${CONFIG_PATH}), modo ${cfg.modo}`);
     console.log(`versione: ${versionOf(appDir)} (${appDir})`);
     console.log(`processi: ${childSpecs(cfg, appDir).map(s => s.name).join(', ')}`);
-    console.log(`finestra aggiornamenti: ${cfg.update_window.from}–${cfg.update_window.to} (ora di Roma)`);
+    console.log(`finestra aggiornamenti: ${windowLabel(cfg.update_window)} (ora di Roma)`);
+    if (cfg.modo === 'agente') console.log(`aggiornamenti dal cloud: ${cfg.aggiornamenti === 'manuali' ? 'spenti' : `ogni ${Math.round(DOWNLOAD_CHECK_MS / 60_000)} min da ${cfg.cloud_url}`}`);
 };
 
 const command = process.argv[2] || 'run';
