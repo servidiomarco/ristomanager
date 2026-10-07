@@ -46,6 +46,7 @@ import {
     getContiCassaGiorno,
     getComandeAperte,
     precontoUnaVolta,
+    scontoComanda,
     specchioComanda,
     diagnosiCassa,
     isPassepartoutConfigured,
@@ -121,7 +122,7 @@ if (CODICE_ABBINA) {
 // tavolo che vuole pagare dal QR diventa blu in cassa). 'specchio': copia
 // in cassa i conti chiusi nel CRM (comanda specchio, fase 4). 'diagnosi':
 // la verifica guidata della sezione Passepartout.
-const CAPABILITIES = ['chiudi-riprendi', 'prenotazioni', 'conti', 'tavoli-aperti', 'chiudi-preconto', 'preconto', 'specchio', 'diagnosi'];
+const CAPABILITIES = ['chiudi-riprendi', 'prenotazioni', 'conti', 'tavoli-aperti', 'chiudi-preconto', 'preconto', 'specchio', 'diagnosi', 'sconto-cassa'];
 
 if (!CODICE_ABBINA && (!SERVER_URL || !TOKEN)) {
     console.error('Config mancante: servono PP_AGENT_SERVER_URL e PP_AGENT_TOKEN, o un abbinamento (--abbina CODICE --server URL).');
@@ -240,6 +241,13 @@ const handlers: Record<string, Handler> = {
         // In fila con la chiusura della stessa comanda: un preconto che
         // arriva mentre la si chiude troverebbe il conto a metà.
         return unaAllaVolta(id, () => precontoUnaVolta(id));
+    },
+    // Lo sconto che la cassa ha messo sul conto aperto della comanda (il
+    // preconto): il conto del QR lo deve togliere come fa la cassa.
+    scontoComanda: (p) => {
+        const id = Number(p?.idComanda);
+        if (!Number.isFinite(id)) throw new Error('Parametro "idComanda" non valido');
+        return scontoComanda(id);
     },
     // Catalogo articoli per l'import menu del CRM (senza immagini: il payload
     // deve stare nel buffer del socket).

@@ -803,6 +803,37 @@ export async function precontoUnaVolta(idComanda: number): Promise<{ emesso: boo
     return { emesso: true };
 }
 
+/** Lo sconto che la cassa ha messo sul conto aperto della comanda. */
+export interface ScontoCassaComanda {
+    idConto: number | null;
+    totaleDocumento: number | null;
+    totaleDaPagare: number | null;
+    /** In euro, come lo scrive la cassa (ScontoEuro). 0 = nessuno sconto. */
+    scontoEuro: number;
+}
+
+/**
+ * In Passepartout lo sconto non sta sulla comanda ma sul suo CONTO (il
+ * preconto, di solito): TotaleDocumento a prezzo pieno, ScontoEuro, e
+ * TotaleDaPagare già scontato (conti del 06/10: comanda 78529, 221,50 −
+ * 21,50 = 200,00). La comanda resta a prezzo pieno, e il CRM che importava
+ * solo le righe mostrava al QR il conto intero. Il servizio non ha una
+ * lettura «conto della comanda»: si prende dai conti del giorno l'ultimo
+ * Aperto della comanda. null = nessun conto aperto, quindi nessuno sconto.
+ */
+export async function scontoComanda(idComanda: number): Promise<ScontoCassaComanda | null> {
+    const conto = (await getContiGiorno())
+        .filter((c) => asNumber(c.IdComanda ?? (c as any).idComanda) === idComanda && asString(c.StatoEnum) === 'Aperto')
+        .pop();
+    if (!conto) return null;
+    return {
+        idConto: asNumber(conto.IdGestionale ?? (conto as any).idGestionale),
+        totaleDocumento: asNumber(conto.TotaleDocumento),
+        totaleDaPagare: asNumber(conto.TotaleDaPagare),
+        scontoEuro: Math.max(0, asNumber(conto.ScontoEuro) ?? 0),
+    };
+}
+
 // ---------------------------------------------------------------------------
 // Comanda specchio (fase 4): un conto chiuso nel CRM copiato in cassa
 // ---------------------------------------------------------------------------

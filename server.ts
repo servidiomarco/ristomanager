@@ -5430,15 +5430,19 @@ async function notifyPassepartoutDoc(tenantId: number, docId: number): Promise<v
 }
 
 /** Quanto la comanda in cassa si è allontanata dalle righe del conto del
- *  CRM che la chiude (quelle dell'import): null se combaciano, se la
- *  comanda è già chiusa (la chiusura riprende) o se non si riesce a
- *  leggerla — lì decide la chiamata di chiusura, come prima del controllo. */
+ *  CRM che la chiude (quelle dell'import), sconto della cassa compreso:
+ *  null se combaciano, se la comanda è già chiusa (la chiusura riprende) o
+ *  se non si riesce a leggerla — lì decide la chiamata di chiusura, come
+ *  prima del controllo. */
 async function differenzaComandaCassa(
     tenantId: number,
     billId: number,
     idComanda: number,
 ): Promise<{ cassaCents: number; contoCents: number } | null> {
-    const rs = await queryWithRetry(`SELECT items FROM table_bills WHERE id = $1 AND tenant_id = $2`, [billId, tenantId]);
+    const rs = await queryWithRetry(
+        `SELECT items, discount_type, discount_value, discount_reason FROM table_bills WHERE id = $1 AND tenant_id = $2`,
+        [billId, tenantId]
+    );
     const items = rs.rows[0]?.items;
     if (!Array.isArray(items) || items.length === 0) return null;
     let comanda: PassepartoutComanda | null;
@@ -5448,9 +5452,13 @@ async function differenzaComandaCassa(
         return null;
     }
     if (!comanda || comanda.isPagato) return null;
+    // Uno sconto tolto in cassa dopo il pagamento chiuderebbe come pagato
+    // «esterno» un importo che nessuno ha versato, come una riga aggiunta.
+    const scontoConto = scontoCassaDelConto(rs.rows[0]);
+    const scontoCassa = (await scontoCassaCents(tenantId, idComanda)) ?? scontoConto;
     const contoCents = items.reduce(
-        (sum: number, i: any) => sum + Math.round(Number(i.unit_price_cents) || 0) * (Number(i.qty) || 0), 0);
-    const cassaCents = comandaToBillPayload(comanda).total_cents;
+        (sum: number, i: any) => sum + Math.round(Number(i.unit_price_cents) || 0) * (Number(i.qty) || 0), 0) - scontoConto;
+    const cassaCents = comandaToBillPayload(comanda).total_cents - scontoCassa;
     return cassaCents === contoCents ? null : { cassaCents, contoCents };
 }
 
@@ -7693,6 +7701,8 @@ app.post('/reservations/:id/bill', authenticate, requirePermission('payments:ful
         // gestionale, non dal cameriere. total_cents nel body viene ignorato.
         const fromPassepartout = req.body?.source === 'passepartout';
         let ppPayload: ReturnType<typeof comandaToBillPayload> | null = null;
+        // Lo sconto che il cameriere ha già messo sul conto in cassa.
+        let scontoPp = 0;
         if (fromPassepartout) {
             const tavolo = String(req.body?.pp_tavolo || '').trim();
             if (!tavolo) return res.status(400).json({ error: 'pp_tavolo mancante per source=passepartout' });
@@ -7726,9 +7736,11 @@ app.post('/reservations/:id/bill', authenticate, requirePermission('payments:ful
             if (ppPayload.total_cents <= 0) {
                 return res.status(422).json({ error: 'empty_comanda', message: 'La comanda ha totale zero' });
             }
+            scontoPp = Math.min(await scontoCassaCents(req.tenantId!, ppPayload.id_comanda) ?? 0, ppPayload.total_cents);
         }
+        const colPp = colonneScontoCassa(scontoPp);
 
-        const totalCents = fromPassepartout ? ppPayload!.total_cents : Number(req.body?.total_cents);
+        const totalCents = fromPassepartout ? ppPayload!.total_cents - scontoPp : Number(req.body?.total_cents);
         if (!Number.isFinite(totalCents) || totalCents <= 0) {
             return res.status(400).json({ error: 'total_cents must be a positive integer' });
         }
@@ -7769,8 +7781,8 @@ app.post('/reservations/:id/bill', authenticate, requirePermission('payments:ful
         const inserted = await queryWithRetry(
             `INSERT INTO table_bills
                 (tenant_id, reservation_id, table_id, total_cents, covers, share_token, opened_by_user_id,
-                 items, external_ref, service_date, shift)
-             VALUES ($11, $1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10)
+                 items, external_ref, service_date, shift, discount_type, discount_value, discount_reason)
+             VALUES ($11, $1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $12, $13, $14)
              RETURNING id, reservation_id, table_id, total_cents, covers, currency,
                        items, status, share_token, opened_at, closed_at,
                        opened_by_user_id, closed_by_user_id, external_ref,
@@ -7778,7 +7790,7 @@ app.post('/reservations/:id/bill', authenticate, requirePermission('payments:ful
             [id, resRow.rows[0].table_id, totalRounded, covers, shareToken, req.user?.userId ?? null,
              ppPayload ? JSON.stringify(ppPayload.items) : null,
              ppPayload?.external_ref ?? null,
-             servizioConto.service_date, servizioConto.shift, req.tenantId!]
+             servizioConto.service_date, servizioConto.shift, req.tenantId!, colPp.type, colPp.value, colPp.reason]
         );
         const bill = inserted.rows[0];
         await logBillChanged(null, req.tenantId!, bill.id);
@@ -10471,7 +10483,7 @@ async function loadBillByToken(token: string) {
         `SELECT id, tenant_id, reservation_id, table_id, takeaway_order_id, total_cents, covers, currency,
                 items, status, share_token, opened_at, closed_at,
                 opened_by_user_id, closed_by_user_id, external_ref,
-                cash_settled_cents, tip_cents, notes
+                cash_settled_cents, tip_cents, notes, discount_type
          FROM table_bills
          WHERE share_token = $1
            AND status IN ('OPEN','LOCKED')
@@ -10487,7 +10499,7 @@ async function loadBillSaldatoByToken(token: string) {
         `SELECT id, tenant_id, reservation_id, table_id, takeaway_order_id, total_cents, covers, currency,
                 items, status, share_token, opened_at, closed_at,
                 opened_by_user_id, closed_by_user_id, external_ref,
-                cash_settled_cents, tip_cents, notes
+                cash_settled_cents, tip_cents, notes, discount_type
          FROM table_bills
          WHERE share_token = $1
            AND status IN ('SETTLED','CLOSED')
@@ -10576,6 +10588,11 @@ app.get('/pay/:token', publicPayLimiter, async (req, res) => runAsPlatform(async
             (n: number, i: any) => n + Number(i.unit_price_cents || 0) * Number(i.qty || 0), 0
         );
         const perItemAvailable = billItems.length > 0 && itemsSum === bill.total_cents;
+        // Lo sconto del conto (della cassa o del CRM) è la differenza tra le
+        // righe e il totale: la pagina lo mostra sotto le righe, così l'ospite
+        // capisce perché paga meno della loro somma.
+        const discountCents = bill.discount_type && billItems.length > 0 && itemsSum > bill.total_cents
+            ? itemsSum - bill.total_cents : 0;
 
         // Un conto d'asporto è di una persona sola: la pagina non deve mostrare
         // coperti né proporre lo split equo/per piatto. Il flag viene dalla
@@ -10615,6 +10632,7 @@ app.get('/pay/:token', publicPayLimiter, async (req, res) => runAsPlatform(async
             claimed_cents: claimedCents,
             deposit_credit_cents: depositCreditCents,
             residual_cents: residual,
+            discount_cents: discountCents,
             // La copia digitale dello scontrino, da quando la cassa (o il CRM)
             // l'ha emesso: la pagina la propone a ogni telefono che ha pagato.
             receipt_url: ['SETTLED', 'CLOSED'].includes(bill.status) ? await receiptUrlForBill(bill.tenant_id, bill.id) : null,
@@ -11388,10 +11406,50 @@ async function tablePayState(tenantId: number, tableId: number): Promise<{ open:
     };
 }
 
+// --- Lo sconto della cassa nel conto del QR --------------------------------
+// In Passepartout lo sconto sta sul conto della comanda (il preconto), non
+// sulle righe: il conto del CRM nato dalle righe era a prezzo pieno, e
+// l'ospite pagava dal QR più di quanto la cassa chiedeva (07/10). Lo sconto
+// della cassa entra nel conto come sconto di conto con questo motivo: il
+// CRM non lo applica da sé (la rotta degli sconti rifiuta i conti nati da
+// Passepartout), lo copia dalla cassa a ogni riallineamento.
+const SCONTO_CASSA_MOTIVO = 'Sconto della cassa';
+
+/** Lo sconto del conto aperto della comanda in cassa, in centesimi. 0 se
+ *  in cassa non c'è; null se non si sa (agente senza 'sconto-cassa', o
+ *  muto): allora lo sconto già sul conto resta com'è. */
+async function scontoCassaCents(tenantId: number, idComanda: number): Promise<number | null> {
+    if (!passepartoutAgentSupports(tenantId, 'sconto-cassa')) return null;
+    try {
+        const conto = await callPassepartout<{ scontoEuro?: number } | null>(tenantId, 'scontoComanda', { idComanda }, 10_000);
+        const euro = Number(conto?.scontoEuro ?? 0);
+        return Number.isFinite(euro) && euro > 0 ? Math.round(euro * 100) : 0;
+    } catch (err: any) {
+        console.warn('[passepartout] sconto della cassa non letto per la comanda', idComanda, err?.message ?? err);
+        return null;
+    }
+}
+
+/** Lo sconto della cassa già copiato sul conto, in centesimi. */
+const scontoCassaDelConto = (b: { discount_type?: string | null; discount_value?: unknown; discount_reason?: string | null } | undefined): number =>
+    b?.discount_type === 'AMOUNT' && b?.discount_reason === SCONTO_CASSA_MOTIVO ? Math.round(Number(b.discount_value) * 100) : 0;
+
+/** Le colonne di sconto del conto per lo sconto della cassa. */
+const colonneScontoCassa = (scontoCents: number) => scontoCents > 0
+    ? { type: 'AMOUNT', value: scontoCents / 100, reason: SCONTO_CASSA_MOTIVO }
+    : { type: null, value: null, reason: null };
+
 /** Le righe e il totale del conto tornano quelli della comanda in cassa,
- *  finché nessuno ha iniziato a pagare: dopo, il conto resta com'è e una
- *  differenza la ferma la chiusura in cassa (differenzaComandaCassa). */
-async function riallineaContoAllaComanda(tenantId: number, billId: number, comanda: PassepartoutComanda): Promise<void> {
+ *  sconto della cassa compreso, finché nessuno ha iniziato a pagare: dopo,
+ *  il conto resta com'è e una differenza la ferma la chiusura in cassa
+ *  (differenzaComandaCassa). `scontoCents` null = sconto non letto: resta
+ *  quello già sul conto. */
+async function riallineaContoAllaComanda(
+    tenantId: number,
+    billId: number,
+    comanda: PassepartoutComanda,
+    scontoCents: number | null = null,
+): Promise<void> {
     const payload = comandaToBillPayload(comanda);
     if (payload.total_cents <= 0) return;
     const firma = (items: any[]) => (items || [])
@@ -11401,7 +11459,8 @@ async function riallineaContoAllaComanda(tenantId: number, billId: number, coman
     try {
         await client.query('BEGIN');
         const cur = await client.query(
-            `SELECT id, status, reservation_id, total_cents, items FROM table_bills WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
+            `SELECT id, status, reservation_id, total_cents, items, discount_type, discount_value, discount_reason
+               FROM table_bills WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
             [billId, tenantId]
         );
         const b = cur.rows[0];
@@ -11410,18 +11469,25 @@ async function riallineaContoAllaComanda(tenantId: number, billId: number, coman
               WHERE table_bill_id = $1 AND status IN ('CLAIMED','PAID') AND kind <> 'deposit' LIMIT 1`,
             [billId]
         );
-        if (!b || !['OPEN', 'LOCKED'].includes(b.status) || pagando.rows.length > 0
+        const scontoAttuale = scontoCassaDelConto(b);
+        const sconto = Math.min(scontoCents ?? scontoAttuale, payload.total_cents);
+        const totale = payload.total_cents - sconto;
+        if (!b || !['OPEN', 'LOCKED'].includes(b.status) || pagando.rows.length > 0 || totale <= 0
             || (await staffPaidCentsForBill(billId, client)) > 0
-            || (Number(b.total_cents) === payload.total_cents && firma(b.items) === firma(payload.items))) {
+            || (Number(b.total_cents) === totale && sconto === scontoAttuale && firma(b.items) === firma(payload.items))) {
             await client.query('ROLLBACK');
             return;
         }
         // Prima il totale, poi l'acconto: come syncBillTotalInTx.
+        const col = colonneScontoCassa(sconto);
         await client.query(
-            `UPDATE table_bills SET total_cents = $2, items = $3::jsonb WHERE id = $1`,
-            [billId, payload.total_cents, JSON.stringify(payload.items)]
+            `UPDATE table_bills
+                SET total_cents = $2, items = $3::jsonb,
+                    discount_type = $4, discount_value = $5, discount_reason = $6, discount_by_user_id = NULL
+              WHERE id = $1`,
+            [billId, totale, JSON.stringify(payload.items), col.type, col.value, col.reason]
         );
-        await maintainDepositCredit(client, tenantId, billId, b.reservation_id, payload.total_cents);
+        await maintainDepositCredit(client, tenantId, billId, b.reservation_id, totale);
         await logBillChanged(client, tenantId, billId);
         await client.query('COMMIT');
         bill = b;
@@ -11549,7 +11615,7 @@ async function contoDalQrCassa(tenantId: number, tableId: number): Promise<Esito
         if (idComanda == null) return { url: urlDi(esistente.share_token) };
         const comanda = await leggiComanda(idComanda);
         if (comanda && !comanda.isPagato) {
-            await riallineaContoAllaComanda(tenantId, esistente.id, comanda);
+            await riallineaContoAllaComanda(tenantId, esistente.id, comanda, await scontoCassaCents(tenantId, idComanda));
             return { url: urlDi(esistente.share_token) };
         }
         // La comanda del conto è chiusa in cassa: un conto mai pagato nel
@@ -11576,6 +11642,11 @@ async function contoDalQrCassa(tenantId: number, tableId: number): Promise<Esito
     const externalRef = `pp:comanda:${aperta.pp_comanda_id}`;
     const payload = comandaToBillPayload(comanda);
     if (payload.total_cents <= 0) return { status: 409, error: 'nessuna_comanda' };
+    // Lo sconto che il cameriere ha già messo in cassa sul conto del tavolo.
+    const scontoCassa = Math.min(await scontoCassaCents(tenantId, aperta.pp_comanda_id) ?? 0, payload.total_cents);
+    const totaleQr = payload.total_cents - scontoCassa;
+    if (totaleQr <= 0) return { status: 409, error: 'chiuso' };
+    const colQr = colonneScontoCassa(scontoCassa);
 
     // La prenotazione del planning da cui la cassa ha aperto il tavolo, se
     // c'è: porta con sé la caparra, che il conto scala.
@@ -11598,15 +11669,15 @@ async function contoDalQrCassa(tenantId: number, tableId: number): Promise<Esito
         const ins = await queryWithRetry(
             `INSERT INTO table_bills
                 (tenant_id, reservation_id, table_id, total_cents, covers, share_token, opened_by_user_id,
-                 items, external_ref, service_date, shift)
-             VALUES ($1, $2, $3, $4, $5, $6, NULL, $7::jsonb, $8, $9, $10)
+                 items, external_ref, service_date, shift, discount_type, discount_value, discount_reason)
+             VALUES ($1, $2, $3, $4, $5, $6, NULL, $7::jsonb, $8, $9, $10, $11, $12, $13)
              RETURNING id, reservation_id, table_id, total_cents, covers, currency,
                        items, status, share_token, opened_at, closed_at,
                        opened_by_user_id, closed_by_user_id, external_ref,
                        cash_settled_cents, tip_cents, notes`,
-            [tenantId, reservationId, aperta.table_id, payload.total_cents, payload.covers,
+            [tenantId, reservationId, aperta.table_id, totaleQr, payload.covers,
              crypto.randomBytes(24).toString('base64url'), JSON.stringify(payload.items), externalRef,
-             servizio.service_date, servizio.shift]
+             servizio.service_date, servizio.shift, colQr.type, colQr.value, colQr.reason]
         );
         bill = ins.rows[0];
     } catch (err: any) {
@@ -11628,7 +11699,7 @@ async function contoDalQrCassa(tenantId: number, tableId: number): Promise<Esito
     // Il tavolo vuole pagare: lo sanno la cassa Passepartout (preconto,
     // tavolo blu) e il personale (push). Fuori dalla risposta: l'ospite va
     // al pagamento senza aspettare la stampa.
-    void segnalaRichiestaContoQr(tenantId, Number(bill.id), aperta.pp_comanda_id, aperta.table_id, payload.total_cents);
+    void segnalaRichiestaContoQr(tenantId, Number(bill.id), aperta.pp_comanda_id, aperta.table_id, totaleQr);
     if (reservationId != null) {
         const credit = await creditPaidDepositsToBill(tenantId, bill.id).catch(() => ({ credited: 0, settled: false }));
         if (credit.credited > 0) {
@@ -39664,6 +39735,8 @@ app.post('/tables/:id/bill', authenticate, requirePermission('payments:full'), a
         // il nome del tavolo CRM (spesso coincidono, es. "40").
         const fromPassepartout = req.body?.source === 'passepartout';
         let ppPayload: ReturnType<typeof comandaToBillPayload> | null = null;
+        // Lo sconto che il cameriere ha già messo sul conto in cassa.
+        let scontoPp = 0;
         if (fromPassepartout) {
             const tavolo = String(req.body?.pp_tavolo || tbl.rows[0].name || '').trim();
             if (!tavolo) return res.status(400).json({ error: 'pp_tavolo mancante per source=passepartout' });
@@ -39675,9 +39748,11 @@ app.post('/tables/:id/bill', authenticate, requirePermission('payments:full'), a
             if (ppPayload.total_cents <= 0) {
                 return res.status(422).json({ error: 'empty_comanda', message: 'La comanda ha totale zero' });
             }
+            scontoPp = Math.min(await scontoCassaCents(req.tenantId!, ppPayload.id_comanda) ?? 0, ppPayload.total_cents);
         }
+        const colPp = colonneScontoCassa(scontoPp);
 
-        const totalCents = fromPassepartout ? ppPayload!.total_cents : Number(req.body?.total_cents);
+        const totalCents = fromPassepartout ? ppPayload!.total_cents - scontoPp : Number(req.body?.total_cents);
         if (!Number.isFinite(totalCents) || totalCents <= 0) {
             return res.status(400).json({ error: 'total_cents deve essere un intero positivo' });
         }
@@ -39695,8 +39770,8 @@ app.post('/tables/:id/bill', authenticate, requirePermission('payments:full'), a
             inserted = await queryWithRetry(
                 `INSERT INTO table_bills
                     (tenant_id, reservation_id, table_id, total_cents, covers, share_token, opened_by_user_id,
-                     items, external_ref, service_date, shift)
-                 VALUES ($10, NULL, $1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9)
+                     items, external_ref, service_date, shift, discount_type, discount_value, discount_reason)
+                 VALUES ($10, NULL, $1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $11, $12, $13)
                  RETURNING id, reservation_id, table_id, total_cents, covers, currency,
                            items, status, share_token, opened_at, closed_at,
                            opened_by_user_id, closed_by_user_id, external_ref,
@@ -39704,7 +39779,7 @@ app.post('/tables/:id/bill', authenticate, requirePermission('payments:full'), a
                 [tableId, Math.round(totalCents), covers, shareToken, req.user?.userId ?? null,
                  ppPayload ? JSON.stringify(ppPayload.items) : null,
                  ppPayload?.external_ref ?? null,
-                 servizioConto.service_date, servizioConto.shift, req.tenantId!]
+                 servizioConto.service_date, servizioConto.shift, req.tenantId!, colPp.type, colPp.value, colPp.reason]
             );
         } catch (err: any) {
             // L'indice unico ha fatto il suo lavoro: c'è già un conto attivo.

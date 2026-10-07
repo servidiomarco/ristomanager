@@ -61,6 +61,9 @@ export interface PublicBillView {
   /** Acconto già versato dal prenotante, portato nel conto: già scalato dal
    *  residuo e dalla barra. Mostrato come riga "Acconto −€X". */
   deposit_credit_cents?: number;
+  /** Sconto sul conto (della cassa o del CRM): le righe sommano più del
+   *  totale di tanto. Mostrato sotto le righe come "Sconto −€X". */
+  discount_cents?: number;
   residual_cents: number;
   /** Copia digitale dello scontrino, a conto saldato e scontrino emesso. */
   receipt_url?: string | null;

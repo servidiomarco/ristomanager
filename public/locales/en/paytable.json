@@ -24,6 +24,7 @@
     "cover_one": "{{count}} guest",
     "cover_other": "{{count}} guests",
     "depositPaid": "Deposit already paid",
+    "discount": "Discount",
     "paidLabel": "Paid {{amount}}",
     "remaining": "Remaining:",
     "showAllItems": "Show all ({{count}})",

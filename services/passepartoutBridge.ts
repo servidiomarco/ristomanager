@@ -47,6 +47,8 @@ export type PassepartoutOp =
     /** Stampa il preconto della comanda, una volta sola (capacità
      *  'preconto'): in cassa il tavolo diventa «vuole pagare». */
     | 'preconto'
+    /** Lo sconto del conto aperto della comanda (capacità 'sconto-cassa'). */
+    | 'scontoComanda'
     /** Copia in cassa un conto chiuso nel CRM: comanda sul tavolo scelto,
      *  senza invio in produzione, chiusa come proforma col tipo esterno
      *  (capacità 'specchio'). */
