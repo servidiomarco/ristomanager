@@ -60,6 +60,9 @@ COPY migrations ./migrations
 # services/supportAssistant.ts): solo questi tre, non tutta la cartella docs.
 COPY docs/funzionalita-app.md docs/Manuale_Utente_CRM.md docs/manuale-operativo-comande-cucina-passe.md ./docs/
 
+# L'installatore del PC della cassa, servito da GET /installa/cassa.ps1.
+COPY scripts/installa-cassa.ps1 ./scripts/
+
 # Expose port 8080 (Railway's default)
 EXPOSE 8080
 

@@ -46,6 +46,12 @@ describe("installatore del PC della cassa", () => {
         expect(script).toContain('/pp-agent/aggiornamento');
     });
 
+    it("l'immagine di produzione lo contiene: il Dockerfile copia solo le cartelle elencate", () => {
+        // Il 07/10 la route rispondeva «non disponibile» su Railway: i test
+        // girano dal repo, l'immagine no.
+        expect(fs.readFileSync('Dockerfile', 'utf8')).toMatch(/^COPY scripts\/installa-cassa\.ps1 \.\/scripts\/$/m);
+    });
+
     it.skipIf(!pwsh)('PowerShell lo legge senza errori di sintassi', () => {
         const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'installa-')), 'cassa.ps1');
         fs.writeFileSync(file, script);
