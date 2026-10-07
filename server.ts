@@ -4148,7 +4148,7 @@ app.put('/passepartout/config', authenticate, requirePermission('settings:full')
 // sezione lo fa da sé: una lista di voci con esito e dati, che l'interfaccia
 // traduce (pp.verifica.<voce>.<esito>). L'ultima resta in passepartout_config.
 const VERSIONI_PASSEPARTOUT_PROVATE = ['2026C1'];
-const CAPACITA_AGENTE_ATTESE = ['chiudi-riprendi', 'prenotazioni', 'conti', 'tavoli-aperti', 'chiudi-preconto', 'preconto', 'specchio', 'diagnosi'];
+const CAPACITA_AGENTE_ATTESE = ['chiudi-riprendi', 'prenotazioni', 'conti', 'tavoli-aperti', 'chiudi-preconto', 'preconto', 'specchio', 'diagnosi', 'sconto-cassa'];
 type EsitoVerifica = 'ok' | 'attenzione' | 'errore' | 'info';
 interface VoceVerifica { voce: string; esito: EsitoVerifica; dati?: Record<string, unknown> }
 
@@ -5326,6 +5326,116 @@ app.post('/passepartout/specchio/riprova', authenticate, requirePermission('sett
         res.json({ rimessi: rs.rowCount ?? 0 });
     } catch (err: any) {
         console.error('POST /passepartout/specchio/riprova error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// --- Comande del CRM in cassa, dal vivo («comanda viva») ---------------------
+// La comanda presa nel CRM nasce e cresce nella comanda in cassa del tavolo
+// vero (docs/passepartout-comanda-viva-prove.md). Due scelte del ristorante:
+// chi stampa in cucina e al bar (la cassa o il CRM: mai tutti e due) e chi
+// fa il conto (la cassa o il CRM). Si accende solo con il modulo comande,
+// i tavoli abbinati, il tipo di pagamento in cassa e un agente che sa
+// scrivere le comande (capacità 'comanda-viva').
+const PP_CHI = new Set(['cassa', 'crm']);
+
+async function requisitiComandeVive(tenantId: number) {
+    const tavoli = await queryWithRetry(
+        `SELECT COUNT(*)::int AS n FROM passepartout_tavoli WHERE tenant_id = $1 AND confermato`,
+        [tenantId]
+    );
+    const cfg = await queryWithRetry(
+        `SELECT articolo_generico_id FROM passepartout_config WHERE tenant_id = $1`,
+        [tenantId]
+    );
+    return {
+        comande: await getFeatureFlag(tenantId, 'table_orders_enabled', false),
+        tavoli_abbinati: Number(tavoli.rows[0]?.n ?? 0),
+        tipo_pagamento: (await getPassepartoutChiusuraConfig(tenantId))?.tipoPagamento ?? null,
+        articolo_generico: cfg.rows[0]?.articolo_generico_id != null,
+        agente: {
+            collegato: getPassepartoutAgentStatus(tenantId).connected,
+            aggiornato: passepartoutAgentSupports(tenantId, 'comanda-viva'),
+        },
+    };
+}
+
+app.get('/passepartout/comande-vive/config', authenticate, requirePermission('settings:full'), requireFeature('passepartout'), async (req, res) => {
+    try {
+        const tenantId = req.tenantId!;
+        const cfg = await queryWithRetry(
+            `SELECT comande_vive_enabled, comande_stampa, comande_conto FROM passepartout_config WHERE tenant_id = $1`,
+            [tenantId]
+        );
+        const c = cfg.rows[0] ?? {};
+        const requisiti = await requisitiComandeVive(tenantId);
+        res.json({
+            enabled: c.comande_vive_enabled === true,
+            stampa: c.comande_stampa ?? 'cassa',
+            conto: c.comande_conto ?? 'cassa',
+            requisiti: {
+                comande: requisiti.comande,
+                tavoli_abbinati: requisiti.tavoli_abbinati,
+                tipo_pagamento: requisiti.tipo_pagamento,
+                articolo_generico: requisiti.articolo_generico,
+            },
+            agente: requisiti.agente,
+        });
+    } catch (err: any) {
+        console.error('GET /passepartout/comande-vive/config error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+app.put('/passepartout/comande-vive/config', authenticate, requirePermission('settings:full'), requireFeature('passepartout'), async (req, res) => {
+    try {
+        const tenantId = req.tenantId!;
+        const body = req.body ?? {};
+        const has = (k: string) => Object.prototype.hasOwnProperty.call(body, k);
+        if (has('enabled') && typeof body.enabled !== 'boolean') return res.status(400).json({ error: 'enabled_non_valido' });
+        if (has('stampa') && !PP_CHI.has(String(body.stampa))) return res.status(400).json({ error: 'stampa_non_valida' });
+        if (has('conto') && !PP_CHI.has(String(body.conto))) return res.status(400).json({ error: 'conto_non_valido' });
+        const prima = (await queryWithRetry(
+            `SELECT comande_vive_enabled, comande_stampa, comande_conto FROM passepartout_config WHERE tenant_id = $1`,
+            [tenantId]
+        )).rows[0] ?? {};
+        const enabled = has('enabled') ? body.enabled === true : prima.comande_vive_enabled === true;
+        const stampa = has('stampa') ? String(body.stampa) : (prima.comande_stampa ?? 'cassa');
+        const conto = has('conto') ? String(body.conto) : (prima.comande_conto ?? 'cassa');
+        // I requisiti si controllano solo all'accensione: chi la spegne deve
+        // poterlo fare anche con l'agente giù.
+        if (enabled && prima.comande_vive_enabled !== true) {
+            const r = await requisitiComandeVive(tenantId);
+            if (!r.comande) {
+                return res.status(409).json({ error: 'comande_spente', message: 'Prima accendi le comande, da Impostazioni → Sala & Cucina.' });
+            }
+            if (r.tavoli_abbinati === 0) {
+                return res.status(409).json({ error: 'tavoli_mancanti', message: 'Prima abbina i tavoli del CRM a quelli della cassa, nella scheda «Prenotazioni in cassa».' });
+            }
+            if (!r.tipo_pagamento) {
+                return res.status(409).json({ error: 'tipo_pagamento_mancante', message: 'Prima scegli il tipo di pagamento in cassa, qui sopra in «Collegamento e chiusura in cassa».' });
+            }
+            if (!r.agente.aggiornato) {
+                return res.status(409).json({ error: 'agente_da_aggiornare', message: 'L\'agente del PC della cassa non sa ancora scrivere le comande: va aggiornato.' });
+            }
+        }
+        await queryWithRetry(
+            `INSERT INTO passepartout_config (tenant_id, comande_vive_enabled, comande_stampa, comande_conto, updated_at)
+             VALUES ($1, $2, $3, $4, now())
+             ON CONFLICT (tenant_id) DO UPDATE SET
+                comande_vive_enabled = $2, comande_stampa = $3, comande_conto = $4, updated_at = now()`,
+            [tenantId, enabled, stampa, conto]
+        );
+        if (req.user) {
+            LogService.logActivity(
+                tenantId, req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.SETTINGS, undefined, 'Passepartout: comande del CRM in cassa',
+                { enabled, stampa, conto }
+            );
+        }
+        res.json({ ok: true });
+    } catch (err: any) {
+        console.error('PUT /passepartout/comande-vive/config error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
     }
 });
