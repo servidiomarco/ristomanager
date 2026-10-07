@@ -1264,6 +1264,48 @@ export interface PassepartoutSalaPianta {
     tavoli: Array<{ nome: string; coperti: number | null }>;
 }
 
+export interface DiagnosiCassa {
+    raggiungibile: boolean;
+    /** Messaggio della cassa (o della rete) quando non risponde. */
+    errore: string | null;
+    versione: string | null;
+    tempo_ms: number;
+    tipi_pagamento: PassepartoutTipoPagamento[] | null;
+    sale: Array<{ sala: string; tavoli: number }> | null;
+    comande_aperte: number | null;
+}
+
+/** La verifica della cassa per la sezione Passepartout, in sola lettura:
+ *  risponde? con che versione? quali tipi di pagamento, sale e tavoli, e
+ *  le comande aperte si leggono? Un errore su una voce non ferma le altre. */
+export async function diagnosiCassa(): Promise<DiagnosiCassa> {
+    const inizio = Date.now();
+    let versione: string | null = null;
+    try {
+        versione = await getVersioneGestionale();
+    } catch (err) {
+        return {
+            raggiungibile: false, errore: (err as Error).message, versione: null, tempo_ms: Date.now() - inizio,
+            tipi_pagamento: null, sale: null, comande_aperte: null,
+        };
+    }
+    const tempo_ms = Date.now() - inizio;
+    const [tipi, pianta, aperte] = await Promise.all([
+        getTipiPagamento().catch(() => null),
+        getPiantaSale().catch(() => null),
+        getComandeAperte().catch(() => null),
+    ]);
+    return {
+        raggiungibile: true,
+        errore: null,
+        versione,
+        tempo_ms,
+        tipi_pagamento: tipi,
+        sale: pianta ? pianta.map((sl) => ({ sala: sl.sala, tavoli: sl.tavoli.length })) : null,
+        comande_aperte: aperte ? aperte.length : null,
+    };
+}
+
 /** Le sale coi loro tavoli, così come li chiama la cassa: serve ad
  *  abbinare i tavoli del CRM. Senza l'immagine della piantina, e senza gli
  *  ingombri (pareti, piante: tipo Ingombro*, spesso senza nome). */

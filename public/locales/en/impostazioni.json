@@ -331,6 +331,7 @@
     "capChiudiPreconto": "Closing after the pre-bill",
     "capPreconto": "Pre-bill from the QR",
     "capSpecchio": "CRM bills on the till",
+    "capDiagnosi": "Check",
     "agentVersion": "agent {{versione}}",
     "pairLast": "Last paired PC: {{pc}}",
     "pairNew": "Connect the till PC",
@@ -408,6 +409,73 @@
     "specchioFailed_other": "{{count}} bills not copied to the till",
     "specchioRetry": "Retry",
     "specchioRetried_one": "{{count}} bill queued again",
-    "specchioRetried_other": "{{count}} bills queued again"
+    "specchioRetried_other": "{{count}} bills queued again",
+    "verifica": {
+      "title": "Till check",
+      "subtitle": "What's in place and what to fix to use the till with the CRM",
+      "badgeOk": "All set",
+      "mai": "Not run yet: checks PC, till, payment type, tables and menu in one go.",
+      "esegui": "Run the check",
+      "ripeti": "Run again",
+      "eseguita": "Last check {{when}}",
+      "agente": {
+        "ok": "PC {{pc}} connected, agent up to date",
+        "attenzione": "PC {{pc}} connected, but the agent needs updating: missing {{mancano}}",
+        "attenzioneFix": "Update the agent on the till PC: the missing features stay off.",
+        "errore": "The till PC is not connected",
+        "erroreFix": "Turn on the till PC, or connect it with the code in the «Connection and till closing» card."
+      },
+      "cassa": {
+        "ok": "Till reachable: Passepartout {{versione}}, answered in {{ms}} ms",
+        "attenzione": "Till reachable, but Passepartout {{versione}} hasn't been tested with Sympotia yet",
+        "attenzioneFix": "It usually works anyway: run the test below while closed and, if something's off, write to us from Help.",
+        "errore": "The till doesn't answer: {{errore}}",
+        "erroreFix": "Check with the dealer that the Passepartout Web Service is on and that user and password on the PC are right."
+      },
+      "pagamento": {
+        "ok": "Payment type «{{tipo}}» confirmed as electronic payment",
+        "non_scelto": "No dedicated payment type",
+        "non_sceltoFix": "Pick it in the «Connection and till closing» card: without it the till doesn't close bills settled in the CRM.",
+        "non_in_cassa": "Payment type «{{tipo}}» no longer exists on the till",
+        "non_in_cassaFix": "Pick another one, or have the dealer recreate it: CRM bills would stay open on the till.",
+        "da_confermare": "Payment type «{{tipo}}» (category {{categoria}}): not yet confirmed as electronic payment on the receipt",
+        "da_confermareFix": "The till doesn't tell the CRM. Look at a receipt closed from the CRM: it must read «electronic payment». If not, have the dealer fix it."
+      },
+      "tavoli": {
+        "ok": "{{abbinati}} of {{tavoli_crm}} tables matched to the till",
+        "attenzione": "{{abbinati}} of {{tavoli_crm}} tables matched, {{da_confermare}} to confirm",
+        "attenzioneFix": "Confirm them in the «Bookings on the till» card.",
+        "da_leggere": "Tables not matched to the till yet",
+        "da_leggereFix": "In the «Bookings on the till» card press «Read tables from the till»."
+      },
+      "menu": {
+        "ok": "{{piatti}} dishes imported from the till",
+        "attenzione": "Till menu not imported yet",
+        "attenzioneFix": "In Menu press «Import from the till»: orders and bills need the till's dishes."
+      },
+      "comande": {
+        "ok": "Open tables read: {{aperte}} open orders right now",
+        "attenzione": "The till answers but doesn't return open orders",
+        "attenzioneFix": "Without it, QR payment and open tables don't work: tell the dealer."
+      },
+      "fiscale": {
+        "info": "QR payments must be linked to the fiscal printer (Italian Revenue Agency FAQ on POS-RT linking)",
+        "infoFix": "The CRM can't check this: ask the dealer and your accountant."
+      },
+      "confermaElettronico": "Yes, it reads electronic payment",
+      "provaTitle": "Write test, while closed",
+      "provaHint": "Writes a «PROVA Sympotia» booking on the till planner for tomorrow at 5am on the chosen table and cancels it right away: the till keeps it as «No-show».",
+      "provaTable": "Table",
+      "provaNoTables": "Needs at least one matched and confirmed table in the «Bookings on the till» card.",
+      "provaSend": "Write and cancel on the till",
+      "provaConfirm": "Tap again: writes to the till",
+      "provaOk": "Test passed: booking written and cancelled on the till",
+      "provaLastOk": "Last test {{when}}: passed",
+      "provaLastKo": "Last test {{when}}: failed ({{errore}})",
+      "rivenditoreTitle": "What to ask the till dealer",
+      "rivenditoreTesto": "To connect Sympotia to the Passepartout till you need:\n1. The Passepartout Web Service (AdapterWS) on, with a user dedicated to Sympotia.\n2. The Web Service port (usually 7606) reachable from the till PC.\n3. A dedicated payment type (e.g. ESTERNO) that reads as electronic payment on the receipt.\n4. The circuit guests pay with from the QR linked to the fiscal printer (POS-RT linking).\n5. The till PC on during service.",
+      "copia": "Copy the list",
+      "copiato": "List copied"
+    }
   }
 }

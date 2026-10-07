@@ -51,6 +51,9 @@ export type PassepartoutOp =
      *  senza invio in produzione, chiusa come proforma col tipo esterno
      *  (capacità 'specchio'). */
     | 'specchio'
+    /** Verifica della cassa per la sezione, in sola lettura (capacità
+     *  'diagnosi'): versione, tempi, tipi di pagamento, sale, comande aperte. */
+    | 'diagnosi'
     /** Introspezione del contratto WCF (?wsdl): elenco operazioni, per
      *  scoprire da remoto se esiste la scrittura comande (comanda specchio)
      *  senza documentazione del concessionario. Sola lettura. */

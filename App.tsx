@@ -73,6 +73,7 @@ import { SmtpIntegrationCard } from './components/SmtpIntegrationCard';
 import { ImapIntegrationCard } from './components/ImapIntegrationCard';
 import { PrenotazioniInCassa } from './components/passepartout/PrenotazioniInCassa';
 import { CollegamentoCassa } from './components/passepartout/CollegamentoCassa';
+import { VerificaCassa } from './components/passepartout/VerificaCassa';
 import { ContiCassa } from './components/passepartout/ContiCassa';
 import { TavoliApertiInCassa } from './components/passepartout/TavoliApertiInCassa';
 import { PagaDalQr } from './components/passepartout/PagaDalQr';
@@ -3698,6 +3699,9 @@ const App: React.FC = () => {
             {hasFeature('passepartout') && hasPermission('settings:full') && (
               <SettingsSection id="imp-passepartout" label={t('settings.tabPassepartout', 'Passepartout')}>
                 <div className="space-y-3">
+                  <CardErrorBoundary label="Passepartout">
+                    <VerificaCassa showToast={addToast} />
+                  </CardErrorBoundary>
                   <CardErrorBoundary label="Passepartout">
                     <CollegamentoCassa showToast={addToast} />
                   </CardErrorBoundary>

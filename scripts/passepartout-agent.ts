@@ -47,6 +47,7 @@ import {
     getComandeAperte,
     precontoUnaVolta,
     specchioComanda,
+    diagnosiCassa,
     isPassepartoutConfigured,
     PassepartoutError,
     type TipoDocumentoConto,
@@ -116,8 +117,9 @@ if (CODICE_ABBINA) {
 // del giorno solo a uno che sa leggerli. 'chiudi-preconto': la chiusura
 // regge una comanda col preconto stampato; 'preconto': sa stamparlo (il
 // tavolo che vuole pagare dal QR diventa blu in cassa). 'specchio': copia
-// in cassa i conti chiusi nel CRM (comanda specchio, fase 4).
-const CAPABILITIES = ['chiudi-riprendi', 'prenotazioni', 'conti', 'tavoli-aperti', 'chiudi-preconto', 'preconto', 'specchio'];
+// in cassa i conti chiusi nel CRM (comanda specchio, fase 4). 'diagnosi':
+// la verifica guidata della sezione Passepartout.
+const CAPABILITIES = ['chiudi-riprendi', 'prenotazioni', 'conti', 'tavoli-aperti', 'chiudi-preconto', 'preconto', 'specchio', 'diagnosi'];
 
 if (!CODICE_ABBINA && (!SERVER_URL || !TOKEN)) {
     console.error('Config mancante: servono PP_AGENT_SERVER_URL e PP_AGENT_TOKEN, o un abbinamento (--abbina CODICE --server URL).');
@@ -158,7 +160,8 @@ const handlers: Record<string, Handler> = {
     // devono creare due volte la stessa.
     prenotazione: (p) => {
         const tag = typeof p?.tag === 'string' ? p.tag : '';
-        if (!/^sympotia:\d+$/.test(tag)) throw new Error('Parametro "tag" non valido');
+        // sympotia-prova:<n> è la prenotazione di prova della verifica guidata.
+        if (!/^sympotia(-prova)?:\d+$/.test(tag)) throw new Error('Parametro "tag" non valido');
         const idGestionale = p?.idGestionale != null && Number.isFinite(Number(p.idGestionale)) ? Number(p.idGestionale) : null;
         const statoAtteso = typeof p?.statoAtteso === 'string' ? p.statoAtteso : null;
         if (p?.azione === 'annulla') {
@@ -204,6 +207,8 @@ const handlers: Record<string, Handler> = {
     },
     // Comande ancora aperte sui tavoli: sala e disponibilità del CRM.
     comandeAperte: () => getComandeAperte(),
+    // La verifica guidata della sezione: sola lettura.
+    diagnosi: () => diagnosiCassa(),
     specchio: (p) => {
         if (typeof p?.tag !== 'string' || !p.tag || typeof p?.tavolo !== 'string' || !p.tavolo || !Array.isArray(p?.righe)) {
             throw new Error('Parametri della comanda specchio non validi');
