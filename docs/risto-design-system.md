@@ -719,6 +719,21 @@ They are deliberately **unlabelled**. "Indietro" / "Avanti" read as the way thro
 and no stepped form here gates its steps: the stepper in the subheader is the navigation, and
 these only nudge it.
 
+**StepNav** [impl] — the stepper itself. By default a tick means only "behind you". A form that
+knows what each step holds passes a per-step `status` and the tick starts telling the truth:
+`done` ticks a step that is filled in, `missing` marks a step with an empty required field in
+`pending` (tint circle, `AlertCircle`, amber rail — the glyph is the second channel), `todo`
+leaves the plain icon on an optional step nobody has touched. A step turns `missing` only once
+it has been opened, or after a save attempt: a form that flags the price before anyone has
+reached the price is nagging. The banquet form shipped the positional ticks over a form that
+would not save — four green ticks, a grey button, nothing to say why.
+
+**The save of a stepped form is never disabled for a missing field.** It stays live and, with
+something empty, opens the step that holds the first gap and focuses the field, which then
+shows its error. What is missing is said beforehand in the Modal's `footerNote` (§7.5), as a
+button that does the same thing. A disabled primary explains nothing, and on a five-step form
+the empty field is usually two screens away from the button.
+
 ### 7.2 Form controls
 
 **Input** [der] — height 44 (mobile) / 40 (desktop), `surface` fill, `border` hairline,
@@ -1004,6 +1019,11 @@ onto their own full-width rows, which is right for a footer of labelled buttons 
 to be wide. A footer built around a single primary action flanked by icon-only controls — a
 stepped form's `StepArrow`s — asks for the row instead: stacked, three related controls become
 three separate rows and the one that matters ends up buried between the two that don't.
+
+`footerNote` puts one full-width line above the footer's actions — what stands between the user
+and the primary ("Manca la data dell'evento"). Its own row, not a child of `footer`: squeezed in
+beside the buttons it truncates on a laptop and, on a phone, wraps the row and leaves the back
+arrow floating halfway between two lines.
 
 **ConfirmDialog** [der] — a Modal with title, body, and an action row. **The safe action is
 the primary.** A destructive confirmation uses `state-solid` with the `critical` family for

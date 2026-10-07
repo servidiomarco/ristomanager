@@ -168,6 +168,8 @@
     "notifications": "Notifications",
     "closeToast": "Dismiss the notification",
     "steps": "Steps",
+    "stepMissing": "to complete",
+    "stepDone": "done",
     "pause": "Pause",
     "play": "Play",
     "recordingSeek": "Position in the recording"

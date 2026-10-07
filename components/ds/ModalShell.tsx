@@ -54,6 +54,12 @@ interface ModalShellProps {
    *  form's back and forward arrows — where stacking turns three related
    *  controls into three separate rows and buries the one that matters. */
   footerLayout?: 'stack' | 'row';
+  /** One line pinned above the footer's actions, full width — what stands
+   *  between the user and the primary action ("Manca la data dell'evento").
+   *  Its own row rather than a child of `footer`: squeezed in beside the
+   *  buttons it either truncates or, on a phone, wraps the row and leaves the
+   *  back arrow floating halfway between two lines. */
+  footerNote?: React.ReactNode;
   size?: ModalSize;
   /** Escape-to-close. Off by default: on a long form it can discard work, so
    *  each modal opts in deliberately. */
@@ -84,6 +90,7 @@ export const ModalShell: React.FC<ModalShellProps> = ({
   footer,
   footerStart,
   footerLayout = 'stack',
+  footerNote,
   size = 'md',
   closeOnEscape = false,
   fixedHeight = false,
@@ -163,8 +170,9 @@ export const ModalShell: React.FC<ModalShellProps> = ({
               footerLayout === 'row'
                 ? 'flex-row items-center justify-between'
                 : 'flex-col items-stretch'
-            }`}
+            } ${footerNote ? 'flex-wrap' : ''}`}
           >
+            {footerNote && <div className="min-w-0 basis-full">{footerNote}</div>}
             <div
               className={`text-[14px] text-[var(--ds-text-muted)] ${
                 footerLayout === 'row' ? 'flex-shrink-0' : 'min-w-0'

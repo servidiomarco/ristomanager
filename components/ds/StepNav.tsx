@@ -1,6 +1,6 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { Check } from 'lucide-react';
+import { AlertCircle, Check } from 'lucide-react';
 
 /* ── StepNav ──────────────────────────────────────────────────────────────
    The header for a form split across screens. Lifted out of the banquet form,
@@ -11,8 +11,14 @@ import { Check } from 'lucide-react';
    Steps never gate each other: every one is reachable from here at any time,
    and validation runs once on save exactly as it did when the form was a
    single scroll. That is why each step is a button rather than a read-only
-   indicator, and why there is no "completed" concept beyond "already behind
-   you".
+   indicator.
+
+   By default the tick means "already behind you", nothing more. A form that
+   knows better passes `status` on its steps, and then the circle tells the
+   truth instead: a tick only where the step is filled in, an amber mark where
+   a required field is still empty. Behind-you ticks lied in the banquet form —
+   four green ticks over a form that would not save, because the price was 0
+   two steps back.
 
    Belongs in ModalShell's `subheader` slot: pinned above the scroll, so it
    stays put while the body moves and does not shift as steps change length. */
@@ -23,8 +29,17 @@ export const StepNav: React.FC<{
    *  section without pretending you can fill it in before the record exists.
    *  `icon` replaces the step number in the circle (done keeps the tick):
    *  a glyph says what the step is about, a number only says how far it is —
-   *  and the rail already carries that. */
-  steps: readonly { label: string; disabled?: boolean; icon?: React.ComponentType<{ className?: string }> }[];
+   *  and the rail already carries that.
+   *
+   *  `status`, when given, replaces "behind you" as the meaning of the tick:
+   *  'done' ticks, 'missing' marks the step amber (a required field is empty),
+   *  'todo' shows the plain icon. Pass it on every step or on none. */
+  steps: readonly {
+    label: string;
+    disabled?: boolean;
+    icon?: React.ComponentType<{ className?: string }>;
+    status?: 'done' | 'missing' | 'todo';
+  }[];
   current: number;
   onSelect: (index: number) => void;
   ariaLabel?: string;
@@ -44,7 +59,11 @@ export const StepNav: React.FC<{
   <nav ref={navRef} className="flex gap-2 overflow-x-auto scrollbar-hide" aria-label={ariaLabel ?? t('aria.steps', 'Passi')}>
     {steps.map((step, i) => {
       const isCurrent = i === current;
-      const isDone = i < current && !step.disabled;
+      // Where you are wins over what the step holds: the current step keeps
+      // its "you are here" fill whatever its fields say.
+      const state = step.disabled ? 'todo' : (step.status ?? (i < current ? 'done' : 'todo'));
+      const isDone = !isCurrent && state === 'done';
+      const isMissing = !isCurrent && state === 'missing';
       return (
         <button
           key={step.label}
@@ -58,6 +77,7 @@ export const StepNav: React.FC<{
               filled behind you, empty ahead. */}
           <span className={`h-[3px] w-full rounded-[var(--ds-radius-control)] ${
             step.disabled ? 'bg-[var(--ds-border)]'
+            : isMissing ? 'bg-[var(--ds-pending-solid)]'
             : isCurrent || isDone ? 'bg-[var(--ds-action-bg)]'
             : 'bg-[var(--ds-border)]'
           }`} />
@@ -67,18 +87,32 @@ export const StepNav: React.FC<{
                 ? 'bg-[var(--ds-surface)] text-[var(--ds-text-subtle)]'
                 : isDone
                   ? 'bg-[var(--ds-seated-solid)] text-[#ffffff]'
+                  : isMissing
+                    // Amber takes dark text (§3.3): tint and text, not solid.
+                    ? 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]'
                   : isCurrent
                     ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                     : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)]'
             }`}>
-              {isDone ? <Check className="h-3.5 w-3.5" /> : step.icon ? <step.icon className="h-3.5 w-3.5" /> : i + 1}
+              {isDone ? <Check className="h-3.5 w-3.5" />
+                : isMissing ? <AlertCircle className="h-3.5 w-3.5" />
+                : step.icon ? <step.icon className="h-3.5 w-3.5" /> : i + 1}
             </span>
             <span className={`truncate text-[14px] ${
               step.disabled ? 'text-[var(--ds-text-subtle)]'
               : isCurrent ? 'font-semibold text-[var(--ds-text-primary)]'
+              : isMissing ? 'text-[var(--ds-pending-text)]'
               : 'text-[var(--ds-text-muted)] group-hover:text-[var(--ds-text-primary)]'
             }`}>
               {step.label}
+              {/* The circle says it by shape and colour; a screen reader gets
+                  the words. Only when the form passed a status — the
+                  positional tick has nothing to add to "step 3 of 5". */}
+              {step.status && !isCurrent && (
+                <span className="sr-only">
+                  {' — '}{isMissing ? t('aria.stepMissing', 'da completare') : isDone ? t('aria.stepDone', 'completato') : ''}
+                </span>
+              )}
             </span>
           </span>
         </button>

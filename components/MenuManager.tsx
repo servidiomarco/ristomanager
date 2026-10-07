@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Dish, RestaurantMenu, BanquetMenu, BanquetCourse, BanquetStatus, Shift, COMMON_ALLERGENS, VAT_RATES, Customer, Table, TableMerge, Reservation, ArrivalStatus, ReservationStatus, Room } from '../types';
-import { Plus, Search, Tag, Tags, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, LayoutGrid, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat, Info, RefreshCw, QrCode, Copy, Languages, Layers, SlidersHorizontal, Share2, MessageCircle, Martini, IceCreamCone, Wine, Wand2, DoorClosed } from 'lucide-react';
+import { Plus, Search, Tag, Tags, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, LayoutGrid, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat, Info, RefreshCw, QrCode, Copy, Languages, Layers, SlidersHorizontal, Share2, MessageCircle, Martini, IceCreamCone, Wine, Wand2, DoorClosed, AlertCircle } from 'lucide-react';
 import { resizeImageToDataUrl } from '../utils/resizeImage';
 import { datePart } from '../utils/displayTime';
 import { printBanquet } from '../utils/printBanquet';
@@ -24,9 +24,9 @@ import { saveDraft, loadDraft, clearDraft, DRAFT_KEYS } from '../services/draftS
 import {
   SegmentedControl, SearchField, SectionHeader, StatusPill, Callout, EmptyState,
   ModalShell, FormCard, Field, Stepper, StepNav, useMediaQuery,
-  dsInput, dsSelect, dsTextarea, dsButton, dsIconButton, dsStepArrow,
+  dsInput, dsInputError, dsSelect, dsTextarea, dsButton, dsIconButton, dsStepArrow, fieldErrorId,
 } from './ds';
-import { moneySymbol } from '../utils/displayMoney';
+import { moneySymbol, moneyUnits } from '../utils/displayMoney';
 import { displayLocale } from '../utils/formatLocale';
 
 const BANQUET_DISH_CATEGORIES = ['Antipasti', 'Primi', 'Secondi', 'Contorni', 'Dolci', 'Bevande'] as const;
@@ -163,6 +163,19 @@ const BANQUET_STEPS = [
   { key: 'tables', label: 'Tavoli assegnati', hint: 'i tavoli occupati nello stesso turno sono disabilitati', icon: LayoutGrid },
   { key: 'notes', label: 'Note operative', hint: 'compaiono nelle stampe per cucina e sala', icon: StickyNote },
 ] as const;
+
+/* I campi senza i quali il banchetto non si salva, con il passo che li ospita e
+   l'id dell'input da mettere a fuoco. Una tabella sola: la nota sopra il
+   pulsante, i segni ambra dello stepper, l'errore sotto il campo e il
+   salvataggio leggono tutti da qui. Prima erano due elenchi scritti a mano con
+   etichette diverse, e l'errore sotto data e prezzo non si accendeva mai:
+   cercava «Data Evento» in una lista che conteneva «la data dell'evento». */
+type BanquetRequiredField = 'name' | 'event_date' | 'price';
+const BANQUET_REQUIRED: Record<BanquetRequiredField, { step: number; inputId: string; labelKey: string; errorKey: string }> = {
+  name: { step: 0, inputId: 'banquet-name', labelKey: 'required.theName', errorKey: 'required.nameError' },
+  event_date: { step: 0, inputId: 'banquet-date', labelKey: 'required.theDate', errorKey: 'required.dateError' },
+  price: { step: 1, inputId: 'banquet-price', labelKey: 'required.thePrice', errorKey: 'required.priceError' },
+};
 
 // Category filters on Piatti alla carta. There are more of these than a
 // SegmentedControl should hold, so they stay individual pills on a wrapping row.
@@ -1032,10 +1045,12 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   }, []);
 
   // New Banquet Menu State
+  // Il prezzo parte vuoto, non da 0: uno «0» nel campo sembra un valore già
+  // scritto, e il form poi rifiutava il salvataggio per un prezzo «mancante».
   const [newBanquet, setNewBanquet] = useState<Partial<BanquetMenu>>({
       name: '',
       description: '',
-      price_per_person: 0,
+      price_per_person: undefined,
       dish_ids: [],
       courses: [],
       event_date: '',
@@ -1057,11 +1072,22 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const [isBanquetCustomerPickerOpen, setIsBanquetCustomerPickerOpen] = useState(false);
   const [selectedBanquetCustomer, setSelectedBanquetCustomer] = useState<Customer | null>(null);
 
-  // Banquet form validation errors
-  const [banquetFormErrors, setBanquetFormErrors] = useState<string[]>([]);
+  // L'errore che arriva dal server (un tavolo già preso, una rete giù). I campi
+  // mancanti non passano di qui: si ricavano dal form, vedi banquetMissing.
+  const [banquetServerError, setBanquetServerError] = useState<string | null>(null);
+  // Diventa vero al primo «Crea menu» con campi vuoti: da lì l'errore compare
+  // sotto il campo. Prima di provarci il form non sgrida nessuno.
+  const [banquetSubmitTried, setBanquetSubmitTried] = useState(false);
+  // I passi già aperti: un passo lasciato con un obbligatorio vuoto si segna
+  // ambra nello stepper; uno mai visto resta neutro finché non lo apri.
+  const [banquetVisited, setBanquetVisited] = useState<Set<number>>(() => new Set([0]));
+  // L'uscita che si sta riempiendo: solo lei apre il catalogo dei piatti, le
+  // altre si leggono come un menù. Chiavata sull'indice, come la ricerca.
+  const [banquetActiveCourse, setBanquetActiveCourse] = useState<number | null>(null);
   const [isSavingBanquet, setIsSavingBanquet] = useState(false);
   // Surfaced when reopening the new-banquet modal and a saved draft exists.
-  const [banquetDraftBanner, setBanquetDraftBanner] = useState<{ savedAt: number } | null>(null);
+  // Col nome: «Bozza trovata» da sola non dice quale banchetto si riprende.
+  const [banquetDraftBanner, setBanquetDraftBanner] = useState<{ savedAt: number; name?: string } | null>(null);
   const [isSavingDish, setIsSavingDish] = useState(false);
   const [tablePickerRoomFilter, setTablePickerRoomFilter] = useState<number | 'ALL'>('ALL');
   // Each step starts at its own top. Without this you leave step 3 scrolled to
@@ -1268,22 +1294,19 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     }
   };
 
-  const handleAddBanquetSubmit = async (e: React.FormEvent) => {
-      e.preventDefault();
+  const handleAddBanquetSubmit = async (e?: React.FormEvent) => {
+      e?.preventDefault();
       if (isSavingBanquet) return;
 
-      const missing: string[] = [];
-      if (!newBanquet.name || !newBanquet.name.trim()) missing.push(t('menuName'));
-      if (!newBanquet.event_date) missing.push(t('required.eventDate'));
-      if (canViewBanquetPrice && (newBanquet.price_per_person == null || isNaN(Number(newBanquet.price_per_person)) || Number(newBanquet.price_per_person) <= 0)) {
-        missing.push(t('required.adultPrice'));
-      }
-
-      if (missing.length > 0) {
-        setBanquetFormErrors(missing);
+      // Il pulsante non è mai spento: con un campo vuoto porta lì. Un «Crea
+      // menu» grigio senza spiegazione è stato il motivo per cui un banchetto
+      // è rimasto in bozza (07/10) — quattro spunte verdi e un pulsante morto.
+      if (banquetMissing.length > 0) {
+        setBanquetSubmitTried(true);
+        goToBanquetField(banquetMissing[0]);
         return;
       }
-      setBanquetFormErrors([]);
+      setBanquetServerError(null);
 
       const courses = (newBanquet.courses || []).filter(c => c.name.trim() !== '');
       const flatDishIds = courses.flatMap(c => c.dish_ids);
@@ -1291,7 +1314,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       const payload = {
           name: newBanquet.name!,
           description: newBanquet.description || '',
-          price_per_person: Number(newBanquet.price_per_person),
+          // Chi non vede i prezzi salva senza: 0, come ha sempre fatto. Un
+          // campo vuoto diventerebbe NaN → null, e la colonna è NOT NULL.
+          price_per_person: Number(newBanquet.price_per_person) || 0,
           dish_ids: flatDishIds,
           courses,
           event_date: newBanquet.event_date!,
@@ -1334,11 +1359,16 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         setEditingBanquetId(null);
         setSelectedBanquetCustomer(null);
         setBanquetDraftBanner(null);
-        setNewBanquet({ name: '', description: '', price_per_person: 0, dish_ids: [], courses: [], event_date: '', shift: undefined, deposit_amount: undefined, guests: undefined, children: 0, children_price: null, customer_id: null, notes_courses: '', notes_service: '', notes_mise_en_place: '', table_ids: [], discount_type: null, discount_value: null });
+        setNewBanquet({ name: '', description: '', price_per_person: undefined, dish_ids: [], courses: [], event_date: '', shift: undefined, deposit_amount: undefined, guests: undefined, children: 0, children_price: null, customer_id: null, notes_courses: '', notes_service: '', notes_mise_en_place: '', table_ids: [], discount_type: null, discount_value: null });
       } catch (err: any) {
         const msg = err?.message || t('err.saving');
         const isConflict = err?.status === 409 || /tavolo/i.test(msg);
-        setBanquetFormErrors([isConflict ? t('err.tableClash', { dettaglio: msg }) : msg]);
+        setBanquetServerError(isConflict ? t('err.tableClash', { dettaglio: msg }) : msg);
+        // Un tavolo conteso si risolve nel passo dei tavoli: portaci lì,
+        // invece di lasciare l'avviso sopra le note.
+        if (isConflict) setBanquetStep(3);
+        // L'avviso sta in cima al passo: portacelo, da metà pagina non si vede.
+        else banquetFormScrollRef.current?.scrollIntoView({ block: 'start' });
       } finally {
         setIsSavingBanquet(false);
       }
@@ -1372,7 +1402,13 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       discount_value: menu.discount_value != null ? Number(menu.discount_value) : null,
     });
     setSelectedBanquetCustomer(null);
-    setBanquetFormErrors([]);
+    setBanquetServerError(null);
+    setBanquetSubmitTried(false);
+    // Un banchetto salvato è già passato da tutti i passi: se gli manca
+    // qualcosa, lo stepper lo dice subito.
+    setBanquetVisited(new Set(BANQUET_STEPS.map((_, i) => i)));
+    // Si riapre leggendo il menù composto, non dentro un catalogo.
+    setBanquetActiveCourse(null);
     setEditingBanquetId(menu.id);
     setIsEditingBanquet(true);
     setBanquetStep(0);
@@ -1385,9 +1421,13 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     setIsEditingBanquet(false);
     setEditingBanquetId(null);
     setSelectedBanquetCustomer(null);
-    setBanquetFormErrors([]);
+    setBanquetServerError(null);
+    setBanquetSubmitTried(false);
+    setBanquetVisited(new Set([0]));
+    // La prima uscita nasce aperta: è lì che si comincia a scegliere.
+    setBanquetActiveCourse(0);
     setNewBanquet({
-      name: '', description: '', price_per_person: 0,
+      name: '', description: '', price_per_person: undefined,
       dish_ids: [],
       courses: [{ name: '1ª Uscita', dish_ids: [] }],
       event_date: '', shift: undefined, deposit_amount: undefined,
@@ -1404,12 +1444,13 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     setIsBanquetFormOpen(true);
 
     const existing = loadDraft<Partial<BanquetMenu>>(DRAFT_KEYS.BANQUET_NEW);
-    setBanquetDraftBanner(existing ? { savedAt: existing.savedAt } : null);
+    setBanquetDraftBanner(existing ? { savedAt: existing.savedAt, name: existing.data?.name?.trim() || undefined } : null);
   };
 
   const closeBanquetForm = () => {
     setIsBanquetFormOpen(false);
-    setBanquetFormErrors([]);
+    setBanquetServerError(null);
+    setBanquetSubmitTried(false);
     setBanquetDraftBanner(null);
     // Always reopen on the first step. Landing back on "Note operative"
     // because that is where you closed it reads as a broken form.
@@ -1424,6 +1465,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     }
     setNewBanquet(existing.data);
     setBanquetDraftBanner(null);
+    // Una bozza con dei piatti si rilegge come menù, tutta chiusa; una vuota
+    // riparte dalla prima uscita aperta, come un banchetto nuovo.
+    setBanquetActiveCourse((existing.data.courses || []).some(c => (c.dish_ids || []).length > 0) ? null : 0);
   };
 
   const handleDiscardBanquetDraft = () => {
@@ -1458,21 +1502,103 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     return () => clearTimeout(timer);
   }, [isBanquetFormOpen, isEditingBanquet, newBanquet]);
 
-  const banquetFieldHasError = (field: string) => banquetFormErrors.includes(field);
-
-  /* Which required fields are still empty — the same three handleAddBanquetSubmit
-     checks, kept in step with it. The save button is disabled off this list, and
-     the footer names what is missing: a dead primary action with nothing to
-     explain it is the reason people click it twice and then leave. */
-  const banquetMissingRequired = useMemo(() => {
-    const missing: string[] = [];
-    if (!newBanquet.name || !newBanquet.name.trim()) missing.push(t('required.theName'));
-    if (!newBanquet.event_date) missing.push(t('required.theDate'));
-    if (canViewBanquetPrice && (newBanquet.price_per_person == null || isNaN(Number(newBanquet.price_per_person)) || Number(newBanquet.price_per_person) <= 0)) {
-      missing.push(t('required.thePrice'));
-    }
+  /* Quali obbligatori sono ancora vuoti, nell'ordine del form. Il prezzo conta
+     solo per chi lo vede: gli altri hanno sempre salvato con 0. */
+  const banquetMissing = useMemo<BanquetRequiredField[]>(() => {
+    const missing: BanquetRequiredField[] = [];
+    if (!newBanquet.name?.trim()) missing.push('name');
+    if (!newBanquet.event_date) missing.push('event_date');
+    if (canViewBanquetPrice && !(Number(newBanquet.price_per_person) > 0)) missing.push('price');
     return missing;
   }, [newBanquet.name, newBanquet.event_date, newBanquet.price_per_person, canViewBanquetPrice]);
+
+  // L'errore sotto il campo, solo dopo un salvataggio tentato.
+  const banquetFieldError = (field: BanquetRequiredField): string | undefined =>
+    banquetSubmitTried && banquetMissing.includes(field) ? t(BANQUET_REQUIRED[field].errorKey) : undefined;
+
+  // «Manca il prezzo per adulto» / «Mancano il nome del menù e la data dell'evento».
+  const banquetMissingText = banquetMissing.length === 0 ? '' : t('required.missing', {
+    count: banquetMissing.length,
+    campi: new Intl.ListFormat(displayLocale(), { type: 'conjunction' })
+      .format(banquetMissing.map(f => t(BANQUET_REQUIRED[f].labelKey))),
+  });
+
+  // Porta al campo: apre il suo passo e ci mette il cursore. Il timeout lascia
+  // al passo il tempo di comparire (le sezioni nascoste non prendono il focus)
+  // e all'aggancio in cima al passo di scorrere prima, così il focus vince.
+  const goToBanquetField = (field: BanquetRequiredField) => {
+    setBanquetStep(BANQUET_REQUIRED[field].step);
+    window.setTimeout(() => document.getElementById(BANQUET_REQUIRED[field].inputId)?.focus(), 0);
+  };
+
+  useEffect(() => {
+    if (!isBanquetFormOpen) return;
+    setBanquetVisited(prev => (prev.has(banquetStep) ? prev : new Set(prev).add(banquetStep)));
+  }, [banquetStep, isBanquetFormOpen]);
+
+  // L'uscita appena aperta in vista: aprendola si chiude quella sopra, che si
+  // accorcia di tutto il catalogo e si porta via la pagina — senza questo, la
+  // testata dell'uscita scelta finiva sopra il bordo della finestra.
+  useEffect(() => {
+    if (banquetActiveCourse == null) return;
+    document
+      .querySelector(`[data-banquet-course="${banquetActiveCourse}"]`)
+      // 'start' e non 'nearest': un'uscita aperta è più alta della finestra,
+      // e 'nearest' su un elemento più alto allinea il fondo — testata fuori.
+      ?.scrollIntoView({ block: 'start' });
+  }, [banquetActiveCourse]);
+
+  /* Cosa dice lo stepper di ogni passo. La spunta vuol dire «compilato», non
+     «già passato»: Coperti e tariffa con il prezzo vuoto non si spunta più solo
+     perché ci sei andato oltre. Ambra solo per un obbligatorio vuoto in un passo
+     già aperto (o dopo un salvataggio tentato); i passi facoltativi vuoti
+     restano neutri — un tavolo non assegnato non è un errore. */
+  const banquetStepStatus = useMemo<('done' | 'missing' | 'todo')[]>(() => {
+    const missingOn = (step: number) => banquetMissing.some(f => BANQUET_REQUIRED[f].step === step);
+    const status = (step: number, filled: boolean) =>
+      missingOn(step) && (banquetSubmitTried || banquetVisited.has(step)) ? 'missing'
+      : filled && !missingOn(step) ? 'done'
+      : 'todo';
+    const hasNotes = [newBanquet.notes_courses, newBanquet.notes_service, newBanquet.notes_mise_en_place]
+      .some(n => !!n?.trim());
+    return [
+      status(0, true),
+      status(1, canViewBanquetPrice || Number(newBanquet.guests) > 0),
+      status(2, (newBanquet.courses || []).some(c => c.dish_ids.length > 0)),
+      status(3, (newBanquet.table_ids || []).length > 0),
+      status(4, hasNotes),
+    ];
+  }, [banquetMissing, banquetSubmitTried, banquetVisited, canViewBanquetPrice, newBanquet.guests, newBanquet.courses, newBanquet.table_ids, newBanquet.notes_courses, newBanquet.notes_service, newBanquet.notes_mise_en_place]);
+
+  /* La riga sotto il titolo: cosa si sta creando, letto dal form mentre lo
+     compili — «dom 18 ott · Cena · 40 coperti · € 2000,00». Prima c'era
+     «Aggiungi almeno un piatto per completare il menù», fissa e falsa: il
+     salvataggio non ha mai chiesto un piatto. */
+  const banquetSummary = useMemo(() => {
+    const parts: string[] = [];
+    if (newBanquet.event_date) {
+      const [y, m, d] = newBanquet.event_date.split('-').map(Number);
+      const date = new Date(y, m - 1, d);
+      if (!Number.isNaN(date.getTime())) {
+        parts.push(new Intl.DateTimeFormat(displayLocale(), {
+          weekday: 'short', day: 'numeric', month: 'short',
+          ...(y !== new Date().getFullYear() ? { year: 'numeric' as const } : {}),
+        }).format(date));
+      }
+    }
+    if (newBanquet.shift) parts.push(t(newBanquet.shift === Shift.LUNCH ? 'lunch' : 'dinner'));
+    const guests = Number(newBanquet.guests) || 0;
+    if (guests > 0) parts.push(`${guests} ${t('covers')}`);
+    if (canViewBanquetPrice && Number(newBanquet.price_per_person) > 0 && guests > 0) {
+      const gross = computeBanquetGrossTotal(newBanquet as BanquetMenu);
+      parts.push(moneyUnits(Math.max(0, gross - computeBanquetDiscountAmount(newBanquet as BanquetMenu, gross))));
+    }
+    return parts.join(' · ');
+  }, [newBanquet, canViewBanquetPrice, t]);
+
+  // Le pietanze per id, per scrivere i piatti scelti di ogni uscita anche
+  // quando vengono da un menu diverso da quello aperto nel catalogo.
+  const dishById = useMemo(() => new Map(dishes.map(d => [d.id, d])), [dishes]);
 
   const addCourse = () => {
     setNewBanquet(prev => {
@@ -1482,6 +1608,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       courses.push({ name: `${next} Uscita`, dish_ids: [] });
       return { ...prev, courses };
     });
+    // L'uscita appena aggiunta è quella che stai per riempire.
+    setBanquetActiveCourse((newBanquet.courses || []).length);
   };
 
   const removeCourse = (index: number) => {
@@ -1500,6 +1628,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       }
       return next;
     });
+    setBanquetActiveCourse(prev => (prev == null || prev === index ? null : prev > index ? prev - 1 : prev));
   };
 
   const renameCourse = (index: number, name: string) => {
@@ -1544,6 +1673,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       if (prev[index] !== undefined) next[newIndex] = prev[index]; else delete next[newIndex];
       return next;
     });
+    // L'uscita aperta segue lo spostamento, come la sua ricerca.
+    setBanquetActiveCourse(prev => (prev === index ? newIndex : prev === newIndex ? index : prev));
   };
 
   const toggleDishMenu = (menuId: number) => {
@@ -3613,9 +3744,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           open={isBanquetFormOpen}
           onClose={closeBanquetForm}
           title={isEditingBanquet ? 'Modifica menu banchetto' : 'Crea menu banchetto'}
-          // The step counter said what the stepper below already shows, and
-          // selected. This line is the one thing the header could not say.
-          subtitle={t('addAtLeastOneDish')}
+          // Cosa si sta creando, letto dal form: la testata resta vera mentre
+          // i campi cambiano, come nella prenotazione. Vuota, dice cosa nascerà.
+          subtitle={banquetSummary || (isEditingBanquet ? undefined : t('banquetForm.newQuote'))}
           size="lg"
           fixedHeight
           // No top padding: the pinned stepper above already supplies it.
@@ -3640,15 +3771,33 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               <ChevronLeft className="h-4 w-4" />
             </button>
           }
+          /* Cosa manca per salvare, sopra il pulsante che non lo farebbe. È un
+             pulsante: porta al primo campo vuoto, come il salvataggio stesso.
+             Visibile da subito — sapere in anticipo che servono nome, data e
+             prezzo vale più di scoprirlo al clic. */
+          footerNote={banquetMissing.length > 0 ? (
+            <div className="flex justify-end">
+              <button
+                type="button"
+                id="banquet-missing-note"
+                onClick={() => { setBanquetSubmitTried(true); goToBanquetField(banquetMissing[0]); }}
+                className="inline-flex min-w-0 items-center gap-1.5 rounded-[var(--ds-radius-control)] px-1 py-1 text-left text-[13px] text-[var(--ds-text-muted)] transition-colors hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              >
+                <AlertCircle className="h-3.5 w-3.5 flex-shrink-0 text-[var(--ds-pending-text)]" aria-hidden />
+                <span>{banquetMissingText}</span>
+              </button>
+            </div>
+          ) : undefined}
           footer={
             <>
-              {/* No Annulla: the X in the header closes the modal, and one exit
-                  is enough. On every step, not just the last — there is nothing
-                  to advance through before saving becomes allowed. */}
+              {/* Mai spento, se non mentre salva: con un campo vuoto porta al
+                  campo (vedi handleAddBanquetSubmit). No Annulla: the X in the
+                  header closes the modal, and one exit is enough. */}
               <button
-                onClick={handleAddBanquetSubmit}
+                onClick={() => handleAddBanquetSubmit()}
                 type="button"
-                disabled={isSavingBanquet || banquetMissingRequired.length > 0}
+                disabled={isSavingBanquet}
+                aria-describedby={banquetMissing.length > 0 ? 'banquet-missing-note' : undefined}
                 className={`min-w-0 flex-1 sm:flex-none ${dsButton.primary}`}
               >
                 {isSavingBanquet && <Loader2 className="h-4 w-4 animate-spin" />}
@@ -3668,7 +3817,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           }
           subheader={
             <StepNav
-              steps={banquetSteps}
+              steps={banquetSteps.map((step, i) => ({ ...step, status: banquetStepStatus[i] }))}
               current={banquetStep}
               onSelect={setBanquetStep}
               ariaLabel={t('banquetStepsAria')}
@@ -3680,6 +3829,14 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               reaching for a ref it does not expose. */}
           <div ref={banquetFormScrollRef} aria-hidden />
 
+          {/* In cima, non in fondo: sotto le note di un passo lungo l'errore
+              del server restava fuori schermo, e il pulsante sembrava non fare
+              niente. */}
+          {banquetServerError && (
+            <Callout tone="critical" icon={AlertCircle} title={t('err.save')} className="mb-4">
+              {banquetServerError}
+            </Callout>
+          )}
 
           {!isEditingBanquet && banquetDraftBanner && (
             <Callout
@@ -3709,327 +3866,313 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 </div>
               }
             >
-              Salvata {new Date(banquetDraftBanner.savedAt).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}
+              {t(banquetDraftBanner.name ? 'banquetForm.draftNamedSavedAt' : 'banquetForm.draftSavedAt', {
+                nome: banquetDraftBanner.name,
+                quando: new Date(banquetDraftBanner.savedAt).toLocaleString(displayLocale(), { dateStyle: 'short', timeStyle: 'short' }),
+              })}
             </Callout>
           )}
 
-          <form onSubmit={handleAddBanquetSubmit} className="space-y-4">
+          {/* Niente invio implicito: un Invio nel nome di un'uscita o nella
+              ricerca dei piatti salvava il banchetto a metà. Si salva solo dal
+              pulsante. */}
+          <form onSubmit={e => e.preventDefault()} className="space-y-4">
+
+              {/* SECTION: Evento — prima del cliente: nome e data sono ciò che
+                  serve per salvare, il cliente si può collegare dopo. */}
+              <section className={banquetStep === 0 ? 'block' : 'hidden'}>
+                <FormCard title={t('banquetForm.event')}>
+                  <div className="space-y-5">
+                    <div className="grid grid-cols-1 gap-5 md:grid-cols-4">
+                      <Field
+                        label={t('banquetForm.name')}
+                        htmlFor="banquet-name"
+                        required
+                        error={banquetFieldError('name')}
+                        className="md:col-span-2"
+                      >
+                        <input
+                          id="banquet-name"
+                          placeholder={t('menuNamePlaceholder')}
+                          className={`${dsInput} ${banquetFieldError('name') ? dsInputError : ''}`}
+                          aria-invalid={!!banquetFieldError('name')}
+                          aria-describedby={banquetFieldError('name') ? fieldErrorId('banquet-name') : undefined}
+                          value={newBanquet.name}
+                          onChange={e => setNewBanquet({ ...newBanquet, name: e.target.value })}
+                        />
+                      </Field>
+                      <Field
+                        label={t('banquetForm.date')}
+                        htmlFor="banquet-date"
+                        required
+                        error={banquetFieldError('event_date')}
+                      >
+                        <input
+                          id="banquet-date"
+                          type="date"
+                          className={`${dsInput} ds-date-input ${banquetFieldError('event_date') ? dsInputError : ''}`}
+                          aria-invalid={!!banquetFieldError('event_date')}
+                          aria-describedby={banquetFieldError('event_date') ? fieldErrorId('banquet-date') : undefined}
+                          value={newBanquet.event_date || ''}
+                          onChange={e => setNewBanquet({ ...newBanquet, event_date: e.target.value })}
+                        />
+                      </Field>
+                      <Field label={t('shift')}>
+                        {/* Cast covers the not-yet-chosen case: an empty value
+                            matches no segment, so neither lights up until you pick
+                            one — the form has never defaulted the shift. */}
+                        <SegmentedControl<Shift>
+                          value={(newBanquet.shift ?? '') as Shift}
+                          onChange={next => setNewBanquet({ ...newBanquet, shift: next })}
+                          ariaLabel="Turno"
+                          options={[
+                            { value: Shift.LUNCH, label: t('lunch'), icon: <Sun className="h-4 w-4" /> },
+                            { value: Shift.DINNER, label: t('dinner'), icon: <Sunset className="h-4 w-4" /> },
+                          ]}
+                        />
+                      </Field>
+                    </div>
+                    <Field label={t('banquetForm.description')} htmlFor="banquet-description" aside={t('optional')}>
+                      <textarea
+                        id="banquet-description"
+                        rows={2}
+                        placeholder={t('commercialDescriptionPlaceholder')}
+                        className={`${dsTextarea} resize-y`}
+                        value={newBanquet.description}
+                        onChange={e => setNewBanquet({ ...newBanquet, description: e.target.value })}
+                      />
+                    </Field>
+                  </div>
+                </FormCard>
+              </section>
 
               {/* SECTION: Cliente */}
               <section className={banquetStep === 0 ? 'block' : 'hidden'}>
-                <FormCard title={t('customer')}>
-                  <p className="mb-4 text-[13px] text-[var(--ds-text-muted)]">{t('customerHint')}</p>
-                {selectedBanquetCustomer ? (
-                  <div className="flex items-center justify-between gap-3 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-canvas)] p-3">
-                    <div className="min-w-0">
-                      <div className="font-semibold text-[var(--ds-text-primary)] text-sm truncate">{selectedBanquetCustomer.name}</div>
-                      <div className="mt-0.5 flex flex-wrap gap-3 text-xs text-[var(--ds-text-muted)]">
-                        {selectedBanquetCustomer.phone && (
-                          <span className="inline-flex items-center gap-1"><Phone className="h-3 w-3" /> {selectedBanquetCustomer.phone}</span>
-                        )}
-                        {selectedBanquetCustomer.email && (
-                          <span className="inline-flex items-center gap-1"><Mail className="h-3 w-3" /> {selectedBanquetCustomer.email}</span>
-                        )}
+                <FormCard title={t('customer')} aside={<span className="text-[13px] text-[var(--ds-text-muted)]">{t('optional')}</span>}>
+                  {selectedBanquetCustomer ? (
+                    <div className="flex items-center justify-between gap-3 rounded-[var(--ds-radius-sm)] bg-[var(--ds-surface-row)] p-3 pl-4">
+                      <div className="min-w-0">
+                        <div className="truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">{selectedBanquetCustomer.name}</div>
+                        <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[13px] text-[var(--ds-text-muted)]">
+                          {selectedBanquetCustomer.phone && (
+                            <span className="inline-flex items-center gap-1"><Phone className="h-3 w-3" aria-hidden /> {selectedBanquetCustomer.phone}</span>
+                          )}
+                          {selectedBanquetCustomer.email && (
+                            <span className="inline-flex min-w-0 items-center gap-1"><Mail className="h-3 w-3 flex-shrink-0" aria-hidden /> <span className="truncate">{selectedBanquetCustomer.email}</span></span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex flex-shrink-0 items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setIsBanquetCustomerPickerOpen(true)}
+                          className="inline-flex h-9 items-center rounded-[var(--ds-radius-control)] px-3 text-[13px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                        >
+                          {t('change')}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedBanquetCustomer(null);
+                            setNewBanquet(prev => ({ ...prev, customer_id: null }));
+                          }}
+                          aria-label={t('removeCustomer')}
+                          title={t('removeCustomer')}
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
                       </div>
                     </div>
-                    <div className="flex items-center gap-1 flex-shrink-0">
+                  ) : (
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <p className="text-[13px] text-[var(--ds-text-muted)]">{t('customerHint')}</p>
                       <button
                         type="button"
                         onClick={() => setIsBanquetCustomerPickerOpen(true)}
-                        className="px-2.5 py-1.5 text-xs font-medium text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] rounded-[var(--ds-radius)]"
+                        className={`${dsButton.quiet} flex-shrink-0 text-[14px]`}
                       >
-                        {t('change')}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedBanquetCustomer(null);
-                          setNewBanquet(prev => ({ ...prev, customer_id: null }));
-                        }}
-                        className="p-1.5 text-[var(--ds-text-muted)] hover:text-[var(--ds-critical-text)] hover:bg-[var(--ds-critical-tint)] rounded-[var(--ds-radius)]"
-                        title={t('removeCustomer')}
-                      >
-                        <X className="h-4 w-4" />
+                        <BookUser className="h-4 w-4" />
+                        {t('pickFromBook')}
                       </button>
                     </div>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setIsBanquetCustomerPickerOpen(true)}
-                    className="inline-flex items-center gap-2 px-3 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-canvas)] text-[var(--ds-text-primary)] text-sm font-medium hover:bg-[var(--ds-surface-row)]"
-                  >
-                    <BookUser className="h-4 w-4" />
-                    {t('pickFromBook')}
-                  </button>
-                )}
+                  )}
                 </FormCard>
               </section>
 
-              {/* SECTION: Evento */}
-              <section className={banquetStep === 0 ? 'block' : 'hidden'}>
-                <FormCard title="Evento">
-                  <p className="mb-4 text-[13px] text-[var(--ds-text-muted)]">{t('banquetIdentity')}</p>
-                <div className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                    <div className="md:col-span-2">
-                      <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{t('menuName')} <span className="text-[var(--ds-critical-text)]">*</span></label>
-                      <input
-                          required
-                          placeholder={t('menuNamePlaceholder')}
-                          className={`w-full bg-[var(--ds-surface)] border rounded-[var(--ds-radius)] px-3 py-2 text-sm focus:outline-none ${
-                            banquetFieldHasError(t('menuName'))
-                              ? 'border-[var(--ds-critical-solid)] focus:border-[var(--ds-critical-solid)]'
-                              : 'border-[var(--ds-border)] focus:border-[var(--ds-text-primary)]'
-                          }`}
-                          value={newBanquet.name}
-                          onChange={e => {
-                            setNewBanquet({...newBanquet, name: e.target.value});
-                            if (banquetFormErrors.length > 0) setBanquetFormErrors(prev => prev.filter(f => f !== t('menuName')));
-                          }}
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{t('eventDateLabel')} <span className="text-[var(--ds-critical-text)]">*</span></label>
-                      <input
-                          type="date"
-                          required
-                          className={`w-full bg-[var(--ds-surface)] border rounded-[var(--ds-radius)] px-3 py-2 text-sm focus:outline-none ${
-                            banquetFieldHasError('Data Evento')
-                              ? 'border-[var(--ds-critical-solid)] focus:border-[var(--ds-critical-solid)]'
-                              : 'border-[var(--ds-border)] focus:border-[var(--ds-text-primary)]'
-                          }`}
-                          value={newBanquet.event_date || ''}
-                          onChange={e => {
-                            setNewBanquet({...newBanquet, event_date: e.target.value});
-                            if (banquetFormErrors.length > 0) setBanquetFormErrors(prev => prev.filter(f => f !== 'Data Evento'));
-                          }}
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{t('shift')}</label>
-                      {/* Cast covers the not-yet-chosen case: an empty value
-                          matches no segment, so neither lights up until you pick
-                          one — the form has never defaulted the shift. */}
-                      <SegmentedControl<Shift>
-                        value={(newBanquet.shift ?? '') as Shift}
-                        onChange={next => setNewBanquet({ ...newBanquet, shift: next })}
-                        ariaLabel="Turno"
-                        options={[
-                          { value: Shift.LUNCH, label: t('lunch'), icon: <Sun className="h-4 w-4" /> },
-                          { value: Shift.DINNER, label: t('dinner'), icon: <Sunset className="h-4 w-4" /> },
-                        ]}
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{t('commercialDescription')} <span className="font-normal text-[var(--ds-text-muted)]">{t('dashOptional')}</span></label>
-                    <textarea
-                      placeholder={t('commercialDescriptionPlaceholder')}
-                      className="w-full bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-[var(--ds-radius)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)] h-20"
-                      value={newBanquet.description}
-                      onChange={e => setNewBanquet({...newBanquet, description: e.target.value})}
-                    />
-                  </div>
-                </div>
-                </FormCard>
-              </section>
-
-              {/* SECTION: Coperti & Tariffa */}
+              {/* SECTION: Coperti — quanti sono. Separati dalla tariffa: chi non
+                  vede i prezzi trova qui l'unica cosa che gli serve. */}
               <section className={banquetStep === 1 ? 'block' : 'hidden'}>
-                <FormCard title={t('banquetStep.covers.label')}>
-                  <p className="mb-4 text-[13px] text-[var(--ds-text-muted)]">{t('coversHint')}</p>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <Field label={t('totalGuests')}>
+                <FormCard title={t('banquetForm.covers')}>
+                  <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+                    <Field label={t('totalGuests')}>
                       {/* Children stay clamped to the headcount, same rule the
                           number inputs enforced — lowering guests below the
                           children count would otherwise price a phantom adult. */}
                       <Stepper
-                          value={newBanquet.guests ?? undefined}
-                          onChange={next => {
-                              const clampedChildren = next != null ? Math.min(newBanquet.children ?? 0, next) : (newBanquet.children ?? 0);
-                              setNewBanquet({ ...newBanquet, guests: next, children: clampedChildren });
-                          }}
-                          min={0}
-                          max={999}
-                          ariaLabel={t('totalGuests')}
+                        value={newBanquet.guests ?? undefined}
+                        onChange={next => {
+                          const clampedChildren = next != null ? Math.min(newBanquet.children ?? 0, next) : (newBanquet.children ?? 0);
+                          setNewBanquet({ ...newBanquet, guests: next, children: clampedChildren });
+                        }}
+                        min={0}
+                        max={999}
+                        ariaLabel={t('totalGuests')}
                       />
-                  </Field>
-                  <Field label={t('ofWhichChildren')}>
+                    </Field>
+                    <Field label={t('ofWhichChildren')}>
                       <Stepper
-                          value={newBanquet.children ?? 0}
-                          onChange={next => {
-                              const clamped = Math.max(0, Math.min(next ?? 0, newBanquet.guests ?? 0));
-                              setNewBanquet({ ...newBanquet, children: clamped });
-                          }}
-                          min={0}
-                          max={newBanquet.guests ?? 0}
-                          ariaLabel={t('ofWhichChildren')}
+                        value={newBanquet.children ?? 0}
+                        onChange={next => {
+                          const clamped = Math.max(0, Math.min(next ?? 0, newBanquet.guests ?? 0));
+                          setNewBanquet({ ...newBanquet, children: clamped });
+                        }}
+                        min={0}
+                        max={newBanquet.guests ?? 0}
+                        ariaLabel={t('ofWhichChildren')}
                       />
-                  </Field>
-                  {canViewBanquetPrice && (
-                  <div>
-                      <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{t('adultPrice')} <span className="text-[var(--ds-critical-text)]">*</span></label>
-                      <input
-                          type="number"
-                          required
-                          min="0"
-                          step="0.01"
-                          className={`w-full bg-[var(--ds-surface)] border rounded-[var(--ds-radius)] px-3 py-2 text-sm focus:outline-none ${
-                            banquetFieldHasError('Prezzo Adulti')
-                              ? 'border-[var(--ds-critical-solid)] focus:border-[var(--ds-critical-solid)]'
-                              : 'border-[var(--ds-border)] focus:border-[var(--ds-text-primary)]'
-                          }`}
-                          value={newBanquet.price_per_person}
-                          onChange={e => {
-                            setNewBanquet({...newBanquet, price_per_person: parseFloat(e.target.value)});
-                            if (banquetFormErrors.length > 0) setBanquetFormErrors(prev => prev.filter(f => f !== 'Prezzo Adulti'));
-                          }}
-                      />
+                    </Field>
                   </div>
-                  )}
-                  {canViewBanquetPrice && (
-                  <div>
-                      <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{t('childPrice')} <span className="font-normal text-[var(--ds-text-muted)]">{t('dashOptional')}</span></label>
-                      <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          placeholder={t('sameAsAdults')}
-                          className="w-full bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-[var(--ds-radius)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)]"
-                          value={newBanquet.children_price ?? ''}
-                          onChange={e => setNewBanquet({...newBanquet, children_price: e.target.value === '' ? null : parseFloat(e.target.value)})}
-                      />
-                  </div>
-                  )}
-                  {canViewBanquetPrice && (
-                  <div>
-                      <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{t('depositLabel', { valuta: moneySymbol() })} <span className="font-normal text-[var(--ds-text-muted)]">{t('dashOptional')}</span></label>
-                      <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          placeholder="0.00"
-                          className="w-full bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-[var(--ds-radius)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)]"
-                          value={newBanquet.deposit_amount ?? ''}
-                          onChange={e => setNewBanquet({...newBanquet, deposit_amount: e.target.value === '' ? undefined : parseFloat(e.target.value)})}
-                      />
-                  </div>
-                  )}
-                  {canViewBanquetPrice && (
-                  <div>
-                      <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{t('discount')} <span className="font-normal text-[var(--ds-text-muted)]">{t('dashOptional')}</span></label>
-                      <div className="flex gap-2">
-                          <div className="inline-flex rounded-[var(--ds-radius)] border border-[var(--ds-border)] overflow-hidden flex-shrink-0">
-                              <button
-                                  type="button"
-                                  onClick={() => setNewBanquet({...newBanquet, discount_type: newBanquet.discount_type === 'PERCENT' ? null : 'PERCENT', discount_value: newBanquet.discount_type === 'PERCENT' ? null : (newBanquet.discount_value ?? null)})}
-                                  className={`px-3 py-2 text-sm font-medium ${newBanquet.discount_type === 'PERCENT' ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)]'}`}
-                                  aria-pressed={newBanquet.discount_type === 'PERCENT'}
-                              >%</button>
-                              <button
-                                  type="button"
-                                  onClick={() => setNewBanquet({...newBanquet, discount_type: newBanquet.discount_type === 'AMOUNT' ? null : 'AMOUNT', discount_value: newBanquet.discount_type === 'AMOUNT' ? null : (newBanquet.discount_value ?? null)})}
-                                  className={`px-3 py-2 text-sm font-medium border-l border-[var(--ds-border)] ${newBanquet.discount_type === 'AMOUNT' ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)]'}`}
-                                  aria-pressed={newBanquet.discount_type === 'AMOUNT'}
-                              >{moneySymbol()}</button>
-                          </div>
-                          <input
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              placeholder={newBanquet.discount_type === 'PERCENT' ? 'es. 10' : '0.00'}
-                              disabled={!newBanquet.discount_type}
-                              className="flex-1 min-w-0 bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-[var(--ds-radius)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)] disabled:opacity-50 disabled:cursor-not-allowed"
-                              value={newBanquet.discount_value ?? ''}
-                              onChange={e => setNewBanquet({...newBanquet, discount_value: e.target.value === '' ? null : parseFloat(e.target.value)})}
-                          />
-                      </div>
-                  </div>
-                  )}
-                </div>
+                </FormCard>
+              </section>
 
-                {/* What the numbers above add up to, shown where they are
-                    entered rather than only on the card afterwards. */}
-                {canViewBanquetPrice && (() => {
-                  const gross = computeBanquetGrossTotal(newBanquet as BanquetMenu);
-                  const discount = computeBanquetDiscountAmount(newBanquet as BanquetMenu, gross);
-                  const total = Math.max(0, gross - discount);
-                  const guests = Number(newBanquet.guests) || 0;
-                  const adultPrice = Number(newBanquet.price_per_person) || 0;
-                  return (
-                    <div className="mt-5 flex flex-wrap items-center justify-between gap-2 rounded-[var(--ds-radius)] bg-[var(--ds-seated-tint)] px-4 py-3">
-                      <div>
-                        <div className="text-[13px] font-semibold text-[var(--ds-seated-text)]">{t('banquetTotal')}</div>
-                        <div className="text-[13px] text-[var(--ds-seated-text)] opacity-80 tabular-nums">
-                          {guests} × {moneySymbol()} {adultPrice.toFixed(2)}
-                          {discount > 0 && t('discountOff', { importo: `${moneySymbol()} ${discount.toFixed(2)}` })}
+              {/* SECTION: Tariffa */}
+              {canViewBanquetPrice && (
+              <section className={banquetStep === 1 ? 'block' : 'hidden'}>
+                <FormCard title={t('banquetForm.rate')}>
+                  <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+                    <Field
+                      label={t('banquetForm.adultPrice')}
+                      htmlFor="banquet-price"
+                      required
+                      error={banquetFieldError('price')}
+                    >
+                      <div className="relative">
+                        <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[15px] text-[var(--ds-text-muted)]" aria-hidden>{moneySymbol()}</span>
+                        <input
+                          id="banquet-price"
+                          type="number"
+                          inputMode="decimal"
+                          min="0"
+                          step="0.01"
+                          className={`${dsInput} ds-money-input pl-10 tabular-nums ${banquetFieldError('price') ? dsInputError : ''}`}
+                          aria-invalid={!!banquetFieldError('price')}
+                          aria-describedby={banquetFieldError('price') ? fieldErrorId('banquet-price') : undefined}
+                          // Vuoto resta vuoto: parseFloat('') è NaN, e un NaN nel
+                          // campo diventava null nella bozza.
+                          value={Number.isFinite(Number(newBanquet.price_per_person)) && newBanquet.price_per_person != null ? newBanquet.price_per_person : ''}
+                          onChange={e => setNewBanquet({ ...newBanquet, price_per_person: e.target.value === '' ? undefined : parseFloat(e.target.value) })}
+                        />
+                      </div>
+                    </Field>
+                    <Field label={t('banquetForm.childPrice')} htmlFor="banquet-child-price" aside={t('optional')}>
+                      <div className="relative">
+                        <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[15px] text-[var(--ds-text-muted)]" aria-hidden>{moneySymbol()}</span>
+                        <input
+                          id="banquet-child-price"
+                          type="number"
+                          inputMode="decimal"
+                          min="0"
+                          step="0.01"
+                          placeholder={t('banquetForm.sameAsAdults')}
+                          className={`${dsInput} ds-money-input pl-10 tabular-nums`}
+                          value={newBanquet.children_price ?? ''}
+                          onChange={e => setNewBanquet({ ...newBanquet, children_price: e.target.value === '' ? null : parseFloat(e.target.value) })}
+                        />
+                      </div>
+                    </Field>
+                    <Field label={t('banquetForm.deposit')} htmlFor="banquet-deposit" aside={t('optional')}>
+                      <div className="relative">
+                        <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[15px] text-[var(--ds-text-muted)]" aria-hidden>{moneySymbol()}</span>
+                        <input
+                          id="banquet-deposit"
+                          type="number"
+                          inputMode="decimal"
+                          min="0"
+                          step="0.01"
+                          className={`${dsInput} ds-money-input pl-10 tabular-nums`}
+                          value={newBanquet.deposit_amount ?? ''}
+                          onChange={e => setNewBanquet({ ...newBanquet, deposit_amount: e.target.value === '' ? undefined : parseFloat(e.target.value) })}
+                        />
+                      </div>
+                    </Field>
+                    <Field label={t('discount')} htmlFor="banquet-discount" aside={t('optional')}>
+                      <div className="flex gap-2">
+                        {/* % o importo; ripremere quello acceso toglie lo sconto. */}
+                        <div className="inline-flex flex-shrink-0 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] p-1" role="group" aria-label={t('discount')}>
+                          {(['PERCENT', 'AMOUNT'] as const).map(kind => {
+                            const on = newBanquet.discount_type === kind;
+                            return (
+                              <button
+                                key={kind}
+                                type="button"
+                                aria-pressed={on}
+                                onClick={() => setNewBanquet({ ...newBanquet, discount_type: on ? null : kind, discount_value: on ? null : (newBanquet.discount_value ?? null) })}
+                                className={`inline-flex h-9 min-w-[40px] items-center justify-center rounded-[var(--ds-radius-control)] px-3 text-[14px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                                  on ? 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]' : 'text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]'
+                                }`}
+                              >
+                                {kind === 'PERCENT' ? '%' : moneySymbol()}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <input
+                          id="banquet-discount"
+                          type="number"
+                          inputMode="decimal"
+                          min="0"
+                          step="0.01"
+                          placeholder={newBanquet.discount_type ? (newBanquet.discount_type === 'PERCENT' ? 'es. 10' : '0,00') : t('banquetForm.pickDiscountKind')}
+                          disabled={!newBanquet.discount_type}
+                          className={`${dsInput} ds-money-input min-w-0 flex-1 tabular-nums disabled:cursor-not-allowed disabled:text-[var(--ds-text-subtle)]`}
+                          value={newBanquet.discount_value ?? ''}
+                          onChange={e => setNewBanquet({ ...newBanquet, discount_value: e.target.value === '' ? null : parseFloat(e.target.value) })}
+                        />
+                      </div>
+                    </Field>
+                  </div>
+
+                  {/* What the numbers above add up to, shown where they are
+                      entered rather than only on the card afterwards. */}
+                  {(() => {
+                    const gross = computeBanquetGrossTotal(newBanquet as BanquetMenu);
+                    const discount = computeBanquetDiscountAmount(newBanquet as BanquetMenu, gross);
+                    const total = Math.max(0, gross - discount);
+                    const guests = Number(newBanquet.guests) || 0;
+                    const adultPrice = Number(newBanquet.price_per_person) || 0;
+                    return (
+                      <div className="mt-6 flex flex-wrap items-end justify-between gap-2 rounded-[var(--ds-radius-sm)] bg-[var(--ds-seated-tint)] px-4 py-3">
+                        <div>
+                          <div className="text-[13px] font-semibold text-[var(--ds-seated-text)]">{t('banquetTotal')}</div>
+                          <div className="text-[13px] tabular-nums text-[var(--ds-seated-text)] opacity-80">
+                            {guests} × {moneyUnits(adultPrice)}
+                            {discount > 0 && t('discountOff', { importo: moneyUnits(discount) })}
+                          </div>
+                        </div>
+                        <div className="text-[28px] font-bold leading-none tabular-nums text-[var(--ds-seated-text)]">
+                          {moneyUnits(total)}
                         </div>
                       </div>
-                      <div className="text-[28px] font-bold tabular-nums leading-none text-[var(--ds-seated-text)]">
-                        {moneySymbol()} {total.toFixed(2)}
-                      </div>
-                    </div>
-                  );
-                })()}
+                    );
+                  })()}
                 </FormCard>
               </section>
+              )}
 
-              {/* SECTION: Note operative */}
-              <section className={banquetStep === 4 ? 'block' : 'hidden'}>
-                <FormCard title={t('banquetStep.notes.label')}>
-                  <p className="mb-4 text-[13px] text-[var(--ds-text-muted)]">{t('notesHint')}</p>
-                <div className="space-y-4">
-                  <div>
-                    <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{t('notesCourses')} <span className="font-normal normal-case tracking-normal">{t('forKitchen')}</span></label>
-                    <textarea
-                      placeholder={t('dietaryNotesPlaceholder')}
-                      className="w-full bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-[var(--ds-radius)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)] h-28"
-                      value={newBanquet.notes_courses || ''}
-                      onChange={e => setNewBanquet({...newBanquet, notes_courses: e.target.value})}
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{t('notesService')} <span className="font-normal normal-case tracking-normal">{t('forFloor')}</span></label>
-                    <textarea
-                      placeholder={t('serviceNotesPlaceholder')}
-                      className="w-full bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-[var(--ds-radius)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)] h-28"
-                      value={newBanquet.notes_service || ''}
-                      onChange={e => setNewBanquet({...newBanquet, notes_service: e.target.value})}
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{t('notesMiseEnPlace')}</label>
-                    <textarea
-                      placeholder={t('miseEnPlacePlaceholder')}
-                      className="w-full bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-[var(--ds-radius)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)] h-28"
-                      value={newBanquet.notes_mise_en_place || ''}
-                      onChange={e => setNewBanquet({...newBanquet, notes_mise_en_place: e.target.value})}
-                    />
-                  </div>
-                </div>
-                </FormCard>
-              </section>
-
+              {/* SECTION: Composizione. Ogni uscita si legge come sul menù
+                  stampato — i piatti scelti, in ordine — e una sola alla volta
+                  apre il catalogo per sceglierli. Prima ogni uscita portava il
+                  suo catalogo intero, ognuno con il suo scroll dentro lo scroll
+                  della finestra: con quattro uscite, quattro liste di tutti i
+                  piatti una sotto l'altra e il menù vero da nessuna parte. */}
               <section className={banquetStep === 2 ? 'block' : 'hidden'}>
-                <FormCard
-                  title={t('menuCompositionTitle')}
-                  aside={
-                    <button
-                      type="button"
-                      onClick={addCourse}
-                      className={`${dsButton.quiet} h-9 flex-shrink-0 px-4 text-[13px]`}
-                    >
-                      <Plus className="h-3.5 w-3.5" /> {t('addCourse')}
-                    </button>
-                  }
-                >
-                  <p className="mb-4 text-[13px] text-[var(--ds-text-muted)]">{t('coursesHint')}</p>
-
+                <FormCard title={t('menuCompositionTitle')}>
                   {/* Da dove pescano le uscite: il menu Banchetti, o uno
                       stagionale. Le chip compaiono solo se c'è una scelta. */}
                   {pickerMenus.length > 1 && (
-                    <div className="mb-4 flex flex-wrap gap-2">
+                    <div className="mb-5 flex flex-wrap items-center gap-2">
+                      <span className="mr-1 text-[13px] text-[var(--ds-text-muted)]">{t('banquetForm.dishesFrom')}</span>
                       {pickerMenus.map(m => {
                         const isActive = (pickerMenuId ?? banquetsMenu?.id) === m.id;
                         return (
@@ -4037,6 +4180,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             key={m.id}
                             type="button"
                             onClick={() => setPickerMenuId(m.id)}
+                            aria-pressed={isActive}
                             className={`${DISH_FILTER_BASE} ${isActive ? DISH_FILTER_ON : DISH_FILTER_OFF}`}
                           >
                             {m.name}
@@ -4046,192 +4190,306 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     </div>
                   )}
 
-                <div className="space-y-3">
-                  {(newBanquet.courses || []).map((course, courseIndex) => {
-                    const totalCourses = (newBanquet.courses || []).length;
-                    const courseQuery = (courseDishQuery[courseIndex] ?? '').trim().toLowerCase();
-                    const courseDishes = courseQuery
-                      ? pickerDishes.filter(d =>
-                          d.name.toLowerCase().includes(courseQuery) ||
-                          (d.category || '').toLowerCase().includes(courseQuery))
-                      : pickerDishes;
-                    return (
-                      <div key={courseIndex} className="bg-[var(--ds-canvas)] rounded-[var(--ds-radius)] border border-[var(--ds-border)] overflow-hidden">
-                        <div className="flex items-center gap-2 px-3 py-2 bg-[var(--ds-surface)] border-b border-[var(--ds-border)]">
-                          <div className="flex flex-col">
+                  <div className="space-y-3">
+                    {(newBanquet.courses || []).map((course, courseIndex) => {
+                      const totalCourses = (newBanquet.courses || []).length;
+                      const isOpen = banquetActiveCourse === courseIndex;
+                      const chosen = course.dish_ids
+                        .map(id => dishById.get(id))
+                        .filter((d): d is Dish => !!d);
+                      const courseQuery = (courseDishQuery[courseIndex] ?? '').trim().toLowerCase();
+                      const courseDishes = courseQuery
+                        ? pickerDishes.filter(d =>
+                            d.name.toLowerCase().includes(courseQuery) ||
+                            (d.category || '').toLowerCase().includes(courseQuery))
+                        : pickerDishes;
+                      // Le categorie note nel loro ordine, poi «Altro» per il resto.
+                      const groups: { label: string; items: Dish[] }[] = [
+                        ...BANQUET_DISH_CATEGORIES.map(category => ({
+                          label: category as string,
+                          items: courseDishes.filter(d => d.category === category),
+                        })),
+                        {
+                          label: t('otherCategory'),
+                          items: courseDishes.filter(d => !BANQUET_DISH_CATEGORIES.includes(d.category as any)),
+                        },
+                      ].filter(g => g.items.length > 0);
+                      const chosenList = chosen.length > 0 ? (
+                        <ul className="flex flex-wrap gap-1.5" aria-label={t('banquetForm.chosenDishes', { uscita: course.name || t('thisCourse') })}>
+                          {chosen.map(dish => (
+                            <li
+                              key={dish.id}
+                              className="inline-flex h-8 max-w-full items-center gap-1 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] pl-3 pr-1 text-[13px] font-medium text-[var(--ds-text-primary)]"
+                            >
+                              <span className="truncate">{dish.name}</span>
+                              <button
+                                type="button"
+                                onClick={() => toggleDishInCourse(courseIndex, dish.id)}
+                                aria-label={t('banquetForm.removeDish', { piatto: dish.name })}
+                                className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null;
+                      return (
+                        <div
+                          key={courseIndex}
+                          data-banquet-course={courseIndex}
+                          className={`scroll-my-3 rounded-[var(--ds-radius-sm)] bg-[var(--ds-surface)] ring-1 transition-shadow ${
+                            isOpen ? 'ring-2 ring-[var(--ds-text-primary)]' : 'ring-[var(--ds-border)]'
+                          }`}
+                        >
+                          {/* Testata: nome modificabile, quanti piatti, ordine. */}
+                          <div className="flex items-center gap-1 py-1.5 pl-3 pr-1.5">
+                            <input
+                              type="text"
+                              value={course.name}
+                              onChange={e => renameCourse(courseIndex, e.target.value)}
+                              placeholder={t('coursePlaceholder', { n: courseIndex + 1 })}
+                              aria-label={t('banquetForm.courseName')}
+                              className="min-w-0 flex-1 rounded-[var(--ds-radius-control)] bg-transparent px-1 py-1.5 text-[15px] font-semibold text-[var(--ds-text-primary)] outline-none placeholder:font-normal placeholder:text-[var(--ds-text-muted)] focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                            />
+                            <span className="mr-1 whitespace-nowrap text-[13px] tabular-nums text-[var(--ds-text-muted)]">
+                              {t('banquetForm.dishCount', { count: course.dish_ids.length })}
+                            </span>
                             <button
                               type="button"
                               onClick={() => moveCourse(courseIndex, -1)}
                               disabled={courseIndex === 0}
-                              className="text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] disabled:opacity-30 disabled:cursor-not-allowed"
+                              aria-label={t('moveUp')}
                               title={t('moveUp')}
+                              className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:pointer-events-none disabled:opacity-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                             >
-                              <ChevronLeft className="h-3.5 w-3.5 rotate-90" />
+                              <ChevronUp className="h-4 w-4" />
                             </button>
                             <button
                               type="button"
                               onClick={() => moveCourse(courseIndex, 1)}
                               disabled={courseIndex === totalCourses - 1}
-                              className="text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] disabled:opacity-30 disabled:cursor-not-allowed"
+                              aria-label={t('moveDown')}
                               title={t('moveDown')}
+                              className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:pointer-events-none disabled:opacity-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                             >
-                              <ChevronRight className="h-3.5 w-3.5 rotate-90" />
+                              <ChevronDown className="h-4 w-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => removeCourse(courseIndex)}
+                              aria-label={t('deleteCourse')}
+                              title={t('deleteCourse')}
+                              className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-control)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                            >
+                              <Trash2 className="h-4 w-4" />
                             </button>
                           </div>
-                          <input
-                            type="text"
-                            value={course.name}
-                            onChange={e => renameCourse(courseIndex, e.target.value)}
-                            placeholder={t('coursePlaceholder', { n: courseIndex + 1 })}
-                            className="flex-1 bg-transparent border-0 focus:ring-0 outline-none text-sm font-semibold text-[var(--ds-text-primary)] px-1 py-0.5"
-                          />
-                          <span className="text-xs text-[var(--ds-text-muted)] whitespace-nowrap">
-                            {course.dish_ids.length} {course.dish_ids.length === 1 ? 'piatto' : 'piatti'}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => removeCourse(courseIndex)}
-                            className="p-1.5 rounded-[var(--ds-radius)] text-[var(--ds-text-muted)] hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)]"
-                            title={t('deleteCourse')}
-                          >
-                            <X className="h-4 w-4" />
-                          </button>
-                        </div>
 
-                        {/* Fuori dall'area scrollabile: la ricerca resta visibile
-                            anche a lista lunga, che è quando serve. */}
-                        {pickerDishes.length > 0 && (
-                          <div className="px-3 pt-3">
-                            <SearchField
-                              value={courseDishQuery[courseIndex] ?? ''}
-                              onChange={q => setCourseDishQuery(prev => ({ ...prev, [courseIndex]: q }))}
-                              placeholder={t('searchDish')}
-                              ariaLabel={t('searchDishInCourse', { uscita: course.name || t('thisCourse') })}
-                            />
+                          <div className="space-y-3 px-3 pb-3">
+                            {/* I piatti scelti, nell'ordine in cui usciranno.
+                                Chiusa, l'uscita è questa riga; aperta, la riga
+                                scende sotto il catalogo — sopra, alla prima
+                                spunta spingeva giù la lista e il clic dopo
+                                prendeva il piatto sbagliato. */}
+                            {!isOpen && (chosenList ?? (
+                              <p className="text-[13px] text-[var(--ds-text-muted)]">{t('banquetForm.noDishYet')}</p>
+                            ))}
+
+                            {!isOpen && course.notes?.trim() && (
+                              <p className="flex items-start gap-1.5 text-[13px] text-[var(--ds-text-muted)]">
+                                <StickyNote className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" aria-hidden />
+                                <span className="line-clamp-2">{course.notes}</span>
+                              </p>
+                            )}
+
+                            {isOpen ? (
+                              <div className="space-y-3 border-t border-[var(--ds-border)] pt-3">
+                                {/* Fuori dall'area scrollabile: la ricerca resta visibile
+                                    anche a lista lunga, che è quando serve. */}
+                                {pickerDishes.length > 0 && (
+                                  <SearchField
+                                    recessed
+                                    value={courseDishQuery[courseIndex] ?? ''}
+                                    onChange={q => setCourseDishQuery(prev => ({ ...prev, [courseIndex]: q }))}
+                                    placeholder={t('searchDish')}
+                                    ariaLabel={t('searchDishInCourse', { uscita: course.name || t('thisCourse') })}
+                                    // Rimasto un piatto solo, Invio lo spunta e
+                                    // svuota la ricerca per il prossimo: un menù
+                                    // si compone scrivendo, senza mouse.
+                                    onKeyDown={e => {
+                                      if (e.key !== 'Enter' || !courseQuery || courseDishes.length !== 1) return;
+                                      e.preventDefault();
+                                      toggleDishInCourse(courseIndex, courseDishes[0].id);
+                                      setCourseDishQuery(prev => ({ ...prev, [courseIndex]: '' }));
+                                    }}
+                                    hint={courseQuery && courseDishes.length === 1 ? (
+                                      <span className="text-[12px] text-[var(--ds-text-muted)]">
+                                        {t(course.dish_ids.includes(courseDishes[0].id) ? 'banquetForm.enterToRemove' : 'banquetForm.enterToAdd')}
+                                      </span>
+                                    ) : undefined}
+                                  />
+                                )}
+
+                                {/* Bleed su entrambi i lati: lo scroll taglia
+                                    anche in orizzontale, e l'anello di fuoco
+                                    dei piatti ai bordi usciva mozzato (§8.11). */}
+                                <div className="-mx-1 max-h-72 space-y-4 overflow-y-auto px-1 py-1">
+                                  {groups.map(group => (
+                                    <div key={group.label}>
+                                      <div className="mb-2 text-[12px] font-semibold text-[var(--ds-text-muted)]">{group.label}</div>
+                                      <div className="grid grid-cols-1 gap-1.5 md:grid-cols-2">
+                                        {group.items.map(dish => {
+                                          const checked = course.dish_ids.includes(dish.id);
+                                          return (
+                                            <button
+                                              key={dish.id}
+                                              type="button"
+                                              aria-pressed={checked}
+                                              onClick={() => toggleDishInCourse(courseIndex, dish.id)}
+                                              className={`flex min-h-[44px] w-full items-center gap-2.5 rounded-[var(--ds-radius-sm)] px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                                                checked
+                                                  ? 'bg-[var(--ds-surface-row)] ring-1 ring-[var(--ds-text-primary)]'
+                                                  : 'ring-1 ring-[var(--ds-border)] hover:bg-[var(--ds-surface-row)]'
+                                              }`}
+                                            >
+                                              <span className={`flex h-4 w-4 flex-shrink-0 items-center justify-center rounded ${
+                                                checked ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]' : 'ring-1 ring-inset ring-[var(--ds-border-strong)]'
+                                              }`}>
+                                                {checked && <Check className="h-3 w-3" strokeWidth={3} />}
+                                              </span>
+                                              <span className="min-w-0 flex-1 truncate text-[14px] font-medium text-[var(--ds-text-primary)]">{dish.name}</span>
+                                              <span className="flex-shrink-0 text-[13px] tabular-nums text-[var(--ds-text-muted)]">{moneyUnits(dish.price)}</span>
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  ))}
+                                  {pickerDishes.length === 0 && (
+                                    <p className="py-4 text-center text-[13px] text-[var(--ds-text-muted)]">
+                                      {t('noDishInThisMenu')}
+                                    </p>
+                                  )}
+                                  {pickerDishes.length > 0 && courseDishes.length === 0 && (
+                                    <p className="py-4 text-center text-[13px] text-[var(--ds-text-muted)]">
+                                      {t('banquetForm.noDishMatch', { q: (courseDishQuery[courseIndex] ?? '').trim() })}
+                                    </p>
+                                  )}
+                                </div>
+
+                                {/* Separati dal catalogo da un filo e da un nome:
+                                    subito sotto l'ultima categoria si leggevano
+                                    come piatti di quella. */}
+                                {chosenList && (
+                                  <div className="border-t border-[var(--ds-border)] pt-3">
+                                    <div className="mb-2 text-[12px] font-semibold text-[var(--ds-text-muted)]">{t('banquetForm.chosen')}</div>
+                                    {chosenList}
+                                  </div>
+                                )}
+
+                                <Field label={t('banquetForm.courseNotes')} htmlFor={`banquet-course-notes-${courseIndex}`} aside={t('optional')}>
+                                  <textarea
+                                    id={`banquet-course-notes-${courseIndex}`}
+                                    value={course.notes || ''}
+                                    onChange={e => setCourseNotes(courseIndex, e.target.value)}
+                                    placeholder={t('courseNotesPlaceholder')}
+                                    rows={2}
+                                    className={`${dsTextarea} resize-y`}
+                                  />
+                                </Field>
+
+                                <div className="flex justify-end">
+                                  <button
+                                    type="button"
+                                    onClick={() => setBanquetActiveCourse(null)}
+                                    className={`${dsButton.quiet} h-9 px-4 text-[14px]`}
+                                  >
+                                    {t('banquetForm.courseDone')}
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setBanquetActiveCourse(courseIndex)}
+                                className={`${dsButton.quiet} h-9 px-4 text-[14px]`}
+                              >
+                                {chosen.length > 0
+                                  ? <><Edit2 className="h-3.5 w-3.5" /> {t('banquetForm.editDishes')}</>
+                                  : <><Plus className="h-3.5 w-3.5" /> {t('banquetForm.pickDishes')}</>}
+                              </button>
+                            )}
                           </div>
-                        )}
-
-                        <div className="p-3 max-h-60 overflow-y-auto space-y-3">
-                          {BANQUET_DISH_CATEGORIES.map(category => {
-                            const categoryDishes = courseDishes.filter(d => d.category === category);
-                            if (categoryDishes.length === 0) return null;
-                            return (
-                              <div key={category}>
-                                <div className="text-[11px] font-semibold tracking-[0.02em] text-[var(--ds-text-subtle)] mb-1.5">
-                                  {category}
-                                </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                                  {categoryDishes.map(dish => {
-                                    const checked = course.dish_ids.includes(dish.id);
-                                    return (
-                                      <div
-                                        key={dish.id}
-                                        onClick={() => toggleDishInCourse(courseIndex, dish.id)}
-                                        className={`p-2 rounded-[var(--ds-radius)] border cursor-pointer transition flex items-start gap-2 ${
-                                          checked
-                                            ? 'bg-[var(--ds-surface-row)] border-[var(--ds-text-primary)]'
-                                            : 'bg-[var(--ds-surface)] border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)]'
-                                        }`}
-                                      >
-                                        <div className={`w-4 h-4 mt-0.5 rounded border flex items-center justify-center flex-shrink-0 ${
-                                          checked ? 'bg-[var(--ds-action-bg)] border-[var(--ds-text-primary)]' : 'border-[var(--ds-border-strong)]'
-                                        }`}>
-                                          {checked && <div className="w-1.5 h-1.5 bg-[var(--ds-action-fg)] rounded-full" />}
-                                        </div>
-                                        <div className="min-w-0">
-                                          <div className="text-sm font-medium text-[var(--ds-text-primary)] truncate">{dish.name}</div>
-                                          <div className="text-xs text-[var(--ds-text-muted)]">{moneySymbol()}{dish.price}</div>
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            );
-                          })}
-                          {(() => {
-                            const orphan = courseDishes.filter(d => !BANQUET_DISH_CATEGORIES.includes(d.category as any));
-                            if (orphan.length === 0) return null;
-                            return (
-                              <div>
-                                <div className="text-[11px] font-semibold tracking-[0.02em] text-[var(--ds-text-subtle)] mb-1.5">{t('otherCategory')}</div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                                  {orphan.map(dish => {
-                                    const checked = course.dish_ids.includes(dish.id);
-                                    return (
-                                      <div
-                                        key={dish.id}
-                                        onClick={() => toggleDishInCourse(courseIndex, dish.id)}
-                                        className={`p-2 rounded-[var(--ds-radius)] border cursor-pointer transition flex items-start gap-2 ${
-                                          checked ? 'bg-[var(--ds-surface-row)] border-[var(--ds-text-primary)]' : 'bg-[var(--ds-surface)] border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)]'
-                                        }`}
-                                      >
-                                        <div className={`w-4 h-4 mt-0.5 rounded border flex items-center justify-center flex-shrink-0 ${
-                                          checked ? 'bg-[var(--ds-action-bg)] border-[var(--ds-text-primary)]' : 'border-[var(--ds-border-strong)]'
-                                        }`}>
-                                          {checked && <div className="w-1.5 h-1.5 bg-[var(--ds-action-fg)] rounded-full" />}
-                                        </div>
-                                        <div className="min-w-0">
-                                          <div className="text-sm font-medium text-[var(--ds-text-primary)] truncate">{dish.name}</div>
-                                          <div className="text-xs text-[var(--ds-text-muted)]">{dish.category} · {moneySymbol()}{dish.price}</div>
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            );
-                          })()}
-                          {pickerDishes.length === 0 && (
-                            <div className="text-xs text-[var(--ds-text-subtle)] text-center py-4">
-                              {t('noDishInThisMenu')}
-                            </div>
-                          )}
-                          {pickerDishes.length > 0 && courseDishes.length === 0 && (
-                            <div className="text-xs text-[var(--ds-text-subtle)] text-center py-4">
-                              Nessun piatto per «{(courseDishQuery[courseIndex] ?? '').trim()}».
-                            </div>
-                          )}
                         </div>
+                      );
+                    })}
 
-                        <div className="px-3 pb-3 pt-2 border-t border-[var(--ds-border)] bg-[var(--ds-surface)]">
-                          <label className="block text-[11px] tracking-[0.02em] font-semibold text-[var(--ds-text-subtle)] mb-1.5">
-                            Note uscita (opzionale)
-                          </label>
-                          <textarea
-                            value={course.notes || ''}
-                            onChange={e => setCourseNotes(courseIndex, e.target.value)}
-                            placeholder={t('courseNotesPlaceholder')}
-                            rows={2}
-                            className="w-full bg-[var(--ds-canvas)] border border-[var(--ds-border)] rounded-[var(--ds-radius)] p-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)] resize-y"
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {(newBanquet.courses || []).length === 0 && (
-                    <div className="text-center py-6 bg-[var(--ds-canvas)] rounded-[var(--ds-radius)] border border-dashed border-[var(--ds-border)]">
-                      <p className="text-sm text-[var(--ds-text-muted)] mb-2">{t('noCourses')}</p>
-                      <button
-                        type="button"
-                        onClick={addCourse}
-                        className="text-sm font-medium text-[var(--ds-text-primary)] hover:underline"
-                      >
-                        + Aggiungi la prima uscita
-                      </button>
-                    </div>
-                  )}
-                </div>
+                    {/* In fondo, dove sei quando hai finito un'uscita. */}
+                    <button
+                      type="button"
+                      onClick={addCourse}
+                      className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-[var(--ds-radius-sm)] border border-dashed border-[var(--ds-border-strong)] px-4 py-2.5 text-[14px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    >
+                      <Plus className="h-4 w-4" />
+                      {(newBanquet.courses || []).length === 0 ? t('banquetForm.firstCourse') : t('addCourse')}
+                    </button>
+                  </div>
                 </FormCard>
               </section>
 
               <section className={banquetStep === 3 ? 'block' : 'hidden'}>
-                <FormCard title={t('banquetStep.tables.label')} aside={<span className="text-[13px] text-[var(--ds-text-muted)]">{t('optional')}</span>}>
-                  <p className="mb-4 text-[13px] text-[var(--ds-text-muted)]">{t('tablesHint')}</p>
+                {/* In testata i posti scelti contro gli ospiti: è la domanda che
+                    ci si fa mentre si scelgono i tavoli, e in fondo alla griglia
+                    (dov'era) si leggeva solo dopo aver smesso di scegliere.
+                    Ambra se non bastano: c'è da aggiungere un tavolo. */}
+                <FormCard
+                  title={t('banquetStep.tables.label')}
+                  aside={(() => {
+                    const ids = newBanquet.table_ids || [];
+                    if (ids.length === 0) return <span className="text-[13px] text-[var(--ds-text-muted)]">{t('optional')}</span>;
+                    const seats = ids.reduce((sum, tid) => sum + (tables.find(tt => tt.id === tid)?.seats ?? 0), 0);
+                    const guests = Number(newBanquet.guests) || 0;
+                    const short = guests > 0 && seats < guests;
+                    return (
+                      <span className={`inline-flex h-7 items-center rounded-[var(--ds-radius-control)] px-3 text-[13px] font-medium tabular-nums ${
+                        short
+                          ? 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]'
+                          : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]'
+                      }`}>
+                        {t('banquetForm.tablesCount', { count: ids.length })}
+                        {' · '}
+                        {guests > 0
+                          ? t('banquetForm.seatsForGuests', { posti: seats, ospiti: guests })
+                          : t('banquetForm.seatsCount', { count: seats })}
+                      </span>
+                    );
+                  })()}
+                >
                 {!newBanquet.event_date || !newBanquet.shift ? (
-                  <p className="text-xs text-[var(--ds-text-muted)] italic">{t('pickDateAndShift')}</p>
+                  // I tavoli liberi dipendono da giorno e turno: senza, la
+                  // griglia non può dire quali sono già presi. Si torna su con
+                  // un clic invece di cercare il passo giusto.
+                  <Callout
+                    tone="info"
+                    icon={Info}
+                    action={
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setBanquetStep(0);
+                          if (!newBanquet.event_date) window.setTimeout(() => document.getElementById('banquet-date')?.focus(), 0);
+                        }}
+                        className="inline-flex h-9 items-center rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-4 text-[13px] font-semibold text-[var(--ds-arriving-text)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                      >
+                        {t('banquetForm.pickDateAndShiftAction')}
+                      </button>
+                    }
+                  >
+                    {t('pickDateAndShift')}
+                  </Callout>
                 ) : tables.length === 0 ? (
-                  <p className="text-xs text-[var(--ds-text-muted)] italic">{t('noTables')}</p>
+                  <p className="text-[13px] text-[var(--ds-text-muted)]">{t('noTables')}</p>
                 ) : (
                   <div className="space-y-3">
 
@@ -4351,34 +4609,51 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-[var(--ds-critical-tint)] border  rounded"></div> {t('tableTaken')}</div>
                     </div>
 
-                    {(newBanquet.table_ids || []).length > 0 && (
-                      <p className="text-xs text-[var(--ds-text-muted)] px-1">
-                        {t('selectedTables')} <span className="font-semibold text-[var(--ds-text-primary)]">{(newBanquet.table_ids || []).length}</span> {t('tablesWord')} ·{' '}
-                        <span className="font-semibold text-[var(--ds-text-primary)]">
-                          {(newBanquet.table_ids || []).reduce((sum, tid) => {
-                            const t = tables.find(tt => tt.id === tid);
-                            return sum + (t ? t.seats : 0);
-                          }, 0)}
-                        </span>{' '}
-                        {t('seatsTotal')}
-                      </p>
-                    )}
                   </div>
                 )}
                 </FormCard>
               </section>
 
-          </form>
+              {/* SECTION: Note operative */}
+              <section className={banquetStep === 4 ? 'block' : 'hidden'}>
+                <FormCard title={t('banquetStep.notes.label')}>
+                  <p className="mb-5 text-[13px] text-[var(--ds-text-muted)]">{t('notesHint')}</p>
+                  <div className="space-y-5">
+                    <Field label={t('banquetForm.notesKitchen')} htmlFor="banquet-notes-kitchen">
+                      <textarea
+                        id="banquet-notes-kitchen"
+                        rows={3}
+                        placeholder={t('dietaryNotesPlaceholder')}
+                        className={`${dsTextarea} resize-y`}
+                        value={newBanquet.notes_courses || ''}
+                        onChange={e => setNewBanquet({ ...newBanquet, notes_courses: e.target.value })}
+                      />
+                    </Field>
+                    <Field label={t('banquetForm.notesFloor')} htmlFor="banquet-notes-floor">
+                      <textarea
+                        id="banquet-notes-floor"
+                        rows={3}
+                        placeholder={t('serviceNotesPlaceholder')}
+                        className={`${dsTextarea} resize-y`}
+                        value={newBanquet.notes_service || ''}
+                        onChange={e => setNewBanquet({ ...newBanquet, notes_service: e.target.value })}
+                      />
+                    </Field>
+                    <Field label={t('banquetForm.notesMise')} htmlFor="banquet-notes-mise">
+                      <textarea
+                        id="banquet-notes-mise"
+                        rows={3}
+                        placeholder={t('miseEnPlacePlaceholder')}
+                        className={`${dsTextarea} resize-y`}
+                        value={newBanquet.notes_mise_en_place || ''}
+                        onChange={e => setNewBanquet({ ...newBanquet, notes_mise_en_place: e.target.value })}
+                      />
+                    </Field>
+                  </div>
+                </FormCard>
+              </section>
 
-          {banquetFormErrors.length > 0 && (
-            <Callout tone="critical" icon={Info} title={t('fillRequired')} className="mt-4">
-              <ul className="list-inside list-disc space-y-0.5">
-                {banquetFormErrors.map(field => (
-                  <li key={field}>{field}</li>
-                ))}
-              </ul>
-            </Callout>
-          )}
+          </form>
         </ModalShell>
       )}
 
