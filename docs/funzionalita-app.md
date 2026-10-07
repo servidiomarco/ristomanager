@@ -622,7 +622,7 @@ Modulo a parte (si attiva con l'abbonamento «recensioni»).
 
 ## HACCP
 
-Registro di autocontrollo digitale, compilabile dal telefono davanti alla cella frigo (campi grandi, salvataggio a ogni campo). Schede: **Registro** (il giorno), **Non conformità**, **Rintracciabilità**, **Archivio**, **Report** e — per chi gestisce l'HACCP — **Configura**.
+Registro di autocontrollo digitale, compilabile dal telefono davanti alla cella frigo (campi grandi, salvataggio a ogni campo). Schede: **Registro** (il giorno), **Non conformità**, **Rintracciabilità**, **Archivio**, **Report** e — per chi gestisce l'HACCP — **Configura**. Le stesse opzioni di Configura (sensori, postazioni, limiti, etichette) stanno anche in **Impostazioni → HACCP**.
 
 **Punti di controllo del locale**
 - Postazioni di temperatura, friggitrici, punti di pulizia, termometri da tarare e attrezzature dei processi (abbattitori, forni) si configurano in **HACCP → Configura**: sono il manuale di autocontrollo del ristorante tradotto in righe del modulo. Per chi parte da zero ci sono i modelli (frigorifero ≤ 4 °C, congelatore ≤ −18 °C, banco caldo ≥ 65 °C, cappe ogni mese, termometro a sonda ogni sei mesi…).
@@ -646,7 +646,9 @@ Registro di autocontrollo digitale, compilabile dal telefono davanti alla cella 
 - Esce sulla **stampante termica** scelta (quelle di Impostazioni → Stampanti, tramite l'agente di stampa del locale) o **dal browser** su una stampante di etichette da 62 mm. Ogni etichetta resta registrata con chi l'ha stampata e compare nel report.
 
 **Sensori di temperatura**
-- I sensori wireless scrivono le temperature da soli: in Configura → Sensori di temperatura si crea l'indirizzo con il token da dare al gateway dei sensori (formato JSON semplice o il webhook dei gateway Monnit).
+- I sensori wireless scrivono le temperature da soli: in Configura → Sensori di temperatura (o Impostazioni → HACCP) si crea l'indirizzo con il token da dare al gateway dei sensori.
+- **Sensori supportati**, ognuno con i passi per collegarlo: **Milesight TS301/TS302** (sonda per alimenti conforme alla EN 12830, col gateway Milesight UG63/UG65 collegato al router, senza abbonamento; il TS302 ha due sonde e segue due celle), **Monnit** (dal portale iMonnit), qualsiasi sensore **LoRaWAN** su una rete ChirpStack o The Things Network, e un formato JSON semplice per gli altri gateway.
+- Dopo un buco di rete il sensore rimanda le letture perse: entrano con la loro ora, una volta sola, e se in quelle ore la cella è rimasta fuori soglia si apre la non conformità. Le letture dei sensori non si modificano. Con la batteria sotto il 20% arriva un avviso.
 - Un sensore mai visto compare alla prima lettura, **da assegnare** a una postazione. Assegnato, compila la rilevazione della sua fascia (orari in Configura → Limiti, di serie 9:00, 16:00 e 21:00) nelle due ore successive, se nessuno l'ha già scritta; la riga porta «Sensore» e il suo nome.
 - Fuori soglia per più di 30 minuti (configurabile) apre **una** non conformità per escursione e avvisa titolare, direzione e cucina; un sensore senza segnale da più di un'ora avvisa. Nel registro di oggi ogni postazione con sensore mostra l'ultimo valore e l'ora.
 
@@ -715,6 +717,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 - **Fiscalità** — dati esercente, provider scontrino, mappa e aliquote IVA.
 - **Comunicazioni** — SMTP/Resend (invio), IMAP (ricezione), libreria **media** per gli allegati, messaggi rapidi della chat staff.
 - **AI** — agente vocale (messaggio iniziale, soglia gruppi, sospensioni, doppio turno), risposte AI ai messaggi + base di conoscenza, prompt logica tavoli.
+- **HACCP** — sensori di temperatura (indirizzo e token del gateway, sensori supportati con i passi per collegarli, assegnazione alle postazioni), postazioni, limiti del manuale, modelli di etichetta. Le stesse card di HACCP → Configura, visibili a chi gestisce l'HACCP.
 - **Amministrazione** — gestione utenti, matrice permessi, log attività.
 
 **Onboarding**: al primo accesso di un nuovo ristorante, un wizard guida in 4 passi (dati del ristorante → sale e tavoli → orari → menu) prima di entrare nel gestionale.
@@ -815,6 +818,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-07 | HACCP; Impostazioni | Nuova sezione HACCP in Impostazioni con sensori, postazioni, limiti ed etichette, e l'elenco dei sensori supportati con i passi per collegarli. Si aggiungono i Milesight TS301/TS302 (sonda per alimenti EN 12830, un TS302 segue due celle) e i sensori LoRaWAN su ChirpStack o The Things Network. Dopo un buco di rete le letture perse entrano con la loro ora, una volta sola, e aprono la non conformità se la cella era fuori soglia; con la batteria del sensore sotto il 20% arriva un avviso. |
 | 2026-10-07 | Integrazione cassa Passepartout; Impostazioni | Il PC della cassa si collega con un codice da Impostazioni → Passepartout («Collega il PC della cassa»): valido 15 minuti e una volta sola, senza più bisogno di noi per il token. Collegare un altro PC stacca quello di prima; «Scollega» toglie l'accesso. La scheda mostra il PC collegato e la versione dell'agente. |
 | 2026-10-07 | Pagamenti, conto al tavolo e cassa; Fiscalità: scontrino, fattura elettronica, proforma | Pagamenti e Fiscalità ora stanno vicine nel menu, sotto Gestione. In testa a Pagamenti c'è il giorno e il turno che si sta guardando, con accanto incassato e coperti di quel servizio (sui Link, incassato e in attesa del periodo). La Chiusura ha la sua ricerca per tavolo, cliente, numero o importo, il tab «Link di pagamento» conta i link in attesa e, dal registro Fiscalità, «Apri il conto» porta dritto alla scheda del conto per riemettere uno scontrino in errore. |
 | 2026-10-07 | Fiscalità: scontrino, fattura elettronica, proforma | Nel registro Fiscalità arriva la ricerca: per tavolo, cliente, intestatario o P.IVA della fattura, numero del documento o importo («45,50»). I tre export stanno in un solo menu «Esporta», i documenti non emessi compaiono in un avviso in testa, i filtri mostrano solo i tipi presenti nel periodo e la fattura riporta l'intestatario anche nella lista. |

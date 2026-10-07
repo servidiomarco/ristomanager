@@ -561,13 +561,41 @@
   "save": "Salva",
   "saveCorrection": "Salva la correzione",
   "sensors": {
+    "catalog": {
+      "cloud": "Cloud del produttore",
+      "generic": {
+        "name": "Formato generico"
+      },
+      "lawNote": "Per le celle dei surgelati servono registratori conformi alla EN 12830 (Reg. CE 37/2005), verificati ogni anno: aggiungi la sonda fra i termometri da tarare e registra lì la verifica.",
+      "lorawan": {
+        "step1": "Aggiungi un'integrazione HTTP verso l'indirizzo qui sopra, con l'intestazione X-Haccp-Sensor-Token.",
+        "step2": "Il sensore si riconosce dal DevEUI e compare qui sotto alla prima lettura.",
+        "summary": "Qualsiasi sensore di temperatura LoRaWAN su una rete che hai già, se il decoder restituisce temperature (o temperature_chn1, temperature_chn2)."
+      },
+      "milesight": {
+        "note": "Gateway senza l'opzione Metadata (firmware vecchio): aggiungi in fondo all'indirizzo ?device=$devEUI",
+        "step1": "Collega il gateway al router col cavo di rete e apri la sua pagina di configurazione.",
+        "step2": "In Network Server attiva il server integrato, banda EU868.",
+        "step3": "Crea un'applicazione con Metadata attivo e una destinazione HTTP: l'indirizzo qui sopra, intestazione X-Haccp-Sensor-Token col token.",
+        "step4": "Aggiungi i sensori col decoder TS301 o TS302. DevEUI e AppKey sono sull'etichetta, o si leggono con l'app Milesight ToolBox avvicinando il telefono.",
+        "step5": "Con ToolBox imposta l'invio ogni 5–10 minuti. La sonda va in cella, col cavo che passa dalla guarnizione della porta.",
+        "step6": "Alla prima lettura il sensore compare qui sotto: assegnalo alla sua postazione. Un TS302 compare due volte, una per sonda.",
+        "summary": "Sonda per alimenti col display: una sonda (TS301) o due (TS302, un sensore per due celle). Serve un gateway Milesight UG63 o UG65 collegato al router."
+      },
+      "monnit": {
+        "step1": "Nel portale iMonnit crea un webhook dei dati verso l'indirizzo qui sopra.",
+        "step2": "Se il portale non permette intestazioni, metti il token in fondo all'indirizzo: ?token=…",
+        "step3": "Alla prima lettura i sensori compaiono qui sotto: assegnali alle postazioni.",
+        "summary": "I sensori parlano col gateway Monnit; le letture passano dal portale iMonnit, che le inoltra con un webhook."
+      },
+      "recommended": "Consigliato",
+      "title": "Sensori supportati e come collegarli"
+    },
     "copied": "Copiato",
     "copyToken": "Copia il token",
     "copyUrl": "Copia l'indirizzo",
     "create": "Crea l'indirizzo",
     "formatGeneric": "JSON con una lettura o un elenco: valore in °C, ora facoltativa.",
-    "formatMonnit": "Il webhook dei gateway Monnit (iMonnit) si incolla così com'è. Se il gateway non manda intestazioni, il token va in fondo all'indirizzo: ?token=…",
-    "formats": "Formati accettati",
     "intro": "Con i sensori wireless le temperature si scrivono da sole. Serve un indirizzo da dare al gateway dei sensori.",
     "name": "Nome del sensore {{id}}",
     "none": "Nessun sensore ancora: compaiono qui alla prima lettura.",
