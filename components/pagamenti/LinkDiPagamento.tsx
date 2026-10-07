@@ -228,7 +228,9 @@ export const LinkDiPagamento: React.FC<{
             >
               {day.label}
             </SectionHeader>
-            <div className="space-y-2">
+            {/* 12px fra un conto e l'altro, non 8: è lo stacco di canvas che
+                dice dove finisce un tavolo e comincia il successivo. */}
+            <div className="space-y-3">
               {day.groups.map(group => {
                 if (group.billId == null) {
                   const only = group.items[0];
@@ -249,13 +251,23 @@ export const LinkDiPagamento: React.FC<{
                 const billTotal = first.bill_total_cents || 0;
                 const pct = billTotal > 0 ? Math.min(100, Math.round((paid / billTotal) * 100)) : 0;
                 return (
+                  // Un conto è UN oggetto: testata e pagamenti nella stessa
+                  // card bianca, col filo tutto intorno. La testata era su
+                  // surface-row, cioè quasi il colore del canvas (#f4f4f5 su
+                  // #ededf1): il bordo alto della card spariva, e le righe
+                  // bianche di un tavolo sembravano attaccate alla testata del
+                  // tavolo dopo. Il filo serve soprattutto al tema scuro, dove
+                  // surface e canvas sono vicini.
                   <div
                     key={`bill-${day.key}-${group.billId}`}
-                    className="overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]"
+                    className="overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] ring-1 ring-[var(--ds-border)]"
                   >
                     {/* Two lines, not one: the table, the customer, the running
-                        total and the bar do not fit across a pane this wide. */}
-                    <div className="bg-[var(--ds-surface-row)] px-3.5 py-2.5">
+                        total and the bar do not fit across a pane this wide.
+                        Bianca come le righe, staccata da loro da un filo: la
+                        gerarchia la fanno il peso del titolo e la barra, non
+                        uno sfondo che si confonde col canvas. */}
+                    <div className="border-b border-[var(--ds-border)] px-3.5 py-3">
                       <div className="flex items-center gap-2">
                         <Receipt className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
                         <span className="flex-shrink-0 text-[14px] font-semibold text-[var(--ds-text-primary)]">
