@@ -70,7 +70,7 @@ export class PassepartoutBridgeError extends Error {
 interface AgentConn {
     socket: Socket;
     connectedAt: Date;
-    hello: { hostname?: string; versioneGestionale?: string; capabilities?: string[] };
+    hello: { hostname?: string; versioneGestionale?: string; versioneAgente?: string; capabilities?: string[] };
 }
 
 const agents = new Map<number, AgentConn>();
@@ -87,8 +87,20 @@ export function getPassepartoutAgentStatus(tenantId: number) {
         connected_at: conn?.connectedAt.toISOString() ?? null,
         hostname: conn?.hello.hostname ?? null,
         versione_gestionale: conn?.hello.versioneGestionale ?? null,
+        versione_agente: conn?.hello.versioneAgente ?? null,
         capabilities: conn?.hello.capabilities ?? [],
     };
+}
+
+/** Stacca l'agente collegato del ristorante: dopo una rotazione del token
+ *  (abbinamento di un altro PC, «Scollega») quello di prima non deve
+ *  restare in linea fino alla prossima riconnessione. */
+export function scollegaAgentePassepartout(tenantId: number): boolean {
+    const conn = agents.get(tenantId);
+    if (!conn) return false;
+    agents.delete(tenantId);
+    try { conn.socket.disconnect(true); } catch (_) {}
+    return true;
 }
 
 /** I ristoranti con un agente collegato adesso: i giri periodici lavorano
@@ -135,6 +147,7 @@ export function setupPassepartoutBridge(io: SocketIOServer, resolveTenant: Passe
             conn.hello = {
                 hostname: typeof info?.hostname === 'string' ? info.hostname : undefined,
                 versioneGestionale: typeof info?.versioneGestionale === 'string' ? info.versioneGestionale : undefined,
+                versioneAgente: typeof info?.versioneAgente === 'string' ? info.versioneAgente.slice(0, 40) : undefined,
                 capabilities: Array.isArray(info?.capabilities)
                     ? info.capabilities.filter((c: unknown): c is string => typeof c === 'string').slice(0, 20)
                     : [],

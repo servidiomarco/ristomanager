@@ -24,7 +24,10 @@
 // server chiama l'agente per i conti che possiede; l'agente fa una
 // chiusura alla volta per comanda.
 
+import fs from 'fs';
 import os from 'os';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { io } from 'socket.io-client';
 import {
     getVersioneGestionale,
@@ -50,9 +53,63 @@ import {
     type StatoPrenotazioneCassa,
 } from '../services/passepartoutService.js';
 
-const SERVER_URL = (process.env.PP_AGENT_SERVER_URL || '').trim();
+// Server e token: dalle variabili d'ambiente (installazioni di prima) o dal
+// file che scrive l'abbinamento col codice (`--abbina`), accanto all'agente.
+const CONFIG_FILE = path.resolve(process.env.PP_AGENT_CONFIG || 'passepartout-agent.json');
+const daFile = ((): { server_url?: string; token?: string } => {
+    try { return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')); } catch { return {}; }
+})();
+const argomento = (nome: string): string | null => {
+    const i = process.argv.indexOf(nome);
+    return i >= 0 && process.argv[i + 1] && !process.argv[i + 1].startsWith('--') ? process.argv[i + 1] : null;
+};
+const SERVER_URL = (argomento('--server') || process.env.PP_AGENT_SERVER_URL || daFile.server_url || '').trim().replace(/\/+$/, '');
 const NODE_URL = (process.env.PP_AGENT_NODE_URL || '').trim().replace(/\/+$/, '');
-const TOKEN = (process.env.PP_AGENT_TOKEN || '').trim();
+const TOKEN = (process.env.PP_AGENT_TOKEN || daFile.token || '').trim();
+
+// La versione dell'agente (sha del pacchetto), annunciata nel saluto: la
+// sezione Passepartout la mostra, e gli aggiornamenti la confrontano.
+const VERSIONE_AGENTE = ((): string | undefined => {
+    const qui = path.dirname(fileURLToPath(import.meta.url));
+    for (const f of [path.resolve(qui, '..', '..', 'build-info.json'), path.resolve(qui, 'build-info.json'), path.resolve('build-info.json')]) {
+        try {
+            const sha = JSON.parse(fs.readFileSync(f, 'utf8'))?.sha;
+            if (typeof sha === 'string' && sha.trim()) return sha.trim().slice(0, 7);
+        } catch { /* prossimo */ }
+    }
+    return undefined;
+})();
+
+// `--abbina CODICE [--server URL]`: scambia il codice generato nella sezione
+// Passepartout col token dell'agente e lo salva in CONFIG_FILE, leggibile
+// solo da chi lo scrive. Poi si avvia l'agente normalmente.
+const CODICE_ABBINA = argomento('--abbina');
+if (CODICE_ABBINA) {
+    void (async () => {
+        if (!SERVER_URL) {
+            console.error('Serve l\'indirizzo del server: --server https://... (o PP_AGENT_SERVER_URL).');
+            process.exit(1);
+        }
+        try {
+            const res = await fetch(`${SERVER_URL}/pp-agent/abbina`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ codice: CODICE_ABBINA, hostname: os.hostname(), versione: VERSIONE_AGENTE }),
+            });
+            const body = await res.json().catch(() => ({})) as any;
+            if (!res.ok || typeof body?.token !== 'string') {
+                console.error(`Abbinamento non riuscito: ${body?.message || body?.error || `HTTP ${res.status}`}`);
+                process.exit(1);
+            }
+            fs.writeFileSync(CONFIG_FILE, JSON.stringify({ server_url: SERVER_URL, token: body.token }, null, 2), { mode: 0o600 });
+            console.log(`Abbinato a ${body.ristorante ?? 'il ristorante'}. Configurazione salvata in ${CONFIG_FILE}: ora avvia l'agente.`);
+            process.exit(0);
+        } catch (err) {
+            console.error(`Abbinamento non riuscito: ${(err as Error).message}`);
+            process.exit(1);
+        }
+    })();
+}
 // Cosa sa fare questo agente, annunciato nell'agent:hello: il server
 // riprova da solo una chiusura solo con un agente che sa riprenderla, e
 // manda prenotazioni solo a un agente che sa scriverle, e chiede i conti
@@ -62,11 +119,11 @@ const TOKEN = (process.env.PP_AGENT_TOKEN || '').trim();
 // in cassa i conti chiusi nel CRM (comanda specchio, fase 4).
 const CAPABILITIES = ['chiudi-riprendi', 'prenotazioni', 'conti', 'tavoli-aperti', 'chiudi-preconto', 'preconto', 'specchio'];
 
-if (!SERVER_URL || !TOKEN) {
-    console.error('Config mancante: servono PP_AGENT_SERVER_URL e PP_AGENT_TOKEN.');
+if (!CODICE_ABBINA && (!SERVER_URL || !TOKEN)) {
+    console.error('Config mancante: servono PP_AGENT_SERVER_URL e PP_AGENT_TOKEN, o un abbinamento (--abbina CODICE --server URL).');
     process.exit(1);
 }
-if (!isPassepartoutConfigured()) {
+if (!CODICE_ABBINA && !isPassepartoutConfigured()) {
     console.error('Config mancante: servono PASSEPARTOUT_WS_URL e PASSEPARTOUT_WS_USER (più password).');
     process.exit(1);
 }
@@ -269,7 +326,7 @@ const collega = (nome: string, base: string) => {
         } catch (err) {
             console.warn(`[agent:${nome}] gestionale non raggiungibile al momento:`, (err as Error).message);
         }
-        socket.emit('agent:hello', { hostname: os.hostname(), versioneGestionale, capabilities: CAPABILITIES });
+        socket.emit('agent:hello', { hostname: os.hostname(), versioneGestionale, versioneAgente: VERSIONE_AGENTE, capabilities: CAPABILITIES });
     });
 
     socket.on('connect_error', (err) => {
@@ -297,5 +354,7 @@ const collega = (nome: string, base: string) => {
     });
 };
 
-collega('cloud', SERVER_URL);
-if (NODE_URL) collega('nodo', NODE_URL);
+if (!CODICE_ABBINA) {
+    collega('cloud', SERVER_URL);
+    if (NODE_URL) collega('nodo', NODE_URL);
+}

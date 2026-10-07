@@ -1,10 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { PlugZap } from 'lucide-react';
-import { Callout, Field, SegmentedControl, StatusPill, dsSelect } from '../ds';
+import { Copy, Link2, PlugZap, Unlink } from 'lucide-react';
+import { Callout, Field, SegmentedControl, StatusPill, dsButton, dsSelect } from '../ds';
 import { formatDateTime } from '../../utils/formatLocale';
 import { sessionTimeZone } from '../../utils/displayTime';
-import { getPpConfig, getPpTipiPagamento, setPpConfig, type PpConfig } from '../../services/passepartoutApiService';
+import {
+  PP_SERVER_URL, creaCodiceAbbinamento, getPpConfig, getPpTipiPagamento, scollegaPcCassa, setPpConfig, type PpConfig,
+} from '../../services/passepartoutApiService';
 import { SchedaPassepartout } from './SchedaPassepartout';
 
 /* ===========================================================================
@@ -28,7 +30,13 @@ const CAPACITA: Record<string, string> = {
   prenotazioni: 'pp.capPrenotazioni',
   conti: 'pp.capConti',
   'tavoli-aperti': 'pp.capAperti',
+  'chiudi-preconto': 'pp.capChiudiPreconto',
+  preconto: 'pp.capPreconto',
+  specchio: 'pp.capSpecchio',
 };
+
+const oraBreve = (iso: string) =>
+  formatDateTime(iso, { timeZone: sessionTimeZone(), hour: '2-digit', minute: '2-digit' });
 
 export const CollegamentoCassa: React.FC<Props> = ({ showToast }) => {
   const { t } = useTranslation('impostazioni', { useSuspense: false });
@@ -36,6 +44,9 @@ export const CollegamentoCassa: React.FC<Props> = ({ showToast }) => {
   const [tipi, setTipi] = useState<string[] | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [saving, setSaving] = useState(false);
+  // Il codice appena generato: in chiaro solo qui, il server tiene l'hash.
+  const [codice, setCodice] = useState<{ codice: string; scade_at: string } | null>(null);
+  const [scollegaArmato, setScollegaArmato] = useState(false);
 
   const showToastRef = useRef(showToast);
   showToastRef.current = showToast;
@@ -74,6 +85,51 @@ export const CollegamentoCassa: React.FC<Props> = ({ showToast }) => {
     }
   };
 
+  const ricarica = async () => {
+    try { setConfig(await getPpConfig()); } catch { /* resta la vista di prima */ }
+  };
+
+  const generaCodice = async () => {
+    if (saving) return;
+    setSaving(true);
+    try {
+      setCodice(await creaCodiceAbbinamento());
+      setScollegaArmato(false);
+    } catch (err: any) {
+      showToastRef.current(err?.message || t('pp.saveFailed'), 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Doppio tocco: «Scollega» arma, il secondo conferma.
+  const scollega = async () => {
+    if (saving) return;
+    if (!scollegaArmato) { setScollegaArmato(true); return; }
+    setSaving(true);
+    try {
+      await scollegaPcCassa();
+      setCodice(null);
+      setScollegaArmato(false);
+      await ricarica();
+      showToastRef.current(t('pp.pairUnlinked'), 'success');
+    } catch (err: any) {
+      showToastRef.current(err?.message || t('pp.saveFailed'), 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const comandoAbbina = codice
+    ? `node passepartout-agent.js --abbina ${codice.codice} --server ${PP_SERVER_URL}`
+    : '';
+  const copia = async (testo: string) => {
+    try {
+      await navigator.clipboard.writeText(testo);
+      showToastRef.current(t('pp.pairCopied'), 'success');
+    } catch { /* appunti non disponibili: il testo resta selezionabile */ }
+  };
+
   const agente = config?.agente;
   // Il valore in uso: quello salvato, o quello ereditato dal server.
   const tipoInUso = config?.tipo_pagamento_esterno ?? config?.effettivo.tipo_pagamento ?? '';
@@ -107,7 +163,49 @@ export const CollegamentoCassa: React.FC<Props> = ({ showToast }) => {
                     ? formatDateTime(agente.connected_at, { timeZone: sessionTimeZone(), day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
                     : '—',
                 })}
+                {agente.versione_agente ? ` · ${t('pp.agentVersion', { versione: agente.versione_agente })}` : ''}
               </p>
+            )}
+            {!agente.connected && config.abbinamento?.hostname && (
+              <p className="text-[13px] text-[var(--ds-text-muted)]">
+                {t('pp.pairLast', { pc: config.abbinamento.hostname })}
+              </p>
+            )}
+          </div>
+
+          {/* Abbinamento del PC della cassa: un codice da 15 minuti, usato
+              una volta dall'agente sul PC. Il token resta un segreto di
+              macchina; abbinare un altro PC stacca quello di prima. */}
+          <div className="space-y-2">
+            <div className="flex flex-wrap gap-2">
+              <button type="button" className={dsButton.secondary} onClick={generaCodice} disabled={saving}>
+                <Link2 className="h-4 w-4" aria-hidden /> {t(agente.connected ? 'pp.pairAnother' : 'pp.pairNew')}
+              </button>
+              {(agente.connected || config.abbinamento?.hostname) && (
+                <button type="button" className={dsButton.secondary} onClick={scollega} disabled={saving}>
+                  <Unlink className="h-4 w-4" aria-hidden /> {t(scollegaArmato ? 'pp.pairUnlinkConfirm' : 'pp.pairUnlink')}
+                </button>
+              )}
+            </div>
+            {codice && (
+              <div className="rounded-[var(--ds-radius)] border border-[var(--ds-border)] p-3 space-y-2">
+                <p className="text-[13px] text-[var(--ds-text-secondary)]">{t('pp.pairCodeLabel', { ora: oraBreve(codice.scade_at) })}</p>
+                <p className="font-mono text-[24px] font-semibold tracking-[0.12em] text-[var(--ds-text-primary)]">{codice.codice}</p>
+                <p className="text-[13px] text-[var(--ds-text-secondary)]">{t('pp.pairHowTo')}</p>
+                <div className="flex items-start gap-2">
+                  <code className="min-w-0 flex-1 break-all rounded-[var(--ds-radius-control)] bg-[var(--ds-canvas)] px-2 py-1.5 text-[12px] text-[var(--ds-text-primary)]">{comandoAbbina}</code>
+                  <button type="button" className={dsButton.secondary} onClick={() => copia(comandoAbbina)} aria-label={t('pp.pairCopy')}>
+                    <Copy className="h-4 w-4" aria-hidden />
+                  </button>
+                </div>
+                <p className="text-[12px] text-[var(--ds-text-muted)]">{t('pp.pairReplaces')}</p>
+              </div>
+            )}
+            {!codice && config.abbinamento?.codice_scade_at && (
+              <p className="text-[13px] text-[var(--ds-text-muted)]">{t('pp.pairPending', { ora: oraBreve(config.abbinamento.codice_scade_at) })}</p>
+            )}
+            {config.abbinamento?.token_storico && (
+              <p className="text-[12px] text-[var(--ds-text-muted)]">{t('pp.pairLegacy')}</p>
             )}
           </div>
 

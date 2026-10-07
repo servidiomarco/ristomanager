@@ -101,6 +101,8 @@ export interface PpAgente {
   connected_at: string | null;
   hostname: string | null;
   versione_gestionale: string | null;
+  /** Sha del pacchetto dell'agente (agenti dal 07/10 in poi). */
+  versione_agente?: string | null;
   capabilities: string[];
 }
 
@@ -111,7 +113,25 @@ export interface PpConfig {
   /** Quelli che la chiusura usa davvero (il ristorante 1 eredita l'env). */
   effettivo: { tipo_pagamento: string | null; tipo_documento: string };
   agente: PpAgente;
+  abbinamento?: {
+    /** Il PC abbinato col codice e quando (anche ad agente spento). */
+    abbinato_at: string | null;
+    hostname: string | null;
+    /** Un codice generato e non ancora usato. */
+    codice_scade_at: string | null;
+    /** Ristorante 1 ancora col token storico in env. */
+    token_storico: boolean;
+  };
 }
+
+/** L'URL del server a cui l'agente si collega: lo stesso dell'app. */
+export const PP_SERVER_URL = API_URL;
+
+export const creaCodiceAbbinamento = (): Promise<{ codice: string; scade_at: string }> =>
+  apiRequest(`${API_URL}/passepartout/abbinamento`, { method: 'POST', headers: getHeaders() });
+
+export const scollegaPcCassa = (): Promise<{ ok: true }> =>
+  apiRequest(`${API_URL}/passepartout/scollega`, { method: 'POST', headers: getHeaders() });
 
 export const getPpConfig = (): Promise<PpConfig> =>
   apiRequest(`${API_URL}/passepartout/config`, { headers: getHeaders(false), cache: 'no-store' });
