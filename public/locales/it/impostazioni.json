@@ -331,6 +331,7 @@
     "capChiudiPreconto": "Chiusura dopo il preconto",
     "capPreconto": "Preconto dal QR",
     "capSpecchio": "Conti del CRM in cassa",
+    "capDiagnosi": "Verifica",
     "agentVersion": "agente {{versione}}",
     "pairLast": "Ultimo PC abbinato: {{pc}}",
     "pairNew": "Collega il PC della cassa",
@@ -408,6 +409,73 @@
     "specchioFailed_other": "{{count}} conti non copiati in cassa",
     "specchioRetry": "Riprova",
     "specchioRetried_one": "{{count}} conto rimesso in coda",
-    "specchioRetried_other": "{{count}} conti rimessi in coda"
+    "specchioRetried_other": "{{count}} conti rimessi in coda",
+    "verifica": {
+      "title": "Verifica della cassa",
+      "subtitle": "Cosa è a posto e cosa sistemare per usare la cassa col CRM",
+      "badgeOk": "Tutto a posto",
+      "mai": "Verifica non ancora eseguita: controlla PC, cassa, tipo di pagamento, tavoli e menu in un colpo solo.",
+      "esegui": "Esegui la verifica",
+      "ripeti": "Ripeti la verifica",
+      "eseguita": "Ultima verifica il {{when}}",
+      "agente": {
+        "ok": "PC {{pc}} collegato, agente aggiornato",
+        "attenzione": "PC {{pc}} collegato, ma l'agente è da aggiornare: mancano {{mancano}}",
+        "attenzioneFix": "Aggiorna l'agente sul PC della cassa: le funzioni che mancano restano spente.",
+        "errore": "Il PC della cassa non è collegato",
+        "erroreFix": "Accendi il PC della cassa, o collegalo con il codice nella scheda «Collegamento e chiusura in cassa»."
+      },
+      "cassa": {
+        "ok": "Cassa raggiungibile: Passepartout {{versione}}, risposta in {{ms}} ms",
+        "attenzione": "Cassa raggiungibile, ma Passepartout {{versione}} non è ancora stata provata con Sympotia",
+        "attenzioneFix": "Di solito funziona lo stesso: fai la prova qui sotto a locale chiuso e, se qualcosa non va, scrivici dall'Aiuto.",
+        "errore": "La cassa non risponde: {{errore}}",
+        "erroreFix": "Controlla col rivenditore che il Web Service di Passepartout sia acceso e che utente e password sul PC siano giusti."
+      },
+      "pagamento": {
+        "ok": "Tipo di pagamento «{{tipo}}» confermato come pagamento elettronico",
+        "non_scelto": "Nessun tipo di pagamento dedicato",
+        "non_sceltoFix": "Sceglilo nella scheda «Collegamento e chiusura in cassa»: senza, la cassa non chiude i conti saldati nel CRM.",
+        "non_in_cassa": "Il tipo di pagamento «{{tipo}}» non c'è più in cassa",
+        "non_in_cassaFix": "Scegline un altro, o fallo ricreare dal rivenditore: i conti del CRM resterebbero aperti in cassa.",
+        "da_confermare": "Tipo di pagamento «{{tipo}}» (categoria {{categoria}}): manca la conferma che sullo scontrino risulti pagamento elettronico",
+        "da_confermareFix": "La cassa non lo dice al CRM. Guarda uno scontrino chiuso dal CRM: in fondo deve risultare «pagamento elettronico». Se no, fallo sistemare dal rivenditore."
+      },
+      "tavoli": {
+        "ok": "{{abbinati}} tavoli abbinati alla cassa su {{tavoli_crm}}",
+        "attenzione": "{{abbinati}} tavoli abbinati su {{tavoli_crm}}, {{da_confermare}} da confermare",
+        "attenzioneFix": "Confermali nella scheda «Prenotazioni in cassa».",
+        "da_leggere": "Tavoli non ancora abbinati alla cassa",
+        "da_leggereFix": "Nella scheda «Prenotazioni in cassa» premi «Leggi i tavoli dalla cassa»."
+      },
+      "menu": {
+        "ok": "{{piatti}} piatti importati dalla cassa",
+        "attenzione": "Menu della cassa non ancora importato",
+        "attenzioneFix": "In Menu premi «Importa da cassa»: servono i piatti della cassa per le comande e i conti."
+      },
+      "comande": {
+        "ok": "Lettura dei tavoli aperti riuscita: {{aperte}} comande aperte adesso",
+        "attenzione": "La cassa risponde ma non dà le comande aperte",
+        "attenzioneFix": "Senza, il pagamento dal QR e i tavoli aperti in cassa non funzionano: segnalalo al rivenditore."
+      },
+      "fiscale": {
+        "info": "Il pagamento dal QR va collegato al registratore telematico (FAQ dell'Agenzia delle Entrate sul collegamento POS-RT)",
+        "infoFix": "Il CRM non può verificarlo: chiedi al rivenditore e al commercialista."
+      },
+      "confermaElettronico": "Sì, risulta pagamento elettronico",
+      "provaTitle": "Prova di scrittura, a locale chiuso",
+      "provaHint": "Scrive nel planning della cassa una prenotazione «PROVA Sympotia» per domani alle 5 sul tavolo scelto e la annulla subito: in cassa resta come «Mancata».",
+      "provaTable": "Tavolo",
+      "provaNoTables": "Serve almeno un tavolo abbinato e confermato nella scheda «Prenotazioni in cassa».",
+      "provaSend": "Scrivi e annulla in cassa",
+      "provaConfirm": "Tocca di nuovo: scrive in cassa",
+      "provaOk": "Prova riuscita: prenotazione scritta e annullata in cassa",
+      "provaLastOk": "Ultima prova il {{when}}: riuscita",
+      "provaLastKo": "Ultima prova il {{when}}: non riuscita ({{errore}})",
+      "rivenditoreTitle": "Cosa chiedere al rivenditore della cassa",
+      "rivenditoreTesto": "Per collegare Sympotia alla cassa Passepartout servono:\n1. Il Web Service di Passepartout (AdapterWS) attivo, con un utente dedicato a Sympotia.\n2. La porta del Web Service (di solito 7606) raggiungibile dal PC della cassa.\n3. Un tipo di pagamento dedicato (per esempio ESTERNO) che sullo scontrino risulti come pagamento elettronico.\n4. Il collegamento al registratore telematico del circuito con cui i clienti pagano dal QR (collegamento POS-RT).\n5. Il PC della cassa acceso durante il servizio.",
+      "copia": "Copia la lista",
+      "copiato": "Lista copiata"
+    }
   }
 }

@@ -144,6 +144,37 @@ export const setPpConfig = (input: { tipo_pagamento_esterno?: string | null; tip
 export const getPpTipiPagamento = (): Promise<Array<{ codice: string; categoria: string | null }>> =>
   apiRequest(`${API_URL}/passepartout/tipi-pagamento`, { headers: getHeaders(false), cache: 'no-store' });
 
+/* ── Verifica guidata della cassa ───────────────────────────────────────── */
+
+export type EsitoVerifica = 'ok' | 'attenzione' | 'errore' | 'info';
+
+/** Una voce della verifica: la scheda la traduce con pp.verifica.<voce>.<esito>
+ *  (o .<motivo> quando c'è), coi dati come parametri. */
+export interface VoceVerifica {
+  voce: 'agente' | 'cassa' | 'pagamento' | 'tavoli' | 'menu' | 'comande' | 'fiscale';
+  esito: EsitoVerifica;
+  dati?: Record<string, any>;
+}
+
+export interface PpVerifica {
+  voci: VoceVerifica[] | null;
+  eseguita_at: string | null;
+  elettronico_confermato?: boolean;
+  prova?: { at: string; esito: string } | null;
+}
+
+export const getVerificaCassa = (): Promise<PpVerifica> =>
+  apiRequest(`${API_URL}/passepartout/diagnosi`, { headers: getHeaders(false), cache: 'no-store' });
+
+export const eseguiVerificaCassa = (): Promise<PpVerifica> =>
+  apiRequest(`${API_URL}/passepartout/diagnosi`, { method: 'POST', headers: getHeaders() });
+
+export const confermaPagamentoElettronico = (confermato: boolean): Promise<{ ok: true }> =>
+  apiRequest(`${API_URL}/passepartout/diagnosi/elettronico`, { method: 'PUT', headers: getHeaders(), body: JSON.stringify({ confermato }) });
+
+export const provaPrenotazioneInCassa = (tableId: number): Promise<{ ok: true; id: number }> =>
+  apiRequest(`${API_URL}/passepartout/prova/prenotazione`, { method: 'POST', headers: getHeaders(), body: JSON.stringify({ table_id: tableId }) });
+
 /* ── Conti della cassa nel CRM (fase 1) ─────────────────────────────────── */
 
 export interface PpContiStato {

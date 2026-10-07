@@ -25,7 +25,7 @@ interface Props {
 }
 
 /** Le capacità che l'agente annuncia, dette per esteso. */
-const CAPACITA: Record<string, string> = {
+export const CAPACITA: Record<string, string> = {
   'chiudi-riprendi': 'pp.capRiprendi',
   prenotazioni: 'pp.capPrenotazioni',
   conti: 'pp.capConti',
@@ -33,6 +33,7 @@ const CAPACITA: Record<string, string> = {
   'chiudi-preconto': 'pp.capChiudiPreconto',
   preconto: 'pp.capPreconto',
   specchio: 'pp.capSpecchio',
+  diagnosi: 'pp.capDiagnosi',
 };
 
 const oraBreve = (iso: string) =>

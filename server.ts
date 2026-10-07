@@ -4115,6 +4115,10 @@ app.put('/passepartout/config', authenticate, requirePermission('settings:full')
              ON CONFLICT (tenant_id) DO UPDATE
                 SET tipo_pagamento_esterno = CASE WHEN $4 THEN EXCLUDED.tipo_pagamento_esterno ELSE passepartout_config.tipo_pagamento_esterno END,
                     tipo_documento = CASE WHEN $5 THEN EXCLUDED.tipo_documento ELSE passepartout_config.tipo_documento END,
+                    -- Un altro tipo di pagamento va riconfermato come elettronico.
+                    esterno_elettronico_confermato = CASE
+                        WHEN $4 AND EXCLUDED.tipo_pagamento_esterno IS DISTINCT FROM passepartout_config.tipo_pagamento_esterno THEN false
+                        ELSE passepartout_config.esterno_elettronico_confermato END,
                     updated_at = now()`,
             [tenantId, tipoPagamento ?? null, tipoDocumento ?? null, tipoPagamento !== undefined, tipoDocumento !== undefined]
         );
@@ -4137,6 +4141,192 @@ app.put('/passepartout/config', authenticate, requirePermission('settings:full')
 
 // I tipi di pagamento configurati nella cassa: le tendine della sezione
 // scelgono fra quelli veri, un nome sbagliato lascerebbe i conti a sospeso.
+// --- Verifica guidata della cassa ---------------------------------------------
+// Attivare l'integrazione presso un ristorante voleva dire controllare a
+// mano, con script dal PC, che la cassa risponda, con che versione, che il
+// tipo di pagamento dedicato esista, che i tavoli siano abbinati. La
+// sezione lo fa da sé: una lista di voci con esito e dati, che l'interfaccia
+// traduce (pp.verifica.<voce>.<esito>). L'ultima resta in passepartout_config.
+const VERSIONI_PASSEPARTOUT_PROVATE = ['2026C1'];
+const CAPACITA_AGENTE_ATTESE = ['chiudi-riprendi', 'prenotazioni', 'conti', 'tavoli-aperti', 'chiudi-preconto', 'preconto', 'specchio', 'diagnosi'];
+type EsitoVerifica = 'ok' | 'attenzione' | 'errore' | 'info';
+interface VoceVerifica { voce: string; esito: EsitoVerifica; dati?: Record<string, unknown> }
+
+async function verificaCassa(tenantId: number): Promise<VoceVerifica[]> {
+    const voci: VoceVerifica[] = [];
+    const agente = getPassepartoutAgentStatus(tenantId);
+    const mancano = CAPACITA_AGENTE_ATTESE.filter((c) => !agente.capabilities.includes(c));
+    voci.push(!agente.connected
+        ? { voce: 'agente', esito: 'errore' }
+        : { voce: 'agente', esito: mancano.length ? 'attenzione' : 'ok', dati: { pc: agente.hostname, versione: agente.versione_agente, mancano } });
+
+    // La cassa: con l'agente che sa fare la diagnosi, tutto in un colpo;
+    // con uno vecchio, almeno la versione.
+    let diagnosi: any = null;
+    if (agente.connected) {
+        try {
+            const inizio = Date.now();
+            diagnosi = passepartoutAgentSupports(tenantId, 'diagnosi')
+                ? await callPassepartout<any>(tenantId, 'diagnosi', {}, 90_000)
+                : { raggiungibile: true, versione: await callPassepartout<string | null>(tenantId, 'versione', {}, 20_000), tempo_ms: Date.now() - inizio };
+        } catch (err: any) {
+            diagnosi = { raggiungibile: false, errore: err?.message ?? String(err) };
+        }
+        if (!diagnosi.raggiungibile) {
+            voci.push({ voce: 'cassa', esito: 'errore', dati: { errore: String(diagnosi.errore ?? '').slice(0, 300) } });
+        } else {
+            const provata = VERSIONI_PASSEPARTOUT_PROVATE.includes(String(diagnosi.versione ?? ''));
+            voci.push({ voce: 'cassa', esito: provata ? 'ok' : 'attenzione', dati: { versione: diagnosi.versione ?? null, ms: diagnosi.tempo_ms ?? null } });
+        }
+    }
+
+    // Il tipo di pagamento con cui la cassa chiude i conti del CRM.
+    const cfg = (await queryWithRetry(
+        `SELECT esterno_elettronico_confermato, pianta_at FROM passepartout_config WHERE tenant_id = $1`, [tenantId]
+    )).rows[0] ?? {};
+    const tipo = (await getPassepartoutChiusuraConfig(tenantId))?.tipoPagamento ?? null;
+    const tipi: Array<{ codice: string; categoria: string | null }> | null = diagnosi?.tipi_pagamento ?? null;
+    if (!tipo) {
+        voci.push({ voce: 'pagamento', esito: 'attenzione', dati: { motivo: 'non_scelto' } });
+    } else if (tipi && !tipi.some((t) => t.codice === tipo)) {
+        voci.push({ voce: 'pagamento', esito: 'errore', dati: { tipo, motivo: 'non_in_cassa' } });
+    } else {
+        const categoria = tipi?.find((t) => t.codice === tipo)?.categoria ?? null;
+        voci.push(cfg.esterno_elettronico_confermato === true
+            ? { voce: 'pagamento', esito: 'ok', dati: { tipo, categoria } }
+            : { voce: 'pagamento', esito: 'attenzione', dati: { tipo, categoria, motivo: 'da_confermare' } });
+    }
+
+    // Tavoli abbinati e menu importato.
+    const tav = (await queryWithRetry(
+        `SELECT (SELECT COUNT(*)::int FROM tables WHERE tenant_id = $1) AS tavoli_crm,
+                (SELECT COUNT(*) FILTER (WHERE confermato)::int FROM passepartout_tavoli WHERE tenant_id = $1) AS abbinati,
+                (SELECT COUNT(*) FILTER (WHERE NOT confermato)::int FROM passepartout_tavoli WHERE tenant_id = $1) AS da_confermare`,
+        [tenantId]
+    )).rows[0];
+    voci.push(!cfg.pianta_at || Number(tav.abbinati) === 0
+        ? { voce: 'tavoli', esito: 'attenzione', dati: { motivo: 'da_leggere' } }
+        : { voce: 'tavoli', esito: Number(tav.da_confermare) > 0 ? 'attenzione' : 'ok', dati: { abbinati: Number(tav.abbinati), tavoli_crm: Number(tav.tavoli_crm), da_confermare: Number(tav.da_confermare) } });
+    const piatti = Number((await queryWithRetry(
+        `SELECT COUNT(*)::int AS n FROM dishes WHERE tenant_id = $1 AND external_ref LIKE 'pp:articolo:%'`, [tenantId]
+    )).rows[0]?.n || 0);
+    voci.push({ voce: 'menu', esito: piatti > 0 ? 'ok' : 'attenzione', dati: { piatti } });
+
+    if (diagnosi?.raggiungibile && diagnosi.comande_aperte !== undefined) {
+        voci.push(diagnosi.comande_aperte == null
+            ? { voce: 'comande', esito: 'attenzione' }
+            : { voce: 'comande', esito: 'ok', dati: { aperte: diagnosi.comande_aperte } });
+    }
+    // Il CRM non lo può verificare: promemoria del collegamento POS-RT.
+    voci.push({ voce: 'fiscale', esito: 'info' });
+    return voci;
+}
+
+app.get('/passepartout/diagnosi', authenticate, requirePermission('settings:full'), requireFeature('passepartout'), async (req, res) => {
+    try {
+        const r = (await queryWithRetry(
+            `SELECT diagnosi, diagnosi_at, esterno_elettronico_confermato, prova_prenotazione_at, prova_prenotazione_esito
+               FROM passepartout_config WHERE tenant_id = $1`,
+            [req.tenantId!]
+        )).rows[0] ?? {};
+        res.json({
+            voci: r.diagnosi ?? null,
+            eseguita_at: r.diagnosi_at ?? null,
+            elettronico_confermato: r.esterno_elettronico_confermato === true,
+            prova: r.prova_prenotazione_at ? { at: r.prova_prenotazione_at, esito: r.prova_prenotazione_esito } : null,
+        });
+    } catch (err: any) {
+        console.error('GET /passepartout/diagnosi error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+app.post('/passepartout/diagnosi', authenticate, requirePermission('settings:full'), requireFeature('passepartout'), async (req, res) => {
+    try {
+        const tenantId = req.tenantId!;
+        const voci = await verificaCassa(tenantId);
+        const salvata = await queryWithRetry(
+            `INSERT INTO passepartout_config (tenant_id, diagnosi, diagnosi_at, updated_at) VALUES ($1, $2::jsonb, now(), now())
+             ON CONFLICT (tenant_id) DO UPDATE SET diagnosi = $2::jsonb, diagnosi_at = now(), updated_at = now()
+             RETURNING diagnosi_at`,
+            [tenantId, JSON.stringify(voci)]
+        );
+        res.json({ voci, eseguita_at: salvata.rows[0].diagnosi_at });
+    } catch (err: any) {
+        console.error('POST /passepartout/diagnosi error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Il ristorante conferma, scontrino alla mano, che il tipo di pagamento
+// dedicato risulta come pagamento elettronico sul registratore.
+app.put('/passepartout/diagnosi/elettronico', authenticate, requirePermission('settings:full'), requireFeature('passepartout'), async (req, res) => {
+    try {
+        const tenantId = req.tenantId!;
+        const confermato = req.body?.confermato === true;
+        await queryWithRetry(
+            `INSERT INTO passepartout_config (tenant_id, esterno_elettronico_confermato, updated_at) VALUES ($1, $2, now())
+             ON CONFLICT (tenant_id) DO UPDATE SET esterno_elettronico_confermato = $2, updated_at = now()`,
+            [tenantId, confermato]
+        );
+        if (req.user) {
+            LogService.logActivity(
+                tenantId, req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.SETTINGS, undefined, 'Passepartout: pagamento elettronico',
+                { confermato, tipo_pagamento: (await getPassepartoutChiusuraConfig(tenantId))?.tipoPagamento ?? null }
+            );
+        }
+        res.json({ ok: true });
+    } catch (err: any) {
+        console.error('PUT /passepartout/diagnosi/elettronico error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Prova di scrittura, a locale chiuso: una prenotazione di prova nel
+// planning della cassa (domani alle 5, fuori servizio) sul tavolo scelto,
+// subito annullata. In cassa resta come «Mancata».
+class ProvaCassaNonRiuscita extends Error {}
+app.post('/passepartout/prova/prenotazione', authenticate, requirePermission('settings:full'), requireFeature('passepartout'), async (req, res) => {
+    const tenantId = req.tenantId!;
+    const salva = (esito: string) => queryWithRetry(
+        `INSERT INTO passepartout_config (tenant_id, prova_prenotazione_at, prova_prenotazione_esito, updated_at) VALUES ($1, now(), $2, now())
+         ON CONFLICT (tenant_id) DO UPDATE SET prova_prenotazione_at = now(), prova_prenotazione_esito = $2, updated_at = now()`,
+        [tenantId, esito.slice(0, 500)]
+    );
+    try {
+        const tableId = Number(req.body?.table_id);
+        const tav = (await queryWithRetry(
+            `SELECT pp_sala, pp_tavolo FROM passepartout_tavoli WHERE tenant_id = $1 AND table_id = $2 AND confermato`,
+            [tenantId, tableId]
+        )).rows[0];
+        if (!tav) return res.status(400).json({ error: 'tavolo_non_abbinato', message: 'Scegli un tavolo abbinato alla cassa.' });
+        if (!passepartoutAgentSupports(tenantId, 'prenotazioni')) {
+            return res.status(409).json({ error: 'agente_non_pronto', message: "L'agente del PC della cassa non è collegato o è da aggiornare." });
+        }
+        const domani = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Rome' }).format(new Date(Date.now() + 86_400_000));
+        const tag = `sympotia-prova:${Date.now()}`;
+        const scritta = await callPassepartout<any>(tenantId, 'prenotazione', {
+            tag, sala: tav.pp_sala, tavoli: [tav.pp_tavolo], dataOra: `${domani}T05:00:00`, durata: 30,
+            intestazione: 'PROVA Sympotia', note: 'Prova della verifica guidata: si annulla da sola',
+            numeroPersone: 1, adulti: 1, bambini: 0, stato: 'Confermata',
+        }, 60_000);
+        const id = Number(scritta?.prenotazione?.idGestionale);
+        if (!Number.isFinite(id)) throw new ProvaCassaNonRiuscita('La cassa non ha restituito la prenotazione di prova');
+        const annullata = await callPassepartout<any>(tenantId, 'prenotazione', { azione: 'annulla', tag, idGestionale: id, giorno: domani }, 60_000);
+        if (annullata?.esito !== 'scritta') throw new ProvaCassaNonRiuscita(`Prenotazione di prova ${id} scritta ma non annullata (${annullata?.esito ?? 'nessuna risposta'}): segnala «Mancata» a mano in cassa`);
+        await salva('ok');
+        res.json({ ok: true, id });
+    } catch (err: any) {
+        const msg = err?.message ?? String(err);
+        await salva(msg).catch(() => {});
+        if (sendPassepartoutError(res, err)) return;
+        if (err instanceof ProvaCassaNonRiuscita) return res.status(502).json({ error: 'prova_non_riuscita', message: msg });
+        console.error('POST /passepartout/prova/prenotazione error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: msg });
+    }
+});
+
 // --- Abbinamento del PC della cassa con un codice -----------------------------
 // Il token dell'agente non si mostra (è un segreto di macchina): dalla
 // sezione si genera un codice breve, valido 15 minuti e una volta sola, e
