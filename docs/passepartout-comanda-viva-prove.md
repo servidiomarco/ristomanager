@@ -78,21 +78,23 @@ Il log di ogni passo serve per la tabella qui sotto. Le risposte dubbie si guard
 
 ## Esiti
 
-Da riempire durante le prove.
+Prove del 07/10/2026 sera, a locale chiuso e senza nessuno in sala: comanda 78556 sul tavolo 88 TETTOIA. Gli invii in produzione si leggono nel database della cassa (`Comanda.numeroInvii`, `dataUltimoInvio`, `ultimaPortataInviata`), in sola lettura. Il campo `DataInvio` delle righe nel web service è solo il momento della scrittura.
 
 | # | Esito | Note |
 |---|---|---|
-| 1 | | |
-| 2a | | |
-| 2b | | |
-| 3 | | |
-| 4 | | |
-| 5a | | |
-| 5b | | |
-| 6 | | |
-| 7 | | |
-| 8 | | |
-| 9 | | |
+| 1 | Riuscito | Prezzi presi dal listino quando non si manda `Prezzo`. Uscite rispettate, righe «Nuovo», nessun invio. Con `Coperti` 0 la cassa mette 1 coperto e una riga «Coperti» da 0 pezzi |
+| 2a | Riuscito | Modo «tutte»: le righe rimandate con il loro `IdGestionale` restano com'erano (stessi numeri, nessun doppione) e la nuova prende un numero suo |
+| 2b | Ignorato | Modo «parziale» (`IDDati` più `IsParziale`): nessuna riga aggiunta, risposta senza id, nessun errore e niente nel log della cassa |
+| 2c | **Riuscito** | Modo «nuove»: `IdGestionale` della comanda e **solo la riga nuova**, senza `IsParziale`. Aggiunta, e le righe non mandate restano intatte, varianti comprese. Il CRM può scrivere solo le sue righe |
+| 3 | Riuscito | `Varianti` accettate: a codice (`Variante`, la descrizione la completa la cassa) e a testo libero (solo `Descrizione`). Se escono sul foglietto: da vedere al passo 4. Rimandando una riga senza `Varianti`, le sue varianti restano |
+| 4 | Da fare | Con qualcuno in cucina: stampa per uscita e varianti sul foglietto |
+| 5a | Riuscito | `DaCancellare` su una riga mai inviata: la riga sparisce. Funziona anche mandando solo quella riga |
+| 5b | Da fare | Con qualcuno in cucina: storno di una riga già inviata |
+| 5c | Riuscito | `Pezzi` su una riga già scritta, mandando solo quella: la quantità cambia sul posto, stesso numero, totale ricalcolato |
+| 6 | Ignorato | `Tavolo` diverso sulla stessa comanda: resta sul tavolo di prima, senza errore |
+| 7 | Da fare | Con qualcuno alla cassa: chiusura dallo schermo della cassa con righe mai inviate |
+| 8 | Da fare | Con qualcuno al palmare: righe del CRM su un tavolo aperto dal palmare (il passo 2c fa ben sperare) |
+| 9 | Riuscito | `ContoComanda` proforma ESTERNO senza invio: conto 82610 pagato, 52 €, nessun invio in produzione |
 
 ## Cosa decidono
 
