@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, ChevronDown, Download, ExternalLink, Landmark, Loader2, Printer, SearchX, X } from 'lucide-react';
+import { AlertCircle, ArrowUpRight, ChevronDown, Download, ExternalLink, Landmark, Loader2, Printer, SearchX, X } from 'lucide-react';
 import { Callout, EmptyState, FormCard, PanePlaceholder, SearchField, SplitPane, StatusPill, dsButton, useMediaQuery } from '../ds';
 import { PeriodPicker, PeriodTrigger, periodLabel, type Period } from '../pagamenti/PeriodPicker';
 import { formatEuro } from '../pagamenti/paymentsView';
@@ -80,11 +80,18 @@ const lastTwelveMonths = (): Period => {
 };
 const spanDays = (p: Period) => (Date.parse(p.to) - Date.parse(p.from)) / 86_400_000;
 
-const FiscalitaPage: React.FC = () => (
-  <RegistroEmessi />
+type OpenBill = (billId: number, serviceDate: string, shift: 'LUNCH' | 'DINNER' | null) => void;
+
+const FiscalitaPage: React.FC<{
+  /** «Apri il conto»: porta in Pagamenti › Chiusura sul servizio del conto
+   *  (giorno e turno), con il conto aperto. Assente se chi guarda non vede
+   *  Pagamenti. */
+  onOpenBill?: OpenBill;
+}> = ({ onOpenBill }) => (
+  <RegistroEmessi onOpenBill={onOpenBill} />
 );
 
-const RegistroEmessi: React.FC = () => {
+const RegistroEmessi: React.FC<{ onOpenBill?: OpenBill }> = ({ onOpenBill }) => {
   const [period, setPeriod] = useState<Period>(defaultPeriod);
   const [periodOpen, setPeriodOpen] = useState(false);
   const [chip, setChip] = useState<ChipFilter>('all');
@@ -453,7 +460,7 @@ const RegistroEmessi: React.FC = () => {
           }
           detail={
             detail ? (
-              <DocumentoDetail detail={detail} onClose={() => setSelectedId(null)} />
+              <DocumentoDetail detail={detail} onClose={() => setSelectedId(null)} onOpenBill={onOpenBill} />
             ) : (
               <PanePlaceholder icon={Landmark}>Seleziona un documento dal registro</PanePlaceholder>
             )
@@ -472,7 +479,7 @@ const RegistroEmessi: React.FC = () => {
   );
 };
 
-const DocumentoDetail: React.FC<{ detail: FiscalDocumentDetail; onClose: () => void }> = ({ detail, onClose }) => {
+const DocumentoDetail: React.FC<{ detail: FiscalDocumentDetail; onClose: () => void; onOpenBill?: OpenBill }> = ({ detail, onClose, onOpenBill }) => {
   const d = detail.document;
   const vatLabel = (code: string) => /^\d/.test(code) ? `iva ${code.replace('.', ',').replace(',00', '')}%` : `natura ${code}`;
   const row = (label: string, value: React.ReactNode) => (
@@ -516,17 +523,32 @@ const DocumentoDetail: React.FC<{ detail: FiscalDocumentDetail; onClose: () => v
           {d.fiscal_id && row('P.iva emittente', <span className="tabular-nums">{d.fiscal_id}</span>)}
         </dl>
         {d.error && <p className="mt-2 break-words text-[13px] text-[var(--ds-critical-text)]">{d.error}</p>}
-        {d.public_token && d.doc_type === 'RECEIPT' && (
-          <a
-            href={`${window.location.origin}/scontrino/${d.public_token}`}
-            target="_blank"
-            rel="noreferrer"
-            className="mt-3 inline-flex h-10 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-4 text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]"
-          >
-            <ExternalLink className="h-4 w-4" />
-            Copia digitale
-          </a>
-        )}
+        <div className="mt-3 flex flex-wrap gap-2 empty:hidden">
+          {/* Il registro legge, il conto agisce: riemettere, annullare, fare
+              la nota di credito si fa dalla scheda del conto in Pagamenti.
+              Senza questo bottone un errore qui era un vicolo cieco. */}
+          {onOpenBill && d.table_bill_id != null && (
+            <button
+              type="button"
+              onClick={() => onOpenBill(d.table_bill_id!, d.bill_service_date ?? datePart(d.created_at), d.bill_shift ?? null)}
+              className="inline-flex h-10 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-4 text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            >
+              <ArrowUpRight className="h-4 w-4" />
+              Apri il conto
+            </button>
+          )}
+          {d.public_token && d.doc_type === 'RECEIPT' && (
+            <a
+              href={`${window.location.origin}/scontrino/${d.public_token}`}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex h-10 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-4 text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]"
+            >
+              <ExternalLink className="h-4 w-4" />
+              Copia digitale
+            </a>
+          )}
+        </div>
       </FormCard>
 
       {detail.items.length > 0 && (

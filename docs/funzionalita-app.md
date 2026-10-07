@@ -80,7 +80,7 @@ Navigazione a gruppi (sidebar desktop, bottom bar + sheet "Altro" su mobile):
 | Servizio | Prenotazioni · Reception · Asporto · Sale & Tavoli · Menu & Banchetti · Comande · Cucina · Passe |
 | Comunicazioni | Chiamate · Messaggi · Email · Chat staff · Notifiche |
 | Operazioni | Attività · Inventario · Lista della Spesa · HACCP |
-| Gestione | Pagamenti · Clienti · Personale · Utenti |
+| Gestione | Pagamenti · Fiscalità · Reportistica · Clienti · Personale · Utenti |
 | Sistema | Impostazioni · (Piattaforma, Consumi AI, Development, Roadmap — solo nel pannello di piattaforma) |
 
 Le voci compaiono solo se l'utente ha il permesso corrispondente **e** se il modulo è incluso nel piano del ristorante (vedi [Piattaforma SaaS](#piattaforma-saas-multi-tenant-moduli-e-abbonamenti)).
@@ -395,14 +395,17 @@ Modulo completo per presa comanda, produzione e coordinamento delle uscite. Si a
 
 **Link di pagamento (caparre e acconti)**
 - Creazione link dall'app (gateway **Revolut** o **SumUp**, anche uno per le caparre e uno per il conto), invio via SMS / WhatsApp / email, revoca, **rimborso**, riconciliazione manuale.
+- Tab «Link di pagamento» col numero dei link **in attesa**; ricerca per cliente, telefono, ordine; in testa alla pagina il periodo in vista con **Incassato** e **In attesa**.
 - Filtri In attesa / Pagati / Falliti / Scaduti; **scadenza automatica** dei link non pagati con eventuale disdetta automatica della prenotazione e messaggio al cliente.
 - Alla ricezione del pagamento il cliente riceve la conferma e lo stato si aggiorna ovunque in tempo reale.
 
 **Chiusura di cassa (tab "Chiusura" in Pagamenti)**
 - Report giornaliero per **metodo di pagamento** (Contanti, Online, Satispay, Buoni pasto, Gift card, Omaggio, Sospeso) e per **documento** (Scontrino, Fattura, Proforma, Senza documento), più mance, acconti maturati e ammanchi. Sotto il totale, i **coperti serviti**. Il toggle turno della barra in alto governa tutta la pagina: **Pranzo**, **Cena** o **Tutti** — incassi, coperti (con la divisione pranzo · cena in vista Tutti) e lista dei conti. Storni esclusi dai totali; consultabile per qualunque data passata col datepicker.
 - Il giorno del report è il **giorno di servizio**: la cena incassata dopo mezzanotte resta nella serata a cui appartiene, non scivola nel giorno dopo. Vale anche per un sospeso saldato a distanza di giorni — torna sulla serata del suo conto.
-- La riga **«Giornata»** sotto i tab Chiusura/Link: totale incassato e coperti dell'intero giorno, sempre a vista qualunque turno o tab si stia guardando.
-- Se sul giorno restano conti con un residuo, il report li conta e li rimanda alla Cassa ("Apri la Cassa"); il KPI **Residuo conti** in testa alla pagina dice quanto manca all'appello.
+- In testa alla pagina il **giorno e il turno in vista** («martedì 6 ottobre · cena»), con accanto **Incassato** e **Coperti** di quel servizio — le stesse cifre della card degli incassi.
+- Se sul giorno restano conti con un residuo, il report li conta e li rimanda alla Cassa ("Apri la Cassa"); la cifra **Da incassare** in testa alla pagina dice quanto manca all'appello.
+- **Ricerca** sui conti chiusi del giorno per tavolo, cliente, numero del documento o importo («45,50»); la card degli incassi resta quella del servizio intero.
+- Dal registro **Fiscalità**, «Apri il conto» su un documento porta qui, sul giorno e sul turno di quel conto, con la scheda già aperta: è da lì che si riemette uno scontrino in errore.
 - Un tocco su un conto chiuso apre la sua **scheda** nel pannello, con lo **scontrino elettronico**: emetti su un conto senza documento, riprova un'emissione fallita, annulla, passa a fattura.
 - I conti d'**asporto** si presentano come «Asporto #N» col nome del cliente (in lista e nella scheda, con l'ora di ritiro) invece di «Tav. —», e non entrano nel conteggio dei coperti serviti.
 
@@ -812,6 +815,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-07 | Pagamenti, conto al tavolo e cassa; Fiscalità: scontrino, fattura elettronica, proforma | Pagamenti e Fiscalità ora stanno vicine nel menu, sotto Gestione. In testa a Pagamenti c'è il giorno e il turno che si sta guardando, con accanto incassato e coperti di quel servizio (sui Link, incassato e in attesa del periodo). La Chiusura ha la sua ricerca per tavolo, cliente, numero o importo, il tab «Link di pagamento» conta i link in attesa e, dal registro Fiscalità, «Apri il conto» porta dritto alla scheda del conto per riemettere uno scontrino in errore. |
 | 2026-10-07 | Fiscalità: scontrino, fattura elettronica, proforma | Nel registro Fiscalità arriva la ricerca: per tavolo, cliente, intestatario o P.IVA della fattura, numero del documento o importo («45,50»). I tre export stanno in un solo menu «Esporta», i documenti non emessi compaiono in un avviso in testa, i filtri mostrano solo i tipi presenti nel periodo e la fattura riporta l'intestatario anche nella lista. |
 | 2026-10-07 | Pagamenti, conto al tavolo e cassa; Integrazione cassa Passepartout | Dopo il pagamento dal QR la pagina del conto non sparisce più: mostra il conto saldato e «Vedi lo scontrino» a ogni telefono che ha pagato, anche quando lo scontrino lo emette la cassa Passepartout. Uno scontrino per tavolo; la copia digitale elenca chi ha pagato e si condivide con un tasto. |
 | 2026-10-06 | Integrazione cassa Passepartout; Pagamenti, conto al tavolo e cassa | Pagamento dal QR dei tavoli aperti in cassa: se un tavolo si chiude in cassa dopo che un ospite ha aperto il conto dal QR senza pagarlo, quel conto si annulla da solo e al tavolo successivo il QR propone la comanda nuova invece di «conto già pagato». |

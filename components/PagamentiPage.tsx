@@ -9,13 +9,13 @@ import {
 import { getFeatureFlags } from '../services/apiService';
 import { datePart } from '../utils/displayTime';
 import {
-  Callout, PanePlaceholder, SearchField, SegmentedControl, SplitPane,
+  Callout, PanePlaceholder, SearchField, SegmentedControl, SplitPane, useMediaQuery,
 } from './ds';
 import { ChiusuraCassa } from './pagamenti/ChiusuraCassa';
 import { LinkDiPagamento, type StatusFilter } from './pagamenti/LinkDiPagamento';
 import { BillDetail } from './pagamenti/BillSheet';
 import { PaymentDetail } from './pagamenti/PaymentDetail';
-import { PeriodPicker, type Period } from './pagamenti/PeriodPicker';
+import { PeriodPicker, periodLabel, type Period } from './pagamenti/PeriodPicker';
 import { formatEuro } from './pagamenti/paymentsView';
 import { Kpi, KpiStrip } from './pagamenti/KpiStrip';
 import { useCashClosure } from './pagamenti/useCashClosure';
@@ -36,13 +36,25 @@ import { useOpenBills } from './pagamenti/useOpenBills';
    SplitPane does that itself.
 
    Date scopes stay independent: Chiusura follows the topbar date, Link
-   follows the period filter. */
+   follows the period filter. The header says which one is on screen, and
+   the figures beside it describe exactly that: the day (and shift) on
+   Chiusura, the period on Link. Fiscalità is the other half of this pair —
+   the same header grammar, and «Apri il conto» from its document sheet
+   lands here, on the bill's service day. */
 
 const KPI_LABELS = {
   incassato: 'Incassato',
   attesa: 'In attesa',
-  residuo: 'Residuo conti',
+  coperti: 'Coperti',
+  daIncassare: 'Da incassare',
 } as const;
+
+// «martedì 7 ottobre» dal giorno di servizio YYYY-MM-DD, come le testate di
+// giorno del registro Fiscalità.
+const serviceDayLabel = (iso: string): string => {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' });
+};
 
 const PagamentiPage: React.FC<{
   globalDate?: Date;
@@ -50,7 +62,11 @@ const PagamentiPage: React.FC<{
   /** Presente solo se chi guarda può entrare in Cassa: il rimando ai conti
    *  da incassare diventa un bottone, altrimenti resta una riga di stato. */
   onOpenCassa?: () => void;
-}> = ({ globalDate, globalShiftFilter, onOpenCassa }) => {
+  /** Conto da aprire all'arrivo, da «Apri il conto» in Fiscalità: App ha già
+   *  portato la topbar sul suo servizio (giorno e turno). */
+  openBillId?: number | null;
+  onOpenBillHandled?: () => void;
+}> = ({ globalDate, globalShiftFilter, onOpenCassa, openBillId, onOpenBillHandled }) => {
   const { t } = useTranslation('pagamenti', { useSuspense: false });
   const [tab, setTab] = useState<'CASSA' | 'LINKS'>('CASSA');
 
@@ -74,6 +90,13 @@ const PagamentiPage: React.FC<{
 
   const [search, setSearch] = useState('');
   const [searchDebounced, setSearchDebounced] = useState('');
+  // La Chiusura ha la sua ricerca: filtra nel browser i conti del giorno già
+  // caricati, e passando da un tab all'altro ognuno ritrova la sua.
+  const [closureSearch, setClosureSearch] = useState('');
+  // Link in attesa, per il badge del tab: un numero fermo, che non cambia coi
+  // filtri della lista — un badge dice che qualcosa aspetta, non quanti
+  // link ci sono.
+  const [pendingCount, setPendingCount] = useState(0);
   // Several raw gateway statuses group under one chip to keep the filter
   // vocabulary simple: Pagati covers COMPLETED and PAID, Falliti covers
   // FAILED and CANCELLED — both terminal, both money-not-received.
@@ -97,13 +120,22 @@ const PagamentiPage: React.FC<{
   const [selectedClosureBillId, setSelectedClosureBillId] = useState<number | null>(null);
 
   // Il report di chiusura vive qui, non nel tab: lo leggono il report stesso
-  // e la riga «Giornata» sotto i tab, che deve restare a vista anche su Link.
+  // e le cifre in testata.
   const { report: closureReport, error: closureError } = useCashClosure(serviceFilter?.service_date);
-  const dayCovers = useMemo(
+  // Le cifre della Chiusura seguono il turno della topbar come la card
+  // «Incassi del…»: la testata dice «· cena», e i numeri accanto parlano
+  // della cena. Stessa somma per metodo e stessi coperti della card.
+  const closureFigures = useMemo(() => {
+    const shift = serviceFilter?.shift;
+    const cents = (closureReport?.methods ?? [])
+      .filter(m => !shift || m.shift === shift)
+      .reduce((n, m) => n + m.amount_cents, 0);
     // Gli asporti non contano: il loro covers è un 1 tecnico, non un coperto.
-    () => (closureReport?.bills ?? []).reduce((n, b) => n + (b.takeaway_order_id != null ? 0 : (b.covers || 0)), 0),
-    [closureReport],
-  );
+    const covers = (closureReport?.bills ?? [])
+      .filter(b => !shift || b.shift === shift)
+      .reduce((n, b) => n + (b.takeaway_order_id != null ? 0 : (b.covers || 0)), 0);
+    return { cents, covers };
+  }, [closureReport, serviceFilter?.shift]);
 
   // The closure tab only exists with pay-at-table on. null = flag not known
   // yet, so the tab bar doesn't flash a section that is about to disappear.
@@ -147,9 +179,14 @@ const PagamentiPage: React.FC<{
       else if (statusFilter === 'expired') params.status = 'EXPIRED';
       if (period.from) params.from = period.from;
       if (period.to) params.to = period.to;
-      const result = await paymentsApiService.list(params);
+      const [result, pending] = await Promise.all([
+        paymentsApiService.list(params),
+        // Solo il conteggio: limit 1 basta, il totale arriva comunque.
+        paymentsApiService.list({ status: 'PENDING,AUTHORISED', limit: 1 }).catch(() => null),
+      ]);
       setItems(result.items);
       setTotal(result.total);
+      if (pending) setPendingCount(pending.total);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -244,8 +281,32 @@ const PagamentiPage: React.FC<{
     [closedBills.bills, selectedClosureBillId],
   );
 
+  // Arrivo da Fiscalità con un conto da aprire: si va sulla Chiusura e lo si
+  // seleziona appena i conti del giorno sono caricati. Se non c'è (conto
+  // annullato, giorno diverso) la richiesta si chiude comunque, per non
+  // restare appesa e scattare più tardi su un giorno scelto a mano.
+  useEffect(() => {
+    if (openBillId == null) return;
+    setTab('CASSA');
+    if (closedBills.loading) return;
+    if (closedBills.bills.some(b => b.id === openBillId)) setSelectedClosureBillId(openBillId);
+    onOpenBillHandled?.();
+  }, [openBillId, closedBills.loading, closedBills.bills, onOpenBillHandled]);
+
+  // «Link di pagamento» per esteso dove ci sta; su telefono, col badge
+  // accanto, si tronca — lì basta «Link», il titolo dice già il resto.
+  const isWide = useMediaQuery('(min-width: 640px)');
+
   const showingCassa = tab === 'CASSA' && billsAvailable;
   const detailOpen = showingCassa ? selectedClosureBill !== null : selectedPayment !== null;
+
+  // Di cosa parla la pagina, accanto alle cifre: il giorno (e il turno) sulla
+  // Chiusura, il periodo sui Link.
+  const scopeLabel = showingCassa
+    ? serviceFilter
+      ? `${serviceDayLabel(serviceFilter.service_date)}${serviceFilter.shift ? ` · ${serviceFilter.shift === 'LUNCH' ? 'pranzo' : 'cena'}` : ''}`
+      : ''
+    : periodLabel(period, new Date(), loadedSpan);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -254,9 +315,11 @@ const PagamentiPage: React.FC<{
           either side of it.
 
           Not the word "Pagamenti" — the sidebar already names the page and
-          shows it selected. What matters at a glance is that these numbers are
-          live: webhooks move them while you are looking at them, so the dot is
-          a standing answer to "is this current?". */}
+          shows it selected. The title is the scope instead: which day (or
+          period) the figures beside it describe — «Stato aggiornato in tempo
+          reale» said nothing about that, and the Chiusura's day was only in
+          the topbar. The dot stays, a standing answer to "is this current?":
+          webhooks move these numbers while you are looking at them. */}
       {/* Asymmetric gutters, deliberately: pl-4 matches the list column's own
           padding so the title starts on the same line as the rows, and the
           right ramp matches the detail pane, so the figures end where the
@@ -267,23 +330,31 @@ const PagamentiPage: React.FC<{
           own — it sits directly under whatever precedes it — so the gap has to
           come from here or the section switch touches the figures. */}
       <div className="flex flex-shrink-0 flex-col gap-3 pb-3 pl-4 pr-4 pt-4 sm:pr-6 lg:flex-row lg:items-center lg:justify-between lg:gap-4 lg:pb-0 lg:pr-8">
-        <h1 className="flex items-center gap-2.5 text-[22px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)] sm:text-[26px]">
+        <h1
+          title={t('live', 'Aggiornato in tempo reale')}
+          className="flex min-w-0 items-center gap-2.5 text-[22px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)] sm:text-[26px]"
+        >
           <span className="relative flex h-2.5 w-2.5 flex-shrink-0" aria-hidden>
             <span className="ds-live-dot absolute inset-0 rounded-[var(--ds-radius-control)] bg-[var(--ds-seated-solid)]" />
             <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[var(--ds-seated-solid)]" />
           </span>
-          {/* Shortened below sm: the full sentence wraps to two lines on a
-              phone, and a title that wraps stops reading as a title. */}
-          <span className="sm:hidden">In tempo reale</span>
-          <span className="hidden sm:inline">Stato aggiornato in tempo reale</span>
+          <span className="sr-only">{t('live', 'Aggiornato in tempo reale')}: </span>
+          <span className="min-w-0 truncate first-letter:uppercase">{scopeLabel}</span>
         </h1>
-        <KpiStrip>
-          <Kpi label={t('kpi.incassato', KPI_LABELS.incassato)} value={formatEuro(totals.paid)} tone="positive" />
-          <Kpi label={t('kpi.attesa', KPI_LABELS.attesa)} value={formatEuro(totals.pending)} tone="pending" />
-          {billsAvailable && (
-            <Kpi label={t('kpi.residuo', KPI_LABELS.residuo)} value={formatEuro(serviceResidual)} tone="critical" />
-          )}
-        </KpiStrip>
+        {showingCassa ? (
+          <KpiStrip>
+            <Kpi label={t('kpi.incassato', KPI_LABELS.incassato)} value={formatEuro(closureFigures.cents)} tone="positive" />
+            <Kpi label={t('kpi.coperti', KPI_LABELS.coperti)} value={String(closureFigures.covers)} />
+            {serviceResidual > 0 && (
+              <Kpi label={t('kpi.daIncassare', KPI_LABELS.daIncassare)} value={formatEuro(serviceResidual)} tone="critical" />
+            )}
+          </KpiStrip>
+        ) : (
+          <KpiStrip>
+            <Kpi label={t('kpi.incassato', KPI_LABELS.incassato)} value={formatEuro(totals.paid)} tone="positive" />
+            <Kpi label={t('kpi.attesa', KPI_LABELS.attesa)} value={formatEuro(totals.pending)} tone="pending" />
+          </KpiStrip>
+        )}
       </div>
 
       <div className="min-h-0 flex-1">
@@ -305,29 +376,23 @@ const PagamentiPage: React.FC<{
                   equalWidth
                   options={[
                     { value: 'CASSA', label: t('tabCassa', 'Chiusura') },
-                    { value: 'LINKS', label: t('tabLinks', 'Link'), badge: total || undefined },
+                    { value: 'LINKS', label: isWide ? t('tabLinks', 'Link di pagamento') : t('tabLinksShort', 'Link'), badge: pendingCount || undefined },
                   ]}
                 />
               )}
-              {/* La riga «Giornata»: totale incassato e coperti dell'intero
-                  giorno di servizio, sorda al toggle del turno e ferma sopra
-                  la lista — il colpo d'occhio che non deve dipendere da cosa
-                  si sta guardando sotto. */}
-              {billsAvailable && closureReport && (
-                <div className="flex items-center justify-between gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-4 py-3 shadow-[var(--ds-shadow-card)]">
-                  <span className="text-[13px] text-[var(--ds-text-muted)]">Giornata</span>
-                  <span className="text-[14px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
-                    {formatEuro(closureReport.total_cents)}
-                    {dayCovers > 0 && (
-                      <span className="ml-2 font-normal text-[var(--ds-text-secondary)]">
-                        · {dayCovers} {dayCovers === 1 ? 'coperto' : 'coperti'}
-                      </span>
-                    )}
-                  </span>
-                </div>
-              )}
-              {!showingCassa && (
+              {/* Ricerca su entrambi i tab, ognuno la sua: sulla Chiusura
+                  filtra i conti del giorno, sui Link interroga il server. */}
+              {showingCassa ? (
                 <SearchField
+                  key="closure"
+                  value={closureSearch}
+                  onChange={setClosureSearch}
+                  placeholder={t('closureSearchPlaceholder', 'Cerca tavolo, cliente, importo…')}
+                  ariaLabel={t('searchAria', 'Cerca')}
+                />
+              ) : (
+                <SearchField
+                  key="links"
                   value={search}
                   onChange={setSearch}
                   placeholder={t('searchPlaceholder', 'Cerca cliente, telefono, ordine…')}
@@ -342,6 +407,7 @@ const PagamentiPage: React.FC<{
                 report={closureReport}
                 error={closureError}
                 shift={serviceFilter?.shift}
+                query={closureSearch.trim()}
                 openCount={collectable.length}
                 openResidualCents={serviceResidual}
                 onOpenCassa={onOpenCassa}

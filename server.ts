@@ -8459,12 +8459,26 @@ app.get('/reports/fiscal-documents/:id', authenticate, requirePermission('fiscal
     try {
         const id = parseInt(req.params.id, 10);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+        const TZ = sqlTimeZone((await getTenantLocale(req.tenantId!)).timezone);
+        // Giorno e turno di servizio del conto, con la regola di GET
+        // /bills/open: «Apri il conto» porta Pagamenti › Chiusura su QUEL
+        // servizio — per un conto chiuso dopo mezzanotte il giorno non è
+        // quello dello scontrino, e fuori dalla Dashboard la topbar ha
+        // sempre un turno, quindi serve sapere quale.
         const rs = await queryWithRetry(
             `SELECT fd.id, fd.doc_type, fd.provider, fd.status, fd.doc_number, fd.provider_ref,
                     fd.total_cents, fd.fiscal_id_snapshot, fd.request, fd.response, fd.error,
                     fd.created_at, fd.confirmed_at, fd.voided_at, fd.public_token,
                     fd.related_doc_id, fd.table_bill_id, fd.table_bill_split_id,
                     t.name AS table_name, r.customer_name, b.closed_at AS bill_closed_at,
+                    CASE WHEN b.id IS NOT NULL THEN COALESCE(
+                        (SELECT o.service_date FROM orders o WHERE o.table_bill_id = b.id ORDER BY o.id LIMIT 1),
+                        ${SERVICE_OF('b.opened_at', TZ)}
+                    ) END AS bill_service_date,
+                    CASE WHEN b.id IS NOT NULL THEN COALESCE(
+                        (SELECT o.shift FROM orders o WHERE o.table_bill_id = b.id ORDER BY o.id LIMIT 1),
+                        ${SHIFT_OF('b.opened_at', TZ)}
+                    ) END AS bill_shift,
                     rel.doc_type AS related_doc_type, rel.doc_number AS related_doc_number,
                     nc.doc_number AS credit_note_number
              FROM fiscal_documents fd
@@ -8489,6 +8503,8 @@ app.get('/reports/fiscal-documents/:id', authenticate, requirePermission('fiscal
                 created_at: doc.created_at, confirmed_at: doc.confirmed_at, voided_at: doc.voided_at,
                 public_token: doc.public_token, table_bill_id: doc.table_bill_id,
                 table_name: doc.table_name, customer_name: doc.customer_name, bill_closed_at: doc.bill_closed_at,
+                bill_service_date: doc.bill_service_date ? String(doc.bill_service_date).slice(0, 10) : null,
+                bill_shift: doc.bill_shift === 'LUNCH' || doc.bill_shift === 'DINNER' ? doc.bill_shift : null,
                 related: doc.related_doc_id ? { id: doc.related_doc_id, doc_type: doc.related_doc_type, doc_number: doc.related_doc_number } : null,
                 credit_note_number: doc.credit_note_number,
                 // Intestatario di fattura e nota di credito, dal payload emesso.
