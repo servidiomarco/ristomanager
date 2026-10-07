@@ -2,7 +2,7 @@
 
 Revisione del 19/09/2026, aperta dalla domanda «trovare un nome più spendibile all'estero» in vista del pacchetto Dubai/Londra.
 
-**Stato: decisione APERTA.** Nessun nome nuovo adottato. Tre candidati proposti e tutti e tre ritirati. Sympotia resta il nome in uso.
+**Stato: decisione APERTA.** Nessun nome nuovo adottato. Tre candidati proposti e tutti e tre ritirati. Sympotia resta il nome in uso. Aggiornamento 07/10: nuovo candidato **Taverli** (§6), il più avanti; domini e marchi ancora da verificare.
 
 > Perché questo file esiste: il dossier di naming precedente (`toDo/01-roadmap-esecuzione-sympotia.md`, `03-bozza-mail-consulente-marchi.md`) non fu mai committato ed è stato cancellato dal disco — dei candidati valutati ad agosto 2026 non resta traccia. **Questo file va tenuto in git.**
 
@@ -84,6 +84,34 @@ Nessuno di questi ha superato l'esame che ha ucciso Coverto e Reesto — **non a
 | **Brindy** | *brindare* | .ai | Il difetto è lo stesso di Sympotia: il brindisi lo fa l'ospite, non chi lavora |
 | **Bontah** | *bontà* | **.com e .ai** | La h italiana è muta, quindi si legge «bontà». Supera la regola 1 |
 | **Rondy** | *ronda*, il giro | .ai | |
+
+### Taverli — aggiunto il 07/10/2026, il candidato più avanti
+
+Proposto da Marco insieme alla domanda su come vendere il SaaS dalla società di Dubai. Da *taverna* / *tavern*, con la desinenza *-li*.
+
+| Criterio | Esito |
+|---|---|
+| **Voce** | Regge. Un italiano dice «ta-VÈR-li», un inglese «TAV-er-lee» o «ta-VER-lee»: l'accento si sposta, ma il nome resta riconoscibile e Sofia lo può dire senza ambiguità che contino |
+| **Dettatura** | Regge. Si scrive da come si sente in tutte e due le lingue: nessuna vocale doppia (regola 1), nessuna lettera muta, nessun digramma ambiguo |
+| **Forma** | 3 sillabe, una meno di Sympotia. Icona sulla T |
+| **Racconto** | La taverna è il locale e chi lo tiene, non l'ospite: corregge il difetto di Sympotia e di Brindy |
+| **Regola 3** | ⚠️ È il punto debole. *Taverna/tavern* sta nel lessico del settore: non al centro come *coperto* o *resto*, ma vicino. Il campo Taverna*/Tavern* in classe 43 sarà affollato; in 9 e 42 è da vedere |
+| **Descrittività (art. 7(2) EUTMR)** | *Taverli* non è parola di dizionario in nessuna lingua UE nota; *taverne* (FR) e *Taverne* (DE) sono vicine ma diverse. Il rischio vero è la somiglianza con marchi anteriori Tavern*, non il rifiuto per motivi assoluti |
+| **Ricerca web (07/10)** | Nessun prodotto, società o marchio «Taverli» trovato: escono solo nomi vicini (Talaveri, Taverna Avli). Segnale debole, **non è una clearance** |
+
+**Domini: NON verificati.** La sessione del 07/10 non ha potuto interrogare né whois né RDAP né il DNS (rete del container bloccata). Da fare a mano, con whois come prevede la regola 4:
+
+```bash
+for d in taverli.com taverli.ai taverli.io gettaverli.com trytaverli.com; do echo "== $d"; whois $d | grep -iE 'no match|not found|creation date|registrar:' | head -3; done
+whois -h whois.nic.it taverli.it | grep -iE 'status|created'
+whois -h whois.eu taverli.eu | grep -iE 'status|registrar'
+whois -h whois.nic.uk taverli.co.uk | grep -iE 'no match|registered on'
+whois -h whois.aeda.ae taverli.ae | grep -iE 'no object|status'
+```
+
+Per la regola 5 il `.com` esatto non è obbligatorio: bastano `.ai` o `get`/`try` + `.com`, più `.it` e `.ae` per i due mercati.
+
+**Prossimo passo se i domini ci sono:** test della dettatura (§9.3), poi la ricerca a pagamento classi 9 e 42 su EUIPO, UKIPO e EAU, con attenzione esplicita a Tavern*/Taverna* anche in classe 43.
 
 **Da non usare:** *Reesy* (a una vocale da **Resy**, che è di American Express — vedi §7), *Goosto* (Gusto), *Soobito* (Subito.it), *Reetmo* (il respelling non salva dalla Fiat né dal fintech: cambia la grafia, non il suono), *Noota* (società di Parigi, €3M, AI in classi 9/42).
 
