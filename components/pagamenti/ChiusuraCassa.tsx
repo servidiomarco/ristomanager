@@ -5,6 +5,7 @@ import type { CashClosureBillRow, CashClosureReport } from '../../types';
 import { Callout, FormCard, StatusPill } from '../ds';
 import { formatEuro } from './paymentsView';
 import { methodLabel } from './settleView';
+import { euroQueryCents } from '../../utils/text';
 import { RiscontroCassa } from './RiscontroCassa';
 
 /* ── Chiusura di cassa ────────────────────────────────────────────────────
@@ -52,6 +53,22 @@ const DOC_FILTERS: { value: DocFilter; label: string; labelKey?: string }[] = [
   { value: 'none', label: 'Senza documento' },
 ];
 
+// La ricerca della Chiusura, nel browser sui conti del giorno: tavolo,
+// cliente, numero del documento, «asporto 12» o «#12», e l'importo esatto
+// («45,50») con la stessa lettura del registro Fiscalità.
+const matchesQuery = (b: CashClosureBillRow, q: string): boolean => {
+  const needle = q.toLowerCase();
+  const haystack = [
+    b.table_name ? `tav. ${b.table_name} tavolo ${b.table_name}` : null,
+    b.customer_name,
+    b.fiscal_doc_number,
+    b.takeaway_order_id != null ? `asporto #${b.takeaway_daily_number ?? ''}` : null,
+  ].filter(Boolean).join(' ').toLowerCase();
+  if (haystack.includes(needle)) return true;
+  const cents = euroQueryCents(q);
+  return cents != null && b.total_cents === cents;
+};
+
 // Funzione chiamata riga per riga, non un componente: niente hook qui dentro
 // (un useTranslation qui cambiava il numero di hook a ogni cambio di righe —
 // turno, data, filtro — e React smontava la pagina).
@@ -78,6 +95,9 @@ export const ChiusuraCassa: React.FC<{
   /** Turno dalla topbar: filtra incassi, coperti e lista dei conti.
    *  Assente = «Tutti», l'intera giornata di servizio. */
   shift?: 'LUNCH' | 'DINNER';
+  /** Ricerca dalla testata della pagina: filtra la lista dei conti chiusi
+   *  (e i conteggi dei chip), non gli incassi del giorno. */
+  query?: string;
   /** Conti con ancora un residuo: qui sono solo un rimando — si incassano
    *  in Cassa, non da questa pagina. */
   openCount?: number;
@@ -87,7 +107,7 @@ export const ChiusuraCassa: React.FC<{
    *  che vive lo scontrino elettronico (emetti, riprova, annulla). */
   selectedId?: number | null;
   onSelectBill?: (id: number) => void;
-}> = ({ report, error, shift, openCount = 0, openResidualCents = 0, onOpenCassa, selectedId, onSelectBill }) => {
+}> = ({ report, error, shift, query = '', openCount = 0, openResidualCents = 0, onOpenCassa, selectedId, onSelectBill }) => {
   const { t } = useTranslation('cassa', { useSuspense: false });
   const [docFilter, setDocFilter] = useState<DocFilter>('all');
 
@@ -97,12 +117,18 @@ export const ChiusuraCassa: React.FC<{
     const all = report?.bills ?? [];
     return shift ? all.filter(b => b.shift === shift) : all;
   }, [report, shift]);
+  // Poi la ricerca: i chip contano i conti trovati, la card degli incassi
+  // resta il giorno intero.
+  const matched = useMemo(
+    () => (query ? bills.filter(b => matchesQuery(b, query)) : bills),
+    [bills, query],
+  );
   const counts = useMemo(() => {
     const c: Record<Exclude<DocFilter, 'all'>, number> = { receipt: 0, invoice: 0, credit_note: 0, proforma: 0, none: 0 };
-    bills.forEach(b => { c[docKind(b)] += 1; });
+    matched.forEach(b => { c[docKind(b)] += 1; });
     return c;
-  }, [bills]);
-  const visibleBills = docFilter === 'all' ? bills : bills.filter(b => docKind(b) === docFilter);
+  }, [matched]);
+  const visibleBills = docFilter === 'all' ? matched : matched.filter(b => docKind(b) === docFilter);
   // Gli incassi per metodo del turno in vista (il server li manda divisi per
   // turno; con «Tutti» qui si sommano). Stessa logica per i coperti, dai
   // conti chiusi: la card dice sempre quello che il toggle della topbar
@@ -248,7 +274,7 @@ export const ChiusuraCassa: React.FC<{
                   in proforma — e quanti restano scoperti. */}
               <div className="flex flex-wrap gap-1.5">
                 {DOC_FILTERS.map(f => {
-                  const count = f.value === 'all' ? bills.length : counts[f.value];
+                  const count = f.value === 'all' ? matched.length : counts[f.value];
                   if (f.value !== 'all' && count === 0) return null;
                   return (
                     <button
@@ -323,7 +349,9 @@ export const ChiusuraCassa: React.FC<{
                 </div>
               ))}
               {visibleBills.length === 0 && (
-                <p className="py-2.5 text-[13px] text-[var(--ds-text-muted)]">{t('noBillForFilter')}</p>
+                <p className="py-2.5 text-[13px] text-[var(--ds-text-muted)]">
+                  {query && matched.length === 0 ? `Nessun conto per «${query}».` : t('noBillForFilter')}
+                </p>
               )}
             </>
           )}

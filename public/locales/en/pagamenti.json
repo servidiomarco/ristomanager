@@ -1,13 +1,18 @@
 {
   "sectionAria": "Payments section",
   "tabCassa": "Close",
-  "tabLinks": "Links",
+  "tabLinks": "Payment links",
+  "tabLinksShort": "Links",
   "searchPlaceholder": "Search customer, phone, order…",
+  "closureSearchPlaceholder": "Search table, customer, amount…",
+  "live": "Updated live",
   "searchAria": "Search",
   "kpi": {
     "incassato": "Taken",
     "attesa": "Pending",
-    "residuo": "Outstanding bills"
+    "residuo": "Outstanding bills",
+    "coperti": "Covers",
+    "daIncassare": "To collect"
   },
   "printCopy": "Print a copy",
   "printSent": "Copy printing",

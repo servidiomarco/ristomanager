@@ -237,10 +237,12 @@ const NAV_ITEMS: NavItem[] = [
   { kind: 'link', label: 'Inventario', labelKey: 'nav.items.inventory', Icon: Boxes, group: 'operazioni', isTab: false, view: ViewState.INVENTARIO },
   { kind: 'link', label: 'Lista della Spesa', labelKey: 'nav.items.shoppingList', Icon: ShoppingCart, group: 'operazioni', isTab: false, view: ViewState.LISTA_DELLA_SPESA, sidebarCollapse: false },
   { kind: 'link', label: 'HACCP', labelKey: 'nav.items.haccp', Icon: ShieldCheck, group: 'operazioni', isTab: false, view: ViewState.HACCP, sidebarCollapse: false },
-  { kind: 'link', label: 'Pagamenti', labelKey: 'nav.items.payments', Icon: CreditCard, group: 'operazioni', isTab: false, view: ViewState.PAGAMENTI, sidebarCollapse: false },
-  { kind: 'link', label: 'Fiscalità', labelKey: 'nav.items.fiscal', Icon: Landmark, group: 'gestione', isTab: false, view: ViewState.FISCALITA, sidebarCollapse: false },
 
-  // Gestione
+  // Gestione — Pagamenti e Fiscalità in testa e vicine: due pagine
+  // separate (la serata e il mese, chi incassa e il titolare), ma una coppia.
+  // Pagamenti stava in Operazioni, a un'intestazione di distanza.
+  { kind: 'link', label: 'Pagamenti', labelKey: 'nav.items.payments', Icon: CreditCard, group: 'gestione', isTab: false, view: ViewState.PAGAMENTI, sidebarCollapse: false },
+  { kind: 'link', label: 'Fiscalità', labelKey: 'nav.items.fiscal', Icon: Landmark, group: 'gestione', isTab: false, view: ViewState.FISCALITA, sidebarCollapse: false },
   { kind: 'link', label: 'Reportistica', labelKey: 'nav.items.reports', Icon: BarChart3, group: 'gestione', isTab: false, view: ViewState.REPORTISTICA, sidebarCollapse: false },
   { kind: 'link', label: 'Clienti', labelKey: 'nav.items.customers', Icon: BookUser, group: 'gestione', isTab: false, view: ViewState.CLIENTI, sidebarCollapse: false },
   { kind: 'link', label: 'Personale', labelKey: 'nav.items.staff', Icon: UsersRound, group: 'gestione', isTab: false, view: ViewState.STAFF, sidebarCollapse: false },
@@ -692,6 +694,9 @@ const App: React.FC = () => {
   // Set when a notification deep-links to a specific booking (?reservationId=…);
   // handed to ReservationList so it opens that booking's detail drawer.
   const [pendingReservationId, setPendingReservationId] = useState<number | null>(null);
+  // «Apri il conto» da Fiscalità: il conto che Pagamenti deve aprire all'arrivo.
+  const [pendingBillId, setPendingBillId] = useState<number | null>(null);
+  const handleOpenBillHandled = useCallback(() => setPendingBillId(null), []);
   // Deep link delle notifiche del supporto: ?ticket= apre la richiesta nella
   // vista Aiuto, ?support= la apre nella tab Supporto del pannello.
   const [pendingSupportTicketId, setPendingSupportTicketId] = useState<number | null>(null);
@@ -3240,13 +3245,31 @@ const App: React.FC = () => {
 
         {view === ViewState.PAGAMENTI && (
           <CardErrorBoundary label={t('nav.items.payments')}>
-            <PagamentiPage globalDate={globalDate} globalShiftFilter={globalShiftFilter} onOpenCassa={canAccessView(ViewState.CASSA) ? () => setView(ViewState.CASSA) : undefined} />
+            <PagamentiPage
+              globalDate={globalDate}
+              globalShiftFilter={globalShiftFilter}
+              onOpenCassa={canAccessView(ViewState.CASSA) ? () => setView(ViewState.CASSA) : undefined}
+              openBillId={pendingBillId}
+              onOpenBillHandled={handleOpenBillHandled}
+            />
           </CardErrorBoundary>
         )}
 
         {view === ViewState.FISCALITA && (
           <CardErrorBoundary label={t('nav.items.fiscal')}>
-            <FiscalitaPage />
+            <FiscalitaPage
+              onOpenBill={canAccessView(ViewState.PAGAMENTI) ? (billId, serviceDate, shift) => {
+                // La Chiusura segue la topbar: la si porta sul servizio del
+                // conto, giorno e turno — fuori dalla Dashboard «Tutti» non
+                // esiste, e il conto di una cena col turno «Pranzo» in topbar
+                // non comparirebbe.
+                const [y, m, d] = serviceDate.split('-').map(Number);
+                if (y && m && d) setGlobalDate(new Date(y, m - 1, d));
+                if (shift) setGlobalShiftFilter(shift);
+                setPendingBillId(billId);
+                setView(ViewState.PAGAMENTI);
+              } : undefined}
+            />
           </CardErrorBoundary>
         )}
 

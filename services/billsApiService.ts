@@ -576,6 +576,9 @@ export interface FiscalDocumentDetail {
     created_at: string; confirmed_at: string | null; voided_at: string | null;
     public_token: string | null; table_bill_id: number | null;
     table_name: string | null; customer_name: string | null; bill_closed_at: string | null;
+    /** Giorno di servizio del conto (YYYY-MM-DD). Assente sul backend vecchio. */
+    bill_service_date?: string | null;
+    bill_shift?: 'LUNCH' | 'DINNER' | null;
     related: { id: number; doc_type: FiscalRegistryDocType; doc_number: string | null } | null;
     credit_note_number: string | null;
     /** Intestatario di fattura e nota di credito. Assente sul backend vecchio. */

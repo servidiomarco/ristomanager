@@ -288,6 +288,10 @@ describe('reportistica fiscale (vista Fiscalità)', () => {
             { description: 'Riga di prova', quantity: 1, unit_price_cents: 560, vat_rate_code: 'N2' },
         ]);
         expect(res.body.payments.cash_cents).toBe(5000);
+        // «Apri il conto» porta Pagamenti sul servizio del conto (aperto
+        // alle 19 di Roma del 10/03, quindi cena del 10/03).
+        expect(res.body.document.bill_service_date).toBe('2026-03-10');
+        expect(res.body.document.bill_shift).toBe('DINNER');
 
         const missing = await api().get('/reports/fiscal-documents/999999999').set(bearer(owner));
         expect(missing.status).toBe(404);

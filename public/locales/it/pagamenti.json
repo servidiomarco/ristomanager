@@ -1,13 +1,18 @@
 {
   "sectionAria": "Sezione pagamenti",
   "tabCassa": "Chiusura",
-  "tabLinks": "Link",
+  "tabLinks": "Link di pagamento",
+  "tabLinksShort": "Link",
   "searchPlaceholder": "Cerca cliente, telefono, ordine…",
+  "closureSearchPlaceholder": "Cerca tavolo, cliente, importo…",
+  "live": "Aggiornato in tempo reale",
   "searchAria": "Cerca",
   "kpi": {
     "incassato": "Incassato",
     "attesa": "In attesa",
-    "residuo": "Residuo conti"
+    "residuo": "Residuo conti",
+    "coperti": "Coperti",
+    "daIncassare": "Da incassare"
   },
   "printCopy": "Stampa copia",
   "printSent": "Copia in stampa",
