@@ -72,7 +72,9 @@ const TOKEN = (process.env.PP_AGENT_TOKEN || daFile.token || '').trim();
 // sezione Passepartout la mostra, e gli aggiornamenti la confrontano.
 const VERSIONE_AGENTE = ((): string | undefined => {
     const qui = path.dirname(fileURLToPath(import.meta.url));
-    for (const f of [path.resolve(qui, '..', '..', 'build-info.json'), path.resolve(qui, 'build-info.json'), path.resolve('build-info.json')]) {
+    // Accanto all'agente (pacchetto leggero), poi alla radice del pacchetto
+    // del nodo (dist/scripts → ../..), poi nella cartella di lavoro.
+    for (const f of [path.resolve(qui, 'build-info.json'), path.resolve(qui, '..', '..', 'build-info.json'), path.resolve('build-info.json')]) {
         try {
             const sha = JSON.parse(fs.readFileSync(f, 'utf8'))?.sha;
             if (typeof sha === 'string' && sha.trim()) return sha.trim().slice(0, 7);
@@ -306,6 +308,33 @@ const handlers: Record<string, Handler> = {
 // server) si mettono in fila, e la seconda — con riprendi — trova il conto
 // già in archivio invece di farne un altro.
 const inCorso = new Map<number | string, Promise<unknown>>();
+
+// Stato per il supervisore in «modo agente» (sala-node/supervisor.mjs), se
+// PP_AGENT_STATE_FILE c'è: collegato al cloud o no, e quante chiamate della
+// cassa sono in corso. Il supervisore aggiorna solo a zero chiamate, e
+// considera sana una versione nuova quando scrive di essere collegata.
+const STATE_FILE = (process.env.PP_AGENT_STATE_FILE || '').trim();
+let chiamateInCorso = 0;
+let collegatoAlCloud: string | null = null;
+const scriviStato = () => {
+    if (!STATE_FILE) return;
+    const tmp = `${STATE_FILE}.tmp`;
+    try {
+        fs.writeFileSync(tmp, JSON.stringify({
+            ok: collegatoAlCloud != null,
+            collegato_at: collegatoAlCloud,
+            in_corso: chiamateInCorso,
+            versione: VERSIONE_AGENTE ?? null,
+            pid: process.pid,
+            scritto_at: new Date().toISOString(),
+        }));
+        fs.renameSync(tmp, STATE_FILE);
+    } catch { /* cartella che manca o disco pieno: l'agente non cade per questo */ }
+};
+if (STATE_FILE && !CODICE_ABBINA) {
+    scriviStato();
+    setInterval(scriviStato, Math.max(1_000, Number(process.env.PP_AGENT_STATE_MS) || 10_000));
+}
 function unaAllaVolta<T>(idComanda: number | string, fn: () => Promise<T>): Promise<T> {
     const prima = inCorso.get(idComanda) ?? Promise.resolve();
     const questa = prima.catch(() => undefined).then(fn);
@@ -324,6 +353,7 @@ const collega = (nome: string, base: string) => {
 
     socket.on('connect', async () => {
         console.log(`[agent:${nome}] connesso a ${base} come ${socket.id}`);
+        if (nome === 'cloud') { collegatoAlCloud = new Date().toISOString(); scriviStato(); }
         let versioneGestionale: string | undefined;
         try {
             versioneGestionale = (await getVersioneGestionale()) ?? undefined;
@@ -340,11 +370,13 @@ const collega = (nome: string, base: string) => {
 
     socket.on('disconnect', (reason) => {
         console.log(`[agent:${nome}] disconnesso (${reason}), riconnessione automatica...`);
+        if (nome === 'cloud') { collegatoAlCloud = null; scriviStato(); }
     });
 
     socket.on('pp:call', async (payload: any, ack: (r: unknown) => void) => {
         const op = String(payload?.op || '');
         const started = Date.now();
+        chiamateInCorso += 1;
         try {
             const handler = handlers[op];
             if (!handler) throw new Error(`Operazione sconosciuta: ${op}`);
@@ -355,6 +387,8 @@ const collega = (nome: string, base: string) => {
             const isGestionale = err instanceof PassepartoutError;
             console.warn(`[agent:${nome}] ${op} errore (${isGestionale ? 'gestionale' : 'agent'}):`, (err as Error).message);
             ack({ ok: false, error: (err as Error).message, kind: isGestionale ? 'gestionale' : 'agent' });
+        } finally {
+            chiamateInCorso -= 1;
         }
     });
 };
