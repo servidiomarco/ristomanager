@@ -24,6 +24,7 @@
     "cover_one": "{{count}} coperto",
     "cover_other": "{{count}} coperti",
     "depositPaid": "Acconto già versato",
+    "discount": "Sconto",
     "paidLabel": "Pagato {{amount}}",
     "remaining": "Rimanenti:",
     "showAllItems": "Mostra tutte ({{count}})",

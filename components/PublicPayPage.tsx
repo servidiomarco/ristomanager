@@ -313,6 +313,15 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
             </ul>
           )}
 
+          {/* Il totale è già scontato: la riga spiega perché è sotto la
+              somma delle righe. Letto in modo difensivo come gli altri campi. */}
+          {typeof bill.discount_cents === 'number' && bill.discount_cents > 0 && (
+            <div className="mt-2 flex items-baseline justify-between text-[13px]">
+              <span className="text-[var(--ds-text-secondary)]">{t('bill.discount')}</span>
+              <span className="tabular-nums text-[var(--ds-text-secondary)]">− {eur(bill.discount_cents)}</span>
+            </div>
+          )}
+
           {bill.deposit_credit_cents != null && bill.deposit_credit_cents > 0 && (
             <div className="mt-3 flex items-baseline justify-between border-t border-[var(--ds-border)] pt-3 text-sm">
               <span className="text-[var(--ds-seated-text)]">{t('bill.depositPaid')}</span>

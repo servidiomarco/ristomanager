@@ -9,7 +9,8 @@ import { api, bearer, ownerToken } from './helpers';
 // al tocco il CRM importa la comanda come conto (e lo riallinea finché
 // nessuno paga). Saldato dal QR, il conto si chiude da solo e la cassa
 // chiude il tavolo col tipo esterno; se in cassa la comanda è cambiata dopo
-// il pagamento, la chiusura si ferma con la differenza.
+// il pagamento, la chiusura si ferma con la differenza. Lo sconto messo in
+// cassa sul conto del tavolo entra nel conto del QR.
 
 const AGENT_TOKEN = 'test-pp-agent-token';
 const WEBHOOK_SECRET = 'segreto-webhook-qr-cassa';
@@ -31,6 +32,10 @@ describe('pagamento dal QR delle comande della cassa Passepartout', () => {
     let qr: string;
     // Lo stato della cassa finta: comande per id e quelle aperte sui tavoli.
     const comande = new Map<number, any>();
+    // Lo sconto in euro sul conto aperto della comanda, come lo legge
+    // GetContiGiorno; scontoMuto = l'agente non risponde su quella lettura.
+    const sconti = new Map<number, number>();
+    let scontoMuto = false;
     const chiamate: Array<{ op: string; params: any }> = [];
 
     const finoA = async (cond: () => Promise<boolean>, descr: string, timeoutMs = 10_000) => {
@@ -57,7 +62,8 @@ describe('pagamento dal QR delle comande della cassa Passepartout', () => {
         return r.body.pay;
     };
     const conto = async (idComanda: number) => (await db.query(
-        `SELECT id, status, total_cents, items, opened_by_user_id, share_token FROM table_bills
+        `SELECT id, status, total_cents, items, opened_by_user_id, share_token,
+                discount_type, discount_value::float AS discount_value, discount_reason FROM table_bills
           WHERE tenant_id = 1 AND external_ref = $1 ORDER BY id DESC LIMIT 1`,
         [`pp:comanda:${idComanda}`]
     )).rows[0];
@@ -123,6 +129,19 @@ describe('pagamento dal QR delle comande della cassa Passepartout', () => {
                 });
             }
             if (payload?.op === 'comanda') return ack({ ok: true, result: comande.get(Number(payload.params?.idGestionale)) ?? null });
+            if (payload?.op === 'comandaTavolo') {
+                const c = [...comande.values()].find(x => !x.isPagato && x.tavolo === payload.params?.tavolo);
+                return ack({ ok: true, result: c ?? null });
+            }
+            if (payload?.op === 'scontoComanda') {
+                if (scontoMuto) return ack({ ok: false, error: 'GetContiGiorno: timeout', kind: 'gestionale' });
+                const id = Number(payload.params?.idComanda);
+                const c = comande.get(id);
+                if (!c || c.isPagato) return ack({ ok: true, result: null });
+                const totale = c.righe.reduce((s: number, r: any) => s + r.totale, 0);
+                const sconto = sconti.get(id) ?? 0;
+                return ack({ ok: true, result: { idConto: id + 100_000, totaleDocumento: totale, totaleDaPagare: totale - sconto, scontoEuro: sconto } });
+            }
             if (payload?.op === 'preconto') return ack({ ok: true, result: { emesso: true } });
             if (payload?.op === 'chiudi') {
                 const c = comande.get(Number(payload.params?.idComanda));
@@ -136,7 +155,7 @@ describe('pagamento dal QR delle comande della cassa Passepartout', () => {
             socket!.on('connect', () => resolve());
             socket!.on('connect_error', reject);
         });
-        socket.emit('agent:hello', { hostname: 'agente-qr', capabilities: ['chiudi-riprendi', 'tavoli-aperti', 'chiudi-preconto', 'preconto'] });
+        socket.emit('agent:hello', { hostname: 'agente-qr', capabilities: ['chiudi-riprendi', 'tavoli-aperti', 'chiudi-preconto', 'preconto', 'sconto-cassa'] });
         await finoA(async () => ((await api().get('/passepartout/status').set(bearer(token))).body.capabilities ?? []).includes('tavoli-aperti'),
             'agente annunciato');
     });
@@ -247,6 +266,98 @@ describe('pagamento dal QR delle comande della cassa Passepartout', () => {
         // Chiusa in cassa: alla lettura dopo, il QR non propone più niente.
         await aggiornaLettura();
         expect((await statoQr()).open).toBe(false);
+    });
+
+    it('lo sconto messo in cassa entra nel conto del QR e lo segue finché nessuno paga (07/10)', async () => {
+        // Come la comanda 78529: 221,50 € di righe, 21,50 di sconto in cassa.
+        apriInCassa(8805, [riga(88051, 'Grigliata', 100, 2), riga(88052, 'Vino', 21.5)]);
+        sconti.set(8805, 21.5);
+        await aggiornaLettura();
+        const tocco = await api().post(`/public/table/${qr}/conto/cassa`);
+        expect(tocco.status).toBe(200);
+        let bill = await conto(8805);
+        expect(bill).toMatchObject({
+            status: 'OPEN', total_cents: 20000, discount_type: 'AMOUNT', discount_value: 21.5, discount_reason: 'Sconto della cassa',
+        });
+        expect(bill.items).toHaveLength(2);
+
+        // La pagina di pagamento: righe a prezzo pieno, sotto lo sconto, e
+        // si paga il totale scontato.
+        const pagina = await api().get(`/pay/${bill.share_token}`);
+        expect(pagina.status).toBe(200);
+        expect(pagina.body).toMatchObject({ bill: { total_cents: 20000 }, discount_cents: 2150, residual_cents: 20000, per_item_available: false });
+        expect(await statoQr()).toMatchObject({ open: true, residual_cents: 20000 });
+
+        // Il cameriere cambia lo sconto in cassa, poi lo toglie: il conto segue.
+        sconti.set(8805, 31.5);
+        await api().post(`/public/table/${qr}/conto/cassa`);
+        expect(await conto(8805)).toMatchObject({ total_cents: 19000, discount_value: 31.5 });
+        sconti.delete(8805);
+        await api().post(`/public/table/${qr}/conto/cassa`);
+        expect(await conto(8805)).toMatchObject({ total_cents: 22150, discount_type: null, discount_value: null, discount_reason: null });
+        expect((await api().get(`/pay/${bill.share_token}`)).body.discount_cents).toBe(0);
+
+        // Sconto rimesso; poi la lettura dello sconto non risponde e in cassa
+        // arriva un caffè: le righe si riallineano, lo sconto resta quello noto.
+        sconti.set(8805, 21.5);
+        await api().post(`/public/table/${qr}/conto/cassa`);
+        expect((await conto(8805)).total_cents).toBe(20000);
+        scontoMuto = true;
+        comande.get(8805).righe.push(riga(88053, 'Caffè', 1.5));
+        await api().post(`/public/table/${qr}/conto/cassa`);
+        expect(await conto(8805)).toMatchObject({ total_cents: 20150, discount_value: 21.5 });
+        scontoMuto = false;
+
+        // Pagato dal QR il totale scontato: la cassa chiude il tavolo, senza
+        // differenza tra conto e comanda.
+        bill = await conto(8805);
+        await pagaTutto(bill.share_token, bill.id, 20150);
+        await finoA(async () => (await db.query(
+            `SELECT status FROM fiscal_documents WHERE table_bill_id = $1 AND provider = 'passepartout'`, [bill.id]
+        )).rows[0]?.status === 'CONFIRMED', 'tavolo scontato chiuso in cassa');
+        expect(chiamate.filter(c => c.op === 'chiudi').at(-1)!.params).toMatchObject({ idComanda: 8805, tipoPagamento: 'ESTERNO' });
+        await aggiornaLettura();
+        expect((await statoQr()).open).toBe(false);
+    });
+
+    it('sconto tolto in cassa dopo il pagamento dal QR: niente chiusura automatica', async () => {
+        apriInCassa(8806, [riga(88061, 'Pizza', 10, 2)]);
+        sconti.set(8806, 5);
+        await aggiornaLettura();
+        expect((await api().post(`/public/table/${qr}/conto/cassa`)).status).toBe(200);
+        const bill = await conto(8806);
+        expect(bill.total_cents).toBe(1500);
+
+        // L'ospite paga 15 €; intanto in cassa lo sconto sparisce.
+        sconti.delete(8806);
+        const chiusurePrima = chiamate.filter(c => c.op === 'chiudi').length;
+        await pagaTutto(bill.share_token, bill.id, 1500);
+        await finoA(async () => (await db.query(
+            `SELECT status FROM fiscal_documents WHERE table_bill_id = $1`, [bill.id]
+        )).rows[0]?.status === 'FAILED', 'chiusura in cassa fermata');
+        const doc = await db.query(`SELECT error FROM fiscal_documents WHERE table_bill_id = $1`, [bill.id]);
+        expect(doc.rows[0].error).toContain('ancora da incassare');
+        expect(chiamate.filter(c => c.op === 'chiudi').length).toBe(chiusurePrima);
+
+        // Il tavolo lo chiude qualcuno in cassa: per i casi dopo, via dal tavolo.
+        comande.get(8806).isPagato = true;
+        await aggiornaLettura();
+    });
+
+    it('anche il conto importato dal personale prende lo sconto della cassa', async () => {
+        const room = await db.query(`SELECT room_id FROM tables WHERE id = $1`, [tableId]);
+        const t3 = await api().post('/tables').set(bearer(token)).send({
+            name: 'PPQ3', shape: 'SQUARE', seats: 2, x: 240, y: 40, room_id: room.rows[0].room_id, status: 'FREE',
+        });
+        apriInCassa(8807, [riga(88071, 'Tagliata', 18, 2)], 'PPQ3');
+        sconti.set(8807, 6);
+        const r = await api().post(`/tables/${t3.body.id}/bill`).set(bearer(token)).send({ source: 'passepartout' });
+        expect(r.status).toBe(201);
+        expect(r.body.bill.total_cents).toBe(3000);
+        expect(await conto(8807)).toMatchObject({ discount_type: 'AMOUNT', discount_value: 6, discount_reason: 'Sconto della cassa' });
+
+        comande.get(8807).isPagato = true;
+        await db.query(`UPDATE table_bills SET status = 'VOIDED' WHERE id = $1`, [r.body.bill.id]);
     });
 
     it('comanda cambiata in cassa dopo il pagamento: niente chiusura automatica, e la differenza per chi è in cassa', async () => {
