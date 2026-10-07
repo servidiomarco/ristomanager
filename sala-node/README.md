@@ -371,8 +371,43 @@ cloud con `POST /admin/agent-releases` (segreto GitHub `PLATFORM_ADMIN_TOKEN`;
 senza, il caricamento si salta). Dal pannello Piattaforma, tab Salute, lo si
 promuove a **stabile**. Il PC lo chiede con `GET /pp-agent/aggiornamento?ho=<sha>`
 e lo scarica da `GET /pp-agent/rilascio/<sha>`, col token dell'agente
-(`Authorization: Bearer`). Lo scaricamento automatico dal supervisore è la
-fase successiva.
+(`Authorization: Bearer`).
+
+### Supervisore in «modo agente» (solo cassa, senza nodo)
+
+Con `"modo": "agente"` in `nodo.json` il supervisore non vuole né database
+né token del nodo e tiene in vita un figlio solo, l'agente della cassa (dal
+pacchetto leggero, o da `dist/scripts/` di quello del nodo). Il servizio si
+chiama `sympotia-cassa` (WinSW), `com.sympotia.cassa` (launchd),
+`sympotia-cassa.service` (systemd).
+
+```json
+{
+  "modo": "agente",
+  "cloud_url": "https://ristomanager-production.up.railway.app",
+  "update_window": { "from": "04:00", "to": "10:00" },
+  "passepartout_agent": {
+    "env": {
+      "PP_AGENT_TOKEN": "<token dell'agente, dall'abbinamento col codice>",
+      "PASSEPARTOUT_WS_URL": "http://192.168.1.10:7606/AdapterWS",
+      "PASSEPARTOUT_WS_USER": "…",
+      "PASSEPARTOUT_WS_PASSWORD": "…"
+    }
+  }
+}
+```
+
+- L'agente scrive ogni 10 s `state/agente.json`: `ok` (collegato al cloud),
+  `in_corso` (chiamate della cassa in corso), `versione`.
+- Ogni ora il supervisore chiede al cloud se per il canale del ristorante c'è
+  una versione diversa. Lo zip si scarica in `inbox\` solo se lo sha256 torna
+  con quello annunciato.
+- Si installa nella finestra, e solo se l'agente non dichiara chiamate in corso.
+  La nuova è sana quando scrive di essere collegata entro 3 minuti; se no,
+  torna la precedente e lo zip va in `inbox\rejected\`. Quella versione non
+  si riscarica: si aspetta la successiva.
+- `"aggiornamenti": "manuali"` spegne lo scaricamento; `inbox\` funziona
+  comunque a mano.
 
 ### Prima installazione (fuori servizio)
 
