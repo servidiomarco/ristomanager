@@ -14,9 +14,10 @@ import { Client } from 'pg';
 
 // Tabelle senza tenant_id, e quindi senza RLS, per scelta: il registro dei
 // tenant, le sessioni (cercate per digest del refresh token, prima di sapere
-// il tenant) e il registro delle migration. Una tabella nuova qui dentro è
-// una decisione da motivare, non una svista.
-const TABELLE_SENZA_TENANT = ['pgmigrations', 'tenants', 'user_sessions'];
+// il tenant), il registro delle migration e i rilasci dell'agente della
+// cassa (lo stesso pacchetto per tutti, niente dei ristoranti dentro). Una
+// tabella nuova qui dentro è una decisione da motivare, non una svista.
+const TABELLE_SENZA_TENANT = ['agent_releases', 'pgmigrations', 'tenants', 'user_sessions'];
 
 describe('invarianti RLS (cataloghi)', () => {
     let db: Client;

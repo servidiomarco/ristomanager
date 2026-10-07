@@ -92,5 +92,22 @@
     "suspendedCount": "sospesi",
     "trialing": "in prova",
     "noBilling": "senza billing"
+  },
+  "agentReleases": {
+    "title": "Agente della cassa",
+    "empty": "Nessun rilascio: la CI li carica a ogni merge su main.",
+    "stableNow": "stabile in uso",
+    "promote": "Promuovi a stabile",
+    "promoted": "Promosso a stabile",
+    "withdraw": "Ritira",
+    "withdrawConfirm": "Tocca di nuovo",
+    "withdrawn": "Rilascio ritirato",
+    "restaurants": "Ristoranti con la cassa",
+    "running": "agente {{v}}",
+    "offline": "PC non collegato",
+    "channelSaved": "Canale salvato",
+    "channelAria": "Canale degli aggiornamenti di {{name}}",
+    "stable": "Stabile",
+    "pilot": "Pilota"
   }
 }

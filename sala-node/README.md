@@ -359,6 +359,21 @@ A mano, sul Mac, dal repo: `npm run package:node -- --zip` costruisce
 server, agente di stampa, agente Passepartout compilato, `node_modules` di
 produzione e la versione in `build-info.json`. Sul PC serve solo Node ≥ 20.
 
+### Il pacchetto leggero dell'agente della cassa
+
+Per i ristoranti che hanno solo la cassa Passepartout, senza nodo:
+`npm run package:agent -- --zip` costruisce `build/agente/sympotia-agente-<sha>.zip`
+con `passepartout-agent.js` (un solo file con le dipendenze dentro, niente
+`node_modules`), `supervisor.mjs` e `build-info.json` (con `contenuto_sha256`,
+l'impronta di agente e supervisore). La CI lo costruisce a ogni push su main
+(artefatto `sympotia-agente-<sha>`) e lo carica nel canale **pilota** del
+cloud con `POST /admin/agent-releases` (segreto GitHub `PLATFORM_ADMIN_TOKEN`;
+senza, il caricamento si salta). Dal pannello Piattaforma, tab Salute, lo si
+promuove a **stabile**. Il PC lo chiede con `GET /pp-agent/aggiornamento?ho=<sha>`
+e lo scarica da `GET /pp-agent/rilascio/<sha>`, col token dell'agente
+(`Authorization: Bearer`). Lo scaricamento automatico dal supervisore è la
+fase successiva.
+
 ### Prima installazione (fuori servizio)
 
 1. Cartella `C:\ProgramData\Sympotia\nodo\` (leggibile solo da SYSTEM e

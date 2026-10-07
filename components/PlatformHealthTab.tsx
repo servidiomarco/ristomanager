@@ -16,6 +16,7 @@ import {
 } from '../services/healthShared';
 import { relativeTime } from '../utils/relativeTime';
 import { formatSupportDateTime } from './SupportThread';
+import { PlatformAgentReleases } from './PlatformAgentReleases';
 import type { ApiError } from '../services/apiError';
 
 /* ============================================
@@ -412,6 +413,8 @@ export const PlatformHealthTab: React.FC<{
                 </div>
               )}
             </FormCard>
+
+            <PlatformAgentReleases showToast={showToast} />
           </>
         )}
       </div>
