@@ -63,6 +63,7 @@ Si usa il tavolo 88 TETTOIA, che non è disegnato in pianta (`--tavolo`/`--sala`
 | 1 | `crea C1 B1` (i numeri stampati da `articoli`) | Comanda nuova con C1 in uscita 1 e B1 in uscita 2: niente stampato, stato delle righe, prezzo preso dal listino |
 | 2a | `aggiungi C1 --uscita 1` | Modo «tutte» (tutte le righe più la nuova): aggiunge o sostituisce? gli `IdGestionale` di prima restano? |
 | 2b | `aggiungi B1 --uscita 2 --modo parziale` | Solo la riga nuova con `IsParziale`: le righe di prima restano? |
+| 2c | `aggiungi C1 --uscita 2 --modo nuove` | Solo la riga nuova, con il numero della comanda e senza `IsParziale`: aggiunge senza toccare le altre? Così il CRM non riscrive mai le righe del palmare |
 | 3 | `variante C1 V1 senza cipolla --modo parziale` | Variante a codice e variante libera: come compaiono in cassa? |
 | 4 | `invia 1` | Solo l'uscita 1 in produzione: foglietto sulla stampante di cucina giusta, con variante e testo libero? B1 resta non inviata? |
 | 5a | `togli <idRiga non inviata> --modo parziale` | La riga sparisce? Prova anche `--modo tutte` |

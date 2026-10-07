@@ -24,14 +24,14 @@
 //   leggi [idComanda]                     la comanda di prova (o quella indicata)
 //   crea <articolo1> <articolo2>          comanda nuova: riga 1 uscita 1, riga 2 uscita 2, senza invio
 //   adotta                                la comanda aperta sul tavolo diventa quella di prova
-//   aggiungi <articolo> [--uscita n]      una riga in più (--modo tutte | parziale)
+//   aggiungi <articolo> [--uscita n]      una riga in più (--modo tutte | nuove | parziale)
 //   variante <articolo> <variante|-> [testo libero]   una riga con varianti
 //   (articolo e variante col numero che stampa «articoli»: i codici hanno spazi)
 //   invia <uscita>                        InviaProduzioneComanda di quella sola uscita
 //   togli <idRiga>                        la riga con DaCancellare (--modo tutte | parziale)
 //   sposta <tavolo> [--sala S]            la comanda su un altro tavolo
 //   chiudi [tipoPagamento]                proforma pagata (default ESTERNO), senza invio
-// Opzioni: --tavolo 88 --sala TETTOIA --prezzo 1.00 --modo tutte|parziale --prova (solo XML)
+// Opzioni: --tavolo 88 --sala TETTOIA --prezzo 1.00 --modo tutte|nuove|parziale --prova (solo XML)
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -61,7 +61,7 @@ for (let i = 0; i < argv.length; i++) {
 }
 const [comando, ...args] = posizionali;
 const soloXml = opzioni.prova === 'true';
-const modo = opzioni.modo === 'parziale' ? 'parziale' : 'tutte';
+const modo = ['parziale', 'nuove'].includes(opzioni.modo) ? opzioni.modo : 'tutte';
 
 const stato = fs.existsSync(STATO) ? JSON.parse(fs.readFileSync(STATO, 'utf8')) : {};
 const tavolo = opzioni.tavolo || stato.tavolo || '88';
@@ -193,13 +193,15 @@ function comandaDiProva() {
     return Number(stato.idComanda);
 }
 
-/** Scrive sulla comanda di prova nel modo scelto: tutte le righe (esistenti
- *  più quelle nuove) oppure solo le nuove con IsParziale. */
+/** Scrive sulla comanda di prova nel modo scelto: «tutte» le righe
+ *  (esistenti più quelle nuove), solo le «nuove» con l'IdGestionale della
+ *  comanda, o solo le nuove con IsParziale («parziale», ignorato dalla cassa
+ *  il 07/10). */
 async function scriviSullaComanda(righeNuove, extra = {}) {
     const id = comandaDiProva();
     const prima = await leggiComanda(id);
     stampa(prima, 'Prima');
-    const righe = modo === 'parziale' ? righeNuove : [...righeEsistenti(prima), ...righeNuove];
+    const righe = modo === 'tutte' ? [...righeEsistenti(prima), ...righeNuove] : righeNuove;
     const xml = comandaXml({
         idDati: modo === 'parziale' ? `ContrattoComanda|${id}` : null,
         parziale: modo === 'parziale',
@@ -315,7 +317,7 @@ async function main() {
             const riga = (prima?.Righe?.PMBRigaComanda ?? []).find((r) => s(r.IdGestionale) === String(idRiga));
             if (!riga && !soloXml) throw new Error(`La riga ${idRiga} non è nella comanda ${id}`);
             const daTogliere = { ...(riga ? righeEsistenti({ Righe: { PMBRigaComanda: [riga] } })[0] : { IdGestionale: idRiga }), DaCancellare: 'true' };
-            if (modo === 'parziale') {
+            if (modo !== 'tutte') {
                 await scriviSullaComanda([daTogliere]);
             } else {
                 stampa(prima, 'Prima');
