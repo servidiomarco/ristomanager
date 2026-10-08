@@ -1108,6 +1108,9 @@ export interface ParametriComandaViva {
     coperti: number;
     righe: RigaViva[];
     idArticoloGenerico: number | null;
+    /** Le uscite della cassa da mandare in produzione dopo la scrittura
+     *  (fase 3, «stampa: la cassa»): quelle lanciate nel CRM. */
+    inviaUscite?: number[];
 }
 
 export interface EsitoRigaViva {
@@ -1131,6 +1134,8 @@ export interface EsitoComandaViva {
     righe: EsitoRigaViva[];
     /** Somma delle righe non cancellate della comanda, tutte. */
     totaleCassaCents: number;
+    /** Le uscite mandate in produzione dalla cassa con questa chiamata. */
+    inviate?: number[];
 }
 
 /** Quello che l'agente ricorda di un ordine fra un tentativo e l'altro:
@@ -1334,9 +1339,28 @@ export async function scriviComandaViva(
         const trovata = i >= 0 ? nuove.splice(i, 1)[0] : null;
         esiti.set(a.chiave, { chiave: a.chiave, idRiga: trovata?.idGestionale ?? null, statoEnum: trovata?.statoEnum ?? null });
     }
-    for (const r of dopo?.righe ?? []) {
-        for (const e of esiti.values()) {
-            if (e.idRiga === r.idGestionale && !e.sparita) e.statoEnum = r.statoEnum ?? e.statoEnum;
+    const aggiornaStati = (c: PassepartoutComanda | null) => {
+        for (const r of c?.righe ?? []) {
+            for (const e of esiti.values()) {
+                if (e.idRiga === r.idGestionale && !e.sparita) e.statoEnum = r.statoEnum ?? e.statoEnum;
+            }
+        }
+    };
+    aggiornaStati(dopo);
+
+    // 5. Le uscite lanciate nel CRM, mandate in produzione dalla cassa (fase
+    //    3, «stampa: la cassa»). La cassa manda l'uscita intera: anche le
+    //    righe di palmare e cassa di quell'uscita non ancora mandate, come il
+    //    suo «Invia uscita» (prova 4: le uscite dopo restano in attesa).
+    const uscite = [...new Set((p.inviaUscite ?? []).filter((u) => Number.isInteger(u) && u > 0))].sort((a, b) => a - b);
+    let inviate: number[] = [];
+    if (uscite.length > 0 && idComanda != null) {
+        await inviaProduzioneComanda({ idComanda, inviaTutto: false, uscite });
+        inviate = uscite;
+        const riletta = await getComanda(idComanda);
+        if (riletta) {
+            dopo = riletta;
+            aggiornaStati(dopo);
         }
     }
 
@@ -1346,6 +1370,7 @@ export async function scriviComandaViva(
         chiusa: false,
         righe: p.righe.map((r) => esiti.get(r.chiave) ?? { chiave: r.chiave, idRiga: null, statoEnum: null }),
         totaleCassaCents: totaleDi(dopo),
+        ...(inviate.length > 0 ? { inviate } : {}),
     };
 }
 

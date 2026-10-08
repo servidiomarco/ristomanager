@@ -36,6 +36,7 @@ export const CAPACITA: Record<string, string> = {
   diagnosi: 'pp.capDiagnosi',
   'sconto-cassa': 'pp.capSconto',
   'comanda-viva': 'pp.capComandaViva',
+  'comanda-viva-invio': 'pp.capComandaVivaInvio',
 };
 
 const oraBreve = (iso: string) =>
