@@ -67,18 +67,24 @@ Si usa il tavolo 88 TETTOIA, che non è disegnato in pianta (`--tavolo`/`--sala`
 | 3 | `variante C1 V1 senza cipolla --modo parziale` | Variante a codice e variante libera: come compaiono in cassa? |
 | 4 | `invia 1` | Solo l'uscita 1 in produzione: foglietto sulla stampante di cucina giusta, con variante e testo libero? B1 resta non inviata? |
 | 5a | `togli <idRiga non inviata> --modo parziale` | La riga sparisce? Prova anche `--modo tutte` |
-| 5b | `togli <idRiga inviata>` | Riga già mandata: diventa «Cancellato»? Esce un foglietto di storno in cucina? |
+| 5b | `togli <idRiga inviata> --modo nuove` | Riga già mandata: diventa «Cancellato»? Esce un foglietto di storno in cucina? |
 | 5c | `pezzi <idRiga> 2 --modo nuove` | La quantità di una riga già scritta cambia sul posto, con lo stesso numero di riga? |
 | 6 | `sposta 87` | La comanda passa al tavolo 87, con le stesse righe? |
-| 7 | `crea C1 B1` su un tavolo libero, poi chiusura **dallo schermo della cassa** | Alla chiusura la cassa manda in produzione le righe mai inviate? Cosa chiede al cassiere? |
-| 8 | Aprire un tavolo dal palmare o dalla cassa con una riga, poi `adotta --tavolo N` e `aggiungi C1 --modo parziale` | Le righe del CRM si aggiungono alla comanda del palmare senza toccare le sue? |
+| 7 | `aggiungi B1 --uscita 2 --modo nuove --stato InProduzione` su una comanda con righe mai inviate, poi chiusura **dallo schermo della cassa** | Alla chiusura la cassa manda in produzione le righe mai inviate? Cosa chiede al cassiere? Rispetta lo stato «già mandata» scritto dal CRM? |
+| 8 | Aprire un tavolo dal palmare Passepartout con una riga, poi `adotta --tavolo N` e `aggiungi C1 --modo nuove`; poi il palmare rientra nel tavolo, il CRM scrive (`aggiungi B1 --uscita 2 --modo nuove`) e il palmare salva una riga sua | Le righe del CRM si aggiungono alla comanda del palmare senza toccare le sue? Il salvataggio del palmare cancella quelle scritte dal CRM mentre era dentro? |
 | 9 | `chiudi` | Proforma pagata ESTERNO, tavolo libero. Da fare dopo ogni prova che lascia una comanda aperta |
 
 Il log di ogni passo serve per la tabella qui sotto. Le risposte dubbie si guardano anche in `pmbLog` sul PC, in sola lettura.
 
 ## Esiti
 
-Prove del 07/10/2026 sera, a locale chiuso e senza nessuno in sala: comanda 78556 sul tavolo 88 TETTOIA. Gli invii in produzione si leggono nel database della cassa (`Comanda.numeroInvii`, `dataUltimoInvio`, `ultimaPortataInviata`), in sola lettura. Il campo `DataInvio` delle righe nel web service è solo il momento della scrittura.
+Due giri di prove, a locale chiuso:
+- **07/10/2026 sera, senza nessuno in sala:** comanda 78556 sul tavolo 88 TETTOIA (passi 1, 2, 3, 5a, 5c, 6, 9).
+- **08/10/2026 mattina, con qualcuno in cucina, alla cassa e al palmare:**
+  - comanda 78557 sul tavolo 88 (passi 4, 5b, 7), chiusa col conto proforma 82611;
+  - comanda 78560 aperta dal palmare sul tavolo «80-» TETTOIA (passo 8), chiusa col conto proforma 82612.
+
+Gli invii in produzione si leggono nel database della cassa (`Comanda.numeroInvii`, `dataUltimoInvio`, `ultimaPortataInviata`), in sola lettura. Il campo `DataInvio` delle righe nel web service è solo il momento della scrittura. In cassa il nome del tavolo è quello di `Tavolo.numero`, anche con segni: il tavolo 80 è «80-».
 
 | # | Esito | Note |
 |---|---|---|
@@ -87,22 +93,25 @@ Prove del 07/10/2026 sera, a locale chiuso e senza nessuno in sala: comanda 7855
 | 2b | Ignorato | Modo «parziale» (`IDDati` più `IsParziale`): nessuna riga aggiunta, risposta senza id, nessun errore e niente nel log della cassa |
 | 2c | **Riuscito** | Modo «nuove»: `IdGestionale` della comanda e **solo la riga nuova**, senza `IsParziale`. Aggiunta, e le righe non mandate restano intatte, varianti comprese. Il CRM può scrivere solo le sue righe |
 | 3 | Riuscito | `Varianti` accettate: a codice (`Variante`, la descrizione la completa la cassa) e a testo libero (solo `Descrizione`). Se escono sul foglietto: da vedere al passo 4. Rimandando una riga senza `Varianti`, le sue varianti restano |
-| 4 | Da fare | Con qualcuno in cucina: stampa per uscita e varianti sul foglietto |
+| 4 | **Riuscito** | `InviaProduzioneComanda` con `uscite=[1]`: al monitor della cucina arriva solo l'uscita 1, con la variante a codice («+ SCAMORZA AFF») e quella libera («- senza cipolla»). Al bar niente. Le righe dell'uscita 1 passano «InProduzione», la birra in uscita 2 resta «InAttesa». Nel database un invio (`numeroInvii` 1, `ultimaPortataInviata` 1) |
 | 5a | Riuscito | `DaCancellare` su una riga mai inviata: la riga sparisce. Funziona anche mandando solo quella riga |
-| 5b | Da fare | Con qualcuno in cucina: storno di una riga già inviata |
+| 5b | **Riuscito** | `DaCancellare` su una riga già mandata, scrivendo solo quella: la riga resta in comanda come «Cancellato» e la cucina la vede subito come storno («-1 Tagliatelle Silana», con le sue varianti), **senza un nuovo invio**. Alla chiusura la riga stornata non entra nel conto. Un secondo `invia` della stessa uscita non serve: non è stato provato perché rischia di rimandare le altre righe |
 | 5c | Riuscito | `Pezzi` su una riga già scritta, mandando solo quella: la quantità cambia sul posto, stesso numero, totale ricalcolato |
 | 6 | Ignorato | `Tavolo` diverso sulla stessa comanda: resta sul tavolo di prima, senza errore |
-| 7 | Da fare | Con qualcuno alla cassa: chiusura dallo schermo della cassa con righe mai inviate |
-| 8 | Da fare | Con qualcuno al palmare: righe del CRM su un tavolo aperto dal palmare (il passo 2c fa ben sperare) |
+| 7 | In parte | **`StatoEnum` ignorato:** la riga scritta come «InProduzione» nasce «Nuovo». Il CRM non può segnare una riga «mandata» senza mandarla. **Chiusura:** dallo schermo della cassa fino al pagamento non parte niente; la chiusura vera dallo schermo non è stata fatta, perché chiedeva lo scontrino fiscale. La chiusura proforma via `ContoComanda` senza invio (conto 82611) non manda niente, neanche con due righe mai inviate |
+| 8 | **Riuscito** | Sulla comanda aperta dal palmare (coperto e acqua), il modo «nuove» aggiunge la tagliatella del CRM senza toccare le righe del palmare, e il palmare la vede. Con il palmare **dentro il tavolo** il CRM scrive lo stesso (birra), e quando il palmare salva un'altra acqua la birra del CRM resta: il palmare aggiunge, non riscrive la comanda |
 | 9 | Riuscito | `ContoComanda` proforma ESTERNO senza invio: conto 82610 pagato, 52 €, nessun invio in produzione |
 
 ## Cosa decidono
 
-- **Aggiungere** (2a/2b): con quale modo il giro della fase 2 scrive le righe nuove.
-- **Riconoscere le righe nostre** (1, 2): l'`IdGestionale` di riga dopo la scrittura, da salvare in `passepartout_righe_vive`.
-- **Varianti** (3, 4): campo `Varianti` (strutturato o testo libero) oppure tutto nella descrizione, come fa oggi la comanda specchio.
-- **Stampa in cucina dalla cassa** (4): `InviaProduzioneComanda` per uscita, oppure `RiceviMessaggio` InviaUscite/InviaElemento.
-- **Storni** (5): `DaCancellare` via PutComanda, oppure il ripiego (avviso alla cassa, storno a mano).
-- **Cambio tavolo** (6): via PutComanda, oppure il ripiego («sposta il tavolo in cassa»).
-- **Stampa dal CRM** (7): se la chiusura dalla cassa ristampa, l'opzione «stampa: il CRM» deve segnare le righe come inviate senza stampa, oppure va sconsigliata.
-- **Tavolo già aperto** (8): conferma della scelta dell'utente: un tavolo, una comanda.
+- **Aggiungere** (2c, 8): il giro della fase 2 scrive solo le righe del CRM, con l'`IdGestionale` della comanda e senza `IsParziale` (modo «nuove»). Non riscrive mai le righe del palmare o della cassa, e non c'è da aspettare che il palmare esca dal tavolo.
+- **Riconoscere le righe nostre** (1, 2): l'`IdGestionale` di riga restituito dopo la scrittura, da salvare in `passepartout_righe_vive`. La risposta di `PutComanda` è la comanda intera con tutte le righe e i loro id: la riga nuova è quella con un id che prima non c'era, perché la riga non porta una chiave nostra.
+- **Quantità e storni** (5a, 5b, 5c):
+  - una quantità più bassa si scrive come `Pezzi` sulla stessa riga;
+  - uno storno si scrive come `DaCancellare`, sia su una riga non mandata (sparisce) sia su una mandata (diventa «Cancellato» e la cucina vede lo storno);
+  - non serve il ripiego dell'avviso alla cassa.
+- **Varianti** (3, 4): nel campo `Varianti`, strutturato: a codice quando la variante del CRM ha un articolo variante in cassa, a testo libero altrimenti. Arrivano al monitor della cucina. Una riga già scritta si rimanda senza `Varianti`, che restano.
+- **Stampa in cucina dalla cassa** (4): `InviaProduzioneComanda` con le sole uscite lanciate. Le uscite dopo restano «InAttesa».
+- **Cambio tavolo** (6): ripiego. Un ordine già scritto in cassa si sposta in cassa, e il CRM rifiuta lo spostamento con «sposta il tavolo in cassa».
+- **Stampa dal CRM** (7): una riga non si può segnare «mandata» senza mandarla, e la chiusura dallo schermo della cassa con righe mai mandate non è provata fino in fondo. L'opzione «stampa: il CRM» resta possibile solo se il conto lo chiude il CRM (`ContoComanda` senza invio). La scheda deve avvisare che una chiusura o un «Invia» premuti in cassa possono mandare in produzione le righe del CRM una seconda volta.
+- **Tavolo già aperto** (8): confermata la scelta dell'utente: un tavolo, una comanda. Il CRM aggiunge le sue righe alla comanda del palmare.
