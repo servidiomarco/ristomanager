@@ -146,6 +146,8 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
             PASSEPARTOUT_COMANDE_VIVE_SWEEP_MS: '3600000',
             // La stampa di ripiego della comanda viva (fase 3): nei test dopo mezzo secondo.
             PASSEPARTOUT_COMANDE_VIVE_RIPIEGO_MS: '500',
+            // Le comande chiuse in cassa: nei test si guarda a ogni giro.
+            PASSEPARTOUT_COMANDE_VIVE_CHIUSE_MS: '1',
             // Il flag del token storico si rilegge a ogni handshake: il test
             // dell'abbinamento lo spegne e lo riaccende per i file dopo.
             PP_TOKEN_STORICO_TTL_MS: '0',

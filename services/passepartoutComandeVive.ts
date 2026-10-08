@@ -36,12 +36,15 @@
 import { queryWithRetry, runAsPlatform, runWithTenantContext, withTenant } from '../db.js';
 import { isFeatureEnabledForTenant } from './entitlements.js';
 import { callPassepartout, connectedPassepartoutTenants, passepartoutAgentSupports, PassepartoutBridgeError } from './passepartoutBridge.js';
-import type { EsitoComandaViva, ParametriComandaViva, RigaViva, VarianteViva } from './passepartoutService.js';
+import type { EsitoComandaViva, ParametriComandaViva, PassepartoutComanda, PassepartoutComandaAperta, RigaViva, VarianteViva } from './passepartoutService.js';
 import { BAR_COURSE_NO, DESSERT_COURSE_NO } from '../utils/courses.js';
 
 const CAPACITA = 'comanda-viva';
 const CAPACITA_INVIO = 'comanda-viva-invio';
 const MAX_TENTATIVI = 8;
+// Ogni quanto, al massimo, si chiede alla cassa quali comande sono aperte
+// per accorgersi di quelle chiuse da lei.
+const CHIUSE_IN_CASSA_OGNI_MS = () => Number(process.env.PASSEPARTOUT_COMANDE_VIVE_CHIUSE_MS ?? '') || 15_000;
 // Quanto si aspetta la cassa prima di stampare dal CRM un'uscita lanciata.
 const STAMPA_DI_RIPIEGO_DOPO_MS = () => Number(process.env.PASSEPARTOUT_COMANDE_VIVE_RIPIEGO_MS) || 45_000;
 // Un problema di configurazione non passa ritentando.
@@ -66,6 +69,9 @@ export interface ComandeViveDeps {
     /** I foglietti di partita stampati dal CRM per righe lanciate che la
      *  cassa non ha mandato (ripiego): stampa e segna stampata_crm. */
     stampaDalCrm: (tenantId: number, orderId: number, orderItemIds: number[]) => Promise<void>;
+    /** L'ordine del CRM la cui comanda è stata chiusa in cassa: si chiude
+     *  senza conto del CRM (il conto l'ha fatto la cassa). true se chiuso. */
+    chiudiOrdineChiusoInCassa: (tenantId: number, orderId: number) => Promise<boolean>;
 }
 
 let deps: ComandeViveDeps | null = null;
@@ -328,11 +334,52 @@ function avvisa(tenantId: number, r: any) {
     } catch { /* l'etichetta nel palmare non ferma il giro */ }
 }
 
+const ultimaLetturaChiuse = new Map<number, number>();
+
+/** Gli ordini del CRM la cui comanda la cassa ha chiuso dal suo schermo
+ *  (fase 4, collaudo sulla demo del 08/10: prima l'ordine restava aperto nel
+ *  CRM). Una lettura delle comande aperte ogni tanto; una comanda che non
+ *  c'è più si rilegge, e se è pagata o sparita l'ordine si chiude. */
+export async function chiuseInCassa(tenantId: number): Promise<number> {
+    if (!deps) return 0;
+    const ultima = ultimaLetturaChiuse.get(tenantId) ?? 0;
+    if (Date.now() - ultima < CHIUSE_IN_CASSA_OGNI_MS()) return 0;
+    const rs = await queryWithRetry(
+        `SELECT v.order_id, v.pp_comanda_id
+           FROM passepartout_comande_vive v
+           JOIN orders o ON o.id = v.order_id AND o.tenant_id = v.tenant_id
+          WHERE v.tenant_id = $1 AND v.stato = 'SCRITTA' AND v.pp_comanda_id IS NOT NULL AND o.status = 'OPEN'`,
+        [tenantId]
+    );
+    if (rs.rows.length === 0) return 0;
+    ultimaLetturaChiuse.set(tenantId, Date.now());
+    const aperte = await callPassepartout<PassepartoutComandaAperta[]>(tenantId, 'comandeAperte', {}, 60_000);
+    const ids = new Set((aperte ?? []).map((c) => Number(c.idComanda)));
+    let chiusi = 0;
+    for (const r of rs.rows) {
+        const idComanda = Number(r.pp_comanda_id);
+        if (ids.has(idComanda)) continue;
+        // Non fra le aperte: si rilegge, per non chiudere per una lettura storta.
+        const c = await callPassepartout<PassepartoutComanda | null>(tenantId, 'comanda', { idGestionale: idComanda }, 30_000);
+        if (c && !c.isPagato) continue;
+        const orderId = Number(r.order_id);
+        if (await deps.chiudiOrdineChiusoInCassa(tenantId, orderId)) chiusi++;
+        await segna(tenantId, orderId, { stato: 'CHIUSA' });
+    }
+    return chiusi;
+}
+
 /** Una passata sugli ordini di un ristorante, DENTRO il suo contesto tenant. */
 export async function lavoraComandeVive(tenantId: number, soloOrdine: number | null = null): Promise<number> {
     if (!(await isFeatureEnabledForTenant(tenantId, 'passepartout'))) return 0;
     if (!passepartoutAgentSupports(tenantId, CAPACITA)) return 0;
     if (deps && await deps.nodeOwnsBills(tenantId)) return 0;
+    try {
+        await chiuseInCassa(tenantId);
+    } catch (err: any) {
+        // Agente giù o vecchio: ci si riprova al giro dopo.
+        if (!(err instanceof PassepartoutBridgeError)) console.error('[passepartout] comande vive, chiuse in cassa:', err?.message || err);
+    }
     const cfg = await configVive(tenantId);
     if (!cfg) return 0;
     const ordini = await ordiniDaGuardare(tenantId, soloOrdine);

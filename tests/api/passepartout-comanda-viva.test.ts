@@ -598,6 +598,16 @@ describe('ordini del CRM in cassa: chi stampa in cucina', () => {
             auth: { token: AGENT_TOKEN }, transports: ['websocket'], reconnection: false,
         });
         socket.on('pp:call', async (payload: any, ack: (r: unknown) => void) => {
+            // Le letture con cui il giro si accorge delle comande chiuse in cassa.
+            if (payload?.op === 'comandeAperte') {
+                return ack({ ok: true, result: [...cassa.comande.values()].filter((c) => !c.pagata).map((c) => ({
+                    idComanda: c.id, tavolo: c.tavolo, sala: c.sala, coperti: c.coperti, idPrenotazione: null, aperta: null, totale: 0,
+                })) });
+            }
+            if (payload?.op === 'comanda') {
+                const c = cassa.comande.get(Number(payload.params?.idGestionale));
+                return ack({ ok: true, result: c ? { idGestionale: c.id, isPagato: c.pagata, righe: [] } : null });
+            }
             if (payload?.op !== 'comandaViva') return ack({ ok: false, error: `op non prevista: ${payload?.op}`, kind: 'agent' });
             try {
                 const p = payload.params;
@@ -656,8 +666,10 @@ describe('ordini del CRM in cassa: chi stampa in cucina', () => {
         expect((await salva({ stampa: 'cassa', conto: 'cassa' })).status).toBe(200);
     });
 
+    let ordineW1: number;
     it('l\'uscita lanciata nel CRM la manda la cassa, e il CRM non stampa', async () => {
         const ordine = await nuovoOrdine('W1');
+        ordineW1 = ordine;
         await batti(ordine, [
             { dish_id: piatto, qty: 1, course_no: 1 },
             { dish_id: dolce, qty: 1, course_no: 2 },
@@ -716,5 +728,18 @@ describe('ordini del CRM in cassa: chi stampa in cucina', () => {
         } finally {
             cassa.rifiuta.delete('W3');
         }
+    });
+
+    it('la comanda chiusa in cassa chiude l\'ordine nel CRM, senza un conto del CRM', async () => {
+        const c = cassa.sulTavolo('W1')!;
+        c.pagata = true;
+        // Il giro passa a ogni modifica di un ordine del ristorante.
+        await api().patch(`/orders/${ordini[ordini.length - 1]}`).set(bearer(token)).send({ covers: 4 });
+        await finoA(async () => (await viva(ordineW1))?.stato === 'CHIUSA', 'ordine segnato chiuso in cassa');
+        const o = (await db.query(`SELECT status, closed_by_user_id, table_bill_id FROM orders WHERE id = $1`, [ordineW1])).rows[0];
+        expect(o).toMatchObject({ status: 'CLOSED', closed_by_user_id: null, table_bill_id: null });
+        // Gli altri, con la comanda ancora aperta in cassa, restano aperti.
+        const w2 = ordini[ordini.indexOf(ordineW1) + 1];
+        expect((await db.query(`SELECT status FROM orders WHERE id = $1`, [w2])).rows[0].status).toBe('OPEN');
     });
 });
