@@ -115,8 +115,11 @@ describe('abbinamento del PC della cassa col codice', () => {
         // che nessuno del ristorante sia passato dal server in quel minuto,
         // quindi entitlement non in cache. Con la RLS rigida il controllo
         // dell'entitlement leggeva fuori contesto e rispondeva 403.
-        const nuovo = await db.query(`INSERT INTO tenants (slug, name) VALUES ('cassa-fredda', 'Cassa fredda') RETURNING id`);
-        const id = Number(nuovo.rows[0].id);
+        // Id fisso e mai usato nella suite: con la sequenza riportata al
+        // massimo da altri file, un id riusato troverebbe in cache gli
+        // entitlement del ristorante cancellato prima.
+        const id = 8831;
+        await db.query(`INSERT INTO tenants (id, slug, name) VALUES ($1, 'cassa-fredda', 'Cassa fredda')`, [id]);
         try {
             await db.query(`INSERT INTO tenant_features (tenant_id, feature, enabled) VALUES ($1, 'passepartout', true)`, [id]);
             const codice = 'KX7P-4M2Q';
