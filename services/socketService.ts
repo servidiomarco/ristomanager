@@ -111,8 +111,12 @@ export class SocketService {
       // prenotazione" del Frantoio mentre lavorava nel pannello SaaS. I dati
       // di un tenant li vede solo impersonando, con un token da OWNER che
       // entra nella stanza per la via normale.
+      // La sessione «Entra» (PLATFORM_ADMIN con scopedTenantId) lavora dentro
+      // il ristorante, col suo tenantId nel token: entra nelle sue stanze,
+      // o prenotazioni, tavoli e arrivi dalla cassa non si aggiornano senza
+      // ricaricare la pagina.
       const tenantId = socket.user!.tenantId;
-      if (String(socket.user!.role) !== 'PLATFORM_ADMIN') {
+      if (String(socket.user!.role) !== 'PLATFORM_ADMIN' || isPlatformScopedSession(socket.user!)) {
         socket.join(`tenant:${tenantId}`);
         // Chat staff: room per utente e per ruolo, join automatico — la
         // membership discende dal JWT, non è una scelta della UI (a
@@ -122,7 +126,7 @@ export class SocketService {
         // vive nel token.
         socket.join(`tenant:${tenantId}:user:${socket.user!.userId}`);
         socket.join(`tenant:${tenantId}:role:${socket.user!.role}`);
-      } else if (!isPlatformScopedSession(socket.user!)) {
+      } else {
         // Il pannello di piattaforma ha una stanza sua, fuori da ogni
         // tenant: ci passano solo gli eventi pensati per lui (oggi il
         // supporto), così la richiesta che arriva compare senza ricaricare.

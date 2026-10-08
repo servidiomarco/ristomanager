@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import bcrypt from 'bcryptjs';
 import { Client } from 'pg';
+import { io as ioClient, type Socket } from 'socket.io-client';
 import { api, bearer } from './helpers';
 
 // Sessione di piattaforma scopata (layer sopra l'OWNER):
@@ -155,6 +156,39 @@ describe('sessione di piattaforma scopata su un tenant', () => {
         const matrix = await api().get('/auth/permissions/roles').set(bearer(scopedAccessToken));
         expect(matrix.status).toBe(200);
         expect(matrix.body.OWNER).toBeTruthy();
+    });
+
+    it('il socket della sessione scopata riceve gli eventi del tenant, quello del pannello no', async () => {
+        // Prima del 08/10 la sessione «Entra» restava fuori dalla stanza del
+        // ristorante: prenotazioni e arrivi dalla cassa si vedevano solo
+        // ricaricando la pagina.
+        const apri = (tok: string) => new Promise<Socket>((resolve, reject) => {
+            const s = ioClient(process.env.TEST_BASE_URL as string, { transports: ['websocket'], auth: { token: tok }, reconnection: false });
+            s.once('connection:acknowledged', () => resolve(s));
+            s.once('connect_error', reject);
+        });
+        const dentro = await apri(scopedAccessToken);
+        const pannello = await apri(platformAdminToken);
+        const visti = { dentro: [] as string[], pannello: [] as string[] };
+        dentro.on('room:created', (r: any) => visti.dentro.push(r.name));
+        pannello.on('room:created', (r: any) => visti.pannello.push(r.name));
+        let roomId: number | null = null;
+        try {
+            const r = await api().post('/rooms').set(bearer(scopedAccessToken)).send({ name: 'Sala socket scope', width: 800, height: 600 });
+            expect(r.status).toBe(201);
+            roomId = r.body.id;
+            const scadenza = Date.now() + 5_000;
+            while (visti.dentro.length === 0 && Date.now() < scadenza) await new Promise(res => setTimeout(res, 50));
+            expect(visti.dentro).toEqual(['Sala socket scope']);
+            expect(visti.pannello).toEqual([]);
+        } finally {
+            dentro.close();
+            pannello.close();
+            if (roomId != null) {
+                const client = await pgClient();
+                try { await client.query('DELETE FROM rooms WHERE id = $1', [roomId]); } finally { await client.end(); }
+            }
+        }
     });
 
     it('il refresh preserva lo scope', async () => {
