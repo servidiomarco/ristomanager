@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Client } from 'pg';
+import { createHash } from 'node:crypto';
 import { io as ioClient, type Socket } from 'socket.io-client';
 import { api, bearer, ownerToken } from './helpers';
 
@@ -107,6 +108,36 @@ describe('abbinamento del PC della cassa col codice', () => {
         expect(usato.length).toBeGreaterThan(0);
         expect((await api().post('/pp-agent/abbina').send({ codice: 'ZZZZ-ZZZZ' })).status).toBe(404);
         expect((await api().post('/pp-agent/abbina').send({ codice: 'corto' })).status).toBe(400);
+    });
+
+    it('un ristorante che il server non ha ancora visto si abbina lo stesso', async () => {
+        // Il caso della prima installazione vera (08/10): codice usato senza
+        // che nessuno del ristorante sia passato dal server in quel minuto,
+        // quindi entitlement non in cache. Con la RLS rigida il controllo
+        // dell'entitlement leggeva fuori contesto e rispondeva 403.
+        const nuovo = await db.query(`INSERT INTO tenants (slug, name) VALUES ('cassa-fredda', 'Cassa fredda') RETURNING id`);
+        const id = Number(nuovo.rows[0].id);
+        try {
+            await db.query(`INSERT INTO tenant_features (tenant_id, feature, enabled) VALUES ($1, 'passepartout', true)`, [id]);
+            const codice = 'KX7P-4M2Q';
+            const hash = createHash('sha256').update('KX7P4M2Q').digest('hex');
+            await db.query(
+                `INSERT INTO passepartout_abbinamenti (tenant_id, codice_hash, scade_at) VALUES ($1, $2, now() + interval '15 minutes')`,
+                [id, hash]
+            );
+            const r = await api().post('/pp-agent/abbina').send({ codice, hostname: 'PC-FREDDO', versione: 'abc1234' });
+            expect(r.status).toBe(200);
+            expect(r.body).toMatchObject({ ristorante: 'Cassa fredda' });
+            expect(r.body.token).toMatch(/^[0-9a-f]{48}$/);
+            const cfg = await db.query(`SELECT abbinato_hostname FROM passepartout_config WHERE tenant_id = $1`, [id]);
+            expect(cfg.rows[0]?.abbinato_hostname).toBe('PC-FREDDO');
+        } finally {
+            await db.query(`DELETE FROM passepartout_config WHERE tenant_id = $1`, [id]);
+            await db.query(`DELETE FROM passepartout_abbinamenti WHERE tenant_id = $1`, [id]);
+            await db.query(`DELETE FROM tenant_features WHERE tenant_id = $1`, [id]);
+            await db.query(`DELETE FROM role_permissions WHERE tenant_id = $1`, [id]);
+            await db.query(`DELETE FROM tenants WHERE id = $1`, [id]);
+        }
     });
 
     it('«Scollega» ruota il token: l\'agente si stacca e non rientra', async () => {
