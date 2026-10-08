@@ -170,6 +170,9 @@ export const DOMAIN_EVENTS: Record<string, DomainEventSpec> = {
     // Piano ferie: un solo tipo, il client rilegge il piano o le proprie
     // richieste — il payload dice solo cosa è cambiato.
     'leave:changed': spec('cloud'),
+    // Food cost: prezzi, schede e impostazioni. Il client rilegge i dati,
+    // il payload dice solo cosa è cambiato.
+    'foodcost:changed': spec('cloud'),
     'supplier:created': spec('cloud'),
     'supplier:updated': spec('cloud'),
     'supplier:deleted': spec('cloud'),

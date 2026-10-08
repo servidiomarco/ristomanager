@@ -122,6 +122,10 @@ export interface BanquetCourse {
   name: string;          // e.g. "1ª Uscita", "Antipasti"
   dish_ids: number[];
   notes?: string;
+  /** Food cost: quota di porzione per piatto (chiave = id del piatto), 1 se
+   *  assente. 0,5 = mezza porzione, come i piatti condivisi negli antipasti
+   *  misti. Viaggia col banchetto ma conta solo per il costo per coperto. */
+  quote?: Record<string, number>;
 }
 
 /** Preventivo o confermato. Nasce QUOTE; la conferma è un'azione dello
@@ -988,6 +992,8 @@ export enum ViewState {
   DEVELOPMENT = 'DEVELOPMENT',
   ROADMAP = 'ROADMAP',
   RECENSIONI = 'RECENSIONI',
+  // Food cost: schede tecniche, costi degli ingredienti, margini dei piatti.
+  FOOD_COST = 'FOOD_COST',
   // Pannello piattaforma (Fase D2): sopra i tenant, solo PLATFORM_ADMIN.
   PLATFORM = 'PLATFORM',
   // Aiuto: richieste di supporto al team Sympotia, aperta a ogni ruolo del

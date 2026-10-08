@@ -11,6 +11,10 @@ import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { BanquetCompositionModal } from './BanquetCompositionModal';
 import { BanquetPaymentsModal } from './BanquetPaymentsModal';
 import { DishDetailModal } from './DishDetailModal';
+import { useFoodCost } from '../hooks/useFoodCost';
+import { BanchettoFoodCost } from './foodcost/BanchettoFoodCost';
+import { PiattoFoodCost } from './foodcost/PiattoFoodCost';
+import { SchedaTecnica } from './foodcost/SchedaTecnica';
 import { CustomerPickerModal } from './CustomerPickerModal';
 import { getCustomers, getTableMerges, getRoomClosed, importMenuPassepartout, translateMenu, digitalMenuUrl, tableQrUrl, isTechnicalPublicHost, getTableQrTokens, rotateTableQrToken, getTableQrPrint, saveTableQrPrint, type TableQrToken, type TableQrPrintSettings, getFeatureFlags, updateFeatureFlags, getDigitalMenu, setDigitalMenu, getMenuCategories, saveMenuCategories, saveDishOrder, setDishEnabled, createMenu, renameMenu, deleteMenu, setBanquetStatus, setCategoryMenu, setCategoryBar, setCategoryDessert, setCategoryWine, suggestDishWinePairings, pairMenuWines, createMenuCategory, renameMenuCategory, deleteMenuCategory, getBanquetShareLink, sendBanquetQuoteEmail, sendBanquetQuoteWhatsApp, getModifierGroups, getDishComponents, type AdminModifierGroup, type MenuImportResult, type MenuTranslateResult, type PairWinesResult, type MenuCategory } from '../services/apiService';
 import { socketClient } from '../services/socketClient';
@@ -247,6 +251,10 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   })), [t]);
   const { hasPermission, hasFeature, user } = useAuth();
   const canViewBanquetPrice = hasPermission('banquet:view_price');
+  // Food cost: costi dei piatti e del banchetto, per chi ha foodcost:view
+  // (il hook non chiama niente per gli altri).
+  const fc = useFoodCost();
+  const [schedaDish, setSchedaDish] = useState<Dish | null>(null);
   const canManageBanquetPayments = hasPermission('banquet:manage_payments');
   // Import dalla cassa Passepartout: entitlement del solo ristorante col
   // gestionale (oggi Vecchio Frantoio). Gli altri tenant non vedono il bottone.
@@ -1374,10 +1382,34 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       }
   };
 
+  // Quota di porzione di un piatto in un'uscita (food cost del banchetto).
+  // 1 è il default e non si scrive: le uscite di chi non usa il food cost
+  // restano identiche a prima.
+  const setQuotaPorzione = (courseIndex: number, dishId: number, quota: number) => {
+    setNewBanquet(prev => ({
+      ...prev,
+      courses: (prev.courses || []).map((c, i) => {
+        if (i !== courseIndex) return c;
+        const quote = { ...(c.quote || {}) };
+        if (quota === 1) delete quote[String(dishId)];
+        else quote[String(dishId)] = quota;
+        const { quote: _old, ...rest } = c;
+        return Object.keys(quote).length > 0 ? { ...rest, quote } : rest;
+      }),
+    }));
+  };
+
   const handleEditBanquet = (menu: BanquetMenu) => {
     // Derive courses: use stored courses if present, otherwise wrap legacy flat list into a single course
     const courses: BanquetCourse[] = menu.courses && menu.courses.length > 0
-      ? menu.courses.map(c => ({ name: c.name, dish_ids: [...(c.dish_ids || [])], notes: c.notes || '' }))
+      ? menu.courses.map(c => ({
+          name: c.name,
+          dish_ids: [...(c.dish_ids || [])],
+          notes: c.notes || '',
+          // Le quote di porzione del food cost: senza, ogni modifica del
+          // banchetto le azzererebbe a una porzione intera.
+          ...(c.quote ? { quote: { ...c.quote } } : {}),
+        }))
       : (menu.dish_ids && menu.dish_ids.length > 0
           ? [{ name: 'Composizione', dish_ids: [...menu.dish_ids] }]
           : []);
@@ -2600,6 +2632,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           );
                         })()}
                       </div>
+                      <PiattoFoodCost fc={fc} dish={viewDish} onOpenScheda={() => setSchedaDish(viewDish)} />
                       {canEdit && (
                         <div className="mt-auto flex items-center gap-2 pt-2">
                           <button
@@ -4160,6 +4193,15 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               </section>
               )}
 
+              {/* Food cost del banchetto: costo per coperto e margine accanto al
+                  prezzo che lo determina. Le quote di porzione si cambiano nel
+                  passo del menù. */}
+              {fc.enabled && (
+                <section className={banquetStep === 1 ? 'block' : 'hidden'}>
+                  <BanchettoFoodCost fc={fc} banquet={newBanquet} dishById={dishById} showPrices={canViewBanquetPrice} />
+                </section>
+              )}
+
               {/* SECTION: Composizione. Ogni uscita si legge come sul menù
                   stampato — i piatti scelti, in ordine — e una sola alla volta
                   apre il catalogo per sceglierli. Prima ogni uscita portava il
@@ -4436,6 +4478,17 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     </button>
                   </div>
                 </FormCard>
+                {fc.enabled && (
+                  <div className="mt-4">
+                    <BanchettoFoodCost
+                      fc={fc}
+                      banquet={newBanquet}
+                      dishById={dishById}
+                      showPrices={canViewBanquetPrice}
+                      onQuota={setQuotaPorzione}
+                    />
+                  </div>
+                )}
               </section>
 
               <section className={banquetStep === 3 ? 'block' : 'hidden'}>
@@ -5495,8 +5548,22 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         <DishDetailModal
           dish={viewDish}
           onClose={() => setViewDish(null)}
+          extra={fc.enabled ? (
+            <PiattoFoodCost
+              fc={fc}
+              dish={viewDish}
+              onOpenScheda={() => { setSchedaDish(viewDish); setViewDish(null); }}
+            />
+          ) : undefined}
         />
       )}
+
+      <SchedaTecnica
+        open={schedaDish != null}
+        onClose={() => setSchedaDish(null)}
+        fc={fc}
+        target={schedaDish ? { kind: 'piatto', dish: schedaDish } : null}
+      />
 
       <CustomerPickerModal
         isOpen={isBanquetCustomerPickerOpen}

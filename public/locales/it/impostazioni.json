@@ -31,7 +31,8 @@
       "Chat staff": "Chat staff",
       "Recensioni": "Recensioni",
       "Asporto": "Asporto",
-      "HACCP": "HACCP"
+      "HACCP": "HACCP",
+      "Food cost": "Food cost"
     },
     "p": {
       "view": "Visualizza",
@@ -51,7 +52,9 @@
       "takeawayManage": "Gestisce ordini asporto",
       "haccpView": "Visualizza registri e report",
       "haccpRecord": "Compila e corregge",
-      "haccpManage": "Configura punti e limiti"
+      "haccpManage": "Configura punti e limiti",
+      "foodcostView": "Visualizza costi e margini",
+      "foodcostManage": "Modifica prezzi e schede"
     }
   },
   "prom": {

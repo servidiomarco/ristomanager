@@ -41,7 +41,8 @@
       "aiUsage": "Consumi AI",
       "development": "Development",
       "roadmap": "Roadmap",
-      "darkMode": "Modalità scura"
+      "darkMode": "Modalità scura",
+      "foodCost": "Food cost"
     },
     "more": "Altro",
     "createNew": "Crea nuovo",

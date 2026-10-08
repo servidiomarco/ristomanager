@@ -74,7 +74,13 @@ export type Permission =
   // l'HACCP stava sotto dashboard:view e chiunque cancellava le righe.
   | 'haccp:view'
   | 'haccp:record'
-  | 'haccp:manage';
+  | 'haccp:manage'
+  // Food cost: costi degli ingredienti, schede tecniche, margini. Dati
+  // economici riservati come i compensi: di default titolare, direzione e
+  // manager. `manage` scrive prezzi e schede. Le route esigono anche
+  // l'entitlement 'food_cost'.
+  | 'foodcost:view'
+  | 'foodcost:manage';
 
 // Role-permission mapping
 // I permessi di una sessione aperta col PIN di sala sul nodo (fase A2): solo
@@ -154,7 +160,9 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'takeaway:manage',
     'haccp:view',
     'haccp:record',
-    'haccp:manage'
+    'haccp:manage',
+    'foodcost:view',
+    'foodcost:manage'
   ],
   [UserRole.OWNER]: [
     'dashboard:view',
@@ -204,7 +212,9 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'takeaway:manage',
     'haccp:view',
     'haccp:record',
-    'haccp:manage'
+    'haccp:manage',
+    'foodcost:view',
+    'foodcost:manage'
   ],
   [UserRole.GENERAL_MANAGER]: [
     'dashboard:view',
@@ -247,7 +257,9 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'takeaway:manage',
     'haccp:view',
     'haccp:record',
-    'haccp:manage'
+    'haccp:manage',
+    'foodcost:view',
+    'foodcost:manage'
   ],
   [UserRole.MANAGER]: [
     'dashboard:view',
@@ -285,7 +297,9 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'takeaway:manage',
     'haccp:view',
     'haccp:record',
-    'haccp:manage'
+    'haccp:manage',
+    'foodcost:view',
+    'foodcost:manage'
   ],
   [UserRole.RECEPTION]: [
     'dashboard:view',
@@ -377,6 +391,7 @@ const VIEW_PERMISSIONS: Record<ViewState, Permission[]> = {
   [ViewState.ATTIVITA]: ['dashboard:view'],
   [ViewState.LISTA_DELLA_SPESA]: ['dashboard:view'],
   [ViewState.HACCP]: ['haccp:view'],
+  [ViewState.FOOD_COST]: ['foodcost:view'],
   [ViewState.CONVERSAZIONI]: ['voice_calls:view'],
   [ViewState.MESSAGGI]: ['reservations:view'],
   [ViewState.CHAT_STAFF]: ['staffchat:use'],

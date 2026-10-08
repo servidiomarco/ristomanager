@@ -158,6 +158,7 @@ const FEATURE_LABEL: Record<AdminTenantFeature, string> = {
   passepartout: 'cassa passepartout',
   reviews: 'recensioni',
   sala_node: 'nodo di sala',
+  food_cost: 'food cost',
 };
 
 const featureLabel = (f: AdminTenantFeature, t?: TFunc): string =>
@@ -669,7 +670,7 @@ const NewTenantModal: React.FC<{
   const [slugTouched, setSlugTouched] = useState(false);
   const [email, setEmail] = useState('');
   const [features, setFeatures] = useState<Record<AdminTenantFeature, boolean>>({
-    voice: false, whatsapp: false, web_booking: false, pay_at_table: false, passepartout: false, reviews: false, sala_node: false,
+    voice: false, whatsapp: false, web_booking: false, pay_at_table: false, passepartout: false, reviews: false, sala_node: false, food_cost: false,
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -677,7 +678,7 @@ const NewTenantModal: React.FC<{
 
   const reset = () => {
     setName(''); setSlug(''); setSlugTouched(false); setEmail('');
-    setFeatures({ voice: false, whatsapp: false, web_booking: false, pay_at_table: false, passepartout: false, reviews: false, sala_node: false });
+    setFeatures({ voice: false, whatsapp: false, web_booking: false, pay_at_table: false, passepartout: false, reviews: false, sala_node: false, food_cost: false });
     setError(null); setCreated(null);
   };
 

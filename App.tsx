@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChevronUp, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, AlertTriangle, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator, BarChart3, Star, ShoppingBag, LifeBuoy, PlugZap, Radio, Thermometer, SlidersHorizontal, Tag } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChevronUp, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, AlertTriangle, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator, BarChart3, Star, ShoppingBag, LifeBuoy, PlugZap, Radio, Thermometer, SlidersHorizontal, Tag, Scale } from 'lucide-react';
 import { ViewState, Room, Table, Dish, RestaurantMenu, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Shift, UserRole, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -25,6 +25,7 @@ import { KitchenDisplay } from './components/KitchenDisplay';
 import { ExpediterDisplay } from './components/ExpediterDisplay';
 import { ShoppingListPage } from './components/ShoppingListPage';
 import { HaccpPage } from './components/HaccpPage';
+import { FoodCostPage } from './components/foodcost/FoodCostPage';
 import { HaccpSettingsLabels, HaccpSettingsLimits, HaccpSettingsPoints, HaccpSettingsSensors } from './components/haccp/HaccpSettingsPanels';
 import ConversazioniPage from './components/ConversazioniPage';
 import InboxPage from './components/InboxPage';
@@ -247,6 +248,8 @@ const NAV_ITEMS: NavItem[] = [
   { kind: 'link', label: 'Pagamenti', labelKey: 'nav.items.payments', Icon: CreditCard, group: 'gestione', isTab: false, view: ViewState.PAGAMENTI, sidebarCollapse: false },
   { kind: 'link', label: 'Fiscalità', labelKey: 'nav.items.fiscal', Icon: Landmark, group: 'gestione', isTab: false, view: ViewState.FISCALITA, sidebarCollapse: false },
   { kind: 'link', label: 'Reportistica', labelKey: 'nav.items.reports', Icon: BarChart3, group: 'gestione', isTab: false, view: ViewState.REPORTISTICA, sidebarCollapse: false },
+  // Food cost: costi e margini dei piatti, vicino ai numeri del locale.
+  { kind: 'link', label: 'Food cost', labelKey: 'nav.items.foodCost', Icon: Scale, group: 'gestione', isTab: false, view: ViewState.FOOD_COST, sidebarCollapse: false },
   { kind: 'link', label: 'Clienti', labelKey: 'nav.items.customers', Icon: BookUser, group: 'gestione', isTab: false, view: ViewState.CLIENTI, sidebarCollapse: false },
   { kind: 'link', label: 'Personale', labelKey: 'nav.items.staff', Icon: UsersRound, group: 'gestione', isTab: false, view: ViewState.STAFF, sidebarCollapse: false },
   { kind: 'link', label: 'Utenti', labelKey: 'nav.items.users', Icon: Users, group: 'gestione', isTab: false, view: ViewState.USERS, sidebarCollapse: false, requiresUserManagement: true },
@@ -3294,6 +3297,10 @@ const App: React.FC = () => {
 
         {view === ViewState.REPORTISTICA && (
           <ReportisticaPage />
+        )}
+
+        {view === ViewState.FOOD_COST && (
+          <FoodCostPage dishes={dishes} showToast={addToast} />
         )}
 
         {view === ViewState.MONITORING && (

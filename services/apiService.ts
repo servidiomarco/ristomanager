@@ -2065,8 +2065,8 @@ export const completeOnboarding = async (): Promise<void> => {
 // Autenticate col JWT PLATFORM_ADMIN via il normale bearer di getHeaders():
 // il server prova prima il JWT, l'env token resta per gli script.
 
-export type AdminTenantFeature = 'voice' | 'whatsapp' | 'web_booking' | 'pay_at_table' | 'passepartout' | 'reviews' | 'sala_node';
-export const ADMIN_TENANT_FEATURES: AdminTenantFeature[] = ['voice', 'whatsapp', 'web_booking', 'pay_at_table', 'passepartout', 'reviews', 'sala_node'];
+export type AdminTenantFeature = 'voice' | 'whatsapp' | 'web_booking' | 'pay_at_table' | 'passepartout' | 'reviews' | 'sala_node' | 'food_cost';
+export const ADMIN_TENANT_FEATURES: AdminTenantFeature[] = ['voice', 'whatsapp', 'web_booking', 'pay_at_table', 'passepartout', 'reviews', 'sala_node', 'food_cost'];
 
 export interface AdminTenant {
   id: number;

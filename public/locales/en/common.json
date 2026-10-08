@@ -41,7 +41,8 @@
       "aiUsage": "AI usage",
       "development": "Development",
       "roadmap": "Roadmap",
-      "darkMode": "Dark mode"
+      "darkMode": "Dark mode",
+      "foodCost": "Food cost"
     },
     "more": "More",
     "createNew": "Create new",

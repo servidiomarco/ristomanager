@@ -23,11 +23,14 @@ import { queryWithRetry, runWithTenantContext } from '../db.js';
 // 'sala_node' = nodo di sala (relay + cache sulla LAN, hardware in comodato):
 // add-on con hardware dietro, fail-closed come 'passepartout' — acceso per il
 // tenant 1 dalla migration nodo-di-sala.
-export const TENANT_FEATURES = ['voice', 'whatsapp', 'web_booking', 'pay_at_table', 'passepartout', 'reviews', 'takeaway', 'sala_node'] as const;
+// 'food_cost' = schede tecniche, costo dei piatti e dei banchetti: fail-closed,
+// acceso per il tenant 1 dalla migration food-cost-schede. Se si venda a parte
+// o dentro un piano non è ancora deciso.
+export const TENANT_FEATURES = ['voice', 'whatsapp', 'web_booking', 'pay_at_table', 'passepartout', 'reviews', 'takeaway', 'sala_node', 'food_cost'] as const;
 export type TenantFeature = (typeof TENANT_FEATURES)[number];
 export type TenantFeatureMap = Record<TenantFeature, boolean>;
 
-const ALL_DISABLED: TenantFeatureMap = { voice: false, whatsapp: false, web_booking: false, pay_at_table: false, passepartout: false, reviews: false, takeaway: false, sala_node: false };
+const ALL_DISABLED: TenantFeatureMap = { voice: false, whatsapp: false, web_booking: false, pay_at_table: false, passepartout: false, reviews: false, takeaway: false, sala_node: false, food_cost: false };
 
 // Cache per tenant con TTL breve, stesso schema di identityCache
 // (businessIdentity in server.ts): gli entitlement si leggono su ogni

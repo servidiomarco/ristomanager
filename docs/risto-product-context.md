@@ -296,7 +296,7 @@ State these as roadmap or leave them off the site entirely. Do not imply them.
 - **Delivery and takeaway aggregators** (Deliveroo, Glovo, JustEat).
 - **Accounting or payroll export.**
 - **Loyalty programmes, gift cards, marketing campaign sending.**
-- **Forecasting, labour cost, or food cost analytics** — the back-office layer Nory and Restaurant365 sell.
+- **Forecasting and labour cost analytics** — the back-office layer Nory and Restaurant365 sell. Food cost exists since 08/10/2026 (recipe cards, cost and margin per dish and per banquet guest, prices entered by hand); supplier-invoice import, food cost on actual sales and menu engineering are not built yet.
 - **A native mobile app.** It is a PWA, which is a strength, but it isn't in the App Store.
 - **A self-service signup.** Every restaurant is onboarded by hand today.
 
