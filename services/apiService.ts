@@ -1874,6 +1874,32 @@ export const updatePaymentLinkExpirySettings = async (
   });
 };
 
+// Promemoria automatico all'ospite prima della prenotazione (per tenant).
+export interface BookingReminderSettings {
+  enabled: boolean;
+  timing: 'day_before' | 'hours_before';
+  /** HH:MM del giorno prima, tra 09:00 e 20:00. */
+  day_before_time: string;
+  /** Ore prima dell'arrivo, tra 2 e 48. */
+  hours_before: number;
+}
+
+export const getBookingReminderSettings = async (): Promise<BookingReminderSettings> => {
+  return apiRequest<BookingReminderSettings>(`${API_URL}/settings/booking-reminders`, {
+    headers: getHeaders(false),
+  });
+};
+
+export const updateBookingReminderSettings = async (
+  updates: Partial<BookingReminderSettings>
+): Promise<BookingReminderSettings> => {
+  return apiRequest<BookingReminderSettings>(`${API_URL}/settings/booking-reminders`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify(updates),
+  });
+};
+
 // Coperto e servizio: gli importi delle righe di sistema delle comande.
 // Le aliquote IVA delle due righe stanno nella mappatura IVA (Fiscalità).
 export interface ChargeSettings {

@@ -172,7 +172,8 @@
   "card": {
     "adminsOnly": "Only administrators can change this setting.",
     "save": "Save changes",
-    "errLoad": "Could not load the settings"
+    "errLoad": "Could not load the settings",
+    "loading": "Loading…"
   },
   "dep": {
     "badGuests": "The number of covers must be a whole number between 1 and 100",
@@ -200,6 +201,25 @@
     "msgDeclined": "Booking not confirmed (the same wording as a manual decline)",
     "msgNone": "No message",
     "msgHint": "It goes out on the channel set in the source's Reply channels (WhatsApp falling back to SMS, email)."
+  },
+  "promOspite": {
+    "title": "Automatic reminder",
+    "intro": "Goes out on its own before every confirmed booking. It skips guests who booked less than 12 hours earlier and those who already got a reminder by hand.",
+    "switchOff": "Switch the automatic reminder off",
+    "switchOn": "Switch the automatic reminder on",
+    "when": "When",
+    "dayBefore": "The day before",
+    "hoursBefore": "Hours before",
+    "at": "At",
+    "atHint": "Between 9:00 and 20:00, on the restaurant's clock.",
+    "howMany": "How many hours before",
+    "hoursUnit": "hours before arrival",
+    "hoursHint": "From 2 to 48. Nothing goes out between 21:00 and 9:00: the message waits for the morning.",
+    "channelHint": "It goes out on the channel set in the source's Reply channels (WhatsApp with SMS fallback, email). If a send fails, whoever manages bookings gets a notice.",
+    "badHours": "The hours must be a whole number between 2 and 48",
+    "badTime": "The time must be between 9:00 and 20:00",
+    "saved": "Guest reminder updated",
+    "errSave": "Could not update the reminder"
   },
   "bl": {
     "source": {

@@ -233,6 +233,22 @@ import {
     type PaymentLinkExpiryPolicy,
 } from './services/paymentLinkExpiryPolicy.js';
 import {
+    getBookingReminderPolicy,
+    saveBookingReminderPolicy,
+    normalizeBookingReminderPolicy,
+    decideBookingReminder,
+    claimBookingReminder,
+    finishBookingReminder,
+    bookingReminderFailureDigest,
+    bookingReminderFailureTag,
+    BOOKING_REMINDER_CANDIDATES_SQL,
+    DAY_BEFORE_TIME_MIN,
+    DAY_BEFORE_TIME_MAX,
+    HOURS_BEFORE_MIN,
+    HOURS_BEFORE_MAX,
+    type BookingReminderPolicy,
+} from './services/bookingReminders.js';
+import {
     getBlacklistPolicy,
     saveBlacklistPolicy,
     isBlacklistBehavior,
@@ -3371,10 +3387,12 @@ app.post('/reservations/:id/send-reminder', authenticate, requirePermission('res
             return res.status(409).json({ error: 'invalid_status', message: `La prenotazione è ${resv.reservation_status}: niente reminder.` });
         }
 
+        // Nome e telefono del ristorante della prenotazione, non del tenant 1.
+        await refreshBusinessIdentity(req.tenantId!).catch(() => {});
         const sendResult = await sendBookingConfirmation(
             req.tenantId!,
             resv.phone,
-            buildReminderMessage(resv.customer_name, resv.reservation_time, resv.guests, resv.room_name, resolveGuestLanguage(resv), { timezone: fusoMsg }),
+            buildReminderMessage(resv.customer_name, resv.reservation_time, resv.guests, resv.room_name, resolveGuestLanguage(resv), { timezone: fusoMsg }, businessIdentity(req.tenantId!)),
             id,
             {
                 whatsappTemplate: buildBookingReminderTemplate(resv.customer_name, resv.reservation_time, resv.guests, resolveGuestLanguage(resv), { timezone: fusoMsg }),
@@ -17103,6 +17121,7 @@ const SCHEDULER_LOCK_REVIEW_REQUESTS = 761007;
 const SCHEDULER_LOCK_PLATFORM_HEALTH = 761008;
 const SCHEDULER_LOCK_HEALTH_RETENTION = 761009;
 const SCHEDULER_LOCK_HACCP_SENSORS = 761010;
+const SCHEDULER_LOCK_BOOKING_REMINDERS = 761011;
 
 // Il lock advisory è di SESSIONE: va preso su un client dedicato tenuto per
 // tutta la durata del tick (sul pool condiviso un'altra query potrebbe
@@ -17981,6 +18000,177 @@ const startReviewRequestScheduler = () => {
     };
     const lockedTick = () => runSchedulerTickWithLock(SCHEDULER_LOCK_REVIEW_REQUESTS, 'review-requests', tick)
         .catch((err: any) => console.error('[review-requests] lock wrapper failed:', err?.message || err));
+    lockedTick();
+    setInterval(lockedTick, 15 * 60 * 1000);
+};
+
+// ============================================
+// PROMEMORIA AUTOMATICO ALL'OSPITE — sweep (services/bookingReminders.ts)
+// ============================================
+// Ogni 15 minuti guarda le prenotazioni confermate delle prossime 72 ore e
+// manda il promemoria a quelle per cui è arrivato il momento, sui canali
+// della policy prenotazioni: lo stesso messaggio del bottone manuale
+// (WhatsApp col template approvato, SMS, email). Quando partire lo decide
+// decideBookingReminder; ogni esito scrive auto_reminder_status e una riga
+// presa in carico non si ritenta mai — le regole sono quelle della
+// richiesta di recensione qui sopra, nate dall'incidente del 18-19/09.
+
+/** I promemoria falliti OGGI, in un avviso solo a chi gestisce le
+ *  prenotazioni: sono ospiti da chiamare a mano. Stesso tag per tutta la
+ *  giornata, come per le recensioni. Non lancia mai. */
+async function notifyBookingReminderFailures(tenantId: number, tz: string): Promise<void> {
+    try {
+        const today = getItalianTodayIso(new Date(), tz);
+        const failed = await queryWithRetry(
+            `SELECT customer_name, auto_reminder_error AS error
+               FROM reservations
+              WHERE tenant_id = $1 AND auto_reminder_status = 'failed'
+                AND (auto_reminder_failed_at AT TIME ZONE $3)::date = $2::date
+              ORDER BY auto_reminder_failed_at DESC`,
+            [tenantId, today, tz]
+        );
+        if (failed.rows.length === 0) return;
+        const roles = await queryWithRetry(
+            `SELECT DISTINCT role FROM role_permissions WHERE tenant_id = $1 AND permission = 'reservations:full'`,
+            [tenantId]
+        );
+        const roleList = roles.rows.map((r: any) => String(r.role));
+        if (roleList.length === 0) return;
+        const { title, body } = bookingReminderFailureDigest(
+            failed.rows.map((r: any) => ({ customerName: r.customer_name, error: r.error }))
+        );
+        await pushSendToRoles(tenantId, roleList, {
+            category: 'system',
+            title,
+            body,
+            url: '/?view=RESERVATIONS',
+            tag: bookingReminderFailureTag(today),
+        });
+    } catch (err: any) {
+        console.warn('[booking-reminder] avviso fallimenti non inviato:', err?.message || err);
+    }
+}
+
+const startBookingReminderScheduler = () => {
+    const tick = async () => {
+        try {
+            const now = new Date();
+            // Nessun filtro tenant, come gli altri tick: ogni riga porta il
+            // suo tenant_id, e la policy si legge per tenant nel loop.
+            const result = await queryWithRetry(BOOKING_REMINDER_CANDIDATES_SQL);
+            if (result.rows.length === 0) return;
+
+            const gates = new Map<number, { policy: BookingReminderPolicy; tz: string }>();
+            const failedTenants = new Set<number>();
+            const gateFor = async (tenantId: number) => {
+                let gate = gates.get(tenantId);
+                if (!gate) {
+                    const policy = await getBookingReminderPolicy(tenantId);
+                    const tz = (await getTenantLocale(tenantId)).timezone;
+                    // Identità fresca prima di comporre i messaggi del tenant.
+                    if (policy.enabled) await refreshBusinessIdentity(tenantId).catch(() => {});
+                    gate = { policy, tz };
+                    gates.set(tenantId, gate);
+                }
+                return gate;
+            };
+
+            for (const row of result.rows) {
+                const tenantId = Number(row.tenant_id);
+                const gate = await gateFor(tenantId);
+                if (!gate.policy.enabled) continue;
+
+                const reservationTime = new Date(row.reservation_time);
+                const contacts = [row.created_at, row.confirmation_sent_at]
+                    .map((v: any) => (v ? new Date(v).getTime() : NaN))
+                    .filter((ms: number) => Number.isFinite(ms));
+                const decision = decideBookingReminder({
+                    now,
+                    reservationTime,
+                    lastContactAt: contacts.length > 0 ? new Date(Math.max(...contacts)) : null,
+                    policy: gate.policy,
+                    tz: gate.tz,
+                });
+                if (decision === 'wait') continue;
+
+                // Presa in carico PRIMA di qualunque invio, sull'orario su cui
+                // si è deciso: se la prenotazione è stata spostata nel
+                // frattempo, non si invia e il giro dopo la rivaluta.
+                if (!(await claimBookingReminder(tenantId, row.id, reservationTime))) continue;
+                const mark = async (status: Parameters<typeof finishBookingReminder>[2], channel: string | null = null, error: string | null = null) => {
+                    const updated = await finishBookingReminder(tenantId, row.id, status, channel, error);
+                    // Solo l'invio cambia qualcosa che si vede (la campanella
+                    // reminder_sent): replica al nodo e broadcast come fa il
+                    // bottone manuale.
+                    if (updated && status === 'sent') {
+                        await logReservationChanged(null, tenantId, Number(updated.id));
+                        try { socketService?.broadcastReservationUpdated(tenantId, updated as any); } catch (_) {}
+                    }
+                };
+
+                try {
+                    if (decision !== 'send') {
+                        await mark(decision);
+                        continue;
+                    }
+                    // Promemoria già mandato a mano dallo staff (e mai uno
+                    // automatico prima): un secondo messaggio sarebbe un doppione.
+                    if (row.reminder_sent === true && row.auto_reminder_status == null) {
+                        await mark('skipped_manual');
+                        continue;
+                    }
+                    const phone = String(row.phone || '').trim();
+                    const email = String(row.email || '').trim();
+                    if (!phone && !email) {
+                        await mark('skipped_no_contact');
+                        continue;
+                    }
+
+                    const language = resolveGuestLanguage(row);
+                    const identity = businessIdentity(tenantId);
+                    const msgOpts = { timezone: gate.tz };
+                    const outcome = await dispatchBookingNotification({
+                        tenantId,
+                        source: row.source,
+                        phone,
+                        email,
+                        reservationId: row.id,
+                        smsText: buildReminderMessage(row.customer_name, row.reservation_time, row.guests, row.room_name, language, msgOpts, identity),
+                        whatsappTemplate: buildBookingReminderTemplate(row.customer_name, row.reservation_time, row.guests, language, msgOpts),
+                        buildEmail: () => buildBookingReminderEmail({
+                            customerName: row.customer_name,
+                            reservationTime: row.reservation_time,
+                            guests: row.guests,
+                            roomName: row.room_name,
+                            language,
+                            timezone: gate.tz,
+                            identity,
+                        }),
+                        kind: 'reminder',
+                    });
+                    if (outcome.delivered) {
+                        await mark('sent', outcome.channel);
+                        console.log(`🔔 Promemoria inviato (tenant ${tenantId}, prenotazione ${row.id}, canale ${outcome.channel})`);
+                    } else {
+                        await mark('failed', null, outcome.error || 'invio non riuscito');
+                        failedTenants.add(tenantId);
+                    }
+                } catch (err: any) {
+                    console.error(`[booking-reminder] prenotazione ${row.id} fallita:`, err?.message || err);
+                    await mark('failed', null, err?.message || String(err)).catch(() => {});
+                    failedTenants.add(tenantId);
+                }
+            }
+            // Un avviso per ristorante a fine giro, non uno per promemoria.
+            for (const tenantId of failedTenants) {
+                await notifyBookingReminderFailures(tenantId, gates.get(tenantId)?.tz ?? 'Europe/Rome');
+            }
+        } catch (err) {
+            console.error('Booking reminder scheduler error:', err);
+        }
+    };
+    const lockedTick = () => runSchedulerTickWithLock(SCHEDULER_LOCK_BOOKING_REMINDERS, 'booking-reminders', tick)
+        .catch((err: any) => console.error('[booking-reminders] lock wrapper failed:', err?.message || err));
     lockedTick();
     setInterval(lockedTick, 15 * 60 * 1000);
 };
@@ -26242,16 +26432,19 @@ function buildDeclineMessage(
 }
 
 // Reminder della prenotazione — inviato a mano dal tab Comunicazione del
-// modal ("Invia reminder"). Stesso dispatcher delle conferme: WhatsApp col
-// template approvato quando TWILIO_WA_CONTENT_SID_BOOKING_REMINDER è
-// impostata, SMS finché non lo è.
+// modal ("Invia reminder") o in automatico dallo sweep dei promemoria.
+// Stesso dispatcher delle conferme: WhatsApp col template approvato quando
+// TWILIO_WA_CONTENT_SID_BOOKING_REMINDER è impostata, SMS finché non lo è.
+// `identity` è quella del ristorante della prenotazione: lo sweep gira per
+// tutti i tenant, e senza passarla nome e telefono sarebbero del tenant 1.
 function buildReminderMessage(
     customerName: string | null | undefined,
     reservationTime: string | Date,
     guests: number | null | undefined,
     roomName?: string | null,
     language?: string | null,
-    opts?: MsgOpts
+    opts?: MsgOpts,
+    identity: BusinessIdentity = businessIdentity()
 ): string {
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime), msgTz(opts));
     const fullName = toTitleCase(customerName);
@@ -26260,12 +26453,12 @@ function buildReminderMessage(
         const greeting = fullName ? `Hi ${fullName}!` : 'Hi!';
         const guestsLabel = guestsNum === 1 ? 'guest' : 'guests';
         const roomPart = roomName ? ` (${roomName})` : '';
-        return `${greeting} We look forward to seeing you on ${dateLabel} at ${timeLabel}: a table for ${guestsNum} ${guestsLabel}${roomPart} at ${businessIdentity().name}. Need to change anything or something came up? Call us at ${businessIdentity().phone} — we'll take care of it. See you soon!`;
+        return `${greeting} We look forward to seeing you on ${dateLabel} at ${timeLabel}: a table for ${guestsNum} ${guestsLabel}${roomPart} at ${identity.name}. Need to change anything or something came up? Call us at ${identity.phone} — we'll take care of it. See you soon!`;
     }
     const greeting = fullName ? `Ciao ${fullName}!` : 'Ciao!';
     const persone = guestsNum === 1 ? 'persona' : 'persone';
     const roomPart = roomName ? ` (${roomName})` : '';
-    return `${greeting} Ti aspettiamo ${dateLabel} alle ${timeLabel}: tavolo per ${guestsNum} ${persone}${roomPart} da ${businessIdentity().name}. Per modifiche o imprevisti chiamaci al ${businessIdentity().phone} — sistemiamo tutto noi. A presto!`;
+    return `${greeting} Ti aspettiamo ${dateLabel} alle ${timeLabel}: tavolo per ${guestsNum} ${persone}${roomPart} da ${identity.name}. Per modifiche o imprevisti chiamaci al ${identity.phone} — sistemiamo tutto noi. A presto!`;
 }
 
 // Avviso di modifica — parte da solo quando ora o coperti di una
@@ -26739,8 +26932,7 @@ function escapeHtml(s: string): string {
 // place so any future number change lives in a single spot. The WhatsApp link
 // uses wa.me (works in Gmail, iOS Mail, most clients); the phone link uses
 // tel: so a tap on mobile opens the dialer.
-function contactBlockHtml(language?: string | null): string {
-    const identity = businessIdentity();
+function contactBlockHtml(language?: string | null, identity: BusinessIdentity = businessIdentity()): string {
     const english = isEnglishGuest(language);
     return `
       <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;margin:0 0 16px;">
@@ -27033,6 +27225,61 @@ function buildBookingConfirmationEmail(params: {
     `;
     const html = wrapEmailHtml(`Prenotazione confermata per il ${dateLabel} alle ${timeLabel}`, detailsHtml);
     return { subject, text, html };
+}
+
+// Email del promemoria automatico: parte quando la policy dei canali della
+// fonte mette l'email prima del telefono (le prenotazioni web, di serie) o
+// in copia. Lo stesso testo dell'SMS dentro il wrapper condiviso, con
+// l'identità del ristorante della prenotazione e non quella del tenant 1.
+function buildBookingReminderEmail(params: {
+    customerName: string | null | undefined;
+    reservationTime: string | Date;
+    guests: number | null | undefined;
+    roomName?: string | null;
+    language?: string | null;
+    timezone?: string | null;
+    identity: BusinessIdentity;
+}): { subject: string; text: string; html: string } {
+    const { identity } = params;
+    const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(params.reservationTime), params.timezone || 'Europe/Rome');
+    const guestsNum = Math.max(1, Math.trunc(Number(params.guests) || 1));
+    const room = (params.roomName || '').trim();
+    const name = toTitleCase(params.customerName);
+    const text = buildReminderMessage(params.customerName, params.reservationTime, params.guests, params.roomName ?? null, params.language, { timezone: params.timezone }, identity);
+
+    if (isEnglishGuest(params.language)) {
+        const guestsLabel = guestsNum === 1 ? 'guest' : 'guests';
+        const roomPart = room ? ` · ${escapeHtml(room)}` : '';
+        const subject = `See you soon — ${dateLabel} ${timeLabel}`;
+        const detailsHtml = `
+      <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${name ? `Hi ${escapeHtml(name)},` : 'Hi,'}<br>a quick reminder of your reservation at ${escapeHtml(identity.name)}.</p>
+      <table role="presentation" cellpadding="0" cellspacing="0" class="confirm-box" style="width:100%;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:12px;padding:16px;margin:0 0 16px;">
+        <tr><td style="padding:6px 0;font-size:14px;color:#065f46;"><strong>Date:</strong> ${escapeHtml(dateLabel)}</td></tr>
+        <tr><td style="padding:6px 0;font-size:14px;color:#065f46;"><strong>Time:</strong> ${escapeHtml(timeLabel)}</td></tr>
+        <tr><td style="padding:6px 0;font-size:14px;color:#065f46;"><strong>Guests:</strong> ${guestsNum} ${guestsLabel}${roomPart}</td></tr>
+      </table>
+      <p class="muted" style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#57534e;">Need to change or cancel? Reply to this email or contact us: we'll take care of it.</p>
+      ${contactBlockHtml(params.language, identity)}
+      <p style="margin:16px 0 0;font-size:14px;">See you soon!<br><em>${escapeHtml(identity.name)}</em></p>
+    `;
+        return { subject, text, html: wrapEmailHtml(`Your table on ${dateLabel} at ${timeLabel}`, detailsHtml, params.language) };
+    }
+
+    const persone = guestsNum === 1 ? 'persona' : 'persone';
+    const roomPart = room ? ` · ${escapeHtml(room)}` : '';
+    const subject = `Ti aspettiamo — ${dateLabel} ${timeLabel}`;
+    const detailsHtml = `
+      <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${name ? `Ciao ${escapeHtml(name)},` : 'Ciao,'}<br>ti ricordiamo la prenotazione da ${escapeHtml(identity.name)}.</p>
+      <table role="presentation" cellpadding="0" cellspacing="0" class="confirm-box" style="width:100%;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:12px;padding:16px;margin:0 0 16px;">
+        <tr><td style="padding:6px 0;font-size:14px;color:#065f46;"><strong>Data:</strong> ${escapeHtml(dateLabel)}</td></tr>
+        <tr><td style="padding:6px 0;font-size:14px;color:#065f46;"><strong>Ora:</strong> ${escapeHtml(timeLabel)}</td></tr>
+        <tr><td style="padding:6px 0;font-size:14px;color:#065f46;"><strong>Ospiti:</strong> ${guestsNum} ${persone}${roomPart}</td></tr>
+      </table>
+      <p class="muted" style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#57534e;">Per modifiche o imprevisti rispondi a questa email o contattaci: sistemiamo tutto noi.</p>
+      ${contactBlockHtml(params.language, identity)}
+      <p style="margin:16px 0 0;font-size:14px;">A presto!<br><em>${escapeHtml(identity.name)}</em></p>
+    `;
+    return { subject, text, html: wrapEmailHtml(`Il tuo tavolo il ${dateLabel} alle ${timeLabel}`, detailsHtml) };
 }
 
 // Email di disdetta — lo stesso testo dell'SMS (buildDeclineMessage) dentro il
@@ -32283,6 +32530,59 @@ app.put('/settings/payment-link-expiry', authenticate, requirePermission('settin
         res.json(next);
     } catch (err) {
         console.error('PUT /settings/payment-link-expiry error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ============================================
+// PROMEMORIA AUTOMATICO ALL'OSPITE (services/bookingReminders.ts)
+// ============================================
+// Impostazioni → Prenotazioni → Promemoria all'ospite. Lettura a chiunque
+// veda le impostazioni, modifica a settings:full come la scadenza dei link.
+
+app.get('/settings/booking-reminders', authenticate, async (req, res) => {
+    try {
+        res.json(await getBookingReminderPolicy(req.tenantId!));
+    } catch (err) {
+        console.error('GET /settings/booking-reminders error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/settings/booking-reminders', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        // Update parziale: i campi assenti restano come sono, la policy
+        // risultante deve comunque essere valida intera.
+        const current = await getBookingReminderPolicy(req.tenantId!);
+        const body = req.body ?? {};
+        const next = normalizeBookingReminderPolicy({
+            enabled: body.enabled !== undefined ? body.enabled : current.enabled,
+            timing: body.timing !== undefined ? body.timing : current.timing,
+            day_before_time: body.day_before_time !== undefined ? body.day_before_time : current.day_before_time,
+            hours_before: body.hours_before !== undefined ? body.hours_before : current.hours_before,
+        });
+        if (!next) {
+            return res.status(400).json({
+                error: 'invalid_policy',
+                message: `Policy non valida: enabled booleano, timing tra day_before|hours_before, day_before_time HH:MM tra ${DAY_BEFORE_TIME_MIN} e ${DAY_BEFORE_TIME_MAX}, hours_before intero tra ${HOURS_BEFORE_MIN} e ${HOURS_BEFORE_MAX}`,
+            });
+        }
+        await saveBookingReminderPolicy(req.tenantId!, next);
+        if (req.user) {
+            const quando = next.timing === 'day_before'
+                ? `il giorno prima alle ${next.day_before_time}`
+                : `${next.hours_before} ore prima`;
+            LogService.logActivity(
+                req.tenantId!,
+                req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.SETTINGS,
+                0,
+                `Promemoria all'ospite: ${next.enabled ? `attivo, ${quando}` : 'disattivato'}`
+            );
+        }
+        res.json(next);
+    } catch (err) {
+        console.error('PUT /settings/booking-reminders error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -43902,6 +44202,12 @@ const startServer = async () => {
                         console.log('✅ Review request scheduler started (15 min, finestra 10-21 Europe/Rome)');
                     } catch (schedErr) {
                         console.error('Review request scheduler failed to start:', schedErr);
+                    }
+                    if (!isServiceNode) try {
+                        startBookingReminderScheduler();
+                        console.log('✅ Booking reminder scheduler started (15 min, finestra 9-21 del ristorante)');
+                    } catch (schedErr) {
+                        console.error('Booking reminder scheduler failed to start:', schedErr);
                     }
                     if (!isServiceNode) try {
                         startPaymentRequestReconcileScheduler();
