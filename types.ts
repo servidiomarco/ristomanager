@@ -851,6 +851,19 @@ export interface OrderWithItems {
   /** Quanto si deve davvero. */
   total_cents: number;
   voided_cents: number;
+  /** L'ordine nella comanda in cassa Passepartout, se ci va. Assente con un
+   *  server vecchio. */
+  comanda_viva?: ComandaVivaStato | null;
+}
+
+/** Stato di un ordine del CRM nella comanda in cassa Passepartout
+ *  (services/passepartoutComandeVive.ts). PENDING = sta andando in cassa,
+ *  SCRITTA = in cassa, FAILED = fermo per un errore, CHIUSA = finito. */
+export interface ComandaVivaStato {
+  stato: 'PENDING' | 'SCRITTA' | 'FAILED' | 'CHIUSA';
+  error: string | null;
+  pp_comanda_id: number | null;
+  palmare: boolean;
 }
 
 // ============================================

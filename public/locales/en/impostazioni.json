@@ -333,6 +333,7 @@
     "capSpecchio": "CRM bills on the till",
     "capDiagnosi": "Check",
     "capSconto": "Till discount on the QR",
+    "capComandaViva": "CRM orders on the till",
     "agentVersion": "agent {{versione}}",
     "pairLast": "Last paired PC: {{pc}}",
     "pairNew": "Connect the till PC",

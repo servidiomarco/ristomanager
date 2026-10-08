@@ -319,5 +319,12 @@
     "order": "Comanda"
   },
   "arrived": "Arrivato",
-  "releaseArrived": "Rilascia: Arrivato"
+  "releaseArrived": "Rilascia: Arrivato",
+  "cassa": {
+    "scritta": "In cassa",
+    "scrittaTitolo": "L'ordine è nella comanda in cassa del tavolo",
+    "inAttesa": "Verso la cassa",
+    "errore": "Errore cassa",
+    "erroreDettaglio": "Cassa Passepartout: {{errore}}"
+  }
 }

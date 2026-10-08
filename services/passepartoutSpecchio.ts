@@ -40,8 +40,9 @@ let deps: SpecchioDeps | null = null;
 
 /** La riga in coda, nella transazione che chiude il conto (client del
  *  chiamante). Solo conti del CRM con un totale (non quelli nati da una
- *  comanda della cassa, che in cassa ci sono già), solo in modalità
- *  statistiche e con il tavolo specchio scelto. */
+ *  comanda della cassa, che in cassa ci sono già, né quelli degli ordini
+ *  già scritti nella comanda in cassa del loro tavolo: passepartoutComandeVive),
+ *  solo in modalità statistiche e con il tavolo specchio scelto. */
 export async function accodaSpecchio(client: any, tenantId: number, billId: number): Promise<boolean> {
     const rs = await client.query(
         `INSERT INTO passepartout_specchio (tenant_id, table_bill_id)
@@ -52,6 +53,10 @@ export async function accodaSpecchio(client: any, tenantId: number, billId: numb
             AND b.takeaway_order_id IS NULL AND b.total_cents > 0
             AND (b.external_ref IS NULL OR b.external_ref NOT LIKE 'pp:comanda:%')
             AND pc.conti_crm_mode = 'statistiche' AND pc.specchio_tavolo IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM orders o
+                              JOIN passepartout_comande_vive v ON v.tenant_id = o.tenant_id AND v.order_id = o.id
+                             WHERE o.tenant_id = b.tenant_id AND o.table_bill_id = b.id
+                               AND v.pp_comanda_id IS NOT NULL)
          ON CONFLICT (tenant_id, table_bill_id) DO NOTHING
          RETURNING table_bill_id`,
         [tenantId, billId]

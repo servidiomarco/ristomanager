@@ -89,6 +89,9 @@ export interface PassepartoutRigaComanda {
     isPagato: boolean;
     isOfferto: boolean;
     stato: string | null;
+    /** EnumStatoRigaComanda: Nuovo, InAttesa, InProduzione, Fatto,
+     *  Cancellato, Preventivo. */
+    statoEnum?: string | null;
     tipo: string | null;
 }
 
@@ -251,6 +254,7 @@ function mapRigaComanda(r: Record<string, unknown>): PassepartoutRigaComanda {
         isPagato: asBoolean(r.IsPagato),
         isOfferto: asBoolean(r.IsOfferto),
         stato: asString(r.Stato),
+        statoEnum: asString(r.StatoEnum),
         tipo: asString(r.Tipo),
     };
 }
@@ -1041,6 +1045,307 @@ async function completaChiusura(
         totalePagato: asNumber(conto.TotalePagato),
         totaleDaPagare: asNumber(conto.TotaleDaPagare),
         avviso,
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Comanda viva: le righe del CRM nella comanda in cassa del tavolo vero
+// ---------------------------------------------------------------------------
+//
+// Provato sulla cassa vera il 07 e 08/10 (docs/passepartout-comanda-viva-prove.md):
+// - PutComanda con l'IdGestionale della comanda e SOLO le righe da scrivere
+//   (senza IsParziale, che la cassa ignora) aggiunge le righe nuove e
+//   cambia quelle mandate col loro IdGestionale: le altre, comprese quelle
+//   del palmare, restano come sono. Il palmare a sua volta aggiunge e non
+//   riscrive: le righe del CRM scritte mentre è dentro il tavolo restano.
+// - Pezzi e Prezzo si cambiano sul posto, sulla stessa riga.
+// - DaCancellare toglie una riga mai mandata; su una mandata la segna
+//   «Cancellato» e la cucina vede lo storno, senza un nuovo invio.
+// - Le varianti a testo libero (Varianti, solo Descrizione) arrivano al
+//   monitor della cucina; il prezzo delle varianti il CRM lo tiene nel
+//   prezzo della riga, così il totale della cassa è quello del CRM.
+// - La risposta di PutComanda è la comanda intera: le righe nuove sono
+//   quelle con un id che prima non c'era. La cassa non ha una nota per
+//   riga, quindi la chiave del CRM la tiene il server (passepartout_righe_vive)
+//   e l'agente se la ricorda fra un tentativo e l'altro (`memoria`).
+// - Il cambio di tavolo (Tavolo su una comanda esistente) la cassa lo
+//   ignora: non si scrive mai.
+
+export interface VarianteViva {
+    descrizione: string;
+    /** «+» in cassa; false per le tolte («Senza cipolla»): «-». */
+    inAggiunta: boolean;
+}
+
+export interface RigaViva {
+    /** La chiave del CRM: 'oi:<order_item_id>', 'coperto', 'servizio'. */
+    chiave: string;
+    /** IdGestionale della riga in cassa, se il CRM l'ha già scritta. */
+    idRiga: number | null;
+    /** Articolo del catalogo della cassa; null = articolo generico. */
+    idArticolo: number | null;
+    descrizione: string;
+    pezzi: number;
+    prezzoCents: number;
+    uscita: number;
+    varianti: VarianteViva[];
+    /** La riga coperto: TipoEnum Coperto sull'articolo del coperto. */
+    coperto?: boolean;
+    /** Coperto e servizio del CRM: solo su una comanda nata dal CRM. Sul
+     *  tavolo aperto dal palmare coperti e servizio sono quelli della cassa. */
+    soloComandaNostra?: boolean;
+    /** Da togliere: sparisce se mai mandata, diventa uno storno se mandata. */
+    cancella?: boolean;
+}
+
+export interface ParametriComandaViva {
+    /** «sympotia-ordine:<id>»: in nota alla comanda che il CRM crea. */
+    tag: string;
+    /** La comanda in cassa dell'ordine, se il server la conosce già. */
+    idComanda: number | null;
+    sala: string;
+    tavolo: string;
+    coperti: number;
+    righe: RigaViva[];
+    idArticoloGenerico: number | null;
+}
+
+export interface EsitoRigaViva {
+    chiave: string;
+    idRiga: number | null;
+    statoEnum: string | null;
+    /** Tolta, o mai scritta e non più da scrivere. */
+    cancellata?: boolean;
+    /** Tolta in cassa da qualcuno: il CRM non la rimette. */
+    sparita?: boolean;
+    /** Coperto o servizio non scritti su una comanda del palmare. */
+    saltata?: boolean;
+}
+
+export interface EsitoComandaViva {
+    idComanda: number | null;
+    /** La comanda c'era già in cassa, aperta dal palmare o dalla cassa. */
+    palmare: boolean;
+    /** La comanda è chiusa in cassa: non si scrive più. */
+    chiusa: boolean;
+    righe: EsitoRigaViva[];
+    /** Somma delle righe non cancellate della comanda, tutte. */
+    totaleCassaCents: number;
+}
+
+/** Quello che l'agente ricorda di un ordine fra un tentativo e l'altro:
+ *  se la risposta va persa (timeout del server, linea che cade) il
+ *  tentativo dopo non riscrive le stesse righe una seconda volta. */
+export interface MemoriaComandaViva {
+    idComanda: number | null;
+    righe: Record<string, number>;
+}
+
+const CANCELLATA = 'Cancellato';
+
+/** I campi di PMBRigaComanda nell'ordine dello schema (un campo fuori posto
+ *  la cassa lo ignora senza errore). */
+function rigaVivaXml(f: {
+    articolo?: string | null;
+    daCancellare?: boolean;
+    descrizione?: string | null;
+    idRiga?: number | null;
+    pezzi: number;
+    prezzoCents: number;
+    coperto?: boolean;
+    uscita?: number | null;
+    varianti?: VarianteViva[];
+}): string {
+    const varianti = (f.varianti ?? [])
+        .map((v) => ({ ...v, descrizione: testoPerCassa(v.descrizione, 60) }))
+        .filter((v) => v.descrizione !== '');
+    return '<c:PMBRigaComanda>' +
+        (f.articolo ? `<c:Articolo>${xmlEscape(f.articolo)}</c:Articolo>` : '') +
+        (f.daCancellare ? '<c:DaCancellare>true</c:DaCancellare>' : '') +
+        (f.descrizione ? `<c:Descrizione>${xmlEscape(f.descrizione)}</c:Descrizione>` : '') +
+        (f.idRiga != null ? `<c:IdGestionale>${f.idRiga}</c:IdGestionale>` : '') +
+        `<c:Pezzi>${f.pezzi}</c:Pezzi>` +
+        `<c:Prezzo>${euro(f.prezzoCents)}</c:Prezzo>` +
+        (f.coperto ? '<c:TipoEnum>Coperto</c:TipoEnum>' : '') +
+        '<c:Tool_EseguiInvio>false</c:Tool_EseguiInvio>' +
+        `<c:Totale>${euro(f.prezzoCents * f.pezzi)}</c:Totale>` +
+        (f.uscita != null ? `<c:Uscita>${f.uscita}</c:Uscita>` : '') +
+        (varianti.length
+            ? '<c:Varianti>' + varianti.map((v) => '<c:PMBRigaVariante>' +
+                `<c:Descrizione>${xmlEscape(v.descrizione)}</c:Descrizione>` +
+                `<c:InAggiunta>${v.inAggiunta ? 'true' : 'false'}</c:InAggiunta>` +
+                '<c:Prezzo>0.00</c:Prezzo>' +
+                '</c:PMBRigaVariante>').join('') + '</c:Varianti>'
+            : '') +
+        '</c:PMBRigaComanda>';
+}
+
+/** La riga com'è in cassa, rimandata col suo IdGestionale e i campi da
+ *  cambiare (come nelle prove 5a e 5c). */
+function rigaEsistenteXml(r: PassepartoutRigaComanda, cambia: { pezzi?: number; prezzoCents?: number; daCancellare?: boolean }): string {
+    return rigaVivaXml({
+        articolo: r.articolo,
+        daCancellare: cambia.daCancellare,
+        descrizione: r.descrizione,
+        idRiga: r.idGestionale,
+        pezzi: cambia.pezzi ?? Math.round(r.pezzi ?? 1),
+        prezzoCents: cambia.prezzoCents ?? Math.round((r.prezzo ?? 0) * 100),
+        uscita: r.uscita,
+    });
+}
+
+export async function scriviComandaViva(
+    p: ParametriComandaViva,
+    memoria: MemoriaComandaViva = { idComanda: null, righe: {} },
+): Promise<EsitoComandaViva> {
+    const conTag = (c: PassepartoutComanda) => (c.note ?? '').includes(p.tag);
+    const totaleDi = (c: PassepartoutComanda | null) => Math.round((c?.righe ?? [])
+        .filter((r) => r.statoEnum !== CANCELLATA)
+        .reduce((s, r) => s + (r.totale ?? 0), 0) * 100);
+
+    // 1. La comanda: quella già nota, o quella aperta sul tavolo, o nessuna
+    //    (la crea la scrittura).
+    let idComanda = p.idComanda ?? memoria.idComanda ?? null;
+    let comanda = idComanda != null ? await getComanda(idComanda) : null;
+    if (idComanda != null && (!comanda || comanda.isPagato)) {
+        return {
+            idComanda,
+            palmare: comanda != null && !conTag(comanda),
+            chiusa: true,
+            righe: p.righe.map((r) => ({ chiave: r.chiave, idRiga: r.idRiga, statoEnum: null })),
+            totaleCassaCents: totaleDi(comanda),
+        };
+    }
+    if (!comanda) {
+        comanda = await getComandaTavolo(p.tavolo);
+        if (comanda && comanda.isPagato) comanda = null;
+    }
+    const palmare = comanda != null && !conTag(comanda);
+    const prima = new Map((comanda?.righe ?? []).filter((r) => r.idGestionale != null).map((r) => [r.idGestionale!, r]));
+
+    // 2. Cosa scrivere.
+    const articoli = await articoliPerId();
+    const generico = p.idArticoloGenerico != null ? articoli.get(p.idArticoloGenerico) : undefined;
+    const articoloCoperto = [...articoli.values()].find((a) => /^copert/i.test(a.codice ?? '') || /^copert/i.test(a.descrizione ?? ''));
+    const xmlRighe: string[] = [];
+    const esiti = new Map<string, EsitoRigaViva>();
+    const aggiunte: Array<{ chiave: string; codice: string | null; descrizione: string | null; pezzi: number; uscita: number | null }> = [];
+    for (const r of p.righe) {
+        if (r.soloComandaNostra && palmare) {
+            esiti.set(r.chiave, { chiave: r.chiave, idRiga: null, statoEnum: null, saltata: true });
+            continue;
+        }
+        const pezzi = Math.max(1, Math.round(r.pezzi));
+        const idNoto = r.idRiga ?? memoria.righe[r.chiave] ?? null;
+        if (idNoto != null) {
+            const inCassa = prima.get(idNoto);
+            if (!inCassa || (inCassa.statoEnum === CANCELLATA && !r.cancella)) {
+                // Tolta in cassa: la cassa conserva, il CRM non la rimette.
+                esiti.set(r.chiave, { chiave: r.chiave, idRiga: idNoto, statoEnum: inCassa?.statoEnum ?? null, ...(r.cancella ? { cancellata: true } : { sparita: true }) });
+                continue;
+            }
+            if (r.cancella) {
+                if (inCassa.statoEnum !== CANCELLATA) xmlRighe.push(rigaEsistenteXml(inCassa, { daCancellare: true }));
+                esiti.set(r.chiave, { chiave: r.chiave, idRiga: idNoto, statoEnum: CANCELLATA, cancellata: true });
+                continue;
+            }
+            const cambiaPezzi = Math.round(inCassa.pezzi ?? 0) !== pezzi;
+            const cambiaPrezzo = Math.round((inCassa.prezzo ?? 0) * 100) !== r.prezzoCents;
+            if (cambiaPezzi || cambiaPrezzo) xmlRighe.push(rigaEsistenteXml(inCassa, { pezzi, prezzoCents: r.prezzoCents }));
+            esiti.set(r.chiave, { chiave: r.chiave, idRiga: idNoto, statoEnum: inCassa.statoEnum ?? null });
+            continue;
+        }
+        if (r.cancella) {
+            esiti.set(r.chiave, { chiave: r.chiave, idRiga: null, statoEnum: null, cancellata: true });
+            continue;
+        }
+        const art = r.coperto ? articoloCoperto : (r.idArticolo != null ? articoli.get(r.idArticolo) : undefined) ?? generico;
+        if (!art?.codice && !r.coperto) {
+            throw new PassepartoutError(
+                `«${r.descrizione}» non ha un articolo in cassa: scegli l'articolo per i piatti del CRM nella sezione Passepartout`,
+                'PutComanda',
+            );
+        }
+        // Sull'articolo generico il nome è quello del CRM; sugli articoli
+        // della cassa la descrizione la completa la cassa dal catalogo.
+        const descrizione = r.coperto || art === generico || art?.codice == null
+            ? testoPerCassa(r.coperto ? 'Coperto' : r.descrizione, 60) || 'Voce'
+            : null;
+        // Il coperto senza uscita: in cassa sta sull'uscita 0 (prova 1).
+        const uscita = r.coperto ? null : r.uscita;
+        xmlRighe.push(rigaVivaXml({
+            articolo: art?.codice ?? null,
+            descrizione,
+            pezzi,
+            prezzoCents: r.prezzoCents,
+            coperto: r.coperto,
+            uscita,
+            varianti: r.varianti,
+        }));
+        aggiunte.push({ chiave: r.chiave, codice: art?.codice ?? null, descrizione, pezzi, uscita });
+    }
+
+    // 3. Una scrittura sola: la comanda nuova con le sue righe, o le sole
+    //    righe da aggiungere, cambiare o togliere sulla comanda che c'è.
+    let dopo = comanda;
+    if (xmlRighe.length > 0) {
+        const xml =
+            `<comanda xmlns:c="http://schemas.datacontract.org/2004/07/PMessageBox.Contract.Comanda">` +
+            (comanda
+                ? `<c:IdGestionale>${comanda.idGestionale}</c:IdGestionale>` +
+                  `<c:Righe>${xmlRighe.join('')}</c:Righe>`
+                : `<c:Coperti>${Math.max(0, Math.round(p.coperti))}</c:Coperti>` +
+                  `<c:Note>${xmlEscape(`Ordine Sympotia ${p.tag}`)}</c:Note>` +
+                  `<c:Righe>${xmlRighe.join('')}</c:Righe>` +
+                  `<c:Sala>${xmlEscape(p.sala)}</c:Sala>` +
+                  `<c:Tavolo>${xmlEscape(p.tavolo)}</c:Tavolo>`) +
+            `</comanda>`;
+        const risposta = (await soapCall('PutComanda', xml, 30_000)) as Record<string, any> | null;
+        const letta = risposta && !isNil(risposta) && asNumber(risposta.IdGestionale) != null ? mapComanda(risposta) : null;
+        dopo = letta && letta.righe.length > 0
+            ? letta
+            : (letta?.idGestionale != null ? await getComanda(letta.idGestionale) : comanda
+                ? await getComanda(comanda.idGestionale!)
+                : await getComandaTavolo(p.tavolo));
+        if (!dopo || (!comanda && !conTag(dopo))) {
+            throw new PassepartoutError('Comanda non ritrovata dopo la scrittura', 'PutComanda');
+        }
+        idComanda = dopo.idGestionale;
+    } else if (comanda) {
+        idComanda = comanda.idGestionale;
+    }
+
+    // 4. Gli id delle righe nuove: quelle che prima non c'erano, abbinate a
+    //    quelle chieste per articolo, pezzi e uscita (anche il palmare può
+    //    aver aggiunto una riga nello stesso momento).
+    const nuove = (dopo?.righe ?? [])
+        .filter((r) => r.idGestionale != null && !prima.has(r.idGestionale))
+        .sort((a, b) => a.idGestionale! - b.idGestionale!);
+    const stessa = (n: PassepartoutRigaComanda, a: typeof aggiunte[number], conDescrizione: boolean) =>
+        Math.round(n.pezzi ?? 0) === a.pezzi
+        && (a.uscita == null || (n.uscita ?? 0) === a.uscita)
+        && (a.codice == null || n.articolo === a.codice)
+        && (!conDescrizione || a.descrizione == null || n.descrizione === a.descrizione);
+    for (const a of aggiunte) {
+        // Prima con la descrizione (righe diverse sull'articolo generico),
+        // poi senza, se la cassa l'ha riscritta.
+        let i = nuove.findIndex((n) => stessa(n, a, true));
+        if (i < 0) i = nuove.findIndex((n) => stessa(n, a, false));
+        const trovata = i >= 0 ? nuove.splice(i, 1)[0] : null;
+        esiti.set(a.chiave, { chiave: a.chiave, idRiga: trovata?.idGestionale ?? null, statoEnum: trovata?.statoEnum ?? null });
+    }
+    for (const r of dopo?.righe ?? []) {
+        for (const e of esiti.values()) {
+            if (e.idRiga === r.idGestionale && !e.sparita) e.statoEnum = r.statoEnum ?? e.statoEnum;
+        }
+    }
+
+    return {
+        idComanda,
+        palmare,
+        chiusa: false,
+        righe: p.righe.map((r) => esiti.get(r.chiave) ?? { chiave: r.chiave, idRiga: null, statoEnum: null }),
+        totaleCassaCents: totaleDi(dopo),
     };
 }
 

@@ -333,6 +333,7 @@
     "capSpecchio": "Conti del CRM in cassa",
     "capDiagnosi": "Verifica",
     "capSconto": "Sconto della cassa nel QR",
+    "capComandaViva": "Ordini del CRM in cassa",
     "agentVersion": "agente {{versione}}",
     "pairLast": "Ultimo PC abbinato: {{pc}}",
     "pairNew": "Collega il PC della cassa",
