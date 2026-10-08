@@ -88,6 +88,17 @@ export const getPpTavoli = (): Promise<PpTavoli> =>
 export const abbinaPpTavoli = (): Promise<PpTavoli> =>
   apiRequest(`${API_URL}/passepartout/tavoli/abbina`, { method: 'POST', headers: getHeaders() });
 
+export interface PpTavoliCreati extends PpTavoli {
+  sale_create: number;
+  tavoli_creati: number;
+  tavoli_abbinati: number;
+  gia_abbinati: number;
+}
+
+/** Crea nel CRM le sale scelte della cassa, coi loro tavoli già abbinati. */
+export const creaPpTavoli = (sale: string[]): Promise<PpTavoliCreati> =>
+  apiRequest(`${API_URL}/passepartout/tavoli/crea`, { method: 'POST', headers: getHeaders(), body: JSON.stringify({ sale }) });
+
 /** sala + tavolo della cassa; entrambi vuoti = il tavolo non va in cassa. */
 export const setPpTavolo = (tableId: number, ppSala: string | null, ppTavolo: string | null): Promise<Partial<PpTavolo>> =>
   apiRequest(`${API_URL}/passepartout/tavoli/${tableId}`, {

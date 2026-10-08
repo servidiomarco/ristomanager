@@ -4956,6 +4956,122 @@ app.put('/passepartout/tavoli/:tableId', authenticate, requirePermission('settin
     }
 });
 
+// «Crea nel CRM le sale e i tavoli della cassa»: per un ristorante nuovo, che
+// nel CRM non ha ancora la sala, dall'ultima pianta letta. Una sala con lo
+// stesso nome si riusa; un tavolo con lo stesso nome in quella sala si abbina
+// invece di raddoppiarlo; un tavolo della cassa già abbinato si salta, così
+// rifarlo non crea doppioni. I tavoli nuovi nascono in griglia, come
+// nell'onboarding, e già abbinati: il nome è quello della cassa.
+const POSTI_SE_LA_CASSA_NON_LI_DICE = 4;
+app.post('/passepartout/tavoli/crea', authenticate, requirePermission('settings:full'), requirePermission('floorplan:full'), requireFeature('passepartout'), async (req, res) => {
+    try {
+        const tenantId = req.tenantId!;
+        const richieste: string[] = Array.isArray(req.body?.sale)
+            ? req.body.sale.filter((s: unknown): s is string => typeof s === 'string')
+            : [];
+        if (richieste.length === 0) return res.status(400).json({ error: 'Scegli almeno una sala della cassa' });
+        const cfg = await queryWithRetry(`SELECT pianta FROM passepartout_config WHERE tenant_id = $1`, [tenantId]);
+        const pianta: Array<{ sala: string; tavoli: Array<{ nome: string; coperti: number | null }> }> | null = cfg.rows[0]?.pianta ?? null;
+        if (!pianta) return res.status(409).json({ error: 'pianta_non_letta', message: 'Prima leggi i tavoli dalla cassa.' });
+        const sconosciuta = richieste.find(n => !pianta.some(s => s.sala === n));
+        if (sconosciuta) return res.status(400).json({ error: `In cassa non c'è la sala ${sconosciuta}` });
+
+        const chiave = (s: string) => s.trim().toLocaleLowerCase('it');
+        const saleNuove: any[] = [];
+        const tavoliNuovi: any[] = [];
+        let abbinatiEsistenti = 0;
+        let giaAbbinati = 0;
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
+            const gia = await client.query(`SELECT pp_sala, pp_tavolo FROM passepartout_tavoli WHERE tenant_id = $1`, [tenantId]);
+            const abbinato = new Set<string>(gia.rows.map((r: any) => `${r.pp_sala}\u0000${r.pp_tavolo}`));
+            for (const sala of pianta.filter(s => richieste.includes(s.sala))) {
+                const daFare = sala.tavoli.filter(tv => !abbinato.has(`${sala.sala}\u0000${tv.nome}`));
+                giaAbbinati += sala.tavoli.length - daFare.length;
+                if (daFare.length === 0) continue;
+                const stanze = await client.query(`SELECT * FROM rooms WHERE tenant_id = $1 ORDER BY id`, [tenantId]);
+                let room = stanze.rows.find((r: any) => chiave(String(r.name)) === chiave(sala.sala));
+                if (!room) {
+                    const ins = await client.query(
+                        `INSERT INTO rooms (tenant_id, name, width, height) VALUES ($1, $2, 800, 600) RETURNING *`,
+                        [tenantId, sala.sala]
+                    );
+                    room = ins.rows[0];
+                    saleNuove.push(room);
+                }
+                const esistenti = await client.query(
+                    `SELECT t.id, t.name, (pt.table_id IS NOT NULL) AS abbinato
+                       FROM tables t LEFT JOIN passepartout_tavoli pt ON pt.table_id = t.id AND pt.tenant_id = t.tenant_id
+                      WHERE t.tenant_id = $1 AND t.room_id = $2`,
+                    [tenantId, room.id]
+                );
+                let posto = esistenti.rows.length;
+                for (const tv of daFare) {
+                    const omonimo = esistenti.rows.find((r: any) => !r.abbinato && chiave(String(r.name)) === chiave(tv.nome));
+                    let tableId: number;
+                    if (omonimo) {
+                        omonimo.abbinato = true;
+                        tableId = Number(omonimo.id);
+                        abbinatiEsistenti++;
+                    } else {
+                        // Coperti da 0 o 1 in cassa vogliono dire «non impostati».
+                        const seats = tv.coperti != null && tv.coperti >= 2 ? Math.round(tv.coperti) : POSTI_SE_LA_CASSA_NON_LI_DICE;
+                        const ins = await client.query(
+                            `INSERT INTO tables (tenant_id, name, shape, seats, x, y, room_id, status, rotation)
+                             VALUES ($1, $2, 'SQUARE', $3, $4, $5, $6, 'FREE', 0) RETURNING *`,
+                            [tenantId, tv.nome, seats, 60 + (posto % 5) * 140, 60 + Math.floor(posto / 5) * 140, room.id]
+                        );
+                        posto++;
+                        tableId = Number(ins.rows[0].id);
+                        tavoliNuovi.push(ins.rows[0]);
+                    }
+                    await client.query(
+                        `INSERT INTO passepartout_tavoli (table_id, tenant_id, pp_sala, pp_tavolo, origine, confermato, updated_at)
+                         VALUES ($1, $2, $3, $4, 'manuale', true, now())
+                         ON CONFLICT (table_id) DO NOTHING`,
+                        [tableId, tenantId, sala.sala, tv.nome]
+                    );
+                    abbinato.add(`${sala.sala}\u0000${tv.nome}`);
+                }
+                // La griglia è di 5 tavoli per riga: la sala cresce se non ci sta.
+                const altezza = 60 + Math.ceil(posto / 5) * 140;
+                if (altezza > Number(room.height)) {
+                    await client.query(`UPDATE rooms SET height = $1 WHERE id = $2 AND tenant_id = $3`, [altezza, room.id, tenantId]);
+                    room.height = altezza;
+                }
+            }
+            await client.query('COMMIT');
+        } catch (err) {
+            await client.query('ROLLBACK').catch(() => {});
+            throw err;
+        } finally {
+            client.release();
+        }
+        if (socketService) {
+            for (const r of saleNuove) socketService.broadcastRoomCreated(tenantId, r);
+            for (const tb of tavoliNuovi) socketService.broadcastTableCreated(tenantId, tb);
+        }
+        if (req.user && (saleNuove.length || tavoliNuovi.length || abbinatiEsistenti)) {
+            LogService.logActivity(
+                tenantId, req.user.userId, req.user.email, req.user.email,
+                ActivityAction.CREATE, ResourceType.SETTINGS, undefined, 'Passepartout: sale e tavoli creati dalla cassa',
+                { sale: richieste, sale_create: saleNuove.length, tavoli_creati: tavoliNuovi.length, tavoli_abbinati: abbinatiEsistenti }
+            );
+        }
+        res.json({
+            sale_create: saleNuove.length,
+            tavoli_creati: tavoliNuovi.length,
+            tavoli_abbinati: abbinatiEsistenti,
+            gia_abbinati: giaAbbinati,
+            ...(await caricaTavoliPassepartout(tenantId)),
+        });
+    } catch (err: any) {
+        console.error('POST /passepartout/tavoli/crea error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
 // --- Conti della cassa nel CRM (sola lettura) ---------------------------------
 // I tavoli chiusi solo in cassa entrano nei report, nella spesa per cliente
 // e nel riscontro di fine giornata. Import e letture in

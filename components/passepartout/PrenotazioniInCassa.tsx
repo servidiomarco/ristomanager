@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { CalendarCheck, Loader2, RefreshCw } from 'lucide-react';
+import { CalendarCheck, Loader2, Plus, RefreshCw } from 'lucide-react';
 import { Callout, Field, StatusPill, dsButton, dsSelect } from '../ds';
 import { formatDateTime } from '../../utils/formatLocale';
 import { sessionTimeZone } from '../../utils/displayTime';
 import {
-  abbinaPpTavoli, getPpPrenotazioni, getPpTavoli, setPpPrenotazioniEnabled, setPpTavolo, sincronizzaPpPrenotazioni,
+  abbinaPpTavoli, creaPpTavoli, getPpPrenotazioni, getPpTavoli, setPpPrenotazioniEnabled, setPpTavolo, sincronizzaPpPrenotazioni,
   type PpPrenotazioniStato, type PpTavoli, type PpTavolo,
 } from '../../services/passepartoutApiService';
 import { InterruttorePassepartout, SchedaPassepartout } from './SchedaPassepartout';
@@ -28,14 +28,19 @@ interface Props {
 
 const opzione = (sala: string | null, tavolo: string | null) => (sala && tavolo ? JSON.stringify([sala, tavolo]) : '');
 const ordinaNomi = (a: string, b: string) => a.localeCompare(b, 'it', { numeric: true, sensitivity: 'base' });
+// Sale della cassa che non sono una sala vera (ordini dal tavolo, totem,
+// asporto): fra quelle da creare nel CRM partono non scelte.
+const SALA_VIRTUALE = /^(myself|totem|asporto|delivery|pass ?delivery|kiosk|take ?away)$/i;
 
 export const PrenotazioniInCassa: React.FC<Props> = ({ showToast }) => {
   const { t } = useTranslation('impostazioni', { useSuspense: false });
   const [stato, setStato] = useState<PpPrenotazioniStato | null>(null);
   const [tavoli, setTavoli] = useState<PpTavoli | null>(null);
   const [loadError, setLoadError] = useState(false);
-  const [busy, setBusy] = useState<null | 'toggle' | 'abbina' | 'sync' | number>(null);
+  const [busy, setBusy] = useState<null | 'toggle' | 'abbina' | 'crea' | 'sync' | number>(null);
   const [tutti, setTutti] = useState(false);
+  // Sale della cassa tolte dalla creazione; null = la scelta di partenza.
+  const [escluse, setEscluse] = useState<Set<string> | null>(null);
 
   const showToastRef = useRef(showToast);
   showToastRef.current = showToast;
@@ -114,6 +119,31 @@ export const PrenotazioniInCassa: React.FC<Props> = ({ showToast }) => {
     tavoli: [...s.tavoli].sort((a, b) => ordinaNomi(a.nome, b.nome)),
   })), [tavoli]);
 
+  // Le sale della cassa coi tavoli che nel CRM non hanno ancora un tavolo
+  // abbinato: quelli si possono creare da qui.
+  const daCreare = useMemo(() => {
+    const abbinati = new Set((tavoli?.tavoli ?? []).filter(r => r.pp_sala != null).map(r => `${r.pp_sala}\u0000${r.pp_tavolo}`));
+    return sale
+      .map(s => ({ sala: s.sala, n: s.tavoli.filter(tv => !abbinati.has(`${s.sala}\u0000${tv.nome}`)).length }))
+      .filter(s => s.n > 0);
+  }, [tavoli, sale]);
+  const esclusione = escluse ?? new Set(daCreare.filter(s => SALA_VIRTUALE.test(s.sala.trim())).map(s => s.sala));
+  const scelte = daCreare.filter(s => !esclusione.has(s.sala));
+  const tavoliScelti = scelte.reduce((n, s) => n + s.n, 0);
+  const cambiaScelta = (sala: string) => {
+    const nuova = new Set(esclusione);
+    if (nuova.has(sala)) nuova.delete(sala); else nuova.add(sala);
+    setEscluse(nuova);
+  };
+
+  const crea = () => esegui('crea', async () => {
+    const r = await creaPpTavoli(scelte.map(s => s.sala));
+    setTavoli({ pianta: r.pianta, pianta_at: r.pianta_at, tavoli: r.tavoli });
+    setStato(await getPpPrenotazioni());
+    setEscluse(null);
+    showToastRef.current(t('pp.createDone', { count: r.tavoli_creati + r.tavoli_abbinati }), 'success');
+  });
+
   const agente = stato?.agente;
   const senzaTavoli = stato != null && stato.tavoli.abbinati === 0;
 
@@ -175,7 +205,9 @@ export const PrenotazioniInCassa: React.FC<Props> = ({ showToast }) => {
             ) : (
               <>
                 {righe.length === 0 ? (
-                  <p className="text-[13px] text-[var(--ds-text-muted)]">{t('pp.allMatched')}</p>
+                  <p className="text-[13px] text-[var(--ds-text-muted)]">
+                    {(tavoli.tavoli.length === 0) ? t('pp.noCrmTables') : t('pp.allMatched')}
+                  </p>
                 ) : (
                   <ul className="divide-y divide-[var(--ds-border)]">
                     {righe.map(row => {
@@ -233,9 +265,38 @@ export const PrenotazioniInCassa: React.FC<Props> = ({ showToast }) => {
                     })}
                   </ul>
                 )}
-                <button type="button" className="text-[13px] font-medium text-[var(--ds-text-secondary)] underline-offset-2 hover:underline" onClick={() => setTutti(v => !v)}>
-                  {tutti ? t('pp.showPending') : t('pp.showAll')}
-                </button>
+                {tavoli.tavoli.length > 0 && (
+                  <button type="button" className="text-[13px] font-medium text-[var(--ds-text-secondary)] underline-offset-2 hover:underline" onClick={() => setTutti(v => !v)}>
+                    {tutti ? t('pp.showPending') : t('pp.showAll')}
+                  </button>
+                )}
+
+                {daCreare.length > 0 && (
+                  <div className="space-y-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3">
+                    <div>
+                      <p className="text-[14px] font-medium text-[var(--ds-text-primary)]">{t('pp.createTitle')}</p>
+                      <p className="text-[13px] text-[var(--ds-text-muted)]">{t('pp.createHint')}</p>
+                    </div>
+                    <div className="flex flex-wrap gap-x-5 gap-y-2">
+                      {daCreare.map(s => (
+                        <label key={s.sala} className="inline-flex cursor-pointer select-none items-center gap-2 text-[14px] text-[var(--ds-text-primary)]">
+                          <input
+                            type="checkbox"
+                            checked={!esclusione.has(s.sala)}
+                            disabled={busy != null}
+                            onChange={() => cambiaScelta(s.sala)}
+                            className="h-5 w-5 flex-shrink-0 rounded-[var(--ds-radius)] accent-[var(--ds-action-bg)]"
+                          />
+                          {t('pp.createRoom', { sala: s.sala, count: s.n })}
+                        </label>
+                      ))}
+                    </div>
+                    <button type="button" className={dsButton.secondary} onClick={crea} disabled={busy != null || tavoliScelti === 0}>
+                      {busy === 'crea' ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Plus className="h-4 w-4" aria-hidden />}
+                      {t('pp.createButton', { count: tavoliScelti })}
+                    </button>
+                  </div>
+                )}
               </>
             )}
           </section>
