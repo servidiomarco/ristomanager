@@ -105,6 +105,8 @@
     "closuresHint": "Schedule or remove per-service closures for rooms and tables.",
     "replyChannels": "Reply channels",
     "replyChannelsHint": "Which channel replies to the guest for each booking source: priority order and fallback across email, WhatsApp and SMS.",
+    "guestReminders": "Guest reminder",
+    "guestRemindersHint": "The message that reminds the guest of the booking: whether it goes out on its own, and when.",
     "quickNotes": "Quick booking notes",
     "quickNotesHint": "Suggested chips in the booking dialog. Each note can carry an icon shown on the card. Drag to reorder.",
     "allergens": "Intolerances",

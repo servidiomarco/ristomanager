@@ -58,6 +58,7 @@ import { ReservationNotesManager } from './components/ReservationNotesManager';
 import { ReservationAllergensManager } from './components/ReservationAllergensManager';
 import { AutoDepositManager } from './components/AutoDepositManager';
 import { PaymentLinkExpiryManager } from './components/PaymentLinkExpiryManager';
+import { BookingReminderManager } from './components/BookingReminderManager';
 import { ChargeSettingsManager } from './components/ChargeSettingsManager';
 import { BlacklistPolicyManager } from './components/BlacklistPolicyManager';
 import { PayAtTableSettingsManager } from './components/PayAtTableSettingsManager';
@@ -3560,6 +3561,13 @@ const App: React.FC = () => {
                   description={t('settings.replyChannelsHint')}
                 >
                   <BookingChannelsManager showToast={addToast} />
+                </SettingsDisclosure>
+                <SettingsDisclosure
+                  icon={BellRing}
+                  title={t('settings.guestReminders')}
+                  description={t('settings.guestRemindersHint')}
+                >
+                  <BookingReminderManager showToast={addToast} />
                 </SettingsDisclosure>
                 <SettingsDisclosure
                   icon={StickyNote}
