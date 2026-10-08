@@ -7,7 +7,7 @@ import { UserRole, ViewState } from '../types.js';
 import { RolePermissionService, ALL_PERMISSIONS, ALL_PERMISSION_KEYS, Permission, isReportsAdmin } from './permissionService.js';
 import { LogService, ActivityAction, ResourceType } from '../activityLogs/logService.js';
 import { getTenantFeatures } from '../services/entitlements.js';
-import { isSmtpConfigured, sendMail, isPlatformMailConfigured, sendPlatformMail } from '../services/smtpService.js';
+import { isSmtpConfigured, sendMail, isPlatformMailConfigured, sendPlatformMail, mittenteDelReset } from '../services/smtpService.js';
 import { PLATFORM_NAME } from '../platform.js';
 import { queryWithRetry, runAsPlatform, runWithTenantContext } from '../db.js';
 import { isServiceNode } from '../services/topology.js';
@@ -706,11 +706,18 @@ router.post('/forgot-password', forgotPasswordLimiter, (req: Request, res: Respo
     // lì — casella e dominio del prodotto, non del ristorante a cui la
     // riga utente è appoggiata. Senza, si ripiega sul transport del tenant
     // con la sola identità visibile di piattaforma: meglio un'email
-    // consegnata col mittente sbagliato che nessuna email.
+    // consegnata col mittente sbagliato che nessuna email. L'utente di un
+    // ristorante senza posta sua, al contrario, ripiega sul mittente di
+    // piattaforma (mittenteDelReset).
     const isPlatformAccount = userRow.role === UserRole.PLATFORM_ADMIN;
-    const viaPlatformSender = isPlatformAccount && isPlatformMailConfigured();
+    const mittente = mittenteDelReset({
+      accountDiPiattaforma: isPlatformAccount,
+      piattaforma: isPlatformMailConfigured(),
+      ristorante: await isSmtpConfigured(tenantId),
+    });
+    const viaPlatformSender = mittente === 'piattaforma';
 
-    if (!viaPlatformSender && !(await isSmtpConfigured(tenantId))) {
+    if (mittente == null) {
       // Il warn è l'unico posto dove la differenza è visibile — nei log del
       // server, mai nella risposta.
       console.warn(`[forgot-password] SMTP non configurato per il tenant ${tenantId}: reset non inviabile per l'utente ${userRow.id}`);
@@ -729,7 +736,10 @@ router.post('/forgot-password', forgotPasswordLimiter, (req: Request, res: Respo
 
     const mailInput = {
       to: email.toLowerCase().trim(),
-      fromNameOverride: isPlatformAccount ? PLATFORM_NAME : undefined,
+      // Dalla casella di piattaforma il nome del mittente è quello del
+      // prodotto anche per l'utente di un ristorante: il ristorante è
+      // nell'oggetto e in firma.
+      fromNameOverride: isPlatformAccount || viaPlatformSender ? PLATFORM_NAME : undefined,
       subject: `Reimposta la tua password — ${brandName}`,
       text:
         `Ciao ${userRow.full_name},\n\n` +
