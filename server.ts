@@ -37401,6 +37401,45 @@ async function segnaStampateDalCrmInTx(client: any, tenantId: number, orderId: n
     );
 }
 
+/** Comanda viva: la cassa ha chiuso dal suo schermo la comanda di un ordine
+ *  del CRM (fase 4). L'ordine si chiude senza conto del CRM: il conto l'ha
+ *  fatto la cassa, e i soldi arrivano nei report coi conti importati dalla
+ *  cassa (contarli anche qui li raddoppierebbe). Le bozze mai mandate si
+ *  scartano, come chiudendo con discard_pending. */
+async function chiudiOrdineChiusoInCassa(tenantId: number, orderId: number): Promise<boolean> {
+    const client = await pool.connect();
+    let chiuso = false;
+    try {
+        await client.query('BEGIN');
+        const o = await client.query(`SELECT id, status FROM orders WHERE id = $1 AND tenant_id = $2 FOR UPDATE`, [orderId, tenantId]);
+        if (o.rows[0]?.status === 'OPEN') {
+            await client.query(`DELETE FROM order_items WHERE order_id = $1 AND tenant_id = $2 AND status = 'DRAFT'`, [orderId, tenantId]);
+            await client.query(
+                `UPDATE orders SET status = 'CLOSED', closed_at = CURRENT_TIMESTAMP, closed_by_user_id = NULL
+                  WHERE id = $1 AND tenant_id = $2`,
+                [orderId, tenantId]
+            );
+            await outboxEnqueueInTx(client, tenantId, 'order:updated', `order:${orderId}`, { order_id: orderId }, { actor: { channel: 'passepartout' } });
+            chiuso = true;
+        }
+        await client.query('COMMIT');
+    } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw err;
+    } finally {
+        client.release();
+    }
+    if (!chiuso) return false;
+    outboxKick();
+    await closeOrderCourseNotifications(tenantId, orderId);
+    LogService.logActivity(
+        tenantId, null, 'passepartout', 'Cassa Passepartout',
+        ActivityAction.UPDATE, ResourceType.ORDER, orderId, `comanda #${orderId}`,
+        { status: 'CLOSED', via: 'passepartout', motivo: 'chiusa in cassa' }
+    );
+    return true;
+}
+
 /** La stampa di ripiego chiesta dal giro delle comande vive: le righe
  *  lanciate che la cassa non ha mandato, per uscita. */
 async function stampaComandeViveDalCrm(tenantId: number, orderId: number, orderItemIds: number[]): Promise<void> {
@@ -44147,6 +44186,7 @@ const startServer = async () => {
                                 try { socketService?.broadcastToAll(t, 'passepartout:comanda-viva', stato); } catch (_) {}
                             },
                             stampaDalCrm: stampaComandeViveDalCrm,
+                            chiudiOrdineChiusoInCassa,
                         });
                     }
                     console.log('✅ Passepartout agent bridge attivo su /pp-agent');
