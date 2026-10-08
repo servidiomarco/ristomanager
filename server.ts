@@ -90,7 +90,7 @@ import {
     startPassepartoutTavoliApertiSync, elencoTavoliAperti, aggiornaTavoliAperti, comandaApertaSuiTavoli,
 } from './services/passepartoutTavoliAperti.js';
 import { accodaSpecchio, avviaSpecchio, startPassepartoutSpecchioSync } from './services/passepartoutSpecchio.js';
-import { avviaComandeVive, riprovaComandaViva, startPassepartoutComandeVive, statiComandeVive } from './services/passepartoutComandeVive.js';
+import { avviaComandeVive, riprovaComandaViva, startPassepartoutComandeVive, statiComandeVive, uscitaPerCassa } from './services/passepartoutComandeVive.js';
 import {
     SUPPORT_CATEGORIES, SUPPORT_STATUSES, SUPPORT_SUBJECT_MAX, SUPPORT_BODY_MAX, SUPPORT_ATTACHMENTS_MAX, SUPPORT_RATING_COMMENT_MAX,
     sanitizeClientContext, supportTenantTag, supportPlatformTag,
@@ -4167,7 +4167,7 @@ app.put('/passepartout/config', authenticate, requirePermission('settings:full')
 // sezione lo fa da sé: una lista di voci con esito e dati, che l'interfaccia
 // traduce (pp.verifica.<voce>.<esito>). L'ultima resta in passepartout_config.
 const VERSIONI_PASSEPARTOUT_PROVATE = ['2026C1'];
-const CAPACITA_AGENTE_ATTESE = ['chiudi-riprendi', 'prenotazioni', 'conti', 'tavoli-aperti', 'chiudi-preconto', 'preconto', 'specchio', 'diagnosi', 'sconto-cassa', 'comanda-viva'];
+const CAPACITA_AGENTE_ATTESE = ['chiudi-riprendi', 'prenotazioni', 'conti', 'tavoli-aperti', 'chiudi-preconto', 'preconto', 'specchio', 'diagnosi', 'sconto-cassa', 'comanda-viva', 'comanda-viva-invio'];
 type EsitoVerifica = 'ok' | 'attenzione' | 'errore' | 'info';
 interface VoceVerifica { voce: string; esito: EsitoVerifica; dati?: Record<string, unknown> }
 
@@ -5537,6 +5537,16 @@ app.put('/passepartout/comande-vive/config', authenticate, requirePermission('se
         const enabled = has('enabled') ? body.enabled === true : prima.comande_vive_enabled === true;
         const stampa = has('stampa') ? String(body.stampa) : (prima.comande_stampa ?? 'cassa');
         const conto = has('conto') ? String(body.conto) : (prima.comande_conto ?? 'cassa');
+        // La cassa manda in produzione le righe del CRM mai partite quando
+        // chiude dal suo schermo e a ogni suo «Invia» (collaudo sulla demo,
+        // 08/10): con la stampa del CRM e il conto della cassa la cucina le
+        // riceverebbe due volte. Il conto del CRM chiude senza invio.
+        if (stampa === 'crm' && conto !== 'crm') {
+            return res.status(409).json({
+                error: 'stampa_crm_senza_conto_crm',
+                message: 'Con la stampa del CRM il conto lo deve fare il CRM: la cassa, chiudendo, manderebbe in produzione le righe del CRM una seconda volta.',
+            });
+        }
         // I requisiti si controllano solo all'accensione: chi la spegne deve
         // poterlo fare anche con l'agente giù.
         if (enabled && prima.comande_vive_enabled !== true) {
@@ -37211,7 +37221,22 @@ async function broadcastCourseReadyIfAutoComplete(tenantId: number, orderId: num
 // senza banner); 'ANNULLO CHIAMATA' e 'STORNO' viaggiano col kind
 // COMANDA_ANNULLO — un agente vecchio NON deve poterli stampare come piatti
 // da cucinare, e su un kind sconosciuto si arena senza stampare.
-async function enqueueCoursePrintsInTx(client: any, tenantId: number, orderId: number, courseNo: number, firedRows: any[], variation?: { label: 'AGGIUNTA' | 'ANNULLO CHIAMATA' | 'STORNO'; reason?: string | null }): Promise<void> {
+async function enqueueCoursePrintsInTx(client: any, tenantId: number, orderId: number, courseNo: number, firedRows: any[], variation?: { label: 'AGGIUNTA' | 'ANNULLO CHIAMATA' | 'STORNO'; reason?: string | null }, opts?: { daRipiego?: boolean }): Promise<void> {
+    // Comanda viva con «stampa: la cassa» (fase 3): le righe le manda in
+    // produzione la cassa, e qui non si stampano. Stampa il CRM, e segna le
+    // righe come sue, quando la cassa non può (agente giù, ordine fermo) o
+    // quando l'uscita è già sua; lo storno solo delle righe che ha stampato.
+    // L'annullo chiamata resta sempre del CRM: la cassa non ne ha uno.
+    if (opts?.daRipiego) {
+        await segnaStampateDalCrmInTx(client, tenantId, orderId, firedRows.map((r: any) => Number(r.id)));
+    } else if (variation?.label !== 'ANNULLO CHIAMATA') {
+        const scelta = await stampaComandaVivaInTx(client, tenantId, orderId, courseNo, firedRows, variation?.label ?? null);
+        if (scelta) {
+            if (scelta.segna.length > 0) await segnaStampateDalCrmInTx(client, tenantId, orderId, scelta.segna);
+            firedRows = scelta.daStampare;
+            if (firedRows.length === 0) return;
+        }
+    }
     // Per l'asporto il ticket non ha tavolo né coperti: l'intestazione è
     // «Asporto HH:MM» — l'ora di ritiro è ciò che serve alla partita.
     // Il cameriere del ticket è chi ha aperto il tavolo: la partita cerca
@@ -37312,6 +37337,95 @@ async function enqueueCoursePrintsInTx(client: any, tenantId: number, orderId: n
                 ...(others.length > 0 ? { others } : {}),
             }), station.printer, tenantId, kind]
         );
+    }
+}
+
+/** Comanda viva, «stampa: la cassa»: cosa stampa il CRM per queste righe.
+ *  null = l'ordine non va in cassa (o stampa il CRM): si stampa come sempre. */
+async function stampaComandaVivaInTx(
+    client: any, tenantId: number, orderId: number, courseNo: number, rows: any[], label: 'AGGIUNTA' | 'STORNO' | null,
+): Promise<{ daStampare: any[]; segna: number[] } | null> {
+    const q = await client.query(
+        `SELECT pc.comande_stampa, pc.comande_vive_enabled,
+                (pc.comande_vive_dal IS NOT NULL AND o.opened_at >= pc.comande_vive_dal) AS dopo,
+                EXISTS (SELECT 1 FROM passepartout_tavoli pt
+                         WHERE pt.tenant_id = o.tenant_id AND pt.table_id = o.table_id AND pt.confermato) AS abbinato,
+                v.stato AS v_stato
+           FROM orders o
+           JOIN passepartout_config pc ON pc.tenant_id = o.tenant_id
+           LEFT JOIN passepartout_comande_vive v ON v.tenant_id = o.tenant_id AND v.order_id = o.id
+          WHERE o.id = $1 AND o.tenant_id = $2 AND o.order_type = 'DINE_IN'`,
+        [orderId, tenantId]
+    );
+    const r = q.rows[0];
+    if (!r || r.comande_stampa !== 'cassa') return null;
+    // CHIUSA: la comanda in cassa è finita, le righe nuove non ci vanno.
+    const vivo = r.v_stato != null ? r.v_stato !== 'CHIUSA' : (r.comande_vive_enabled && r.dopo && r.abbinato);
+    if (!vivo) return null;
+    const scritte = await client.query(
+        `SELECT rv.chiave, rv.inviata, rv.stampata_crm, oi.course_no
+           FROM passepartout_righe_vive rv
+           LEFT JOIN order_items oi ON oi.id = rv.order_item_id AND oi.tenant_id = rv.tenant_id
+          WHERE rv.tenant_id = $1 AND rv.order_id = $2`,
+        [tenantId, orderId]
+    );
+    const uscita = uscitaPerCassa(courseNo);
+    const uscitaDelCrm = scritte.rows.some((x: any) => x.stampata_crm && !x.inviata && x.course_no != null && uscitaPerCassa(Number(x.course_no)) === uscita);
+    if (label === 'STORNO') {
+        const stampatePrima = new Set(scritte.rows.filter((x: any) => x.stampata_crm).map((x: any) => String(x.chiave)));
+        return { daStampare: rows.filter((x: any) => uscitaDelCrm || stampatePrima.has(`oi:${x.id}`)), segna: [] };
+    }
+    const cassaManda = r.v_stato !== 'FAILED'
+        && passepartoutAgentSupports(tenantId, 'comanda-viva-invio')
+        && !(await nodeOwnsBills(tenantId))
+        && await isFeatureEnabledForTenant(tenantId, 'passepartout');
+    if (cassaManda && !uscitaDelCrm) return { daStampare: [], segna: [] };
+    return { daStampare: rows, segna: rows.map((x: any) => Number(x.id)) };
+}
+
+/** Le righe stampate dal CRM su un ordine in cassa: la loro uscita resta del
+ *  CRM, e la cassa non la manderà (la ristamperebbe). */
+async function segnaStampateDalCrmInTx(client: any, tenantId: number, orderId: number, orderItemIds: number[]): Promise<void> {
+    if (orderItemIds.length === 0) return;
+    await client.query(
+        `INSERT INTO passepartout_comande_vive (tenant_id, order_id, table_id)
+         SELECT o.tenant_id, o.id, o.table_id FROM orders o WHERE o.id = $1 AND o.tenant_id = $2
+         ON CONFLICT (tenant_id, order_id) DO NOTHING`,
+        [orderId, tenantId]
+    );
+    await client.query(
+        `INSERT INTO passepartout_righe_vive (tenant_id, order_id, chiave, order_item_id, stampata_crm)
+         SELECT $1, $2, 'oi:' || x, x, true FROM unnest($3::int[]) AS x
+         ON CONFLICT (tenant_id, order_id, chiave) DO UPDATE SET stampata_crm = true, updated_at = now()`,
+        [tenantId, orderId, orderItemIds]
+    );
+}
+
+/** La stampa di ripiego chiesta dal giro delle comande vive: le righe
+ *  lanciate che la cassa non ha mandato, per uscita. */
+async function stampaComandeViveDalCrm(tenantId: number, orderId: number, orderItemIds: number[]): Promise<void> {
+    if (orderItemIds.length === 0) return;
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const rs = await client.query(
+            `SELECT * FROM order_items
+              WHERE tenant_id = $1 AND order_id = $2 AND id = ANY($3::int[])
+                AND status NOT IN ('DRAFT', 'VOIDED') AND fired_at IS NOT NULL
+              ORDER BY course_no, id FOR UPDATE`,
+            [tenantId, orderId, orderItemIds]
+        );
+        const perUscita = new Map<number, any[]>();
+        for (const row of rs.rows) perUscita.set(Number(row.course_no), [...(perUscita.get(Number(row.course_no)) ?? []), row]);
+        for (const [courseNo, rows] of perUscita) {
+            await enqueueCoursePrintsInTx(client, tenantId, orderId, courseNo, rows, undefined, { daRipiego: true });
+        }
+        await client.query('COMMIT');
+    } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw err;
+    } finally {
+        client.release();
     }
 }
 
@@ -39397,6 +39511,8 @@ app.post('/orders/:id/courses/:n/fire', authenticate, requireAnyPermission('orde
             });
         }
 
+        // Comanda viva, «stampa: la cassa»: l'uscita lanciata la manda la cassa.
+        if (fired.length > 0) avviaComandeVive(req.tenantId!);
         res.json({ order_id: orderId, course_no: courseNo, items: fired });
     } catch (err: any) {
         await client.query('ROLLBACK').catch(() => {});
@@ -39628,6 +39744,8 @@ app.post('/orders/:id/courses/:n/serve', authenticate, requireAnyPermission('ord
         // per tutta la sala, non solo per il cameriere che l'ha servita.
         await markSharedNotificationsRead(req.tenantId!, [`course-${orderId}-${courseNo}`]);
 
+        // L'uscita dopo, lanciata in AUTO_NEXT: con la comanda viva la manda la cassa.
+        if (nextFired != null) avviaComandeVive(req.tenantId!);
         res.json({ order_id: orderId, course_no: courseNo, items: upd.rows, next_fired_course: nextFired });
     } catch (err: any) {
         await client.query('ROLLBACK').catch(() => {});
@@ -44028,6 +44146,7 @@ const startServer = async () => {
                             avvisa: (t, stato) => {
                                 try { socketService?.broadcastToAll(t, 'passepartout:comanda-viva', stato); } catch (_) {}
                             },
+                            stampaDalCrm: stampaComandeViveDalCrm,
                         });
                     }
                     console.log('✅ Passepartout agent bridge attivo su /pp-agent');
