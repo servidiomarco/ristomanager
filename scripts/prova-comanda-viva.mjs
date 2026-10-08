@@ -33,6 +33,8 @@
 //   sposta <tavolo> [--sala S]            la comanda su un altro tavolo
 //   chiudi [tipoPagamento]                proforma pagata (default ESTERNO), senza invio
 // Opzioni: --tavolo 88 --sala TETTOIA --prezzo 1.00 --modo tutte|nuove|parziale --prova (solo XML)
+//          --stato InProduzione|Fatto (prova 7, 08/10: per segnare le righe «mandate» senza
+//          stampare; la cassa lo ignora e le fa nascere «Nuovo»)
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -63,6 +65,9 @@ for (let i = 0; i < argv.length; i++) {
 const [comando, ...args] = posizionali;
 const soloXml = opzioni.prova === 'true';
 const modo = ['parziale', 'nuove'].includes(opzioni.modo) ? opzioni.modo : 'tutte';
+if (opzioni.stato && !['Nuovo', 'InAttesa', 'InProduzione', 'Fatto'].includes(opzioni.stato)) {
+    throw new Error('--stato Nuovo | InAttesa | InProduzione | Fatto');
+}
 
 const stato = fs.existsSync(STATO) ? JSON.parse(fs.readFileSync(STATO, 'utf8')) : {};
 const tavolo = opzioni.tavolo || stato.tavolo || '88';
@@ -149,7 +154,7 @@ function stampa(c, titolo) {
 
 // --- scrittura ----------------------------------------------------------------------
 // Campi di PMBRigaComanda nell'ordine dello schema; si scrivono solo quelli dati.
-const ORDINE_RIGA = ['Articolo', 'DaCancellare', 'Descrizione', 'IdGestionale', 'Pezzi', 'Prezzo', 'TipoEnum',
+const ORDINE_RIGA = ['Articolo', 'DaCancellare', 'Descrizione', 'IdGestionale', 'Pezzi', 'Prezzo', 'StatoEnum', 'TipoEnum',
     'Tool_EseguiInvio', 'Totale', 'Uscita', 'Varianti'];
 function rigaXml(r) {
     return '<c:PMBRigaComanda>' + ORDINE_RIGA.map((k) => {
@@ -186,6 +191,7 @@ const righeEsistenti = (c) => (c?.Righe?.PMBRigaComanda ?? []).map((r) => ({
 const rigaNuova = (codice, uscita, extra = {}) => ({
     Articolo: codice, Pezzi: 1, Tool_EseguiInvio: 'false', Uscita: uscita,
     ...(opzioni.prezzo ? { Prezzo: Number(opzioni.prezzo), Totale: Number(opzioni.prezzo) } : {}),
+    ...(opzioni.stato ? { StatoEnum: opzioni.stato } : {}),
     ...extra,
 });
 
