@@ -172,7 +172,8 @@
   "card": {
     "adminsOnly": "Solo gli amministratori possono modificare questa impostazione.",
     "save": "Salva modifiche",
-    "errLoad": "Errore nel caricamento delle impostazioni"
+    "errLoad": "Errore nel caricamento delle impostazioni",
+    "loading": "Caricamento…"
   },
   "dep": {
     "badGuests": "Il numero di coperti deve essere un intero tra 1 e 100",
@@ -200,6 +201,25 @@
     "msgDeclined": "Prenotazione non confermata (stessi testi del rifiuto manuale)",
     "msgNone": "Nessun messaggio",
     "msgHint": "Parte sul canale previsto dai Canali di risposta della fonte (WhatsApp con ripiego SMS, email)."
+  },
+  "promOspite": {
+    "title": "Promemoria automatico",
+    "intro": "Parte da solo prima di ogni prenotazione confermata. Salta chi ha prenotato da meno di 12 ore e chi ha già avuto il promemoria a mano.",
+    "switchOff": "Disattiva il promemoria automatico",
+    "switchOn": "Attiva il promemoria automatico",
+    "when": "Quando",
+    "dayBefore": "Il giorno prima",
+    "hoursBefore": "Ore prima",
+    "at": "Alle",
+    "atHint": "Tra le 9:00 e le 20:00, sull'ora del ristorante.",
+    "howMany": "Quante ore prima",
+    "hoursUnit": "ore prima dell'arrivo",
+    "hoursHint": "Da 2 a 48. Fra le 21 e le 9 non parte niente: il messaggio aspetta la mattina.",
+    "channelHint": "Parte sul canale previsto dai Canali di risposta della fonte (WhatsApp con ripiego SMS, email). Se un invio non riesce arriva un avviso a chi gestisce le prenotazioni.",
+    "badHours": "Le ore devono essere un intero tra 2 e 48",
+    "badTime": "L'orario deve stare tra le 9:00 e le 20:00",
+    "saved": "Promemoria all'ospite aggiornato",
+    "errSave": "Errore aggiornamento del promemoria"
   },
   "bl": {
     "source": {
