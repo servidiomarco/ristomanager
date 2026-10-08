@@ -98,7 +98,7 @@ Gli invii in produzione si leggono nel database della cassa (`Comanda.numeroInvi
 | 5b | **Riuscito** | `DaCancellare` su una riga già mandata, scrivendo solo quella: la riga resta in comanda come «Cancellato» e la cucina la vede subito come storno («-1 Tagliatelle Silana», con le sue varianti), **senza un nuovo invio**. Alla chiusura la riga stornata non entra nel conto. Un secondo `invia` della stessa uscita non serve: non è stato provato perché rischia di rimandare le altre righe |
 | 5c | Riuscito | `Pezzi` su una riga già scritta, mandando solo quella: la quantità cambia sul posto, stesso numero, totale ricalcolato |
 | 6 | Ignorato | `Tavolo` diverso sulla stessa comanda: resta sul tavolo di prima, senza errore |
-| 7 | In parte | **`StatoEnum` ignorato:** la riga scritta come «InProduzione» nasce «Nuovo». Il CRM non può segnare una riga «mandata» senza mandarla. **Chiusura:** dallo schermo della cassa fino al pagamento non parte niente; la chiusura vera dallo schermo non è stata fatta, perché chiedeva lo scontrino fiscale. La chiusura proforma via `ContoComanda` senza invio (conto 82611) non manda niente, neanche con due righe mai inviate |
+| 7 | **Riuscito** (demo, 08/10 sera) | **`StatoEnum` ignorato:** la riga scritta come «InProduzione» nasce «Nuovo», quindi il CRM non può segnare una riga «mandata» senza mandarla. **Chiusura dallo schermo della cassa** (provata sulla demo, che non ha il registratore): la cassa manda in produzione le righe del CRM mai mandate, senza chiedere niente, poi segna tutto «Fatto» e chiude. Anche un «Invia» premuto in cassa per una riga sua manda le righe del CRM non ancora partite. La chiusura proforma via `ContoComanda` senza invio (conto 82611, Frantoio) invece non manda niente |
 | 8 | **Riuscito** | Sulla comanda aperta dal palmare (coperto e acqua), il modo «nuove» aggiunge la tagliatella del CRM senza toccare le righe del palmare, e il palmare la vede. Con il palmare **dentro il tavolo** il CRM scrive lo stesso (birra), e quando il palmare salva un'altra acqua la birra del CRM resta: il palmare aggiunge, non riscrive la comanda |
 | 9 | Riuscito | `ContoComanda` proforma ESTERNO senza invio: conto 82610 pagato, 52 €, nessun invio in produzione |
 
@@ -113,5 +113,28 @@ Gli invii in produzione si leggono nel database della cassa (`Comanda.numeroInvi
 - **Varianti** (3, 4): nel campo `Varianti`, strutturato: a codice quando la variante del CRM ha un articolo variante in cassa, a testo libero altrimenti. Arrivano al monitor della cucina. Una riga già scritta si rimanda senza `Varianti`, che restano.
 - **Stampa in cucina dalla cassa** (4): `InviaProduzioneComanda` con le sole uscite lanciate. Le uscite dopo restano «InAttesa».
 - **Cambio tavolo** (6): ripiego. Un ordine già scritto in cassa si sposta in cassa, e il CRM rifiuta lo spostamento con «sposta il tavolo in cassa».
-- **Stampa dal CRM** (7): una riga non si può segnare «mandata» senza mandarla, e la chiusura dallo schermo della cassa con righe mai mandate non è provata fino in fondo. L'opzione «stampa: il CRM» resta possibile solo se il conto lo chiude il CRM (`ContoComanda` senza invio). La scheda deve avvisare che una chiusura o un «Invia» premuti in cassa possono mandare in produzione le righe del CRM una seconda volta.
+- **Stampa dal CRM** (7): una riga non si può segnare «mandata» senza mandarla, e la cassa manda in produzione le righe del CRM mai partite sia alla chiusura dallo schermo sia a ogni «Invia» premuto in cassa. Quindi **«stampa: il CRM» si può scegliere solo con «conto: il CRM»**, che chiude con `ContoComanda` senza invio, e la scheda lo impedisce, non solo lo segnala. Con «stampa: la cassa» il comportamento della cassa è quello giusto: il CRM non stampa i suoi foglietti e fa mandare le uscite dalla cassa.
 - **Tavolo già aperto** (8): confermata la scelta dell'utente: un tavolo, una comanda. Il CRM aggiunge le sue righe alla comanda del palmare.
+
+## Collaudo della fase 2 sulla demo (08/10/2026 sera)
+
+Sulla demo Passepartout del rivenditore (VM di prova, Menu 2026C1), collegata al ristorante «Demo Integrazione Passepartout» con l'installatore. Agente `5717733`, stampa e conto «la cassa». Ordini presi nel CRM con «Entra».
+
+| Prova | Esito |
+|---|---|
+| Ordine su un tavolo libero (SOTTO 3) | Comanda nuova 1410 con la nota `sympotia-ordine:336`, righe del CRM e coperti, nessun invio |
+| Ordine su un tavolo con una comanda vecchia aperta (SOTTO 2, comanda 1405 in stato 0 dei dati d'esempio) | Il giro prova ad aggiungere alla comanda trovata e Passepartout va in errore interno: `NullReferenceException` in `PagamentoFBO.IsCancellabile`, lo stesso della chiusura dopo un preconto al Frantoio. L'ordine resta in attesa e ritenta |
+| Spostamento nel CRM di quell'ordine, non ancora in cassa, su SOTTO 3 | Permesso; la comanda nasce sul tavolo nuovo |
+| Riga aggiunta in cassa (tisana) e «Invia» dalla cassa | La cassa manda in produzione anche tutte le righe del CRM non ancora partite. Nel CRM la tisana non si vede: arriva con la fase 5 (righe della cassa nel pad) e nel conto con la fase 4 |
+| Riga nuova e storno dal CRM | In cassa arrivano solo la riga nuova e lo storno («Cancellato»); le altre righe non si toccano |
+| Tavolo aperto nel Menu Client mentre il CRM scrive | Al salvataggio la cassa avvisa che un altro utente ha modificato la comanda e che le modifiche della cassa non salvate andranno perse. Il palmare Passepartout invece aggiungeva senza perdere niente (passo 8) |
+| Chiusura del conto dallo schermo della cassa (passo 7) | La pasta del CRM mai mandata parte in produzione alla chiusura (il monitor della cucina suona), poi tutte le righe diventano «Fatto» e la comanda si chiude. Conto 204 da 20,90 €: lo storno è rispettato |
+| L'ordine nel CRM dopo la chiusura in cassa | Resta aperto: il CRM non si accorge che la cassa ha chiuso la comanda |
+
+**Cosa aggiunge al piano:**
+- **Fase 3:** con «stampa: la cassa» il CRM non stampa i suoi foglietti e fa mandare le uscite dalla cassa. «Stampa: il CRM» si può scegliere solo con «conto: il CRM».
+- **Fase 4:** quando la cassa chiude la comanda di un ordine del CRM, l'ordine si chiude col conto della cassa (righe della cassa comprese, come la tisana).
+- **Scheda e istruzioni per il personale:**
+  - non tenere aperto in cassa un tavolo che riceve ordini dal CRM;
+  - una comanda rimasta aperta in cassa su un tavolo blocca le righe del CRM su quel tavolo finché non si chiude o si sposta l'ordine.
+
