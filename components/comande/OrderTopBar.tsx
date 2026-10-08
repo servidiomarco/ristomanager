@@ -63,6 +63,9 @@ interface OrderTopBarProps {
    *  Catalogo chiuso: lista, bottoni 3 per riga, bottoni 4 per riga. */
   catView?: 'list' | 'grid3' | 'grid4';
   onCatView?: (v: 'list' | 'grid3' | 'grid4') => void;
+  /** Dove sta l'ordine nella cassa Passepartout (CassaPill), accanto a chi
+   *  è seduto; null per gli ordini che non vanno in cassa. */
+  cassa?: React.ReactNode;
 }
 
 const stepper =
@@ -73,7 +76,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
   billDisabled, clearDisabled, wide,
   onSearch, densityCompact, onToggleDensity, soundOn, onToggleSound,
   onBack, onCovers, onBill, onDiscount, onTransfer, onClearDrafts, onDeleteOrder,
-  paged, catView = 'list', onCatView, showBack = true, inBar = false,
+  paged, catView = 'list', onCatView, showBack = true, inBar = false, cassa,
 }) => {
   const { t } = useTranslation('comande', { useSuspense: false });
   const [menuOpen, setMenuOpen] = useState(false);
@@ -333,6 +336,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
               {euro(totalCents)}
             </span>
           </div>
+          {cassa}
           <div className="ml-auto flex flex-shrink-0 items-center gap-2">
             <button
               type="button"
@@ -443,6 +447,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
             <span className="flex-shrink-0 font-semibold tabular-nums text-[var(--ds-text-primary)]">
               {euro(totalCents)}
             </span>
+            {cassa && <span className="ml-1 self-center">{cassa}</span>}
           </div>
         </div>
         {touchMenu}
@@ -460,6 +465,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
         <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-2.5 shadow-[var(--ds-shadow-card)]">
           <div className="flex items-center gap-1">
             <div className="min-w-0 flex-1">{coversControl}</div>
+            {cassa}
             {onSearch && (
               <button
                 type="button"
@@ -502,8 +508,11 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
           </button>
           )}
           <div className="min-w-0 flex-1">
-            <div className="truncate text-[20px] font-semibold tracking-[-0.02em] text-[var(--ds-text-primary)]">
-              Tav. {tableName}
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="truncate text-[20px] font-semibold tracking-[-0.02em] text-[var(--ds-text-primary)]">
+                Tav. {tableName}
+              </span>
+              {cassa}
             </div>
             <div className="truncate text-[13px] tabular-nums text-[var(--ds-text-muted)]">
               {guestName ? `${guestName} · ` : ''}

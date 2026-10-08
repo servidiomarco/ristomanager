@@ -218,6 +218,10 @@ export const DOMAIN_EVENTS: Record<string, DomainEventSpec> = {
     // I tavoli aperti nella cassa Passepartout: una proiezione della cassa
     // riletta ogni minuto, non un fatto del CRM.
     'passepartout:tavoli-aperti': spec('transient'),
+    // Lo stato di un ordine nella comanda in cassa (passepartoutComandeVive):
+    // l'etichetta del palmare; la verità resta passepartout_comande_vive,
+    // riletta con l'ordine.
+    'passepartout:comanda-viva': spec('transient'),
 };
 
 export const eventSpec = (type: string): DomainEventSpec | undefined => DOMAIN_EVENTS[type];

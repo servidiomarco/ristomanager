@@ -53,6 +53,10 @@ export type PassepartoutOp =
      *  senza invio in produzione, chiusa come proforma col tipo esterno
      *  (capacità 'specchio'). */
     | 'specchio'
+    /** Le righe di un ordine del CRM nella comanda in cassa del suo tavolo
+     *  (capacità 'comanda-viva'): scrive solo le righe da aggiungere,
+     *  cambiare o togliere, e restituisce gli id delle righe in cassa. */
+    | 'comandaViva'
     /** Verifica della cassa per la sezione, in sola lettura (capacità
      *  'diagnosi'): versione, tempi, tipi di pagamento, sale, comande aperte. */
     | 'diagnosi'

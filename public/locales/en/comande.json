@@ -319,5 +319,12 @@
     "order": "Order"
   },
   "arrived": "Arrived",
-  "releaseArrived": "Release: arrived"
+  "releaseArrived": "Release: arrived",
+  "cassa": {
+    "scritta": "On the till",
+    "scrittaTitolo": "The order is in the table's order on the till",
+    "inAttesa": "Going to the till",
+    "errore": "Till error",
+    "erroreDettaglio": "Passepartout till: {{errore}}"
+  }
 }

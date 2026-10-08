@@ -90,6 +90,7 @@ import {
     startPassepartoutTavoliApertiSync, elencoTavoliAperti, aggiornaTavoliAperti, comandaApertaSuiTavoli,
 } from './services/passepartoutTavoliAperti.js';
 import { accodaSpecchio, avviaSpecchio, startPassepartoutSpecchioSync } from './services/passepartoutSpecchio.js';
+import { avviaComandeVive, riprovaComandaViva, startPassepartoutComandeVive, statiComandeVive } from './services/passepartoutComandeVive.js';
 import {
     SUPPORT_CATEGORIES, SUPPORT_STATUSES, SUPPORT_SUBJECT_MAX, SUPPORT_BODY_MAX, SUPPORT_ATTACHMENTS_MAX, SUPPORT_RATING_COMMENT_MAX,
     sanitizeClientContext, supportTenantTag, supportPlatformTag,
@@ -4148,7 +4149,7 @@ app.put('/passepartout/config', authenticate, requirePermission('settings:full')
 // sezione lo fa da sé: una lista di voci con esito e dati, che l'interfaccia
 // traduce (pp.verifica.<voce>.<esito>). L'ultima resta in passepartout_config.
 const VERSIONI_PASSEPARTOUT_PROVATE = ['2026C1'];
-const CAPACITA_AGENTE_ATTESE = ['chiudi-riprendi', 'prenotazioni', 'conti', 'tavoli-aperti', 'chiudi-preconto', 'preconto', 'specchio', 'diagnosi', 'sconto-cassa'];
+const CAPACITA_AGENTE_ATTESE = ['chiudi-riprendi', 'prenotazioni', 'conti', 'tavoli-aperti', 'chiudi-preconto', 'preconto', 'specchio', 'diagnosi', 'sconto-cassa', 'comanda-viva'];
 type EsitoVerifica = 'ok' | 'attenzione' | 'errore' | 'info';
 interface VoceVerifica { voce: string; esito: EsitoVerifica; dati?: Record<string, unknown> }
 
@@ -5419,11 +5420,19 @@ app.put('/passepartout/comande-vive/config', authenticate, requirePermission('se
                 return res.status(409).json({ error: 'agente_da_aggiornare', message: 'L\'agente del PC della cassa non sa ancora scrivere le comande: va aggiornato.' });
             }
         }
+        // comande_vive_dal: vanno in cassa solo gli ordini aperti da quando è
+        // acceso. Accendendo a servizio iniziato, i tavoli già battuti in
+        // cassa non si raddoppiano.
         await queryWithRetry(
-            `INSERT INTO passepartout_config (tenant_id, comande_vive_enabled, comande_stampa, comande_conto, updated_at)
-             VALUES ($1, $2, $3, $4, now())
+            `INSERT INTO passepartout_config (tenant_id, comande_vive_enabled, comande_stampa, comande_conto, comande_vive_dal, updated_at)
+             VALUES ($1, $2, $3, $4, CASE WHEN $2 THEN now() END, now())
              ON CONFLICT (tenant_id) DO UPDATE SET
-                comande_vive_enabled = $2, comande_stampa = $3, comande_conto = $4, updated_at = now()`,
+                comande_vive_enabled = $2, comande_stampa = $3, comande_conto = $4,
+                comande_vive_dal = CASE
+                    WHEN NOT $2 THEN NULL
+                    WHEN passepartout_config.comande_vive_enabled THEN passepartout_config.comande_vive_dal
+                    ELSE now() END,
+                updated_at = now()`,
             [tenantId, enabled, stampa, conto]
         );
         if (req.user) {
@@ -5437,6 +5446,32 @@ app.put('/passepartout/comande-vive/config', authenticate, requirePermission('se
     } catch (err: any) {
         console.error('PUT /passepartout/comande-vive/config error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Lo stato in cassa degli ordini (in cassa, in attesa, errore), per
+// l'etichetta nel palmare; poi arriva da 'passepartout:comanda-viva'.
+app.get('/passepartout/comande-vive/ordini', authenticate, requirePermission('orders:view'), async (req, res) => {
+    try {
+        const ids = String(req.query.ids ?? '').split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 200);
+        res.json({ ordini: await statiComandeVive(req.tenantId!, ids) });
+    } catch (err: any) {
+        console.error('GET /passepartout/comande-vive/ordini error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// «Riprova» su un ordine che il giro ha fermato (FAILED).
+app.post('/passepartout/comande-vive/ordini/:orderId/riprova', authenticate, requirePermission('orders:take'), async (req, res) => {
+    try {
+        const orderId = Number(req.params.orderId);
+        if (!Number.isInteger(orderId)) return res.status(400).json({ error: 'ordine_non_valido' });
+        if (!(await riprovaComandaViva(req.tenantId!, orderId))) return res.status(409).json({ error: 'non_fermo' });
+        avviaComandeVive(req.tenantId!);
+        res.json({ ok: true });
+    } catch (err: any) {
+        console.error('POST /passepartout/comande-vive/ordini/:orderId/riprova error:', err);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
@@ -36641,12 +36676,26 @@ async function loadOrderView(tenantId: number, orderId: number): Promise<any | n
     const order = o.rows[0];
     const total_cents = applyDiscount(subtotal_cents, order.discount_type, order.discount_value);
 
+    // Lo stato dell'ordine nella comanda in cassa Passepartout, se ci va
+    // (passepartoutComandeVive): l'etichetta del palmare. Fuori da `order`,
+    // che viaggia anche negli eventi e nelle repliche come riga della tabella.
+    let comanda_viva: any = null;
+    try {
+        const v = await queryWithRetry(
+            `SELECT stato, error, pp_comanda_id, palmare FROM passepartout_comande_vive
+              WHERE tenant_id = $1 AND order_id = $2`,
+            [tenantId, orderId]
+        );
+        comanda_viva = v.rows[0] ?? null;
+    } catch (_) { /* il nodo di un'installazione vecchia: niente etichetta */ }
+
     return {
         order, items, courses,
         subtotal_cents,
         discount_cents: subtotal_cents - total_cents,
         total_cents,
         voided_cents,
+        comanda_viva,
     };
 }
 
@@ -36927,6 +36976,7 @@ app.delete('/orders/:id', authenticate, requirePermission('orders:take'), async 
             { order_id: Number(id) }, outboxContext(req));
         await client.query('COMMIT');
         outboxKick();
+        avviaComandeVive(req.tenantId!);
         client.release();
         await closeOrderCourseNotifications(req.tenantId!, id);
 
@@ -37802,6 +37852,7 @@ app.post('/orders/items/:id/weight', authenticate, requireAnyPermission('orders:
         await syncSystemLines(req.tenantId!, row.order_id);
         const view = await loadOrderView(req.tenantId!, row.order_id);
         const sync = await resyncBillForOrder(req.tenantId!, row.order_id);
+        avviaComandeVive(req.tenantId!);
         try {
             socketService?.broadcastToAll(req.tenantId!, 'order:updated', view.order);
             // Il monitor della partita vede il peso nuovo subito, non al poll.
@@ -37971,6 +38022,7 @@ app.post('/orders/:id/send', authenticate, requirePermission('orders:take'), asy
             }
         } catch (_) {}
         outboxKick();
+        avviaComandeVive(req.tenantId!);
 
         for (const c of fired) {
             await broadcastCourseReadyIfAutoComplete(req.tenantId!, orderId, c, firedRowsByCourse.get(c) ?? []);
@@ -38050,6 +38102,7 @@ app.post('/orders/:id/courses/:n/recall', authenticate, requirePermission('order
             socketService?.broadcastToAll(req.tenantId!, 'course:recalled', { order_id: orderId, course_no: courseNo });
         } catch (_) {}
         outboxKick();
+        avviaComandeVive(req.tenantId!);
         res.json(view);
     } catch (err: any) {
         console.error('POST /orders/:id/courses/:n/recall error:', err);
@@ -39612,6 +39665,7 @@ app.patch('/orders/:id', authenticate, requirePermission('orders:take'), async (
         if (req.body?.covers != null) {
             await syncSystemLines(req.tenantId!, id);
             await resyncBillForOrder(req.tenantId!, id);
+            avviaComandeVive(req.tenantId!);
         }
         // I coperti viaggiano anche sul conto: è il divisore dello split equo.
         if (upd.rows[0].table_bill_id && req.body?.covers != null) {
@@ -39705,6 +39759,7 @@ app.post('/orders/:id/close', authenticate, requirePermission('orders:take'), as
             await client.query('COMMIT');
             client.release();
             outboxKick();
+            avviaComandeVive(req.tenantId!);
             await closeOrderCourseNotifications(req.tenantId!, orderId);
             return res.json({
                 order_id: orderId,
@@ -39777,6 +39832,7 @@ app.post('/orders/:id/close', authenticate, requirePermission('orders:take'), as
             socketService?.broadcastToAll(req.tenantId!, 'bill:updated', synced.bill);
         } catch (_) {}
         outboxKick();
+        avviaComandeVive(req.tenantId!);
         // Comanda chiusa: un'uscita «pronta» non ancora servita non ha più
         // un tavolo a cui arrivare.
         await closeOrderCourseNotifications(req.tenantId!, orderId);
@@ -40199,6 +40255,7 @@ app.post('/orders/items/:id/void', authenticate, requirePermission('orders:void'
         await syncSystemLines(req.tenantId!, item.order_id);
         const view = await loadOrderView(req.tenantId!, item.order_id);
         const sync = await resyncBillForOrder(req.tenantId!, item.order_id);
+        avviaComandeVive(req.tenantId!);
 
         try {
             // La cucina deve vedere sparire la riga dal monitor: continuare a
@@ -40334,6 +40391,27 @@ app.post('/orders/:id/transfer', authenticate, requirePermission('orders:take'),
         if (order.table_id === targetId) {
             await client.query('ROLLBACK'); client.release();
             return res.status(409).json({ error: 'La comanda è già su questo tavolo' });
+        }
+        // Un ordine già scritto nella comanda in cassa del suo tavolo: la
+        // cassa non cambia il tavolo a una comanda dal web service (prova 6
+        // del 07/10, il campo Tavolo viene ignorato), e spostarlo solo nel
+        // CRM lascerebbe le righe sul tavolo di prima.
+        const inCassa = await client.query(
+            `SELECT 1 FROM passepartout_comande_vive v
+              WHERE v.tenant_id = $1 AND v.order_id = $2 AND v.stato <> 'CHIUSA'
+                AND (v.pp_comanda_id IS NOT NULL
+                     OR EXISTS (SELECT 1 FROM passepartout_righe_vive r
+                                 WHERE r.tenant_id = v.tenant_id AND r.order_id = v.order_id))`,
+            [req.tenantId!, id]
+        );
+        if (inCassa.rows.length > 0) {
+            await client.query('ROLLBACK'); client.release();
+            // `error` è il testo che il palmare mostra, come nelle altre
+            // risposte delle comande.
+            return res.status(409).json({
+                error: 'Questa comanda è già nella cassa Passepartout, che non la sposta da qui: sposta il tavolo in cassa.',
+                code: 'comanda_in_cassa',
+            });
         }
 
         const tbl = await client.query(`SELECT id, name FROM tables WHERE id = $1 AND tenant_id = $2`, [targetId, req.tenantId!]);
@@ -43527,6 +43605,13 @@ const startServer = async () => {
                         // I conti del CRM copiati in cassa (comanda specchio).
                         startPassepartoutSpecchioSync({
                             tipoPagamentoEsterno: async (t) => (await getPassepartoutChiusuraConfig(t))?.tipoPagamento ?? null,
+                        });
+                        // Gli ordini del CRM nella comanda in cassa del tavolo vero.
+                        startPassepartoutComandeVive({
+                            nodeOwnsBills,
+                            avvisa: (t, stato) => {
+                                try { socketService?.broadcastToAll(t, 'passepartout:comanda-viva', stato); } catch (_) {}
+                            },
                         });
                     }
                     console.log('✅ Passepartout agent bridge attivo su /pp-agent');

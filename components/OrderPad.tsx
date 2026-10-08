@@ -6,7 +6,7 @@ import {
   ArrowLeft, ArrowRight, ChevronDown, Loader2, Trash2, TriangleAlert, Users, X,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
-import type { Dish, RestaurantMenu, Reservation, Room, Table, TableMerge, OrderWithItems, OrderItem } from '../types';
+import type { Dish, RestaurantMenu, Reservation, Room, Table, TableMerge, OrderWithItems, OrderItem, ComandaVivaStato } from '../types';
 import { Shift } from '../types';
 import { datePart } from '../utils/displayTime';
 import { getTableMerges } from '../services/apiService';
@@ -35,6 +35,7 @@ import {
 import { VariantSheet } from './VariantSheet';
 import { TableGrid } from './comande/TableGrid';
 import { OrderTopBar } from './comande/OrderTopBar';
+import { CassaPill } from './comande/CassaPill';
 import { DishBrowser } from './comande/DishBrowser';
 import { DishSearchSheet } from './comande/DishSearchSheet';
 import { CourseChips } from './comande/CourseChips';
@@ -1527,6 +1528,22 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
   const openOrderId = order?.order.id ?? null;
   useEffect(() => { openOrderIdRef.current = openOrderId; }, [openOrderId]);
 
+  // L'ordine nella comanda in cassa Passepartout: l'etichetta si muove con
+  // il giro (passepartoutComandeVive), e un ordine fermo per un errore lo
+  // dice nella riga d'errore, con il motivo.
+  useEffect(() => {
+    const socket = socketClient.getSocket();
+    if (!socket) return;
+    const onCassa = (p: ComandaVivaStato & { order_id?: number }) => {
+      if (p?.order_id == null || p.order_id !== openOrderIdRef.current) return;
+      const stato: ComandaVivaStato = { stato: p.stato, error: p.error ?? null, pp_comanda_id: p.pp_comanda_id ?? null, palmare: p.palmare === true };
+      setOrder(prev => (prev && prev.order.id === p.order_id ? { ...prev, comanda_viva: stato } : prev));
+      if (stato.stato === 'FAILED' && stato.error) setError(t('cassa.erroreDettaglio', { errore: stato.error }));
+    };
+    socket.on('passepartout:comanda-viva', onCassa);
+    return () => { socket.off('passepartout:comanda-viva', onCassa); };
+  }, [t]);
+
   // Presenza sul tavolo: all'ingresso ci si annuncia e l'ack dice chi c'è
   // già; le variazioni arrivano via orderpad:presence. Sul reconnect ci si
   // riannuncia (il server ha perso la presenza col vecchio socket), e
@@ -2014,6 +2031,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ isInitialLoading = false, di
       onDeleteOrder={hasPermission('orders:void') && order.order.table_bill_id == null
         ? () => setDeleteOrderOpen(true)
         : undefined}
+      cassa={<CassaPill stato={order.comanda_viva} />}
     />
   );
 

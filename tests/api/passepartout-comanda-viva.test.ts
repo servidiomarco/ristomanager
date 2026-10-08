@@ -1,0 +1,443 @@
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import http from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { Client } from 'pg';
+import { io as ioClient, type Socket } from 'socket.io-client';
+import { api, bearer, ownerToken } from './helpers';
+import { differenza, righeDesiderate, uscitaPerCassa, variantiPerCassa } from '../../services/passepartoutComandeVive';
+import { PassepartoutError, scriviComandaViva, type EsitoComandaViva, type MemoriaComandaViva } from '../../services/passepartoutService';
+
+// Comanda viva, fase 2: gli ordini del CRM nella comanda in cassa del
+// tavolo vero. Due livelli: le righe (cosa va in cassa e la differenza con
+// quello già scritto), e il percorso intero — rotte delle comande, giro sul
+// server, un agente finto che usa la scrittura vera dell'agente, e una cassa
+// SOAP finta che ricorda comande e righe come la cassa delle prove del 07 e
+// 08/10 (docs/passepartout-comanda-viva-prove.md).
+
+const AGENT_TOKEN = 'test-pp-agent-token';
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+describe('righe della comanda viva', () => {
+    const riga = (over: Record<string, unknown>) => ({
+        id: 1, line_kind: 'DISH', qty: 1, unit_price_cents: 1000, modifiers: null, note: null,
+        course_no: 1, name_snapshot: 'Piatto', weight_grams: null, external_ref: null, ...over,
+    });
+
+    it('uscite: le portate restano, il Bar va sulla 1 come in cassa, i Dolci dopo', () => {
+        expect(uscitaPerCassa(1)).toBe(1);
+        expect(uscitaPerCassa(3)).toBe(3);
+        expect(uscitaPerCassa(99)).toBe(1);
+        expect(uscitaPerCassa(98)).toBe(7);
+    });
+
+    it('varianti firmate e nota come varianti libere', () => {
+        expect(variantiPerCassa([{ name: '+ Bufala' }, { name: 'Senza cipolla' }, { name: 'Molta Nduja' }, { name: 'Media' }], 'ben cotta'))
+            .toEqual([
+                { descrizione: 'Bufala', inAggiunta: true },
+                { descrizione: 'cipolla', inAggiunta: false },
+                { descrizione: 'Molta Nduja', inAggiunta: true },
+                { descrizione: 'Media', inAggiunta: true },
+                { descrizione: 'ben cotta', inAggiunta: true },
+            ]);
+    });
+
+    it('il prezzo delle varianti sta nella riga, l\'articolo viene dal piatto importato', () => {
+        const [d] = righeDesiderate([riga({
+            id: 7, qty: 2, unit_price_cents: 1300, modifiers: [{ name: '+ Bufala', price_delta_cents: 200 }],
+            external_ref: 'pp:articolo:11', course_no: 2,
+        })], 0, false);
+        expect(d).toMatchObject({ chiave: 'oi:7', idArticolo: 11, pezzi: 2, prezzoCents: 1500, uscita: 2 });
+    });
+
+    it('coperto: quello del CRM, o a zero coi coperti; mai sul tavolo del palmare', () => {
+        const conCoperto = righeDesiderate([riga({ id: 2, line_kind: 'COVER', qty: 3, unit_price_cents: 250, name_snapshot: 'Coperto' })], 3, false);
+        expect(conCoperto[0]).toMatchObject({ chiave: 'coperto', coperto: true, pezzi: 3, prezzoCents: 250, soloComandaNostra: true });
+        const senza = righeDesiderate([riga({ id: 3 })], 4, false);
+        expect(senza[0]).toMatchObject({ chiave: 'coperto', pezzi: 4, prezzoCents: 0 });
+        const palmare = righeDesiderate([
+            riga({ id: 2, line_kind: 'COVER', qty: 3, unit_price_cents: 250 }),
+            riga({ id: 4, line_kind: 'SERVICE', unit_price_cents: 300, name_snapshot: 'Servizio 10%' }),
+            riga({ id: 5 }),
+        ], 3, true);
+        expect(palmare.map((r) => r.chiave)).toEqual(['oi:5']);
+    });
+
+    it('la differenza: nuove, cambiate nel CRM, da togliere; le sparite in cassa no', () => {
+        const desiderate = righeDesiderate([
+            riga({ id: 1, qty: 2 }), riga({ id: 2 }), riga({ id: 3, unit_price_cents: 900 }), riga({ id: 6 }),
+        ], 0, false);
+        const out = differenza(desiderate, [
+            { chiave: 'oi:1', pp_riga_id: 101, pezzi_scritti: 1, prezzo_cents_scritto: 1000, sparita: false },
+            { chiave: 'oi:2', pp_riga_id: 102, pezzi_scritti: 1, prezzo_cents_scritto: 1000, sparita: false },
+            { chiave: 'oi:3', pp_riga_id: 103, pezzi_scritti: 1, prezzo_cents_scritto: 1000, sparita: false },
+            { chiave: 'oi:4', pp_riga_id: 104, pezzi_scritti: 1, prezzo_cents_scritto: 1000, sparita: false },
+            { chiave: 'oi:5', pp_riga_id: 105, pezzi_scritti: 1, prezzo_cents_scritto: 1000, sparita: true },
+            { chiave: 'oi:6', pp_riga_id: 106, pezzi_scritti: 1, prezzo_cents_scritto: 1000, sparita: true },
+        ]);
+        const per = Object.fromEntries(out.map((r) => [r.chiave, r]));
+        expect(Object.keys(per).sort()).toEqual(['oi:1', 'oi:3', 'oi:4']);
+        expect(per['oi:1']).toMatchObject({ idRiga: 101, pezzi: 2 });
+        expect(per['oi:3']).toMatchObject({ idRiga: 103, prezzoCents: 900 });
+        expect(per['oi:4']).toMatchObject({ idRiga: 104, cancella: true });
+    });
+});
+
+// ---------------------------------------------------------------------------
+// La cassa finta: comande e righe in memoria, PutComanda come la cassa vera
+// (righe con id = cambiate, senza id = aggiunte, DaCancellare = tolte se mai
+// mandate, «Cancellato» se mandate).
+// ---------------------------------------------------------------------------
+interface RigaFinta { id: number; articolo: string; descrizione: string; pezzi: number; prezzo: number; uscita: number; stato: string; tipo: string; varianti: string[] }
+interface ComandaFinta { id: number; note: string; sala: string; tavolo: string; coperti: number; pagata: boolean; righe: RigaFinta[] }
+
+const CATALOGO = [
+    { id: 1, codice: 'Coperti', descrizione: 'Coperti', prezzo: 3 },
+    { id: 11, codice: 'Tagliatelle Silana', descrizione: 'Tagliatelle Silana', prezzo: 13 },
+    { id: 500, codice: 'VARIE', descrizione: 'Varie', prezzo: 0 },
+];
+
+function cassaFinta() {
+    const comande = new Map<number, ComandaFinta>();
+    let prossima = 80_000;
+    let prossimaRiga = 900_000;
+    const put: string[] = [];
+    const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const un = (s: string) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+    const campo = (xml: string, nome: string) => {
+        const m = new RegExp(`<c:${nome}>([^<]*)</c:${nome}>`).exec(xml);
+        return m ? un(m[1]) : null;
+    };
+    const comandaXml = (c: ComandaFinta) =>
+        `<a:Coperti>${c.coperti}</a:Coperti><a:IdGestionale>${c.id}</a:IdGestionale><a:IsPagato>${c.pagata}</a:IsPagato>` +
+        `<a:Note>${esc(c.note)}</a:Note><a:Righe>` + c.righe.map((r) =>
+            `<a:PMBRigaComanda><a:Articolo>${esc(r.articolo)}</a:Articolo><a:Descrizione>${esc(r.descrizione)}</a:Descrizione>` +
+            `<a:IdGestionale>${r.id}</a:IdGestionale><a:Pezzi>${r.pezzi}</a:Pezzi><a:Prezzo>${r.prezzo.toFixed(4)}</a:Prezzo>` +
+            `<a:StatoEnum>${r.stato}</a:StatoEnum><a:TipoEnum>${r.tipo}</a:TipoEnum><a:Totale>${(r.prezzo * r.pezzi).toFixed(4)}</a:Totale>` +
+            `<a:Uscita>${r.uscita}</a:Uscita></a:PMBRigaComanda>`).join('') +
+        `</a:Righe><a:Sala>${esc(c.sala)}</a:Sala><a:Tavolo>${esc(c.tavolo)}</a:Tavolo>`;
+
+    function putComanda(body: string): ComandaFinta {
+        put.push(body);
+        const corpo = /<comanda[^>]*>([\s\S]*)<\/comanda>/.exec(body)![1];
+        const [testa, resto = ''] = corpo.split('<c:Righe>');
+        const [righeXml, coda = ''] = resto.split('</c:Righe>');
+        const id = campo(testa, 'IdGestionale');
+        let c: ComandaFinta;
+        if (id) {
+            c = comande.get(Number(id))!;
+        } else {
+            c = {
+                id: ++prossima, note: campo(testa, 'Note') ?? '', sala: campo(coda, 'Sala') ?? '', tavolo: campo(coda, 'Tavolo') ?? '',
+                coperti: Number(campo(testa, 'Coperti') ?? 0), pagata: false, righe: [],
+            };
+            comande.set(c.id, c);
+        }
+        for (const xml of righeXml.match(/<c:PMBRigaComanda>[\s\S]*?<\/c:PMBRigaComanda>/g) ?? []) {
+            const varianti = [...xml.matchAll(/<c:PMBRigaVariante><c:Descrizione>([^<]*)<\/c:Descrizione><c:InAggiunta>(true|false)<\/c:InAggiunta>/g)]
+                .map((m) => `${m[2] === 'true' ? '+' : '-'}${un(m[1])}`);
+            const r = xml.replace(/<c:Varianti>[\s\S]*<\/c:Varianti>/, '');
+            const idRiga = campo(r, 'IdGestionale');
+            if (idRiga) {
+                const esistente = c.righe.find((x) => x.id === Number(idRiga))!;
+                if (campo(r, 'DaCancellare') === 'true') {
+                    if (esistente.stato === 'Nuovo') c.righe = c.righe.filter((x) => x !== esistente);
+                    else esistente.stato = 'Cancellato';
+                } else {
+                    esistente.pezzi = Number(campo(r, 'Pezzi'));
+                    esistente.prezzo = Number(campo(r, 'Prezzo'));
+                }
+                continue;
+            }
+            const articolo = campo(r, 'Articolo') ?? '';
+            const coperto = campo(r, 'TipoEnum') === 'Coperto';
+            c.righe.push({
+                id: ++prossimaRiga, articolo, descrizione: campo(r, 'Descrizione') ?? CATALOGO.find((a) => a.codice === articolo)?.descrizione ?? articolo,
+                pezzi: Number(campo(r, 'Pezzi')), prezzo: Number(campo(r, 'Prezzo')), uscita: coperto ? 0 : Number(campo(r, 'Uscita') ?? 1),
+                stato: 'Nuovo', tipo: coperto ? 'Coperto' : 'Semplice', varianti,
+            });
+        }
+        return c;
+    }
+
+    const busta = (op: string, risultato: string) =>
+        `<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body>` +
+        `<${op}Response xmlns="http://tempuri.org/"><${op}Result xmlns:a="x" xmlns:i="http://www.w3.org/2001/XMLSchema-instance">${risultato}</${op}Result></${op}Response></s:Body></s:Envelope>`;
+    const nil = (op: string) =>
+        `<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><${op}Response xmlns="http://tempuri.org/">` +
+        `<${op}Result i:nil="true" xmlns:i="http://www.w3.org/2001/XMLSchema-instance"/></${op}Response></s:Body></s:Envelope>`;
+
+    const server = http.createServer((req, res) => {
+        let body = '';
+        req.on('data', (d) => { body += d; });
+        req.on('end', () => {
+            const op = String(req.headers.soapaction ?? '').replace(/"/g, '').split('/').pop() ?? '';
+            const ok = (xml: string) => { res.writeHead(200, { 'Content-Type': 'text/xml' }); res.end(xml); };
+            if (op === 'GetArticoli') {
+                return ok(busta(op, CATALOGO.map((a) =>
+                    `<a:ContrattoArticolo><a:Codice>${a.codice}</a:Codice><a:Descrizione>${a.descrizione}</a:Descrizione>` +
+                    `<a:IdGestionale>${a.id}</a:IdGestionale><a:IsAttivo>true</a:IsAttivo><a:Prezzo>${a.prezzo}</a:Prezzo></a:ContrattoArticolo>`).join('')));
+            }
+            if (op === 'GetComanda') {
+                const c = comande.get(Number(/<idGestionale>(\d+)<\/idGestionale>/.exec(body)?.[1]));
+                return ok(c ? busta(op, comandaXml(c)) : nil(op));
+            }
+            if (op === 'GetComandaTavolo') {
+                const tavolo = /<tavolo>([^<]*)<\/tavolo>/.exec(body)?.[1] ?? '';
+                const c = [...comande.values()].find((x) => x.tavolo === tavolo && !x.pagata);
+                return ok(c ? busta(op, comandaXml(c)) : nil(op));
+            }
+            if (op === 'PutComanda') return ok(busta(op, comandaXml(putComanda(body))));
+            ok(`<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><s:Fault><faultstring>op non prevista: ${op}</faultstring></s:Fault></s:Body></s:Envelope>`);
+        });
+    });
+    return { server, comande, put, sulTavolo: (t: string) => [...comande.values()].find((c) => c.tavolo === t && !c.pagata) ?? null };
+}
+
+describe('ordini del CRM nella comanda in cassa', () => {
+    let token: string;
+    let db: Client;
+    let socket: Socket | null = null;
+    const cassa = cassaFinta();
+    const tavoli: Record<string, number> = {};
+    const ordini: number[] = [];
+    let piattoCassa: number;
+    let piattoCrm: number;
+    let comandePrima = false;
+    // La memoria dell'agente (scripts/passepartout-agent.ts), qui in memoria.
+    const memoria = new Map<string, MemoriaComandaViva>();
+    let perdiRisposta = false;
+
+    const finoA = async (cond: () => Promise<boolean>, descr: string, timeoutMs = 8_000) => {
+        const deadline = Date.now() + timeoutMs;
+        for (;;) {
+            if (await cond()) return;
+            if (Date.now() > deadline) throw new Error(`Timeout: ${descr}`);
+            await sleep(150);
+        }
+    };
+    const viva = async (orderId: number) => (await db.query(
+        `SELECT stato, pp_comanda_id, palmare, error FROM passepartout_comande_vive WHERE tenant_id = 1 AND order_id = $1`, [orderId]
+    )).rows[0];
+    const scritte = async (orderId: number) => (await db.query(
+        `SELECT chiave, pp_riga_id, pezzi_scritti, prezzo_cents_scritto FROM passepartout_righe_vive WHERE tenant_id = 1 AND order_id = $1 ORDER BY chiave`, [orderId]
+    )).rows;
+    const nuovoOrdine = async (tavolo: string, covers: number) => {
+        const o = await api().post('/orders').set(bearer(token)).send({ table_id: tavoli[tavolo], covers });
+        expect(o.status).toBe(201);
+        ordini.push(o.body.order.id);
+        return o.body.order.id as number;
+    };
+    const batti = async (orderId: number, items: Array<Record<string, unknown>>) => {
+        expect((await api().post(`/orders/${orderId}/items`).set(bearer(token)).send({ items })).status).toBe(201);
+        const sent = await api().post(`/orders/${orderId}/send`).set(bearer(token)).send({});
+        expect(sent.status).toBe(200);
+        return sent.body;
+    };
+    const rigaDi = async (orderId: number, dishId: number) => (await db.query(
+        `SELECT id FROM order_items WHERE order_id = $1 AND dish_id = $2 AND status <> 'VOIDED' ORDER BY id LIMIT 1`, [orderId, dishId]
+    )).rows[0]?.id as number;
+
+    beforeAll(async () => {
+        token = await ownerToken();
+        db = new Client({ connectionString: process.env.DATABASE_URL || 'postgresql://localhost/ristotest_api' });
+        await db.connect();
+        await new Promise<void>((resolve) => cassa.server.listen(0, '127.0.0.1', () => resolve()));
+        process.env.PASSEPARTOUT_WS_URL = `http://127.0.0.1:${(cassa.server.address() as AddressInfo).port}/AdapterWS`;
+        process.env.PASSEPARTOUT_WS_USER = 'utente-prova';
+        process.env.PASSEPARTOUT_WS_PASSWORD = 'segreto-prova';
+
+        await api().put('/settings/entitlements').set(bearer(token)).send({ passepartout: true });
+        comandePrima = (await api().get('/settings/features').set(bearer(token))).body.table_orders_enabled === true;
+        await api().put('/settings/features').set(bearer(token)).send({ table_orders_enabled: true });
+
+        const room = await api().post('/rooms').set(bearer(token)).send({ name: 'Sala Comanda Viva 2', width: 600, height: 400 });
+        for (const [i, nome] of ['V1', 'V2', 'V3'].entries()) {
+            const t = await api().post('/tables').set(bearer(token)).send({
+                name: `CV${nome}`, shape: 'SQUARE', seats: 4, x: 40 + i * 80, y: 40, room_id: room.body.id, status: 'FREE',
+            });
+            tavoli[nome] = t.body.id;
+            await db.query(
+                `INSERT INTO passepartout_tavoli (table_id, tenant_id, pp_sala, pp_tavolo, origine, confermato)
+                 VALUES ($1, 1, 'TETTOIA', $2, 'manuale', true)`,
+                [t.body.id, nome]
+            );
+        }
+        for (const [nome, prezzo, set] of [
+            ['Tagliatelle Viva', 13, (id: number) => { piattoCassa = id; }],
+            ['Vino della casa Viva', 5, (id: number) => { piattoCrm = id; }],
+        ] as const) {
+            const d = await api().post('/dishes').set(bearer(token)).send({ name: nome, description: null, price: prezzo, category: 'PRIMI', allergens: null });
+            expect(d.status).toBe(201);
+            set(d.body.id);
+        }
+        // Un piatto importato dalla cassa (porta l'id dell'articolo) e uno
+        // del CRM, che va sull'articolo generico.
+        await db.query(`UPDATE dishes SET external_ref = 'pp:articolo:11' WHERE id = $1`, [piattoCassa]);
+        await db.query(
+            `INSERT INTO passepartout_config (tenant_id, articolo_generico_id) VALUES (1, 500)
+             ON CONFLICT (tenant_id) DO UPDATE SET articolo_generico_id = 500`
+        );
+
+        socket = ioClient(`${process.env.TEST_BASE_URL}/pp-agent`, {
+            auth: { token: AGENT_TOKEN }, transports: ['websocket'], reconnection: false,
+        });
+        socket.on('pp:call', async (payload: any, ack: (r: unknown) => void) => {
+            if (payload?.op !== 'comandaViva') return ack({ ok: false, error: `op non prevista: ${payload?.op}`, kind: 'agent' });
+            try {
+                const p = payload.params;
+                const esito: EsitoComandaViva = await scriviComandaViva(p, memoria.get(p.tag) ?? { idComanda: null, righe: {} });
+                const m = memoria.get(p.tag) ?? { idComanda: null, righe: {} };
+                if (esito.idComanda != null) m.idComanda = esito.idComanda;
+                for (const r of esito.righe) {
+                    if (r.cancellata) delete m.righe[r.chiave];
+                    else if (r.idRiga != null) m.righe[r.chiave] = r.idRiga;
+                }
+                memoria.set(p.tag, m);
+                // La linea che cade dopo la scrittura: la cassa ha le righe,
+                // il server non lo sa.
+                if (perdiRisposta) { perdiRisposta = false; return ack({ ok: false, error: 'linea caduta', kind: 'agent' }); }
+                ack({ ok: true, result: esito });
+            } catch (err) {
+                ack({ ok: false, error: (err as Error).message, kind: err instanceof PassepartoutError ? 'gestionale' : 'agent' });
+            }
+        });
+        await new Promise<void>((resolve, reject) => {
+            socket!.on('connect', () => resolve());
+            socket!.on('connect_error', reject);
+        });
+        socket.emit('agent:hello', { hostname: 'agente-comanda-viva-2', capabilities: ['comanda-viva'] });
+        await finoA(async () => ((await api().get('/passepartout/status').set(bearer(token))).body.capabilities ?? []).includes('comanda-viva'),
+            'agente annunciato');
+    });
+
+    afterAll(async () => {
+        await api().put('/passepartout/comande-vive/config').set(bearer(token)).send({ enabled: false });
+        for (const id of ordini) {
+            await api().delete(`/orders/${id}?forza=1`).set(bearer(token)).send({ motivo: 'fine prova' });
+        }
+        await sleep(300);
+        socket?.close();
+        await db.query(`DELETE FROM passepartout_comande_vive WHERE tenant_id = 1 AND order_id = ANY($1::int[])`, [ordini]);
+        await db.query(`DELETE FROM passepartout_tavoli WHERE tenant_id = 1 AND table_id = ANY($1::int[])`, [Object.values(tavoli)]);
+        await db.query(`UPDATE passepartout_config SET articolo_generico_id = NULL WHERE tenant_id = 1`);
+        await api().put('/settings/features').set(bearer(token)).send({ table_orders_enabled: comandePrima });
+        delete process.env.PASSEPARTOUT_WS_URL;
+        delete process.env.PASSEPARTOUT_WS_USER;
+        delete process.env.PASSEPARTOUT_WS_PASSWORD;
+        await new Promise<void>((resolve) => cassa.server.close(() => resolve()));
+        await db.end();
+    });
+
+    let prima: number;
+    it('un ordine aperto prima di accendere non va in cassa', async () => {
+        prima = await nuovoOrdine('V3', 2);
+        await batti(prima, [{ dish_id: piattoCassa, qty: 1, course_no: 1 }]);
+        expect((await api().put('/passepartout/comande-vive/config').set(bearer(token)).send({ enabled: true })).status).toBe(200);
+        await api().patch(`/orders/${prima}`).set(bearer(token)).send({ covers: 3 });
+        await sleep(400);
+        expect(await viva(prima)).toBeUndefined();
+        expect(cassa.sulTavolo('V3')).toBeNull();
+    });
+
+    let ordine: number;
+    it('l\'ordine mandato nasce in cassa sul suo tavolo, con coperto, varianti e prezzi del CRM', async () => {
+        ordine = await nuovoOrdine('V1', 2);
+        await batti(ordine, [
+            { dish_id: piattoCassa, qty: 2, course_no: 1, note: 'ben cotta' },
+            { dish_id: piattoCrm, qty: 1, course_no: 99 },
+        ]);
+        await finoA(async () => (await viva(ordine))?.stato === 'SCRITTA', 'ordine scritto in cassa');
+        const c = cassa.sulTavolo('V1')!;
+        expect(c).toMatchObject({ note: `Ordine Sympotia sympotia-ordine:${ordine}`, sala: 'TETTOIA', coperti: 2 });
+        expect(c.righe).toEqual(expect.arrayContaining([
+            expect.objectContaining({ articolo: 'Coperti', tipo: 'Coperto', pezzi: 2, prezzo: 0 }),
+            expect.objectContaining({ articolo: 'Tagliatelle Silana', descrizione: 'Tagliatelle Silana', pezzi: 2, prezzo: 13, uscita: 1, varianti: ['+ben cotta'] }),
+            expect.objectContaining({ articolo: 'VARIE', descrizione: expect.stringMatching(/^vino della casa viva$/i), pezzi: 1, prezzo: 5, uscita: 1 }),
+        ]));
+        expect(c.righe).toHaveLength(3);
+        // Mai in produzione da qui: le righe nascono senza invio.
+        expect(cassa.put.every((b) => !b.includes('<c:Tool_EseguiInvio>true'))).toBe(true);
+        expect(await viva(ordine)).toMatchObject({ pp_comanda_id: c.id, palmare: false, error: null });
+        expect((await scritte(ordine)).map((r: any) => r.chiave).sort()).toEqual(['coperto', `oi:${await rigaDi(ordine, piattoCassa)}`, `oi:${await rigaDi(ordine, piattoCrm)}`].sort());
+        const vista = await api().get(`/orders/${ordine}`).set(bearer(token));
+        expect(vista.body.comanda_viva).toMatchObject({ stato: 'SCRITTA', pp_comanda_id: c.id });
+    });
+
+    it('lo storno di un pezzo cambia la stessa riga, quello intero la toglie', async () => {
+        const c = cassa.sulTavolo('V1')!;
+        const tagliatelle = c.righe.find((r) => r.articolo === 'Tagliatelle Silana')!;
+        const idTagliatelle = await rigaDi(ordine, piattoCassa);
+        expect((await api().post(`/orders/items/${idTagliatelle}/void`).set(bearer(token)).send({ reason: 'prova', qty: 1 })).status).toBe(200);
+        await finoA(async () => cassa.sulTavolo('V1')!.righe.find((r) => r.id === tagliatelle.id)?.pezzi === 1, 'un pezzo in meno sulla stessa riga');
+        expect(cassa.sulTavolo('V1')!.righe).toHaveLength(3);
+
+        const idVino = await rigaDi(ordine, piattoCrm);
+        expect((await api().post(`/orders/items/${idVino}/void`).set(bearer(token)).send({ reason: 'prova' })).status).toBe(200);
+        await finoA(async () => !cassa.sulTavolo('V1')!.righe.some((r) => r.articolo === 'VARIE'), 'vino tolto dalla cassa');
+        await finoA(async () => !(await scritte(ordine)).some((r: any) => r.chiave === `oi:${idVino}`), 'riga dimenticata');
+        expect((await viva(ordine)).stato).toBe('SCRITTA');
+    });
+
+    it('i coperti cambiati nel CRM cambiano la riga coperto', async () => {
+        const coperto = cassa.sulTavolo('V1')!.righe.find((r) => r.tipo === 'Coperto')!;
+        expect((await api().patch(`/orders/${ordine}`).set(bearer(token)).send({ covers: 4 })).status).toBe(200);
+        await finoA(async () => cassa.sulTavolo('V1')!.righe.find((r) => r.id === coperto.id)?.pezzi === 4, 'quattro coperti');
+    });
+
+    it('un ordine già in cassa non si sposta dal CRM', async () => {
+        const r = await api().post(`/orders/${ordine}/transfer`).set(bearer(token)).send({ table_id: tavoli.V3 });
+        expect(r.status).toBe(409);
+        expect(r.body.code).toBe('comanda_in_cassa');
+    });
+
+    it('sul tavolo aperto dal palmare il CRM aggiunge le sue righe alla stessa comanda, senza coperto', async () => {
+        cassa.comande.set(70_001, {
+            id: 70_001, note: '', sala: 'TETTOIA', tavolo: 'V2', coperti: 3, pagata: false,
+            righe: [
+                { id: 700_001, articolo: 'Coperti', descrizione: 'Coperti', pezzi: 3, prezzo: 3, uscita: 0, stato: 'Nuovo', tipo: 'Coperto', varianti: [] },
+                { id: 700_002, articolo: 'ACQUA', descrizione: 'Acqua naturale', pezzi: 1, prezzo: 2.5, uscita: 1, stato: 'Nuovo', tipo: 'Semplice', varianti: [] },
+            ],
+        });
+        const o = await nuovoOrdine('V2', 3);
+        await batti(o, [{ dish_id: piattoCassa, qty: 1, course_no: 2 }]);
+        await finoA(async () => (await viva(o))?.stato === 'SCRITTA', 'righe nella comanda del palmare');
+        expect(await viva(o)).toMatchObject({ pp_comanda_id: 70_001, palmare: true });
+        const c = cassa.comande.get(70_001)!;
+        expect(c.righe.map((r) => r.id).slice(0, 2)).toEqual([700_001, 700_002]);
+        expect(c.righe).toHaveLength(3);
+        expect(c.righe[2]).toMatchObject({ articolo: 'Tagliatelle Silana', uscita: 2, pezzi: 1 });
+        expect(c.righe.filter((r) => r.tipo === 'Coperto')).toHaveLength(1);
+    });
+
+    it('una risposta persa non scrive due volte le stesse righe', async () => {
+        perdiRisposta = true;
+        await batti(ordine, [{ dish_id: piattoCrm, qty: 2, course_no: 1 }]);
+        await finoA(async () => ((await viva(ordine))?.error ?? '').includes('linea caduta'), 'tentativo fallito');
+        expect(cassa.sulTavolo('V1')!.righe.filter((r) => r.articolo === 'VARIE')).toHaveLength(1);
+        // Il tentativo dopo (qui subito invece che fra un minuto).
+        await db.query(`UPDATE passepartout_comande_vive SET next_at = now() WHERE tenant_id = 1 AND order_id = $1`, [ordine]);
+        await api().patch(`/orders/${ordine}`).set(bearer(token)).send({ covers: 4 });
+        await finoA(async () => (await viva(ordine))?.stato === 'SCRITTA' && (await viva(ordine))?.error == null, 'riscritto');
+        expect(cassa.sulTavolo('V1')!.righe.filter((r) => r.articolo === 'VARIE')).toHaveLength(1);
+        const idVino = await rigaDi(ordine, piattoCrm);
+        expect((await scritte(ordine)).find((r: any) => r.chiave === `oi:${idVino}`)).toMatchObject({ pezzi_scritti: 2, prezzo_cents_scritto: 500 });
+    });
+
+    it('la cancellazione forzata dell\'ordine toglie dalla cassa le righe del CRM', async () => {
+        const id = cassa.sulTavolo('V1')!.id;
+        const r = await api().delete(`/orders/${ordine}?forza=1`).set(bearer(token)).send({ motivo: 'prova cancellazione' });
+        expect(r.status).toBe(200);
+        await finoA(async () => (await viva(ordine))?.stato === 'CHIUSA', 'ordine chiuso anche in cassa');
+        expect(cassa.comande.get(id)!.righe).toHaveLength(0);
+        expect(await scritte(ordine)).toHaveLength(0);
+    });
+
+    it('la scrittura in cassa senza articolo generico si ferma con un errore chiaro', async () => {
+        await expect(scriviComandaViva({
+            tag: 'sympotia-ordine:999999', idComanda: null, sala: 'TETTOIA', tavolo: 'V9', coperti: 1,
+            righe: [{ chiave: 'oi:1', idRiga: null, idArticolo: null, descrizione: 'Piatto senza cassa', pezzi: 1, prezzoCents: 900, uscita: 1, varianti: [] }],
+            idArticoloGenerico: null,
+        })).rejects.toThrow(/non ha un articolo in cassa/);
+        expect(cassa.sulTavolo('V9')).toBeNull();
+    });
+});

@@ -48,11 +48,14 @@ import {
     precontoUnaVolta,
     scontoComanda,
     specchioComanda,
+    scriviComandaViva,
     diagnosiCassa,
     isPassepartoutConfigured,
     PassepartoutError,
     type TipoDocumentoConto,
     type StatoPrenotazioneCassa,
+    type EsitoComandaViva,
+    type MemoriaComandaViva,
 } from '../services/passepartoutService.js';
 
 // Server e token: dalle variabili d'ambiente (installazioni di prima) o dal
@@ -121,8 +124,9 @@ if (CODICE_ABBINA) {
 // regge una comanda col preconto stampato; 'preconto': sa stamparlo (il
 // tavolo che vuole pagare dal QR diventa blu in cassa). 'specchio': copia
 // in cassa i conti chiusi nel CRM (comanda specchio, fase 4). 'diagnosi':
-// la verifica guidata della sezione Passepartout.
-const CAPABILITIES = ['chiudi-riprendi', 'prenotazioni', 'conti', 'tavoli-aperti', 'chiudi-preconto', 'preconto', 'specchio', 'diagnosi', 'sconto-cassa'];
+// la verifica guidata della sezione Passepartout. 'comanda-viva': scrive le
+// righe degli ordini del CRM nella comanda in cassa del tavolo vero.
+const CAPABILITIES = ['chiudi-riprendi', 'prenotazioni', 'conti', 'tavoli-aperti', 'chiudi-preconto', 'preconto', 'specchio', 'diagnosi', 'sconto-cassa', 'comanda-viva'];
 
 if (!CODICE_ABBINA && (!SERVER_URL || !TOKEN)) {
     console.error('Config mancante: servono PP_AGENT_SERVER_URL e PP_AGENT_TOKEN, o un abbinamento (--abbina CODICE --server URL).');
@@ -235,6 +239,43 @@ const handlers: Record<string, Handler> = {
             totaleCents: Math.round(Number(p.totaleCents) || 0),
         }));
     },
+    // Le righe di un ordine del CRM nella comanda in cassa del suo tavolo.
+    // In fila per tavolo: due ordini dello stesso tavolo (o due giri del
+    // server) non creano due comande, e il secondo trova le righe del primo.
+    comandaViva: (p) => {
+        const tag = typeof p?.tag === 'string' ? p.tag : '';
+        if (!/^sympotia-ordine:\d+$/.test(tag) || typeof p?.tavolo !== 'string' || !p.tavolo || !Array.isArray(p?.righe)) {
+            throw new Error('Parametri della comanda viva non validi');
+        }
+        const intero = (v: unknown): number | null => (v != null && Number.isFinite(Number(v)) ? Math.round(Number(v)) : null);
+        return unaAllaVolta(`viva:${p.tavolo}`, async () => {
+            const esito = await scriviComandaViva({
+                tag,
+                idComanda: intero(p.idComanda),
+                sala: String(p.sala ?? ''),
+                tavolo: p.tavolo,
+                coperti: intero(p.coperti) ?? 0,
+                righe: p.righe.map((r: any) => ({
+                    chiave: String(r?.chiave ?? ''),
+                    idRiga: intero(r?.idRiga),
+                    idArticolo: intero(r?.idArticolo),
+                    descrizione: String(r?.descrizione ?? ''),
+                    pezzi: intero(r?.pezzi) ?? 1,
+                    prezzoCents: intero(r?.prezzoCents) ?? 0,
+                    uscita: intero(r?.uscita) ?? 1,
+                    varianti: Array.isArray(r?.varianti)
+                        ? r.varianti.map((v: any) => ({ descrizione: String(v?.descrizione ?? ''), inAggiunta: v?.inAggiunta !== false }))
+                        : [],
+                    coperto: r?.coperto === true,
+                    soloComandaNostra: r?.soloComandaNostra === true,
+                    cancella: r?.cancella === true,
+                })),
+                idArticoloGenerico: intero(p.idArticoloGenerico),
+            }, memoriaVive.leggi(tag));
+            memoriaVive.ricorda(tag, esito);
+            return esito;
+        });
+    },
     preconto: (p) => {
         const id = Number(p?.idComanda);
         if (!Number.isFinite(id)) throw new Error('Parametro "idComanda" non valido');
@@ -343,6 +384,43 @@ if (STATE_FILE && !CODICE_ABBINA) {
     scriviStato();
     setInterval(scriviStato, Math.max(1_000, Number(process.env.PP_AGENT_STATE_MS) || 10_000));
 }
+// Quello che l'agente ha scritto per ogni ordine del CRM (comanda e righe),
+// in un file accanto alla configurazione: se la risposta al server va persa
+// (timeout, linea che cade, riavvio del server) il tentativo dopo trova le
+// righe già scritte invece di aggiungerle una seconda volta. La cassa non ha
+// una nota per riga: senza questa memoria non c'è modo di riconoscerle.
+const memoriaVive = (() => {
+    const file = path.join(path.dirname(CONFIG_FILE), 'passepartout-comande-vive.json');
+    type Voce = MemoriaComandaViva & { at: string };
+    let voci: Record<string, Voce> = {};
+    try { voci = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* prima volta */ }
+    return {
+        leggi(tag: string): MemoriaComandaViva {
+            const v = voci[tag];
+            return { idComanda: v?.idComanda ?? null, righe: { ...(v?.righe ?? {}) } };
+        },
+        ricorda(tag: string, esito: EsitoComandaViva): void {
+            const v: Voce = voci[tag] ?? { idComanda: null, righe: {}, at: '' };
+            if (esito.idComanda != null) v.idComanda = esito.idComanda;
+            for (const r of esito.righe) {
+                if (r.cancellata) delete v.righe[r.chiave];
+                else if (r.idRiga != null) v.righe[r.chiave] = r.idRiga;
+            }
+            v.at = new Date().toISOString();
+            voci[tag] = v;
+            // Tre giorni bastano: un ordine non resta aperto di più.
+            const limite = Date.now() - 3 * 86_400_000;
+            for (const [k, x] of Object.entries(voci)) if (Date.parse(x.at) < limite) delete voci[k];
+            try {
+                fs.writeFileSync(`${file}.tmp`, JSON.stringify(voci));
+                fs.renameSync(`${file}.tmp`, file);
+            } catch (err) {
+                console.warn('[agent] memoria delle comande vive non salvata:', (err as Error).message);
+            }
+        },
+    };
+})();
+
 function unaAllaVolta<T>(idComanda: number | string, fn: () => Promise<T>): Promise<T> {
     const prima = inCorso.get(idComanda) ?? Promise.resolve();
     const questa = prima.catch(() => undefined).then(fn);
