@@ -305,6 +305,18 @@ function platformEnvConfig(): EmailConfig {
     };
 }
 
+/** Da dove parte l'email di reset. Un account di piattaforma esce dal
+ *  mittente di piattaforma (casella e dominio del prodotto), e senza ripiega
+ *  sulla posta del ristorante a cui la riga utente è appoggiata. Un utente
+ *  di ristorante esce dalla posta del ristorante; se il ristorante non ne ha
+ *  una (un cliente appena attivato: il demo Passepartout, 08/10), dal
+ *  mittente di piattaforma, o non potrebbe mai recuperare la password.
+ *  null = nessun mittente. */
+export function mittenteDelReset(c: { accountDiPiattaforma: boolean; piattaforma: boolean; ristorante: boolean }): 'piattaforma' | 'ristorante' | null {
+    if (c.accountDiPiattaforma) return c.piattaforma ? 'piattaforma' : c.ristorante ? 'ristorante' : null;
+    return c.ristorante ? 'ristorante' : c.piattaforma ? 'piattaforma' : null;
+}
+
 export function isPlatformMailConfigured(): boolean {
     return isProviderConfigured(platformEnvConfig());
 }

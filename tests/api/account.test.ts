@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createHash } from 'node:crypto';
 import { Client } from 'pg';
 import { api, ownerToken, bearer } from './helpers';
+import { mittenteDelReset } from '../../services/smtpService';
 
 // Account self-service (profilo, cambio password/email) + recupero password.
 //
@@ -172,6 +173,19 @@ describe('account self-service e recupero password', () => {
         expect(inesistente.status).toBe(200);
         expect(esistente.body).toEqual({ ok: true });
         expect(inesistente.body).toEqual(esistente.body);
+    });
+
+    it('il reset di un utente di ristorante senza posta sua parte dalla posta di Sympotia', () => {
+        // Un cliente appena attivato non ha ancora configurato la sua posta:
+        // senza ripiego, nessuno dei suoi utenti potrebbe recuperare la password.
+        expect(mittenteDelReset({ accountDiPiattaforma: false, piattaforma: true, ristorante: false })).toBe('piattaforma');
+        expect(mittenteDelReset({ accountDiPiattaforma: false, piattaforma: true, ristorante: true })).toBe('ristorante');
+        expect(mittenteDelReset({ accountDiPiattaforma: false, piattaforma: false, ristorante: true })).toBe('ristorante');
+        expect(mittenteDelReset({ accountDiPiattaforma: false, piattaforma: false, ristorante: false })).toBeNull();
+        // Gli account di piattaforma come prima: la casella del prodotto, o quella del ristorante di appoggio.
+        expect(mittenteDelReset({ accountDiPiattaforma: true, piattaforma: true, ristorante: true })).toBe('piattaforma');
+        expect(mittenteDelReset({ accountDiPiattaforma: true, piattaforma: false, ristorante: true })).toBe('ristorante');
+        expect(mittenteDelReset({ accountDiPiattaforma: true, piattaforma: false, ristorante: false })).toBeNull();
     });
 
     it('reset-password con token fasullo → 400 invalid_or_expired', async () => {
