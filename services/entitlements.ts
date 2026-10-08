@@ -9,7 +9,7 @@
 // (voice_agent_enabled, public_bookings_enabled…): quelli dicono se il
 // ristoratore ha acceso il canale, l'entitlement dice se il canale gli è
 // stato venduto. Feature assente a DB = non venduta = spenta.
-import { queryWithRetry } from '../db.js';
+import { queryWithRetry, runWithTenantContext } from '../db.js';
 
 // 'passepartout' = integrazione col gestionale di cassa (import menu,
 // chiusura conti): la vende solo chi ha Passepartout in sala — oggi il
@@ -44,10 +44,14 @@ export async function getTenantFeatures(tenantId: number): Promise<TenantFeature
         return cached.features;
     }
     try {
-        const result = await queryWithRetry(
+        // Sempre nel contesto del ristorante chiesto, non in quello del
+        // chiamante: con la RLS rigida una lettura senza contesto (lo scambio
+        // del codice in /pp-agent/abbina, prima di sapere il ristorante) vede
+        // zero righe, e il «tutto spento» finiva in cache per 60 s.
+        const result = await runWithTenantContext(tenantId, () => queryWithRetry(
             'SELECT feature, enabled FROM tenant_features WHERE tenant_id = $1',
             [tenantId]
-        );
+        ));
         const features: TenantFeatureMap = { ...ALL_DISABLED };
         for (const row of result.rows) {
             if ((TENANT_FEATURES as readonly string[]).includes(row.feature)) {
