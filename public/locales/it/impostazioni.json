@@ -224,6 +224,19 @@
     "saved": "Promemoria all'ospite aggiornato",
     "errSave": "Errore aggiornamento del promemoria"
   },
+  "gestOspite": {
+    "title": "Link «Gestisci la prenotazione»",
+    "intro": "Conferma e promemoria portano un link: l'ospite conferma la presenza o annulla da solo, e la prenotazione si aggiorna qui.",
+    "switchOff": "Disattiva la gestione dall'ospite",
+    "switchOn": "Attiva la gestione dall'ospite",
+    "cutoff": "Annullo dal link fino a",
+    "cutoffUnit": "ore prima dell'arrivo",
+    "cutoffHint": "Più vicino all'arrivo la pagina dice di chiamare il locale.",
+    "depositHint": "Se l'ospite annulla con una caparra pagata e mancano almeno 24 ore, arriva un avviso per rimborsarla; sotto le 24 ore la caparra resta al locale e la pagina lo dice prima dell'annullo.",
+    "badCutoff": "Le ore devono essere un intero tra 1 e 72",
+    "saved": "Gestione dall'ospite aggiornata",
+    "errSave": "Errore aggiornamento della gestione dall'ospite"
+  },
   "bl": {
     "source": {
       "MANUAL": "Manuale (CRM)",

@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { BellRing, Loader2, Mail, Send } from 'lucide-react';
+import { BellRing, Link2, Loader2, Mail, Send } from 'lucide-react';
 import type { OutboundMessage } from '../../services/apiService';
 import { EmptyState, StatusPill, LinkifiedText } from '../ds';
 import type { PillTone } from '../ds';
@@ -62,7 +62,9 @@ export const MessaggiPanel: React.FC<{
   onSendReminder: () => void;
   reminderSending?: boolean;
   reminderSent?: boolean;
-}> = ({ messages, loading, phone, email, onNewEmail, onSendConfirmation, onSendReminder, reminderSending, reminderSent }) => {
+  /** Copia il link «Gestisci la prenotazione» da incollare in una chat. */
+  onCopyGuestLink?: () => void;
+}> = ({ messages, loading, phone, email, onNewEmail, onSendConfirmation, onSendReminder, reminderSending, reminderSent, onCopyGuestLink }) => {
   const { t } = useTranslation('prenotazioni', { useSuspense: false });
   const [filter, setFilter] = useState<Filter>('all');
 
@@ -113,6 +115,16 @@ export const MessaggiPanel: React.FC<{
                 className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               >
                 <Mail className="h-3.5 w-3.5" aria-hidden /> Nuova email
+              </button>
+            )}
+            {onCopyGuestLink && (
+              <button
+                type="button"
+                onClick={onCopyGuestLink}
+                title="Copia il link dove l'ospite conferma o annulla da solo, da incollare in una chat"
+                className="inline-flex h-9 items-center gap-1.5 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              >
+                <Link2 className="h-3.5 w-3.5" aria-hidden /> Copia link ospite
               </button>
             )}
             {phone && (

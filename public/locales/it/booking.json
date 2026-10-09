@@ -1,0 +1,60 @@
+{
+  "meta": {
+    "title": "La tua prenotazione",
+    "titleFull": "La tua prenotazione — {{business}}"
+  },
+  "header": {
+    "langGroupAria": "Lingua"
+  },
+  "notFound": {
+    "title": "Prenotazione non trovata",
+    "hint": "Il link potrebbe essere incompleto. Aprilo di nuovo dal messaggio o contatta il ristorante."
+  },
+  "loadingAria": "Caricamento in corso",
+  "state": {
+    "confirmed": "Confermata",
+    "pending": "In attesa di conferma",
+    "cancelled": "Annullata",
+    "declined": "Non confermata",
+    "past": "Passata"
+  },
+  "guests_one": "{{count}} persona",
+  "guests_other": "{{count}} persone",
+  "childrenSuffix_one": " ({{count}} bambino)",
+  "childrenSuffix_other": " ({{count}} bambini)",
+  "forName": "a nome di {{name}}",
+  "confirmed": {
+    "ask": "Ci sarai? Confermalo con un tocco: il ristorante tiene il tavolo pronto.",
+    "cta": "Ci saremo",
+    "done": "Hai confermato: ti aspettiamo."
+  },
+  "pending": {
+    "body": "Il ristorante deve ancora confermare la richiesta: ti scriverà appena possibile."
+  },
+  "cancelled": {
+    "body": "Questa prenotazione è annullata. Per prenotare di nuovo contatta il ristorante."
+  },
+  "declined": {
+    "body": "Il ristorante non ha potuto confermare questa richiesta. Contattalo per un altro giorno o orario."
+  },
+  "past": {
+    "body": "Questa prenotazione è passata."
+  },
+  "cancel": {
+    "cta": "Annulla la prenotazione",
+    "ctaRequest": "Annulla la richiesta",
+    "askTitle": "Annullare la prenotazione?",
+    "askTitleRequest": "Annullare la richiesta?",
+    "depositRefund": "La caparra di {{amount}} ti verrà rimborsata dal ristorante.",
+    "depositRetained": "Mancano meno di 24 ore: la caparra di {{amount}} resta al ristorante.",
+    "yes": "Sì, annulla",
+    "no": "No, la tengo",
+    "tooLate_one": "Manca meno di {{count}} ora: per annullare chiama il ristorante.",
+    "tooLate_other": "Mancano meno di {{count}} ore: per annullare chiama il ristorante.",
+    "contactUs": "Per modifiche o per annullare contatta il ristorante."
+  },
+  "errors": {
+    "tooLate": "Non si può più annullare dal link: chiama il ristorante.",
+    "generic": "Qualcosa non ha funzionato. Riprova, o chiama il ristorante."
+  }
+}

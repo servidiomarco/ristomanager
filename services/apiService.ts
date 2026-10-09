@@ -1900,6 +1900,37 @@ export const updateBookingReminderSettings = async (
   });
 };
 
+// «La tua prenotazione»: il link con cui l'ospite conferma o annulla da solo.
+export interface GuestManageSettings {
+  enabled: boolean;
+  /** Fino a quante ore prima dell'arrivo si annulla dal link, tra 1 e 72. */
+  cancel_cutoff_hours: number;
+}
+
+export const getGuestManageSettings = async (): Promise<GuestManageSettings> => {
+  return apiRequest<GuestManageSettings>(`${API_URL}/settings/guest-manage`, {
+    headers: getHeaders(false),
+  });
+};
+
+export const updateGuestManageSettings = async (
+  updates: Partial<GuestManageSettings>
+): Promise<GuestManageSettings> => {
+  return apiRequest<GuestManageSettings>(`${API_URL}/settings/guest-manage`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify(updates),
+  });
+};
+
+/** Il link della prenotazione da passare all'ospite (lo conia se manca). */
+export const createReservationGuestLink = async (reservationId: number): Promise<{ token: string; url: string }> => {
+  return apiRequest<{ token: string; url: string }>(`${API_URL}/reservations/${reservationId}/guest-link`, {
+    method: 'POST',
+    headers: getHeaders(),
+  });
+};
+
 // Coperto e servizio: gli importi delle righe di sistema delle comande.
 // Le aliquote IVA delle due righe stanno nella mappatura IVA (Fiscalità).
 export interface ChargeSettings {
