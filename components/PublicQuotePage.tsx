@@ -122,7 +122,7 @@ export const PublicQuotePage: React.FC = () => {
             <img
               src={business.logo_url}
               alt=""
-              className="mx-auto mb-3 h-16 w-auto max-w-[240px] object-contain"
+              className="mx-auto mb-3 h-16 w-auto max-w-[240px] object-contain mix-blend-multiply"
               onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
             />
           )}
