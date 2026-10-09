@@ -1403,6 +1403,40 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     }));
   };
 
+  // Il food cost nei passi della tariffa e del menù: un tasto che apre il
+  // riquadro lì sotto, senza spostare la pagina. Lo stato è uno solo, così
+  // aperto in un passo resta aperto nell'altro. `where` distingue gli id,
+  // perché i due passi stanno nel DOM insieme.
+  const renderBanquetFoodCost = (where: 'rate' | 'menu', onQuota?: typeof setQuotaPorzione) => {
+    const panelId = `banquet-food-cost-${where}`;
+    return (
+      <div className="space-y-4">
+        <button
+          type="button"
+          onClick={() => setBanquetFcOpen(v => !v)}
+          aria-expanded={banquetFcOpen}
+          aria-controls={panelId}
+          className={dsButton.secondary}
+        >
+          <Scale className="h-4 w-4" aria-hidden />
+          {banquetFcOpen ? t('banquetForm.hideFoodCost') : t('banquetForm.showFoodCost')}
+          <ChevronDown className={`h-4 w-4 text-[var(--ds-text-muted)] transition-transform ${banquetFcOpen ? 'rotate-180' : ''}`} aria-hidden />
+        </button>
+        {banquetFcOpen && (
+          <div id={panelId}>
+            <BanchettoFoodCost
+              fc={fc}
+              banquet={newBanquet}
+              dishById={dishById}
+              showPrices={canViewBanquetPrice}
+              onQuota={onQuota}
+            />
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const handleEditBanquet = (menu: BanquetMenu) => {
     // Derive courses: use stored courses if present, otherwise wrap legacy flat list into a single course
     const courses: BanquetCourse[] = menu.courses && menu.courses.length > 0
@@ -4200,11 +4234,12 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               )}
 
               {/* Food cost del banchetto: costo per coperto e margine accanto al
-                  prezzo che lo determina. Le quote di porzione si cambiano nel
-                  passo del menù. */}
+                  prezzo che lo determina, chiuso finché non lo si chiede (la
+                  tariffa si concorda col cliente davanti). Le quote di porzione
+                  si cambiano nel passo del menù. */}
               {fc.enabled && (
                 <section className={banquetStep === 1 ? 'block' : 'hidden'}>
-                  <BanchettoFoodCost fc={fc} banquet={newBanquet} dishById={dishById} showPrices={canViewBanquetPrice} />
+                  {renderBanquetFoodCost('rate')}
                 </section>
               )}
 
@@ -4484,32 +4519,10 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     </button>
                   </div>
                 </FormCard>
-                {/* Sotto il menù, come un totale: il tasto apre il riquadro
-                    proprio qui, senza spostare la pagina. */}
+                {/* Sotto il menù, come un totale. */}
                 {fc.enabled && (
-                  <div className="mt-4 space-y-4">
-                    <button
-                      type="button"
-                      onClick={() => setBanquetFcOpen(v => !v)}
-                      aria-expanded={banquetFcOpen}
-                      aria-controls="banquet-food-cost"
-                      className={dsButton.secondary}
-                    >
-                      <Scale className="h-4 w-4" aria-hidden />
-                      {banquetFcOpen ? t('banquetForm.hideFoodCost') : t('banquetForm.showFoodCost')}
-                      <ChevronDown className={`h-4 w-4 text-[var(--ds-text-muted)] transition-transform ${banquetFcOpen ? 'rotate-180' : ''}`} aria-hidden />
-                    </button>
-                    {banquetFcOpen && (
-                      <div id="banquet-food-cost">
-                        <BanchettoFoodCost
-                          fc={fc}
-                          banquet={newBanquet}
-                          dishById={dishById}
-                          showPrices={canViewBanquetPrice}
-                          onQuota={setQuotaPorzione}
-                        />
-                      </div>
-                    )}
+                  <div className="mt-4">
+                    {renderBanquetFoodCost('menu', setQuotaPorzione)}
                   </div>
                 )}
               </section>
