@@ -90,7 +90,7 @@ import {
     startPassepartoutTavoliApertiSync, elencoTavoliAperti, aggiornaTavoliAperti, comandaApertaSuiTavoli,
 } from './services/passepartoutTavoliAperti.js';
 import { accodaSpecchio, avviaSpecchio, startPassepartoutSpecchioSync } from './services/passepartoutSpecchio.js';
-import { avviaComandeVive, riprovaComandaViva, startPassepartoutComandeVive, statiComandeVive, uscitaPerCassa } from './services/passepartoutComandeVive.js';
+import { avviaComandeVive, lavoraComandeVive, riprovaComandaViva, startPassepartoutComandeVive, statiComandeVive, uscitaPerCassa } from './services/passepartoutComandeVive.js';
 import {
     SUPPORT_CATEGORIES, SUPPORT_STATUSES, SUPPORT_SUBJECT_MAX, SUPPORT_BODY_MAX, SUPPORT_ATTACHMENTS_MAX, SUPPORT_RATING_COMMENT_MAX,
     sanitizeClientContext, supportTenantTag, supportPlatformTag,
@@ -4167,7 +4167,7 @@ app.put('/passepartout/config', authenticate, requirePermission('settings:full')
 // sezione lo fa da sé: una lista di voci con esito e dati, che l'interfaccia
 // traduce (pp.verifica.<voce>.<esito>). L'ultima resta in passepartout_config.
 const VERSIONI_PASSEPARTOUT_PROVATE = ['2026C1'];
-const CAPACITA_AGENTE_ATTESE = ['chiudi-riprendi', 'prenotazioni', 'conti', 'tavoli-aperti', 'chiudi-preconto', 'preconto', 'specchio', 'diagnosi', 'sconto-cassa', 'comanda-viva', 'comanda-viva-invio'];
+const CAPACITA_AGENTE_ATTESE = ['chiudi-riprendi', 'prenotazioni', 'conti', 'tavoli-aperti', 'chiudi-preconto', 'preconto', 'specchio', 'diagnosi', 'sconto-cassa', 'comanda-viva', 'comanda-viva-invio', 'comanda-viva-coperto'];
 type EsitoVerifica = 'ok' | 'attenzione' | 'errore' | 'info';
 interface VoceVerifica { voce: string; esito: EsitoVerifica; dati?: Record<string, unknown> }
 
@@ -40269,6 +40269,13 @@ app.post('/orders/:id/close', authenticate, requirePermission('orders:take'), as
         const orderId = parseInt(req.params.id, 10);
         if (!Number.isFinite(orderId)) { client.release(); return res.status(400).json({ error: 'id non valido' }); }
 
+        // Comanda viva con «conto: la cassa» (fase 4): il conto è la comanda
+        // in cassa, non le righe del CRM.
+        if (await contoDellaCassa(req.tenantId!, orderId)) {
+            client.release();
+            return chiudiOrdineColContoDellaCassa(req, res, orderId);
+        }
+
         await client.query('BEGIN');
         const ordRs = await client.query(`SELECT * FROM orders WHERE id = $1 AND tenant_id = $2 FOR UPDATE`, [orderId, req.tenantId!]);
         if (ordRs.rows.length === 0) {
@@ -40451,6 +40458,172 @@ app.post('/orders/:id/close', authenticate, requirePermission('orders:take'), as
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
     }
 });
+
+/** L'ordine è in cassa (comanda viva) e il conto lo fa la cassa. */
+async function contoDellaCassa(tenantId: number, orderId: number): Promise<boolean> {
+    const rs = await queryWithRetry(
+        `SELECT 1 FROM passepartout_comande_vive v
+           JOIN passepartout_config pc ON pc.tenant_id = v.tenant_id
+          WHERE v.tenant_id = $1 AND v.order_id = $2 AND pc.comande_conto = 'cassa' AND v.stato <> 'CHIUSA'`,
+        [tenantId, orderId]
+    );
+    return rs.rows.length > 0;
+}
+
+/** Chiusura dal CRM di un ordine in cassa con «conto: la cassa»: prima
+ *  l'ultima scrittura in sospeso, poi il conto si importa dalla comanda in
+ *  cassa (righe del palmare e della cassa, coperto e sconto della cassa),
+ *  come l'«importa dalla cassa» del conto al tavolo. Si paga nel CRM o dal QR;
+ *  chiuso il conto, la chiusura in cassa è quella dei conti importati
+ *  (chiudiComandaPassepartoutPerBill, col controllo delle differenze). */
+async function chiudiOrdineColContoDellaCassa(req: express.Request, res: express.Response, orderId: number): Promise<any> {
+    const tenantId = req.tenantId!;
+    try {
+        await lavoraComandeVive(tenantId, orderId);
+        const v = (await queryWithRetry(
+            `SELECT pp_comanda_id, stato FROM passepartout_comande_vive WHERE tenant_id = $1 AND order_id = $2`,
+            [tenantId, orderId]
+        )).rows[0];
+        if (!v?.pp_comanda_id || v.stato === 'PENDING' || v.stato === 'FAILED') {
+            return res.status(409).json({
+                error: 'comanda_non_in_cassa',
+                message: 'La comanda non è ancora tutta in cassa: riprova tra un attimo, o chiudi il tavolo in cassa.',
+            });
+        }
+        const idComanda = Number(v.pp_comanda_id);
+        const comanda = await callPassepartout<PassepartoutComanda | null>(tenantId, 'comanda', { idGestionale: idComanda }, 30_000);
+        if (!comanda || comanda.isPagato) {
+            await chiudiOrdineChiusoInCassa(tenantId, orderId);
+            return res.json({
+                order_id: orderId, bill: null, released_split_ids: [],
+                message: 'La cassa ha già chiuso il tavolo: la comanda è chiusa anche qui.',
+            });
+        }
+        const payload = comandaToBillPayload(comanda);
+        const sconto = Math.min(await scontoCassaCents(tenantId, idComanda) ?? 0, payload.total_cents);
+        const col = colonneScontoCassa(sconto);
+        const ref = `pp:comanda:${idComanda}`;
+
+        const client = await pool.connect();
+        let bill: any;
+        let nuovo = false;
+        try {
+            await client.query('BEGIN');
+            const ordRs = await client.query(`SELECT * FROM orders WHERE id = $1 AND tenant_id = $2 FOR UPDATE`, [orderId, tenantId]);
+            const order = ordRs.rows[0];
+            if (!order) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Comanda non trovata' }); }
+            if (order.status !== 'OPEN') {
+                await client.query('ROLLBACK');
+                return res.status(409).json({ error: 'La comanda non è aperta', status: order.status });
+            }
+            // Le bozze non sono mai andate in cassa: come nella chiusura di
+            // sempre, si scartano solo se il cameriere lo conferma.
+            const bozze = await client.query(
+                `SELECT COUNT(*)::int AS n FROM order_items WHERE order_id = $1 AND tenant_id = $2 AND status = 'DRAFT'`,
+                [orderId, tenantId]
+            );
+            if (bozze.rows[0].n > 0 && !req.body?.discard_pending) {
+                await client.query('ROLLBACK');
+                return res.status(409).json({
+                    error: 'Ci sono righe non ancora inviate in cucina',
+                    pending_items: bozze.rows[0].n,
+                    hint: 'Invia o elimina le righe in bozza, oppure richiama con discard_pending: true',
+                });
+            }
+            if (bozze.rows[0].n > 0) {
+                await client.query(`DELETE FROM order_items WHERE order_id = $1 AND tenant_id = $2 AND status = 'DRAFT'`, [orderId, tenantId]);
+            }
+            // Il conto della comanda c'è già se l'ha aperto il QR del tavolo.
+            bill = (await client.query(
+                `SELECT * FROM table_bills WHERE tenant_id = $1 AND external_ref = $2
+                    AND status IN ('OPEN','LOCKED','SETTLED','SETTLED_PARTIAL') LIMIT 1 FOR UPDATE`,
+                [tenantId, ref]
+            )).rows[0];
+            if (!bill) {
+                const altro = order.table_bill_id
+                    ? order.table_bill_id
+                    : (await client.query(
+                        `SELECT id FROM table_bills WHERE tenant_id = $1 AND table_id = $2 AND reservation_id IS NULL
+                            AND status IN ('OPEN','LOCKED','SETTLED','SETTLED_PARTIAL') LIMIT 1`,
+                        [tenantId, order.table_id]
+                    )).rows[0]?.id;
+                if (altro) {
+                    await client.query('ROLLBACK');
+                    return res.status(409).json({
+                        error: 'conto_del_crm',
+                        message: 'Sul tavolo c\'è già un conto del CRM: chiudilo o annullalo, poi chiudi la comanda.',
+                        existing_bill_id: altro,
+                    });
+                }
+                const coperti = Number(payload.covers ?? 0) > 0 ? Number(payload.covers) : Math.max(1, Number(order.covers) || 1);
+                bill = (await client.query(
+                    `INSERT INTO table_bills
+                        (tenant_id, reservation_id, table_id, total_cents, covers, share_token, opened_by_user_id,
+                         items, external_ref, service_date, shift, discount_type, discount_value, discount_reason)
+                     VALUES ($1, NULL, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11, $12, $13)
+                     RETURNING *`,
+                    [tenantId, order.table_id, Math.max(0, payload.total_cents - sconto), coperti,
+                     crypto.randomBytes(24).toString('base64url'), req.user?.userId ?? null,
+                     JSON.stringify(payload.items), ref, order.service_date, order.shift, col.type, col.value, col.reason]
+                )).rows[0];
+                nuovo = true;
+            }
+            await client.query(
+                `UPDATE orders SET table_bill_id = $3, status = 'CLOSED', closed_at = CURRENT_TIMESTAMP, closed_by_user_id = $4
+                  WHERE id = $1 AND tenant_id = $2`,
+                [orderId, tenantId, bill.id, req.user?.userId ?? null]
+            );
+            await outboxEnqueueInTx(client, tenantId, 'order:updated', `order:${orderId}`, { order_id: orderId }, outboxContext(req));
+            await logBillChanged(client, tenantId, bill.id);
+            await client.query('COMMIT');
+        } catch (err: any) {
+            await client.query('ROLLBACK').catch(() => {});
+            if (err?.code === '23505') {
+                return res.status(409).json({ error: 'conto_del_crm', message: 'Sul tavolo c\'è già un conto attivo.' });
+            }
+            throw err;
+        } finally {
+            client.release();
+        }
+        // Un conto aperto prima (dal QR) torna quello della comanda, finché
+        // nessuno ha iniziato a pagare.
+        if (!nuovo) await riallineaContoAllaComanda(tenantId, bill.id, comanda, sconto);
+        try { socketService?.broadcastToAll(tenantId, nuovo ? 'bill:opened' : 'bill:updated', bill); } catch (_) {}
+        outboxKick();
+        avviaComandeVive(tenantId);
+        await closeOrderCourseNotifications(tenantId, orderId);
+        LogService.logActivity(
+            tenantId, req.user?.userId ?? null, req.user?.email ?? '', req.user?.email ?? '',
+            ActivityAction.UPDATE, ResourceType.ORDER, orderId, `Comanda chiusa col conto della cassa · tavolo ${bill.table_id ?? '—'}`,
+            { bill_id: bill.id, comanda_cassa: idComanda, total_cents: bill.total_cents }
+        ).catch(() => {});
+        const fresco = (await queryWithRetry(`SELECT * FROM table_bills WHERE id = $1 AND tenant_id = $2`, [bill.id, tenantId])).rows[0] ?? bill;
+        const fig = await queryWithRetry(
+            `SELECT COALESCE(SUM(amount_cents) FILTER (WHERE status = 'PAID'), 0)::int AS paid_cents,
+                    COALESCE(SUM(amount_cents) FILTER (WHERE status IN ('CLAIMED','PAID')), 0)::int AS live
+               FROM table_bill_splits WHERE table_bill_id = $1`,
+            [bill.id]
+        );
+        const staffPaid = await staffPaidCentsForBill(bill.id);
+        return res.json({
+            order_id: orderId,
+            bill: {
+                ...fresco,
+                paid_cents: fig.rows[0].paid_cents,
+                staff_paid_cents: staffPaid,
+                deposit_credit_cents: 0,
+                deposit_paid_cents: 0,
+                refund_due_cents: 0,
+                residual_cents: Math.max(0, Number(fresco.total_cents) - fig.rows[0].live - staffPaid),
+            },
+            released_split_ids: [],
+        });
+    } catch (err: any) {
+        if (sendPassepartoutError(res, err)) return;
+        console.error('POST /orders/:id/close (conto della cassa) error:', err);
+        return res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+}
 
 // Conto su un tavolo senza prenotazione. Gemello di POST /reservations/:id/bill
 // per i walk-in, che finora non avevano percorso: `table_bills.reservation_id`

@@ -5,7 +5,7 @@ import { Client } from 'pg';
 import { io as ioClient, type Socket } from 'socket.io-client';
 import { api, bearer, ownerToken } from './helpers';
 import { differenza, righeDesiderate, uscitaPerCassa, usciteDaInviare, variantiPerCassa } from '../../services/passepartoutComandeVive';
-import { PassepartoutError, scriviComandaViva, type EsitoComandaViva, type MemoriaComandaViva } from '../../services/passepartoutService';
+import { PassepartoutError, getComanda, scriviComandaViva, type EsitoComandaViva, type MemoriaComandaViva } from '../../services/passepartoutService';
 
 // Comanda viva, fase 2: gli ordini del CRM nella comanda in cassa del
 // tavolo vero. Due livelli: le righe (cosa va in cassa e la differenza con
@@ -79,6 +79,15 @@ describe('righe della comanda viva', () => {
         expect(per['oi:1']).toMatchObject({ idRiga: 101, pezzi: 2 });
         expect(per['oi:3']).toMatchObject({ idRiga: 103, prezzoCents: 900 });
         expect(per['oi:4']).toMatchObject({ idRiga: 104, cancella: true });
+    });
+
+    it('conto della cassa: il coperto ha il numero dei coperti e il prezzo della cassa', () => {
+        const [cop] = righeDesiderate([riga({ id: 2, line_kind: 'COVER', qty: 3, unit_price_cents: 250 })], 3, false, { copertoDellaCassa: true });
+        expect(cop).toMatchObject({ chiave: 'coperto', coperto: true, pezzi: 3, prezzoCents: 0, prezzoDellaCassa: true });
+        const [senza] = righeDesiderate([riga({ id: 3 })], 2, false, { copertoDellaCassa: true });
+        expect(senza).toMatchObject({ chiave: 'coperto', pezzi: 2, prezzoDellaCassa: true });
+        // Sul tavolo del palmare il coperto resta della cassa e il CRM non lo scrive.
+        expect(righeDesiderate([riga({ id: 3 })], 2, true, { copertoDellaCassa: true }).map((r) => r.chiave)).toEqual(['oi:3']);
     });
 
     it('chi stampa: le uscite lanciate le manda la cassa; quella con righe stampate dal CRM resta del CRM', () => {
@@ -173,7 +182,8 @@ function cassaFinta() {
                     else esistente.stato = 'Cancellato';
                 } else {
                     esistente.pezzi = Number(campo(r, 'Pezzi'));
-                    esistente.prezzo = Number(campo(r, 'Prezzo'));
+                    // Senza prezzo resta quello che c'è, come la cassa vera.
+                    if (campo(r, 'Prezzo') != null) esistente.prezzo = Number(campo(r, 'Prezzo'));
                 }
                 continue;
             }
@@ -181,7 +191,10 @@ function cassaFinta() {
             const coperto = campo(r, 'TipoEnum') === 'Coperto';
             c.righe.push({
                 id: ++prossimaRiga, articolo, descrizione: campo(r, 'Descrizione') ?? CATALOGO.find((a) => a.codice === articolo)?.descrizione ?? articolo,
-                pezzi: Number(campo(r, 'Pezzi')), prezzo: Number(campo(r, 'Prezzo')), uscita: coperto ? 0 : Number(campo(r, 'Uscita') ?? 1),
+                // Senza prezzo la cassa prende quello del suo listino (prova del 07/10).
+                pezzi: Number(campo(r, 'Pezzi')),
+                prezzo: campo(r, 'Prezzo') != null ? Number(campo(r, 'Prezzo')) : (CATALOGO.find((a) => a.codice === articolo)?.prezzo ?? 0),
+                uscita: coperto ? 0 : Number(campo(r, 'Uscita') ?? 1),
                 stato: 'Nuovo', tipo: coperto ? 'Coperto' : 'Semplice', varianti,
             });
         }
@@ -567,7 +580,7 @@ describe('ordini del CRM in cassa: chi stampa in cucina', () => {
             `INSERT INTO stations (tenant_id, name, printer, sort_order) VALUES (1, 'Cucina Viva Stampa', 'termica-viva', 95) RETURNING id`
         )).rows[0].id);
         const room = await api().post('/rooms').set(bearer(token)).send({ name: 'Sala Comanda Viva 3', width: 600, height: 400 });
-        for (const [i, nome] of ['W1', 'W2', 'W3'].entries()) {
+        for (const [i, nome] of ['W1', 'W2', 'W3', 'W4'].entries()) {
             const t = await api().post('/tables').set(bearer(token)).send({
                 name: `CV${nome}`, shape: 'SQUARE', seats: 4, x: 40 + i * 80, y: 40, room_id: room.body.id, status: 'FREE',
             });
@@ -605,8 +618,7 @@ describe('ordini del CRM in cassa: chi stampa in cucina', () => {
                 })) });
             }
             if (payload?.op === 'comanda') {
-                const c = cassa.comande.get(Number(payload.params?.idGestionale));
-                return ack({ ok: true, result: c ? { idGestionale: c.id, isPagato: c.pagata, righe: [] } : null });
+                return ack({ ok: true, result: await getComanda(Number(payload.params?.idGestionale)) });
             }
             if (payload?.op !== 'comandaViva') return ack({ ok: false, error: `op non prevista: ${payload?.op}`, kind: 'agent' });
             try {
@@ -741,5 +753,29 @@ describe('ordini del CRM in cassa: chi stampa in cucina', () => {
         // Gli altri, con la comanda ancora aperta in cassa, restano aperti.
         const w2 = ordini[ordini.indexOf(ordineW1) + 1];
         expect((await db.query(`SELECT status FROM orders WHERE id = $1`, [w2])).rows[0].status).toBe('OPEN');
+    });
+
+    it('conto della cassa: coperto della cassa, e chiudendo dal CRM il conto è la comanda in cassa', async () => {
+        await saluta(['comanda-viva', 'comanda-viva-invio', 'comanda-viva-coperto']);
+        const ordine = await nuovoOrdine('W4');
+        await batti(ordine, [{ dish_id: piatto, qty: 1, course_no: 1 }]);
+        await finoA(async () => (await viva(ordine))?.stato === 'SCRITTA', 'ordine scritto in cassa');
+        const c = cassa.sulTavolo('W4')!;
+        // Il coperto è quello della cassa: due coperti al prezzo del suo listino.
+        expect(c.righe.find((r) => r.tipo === 'Coperto')).toMatchObject({ articolo: 'Coperti', pezzi: 2, prezzo: 3 });
+        const scritto = cassa.put.find((b) => b.includes('<c:Tavolo>W4</c:Tavolo>'))!;
+        const copertoXml = /<c:PMBRigaComanda>(?:(?!<\/c:PMBRigaComanda>)[\s\S])*<c:TipoEnum>Coperto<\/c:TipoEnum>[\s\S]*?<\/c:PMBRigaComanda>/.exec(scritto)![0];
+        expect(copertoXml).not.toContain('<c:Prezzo>');
+        // In cassa battono anche una tisana.
+        c.righe.push({ id: 990_001, articolo: 'VARIE', descrizione: 'Tisana', pezzi: 1, prezzo: 1.5, uscita: 1, stato: 'Nuovo', tipo: 'Semplice', varianti: [] });
+
+        const chiusa = await api().post(`/orders/${ordine}/close`).set(bearer(token)).send({});
+        expect(chiusa.status).toBe(200);
+        // 2 coperti × 3 € + gnocchi 12 € + tisana 1,50 €.
+        expect(chiusa.body.bill).toMatchObject({ external_ref: `pp:comanda:${c.id}`, total_cents: 600 + 1200 + 150, residual_cents: 1950 });
+        expect((chiusa.body.bill.items as any[]).map((i) => i.name)).toEqual(expect.arrayContaining(['Tisana']));
+        const o = (await db.query(`SELECT status, table_bill_id FROM orders WHERE id = $1`, [ordine])).rows[0];
+        expect(o).toMatchObject({ status: 'CLOSED', table_bill_id: chiusa.body.bill.id });
+        await db.query(`DELETE FROM table_bills WHERE id = $1`, [chiusa.body.bill.id]);
     });
 });

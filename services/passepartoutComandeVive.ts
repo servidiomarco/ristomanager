@@ -41,6 +41,7 @@ import { BAR_COURSE_NO, DESSERT_COURSE_NO } from '../utils/courses.js';
 
 const CAPACITA = 'comanda-viva';
 const CAPACITA_INVIO = 'comanda-viva-invio';
+const CAPACITA_COPERTO = 'comanda-viva-coperto';
 const MAX_TENTATIVI = 8;
 // Ogni quanto, al massimo, si chiede alla cassa quali comande sono aperte
 // per accorgersi di quelle chiuse da lei.
@@ -124,6 +125,9 @@ export function righeDesiderate(
     }>,
     coperti: number,
     palmare: boolean,
+    /** «Conto: la cassa»: il coperto lo prezza la cassa col suo listino; il
+     *  CRM ne passa solo il numero (scelta dell'utente, 09/10). */
+    opzioni: { copertoDellaCassa?: boolean } = {},
 ): Desiderata[] {
     const out: Desiderata[] = [];
     let copertoPezzi = 0;
@@ -168,11 +172,13 @@ export function righeDesiderate(
     // nessuna riga coperto, la cassa aggiunge la sua al suo prezzo (prova
     // del 06/10) e il totale non tornerebbe più.
     if (!palmare && (copertoPezzi > 0 || coperti > 0)) {
+        const dellaCassa = opzioni.copertoDellaCassa === true;
         out.unshift({
             chiave: 'coperto', orderItemId: null, lanciata: false, idRiga: null, idArticolo: null, descrizione: 'Coperto',
             pezzi: copertoPezzi > 0 ? copertoPezzi : coperti,
-            prezzoCents: copertoPezzi > 0 ? (copertoPrezzo ?? 0) : 0,
+            prezzoCents: dellaCassa ? 0 : copertoPezzi > 0 ? (copertoPrezzo ?? 0) : 0,
             uscita: 1, varianti: [], coperto: true, soloComandaNostra: true,
+            ...(dellaCassa ? { prezzoDellaCassa: true } : {}),
         });
     }
     return out;
@@ -242,7 +248,7 @@ const tag = (orderId: number) => `sympotia-ordine:${orderId}`;
 
 async function configVive(tenantId: number) {
     const rs = await queryWithRetry(
-        `SELECT comande_vive_enabled, comande_vive_dal, articolo_generico_id, comande_stampa FROM passepartout_config WHERE tenant_id = $1`,
+        `SELECT comande_vive_enabled, comande_vive_dal, articolo_generico_id, comande_stampa, comande_conto FROM passepartout_config WHERE tenant_id = $1`,
         [tenantId]
     );
     return rs.rows[0] ?? null;
@@ -388,6 +394,9 @@ export async function lavoraComandeVive(tenantId: number, soloOrdine: number | n
 
     // «Stampa: la cassa» con un agente che sa mandare in produzione.
     const invioDallaCassa = (cfg.comande_stampa ?? 'cassa') === 'cassa' && passepartoutAgentSupports(tenantId, CAPACITA_INVIO);
+    // «Conto: la cassa» col coperto della cassa. Un agente che non lo sa
+    // fare scriverebbe il coperto a zero: resta quello del CRM.
+    const copertoDellaCassa = (cfg.comande_conto ?? 'cassa') === 'cassa' && passepartoutAgentSupports(tenantId, CAPACITA_COPERTO);
 
     let scritti = 0;
     for (const o of ordini) {
@@ -395,7 +404,7 @@ export async function lavoraComandeVive(tenantId: number, soloOrdine: number | n
         const aperto = o.status === 'OPEN';
         const palmare = o.palmare === true;
         const desiderate = o.status === 'OPEN' || o.status === 'CLOSED'
-            ? righeDesiderate(righe.get(orderId) ?? [], Number(o.covers) || 0, palmare)
+            ? righeDesiderate(righe.get(orderId) ?? [], Number(o.covers) || 0, palmare, { copertoDellaCassa })
             : [];
         const giaScritte: Scritta[] = (scritte.get(orderId) ?? []).map((s: any) => ({
             chiave: s.chiave,
