@@ -79,6 +79,7 @@ import { ContiCassa } from './components/passepartout/ContiCassa';
 import { TavoliApertiInCassa } from './components/passepartout/TavoliApertiInCassa';
 import { PagaDalQr } from './components/passepartout/PagaDalQr';
 import { ContiCrmInCassa } from './components/passepartout/ContiCrmInCassa';
+import { ComandeInCassa } from './components/passepartout/ComandeInCassa';
 import { CardErrorBoundary } from './components/CardErrorBoundary';
 import { LegalSettingsCard } from './components/LegalSettingsCard';
 import { TableAssignmentAiPromptCard } from './components/TableAssignmentAiPromptCard';
@@ -3724,6 +3725,9 @@ const App: React.FC = () => {
                   </CardErrorBoundary>
                   <CardErrorBoundary label="Passepartout">
                     <PagaDalQr showToast={addToast} />
+                  </CardErrorBoundary>
+                  <CardErrorBoundary label="Passepartout">
+                    <ComandeInCassa showToast={addToast} />
                   </CardErrorBoundary>
                   <CardErrorBoundary label="Passepartout">
                     <ContiCrmInCassa showToast={addToast} />
