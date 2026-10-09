@@ -53,6 +53,9 @@ export interface FcDati {
   piatti: FcPiattoMeta[];
   impostazioni: FcImpostazioni;
   canManage: boolean;
+  /** La bozza con l'AI si può chiedere (chiave sul server e foodcost:manage).
+   *  Assente da un server di prima: vale false. */
+  aiDisponibile?: boolean;
 }
 
 export interface FcPiattoCosto {
@@ -86,6 +89,24 @@ export interface FcRigaInput {
   productId: number;
   quantita: number;
   note?: string | null;
+  /** Fissa l'unità di un ingrediente che non ne ha ancora una. */
+  unita?: UnitaCosto | null;
+}
+
+/** Una riga proposta dall'AI: un ingrediente del ristorante o uno nuovo. */
+export interface FcRigaBozza {
+  productId: number | null;
+  nomeNuovo: string | null;
+  unita: UnitaCosto;
+  quantita: number;
+  nota: string | null;
+}
+
+export interface FcBozza {
+  righe: FcRigaBozza[];
+  resaQuantita: number | null;
+  resaUnita: UnitaCosto | null;
+  avvisi: string[];
 }
 
 export interface FcIngredienteInput {
@@ -176,6 +197,11 @@ class FoodCostApiService {
     righe: FcRiga[];
   }> {
     return send('PUT', `/schede/preparazione/${productId}`, input);
+  }
+
+  /** La proposta dell'AI per una scheda vuota: non salva niente. */
+  bozzaScheda(input: { piattoId: number; porzioni: number } | { preparazioneId: number }): Promise<FcBozza> {
+    return send('POST', '/bozza', input);
   }
 
   salvaImpostazioni(input: Partial<FcImpostazioni>): Promise<FcImpostazioni> {

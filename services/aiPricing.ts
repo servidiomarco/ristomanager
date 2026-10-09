@@ -17,9 +17,12 @@ export interface ModelPrice {
 }
 
 export const MODEL_PRICES: Record<string, ModelPrice> = {
+    // Listino Anthropic verificato il 2026-10-09: Opus 5.5 costa meno di Opus 5,
+    // e il rincaro di Sonnet 5 annunciato per il 1° settembre non c'è stato.
+    'claude-opus-5-5': { inputPerMTok: 4, outputPerMTok: 20 },
     'claude-opus-5': { inputPerMTok: 5, outputPerMTok: 25 },
     'claude-opus-4-8': { inputPerMTok: 5, outputPerMTok: 25 },
-    'claude-sonnet-5': { inputPerMTok: 3, outputPerMTok: 15 },
+    'claude-sonnet-5': { inputPerMTok: 2, outputPerMTok: 10 },
     'claude-haiku-4-5': { inputPerMTok: 1, outputPerMTok: 5 },
 };
 

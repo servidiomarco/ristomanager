@@ -4,7 +4,10 @@
     "banquet_menu": "Event menu proposal",
     "suggest_reply": "Suggested message reply",
     "whatsapp_agent": "WhatsApp agent",
-    "support_assistant": "Help assistant"
+    "support_assistant": "Help assistant",
+    "wine_pairing": "Wine pairings",
+    "haccp_ddt": "HACCP delivery note reading",
+    "food_cost_bozza": "Recipe card draft (food cost)"
   },
   "errLoad": "Could not load the usage figures",
   "subtitle": "Sofia (ElevenLabs) and the AI analyses (Gemini) side by side.",

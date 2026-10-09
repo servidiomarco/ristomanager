@@ -151,5 +151,14 @@
     "piece": "pezzo",
     "pz": "pezzi",
     "pzShort": "/pz"
+  },
+  "ai": {
+    "draft": "Bozza con l'AI",
+    "writing": "Scrivo la bozza…",
+    "draftTitle": "Bozza dell'AI: controlla ingredienti e grammature, poi salva",
+    "draftEmpty": "L'AI non ha proposto ingredienti",
+    "newTag": "nuovo",
+    "create": "Crea",
+    "search": "Cerca un ingrediente"
   }
 }

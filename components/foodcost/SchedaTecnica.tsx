@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertCircle, Plus, Trash2 } from 'lucide-react';
+import { AlertCircle, Plus, Search, Trash2, Wand2 } from 'lucide-react';
 import { Callout, Field, FormCard, ModalShell, SegmentedControl, Stepper, dsButton, dsInput } from '../ds';
 import type { FoodCostState } from '../../hooks/useFoodCost';
 import { foodCostApiService, type FcIngrediente } from '../../services/foodCostApiService';
@@ -25,7 +25,12 @@ import { FoodCostPill } from './FoodCostPill';
    tutte le righe in un colpo.
 
    Un ingrediente nuovo si crea da qui e va nel magazzino (area cucina); un
-   prezzo che manca si scrive sulla riga, senza cambiare pagina. */
+   prezzo che manca si scrive sulla riga, senza cambiare pagina.
+
+   Una scheda vuota si può far scrivere all'AI: la bozza riempie le righe,
+   segnate con la bacchetta, e diventa una scheda solo col Salva. Gli
+   ingredienti che il magazzino non ha restano proposte finché lo chef non li
+   crea o non ne sceglie uno che c'è già. */
 
 export type SchedaTarget =
   | { kind: 'piatto'; dish: { id: number; name: string; price: number; vat_rate?: number; sold_by_weight?: boolean } }
@@ -36,6 +41,12 @@ interface RigaEdit {
   productId: number | null;
   quantita: string;
   note: string;
+  /** Proposta dall'AI e non ancora toccata. */
+  daAi?: boolean;
+  /** L'unità che la quantità dell'AI presuppone, per un ingrediente che non ne ha. */
+  unitaProposta?: UnitaCosto | null;
+  /** L'ingrediente nuovo che l'AI propone, finché non lo si crea o sceglie. */
+  nomeProposto?: string | null;
 }
 
 const parseDec = (s: string): number | null => {
@@ -76,6 +87,9 @@ export const SchedaTecnica: React.FC<{
   const [unitaPrep, setUnitaPrep] = useState<UnitaCosto>('kg');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [generando, setGenerando] = useState(false);
+  /** Gli avvisi della bozza dell'AI; null finché non se ne chiede una. */
+  const [avvisiAi, setAvvisiAi] = useState<string[] | null>(null);
 
   // Si inizializza all'apertura, non a ogni ricarica dei dati: un prezzo
   // salvato da una riga non deve cancellare quello che si sta scrivendo.
@@ -83,6 +97,8 @@ export const SchedaTecnica: React.FC<{
   useEffect(() => {
     if (!open || !target) return;
     setError(null);
+    setAvvisiAi(null);
+    setGenerando(false);
     const salvate = target.kind === 'piatto'
       ? fc.righePiatto.get(target.dish.id) ?? []
       : fc.righePreparazione.get(target.ingrediente.id) ?? [];
@@ -153,10 +169,48 @@ export const SchedaTecnica: React.FC<{
   const mancanti = (esito.totale?.mancanti ?? []).map(id => fc.ingredienti.get(id)?.nome).filter(Boolean) as string[];
 
   // ---- Azioni -----------------------------------------------------------------
+  // La bacchetta resta finché la quantità è quella dell'AI.
   const aggiorna = (key: string, patch: Partial<RigaEdit>) =>
-    setRighe(prev => prev.map(r => (r.key === key ? { ...r, ...patch } : r)));
+    setRighe(prev => prev.map(r => (r.key === key
+      ? { ...r, ...patch, ...('quantita' in patch && !('daAi' in patch) ? { daAi: false } : {}) }
+      : r)));
   const togli = (key: string) => setRighe(prev => prev.filter(r => r.key !== key));
   const aggiungi = () => setRighe(prev => [...prev, { key: nuovaChiave(), productId: null, quantita: '', note: '' }]);
+
+  // Una bozza per apertura: rifarla darebbe la stessa risposta, pagata due volte.
+  const puoBozza = canManage && fc.dati?.aiDisponibile === true && righe.length === 0 && avvisiAi === null
+    && (isPiatto ? !costoManuale.trim() : true);
+
+  const generaBozza = async () => {
+    if (!puoBozza || generando) return;
+    setGenerando(true);
+    setError(null);
+    try {
+      const bozza = await foodCostApiService.bozzaScheda(isPiatto
+        ? { piattoId: target.dish.id, porzioni }
+        : { preparazioneId: target.ingrediente.id });
+      setRighe(bozza.righe.map(r => ({
+        key: nuovaChiave(),
+        productId: r.productId,
+        quantita: fmtNum(r.quantita),
+        note: r.nota ?? '',
+        daAi: true,
+        unitaProposta: r.unita,
+        nomeProposto: r.nomeNuovo,
+      })));
+      // La resa del semilavorato solo se parla la stessa unità di come si usa.
+      if (!isPiatto && bozza.resaQuantita != null && bozza.resaUnita
+        && (!target.ingrediente.unitaCosto || target.ingrediente.unitaCosto === bozza.resaUnita)) {
+        setUnitaPrep(bozza.resaUnita);
+        setResaQuantita(fmtNum(bozza.resaQuantita));
+      }
+      setAvvisiAi(bozza.avvisi ?? []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setGenerando(false);
+    }
+  };
 
   const salva = async () => {
     if (!canManage || saving) return;
@@ -169,7 +223,14 @@ export const SchedaTecnica: React.FC<{
       setError(t('editor.cycle', 'Questa ricetta finirebbe per contenere sé stessa'));
       return;
     }
-    const payload = righe.map(r => ({ productId: r.productId!, quantita: parseDec(r.quantita)!, note: r.note.trim() || null }));
+    // L'unità proposta va col salvataggio solo per chi non ne ha una: è la
+    // prima scheda a fissarla, così la quantità non resta ambigua.
+    const payload = righe.map(r => ({
+      productId: r.productId!,
+      quantita: parseDec(r.quantita)!,
+      note: r.note.trim() || null,
+      unita: fc.ingredienti.get(r.productId!)?.unitaCosto ? null : r.unitaProposta ?? null,
+    }));
     setSaving(true);
     setError(null);
     try {
@@ -259,6 +320,26 @@ export const SchedaTecnica: React.FC<{
         </Callout>
       )}
 
+      {avvisiAi !== null && (
+        <div className="ds-ai-frame">
+          <div className="ds-ai-card flex items-start gap-2.5 px-3.5 py-3">
+            <Wand2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-[var(--ds-arriving-text)]" aria-hidden />
+            <div className="min-w-0 flex-1">
+              <p className="text-[14px] font-semibold text-[var(--ds-text-primary)]">
+                {righe.length > 0
+                  ? t('ai.draftTitle', 'Bozza dell\'AI: controlla ingredienti e grammature, poi salva')
+                  : t('ai.draftEmpty', 'L\'AI non ha proposto ingredienti')}
+              </p>
+              {avvisiAi.length > 0 && (
+                <ul className="mt-1 space-y-0.5 text-[13px] text-[var(--ds-text-secondary)]">
+                  {avvisiAi.map((a, i) => <li key={i}>{a}</li>)}
+                </ul>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <FormCard
         title={t('editor.ingredients', 'Ingredienti')}
         aside={<span className="text-[13px] text-[var(--ds-text-muted)]">{t('editor.netQty', 'Quantità nette')}</span>}
@@ -270,6 +351,21 @@ export const SchedaTecnica: React.FC<{
               : t('editor.emptyPrep', 'Nessun ingrediente.')}
           </p>
         )}
+        {puoBozza && (generando ? (
+          <div className="mb-3 flex min-h-[44px] items-center gap-2" role="status">
+            <Wand2 className="ds-ai-wand h-4 w-4 text-[var(--ds-arriving-text)]" aria-hidden />
+            <span className="ds-ai-shimmer text-[14px]">{t('ai.writing', 'Scrivo la bozza…')}</span>
+          </div>
+        ) : (
+          /* Wand2 + famiglia arriving: è AI che propone (§ds). */
+          <button
+            type="button"
+            onClick={generaBozza}
+            className="mb-3 inline-flex h-11 items-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-tint)] px-4 text-[15px] font-semibold text-[var(--ds-arriving-text)] transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          >
+            <Wand2 className="h-4 w-4" aria-hidden /> {t('ai.draft', 'Bozza con l\'AI')}
+          </button>
+        ))}
         <ul className="space-y-3">
           {righe.map(r => (
             <RigaEditor
@@ -374,18 +470,31 @@ const RigaEditor: React.FC<{
   showToast?: (message: string, type?: 'success' | 'error' | 'info') => void;
 }> = ({ riga, fc, escluso, readOnly, costo, onChange, onRemove, showToast }) => {
   const { t } = useTranslation('foodcost', { useSuspense: false });
+  const [cercando, setCercando] = useState(false);
   const ing = riga.productId != null ? fc.ingredienti.get(riga.productId) : undefined;
-  const unita = ing?.unitaCosto ? UNITA_QUANTITA[ing.unitaCosto] : null;
+  const unitaRiga = ing?.unitaCosto ?? riga.unitaProposta ?? null;
+  const unita = unitaRiga ? UNITA_QUANTITA[unitaRiga] : null;
   const senzaPrezzo = ing != null && (!ing.unitaCosto || (!ing.isPreparazione && ing.costoCents == null));
+
+  // Scelto un ingrediente che si conta in un'altra unità, la quantità
+  // dell'AI non vale più: va riscritta.
+  const scegli = (id: number) => {
+    const scelto = fc.ingredienti.get(id);
+    const conflitto = riga.unitaProposta != null && scelto?.unitaCosto != null && scelto.unitaCosto !== riga.unitaProposta;
+    onChange({ productId: id, ...(conflitto ? { quantita: '', daAi: false, unitaProposta: null } : {}) });
+  };
 
   return (
     <li className="rounded-[var(--ds-radius-sm)] bg-[var(--ds-surface-row)] p-3">
       <div className="flex flex-wrap items-center gap-2">
         <div className="min-w-0 flex-[1_1_14rem]">
           {riga.productId == null && !readOnly
-            ? <ScegliIngrediente fc={fc} escluso={escluso} onPick={id => onChange({ productId: id })} showToast={showToast} />
+            ? (riga.nomeProposto && !cercando
+              ? <PropostaNuovo nome={riga.nomeProposto} unita={riga.unitaProposta ?? null} fc={fc} escluso={escluso} onPick={scegli} onCerca={() => setCercando(true)} showToast={showToast} />
+              : <ScegliIngrediente fc={fc} escluso={escluso} onPick={scegli} showToast={showToast} iniziale={riga.nomeProposto} unitaIniziale={riga.unitaProposta} />)
             : (
               <p className="truncate text-[15px] font-medium text-[var(--ds-text-primary)]">
+                {riga.daAi && <Wand2 className="mr-1.5 inline h-3.5 w-3.5 align-[-2px] text-[var(--ds-arriving-text)]" aria-hidden />}
                 {ing?.nome ?? t('editor.unknown', 'Ingrediente rimosso')}
                 {ing?.isPreparazione && <span className="ml-2 text-[13px] font-normal text-[var(--ds-text-muted)]">{t('editor.prepTag', 'semilavorato')}</span>}
               </p>
@@ -418,7 +527,7 @@ const RigaEditor: React.FC<{
         )}
       </div>
       {senzaPrezzo && !readOnly && ing && !ing.isPreparazione && (
-        <PrezzoVeloce ingrediente={ing} fc={fc} showToast={showToast} />
+        <PrezzoVeloce ingrediente={ing} fc={fc} showToast={showToast} unitaIniziale={riga.unitaProposta} />
       )}
     </li>
   );
@@ -429,9 +538,11 @@ export const PrezzoVeloce: React.FC<{
   ingrediente: FcIngrediente;
   fc: FoodCostState;
   showToast?: (message: string, type?: 'success' | 'error' | 'info') => void;
-}> = ({ ingrediente, fc, showToast }) => {
+  /** L'unità da proporre quando l'ingrediente non ne ha (quella della bozza). */
+  unitaIniziale?: UnitaCosto | null;
+}> = ({ ingrediente, fc, showToast, unitaIniziale }) => {
   const { t } = useTranslation('foodcost', { useSuspense: false });
-  const [unita, setUnita] = useState<UnitaCosto>(ingrediente.unitaCosto ?? 'kg');
+  const [unita, setUnita] = useState<UnitaCosto>(ingrediente.unitaCosto ?? unitaIniziale ?? 'kg');
   const [prezzo, setPrezzo] = useState('');
   const [saving, setSaving] = useState(false);
   const salva = async () => {
@@ -481,6 +592,68 @@ export const PrezzoVeloce: React.FC<{
   );
 };
 
+// ---- Ingrediente nuovo proposto dall'AI ---------------------------------------------
+
+/** Un ingrediente che l'AI propone e il magazzino non ha: si crea con un
+ *  tocco, si sceglie fra quelli che gli somigliano, o si cerca. Mai creato
+ *  da solo. */
+const PropostaNuovo: React.FC<{
+  nome: string;
+  unita: UnitaCosto | null;
+  fc: FoodCostState;
+  escluso: number | null;
+  onPick: (id: number) => void;
+  onCerca: () => void;
+  showToast?: (message: string, type?: 'success' | 'error' | 'info') => void;
+}> = ({ nome, unita, fc, escluso, onPick, onCerca, showToast }) => {
+  const { t } = useTranslation('foodcost', { useSuspense: false });
+  const [busy, setBusy] = useState(false);
+  const simili = useMemo(() => {
+    const parole = norm(nome).split(/\s+/).filter(w => w.length >= 4);
+    if (parole.length === 0) return [];
+    return (fc.dati?.ingredienti ?? [])
+      .filter(i => i.id !== escluso && parole.some(w => norm(i.nome).includes(w)))
+      .slice(0, 3);
+  }, [nome, fc.dati, escluso]);
+
+  const crea = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const nuovo = await foodCostApiService.creaIngrediente({ nome, unitaCosto: unita ?? 'kg' });
+      fc.reload();
+      onPick(nuovo.id);
+    } catch (err) {
+      showToast?.(err instanceof Error ? err.message : String(err), 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <p className="truncate text-[15px] font-medium text-[var(--ds-text-primary)]">
+        <Wand2 className="mr-1.5 inline h-3.5 w-3.5 align-[-2px] text-[var(--ds-arriving-text)]" aria-hidden />
+        {nome}
+        <span className="ml-2 text-[13px] font-normal text-[var(--ds-text-muted)]">{t('ai.newTag', 'nuovo')}</span>
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className={dsButton.secondary} disabled={busy} onClick={crea}>
+          <Plus className="h-4 w-4" aria-hidden /> {t('ai.create', 'Crea')}
+        </button>
+        {simili.map(i => (
+          <button key={i.id} type="button" className={`${dsButton.secondary} max-w-full`} onClick={() => onPick(i.id)}>
+            <span className="truncate">{i.nome}</span>
+          </button>
+        ))}
+        <button type="button" className={dsButton.secondary} onClick={onCerca} aria-label={t('ai.search', 'Cerca un ingrediente')}>
+          <Search className="h-4 w-4" aria-hidden />
+        </button>
+      </div>
+    </div>
+  );
+};
+
 // ---- Scelta dell'ingrediente ------------------------------------------------------
 
 const ScegliIngrediente: React.FC<{
@@ -488,11 +661,14 @@ const ScegliIngrediente: React.FC<{
   escluso: number | null;
   onPick: (id: number) => void;
   showToast?: (message: string, type?: 'success' | 'error' | 'info') => void;
-}> = ({ fc, escluso, onPick, showToast }) => {
+  /** La ricerca già scritta (il nome proposto dall'AI). */
+  iniziale?: string | null;
+  unitaIniziale?: UnitaCosto | null;
+}> = ({ fc, escluso, onPick, showToast, iniziale, unitaIniziale }) => {
   const { t } = useTranslation('foodcost', { useSuspense: false });
-  const [q, setQ] = useState('');
+  const [q, setQ] = useState(iniziale ?? '');
   const [creando, setCreando] = useState(false);
-  const [unita, setUnita] = useState<UnitaCosto>('kg');
+  const [unita, setUnita] = useState<UnitaCosto>(unitaIniziale ?? 'kg');
   const [prezzo, setPrezzo] = useState('');
   const [busy, setBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
