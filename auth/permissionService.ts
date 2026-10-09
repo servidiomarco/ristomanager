@@ -61,6 +61,9 @@ type TenantPermissionsCache = {
   permissions: Record<string, Permission[]>;
   lastSuccessfulRefresh: number;
   lastRefreshAttempt: number;
+  // Cresce a ogni invalidazione: una lettura partita prima di una modifica
+  // della matrice non scrive in cache il suo risultato ormai vecchio.
+  generation: number;
 };
 
 const cacheByTenant = new Map<number, TenantPermissionsCache>();
@@ -77,17 +80,36 @@ const totalPermissionsIn = (snap: Record<string, Permission[]>): number =>
 const tenantCache = (tenantId: number): TenantPermissionsCache => {
   let entry = cacheByTenant.get(tenantId);
   if (!entry) {
-    entry = { permissions: emptyRoleMap(), lastSuccessfulRefresh: 0, lastRefreshAttempt: 0 };
+    entry = { permissions: emptyRoleMap(), lastSuccessfulRefresh: 0, lastRefreshAttempt: 0, generation: 0 };
     cacheByTenant.set(tenantId, entry);
   }
   return entry;
 };
 
+// Una lettura per tenant alla volta. Chi arriva mentre è in corso e ha già
+// una matrice tiene quella; chi non l'ha mai avuta aspetta la lettura invece
+// di decidere sulla mappa vuota: dopo un deploy l'app apre con molte
+// richieste insieme, e tutte tranne la prima prendevano 403.
+const refreshInFlight = new Map<number, Promise<void>>();
+
 const refreshPermissionCache = async (tenantId: number): Promise<void> => {
   const entry = tenantCache(tenantId);
+  if (Date.now() - entry.lastSuccessfulRefresh < CACHE_TTL) return;
+  const inFlight = refreshInFlight.get(tenantId);
+  if (inFlight) return entry.lastSuccessfulRefresh > 0 ? undefined : inFlight;
+  // Il backoff protegge il DB solo quando c'è una matrice da usare: senza,
+  // si riprova (una lettura alla volta), e un DB giù dà 500, non 403.
+  if (entry.lastSuccessfulRefresh > 0 && Date.now() - entry.lastRefreshAttempt < REFRESH_BACKOFF_MS) return;
+  const refresh: Promise<void> = readPermissions(tenantId, entry).finally(() => {
+    if (refreshInFlight.get(tenantId) === refresh) refreshInFlight.delete(tenantId);
+  });
+  refreshInFlight.set(tenantId, refresh);
+  return refresh;
+};
+
+const readPermissions = async (tenantId: number, entry: TenantPermissionsCache): Promise<void> => {
   const now = Date.now();
-  if (now - entry.lastSuccessfulRefresh < CACHE_TTL) return;
-  if (now - entry.lastRefreshAttempt < REFRESH_BACKOFF_MS) return;
+  const generation = entry.generation;
   entry.lastRefreshAttempt = now;
 
   let fresh: Record<string, Permission[]>;
@@ -110,6 +132,9 @@ const refreshPermissionCache = async (tenantId: number): Promise<void> => {
     throw new Error(`role_permissions is empty for tenant ${tenantId}`);
   }
 
+  // La matrice è cambiata mentre si leggeva: si rilegge, e chi aspettava
+  // questa lettura aspetta la nuova.
+  if (entry.generation !== generation) return refreshPermissionCache(tenantId);
   entry.permissions = fresh;
   entry.lastSuccessfulRefresh = now;
 };
@@ -118,6 +143,14 @@ const invalidate = (tenantId: number): void => {
   const entry = tenantCache(tenantId);
   entry.lastSuccessfulRefresh = 0;
   entry.lastRefreshAttempt = 0;
+  entry.generation += 1;
+  refreshInFlight.delete(tenantId);
+};
+
+// Dopo le migration del boot: una matrice letta mentre lo schema la stava
+// ancora seminando non resta in cache (stessa ragione degli entitlement).
+export const clearPermissionCaches = (): void => {
+  for (const tenantId of cacheByTenant.keys()) invalidate(tenantId);
 };
 
 export class RolePermissionService {
