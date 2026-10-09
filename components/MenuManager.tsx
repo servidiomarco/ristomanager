@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Dish, RestaurantMenu, BanquetMenu, BanquetCourse, BanquetStatus, Shift, COMMON_ALLERGENS, VAT_RATES, Customer, Table, TableMerge, Reservation, ArrivalStatus, ReservationStatus, Room } from '../types';
-import { Plus, Search, Tag, Tags, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, LayoutGrid, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat, Info, RefreshCw, QrCode, Copy, Languages, Layers, SlidersHorizontal, Share2, MessageCircle, Martini, IceCreamCone, Wine, Wand2, DoorClosed, AlertCircle } from 'lucide-react';
+import { Plus, Search, Tag, Tags, Trash2, Edit2, Utensils, Scale, BookOpen, Check, Calendar, List as ListIcon, LayoutGrid, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat, Info, RefreshCw, QrCode, Copy, Languages, Layers, SlidersHorizontal, Share2, MessageCircle, Martini, IceCreamCone, Wine, Wand2, DoorClosed, AlertCircle } from 'lucide-react';
 import { resizeImageToDataUrl } from '../utils/resizeImage';
 import { datePart } from '../utils/displayTime';
 import { printBanquet } from '../utils/printBanquet';
@@ -911,6 +911,10 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   // Which step of the create/edit wizard is showing. Steps never gate each
   // other — validation still runs once, on save.
   const [banquetStep, setBanquetStep] = useState(0);
+  // Il food cost nel passo del menù si apre a richiesta: il menù si compone
+  // spesso col cliente davanti, e costi e margini non sono per lui. Ogni
+  // apertura del form riparte chiuso.
+  const [banquetFcOpen, setBanquetFcOpen] = useState(false);
   // Da quale menu pesca il picker della composizione: il menu Banchetti di
   // default, o uno stagionale (es. Ferragosto) per comporre da quella lista.
   const [pickerMenuId, setPickerMenuId] = useState<number | null>(null);
@@ -1444,6 +1448,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     setEditingBanquetId(menu.id);
     setIsEditingBanquet(true);
     setBanquetStep(0);
+    setBanquetFcOpen(false);
     setPickerMenuId(null);
     setCourseDishQuery({});
     setIsBanquetFormOpen(true);
@@ -1471,6 +1476,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       table_ids: []
     });
     setBanquetStep(0);
+    setBanquetFcOpen(false);
     setPickerMenuId(null);
     setCourseDishQuery({});
     setIsBanquetFormOpen(true);
@@ -4478,15 +4484,32 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     </button>
                   </div>
                 </FormCard>
+                {/* Sotto il menù, come un totale: il tasto apre il riquadro
+                    proprio qui, senza spostare la pagina. */}
                 {fc.enabled && (
-                  <div className="mt-4">
-                    <BanchettoFoodCost
-                      fc={fc}
-                      banquet={newBanquet}
-                      dishById={dishById}
-                      showPrices={canViewBanquetPrice}
-                      onQuota={setQuotaPorzione}
-                    />
+                  <div className="mt-4 space-y-4">
+                    <button
+                      type="button"
+                      onClick={() => setBanquetFcOpen(v => !v)}
+                      aria-expanded={banquetFcOpen}
+                      aria-controls="banquet-food-cost"
+                      className={dsButton.secondary}
+                    >
+                      <Scale className="h-4 w-4" aria-hidden />
+                      {banquetFcOpen ? t('banquetForm.hideFoodCost') : t('banquetForm.showFoodCost')}
+                      <ChevronDown className={`h-4 w-4 text-[var(--ds-text-muted)] transition-transform ${banquetFcOpen ? 'rotate-180' : ''}`} aria-hidden />
+                    </button>
+                    {banquetFcOpen && (
+                      <div id="banquet-food-cost">
+                        <BanchettoFoodCost
+                          fc={fc}
+                          banquet={newBanquet}
+                          dishById={dishById}
+                          showPrices={canViewBanquetPrice}
+                          onQuota={setQuotaPorzione}
+                        />
+                      </div>
+                    )}
                   </div>
                 )}
               </section>

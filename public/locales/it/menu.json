@@ -454,6 +454,8 @@
     "noDishMatch": "Nessun piatto per «{{q}}».",
     "courseNotes": "Nota dell'uscita",
     "courseDone": "Fatto",
+    "showFoodCost": "Mostra food cost",
+    "hideFoodCost": "Nascondi food cost",
     "editDishes": "Modifica piatti",
     "pickDishes": "Scegli i piatti",
     "firstCourse": "Aggiungi la prima uscita",

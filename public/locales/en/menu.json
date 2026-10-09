@@ -454,6 +454,8 @@
     "noDishMatch": "No dish matches “{{q}}”.",
     "courseNotes": "Course note",
     "courseDone": "Done",
+    "showFoodCost": "Show food cost",
+    "hideFoodCost": "Hide food cost",
     "editDishes": "Edit dishes",
     "pickDishes": "Pick dishes",
     "firstCourse": "Add the first course",
