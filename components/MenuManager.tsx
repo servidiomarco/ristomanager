@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Dish, RestaurantMenu, BanquetMenu, BanquetCourse, BanquetStatus, Shift, COMMON_ALLERGENS, VAT_RATES, Customer, Table, TableMerge, Reservation, ArrivalStatus, ReservationStatus, Room } from '../types';
-import { Plus, Search, Tag, Tags, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, LayoutGrid, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat, Info, RefreshCw, QrCode, Copy, Languages, Layers, SlidersHorizontal, Share2, MessageCircle, Martini, IceCreamCone, Wine, Wand2, DoorClosed, AlertCircle } from 'lucide-react';
+import { Plus, Search, Tag, Tags, Trash2, Edit2, Utensils, Scale, BookOpen, Check, Calendar, List as ListIcon, LayoutGrid, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat, Info, RefreshCw, QrCode, Copy, Languages, Layers, SlidersHorizontal, Share2, MessageCircle, Martini, IceCreamCone, Wine, Wand2, DoorClosed, AlertCircle } from 'lucide-react';
 import { resizeImageToDataUrl } from '../utils/resizeImage';
 import { datePart } from '../utils/displayTime';
 import { printBanquet } from '../utils/printBanquet';
@@ -911,6 +911,10 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   // Which step of the create/edit wizard is showing. Steps never gate each
   // other — validation still runs once, on save.
   const [banquetStep, setBanquetStep] = useState(0);
+  // Il food cost nel passo del menù si apre a richiesta: il menù si compone
+  // spesso col cliente davanti, e costi e margini non sono per lui. Ogni
+  // apertura del form riparte chiuso.
+  const [banquetFcOpen, setBanquetFcOpen] = useState(false);
   // Da quale menu pesca il picker della composizione: il menu Banchetti di
   // default, o uno stagionale (es. Ferragosto) per comporre da quella lista.
   const [pickerMenuId, setPickerMenuId] = useState<number | null>(null);
@@ -1399,6 +1403,40 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     }));
   };
 
+  // Il food cost nei passi della tariffa e del menù: un tasto che apre il
+  // riquadro lì sotto, senza spostare la pagina. Lo stato è uno solo, così
+  // aperto in un passo resta aperto nell'altro. `where` distingue gli id,
+  // perché i due passi stanno nel DOM insieme.
+  const renderBanquetFoodCost = (where: 'rate' | 'menu', onQuota?: typeof setQuotaPorzione) => {
+    const panelId = `banquet-food-cost-${where}`;
+    return (
+      <div className="space-y-4">
+        <button
+          type="button"
+          onClick={() => setBanquetFcOpen(v => !v)}
+          aria-expanded={banquetFcOpen}
+          aria-controls={panelId}
+          className={dsButton.secondary}
+        >
+          <Scale className="h-4 w-4" aria-hidden />
+          {banquetFcOpen ? t('banquetForm.hideFoodCost') : t('banquetForm.showFoodCost')}
+          <ChevronDown className={`h-4 w-4 text-[var(--ds-text-muted)] transition-transform ${banquetFcOpen ? 'rotate-180' : ''}`} aria-hidden />
+        </button>
+        {banquetFcOpen && (
+          <div id={panelId}>
+            <BanchettoFoodCost
+              fc={fc}
+              banquet={newBanquet}
+              dishById={dishById}
+              showPrices={canViewBanquetPrice}
+              onQuota={onQuota}
+            />
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const handleEditBanquet = (menu: BanquetMenu) => {
     // Derive courses: use stored courses if present, otherwise wrap legacy flat list into a single course
     const courses: BanquetCourse[] = menu.courses && menu.courses.length > 0
@@ -1444,6 +1482,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     setEditingBanquetId(menu.id);
     setIsEditingBanquet(true);
     setBanquetStep(0);
+    setBanquetFcOpen(false);
     setPickerMenuId(null);
     setCourseDishQuery({});
     setIsBanquetFormOpen(true);
@@ -1471,6 +1510,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       table_ids: []
     });
     setBanquetStep(0);
+    setBanquetFcOpen(false);
     setPickerMenuId(null);
     setCourseDishQuery({});
     setIsBanquetFormOpen(true);
@@ -4194,11 +4234,12 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               )}
 
               {/* Food cost del banchetto: costo per coperto e margine accanto al
-                  prezzo che lo determina. Le quote di porzione si cambiano nel
-                  passo del menù. */}
+                  prezzo che lo determina, chiuso finché non lo si chiede (la
+                  tariffa si concorda col cliente davanti). Le quote di porzione
+                  si cambiano nel passo del menù. */}
               {fc.enabled && (
                 <section className={banquetStep === 1 ? 'block' : 'hidden'}>
-                  <BanchettoFoodCost fc={fc} banquet={newBanquet} dishById={dishById} showPrices={canViewBanquetPrice} />
+                  {renderBanquetFoodCost('rate')}
                 </section>
               )}
 
@@ -4478,15 +4519,10 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     </button>
                   </div>
                 </FormCard>
+                {/* Sotto il menù, come un totale. */}
                 {fc.enabled && (
                   <div className="mt-4">
-                    <BanchettoFoodCost
-                      fc={fc}
-                      banquet={newBanquet}
-                      dishById={dishById}
-                      showPrices={canViewBanquetPrice}
-                      onQuota={setQuotaPorzione}
-                    />
+                    {renderBanquetFoodCost('menu', setQuotaPorzione)}
                   </div>
                 )}
               </section>
