@@ -518,6 +518,9 @@ describe('ordini del CRM in cassa: chi stampa in cucina', () => {
     let comandePrima = false;
     let firePrima: string | null = null;
     const memoria = new Map<string, MemoriaComandaViva>();
+    // La scrittura in sospeso (tavolo aperto nel Menu Client della demo, 09/10):
+    // la chiamata dell'agente scade, ma la cassa la fa lo stesso, senza invio.
+    let inSospeso = false;
 
     const finoA = async (cond: () => Promise<boolean>, descr: string, timeoutMs = 8_000) => {
         const deadline = Date.now() + timeoutMs;
@@ -580,7 +583,7 @@ describe('ordini del CRM in cassa: chi stampa in cucina', () => {
             `INSERT INTO stations (tenant_id, name, printer, sort_order) VALUES (1, 'Cucina Viva Stampa', 'termica-viva', 95) RETURNING id`
         )).rows[0].id);
         const room = await api().post('/rooms').set(bearer(token)).send({ name: 'Sala Comanda Viva 3', width: 600, height: 400 });
-        for (const [i, nome] of ['W1', 'W2', 'W3', 'W4'].entries()) {
+        for (const [i, nome] of ['W1', 'W2', 'W3', 'W4', 'W5', 'W6'].entries()) {
             const t = await api().post('/tables').set(bearer(token)).send({
                 name: `CV${nome}`, shape: 'SQUARE', seats: 4, x: 40 + i * 80, y: 40, room_id: room.body.id, status: 'FREE',
             });
@@ -622,7 +625,7 @@ describe('ordini del CRM in cassa: chi stampa in cucina', () => {
             }
             if (payload?.op !== 'comandaViva') return ack({ ok: false, error: `op non prevista: ${payload?.op}`, kind: 'agent' });
             try {
-                const p = payload.params;
+                const p = inSospeso ? { ...payload.params, inviaUscite: undefined } : payload.params;
                 const esito: EsitoComandaViva = await scriviComandaViva(p, memoria.get(p.tag) ?? { idComanda: null, righe: {} });
                 const m = memoria.get(p.tag) ?? { idComanda: null, righe: {} };
                 if (esito.idComanda != null) m.idComanda = esito.idComanda;
@@ -631,6 +634,7 @@ describe('ordini del CRM in cassa: chi stampa in cucina', () => {
                     else if (r.idRiga != null) m.righe[r.chiave] = r.idRiga;
                 }
                 memoria.set(p.tag, m);
+                if (inSospeso) return ack({ ok: false, error: 'Gestionale non raggiungibile (This operation was aborted)', kind: 'gestionale' });
                 ack({ ok: true, result: esito });
             } catch (err) {
                 ack({ ok: false, error: (err as Error).message, kind: err instanceof PassepartoutError ? 'gestionale' : 'agent' });
@@ -740,6 +744,73 @@ describe('ordini del CRM in cassa: chi stampa in cucina', () => {
         } finally {
             cassa.rifiuta.delete('W3');
         }
+    });
+
+    it('scrittura in sospeso: il CRM non stampa, e quando passa l\'uscita la manda la cassa', async () => {
+        inSospeso = true;
+        let ordine: number;
+        try {
+            ordine = await nuovoOrdine('W5');
+            await batti(ordine, [{ dish_id: piatto, qty: 1, course_no: 1 }]);
+            await lancia(ordine, 1);
+            await finoA(async () => ((await viva(ordine))?.error ?? '').includes('aborted'), 'scrittura senza risposta');
+            // Passato il tempo del ripiego la cassa risponde: niente stampa dal CRM.
+            await sleep(700);
+            await api().patch(`/orders/${ordine}`).set(bearer(token)).send({ covers: 3 });
+            await sleep(800);
+            expect(await stampe(ordine)).toEqual([]);
+        } finally {
+            inSospeso = false;
+        }
+        // Il tentativo dopo (qui subito invece che fra un minuto) trova le righe e manda l'uscita.
+        await db.query(`UPDATE passepartout_comande_vive SET next_at = now() WHERE tenant_id = 1 AND order_id = $1`, [ordine]);
+        await api().patch(`/orders/${ordine}`).set(bearer(token)).send({ covers: 2 });
+        const c = cassa.sulTavolo('W5')!;
+        await finoA(async () => cassa.invii.some((i) => i.id === c.id && i.uscite.join() === '1'), 'uscita 1 mandata dalla cassa');
+        await finoA(async () => (await righeVive(ordine)).every((r: any) => r.inviata), 'righe segnate come mandate');
+        expect(c.righe.filter((r) => r.articolo !== 'Coperti')).toHaveLength(1);
+        expect(await stampe(ordine)).toEqual([]);
+    });
+
+    it('la cassa ha già mandato l\'uscita dal suo «Invia»: il CRM la segna mandata, non la stampa e non la rimanda', async () => {
+        const ordine = await nuovoOrdine('W6');
+        await batti(ordine, [{ dish_id: piatto, qty: 1, course_no: 1 }]);
+        await finoA(async () => (await viva(ordine))?.stato === 'SCRITTA', 'ordine scritto in cassa');
+        const c = cassa.sulTavolo('W6')!;
+        inSospeso = true;
+        try {
+            await lancia(ordine, 1);
+            await finoA(async () => ((await viva(ordine))?.error ?? '').includes('aborted'), 'invio senza risposta');
+            // Intanto in cassa premono «Invia».
+            for (const r of c.righe) if (r.tipo !== 'Coperto') r.stato = 'InProduzione';
+            await sleep(700);
+            await api().patch(`/orders/${ordine}`).set(bearer(token)).send({ covers: 3 });
+            await finoA(async () => (await righeVive(ordine)).every((r: any) => r.inviata), 'righe segnate come mandate');
+        } finally {
+            inSospeso = false;
+        }
+        await db.query(`UPDATE passepartout_comande_vive SET next_at = now() WHERE tenant_id = 1 AND order_id = $1`, [ordine]);
+        await api().patch(`/orders/${ordine}`).set(bearer(token)).send({ covers: 2 });
+        await finoA(async () => (await viva(ordine))?.error == null, 'scrittura riuscita');
+        expect(await stampe(ordine)).toEqual([]);
+        expect(cassa.invii.filter((i) => i.id === c.id)).toEqual([]);
+    });
+
+    it('l\'agente non rimanda un\'uscita che la cassa ha già mandato', async () => {
+        const base = {
+            tag: 'sympotia-ordine:prova-guardia', idComanda: null, sala: 'TETTOIA', tavolo: 'W9', coperti: 0, idArticoloGenerico: 500,
+            righe: [{ chiave: 'oi:1', idRiga: null, idArticolo: 12, descrizione: 'Gnocchi', pezzi: 1, prezzoCents: 1200, uscita: 1, varianti: [] }],
+        };
+        const scritta = await scriviComandaViva(base, { idComanda: null, righe: {} });
+        const c = cassa.comande.get(scritta.idComanda!)!;
+        for (const r of c.righe) r.stato = 'InProduzione';
+        const esito = await scriviComandaViva(
+            { ...base, idComanda: scritta.idComanda, righe: [], inviaUscite: [1] },
+            { idComanda: scritta.idComanda, righe: { 'oi:1': scritta.righe[0].idRiga! } },
+        );
+        expect(esito.inviate).toEqual([1]);
+        expect(cassa.invii.filter((i) => i.id === c.id)).toEqual([]);
+        c.pagata = true;
     });
 
     it('la comanda chiusa in cassa chiude l\'ordine nel CRM, senza un conto del CRM', async () => {
