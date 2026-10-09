@@ -16,6 +16,7 @@
 // Solo cloud: con i conti in sala (nodo) le chiusure non passano di qui.
 
 import { queryWithRetry, runAsPlatform, runWithTenantContext } from '../db.js';
+import { isServiceNode } from './topology.js';
 import { isFeatureEnabledForTenant } from './entitlements.js';
 import { callPassepartout, connectedPassepartoutTenants, passepartoutAgentSupports, PassepartoutBridgeError } from './passepartoutBridge.js';
 import type { EsitoSpecchio, ParametriSpecchio, RigaSpecchio } from './passepartoutService.js';
@@ -44,6 +45,10 @@ let deps: SpecchioDeps | null = null;
  *  già scritti nella comanda in cassa del loro tavolo: passepartoutComandeVive),
  *  solo in modalità statistiche e con il tavolo specchio scelto. */
 export async function accodaSpecchio(client: any, tenantId: number, billId: number): Promise<boolean> {
+    // Lo specchio lo lavora solo il cloud: sul nodo (che ora ha la
+    // configurazione della cassa, fase 6 della comanda viva) la coda
+    // resterebbe lì per sempre.
+    if (isServiceNode) return false;
     const rs = await client.query(
         `INSERT INTO passepartout_specchio (tenant_id, table_bill_id)
          SELECT $1, b.id

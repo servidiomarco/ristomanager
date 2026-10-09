@@ -40,7 +40,7 @@ const CONFIG_TABLES = [
     'dish_prices', 'dish_components', 'modifier_groups', 'modifiers', 'dish_modifier_groups',
     'opening_hours', 'opening_hours_disabled_slots', 'special_closures', 'reservation_note_presets',
     'reservation_note_preset_variants', 'reservation_allergen_presets', 'banquet_menus', 'customers',
-    'app_settings', 'tenant_domains',
+    'app_settings', 'tenant_domains', 'passepartout_config', 'passepartout_tavoli',
 ];
 
 // Come nel bootstrap: colonne tolte dal cloud ma NOT NULL qui. Nessun
