@@ -383,11 +383,15 @@ export const PublicReservationPage: React.FC = () => {
           <PublicLanguageToggle namespace={BOOKING_NAMESPACE} />
         </div>
         <header className="text-center">
+          {/* Molti logo arrivano su fondo bianco pieno (quello del Frantoio è
+              un PNG senza trasparenza): sul grigio della pagina diventerebbe un
+              riquadro. Multiply rende il bianco del colore del fondo e lascia
+              intatto l'inchiostro; la pagina pubblica resta in tema chiaro. */}
           {business.logo_url && (
             <img
               src={business.logo_url}
               alt=""
-              className="mx-auto mb-3 h-16 w-auto max-w-[240px] object-contain"
+              className="mx-auto mb-3 h-16 w-auto max-w-[240px] object-contain mix-blend-multiply"
               onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
             />
           )}
@@ -444,7 +448,7 @@ export const PublicReservationPage: React.FC = () => {
               type="button"
               onClick={() => act('confirm')}
               disabled={busy !== null}
-              className="mt-4 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-4 text-[15px] font-semibold text-[var(--ds-action-fg)] hover:opacity-90 disabled:opacity-60"
+              className="mt-4 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] px-5 py-3 text-[15px] font-semibold text-[var(--ds-action-fg)] hover:opacity-90 disabled:opacity-60"
             >
               {busy === 'confirm' ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Check className="h-4 w-4" aria-hidden />}
               {t('confirmed.cta')}
@@ -456,9 +460,9 @@ export const PublicReservationPage: React.FC = () => {
               type="button"
               onClick={() => { setEditing(true); setError(null); }}
               disabled={busy !== null}
-              className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)] disabled:opacity-60"
+              className="mt-3 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-surface-row)] px-5 py-3 text-[14px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)] disabled:opacity-60"
             >
-              <CalendarClock className="h-4 w-4" aria-hidden />
+              <CalendarClock className="h-4 w-4 flex-shrink-0" aria-hidden />
               {t('modify.cta')}
             </button>
           )}
