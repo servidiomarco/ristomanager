@@ -53,16 +53,17 @@ describe('gestione dall\'ospite — regole', () => {
     it('conferma e annullo solo a gestione accesa e prima della soglia', () => {
         const base = { now, status: 'CONFIRMED', guestConfirmedAt: null };
         const lontana = guestActionsFor({ ...base, reservationTime: new Date(now.getTime() + ore(30)), policy: acceso });
-        expect(lontana).toEqual({ state: 'confirmed', can_confirm: true, can_cancel: true, cancel_block: null });
+        expect(lontana).toEqual({ state: 'confirmed', can_confirm: true, can_cancel: true, cancel_block: null, can_modify: true });
 
         const vicina = guestActionsFor({ ...base, reservationTime: new Date(now.getTime() + ore(2)), policy: acceso });
         expect(vicina.can_cancel).toBe(false);
         expect(vicina.cancel_block).toBe('too_late');
+        expect(vicina.can_modify).toBe(false);
         // Confermare la presenza resta possibile fino all'ultimo.
         expect(vicina.can_confirm).toBe(true);
 
         const spenta = guestActionsFor({ ...base, reservationTime: new Date(now.getTime() + ore(30)), policy: DEFAULT_GUEST_MANAGE_POLICY });
-        expect(spenta).toEqual({ state: 'confirmed', can_confirm: false, can_cancel: false, cancel_block: 'disabled' });
+        expect(spenta).toEqual({ state: 'confirmed', can_confirm: false, can_cancel: false, cancel_block: 'disabled', can_modify: false });
 
         const giaConfermata = guestActionsFor({ ...base, guestConfirmedAt: now, reservationTime: new Date(now.getTime() + ore(30)), policy: acceso });
         expect(giaConfermata.can_confirm).toBe(false);
@@ -71,13 +72,13 @@ describe('gestione dall\'ospite — regole', () => {
 
     it('una richiesta in attesa si ritira ma non si conferma', () => {
         const a = guestActionsFor({ now, status: 'PENDING', guestConfirmedAt: null, reservationTime: new Date(now.getTime() + ore(30)), policy: acceso });
-        expect(a).toEqual({ state: 'pending', can_confirm: false, can_cancel: true, cancel_block: null });
+        expect(a).toEqual({ state: 'pending', can_confirm: false, can_cancel: true, cancel_block: null, can_modify: false });
     });
 
     it('niente azioni su annullate, rifiutate e passate', () => {
         for (const status of ['CANCELLED', 'DECLINED', 'NO_SHOW']) {
             const a = guestActionsFor({ now, status, guestConfirmedAt: null, reservationTime: new Date(now.getTime() + ore(30)), policy: acceso });
-            expect(a.can_confirm || a.can_cancel, status).toBe(false);
+            expect(a.can_confirm || a.can_cancel || a.can_modify, status).toBe(false);
             expect(a.cancel_block, status).toBeNull();
         }
     });

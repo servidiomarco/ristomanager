@@ -1,13 +1,13 @@
 import crypto from 'crypto';
 import type { Request } from 'express';
 import { queryWithRetry } from '../db.js';
-import { outboxEnqueueInTx, withOutboxTx } from './outboxService.js';
+import { outboxEnqueueInTx, outboxKick, withOutboxTx } from './outboxService.js';
 import { Shift, ReservationSource } from '../types.js';
 import { getDatePartInTz, getTimePartInTz } from '../utils/reservationTime.js';
 import { getTenantLocale } from './tenantLocale.js';
 import { spokenFirstName, phoneLast10Variants } from '../utils/text.js';
 import { getAvailableSlots } from '../utils/slots.js';
-import { getCappedRoomIds, pickSelfServiceTable, isTableStillAssignable } from './roomOccupancyService.js';
+import { getCappedRoomIds, pickSelfServiceTable, findTableForChange } from './roomOccupancyService.js';
 import { nonApertoInCassaSql } from './apertiInCassaSql.js';
 
 // ============================================
@@ -1230,12 +1230,24 @@ export async function cancelVoiceReservation(
     if (active.length > 1) return { status: 'ambiguous', candidates: active };
 
     const target = active[0];
-    const updated = await queryWithRetry(`
-        UPDATE reservations
-        SET reservation_status = 'CANCELLED'
-        WHERE id = $1 AND tenant_id = $2
-        RETURNING id, customer_name, reservation_time, shift, guests
-    `, [target.id, tenantId]);
+    // Come l'annullo dallo staff e dall'ospite: libera il tavolo, e la
+    // modifica entra nel log di replica nella stessa transazione. Prima
+    // restava solo il broadcast, che il nodo di sala non vede: lì la
+    // prenotazione annullata da Sofia restava viva sul suo tavolo.
+    const updated = await withOutboxTx(async (client) => {
+        const upd = await client.query(`
+            UPDATE reservations
+            SET reservation_status = 'CANCELLED', table_id = NULL
+            WHERE id = $1 AND tenant_id = $2
+            RETURNING id, tenant_id, customer_name, reservation_time, shift, guests
+        `, [target.id, tenantId]);
+        if (upd.rows[0]) {
+            await outboxEnqueueInTx(client, tenantId, 'reservation:updated', `reservation:${target.id}`,
+                { reservation_id: target.id }, { actor: { channel: 'voice' } });
+        }
+        return upd;
+    });
+    outboxKick();
 
     return { status: 'cancelled', reservation: updated.rows[0] };
 }
@@ -1388,33 +1400,28 @@ export async function modifyVoiceReservation(
     // caller explicitly asked for a different area. Blind re-assignment used
     // to silently free a table the staff had just placed (tavolo 56,
     // 2026-08-04) and the floor plan lied until someone noticed.
+    // La regola (tavolo attuale, capienza solo se i coperti aumentano, poi
+    // un tavolo libero) è quella comune con la modifica dell'ospite dal link:
+    // vedi findTableForChange.
     let assigned: { id: number; name: string; room_name: string | null; location: 'INDOOR' | 'OUTDOOR' | null } | null | undefined;
     if (scheduleChanged) {
-        // Se i coperti non aumentano, la capienza del tavolo attuale non va
-        // rifatta: lo staff può averci messo più persone dei posti nominali
-        // (sedia aggiunta). Il check seats >= guests la bocciava e il fallback
-        // di riassegnazione, a sala piena, negava una modifica di solo orario
-        // (Ciccolini 2026-08-27: 7 su tavolo da 6, posticipo rifiutato due
-        // volte). Con guests=1 restano attivi tutti gli altri controlli
-        // (sala aperta, occupazione, accorpamenti, banchetti).
-        const capacityGuests = newGuests <= current.guests ? 1 : newGuests;
         // Col doppio turno attivo l'occupazione si valuta sul nuovo orario.
         const overlapTime = (await isVoiceDoubleSeatingEnabled(tenantId)) ? newTime : undefined;
-        const keepCurrentTable = current.table_id != null
-            && !newLocation
-            && await isTableStillAssignable(tenantId, current.table_id, newDate, newShift, capacityGuests, current.id, overlapTime);
-        if (!keepCurrentTable) {
-            assigned = await pickAutoAssignTable(
-                tenantId,
-                newDate,
-                newShift,
-                newGuests,
-                newLocation,
-                overlapTime
-            );
-            if (!assigned) {
-                return { status: 'unavailable' };
-            }
+        const found = await findTableForChange(tenantId, {
+            reservationId: current.id,
+            currentTableId: current.table_id ?? null,
+            currentGuests: current.guests,
+            date: newDate,
+            shift: newShift,
+            guests: newGuests,
+            location: newLocation ?? null,
+            overlapTime,
+        });
+        if (!found) {
+            return { status: 'unavailable' };
+        }
+        if (found.kept === false) {
+            assigned = { id: found.table.id, name: found.table.name, room_name: found.table.room_name, location: found.table.location };
         }
     }
 
@@ -1428,24 +1435,38 @@ export async function modifyVoiceReservation(
     // The two branches use different SQL parameter counts. Postgres refuses
     // to bind excess parameters ("could not determine data type of parameter
     // $1"), so we split into two calls with their own params array.
-    const returning = 'id, customer_name, reservation_time, shift, guests, table_id, phone';
-    const updated = scheduleChanged
-        ? await queryWithRetry(
-            `UPDATE reservations
-             SET reservation_time = $1, shift = $2, guests = $3, table_id = $4,
-                 notes = $5, reservation_status = 'CONFIRMED'
-             WHERE id = $6 AND tenant_id = $7
-             RETURNING ${returning}`,
-            [newReservationTime, newShift, newGuests, assigned?.id ?? current.table_id,
-             notesToStore, current.id, tenantId]
-          )
-        : await queryWithRetry(
-            `UPDATE reservations
-             SET notes = $1, reservation_status = 'CONFIRMED'
-             WHERE id = $2 AND tenant_id = $3
-             RETURNING ${returning}`,
-            [notesToStore, current.id, tenantId]
-          );
+    // tenant_id nel RETURNING: il broadcast lo legge da qui, e senza finiva
+    // sempre al tenant 1. «Ci saremo» dell'ospite vale per l'orario che
+    // aveva visto: se l'orario cambia si azzera, come nel PUT dello staff.
+    // La modifica entra nel log di replica nella stessa transazione.
+    const returning = 'id, tenant_id, customer_name, reservation_time, shift, guests, table_id, phone';
+    const updated = await withOutboxTx(async (client) => {
+        const upd = scheduleChanged
+            ? await client.query(
+                `UPDATE reservations
+                 SET reservation_time = $1, shift = $2, guests = $3, table_id = $4,
+                     children = LEAST(COALESCE(children, 0), $3),
+                     notes = $5, reservation_status = 'CONFIRMED',
+                     guest_confirmed_at = CASE WHEN reservation_time IS DISTINCT FROM $1::timestamptz THEN NULL ELSE guest_confirmed_at END
+                 WHERE id = $6 AND tenant_id = $7
+                 RETURNING ${returning}`,
+                [newReservationTime, newShift, newGuests, assigned?.id ?? current.table_id,
+                 notesToStore, current.id, tenantId]
+              )
+            : await client.query(
+                `UPDATE reservations
+                 SET notes = $1, reservation_status = 'CONFIRMED'
+                 WHERE id = $2 AND tenant_id = $3
+                 RETURNING ${returning}`,
+                [notesToStore, current.id, tenantId]
+              );
+        if (upd.rows[0]) {
+            await outboxEnqueueInTx(client, tenantId, 'reservation:updated', `reservation:${current.id}`,
+                { reservation_id: current.id }, { actor: { channel: 'voice' } });
+        }
+        return upd;
+    });
+    outboxKick();
 
     const after: ModifiedReservation = {
         ...updated.rows[0],

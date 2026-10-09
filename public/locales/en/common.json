@@ -109,7 +109,7 @@
     "guestReminders": "Guest reminder",
     "guestRemindersHint": "The message that reminds the guest of the booking: whether it goes out on its own, and when.",
     "guestManage": "Guest self-service",
-    "guestManageHint": "The link in the messages that lets guests confirm or cancel on their own.",
+    "guestManageHint": "The link in the messages that lets guests confirm, change or cancel on their own.",
     "quickNotes": "Quick booking notes",
     "quickNotesHint": "Suggested chips in the booking dialog. Each note can carry an icon shown on the card. Drag to reorder.",
     "allergens": "Intolerances",
