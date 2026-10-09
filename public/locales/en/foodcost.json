@@ -39,7 +39,9 @@
     "overTarget": "over {{pct}}%",
     "perKg": "per kg",
     "search": "Search a dish",
-    "withCard": "with recipe card"
+    "withCard": "with recipe card",
+    "drafts": "AI drafts ({{count}})",
+    "draftTag": "draft to review"
   },
   "editor": {
     "addIngredient": "Add ingredient",
@@ -159,6 +161,16 @@
     "draftEmpty": "The AI proposed no ingredients",
     "newTag": "new",
     "create": "Create",
-    "search": "Search an ingredient"
+    "search": "Search an ingredient",
+    "discard": "Discard",
+    "batch_one": "AI draft for {{count}} dish",
+    "batch_other": "AI drafts for {{count}} dishes",
+    "batchStarted_one": "Preparing {{count}} draft: it will show up here shortly",
+    "batchStarted_other": "Preparing {{count}} drafts: they will show up here as they are ready",
+    "batchNone": "No dishes to prepare",
+    "batchRunning": "Preparing drafts… {{fatte}} of {{totali}}",
+    "batchReview_one": "{{count}} to review",
+    "batchReview_other": "{{count}} to review",
+    "batchHint": "They do not count in costs until you save them."
   }
 }

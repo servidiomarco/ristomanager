@@ -39,7 +39,9 @@
     "overTarget": "sopra il {{pct}}%",
     "perKg": "al kg",
     "search": "Cerca un piatto",
-    "withCard": "con scheda"
+    "withCard": "con scheda",
+    "drafts": "Bozze AI ({{count}})",
+    "draftTag": "bozza da rivedere"
   },
   "editor": {
     "addIngredient": "Aggiungi ingrediente",
@@ -159,6 +161,16 @@
     "draftEmpty": "L'AI non ha proposto ingredienti",
     "newTag": "nuovo",
     "create": "Crea",
-    "search": "Cerca un ingrediente"
+    "search": "Cerca un ingrediente",
+    "discard": "Scarta",
+    "batch_one": "Bozza con l'AI per {{count}} piatto",
+    "batch_other": "Bozze con l'AI per {{count}} piatti",
+    "batchStarted_one": "Preparo {{count}} bozza: arriva qui fra poco",
+    "batchStarted_other": "Preparo {{count}} bozze: arrivano qui man mano",
+    "batchNone": "Nessun piatto da preparare",
+    "batchRunning": "Preparo le bozze… {{fatte}} di {{totali}}",
+    "batchReview_one": "{{count}} da rivedere",
+    "batchReview_other": "{{count}} da rivedere",
+    "batchHint": "Non contano nei costi finché non le salvi."
   }
 }

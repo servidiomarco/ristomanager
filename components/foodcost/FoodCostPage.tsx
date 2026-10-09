@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChefHat, History, Plus } from 'lucide-react';
+import { ChefHat, History, Plus, Wand2 } from 'lucide-react';
 import {
   Callout, EmptyState, Field, FormCard, ModalShell, SearchField, SegmentedControl, StatStrip, dsButton, dsInput, useMediaQuery,
 } from '../ds';
@@ -24,7 +24,7 @@ import { SchedaTecnica, type SchedaTarget } from './SchedaTecnica';
    sul prodotto, e lo storico tiene ogni cambio. */
 
 type Tab = 'piatti' | 'ingredienti' | 'semilavorati' | 'impostazioni';
-type Filtro = 'tutti' | 'senza' | 'incompleti' | 'sopra';
+type Filtro = 'tutti' | 'senza' | 'incompleti' | 'sopra' | 'bozze';
 type Toast = (message: string, type?: 'success' | 'error' | 'info') => void;
 
 const norm = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
@@ -76,7 +76,7 @@ export const FoodCostPage: React.FC<{ dishes: Dish[]; showToast: Toast }> = ({ d
           {!fc.dati && !fc.error && <p className="text-[15px] text-[var(--ds-text-muted)]">{t('loading', 'Caricamento…')}</p>}
 
           {fc.dati && tab === 'piatti' && (
-            <PiattiTab fc={fc} dishes={dishes} onOpen={d => setScheda({ kind: 'piatto', dish: d })} />
+            <PiattiTab fc={fc} dishes={dishes} onOpen={d => setScheda({ kind: 'piatto', dish: d })} showToast={showToast} />
           )}
           {fc.dati && tab === 'ingredienti' && <IngredientiTab fc={fc} showToast={showToast} />}
           {fc.dati && tab === 'semilavorati' && (
@@ -93,7 +93,7 @@ export const FoodCostPage: React.FC<{ dishes: Dish[]; showToast: Toast }> = ({ d
 
 // ---- Piatti ----------------------------------------------------------------------
 
-const PiattiTab: React.FC<{ fc: FoodCostState; dishes: Dish[]; onOpen: (d: Dish) => void }> = ({ fc, dishes, onOpen }) => {
+const PiattiTab: React.FC<{ fc: FoodCostState; dishes: Dish[]; onOpen: (d: Dish) => void; showToast: Toast }> = ({ fc, dishes, onOpen, showToast }) => {
   const { t } = useTranslation('foodcost', { useSuspense: false });
   const [q, setQ] = useState('');
   const [filtro, setFiltro] = useState<Filtro>('tutti');
@@ -116,12 +116,17 @@ const PiattiTab: React.FC<{ fc: FoodCostState; dishes: Dish[]; onOpen: (d: Dish)
   const conScheda = righe.filter(r => r.costo && r.costo.stato !== 'senza_scheda').length;
   const sopra = righe.filter(r => r.pct != null && r.pct > target).length;
   const incompleti = righe.filter(r => r.costo?.stato === 'incompleto').length;
+  // Una bozza conta solo finché il piatto non ha una scheda.
+  const inBozza = (r: { dish: Dish; costo?: CostoPiatto }) =>
+    fc.bozze.has(r.dish.id) && (!r.costo || r.costo.stato === 'senza_scheda');
+  const bozze = righe.filter(inBozza).length;
 
   const visibili = righe.filter(r => {
     if (q.trim() && !norm(r.dish.name).includes(norm(q.trim()))) return false;
     if (filtro === 'senza') return !r.costo || r.costo.stato === 'senza_scheda';
     if (filtro === 'incompleti') return r.costo?.stato === 'incompleto';
     if (filtro === 'sopra') return r.pct != null && r.pct > target;
+    if (filtro === 'bozze') return inBozza(r);
     return true;
   });
 
@@ -135,6 +140,7 @@ const PiattiTab: React.FC<{ fc: FoodCostState; dishes: Dish[]; onOpen: (d: Dish)
           { label: t('dishes.incomplete', 'prezzi mancanti'), value: incompleti, tone: incompleti > 0 ? 'pending' : 'neutral', onClick: () => setFiltro('incompleti') },
         ]}
       />
+      <BozzeInBlocco fc={fc} showToast={showToast} onVedi={() => setFiltro('bozze')} bozze={bozze} />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <SearchField value={q} onChange={setQ} placeholder={t('dishes.search', 'Cerca un piatto')} className="sm:max-w-xs" />
         <SegmentedControl<Filtro>
@@ -149,6 +155,9 @@ const PiattiTab: React.FC<{ fc: FoodCostState; dishes: Dish[]; onOpen: (d: Dish)
             { value: 'senza', label: t('dishes.noCard', 'Senza scheda') },
             { value: 'incompleti', label: t('dishes.incompleteShort', 'Incompleti') },
             { value: 'sopra', label: t('dishes.overShort', 'Sopra target') },
+            ...(bozze > 0 || filtro === 'bozze'
+              ? [{ value: 'bozze' as const, label: t('dishes.drafts', 'Bozze AI ({{count}})', { count: bozze }) }]
+              : []),
           ]}
         />
       </div>
@@ -180,6 +189,9 @@ const PiattiTab: React.FC<{ fc: FoodCostState; dishes: Dish[]; onOpen: (d: Dish)
                     {costo?.stato === 'incompleto' && (
                       <span className="text-[var(--ds-pending-text)]"> · {t('dishes.missingPrices', 'mancano prezzi')}</span>
                     )}
+                    {inBozza({ dish, costo }) && (
+                      <span className="text-[var(--ds-arriving-text)]"> · {t('dishes.draftTag', 'bozza da rivedere')}</span>
+                    )}
                   </span>
                 </span>
                 {/* Sul telefono costo e percentuale in colonna a destra, il
@@ -202,6 +214,66 @@ const PiattiTab: React.FC<{ fc: FoodCostState; dishes: Dish[]; onOpen: (d: Dish)
         </ul>
       )}
       <p className="text-[13px] text-[var(--ds-text-muted)]">{t('dishes.note', 'Food cost sul prezzo di carta senza IVA. Margine = prezzo senza IVA meno costo.')}</p>
+    </div>
+  );
+};
+
+
+// ---- Bozze in blocco ---------------------------------------------------------------
+
+/* L'AI prepara una bozza per ogni piatto senza scheda, in sottofondo: le
+   bozze arrivano man mano (socket) e si rivedono una per una dalla scheda.
+   Finché non si salvano non contano in nessun costo. */
+const BozzeInBlocco: React.FC<{ fc: FoodCostState; showToast: Toast; onVedi: () => void; bozze: number }> = ({ fc, showToast, onVedi, bozze }) => {
+  const { t } = useTranslation('foodcost', { useSuspense: false });
+  const [avvio, setAvvio] = useState(false);
+  const gen = fc.dati?.generazione ?? null;
+  const candidati = fc.dati?.bozzeCandidati ?? 0;
+  if (!fc.dati?.canManage || !fc.dati.aiDisponibile) return null;
+  if (!gen && candidati === 0 && bozze === 0) return null;
+
+  const avvia = async () => {
+    if (avvio) return;
+    setAvvio(true);
+    try {
+      const r = await foodCostApiService.generaBozze();
+      showToast(r.daPreparare > 0
+        ? t('ai.batchStarted', 'Preparo {{count}} bozze: arrivano qui man mano', { count: r.daPreparare })
+        : t('ai.batchNone', 'Nessun piatto da preparare'), 'info');
+      fc.reload();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err), 'error');
+    } finally {
+      setAvvio(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+      {gen ? (
+        <div className="flex min-h-[44px] items-center gap-2" role="status">
+          <Wand2 className="ds-ai-wand h-4 w-4 text-[var(--ds-arriving-text)]" aria-hidden />
+          <span className="ds-ai-shimmer text-[14px]">
+            {t('ai.batchRunning', 'Preparo le bozze… {{fatte}} di {{totali}}', { fatte: gen.fatte, totali: gen.totali })}
+          </span>
+        </div>
+      ) : candidati > 0 && (
+        /* Wand2 + famiglia arriving: è AI che propone (§ds). */
+        <button
+          type="button"
+          onClick={avvia}
+          disabled={avvio}
+          className="inline-flex h-11 items-center gap-2 rounded-[var(--ds-radius-control)] bg-[var(--ds-arriving-tint)] px-4 text-[15px] font-semibold text-[var(--ds-arriving-text)] transition-opacity hover:opacity-80 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+        >
+          <Wand2 className="h-4 w-4" aria-hidden /> {t('ai.batch', 'Bozze con l\'AI per {{count}} piatti', { count: candidati })}
+        </button>
+      )}
+      {bozze > 0 && !gen && (
+        <button type="button" onClick={onVedi} className="min-h-[44px] text-[14px] font-medium text-[var(--ds-text-secondary)] underline-offset-2 hover:underline">
+          {t('ai.batchReview', '{{count}} da rivedere', { count: bozze })}
+        </button>
+      )}
+      <span className="text-[13px] text-[var(--ds-text-muted)]">{t('ai.batchHint', 'Non contano nei costi finché non le salvi.')}</span>
     </div>
   );
 };

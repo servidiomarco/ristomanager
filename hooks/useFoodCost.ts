@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { foodCostApiService, type FcDati, type FcIngrediente, type FcRiga } from '../services/foodCostApiService';
+import { foodCostApiService, type FcBozzaSalvata, type FcDati, type FcIngrediente, type FcRiga } from '../services/foodCostApiService';
 import { onSocketEvent } from '../services/socketEvents';
 import {
   CicloRicettaError,
@@ -34,6 +34,8 @@ export interface FoodCostState {
   righePreparazione: Map<number, FcRiga[]>;
   /** Costo di una porzione del piatto (undefined = nessuna scheda). */
   costoDi: (dishId: number) => CostoPiatto | undefined;
+  /** Le bozze dell'AI per piatto, che non contano nei costi. */
+  bozze: Map<number, FcBozzaSalvata>;
 }
 
 const raggruppa = (righe: FcRiga[], chiave: 'dishId' | 'preparazioneId'): Map<number, FcRiga[]> => {
@@ -77,6 +79,7 @@ export const useFoodCost = (): FoodCostState => {
   const ingredienti = useMemo(() => new Map((dati?.ingredienti ?? []).map(i => [i.id, i])), [dati]);
   const righePiatto = useMemo(() => raggruppa(dati?.righe ?? [], 'dishId'), [dati]);
   const righePreparazione = useMemo(() => raggruppa(dati?.righe ?? [], 'preparazioneId'), [dati]);
+  const bozze = useMemo(() => new Map((dati?.bozze ?? []).map(b => [b.dishId, b])), [dati]);
 
   const calc = useMemo<CalcolatoreFc | null>(() => {
     if (!dati) return null;
@@ -115,5 +118,5 @@ export const useFoodCost = (): FoodCostState => {
 
   const costoDi = useCallback((dishId: number) => costi.get(dishId), [costi]);
 
-  return { enabled, dati, loading, error, reload, calc, ingredienti, righePiatto, righePreparazione, costoDi };
+  return { enabled, dati, loading, error, reload, calc, ingredienti, righePiatto, righePreparazione, costoDi, bozze };
 };
