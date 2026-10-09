@@ -36,8 +36,18 @@
 // l'aveva già stampata). La cassa non accetta righe segnate «già mandate»
 // (500 sul cambio di StatoEnum, prova del 09/10): una riga stampata dal CRM
 // che finisce in cassa non mandata riparte al primo «Invia» della cassa.
-// Niente conto dalla cassa (fase 4). Solo cloud: con i conti in sala (nodo)
-// il giro salta il ristorante, come lo specchio.
+//
+// Fase 6, dove gira: dove vivono gli ordini. Senza servizio in sala nel
+// cloud; col servizio in sala sul nodo, che riceve configurazione e tavoli
+// abbinati con la sincronizzazione della configurazione. L'altro processo
+// salta il ristorante (deps.altrove). Lo stato delle scritture
+// (passepartout_comande_vive e righe) resta di chi le ha fatte e non
+// viaggia: al cambio di mano chi prende gli ordini riscrive la differenza
+// da zero, e l'agente, unico per tutti e due, ritrova righe e comanda dalla
+// sua memoria (per tag) invece di scriverle due volte; le uscite già
+// partite non si rimandano (scriviComandaViva).
+// Resta scoperto: una riga stampata dal CRM per ripiego e finita in cassa
+// non mandata, che dopo un cambio di mano la cassa può rimandare.
 
 import { queryWithRetry, runAsPlatform, runWithTenantContext, withTenant } from '../db.js';
 import { isFeatureEnabledForTenant } from './entitlements.js';
@@ -71,9 +81,10 @@ export interface StatoComandaViva {
 }
 
 export interface ComandeViveDeps {
-    /** Con l'autorità di sala i conti sono del nodo: il giro non tocca il
-     *  ristorante (la fase 6 lo porta sul nodo). */
-    nodeOwnsBills: (tenantId: number) => Promise<boolean>;
+    /** Gli ordini del ristorante li scrive in cassa un altro processo: il
+     *  nodo col servizio in sala, il cloud senza (fase 6). Il giro, il
+     *  ripiego e le chiusure lette dalla cassa lo saltano. */
+    altrove: (tenantId: number) => Promise<boolean>;
     /** Lo stato in cassa di un ordine, per l'etichetta nel palmare
      *  (evento 'passepartout:comanda-viva'). */
     avvisa: (tenantId: number, stato: StatoComandaViva) => void;
@@ -472,7 +483,7 @@ export async function righeDallaCassa(tenantId: number, orderId: number): Promis
 export async function lavoraComandeVive(tenantId: number, soloOrdine: number | null = null): Promise<number> {
     if (!(await isFeatureEnabledForTenant(tenantId, 'passepartout'))) return 0;
     if (!passepartoutAgentSupports(tenantId, CAPACITA)) return 0;
-    if (deps && await deps.nodeOwnsBills(tenantId)) return 0;
+    if (deps && await deps.altrove(tenantId)) return 0;
     try {
         await chiuseInCassa(tenantId);
     } catch (err: any) {
@@ -688,6 +699,8 @@ async function righeInCassa(tenantId: number, ppComandaId: number | null): Promi
  *  altre che ha o che le stanno arrivando le manda lei. */
 export async function stampeDiRipiego(tenantId: number): Promise<number> {
     if (!deps) return 0;
+    // Gli ordini sono di un altro processo: la loro copia qui non si stampa.
+    if (await deps.altrove(tenantId)) return 0;
     const rs = await queryWithRetry(
         `SELECT oi.order_id, oi.id, rv.pp_riga_id, v.pp_comanda_id, v.stato AS v_stato, v.error AS v_error
            FROM order_items oi
@@ -793,7 +806,7 @@ async function ripieghi(): Promise<void> {
         try {
             await runWithTenantContext(tenantId, async () => {
                 if (!(await isFeatureEnabledForTenant(tenantId, 'passepartout'))) return;
-                if (deps && await deps.nodeOwnsBills(tenantId)) return;
+                if (deps && await deps.altrove(tenantId)) return;
                 await stampeDiRipiego(tenantId);
             });
         } catch (err: any) {

@@ -161,6 +161,8 @@ const AUTHORITY_READS: RegExp[] = [
     /^\/reservations\/\d+\/bill$/,
     /^\/orders(\/.*)?$/,
     /^\/kds(\/.*)?$/,
+    // Lo stato degli ordini nella comanda in cassa: lo tiene chi li scrive.
+    /^\/passepartout\/comande-vive\/ordini$/,
     // Fase B4: quello che l'app carica all'avvio per la sala. A linea giù
     // un ricaricamento chiedeva tutto al cloud e apriva una pianta vuota,
     // col nodo acceso a due metri. Il nodo li ha tutti: pianta e menu dalla

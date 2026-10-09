@@ -699,6 +699,39 @@ cassa avvengono sul nodo, anche a linea caduta.
 - **Aggiornare l'agente insieme al nodo**: finché l'agente sul PC è quello
   vecchio, le chiusure fallite tornano a mano come prima.
 
+## Le comande del CRM in cassa dal nodo (comanda viva, fase 6)
+
+Gli ordini del CRM scritti dal vivo nella comanda in cassa del tavolo
+(`services/passepartoutComandeVive.ts`) li scrive chi ha gli ordini. Senza
+«Servizio completo sul nodo» li scrive il cloud; con il servizio in sala li
+scrive il nodo, anche a linea caduta. L'altro processo salta il ristorante
+(`comandeViveAltrove` in server.ts: sul nodo l'interruttore si legge da
+`app_settings`, perché lì `nodeOwnsBills` è sempre falso).
+
+- **Configurazione**: `passepartout_config` (interruttore, chi stampa, chi
+  fa il conto, articolo per i piatti del CRM) e `passepartout_tavoli`
+  (abbinamento dei tavoli) scendono col bootstrap e con la sincronizzazione
+  della configurazione. Niente segreti: le credenziali della cassa stanno
+  sul PC.
+- **Chi stampa**: la cucina la manda la cassa solo se questo processo è
+  quello che scrive in cassa. A linea caduta con il servizio ancora nel
+  cloud il nodo stampa da sé.
+- **Il cambio di mano**: lo stato delle scritture
+  (`passepartout_comande_vive`, `passepartout_righe_vive`) resta di chi le
+  ha fatte e non viaggia. Chi prende gli ordini riscrive la differenza da
+  zero. L'agente, unico per cloud e nodo, ritrova comanda e righe nella sua
+  memoria (per tag dell'ordine) invece di scriverle due volte, e non
+  rimanda le uscite già partite.
+  - Scoperto: una riga stampata dal CRM per ripiego e finita in cassa non
+    mandata può ripartire dalla cassa dopo un cambio di mano.
+- **Il «Riprova»** di un ordine fermo (`POST /passepartout/comande-vive/
+  ordini/:id/riprova`) è una scrittura di servizio: col servizio in sala va
+  al nodo, e nel cloud risponde 409 `authority_on_node`.
+- **Lo specchio** (conti del CRM copiati in cassa) resta del cloud: sul nodo
+  `accodaSpecchio` non accoda.
+- Test: `tests/api/sala-node-comanda-viva.test.ts`, con un agente finto
+  collegato a cloud e nodo e la cassa finta di `tests/api/cassaFinta.ts`.
+
 ## L'accoglienza sul nodo (tappa C)
 
 La prenotazione è del cloud, ma due sue colonne sono del servizio:
