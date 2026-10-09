@@ -26,7 +26,8 @@ Fra le opzioni di import (`OpzioniArticoliRetail`) compaiono `ImportCostoUltimo`
 ## La verifica (sola lettura)
 
 ```bash
-node scripts/passepartout-conta-costi.mjs --cmd C:\ristomanager-agents\run-passepartout-agent.cmd
+node scripts/passepartout-conta-costi.mjs --cmd C:\ristomanager-agents\run-passepartout-agent.cmd   # agente installato a mano
+node scripts/passepartout-conta-costi.mjs --nodo C:\Sympotia\Cassa\nodo.json                      # installatore
 ```
 
 Lo script chiama solo `GetArticoli` e rifiuta qualunque altra operazione che non sia `Get…`. Stampa conteggi ed esempi:
@@ -43,3 +44,10 @@ Va lanciato prima sulla demo della VM e poi sul PC della cassa, sempre con l'ok 
 
 - **Se costi e distinte sono compilati**, il food cost può importarli: le materie prime diventano ingredienti con `external_ref` `pp:articolo:<id>` e storico con fonte `PASSEPARTOUT`, e le componenti dei piatti già abbinati diventano righe di scheda proposte.
 - **Se non sono compilati**, Passepartout serve solo per le vendite per articolo (Fase 3) e i prezzi arrivano dalle fatture.
+
+## Esito del 09/10/2026
+
+- **Demo del rivenditore (VM):** 348 articoli (344 semplici, 3 varianti, 1 coperto). Solo 2 hanno un costo d'acquisto, nessuno ha distinta base o prezzi dei fornitori, e non ci sono materie prime. È il catalogo di vendita e basta, come ci si aspetta da una demo.
+- **Vecchio Frantoio:** 442 articoli (332 semplici, 107 varianti, più acconto, modificatore e coperto). Solo 4 vini hanno un costo d'acquisto; nessuno ha distinta base o prezzi dei fornitori, e non ci sono materie prime.
+
+**Decisione:** niente import da Passepartout (il passo 1b del piano). Il locale non tiene il magazzino in cassa, quindi i costi arrivano a mano e poi dalle fatture (Fase 2). Passepartout serve al food cost solo per le vendite per articolo (Fase 3).

@@ -8,9 +8,11 @@
 //
 // Senza dipendenze, per girare anche sul PC della cassa con il solo node.
 // Le credenziali si prendono dall'ambiente (PASSEPARTOUT_WS_URL, _USER,
-// _PASSWORD, _AZIENDA, _BEW) oppure dal .cmd dell'agente:
+// _PASSWORD, _AZIENDA, _BEW), dal .cmd dell'agente installato a mano oppure
+// dal nodo.json dell'installatore:
 //
 //   node scripts/passepartout-conta-costi.mjs --cmd C:\ristomanager-agents\run-passepartout-agent.cmd
+//   node scripts/passepartout-conta-costi.mjs --nodo C:\Sympotia\Cassa\nodo.json
 //
 // Vedi docs/passepartout/articoli-costi.md.
 
@@ -18,6 +20,7 @@ import { readFileSync } from 'node:fs';
 
 const args = process.argv.slice(2);
 const cmdIdx = args.indexOf('--cmd');
+const nodoIdx = args.indexOf('--nodo');
 const env = {};
 for (const k of ['PASSEPARTOUT_WS_URL', 'PASSEPARTOUT_WS_USER', 'PASSEPARTOUT_WS_PASSWORD', 'PASSEPARTOUT_WS_AZIENDA', 'PASSEPARTOUT_WS_BEW']) {
     if (process.env[k]) env[k] = process.env[k];
@@ -28,9 +31,16 @@ if (cmdIdx >= 0) {
         if (m) env[m[1].toUpperCase()] = m[2];
     }
 }
+if (nodoIdx >= 0) {
+    // L'installatore scrive in UTF-8; un BOM lasciato da un editor romperebbe JSON.parse.
+    const nodo = JSON.parse(readFileSync(args[nodoIdx + 1], 'utf8').replace(/^\uFEFF/, ''));
+    for (const [k, v] of Object.entries(nodo?.passepartout_agent?.env ?? {})) {
+        if (k.startsWith('PASSEPARTOUT_WS_') && typeof v === 'string') env[k] = v;
+    }
+}
 const URL_WS = (env.PASSEPARTOUT_WS_URL || '').trim().replace(/\/$/, '');
 if (!URL_WS) {
-    console.error('PASSEPARTOUT_WS_URL assente (ambiente o --cmd)');
+    console.error('PASSEPARTOUT_WS_URL assente (ambiente, --cmd o --nodo)');
     process.exit(1);
 }
 
@@ -63,9 +73,11 @@ async function soapGet(op, params = '') {
 }
 
 // Parsing a espressioni regolari: basta per contare, e lo script resta senza
-// dipendenze. I prefissi di namespace cambiano fra installazioni (a:, b:…).
+// dipendenze. I prefissi di namespace cambiano fra installazioni (a:, b:…), e
+// WCF apre i contratti con attributi (`<a:ContrattoArticolo z:Id="i1" …>`):
+// senza ammetterli la demo dava 0 articoli su 348. I tag vuoti (`…/>`) no.
 const blocchi = (xml, tag) => {
-    const re = new RegExp(`<(?:\\w+:)?${tag}>([\\s\\S]*?)</(?:\\w+:)?${tag}>`, 'g');
+    const re = new RegExp(`<(?:\\w+:)?${tag}(?:\\s[^>]*)?(?<!/)>([\\s\\S]*?)</(?:\\w+:)?${tag}>`, 'g');
     return [...xml.matchAll(re)].map(m => m[1]);
 };
 const campo = (xml, tag) => {
