@@ -585,7 +585,7 @@ describe('ordini del CRM in cassa: chi stampa in cucina', () => {
             `INSERT INTO stations (tenant_id, name, printer, sort_order) VALUES (1, 'Cucina Viva Stampa', 'termica-viva', 95) RETURNING id`
         )).rows[0].id);
         const room = await api().post('/rooms').set(bearer(token)).send({ name: 'Sala Comanda Viva 3', width: 600, height: 400 });
-        for (const [i, nome] of ['W1', 'W2', 'W3', 'W4', 'W5', 'W6', 'W7', 'W8', 'W9', 'W10'].entries()) {
+        for (const [i, nome] of ['W1', 'W2', 'W3', 'W4', 'W5', 'W6', 'W7', 'W8', 'W9', 'W10', 'W11'].entries()) {
             const t = await api().post('/tables').set(bearer(token)).send({
                 name: `CV${nome}`, shape: 'SQUARE', seats: 4, x: 40 + i * 80, y: 40, room_id: room.body.id, status: 'FREE',
             });
@@ -907,8 +907,8 @@ describe('ordini del CRM in cassa: chi stampa in cucina', () => {
         `SELECT status, provider, error FROM fiscal_documents WHERE table_bill_id = $1 ORDER BY id`, [billId]
     )).rows;
 
-    it('conto del CRM: nasce dalle righe del CRM, è della comanda in cassa, niente sconti; saldato chiude la cassa senza invio', async () => {
-        await saluta(['comanda-viva', 'comanda-viva-invio', 'comanda-viva-coperto', 'chiudi-senza-invio']);
+    it('conto del CRM: nasce dalle righe del CRM, è della comanda in cassa; saldato chiude la cassa senza invio e con lo sconto del CRM', async () => {
+        await saluta(['comanda-viva', 'comanda-viva-invio', 'comanda-viva-coperto', 'chiudi-senza-invio', 'chiudi-con-sconto']);
         await contoCrm('crm');
         try {
             const ordine = await nuovoOrdine('W8');
@@ -916,9 +916,9 @@ describe('ordini del CRM in cassa: chi stampa in cucina', () => {
             await finoA(async () => (await viva(ordine))?.stato === 'SCRITTA', 'ordine scritto in cassa');
             await lancia(ordine, 1);
             const c = cassa.sulTavolo('W8')!;
-            // Lo sconto del CRM non arriverebbe in cassa.
+            // Lo sconto del CRM va sul conto in cassa, alla chiusura.
             const sconto = await api().post(`/orders/${ordine}/discount`).set(bearer(token)).send({ discount_type: 'AMOUNT', discount_value: 1 });
-            expect(sconto.status).toBe(409);
+            expect(sconto.status).toBe(200);
             const totale = (await api().get(`/orders/${ordine}`).set(bearer(token))).body.total_cents;
 
             const chiusa = await api().post(`/orders/${ordine}/close`).set(bearer(token)).send({});
@@ -927,14 +927,13 @@ describe('ordini del CRM in cassa: chi stampa in cucina', () => {
             const billId = chiusa.body.bill.id as number;
             expect((await db.query(`SELECT conto_crm_bill_id FROM passepartout_comande_vive WHERE tenant_id = 1 AND order_id = $1`, [ordine])).rows[0])
                 .toMatchObject({ conto_crm_bill_id: billId });
-            expect((await api().post(`/bills/${billId}/discount`).set(bearer(token)).send({ discount_type: 'AMOUNT', discount_value: 1 })).status).toBe(409);
 
             const pagato = await api().post(`/bills/${billId}/close`).set(bearer(token))
                 .send({ payments: [{ method: 'CONTANTI', amount_cents: totale }] });
             expect(pagato.status).toBe(200);
             await finoA(async () => (await docs(billId)).some((d: any) => d.status === 'CONFIRMED'), 'comanda chiusa in cassa');
             expect(chiusure.filter((p) => Number(p.idComanda) === c.id)).toEqual([
-                expect.objectContaining({ idComanda: c.id, tipoPagamento: 'ESTERNO', senzaInvio: true }),
+                expect.objectContaining({ idComanda: c.id, tipoPagamento: 'ESTERNO', senzaInvio: true, scontoEuro: 1 }),
             ]);
         } finally {
             await ripristina();
@@ -950,6 +949,12 @@ describe('ordini del CRM in cassa: chi stampa in cucina', () => {
             await lancia(ordine, 1);
             const c = cassa.sulTavolo('W9')!;
             c.righe.push({ id: 990_201, articolo: 'VARIE', descrizione: 'Amaro', pezzi: 1, prezzo: 3, uscita: 1, stato: 'InProduzione', tipo: 'Semplice', varianti: [] });
+            // Il conto della cassa non porterebbe lo sconto del CRM.
+            expect((await api().post(`/orders/${ordine}/discount`).set(bearer(token)).send({ discount_type: 'AMOUNT', discount_value: 1 })).status).toBe(200);
+            const rifiutata = await api().post(`/orders/${ordine}/close`).set(bearer(token)).send({});
+            expect(rifiutata.status).toBe(409);
+            expect(rifiutata.body.error).toBe('sconto_con_righe_della_cassa');
+            expect((await api().post(`/orders/${ordine}/discount`).set(bearer(token)).send({ discount_type: null })).status).toBe(200);
             const chiusa = await api().post(`/orders/${ordine}/close`).set(bearer(token)).send({});
             expect(chiusa.status).toBe(200);
             expect(chiusa.body.bill.external_ref).toBe(`pp:comanda:${c.id}`);
@@ -979,6 +984,29 @@ describe('ordini del CRM in cassa: chi stampa in cucina', () => {
             expect(pagato.status).toBe(200);
             await finoA(async () => (await docs(billId)).some((d: any) => d.status === 'FAILED'), 'chiusura fermata');
             expect((await docs(billId)).find((d: any) => d.status === 'FAILED')!.error).toContain('agente della cassa va aggiornato');
+            expect(chiusure.filter((p) => Number(p.idComanda) === c.id)).toEqual([]);
+        } finally {
+            await ripristina();
+        }
+    });
+    it('conto del CRM scontato con un agente che non sa scontare il conto: la chiusura si ferma', async () => {
+        await saluta(['comanda-viva', 'comanda-viva-invio', 'comanda-viva-coperto', 'chiudi-senza-invio']);
+        await contoCrm('cassa');
+        try {
+            const ordine = await nuovoOrdine('W11');
+            await batti(ordine, [{ dish_id: piatto, qty: 1, course_no: 1 }]);
+            await finoA(async () => (await viva(ordine))?.stato === 'SCRITTA', 'ordine scritto in cassa');
+            await lancia(ordine, 1);
+            const c = cassa.sulTavolo('W11')!;
+            expect((await api().post(`/orders/${ordine}/discount`).set(bearer(token)).send({ discount_type: 'AMOUNT', discount_value: 2 })).status).toBe(200);
+            const chiusa = await api().post(`/orders/${ordine}/close`).set(bearer(token)).send({});
+            expect(chiusa.status).toBe(200);
+            const billId = chiusa.body.bill.id as number;
+            const pagato = await api().post(`/bills/${billId}/close`).set(bearer(token))
+                .send({ payments: [{ method: 'CONTANTI', amount_cents: chiusa.body.bill.total_cents }] });
+            expect(pagato.status).toBe(200);
+            await finoA(async () => (await docs(billId)).some((d: any) => d.status === 'FAILED'), 'chiusura fermata');
+            expect((await docs(billId)).find((d: any) => d.status === 'FAILED')!.error).toContain('conto scontato');
             expect(chiusure.filter((p) => Number(p.idComanda) === c.id)).toEqual([]);
         } finally {
             await ripristina();

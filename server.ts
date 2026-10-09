@@ -4168,7 +4168,7 @@ app.put('/passepartout/config', authenticate, requirePermission('settings:full')
 // sezione lo fa da sé: una lista di voci con esito e dati, che l'interfaccia
 // traduce (pp.verifica.<voce>.<esito>). L'ultima resta in passepartout_config.
 const VERSIONI_PASSEPARTOUT_PROVATE = ['2026C1'];
-const CAPACITA_AGENTE_ATTESE = ['chiudi-riprendi', 'prenotazioni', 'conti', 'tavoli-aperti', 'chiudi-preconto', 'preconto', 'specchio', 'diagnosi', 'sconto-cassa', 'comanda-viva', 'comanda-viva-invio', 'comanda-viva-coperto', 'chiudi-senza-invio'];
+const CAPACITA_AGENTE_ATTESE = ['chiudi-riprendi', 'prenotazioni', 'conti', 'tavoli-aperti', 'chiudi-preconto', 'preconto', 'specchio', 'diagnosi', 'sconto-cassa', 'comanda-viva', 'comanda-viva-invio', 'comanda-viva-coperto', 'chiudi-senza-invio', 'chiudi-con-sconto'];
 type EsitoVerifica = 'ok' | 'attenzione' | 'errore' | 'info';
 interface VoceVerifica { voce: string; esito: EsitoVerifica; dati?: Record<string, unknown> }
 
@@ -5744,8 +5744,11 @@ async function differenzaComandaCassa(
     if (!comanda || comanda.isPagato) return null;
     // Uno sconto tolto in cassa dopo il pagamento chiuderebbe come pagato
     // «esterno» un importo che nessuno ha versato, come una riga aggiunta.
-    const scontoConto = scontoCassaDelConto(rs.rows[0]);
-    const scontoCassa = (await scontoCassaCents(tenantId, idComanda)) ?? scontoConto;
+    // Il conto del CRM («conto: il CRM») porta il suo sconto sul conto in
+    // cassa alla chiusura: si confrontano le righe, a prezzo pieno.
+    const delCrm = await contoDelCrmPerComanda(tenantId, billId);
+    const scontoConto = delCrm ? 0 : scontoCassaDelConto(rs.rows[0]);
+    const scontoCassa = delCrm ? 0 : (await scontoCassaCents(tenantId, idComanda)) ?? scontoConto;
     const contoCents = items.reduce(
         (sum: number, i: any) => sum + Math.round(Number(i.unit_price_cents) || 0) * (Number(i.qty) || 0), 0) - scontoConto;
     const cassaCents = comandaToBillPayload(comanda).total_cents - scontoCassa;
@@ -5856,6 +5859,7 @@ async function chiudiComandaPassepartoutPerBill(
             throw new PassepartoutBridgeError('Il conto ha già un documento fiscale in emissione', 'busy');
         }
         const proforma = doc.doc_type === 'PROFORMA';
+        const contoDelCrm = await contoDelCrmPerComanda(tenantId, billId);
         // La comanda in cassa deve essere ancora quella che il conto ha
         // incassato: una riga aggiunta in cassa dopo l'import (l'amaro
         // ordinato dopo il pagamento dal QR) si chiuderebbe come pagata
@@ -5915,6 +5919,31 @@ async function chiudiComandaPassepartoutPerBill(
             throw new PassepartoutBridgeError(messaggio, 'agent');
         }
 
+        // Il conto del CRM («conto: il CRM») scontato nel CRM: lo sconto va
+        // sul conto in cassa, o la cassa chiuderebbe e fiscalizzerebbe il
+        // pieno. Le righe sono a prezzo pieno in tutti e due.
+        let scontoEuro: number | undefined;
+        if (contoDelCrm) {
+            const b = (await queryWithRetry(
+                `SELECT items, total_cents FROM table_bills WHERE id = $1 AND tenant_id = $2`, [billId, tenantId]
+            )).rows[0];
+            const lordo = (Array.isArray(b?.items) ? b.items : []).reduce(
+                (sum: number, i: any) => sum + Math.round(Number(i.unit_price_cents) || 0) * (Number(i.qty) || 0), 0);
+            const scontoCents = lordo - Number(b?.total_cents ?? lordo);
+            if (scontoCents > 0) {
+                if (!passepartoutAgentSupports(tenantId, 'chiudi-con-sconto')) {
+                    const messaggio = `L'agente della cassa va aggiornato per chiudere un conto scontato: chiudi il tavolo in cassa con lo sconto di ${formatMoneyMinor(scontoCents, (await getTenantLocale(tenantId)).currency)}, o aggiorna l'agente e riprova.`;
+                    await queryWithRetry(
+                        `UPDATE fiscal_documents SET status = 'FAILED', error = $3 WHERE id = $1 AND tenant_id = $2 AND status = 'PENDING'`,
+                        [doc.id, tenantId, messaggio]
+                    );
+                    await notifyPassepartoutDoc(tenantId, doc.id);
+                    throw new PassepartoutBridgeError(messaggio, 'agent');
+                }
+            }
+            if (passepartoutAgentSupports(tenantId, 'chiudi-con-sconto')) scontoEuro = Math.max(0, scontoCents) / 100;
+        }
+
         let esito: EsitoChiusuraComanda;
         try {
             // Timeout largo: la sequenza sull'agente può includere invio in
@@ -5926,6 +5955,7 @@ async function chiudiComandaPassepartoutPerBill(
                 proforma,
                 riprendi,
                 ...(senzaInvio ? { senzaInvio: true } : {}),
+                ...(scontoEuro ? { scontoEuro } : {}),
             }, 60_000);
         } catch (err) {
             await notePassepartoutCloseFailure(tenantId, doc.id, err)
@@ -8681,9 +8711,9 @@ app.post('/bills/:id/discount', authenticate, requirePermission('orders:void'), 
         // Il conto di una comanda in cassa (importato, o fatto dal CRM con
         // «conto: il CRM»): lo sconto del CRM non arriverebbe in cassa, che
         // chiuderebbe e fiscalizzerebbe il pieno.
-        if (passepartoutComandaIdFromRef(cur.rows[0].external_ref) != null) {
+        if (passepartoutComandaIdFromRef(cur.rows[0].external_ref) != null && !(await contoDelCrmPerComanda(req.tenantId!, id))) {
             await client.query('ROLLBACK');
-            return res.status(409).json({ error: 'Questo conto è della comanda in cassa: lo sconto per ora si fa in cassa.' });
+            return res.status(409).json({ error: 'Questo conto è della comanda in cassa: lo sconto si fa in cassa.' });
         }
 
         await client.query(
@@ -40379,6 +40409,17 @@ app.post('/orders/:id/close', authenticate, requirePermission('orders:take'), as
             if (v) {
                 const dallaCassa = v.palmare ? null : await righeDallaCassa(req.tenantId!, orderId);
                 if (v.palmare || (dallaCassa?.righe.length ?? 0) > 0) {
+                    // Il conto della cassa non porterebbe lo sconto del CRM.
+                    const scontato = await queryWithRetry(
+                        `SELECT 1 FROM orders WHERE id = $1 AND tenant_id = $2 AND discount_type IS NOT NULL`, [orderId, req.tenantId!]
+                    );
+                    if (scontato.rows.length > 0) {
+                        client.release();
+                        return res.status(409).json({
+                            error: 'sconto_con_righe_della_cassa',
+                            message: 'Sul tavolo ci sono righe battute in cassa: il conto lo fa la cassa, e lo sconto va fatto lì. Togli lo sconto dall\'ordine, poi chiudi.',
+                        });
+                    }
                     client.release();
                     return chiudiOrdineColContoDellaCassa(req, res, orderId);
                 }
@@ -41236,13 +41277,17 @@ app.post('/orders/:id/discount', authenticate, requirePermission('orders:void'),
 
         // Un ordine nella comanda in cassa: lo sconto del CRM non arriverebbe
         // in cassa, e la cassa chiuderebbe e fiscalizzerebbe il pieno.
+        // Con «conto: il CRM» lo sconto va sul conto in cassa alla chiusura.
         if (!clear) {
             const inCassa = await queryWithRetry(
-                `SELECT 1 FROM passepartout_comande_vive WHERE tenant_id = $1 AND order_id = $2 AND stato <> 'CHIUSA' LIMIT 1`,
+                `SELECT 1 FROM passepartout_comande_vive v
+                   JOIN passepartout_config pc ON pc.tenant_id = v.tenant_id
+                  WHERE v.tenant_id = $1 AND v.order_id = $2 AND v.stato <> 'CHIUSA'
+                    AND (pc.comande_conto <> 'crm' OR v.palmare) LIMIT 1`,
                 [req.tenantId!, id]
             );
             if (inCassa.rows.length > 0) {
-                return res.status(409).json({ error: 'Questo ordine è nella comanda in cassa: lo sconto per ora si fa in cassa, sul conto del tavolo.' });
+                return res.status(409).json({ error: 'Questo ordine è nella comanda in cassa e il conto lo fa la cassa: lo sconto si fa in cassa, sul conto del tavolo.' });
             }
         }
 

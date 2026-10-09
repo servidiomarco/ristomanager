@@ -459,7 +459,7 @@
     "vivoPrintHintCassa": "Courses fired in the CRM are sent to production by the till, on its printers. The CRM station printers don't print these tables; kitchen monitors stay. If the till doesn't answer, the CRM prints after a few seconds.",
     "vivoPrintHintCrm": "The CRM's station printers print, and the CRM makes the bill. On the till, don't press «Send» or close these tables from the screen: it would send the CRM's items to production a second time. The table is closed by the payment in the CRM (the agent must be up to date).",
     "vivoBillHintCassa": "The bill is the till order, with the till's cover charge and discounts. Guests pay at the till, from the table QR or from the CRM, which takes it from the till.",
-    "vivoBillHintCrm": "The bill is built from the CRM's items, with the CRM's cover charge. Paid in the CRM or by QR, it closes the order on the till with the external payment type and the till issues the receipt, if the totals match. If something was rung up at the till or on the handheld for the table, the till makes the bill. For now, discounts are applied at the till.",
+    "vivoBillHintCrm": "The bill is built from the CRM's items, with the CRM's cover charge and discounts. Paid in the CRM or by QR, it closes the order on the till with the external payment type and the till issues the receipt, if the totals match; the discount goes on the till's bill, as when the till applies it. If something was rung up at the till or on the handheld for the table, the till makes the bill.",
     "vivoNeedOrders": "Turn on orders, in Settings → Floor & kitchen.",
     "vivoNeedTables": "Pair the CRM tables with the till ones, in the «Bookings on the till» card.",
     "vivoNeedType": "Choose the till payment type above, in «Connection and till closing».",
@@ -531,6 +531,7 @@
       "copia": "Copy the list",
       "copiato": "List copied"
     },
-    "capChiudiSenzaInvio": "Close on the till without resending to the kitchen"
+    "capChiudiSenzaInvio": "Close on the till without resending to the kitchen",
+    "capChiudiConSconto": "The CRM's discount on the till's bill"
   }
 }
