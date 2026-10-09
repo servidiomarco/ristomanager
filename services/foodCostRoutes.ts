@@ -17,12 +17,13 @@
 import express from 'express';
 import type { Request, Response } from 'express';
 import type { PoolClient } from 'pg';
-import { queryWithRetry, withTenant } from '../db.js';
+import { queryWithRetry, runWithTenantContext, withTenant } from '../db.js';
 import { authenticate, requirePermission } from '../auth/authMiddleware.js';
 import { RolePermissionService } from '../auth/permissionService.js';
 import { isPlatformScopedSession } from '../auth/authService.js';
 import { isAiKeyInvalid } from '../utils/aiErrors.js';
 import {
+    FOOD_COST_AI_MODEL,
     FoodCostAiError,
     isFoodCostAiConfigured,
     proponiSchede,
@@ -53,6 +54,8 @@ export interface FoodCostDeps {
     broadcast: (tenantId: number, event: string, data: unknown, excludeSocketId?: string) => void;
     /** Chiave Anthropic rifiutata: la risposta che spiega cosa fare (server.ts). */
     onAiKeyInvalid: (res: Response, route: string, err: unknown) => unknown;
+    /** Le categorie del menu che sono carta dei vini o bar: niente ricetta da proporre. */
+    categorieSenzaRicetta: (tenantId: number) => Promise<string[]>;
 }
 
 export interface FoodCostSettings {
@@ -427,6 +430,82 @@ const registraUsoAi = (tenantId: number, userEmail: string | null) => (u: FoodCo
     ).catch(err => console.error('[food-cost] ai_token_usage (food_cost_bozza) non scritto:', err?.message || err));
 };
 
+/** La richiesta per un piatto, dalla sua riga di dishes. */
+const richiestaPiatto = (dish: any, porzioni: number, componenti: string[]): RichiestaBozza => ({
+    chiave: `piatto:${dish.id}`,
+    tipo: 'piatto',
+    nome: dish.name,
+    descrizione: cleanText(dish.description, 1000),
+    categoria: dish.category ?? null,
+    prezzo: Number(dish.price) || 0,
+    alPeso: Boolean(dish.sold_by_weight),
+    porzioni,
+    componenti: componenti.slice(0, 40),
+});
+
+const componentiDi = async (tenantId: number, dishIds: number[]): Promise<Map<number, string[]>> => {
+    const out = new Map<number, string[]>();
+    if (dishIds.length === 0) return out;
+    const r = await queryWithRetry(
+        `SELECT dish_id, name FROM dish_components WHERE tenant_id = $1 AND dish_id = ANY($2::int[]) ORDER BY sort_order, id`,
+        [tenantId, dishIds],
+    );
+    for (const c of r.rows) {
+        if (!c.name) continue;
+        const list = out.get(c.dish_id) ?? [];
+        list.push(String(c.name));
+        out.set(c.dish_id, list);
+    }
+    return out;
+};
+
+// ---- Bozze in blocco ---------------------------------------------------------------
+
+// Un giro non prende più di tanti piatti: un menu vero ne ha 100–150, e
+// rilanciare prende quelli che mancano.
+const BOZZE_MASSIME = 200;
+// Piatti per chiamata: l'elenco ingredienti si paga una volta per lotto (poi
+// arriva dalla cache) e la risposta resta sotto il tetto di token.
+const LOTTO_BOZZE = 5;
+
+/** I piatti da preparare: attivi, senza scheda né costo a mano, senza bozza,
+ *  fuori dalle categorie di vini e bar. */
+const CANDIDATI_FROM = `
+      FROM dishes d
+     WHERE d.tenant_id = $1 AND d.is_active AND d.crm_enabled
+       AND NOT (COALESCE(d.category, '') = ANY($2::text[]))
+       AND NOT EXISTS (SELECT 1 FROM food_cost_righe r WHERE r.tenant_id = $1 AND r.dish_id = d.id)
+       AND NOT EXISTS (SELECT 1 FROM food_cost_piatti p WHERE p.tenant_id = $1 AND p.dish_id = d.id)
+       AND NOT EXISTS (SELECT 1 FROM food_cost_bozze b WHERE b.tenant_id = $1 AND b.dish_id = d.id)`;
+
+interface BozzaSalvata {
+    dishId: number;
+    righe: unknown[];
+    avvisi: string[];
+    porzioni: number;
+    createdAt: string;
+}
+
+const leggiBozze = async (tenantId: number): Promise<BozzaSalvata[]> => {
+    const r = await queryWithRetry(
+        `SELECT dish_id, righe, avvisi, porzioni, created_at FROM food_cost_bozze WHERE tenant_id = $1 ORDER BY dish_id`,
+        [tenantId],
+    );
+    return r.rows.map((b: any) => ({
+        dishId: b.dish_id,
+        righe: Array.isArray(b.righe) ? b.righe : [],
+        avvisi: Array.isArray(b.avvisi) ? b.avvisi : [],
+        porzioni: Number(b.porzioni) || 1,
+        createdAt: new Date(b.created_at).toISOString(),
+    }));
+};
+
+export interface StatoGenerazione {
+    totali: number;
+    fatte: number;
+    errori: number;
+}
+
 // ---- Router ----------------------------------------------------------------------
 
 export function createFoodCostRouter(deps: FoodCostDeps): express.Router {
@@ -439,6 +518,11 @@ export function createFoodCostRouter(deps: FoodCostDeps): express.Router {
         if (isPlatformScopedSession(req.user)) return true;
         return RolePermissionService.hasPermission(req.user.tenantId, req.user.role, 'foodcost:manage');
     };
+
+    // Le generazioni in blocco in corso, per ristorante: una alla volta. Sta
+    // in memoria perché il lavoro gira in questo processo; se il server
+    // riparte a metà, le bozze fatte restano e un nuovo giro fa le altre.
+    const generazioni = new Map<number, StatoGenerazione>();
 
     const changed = (req: Request, what: string) => {
         try {
@@ -453,9 +537,29 @@ export function createFoodCostRouter(deps: FoodCostDeps): express.Router {
     // soli mentre si scrive: ingredienti, righe di tutte le schede, porzioni.
     router.get('/dati', ...view, async (req, res) => {
         try {
-            const dati = await caricaDatiFoodCost(req.tenantId!);
+            const tenantId = req.tenantId!;
+            const dati = await caricaDatiFoodCost(tenantId);
             const puoModificare = await canManage(req);
-            res.json({ ...dati, canManage: puoModificare, aiDisponibile: puoModificare && isFoodCostAiConfigured() });
+            // Le bozze servono solo a chi può salvarle: le altre letture non le portano.
+            let bozze: BozzaSalvata[] = [];
+            let bozzeCandidati = 0;
+            if (puoModificare) {
+                const escluse = await deps.categorieSenzaRicetta(tenantId);
+                const [b, c] = await Promise.all([
+                    leggiBozze(tenantId),
+                    queryWithRetry(`SELECT count(*)::int AS n ${CANDIDATI_FROM}`, [tenantId, escluse]),
+                ]);
+                bozze = b;
+                bozzeCandidati = Math.min(BOZZE_MASSIME, c.rows[0]?.n ?? 0);
+            }
+            res.json({
+                ...dati,
+                canManage: puoModificare,
+                aiDisponibile: puoModificare && isFoodCostAiConfigured(),
+                bozze,
+                bozzeCandidati,
+                generazione: generazioni.get(tenantId) ?? null,
+            });
         } catch (err) {
             fail(res, err, 'GET /dati');
         }
@@ -709,6 +813,8 @@ export function createFoodCostRouter(deps: FoodCostDeps): express.Router {
                 await verificaIngredienti(client, tenantId, righe);
                 await fissaUnita(client, tenantId, righe);
                 await scriviRighe(client, tenantId, { dishId }, righe);
+                // Salvata la scheda, la bozza dell'AI ha fatto il suo lavoro.
+                await client.query(`DELETE FROM food_cost_bozze WHERE tenant_id = $1 AND dish_id = $2`, [tenantId, dishId]);
                 if (righe.length === 0 && costoManualeCents == null && porzioni === 1) {
                     await client.query(`DELETE FROM food_cost_piatti WHERE dish_id = $1 AND tenant_id = $2`, [dishId, tenantId]);
                 } else {
@@ -838,25 +944,12 @@ export function createFoodCostRouter(deps: FoodCostDeps): express.Router {
                         `SELECT id, name, description, category, price, sold_by_weight FROM dishes WHERE id = $1 AND tenant_id = $2`,
                         [piattoId, tenantId],
                     ),
-                    queryWithRetry(
-                        `SELECT name FROM dish_components WHERE tenant_id = $1 AND dish_id = $2 ORDER BY sort_order, id`,
-                        [tenantId, piattoId],
-                    ),
+                    componentiDi(tenantId, [piattoId]),
                 ]);
                 const dish = d.rows[0];
                 if (!dish) throw new FoodCostError(404, { error: 'Piatto non trovato' });
                 categoria = dish.category ?? null;
-                richiesta = {
-                    chiave: `piatto:${dish.id}`,
-                    tipo: 'piatto',
-                    nome: dish.name,
-                    descrizione: cleanText(dish.description, 1000),
-                    categoria,
-                    prezzo: Number(dish.price) || 0,
-                    alPeso: Boolean(dish.sold_by_weight),
-                    porzioni,
-                    componenti: comp.rows.map((c: any) => String(c.name)).filter(Boolean).slice(0, 40),
-                };
+                richiesta = richiestaPiatto(dish, porzioni, comp.get(piattoId) ?? []);
             } else {
                 const ing = dati.ingredienti.find(i => i.id === preparazioneId);
                 if (!ing) throw new FoodCostError(404, { error: 'Semilavorato non trovato' });
@@ -884,6 +977,114 @@ export function createFoodCostRouter(deps: FoodCostDeps): express.Router {
                 });
             }
             fail(res, err, 'POST /bozza');
+        }
+    });
+
+    // ---- Bozze in blocco -------------------------------------------------------------
+    // Una bozza per ogni piatto senza scheda, in sottofondo. Le bozze stanno in
+    // food_cost_bozze e non contano in nessun costo finché lo chef non le apre
+    // e le salva come scheda.
+
+    const generaInSottofondo = async (
+        tenantId: number,
+        piatti: any[],
+        stato: StatoGenerazione,
+        userEmail: string | null,
+    ) => {
+        const avvisa = () => {
+            try {
+                deps.broadcast(tenantId, 'foodcost:changed', { what: 'bozze' });
+            } catch (err) {
+                console.warn('[food-cost] broadcast fallito:', (err as Error)?.message || err);
+            }
+        };
+        try {
+            const dati = await caricaDatiFoodCost(tenantId);
+            const contesto = { ingredienti: ingredientiPerAi(dati), esempi: await esempiSchede(tenantId, dati, null) };
+            const componenti = await componentiDi(tenantId, piatti.map(d => d.id));
+            let modello = FOOD_COST_AI_MODEL;
+            const uso = registraUsoAi(tenantId, userEmail);
+            for (let i = 0; i < piatti.length; i += LOTTO_BOZZE) {
+                const lotto = piatti.slice(i, i + LOTTO_BOZZE);
+                try {
+                    const bozze = await proponiSchede(
+                        lotto.map(d => richiestaPiatto(d, 1, componenti.get(d.id) ?? [])),
+                        contesto,
+                        u => { modello = u.model; uso(u); },
+                    );
+                    await withTenant(tenantId, async client => {
+                        for (const d of lotto) {
+                            const b = bozze.get(`piatto:${d.id}`);
+                            if (!b) continue;
+                            // Nel frattempo qualcuno può aver scritto la scheda, o
+                            // cancellato il piatto: allora la bozza non serve più.
+                            await client.query(
+                                `INSERT INTO food_cost_bozze (dish_id, tenant_id, righe, avvisi, porzioni, model)
+                                 SELECT $1, $2, $3::jsonb, $4::jsonb, 1, $5
+                                  WHERE EXISTS (SELECT 1 FROM dishes WHERE id = $1 AND tenant_id = $2)
+                                    AND NOT EXISTS (SELECT 1 FROM food_cost_righe WHERE tenant_id = $2 AND dish_id = $1)
+                                    AND NOT EXISTS (SELECT 1 FROM food_cost_piatti WHERE tenant_id = $2 AND dish_id = $1)
+                                 ON CONFLICT (dish_id) DO NOTHING`,
+                                [d.id, tenantId, JSON.stringify(b.righe), JSON.stringify(b.avvisi), modello.slice(0, 64)],
+                            );
+                        }
+                    });
+                } catch (err) {
+                    stato.errori += lotto.length;
+                    console.error('[food-cost] bozze in blocco, lotto fallito:', (err as Error)?.message || err);
+                    // Senza chiave buona i lotti dopo fallirebbero uguali: ci si ferma.
+                    if (isAiKeyInvalid(err) || (err instanceof FoodCostAiError && err.kind === 'not_configured')) break;
+                }
+                stato.fatte = Math.min(stato.totali, stato.fatte + lotto.length);
+                avvisa();
+            }
+        } catch (err) {
+            console.error('[food-cost] bozze in blocco interrotte:', (err as Error)?.message || err);
+        } finally {
+            generazioni.delete(tenantId);
+            avvisa();
+        }
+    };
+
+    router.post('/bozze/genera', ...manage, async (req, res) => {
+        try {
+            const tenantId = req.tenantId!;
+            if (!isFoodCostAiConfigured()) {
+                throw new FoodCostError(503, { error: 'Bozze con l\'AI non disponibili', code: 'ai_not_configured' });
+            }
+            const inCorso = generazioni.get(tenantId);
+            if (inCorso) throw new FoodCostError(409, { error: 'Le bozze sono già in preparazione', code: 'in_corso', ...inCorso });
+            const escluse = await deps.categorieSenzaRicetta(tenantId);
+            const r = await queryWithRetry(
+                `SELECT d.id, d.name, d.description, d.category, d.price, d.sold_by_weight ${CANDIDATI_FROM}
+                  ORDER BY d.category NULLS LAST, d.name, d.id
+                  LIMIT ${BOZZE_MASSIME}`,
+                [tenantId, escluse],
+            );
+            if (r.rows.length === 0) return res.json({ daPreparare: 0 });
+            // Il blocco si prende prima di rispondere: due tocchi ravvicinati
+            // non fanno partire due giri.
+            const stato: StatoGenerazione = { totali: r.rows.length, fatte: 0, errori: 0 };
+            generazioni.set(tenantId, stato);
+            res.status(202).json({ daPreparare: r.rows.length });
+            const userEmail = req.user?.email ?? null;
+            void runWithTenantContext(tenantId, () => generaInSottofondo(tenantId, r.rows, stato, userEmail));
+        } catch (err) {
+            fail(res, err, 'POST /bozze/genera');
+        }
+    });
+
+    router.delete('/bozze/:dishId', ...manage, async (req, res) => {
+        try {
+            const tenantId = req.tenantId!;
+            const dishId = parseId(req.params.dishId);
+            if (!dishId) throw new FoodCostError(400, { error: 'id non valido' });
+            await withTenant(tenantId, client =>
+                client.query(`DELETE FROM food_cost_bozze WHERE tenant_id = $1 AND dish_id = $2`, [tenantId, dishId]));
+            changed(req, 'bozze');
+            res.status(204).end();
+        } catch (err) {
+            fail(res, err, 'DELETE /bozze/:dishId');
         }
     });
 

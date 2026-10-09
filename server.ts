@@ -28836,6 +28836,10 @@ app.use('/food-cost', createFoodCostRouter({
         socketService?.broadcastToAll(tenantId, event, data, excludeSocketId);
     },
     onAiKeyInvalid: (res, route, err) => sendAiKeyInvalid(res, route, err),
+    categorieSenzaRicetta: async tenantId => {
+        const prefs = await getMenuCategoryPrefs(tenantId);
+        return Object.entries(prefs).filter(([, p]) => p?.wine === true || p?.bar === true).map(([c]) => c);
+    },
 }));
 
 // I sensori HACCP che tacciono: ogni dieci minuti, una replica sola.

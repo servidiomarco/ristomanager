@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { AlertCircle, Plus, Search, Trash2, Wand2 } from 'lucide-react';
 import { Callout, Field, FormCard, ModalShell, SegmentedControl, Stepper, dsButton, dsInput } from '../ds';
 import type { FoodCostState } from '../../hooks/useFoodCost';
-import { foodCostApiService, type FcIngrediente } from '../../services/foodCostApiService';
+import { foodCostApiService, type FcIngrediente, type FcRigaBozza } from '../../services/foodCostApiService';
 import { money, moneySymbol } from '../../utils/displayMoney';
 import {
   CicloRicettaError,
@@ -69,6 +69,30 @@ const inputSuRiga = dsInput.replace('bg-[var(--ds-surface-row)]', 'bg-[var(--ds-
 let keySeq = 0;
 const nuovaChiave = () => `r${++keySeq}`;
 
+/** Le righe di una bozza dell'AI nell'editor. Una bozza preparata in blocco
+ *  può essere di qualche ora fa: un ingrediente nuovo creato nel frattempo
+ *  si aggancia per nome, uno cancellato sparisce, e una quantità in un'unità
+ *  che l'ingrediente non usa più va riscritta. */
+const righeDaBozza = (righe: FcRigaBozza[], fc: FoodCostState): RigaEdit[] => {
+  const perNome = new Map((fc.dati?.ingredienti ?? []).map(i => [norm(i.nome).trim(), i]));
+  return righe.flatMap(r => {
+    const ing = r.productId != null
+      ? fc.ingredienti.get(r.productId)
+      : (r.nomeNuovo ? perNome.get(norm(r.nomeNuovo).trim()) : undefined);
+    if (r.productId != null && !ing) return [];
+    const conflitto = ing?.unitaCosto != null && ing.unitaCosto !== r.unita;
+    return [{
+      key: nuovaChiave(),
+      productId: ing?.id ?? null,
+      quantita: conflitto ? '' : fmtNum(r.quantita),
+      note: r.nota ?? '',
+      daAi: !conflitto,
+      unitaProposta: conflitto ? null : r.unita,
+      nomeProposto: ing ? null : r.nomeNuovo,
+    }];
+  });
+};
+
 export const SchedaTecnica: React.FC<{
   open: boolean;
   onClose: () => void;
@@ -90,6 +114,9 @@ export const SchedaTecnica: React.FC<{
   const [generando, setGenerando] = useState(false);
   /** Gli avvisi della bozza dell'AI; null finché non se ne chiede una. */
   const [avvisiAi, setAvvisiAi] = useState<string[] | null>(null);
+  /** La bozza viene da quelle preparate in blocco: si può scartare. */
+  const [bozzaSalvata, setBozzaSalvata] = useState(false);
+  const [scartando, setScartando] = useState(false);
 
   // Si inizializza all'apertura, non a ogni ricarica dei dati: un prezzo
   // salvato da una riga non deve cancellare quello che si sta scrivendo.
@@ -99,6 +126,7 @@ export const SchedaTecnica: React.FC<{
     setError(null);
     setAvvisiAi(null);
     setGenerando(false);
+    setBozzaSalvata(false);
     const salvate = target.kind === 'piatto'
       ? fc.righePiatto.get(target.dish.id) ?? []
       : fc.righePreparazione.get(target.ingrediente.id) ?? [];
@@ -107,6 +135,15 @@ export const SchedaTecnica: React.FC<{
       const meta = fc.dati?.piatti.find(p => p.dishId === target.dish.id);
       setPorzioni(meta?.porzioni ?? 1);
       setCostoManuale(meta?.costoManualeCents != null ? fmtNum(meta.costoManualeCents / 100) : '');
+      // Una scheda vuota con la sua bozza preparata in blocco si apre già
+      // riempita: è lo stesso stato di una bozza appena chiesta.
+      const bozza = fc.bozze.get(target.dish.id);
+      if (bozza && salvate.length === 0 && meta?.costoManualeCents == null) {
+        setRighe(righeDaBozza(bozza.righe, fc));
+        setPorzioni(bozza.porzioni);
+        setAvvisiAi(bozza.avvisi);
+        setBozzaSalvata(true);
+      }
     } else {
       setResaQuantita(fmtNum(target.ingrediente.resaQuantita));
       setUnitaPrep(target.ingrediente.unitaCosto ?? 'kg');
@@ -189,15 +226,7 @@ export const SchedaTecnica: React.FC<{
       const bozza = await foodCostApiService.bozzaScheda(isPiatto
         ? { piattoId: target.dish.id, porzioni }
         : { preparazioneId: target.ingrediente.id });
-      setRighe(bozza.righe.map(r => ({
-        key: nuovaChiave(),
-        productId: r.productId,
-        quantita: fmtNum(r.quantita),
-        note: r.nota ?? '',
-        daAi: true,
-        unitaProposta: r.unita,
-        nomeProposto: r.nomeNuovo,
-      })));
+      setRighe(righeDaBozza(bozza.righe, fc));
       // La resa del semilavorato solo se parla la stessa unità di come si usa.
       if (!isPiatto && bozza.resaQuantita != null && bozza.resaUnita
         && (!target.ingrediente.unitaCosto || target.ingrediente.unitaCosto === bozza.resaUnita)) {
@@ -209,6 +238,22 @@ export const SchedaTecnica: React.FC<{
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setGenerando(false);
+    }
+  };
+
+  const scartaBozza = async () => {
+    if (!isPiatto || scartando) return;
+    setScartando(true);
+    try {
+      await foodCostApiService.scartaBozza(target.dish.id);
+      fc.reload();
+      setRighe([]);
+      setAvvisiAi(null);
+      setBozzaSalvata(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setScartando(false);
     }
   };
 
@@ -336,6 +381,16 @@ export const SchedaTecnica: React.FC<{
                 </ul>
               )}
             </div>
+            {bozzaSalvata && canManage && (
+              <button
+                type="button"
+                onClick={scartaBozza}
+                disabled={scartando}
+                className="-my-1 inline-flex h-11 flex-shrink-0 items-center rounded-[var(--ds-radius-control)] px-3 text-[14px] font-medium text-[var(--ds-text-secondary)] hover:bg-[var(--ds-surface)] hover:text-[var(--ds-critical-text)] disabled:opacity-40"
+              >
+                {t('ai.discard', 'Scarta')}
+              </button>
+            )}
           </div>
         </div>
       )}

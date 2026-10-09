@@ -56,6 +56,26 @@ export interface FcDati {
   /** La bozza con l'AI si può chiedere (chiave sul server e foodcost:manage).
    *  Assente da un server di prima: vale false. */
   aiDisponibile?: boolean;
+  /** Le bozze dell'AI in attesa dello chef (solo per chi può salvarle). */
+  bozze?: FcBozzaSalvata[];
+  /** Quanti piatti senza scheda l'AI potrebbe preparare in blocco. */
+  bozzeCandidati?: number;
+  /** La preparazione in blocco in corso, se c'è. */
+  generazione?: FcGenerazione | null;
+}
+
+export interface FcBozzaSalvata {
+  dishId: number;
+  righe: FcRigaBozza[];
+  avvisi: string[];
+  porzioni: number;
+  createdAt: string;
+}
+
+export interface FcGenerazione {
+  totali: number;
+  fatte: number;
+  errori: number;
 }
 
 export interface FcPiattoCosto {
@@ -197,6 +217,19 @@ class FoodCostApiService {
     righe: FcRiga[];
   }> {
     return send('PUT', `/schede/preparazione/${productId}`, input);
+  }
+
+  /** Fa preparare all'AI, in sottofondo, una bozza per ogni piatto senza scheda. */
+  generaBozze(): Promise<{ daPreparare: number }> {
+    return send('POST', '/bozze/genera', {});
+  }
+
+  async scartaBozza(dishId: number): Promise<void> {
+    const response = await fetchWithAuth(`${API_URL}/food-cost/bozze/${dishId}`, { method: 'DELETE', headers: getHeaders(false) });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: 'Request failed' }));
+      throw buildApiError(response.status, errorData);
+    }
   }
 
   /** La proposta dell'AI per una scheda vuota: non salva niente. */
