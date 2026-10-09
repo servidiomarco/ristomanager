@@ -6,7 +6,8 @@
     "pay_at_table": "conto al tavolo",
     "passepartout": "cassa passepartout",
     "reviews": "recensioni",
-    "sala_node": "nodo di sala"
+    "sala_node": "nodo di sala",
+    "food_cost": "food cost"
   },
   "billing": {
     "active": "abbonato",

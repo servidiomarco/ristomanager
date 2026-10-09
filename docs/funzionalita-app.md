@@ -38,16 +38,17 @@
 26. [Personale (turni e presenze)](#personale-turni-e-presenze)
 27. [Inventario](#inventario)
 28. [Lista della spesa e fornitori](#lista-della-spesa-e-fornitori)
-29. [HACCP](#haccp)
-30. [Funzioni AI](#funzioni-ai)
-31. [Impostazioni](#impostazioni)
-32. [Utenti, ruoli e permessi](#utenti-ruoli-e-permessi)
-33. [Privacy e GDPR](#privacy-e-gdpr)
-34. [Piattaforma SaaS: multi-tenant, moduli e abbonamenti](#piattaforma-saas-multi-tenant-moduli-e-abbonamenti)
-35. [Aiuto e supporto](#aiuto-e-supporto)
-36. [Funzionalità trasversali](#funzionalità-trasversali)
-37. [Integrazioni esterne](#integrazioni-esterne)
-38. [Registro aggiornamenti](#registro-aggiornamenti)
+29. [Food cost](#food-cost)
+30. [HACCP](#haccp)
+31. [Funzioni AI](#funzioni-ai)
+32. [Impostazioni](#impostazioni)
+33. [Utenti, ruoli e permessi](#utenti-ruoli-e-permessi)
+34. [Privacy e GDPR](#privacy-e-gdpr)
+35. [Piattaforma SaaS: multi-tenant, moduli e abbonamenti](#piattaforma-saas-multi-tenant-moduli-e-abbonamenti)
+36. [Aiuto e supporto](#aiuto-e-supporto)
+37. [Funzionalità trasversali](#funzionalità-trasversali)
+38. [Integrazioni esterne](#integrazioni-esterne)
+39. [Registro aggiornamenti](#registro-aggiornamenti)
 
 ---
 
@@ -80,7 +81,7 @@ Navigazione a gruppi (sidebar desktop, bottom bar + sheet "Altro" su mobile):
 | Servizio | Prenotazioni · Reception · Asporto · Sale & Tavoli · Menu & Banchetti · Comande · Cucina · Passe |
 | Comunicazioni | Chiamate · Messaggi · Email · Chat staff · Notifiche |
 | Operazioni | Attività · Inventario · Lista della Spesa · HACCP |
-| Gestione | Pagamenti · Fiscalità · Reportistica · Clienti · Personale · Utenti |
+| Gestione | Pagamenti · Fiscalità · Reportistica · Food cost · Clienti · Personale · Utenti |
 | Sistema | Impostazioni · (Piattaforma, Consumi AI, Development, Roadmap — solo nel pannello di piattaforma) |
 
 Le voci compaiono solo se l'utente ha il permesso corrispondente **e** se il modulo è incluso nel piano del ristorante (vedi [Piattaforma SaaS](#piattaforma-saas-multi-tenant-moduli-e-abbonamenti)).
@@ -288,6 +289,7 @@ Due voci in sidebar: **Menu** (i piatti, organizzati in menu) e **Banchetti** (g
 - Wizard a passi: evento e cliente → coperti e tariffa (prezzo per adulto, per bambino, acconto, sconto in € o %) → composizione del menù per uscite → tavoli assegnati → note operative (cucina, sala, mise en place). Per salvare servono solo **nome, data e prezzo per adulto**: sopra il pulsante una riga dice cosa manca, e il pulsante — sempre attivo — porta al campo vuoto. Lo stepper spunta i passi compilati e segna in ambra quelli con un campo obbligatorio vuoto; in testata il riepilogo dell'evento (data, turno, coperti, totale) si aggiorna mentre si compila.
 - **Composizione per uscite**: ogni uscita si legge come sul menù (i piatti scelti, in ordine, ognuno con la × per toglierlo) e una alla volta apre il catalogo per sceglierli. Il catalogo pesca dal menu Banchetti, o da un menu stagionale a scelta; la ricerca trova il piatto per nome o categoria e, rimasto un piatto solo, Invio lo aggiunge.
 - Nel passo dei tavoli, in testata, i posti scelti contro gli ospiti («40 posti per 40 ospiti»), in ambra se non bastano.
+- **Food cost del banchetto** (con il modulo Food cost): costo per coperto, margine e prezzo consigliato mentre si compone il menù, con la quota di porzione per piatto — vedi [Food cost](#food-cost).
 - **Bozza**: un banchetto nuovo non salvato si conserva sul dispositivo; riaprendo «Crea menu banchetto» un avviso col nome del banchetto propone di riprenderlo o scartarlo.
 - **Registro pagamenti del banchetto**: acconti e saldo per contanti/carta/bonifico, stato Saldato / Parziale / Non pagato. Prezzi e pagamenti visibili solo ai ruoli autorizzati.
 - Calendario eventi e filtri temporali (questa settimana, questo mese, più avanti, passati).
@@ -631,6 +633,19 @@ Modulo a parte (si attiva con l'abbonamento «recensioni»).
 
 ---
 
+## Food cost
+
+Quanto costa ogni piatto e quanto resta al ristorante, per il servizio di tutti i giorni e per i banchetti. Voce **Food cost** in Gestione, per chi ha il permesso (di default titolare, direzione e manager); è un modulo che si accende per ristorante.
+
+- **Ingredienti = prodotti del magazzino**, con **prezzo IVA esclusa** al kg, al litro o al pezzo e **resa** (la parte che resta dopo scarto e cottura: il branzino intero rende circa il 48% di filetto). Un ingrediente nuovo si crea anche dalla scheda del piatto e finisce in magazzino, area cucina. Ogni cambio di prezzo resta nello **storico prezzi** con chi l'ha fatto. Un prodotto che sta in una scheda non si cancella dal magazzino finché non lo si toglie dalla scheda.
+- **Scheda tecnica del piatto**: ingredienti con quantità nette (g, ml, pezzi), **porzioni della ricetta** (la teglia da 8) e il costo che si aggiorna mentre si scrive. In testa: **costo a porzione, food cost %** (sul prezzo di carta senza IVA), **margine** e **prezzo consigliato** per stare nel target. Un prezzo che manca si scrive direttamente sulla riga; per i piatti comprati fatti (acqua, vino in bottiglia, dolci) basta un **costo a mano**. Per i piatti venduti al peso la scheda vale per un kg, come il prezzo.
+- **Semilavorati** (ragù, fondi, impasti): ricette che entrano in altre ricette, con quanto rendono; il loro costo al kg segue i prezzi degli ingredienti, quindi un rincaro arriva fino al piatto da solo. Il sistema impedisce le ricette che finirebbero per contenere sé stesse.
+- **Pagina Food cost**: piatti con costo, food cost % colorato rispetto al target (verde entro, ambra fino a 5 punti sopra, rosso oltre) e margine, con i filtri «senza scheda», «incompleti» e «sopra target»; ingredienti con prezzo, unità e resa modificabili in riga e filtro «senza prezzo»; semilavorati; **Impostazioni** con food cost obiettivo (di serie 30%), IVA dei banchetti (10%) e costo del menu bambini rispetto all'adulto (50%).
+- **Nel Menu**: la scheda del piatto mostra costo, food cost e margine, e apre la scheda tecnica.
+- **Nel banchetto**: nei passi «Coperti e tariffa» e «Composizione menù» il riquadro Food cost dà **costo per coperto** (e per bambino), **margine per coperto e totale**, food cost sul prezzo senza IVA e sconto compreso, e il **prezzo a persona consigliato**. Nelle uscite si sceglie la **quota di porzione** di ogni piatto (1, ¾, ½, ⅓, ¼: gli assaggi condivisi degli antipasti misti non sono porzioni intere). I piatti senza scheda sono segnalati e non contati. Costi e margini non compaiono mai nel preventivo stampato né in quello condiviso col cliente.
+
+---
+
 ## HACCP
 
 Registro di autocontrollo digitale, compilabile dal telefono davanti alla cella frigo (campi grandi, salvataggio a ogni campo). Schede: **Registro** (il giorno), **Non conformità**, **Rintracciabilità**, **Archivio**, **Report** e — per chi gestisce l'HACCP — **Configura**. Le stesse opzioni di Configura (sensori, postazioni, limiti, etichette) stanno anche in **Impostazioni → HACCP**.
@@ -757,7 +772,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 ## Piattaforma SaaS: multi-tenant, moduli e abbonamenti
 
 - **Ogni ristorante è un tenant isolato a livello di database** (Row Level Security): dati, branding, impostazioni, permessi e integrazioni separati. Pagine pubbliche per **slug** (`/prenota/nome-ristorante`) o **dominio personalizzato**.
-- **Moduli vendibili (add-on)**: Agente vocale (`voice`), WhatsApp (`whatsapp`), Prenotazioni web (`web_booking`), Conto al tavolo (`pay_at_table`), integrazione Passepartout (`passepartout`), Recensioni Google (`reviews`). L'email è canale base. Un modulo non incluso nel piano non compare nemmeno al Proprietario.
+- **Moduli vendibili (add-on)**: Agente vocale (`voice`), WhatsApp (`whatsapp`), Prenotazioni web (`web_booking`), Conto al tavolo (`pay_at_table`), integrazione Passepartout (`passepartout`), Recensioni Google (`reviews`), Food cost (`food_cost`). L'email è canale base. Un modulo non incluso nel piano non compare nemmeno al Proprietario.
 - **Doppio livello di controllo**: il modulo va *venduto* (entitlement) e poi *acceso* dal ristoratore (interruttore operativo). Tutti i default sono prudenti (spento).
 - **Billing con Stripe**: abbonamento per tenant con add-on, checkout e portale clienti; lo stato dell'abbonamento accende/spegne i moduli da solo (webhook). Quadro MRR e stato clienti per l'amministrazione.
 - **Pannello Piattaforma** (solo admin): creazione nuovo ristorante in un click (con owner e password temporanea mostrata una sola volta), sospensione/riattivazione (la sospensione spegne anche login e pagine pubbliche), accensione moduli, **impersonificazione** dell'owner per assistenza (sessione breve, tracciata e con banner visibile). Fuori dal pannello la sessione dell'admin vale solo per il suo ristorante di casa e senza permessi: report e liste non mescolano mai i dati di più ristoranti. Un admin disattivato o retrocesso perde subito l'accesso al pannello, senza aspettare la scadenza della sessione.
@@ -830,6 +845,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-10-09 | Food cost; Menu & Banchetti; Inventario | Nuovo **Food cost**: prezzi degli ingredienti (sono i prodotti del magazzino) con resa e storico, schede tecniche dei piatti e dei semilavorati con quantità e porzioni, e per ogni piatto costo, food cost sul prezzo senza IVA, margine e prezzo consigliato. Nel banchetto, mentre si compone il menù, costo per coperto, margine e prezzo a persona consigliato, con la quota di porzione per piatto. Visibile a titolare, direzione e manager; i costi non finiscono mai nel preventivo del cliente. Un prodotto usato in una scheda non si cancella dal magazzino. |
 | 2026-10-09 | Comande, Cucina e Passe; Integrazione cassa Passepartout | Nella comanda del CRM compaiono anche le righe battute in cassa o dal palmare Passepartout sullo stesso tavolo, nel riquadro «Dalla cassa» col totale del tavolo in cassa: si vedono, non si modificano. |
 | 2026-10-09 | Integrazione cassa Passepartout; Comande, Cucina e Passe | Niente più piatti in cucina due volte quando la cassa è lenta o ha il tavolo aperto: prima di stampare dal CRM si chiede alla cassa, e se risponde i piatti li manda lei. Il CRM stampa solo se la cassa non risponde o non prenderà quei piatti. |
 | 2026-10-09 | Integrazione cassa Passepartout; Comande, Cucina e Passe | Nuova scheda «Comande del CRM in cassa» in Impostazioni → Passepartout: le comande prese nel CRM entrano nella comanda in cassa del tavolo vero. Le uscite lanciate dal CRM le manda in cucina la cassa, il conto lo fa la cassa (col suo coperto e il suo sconto), e quando la cassa chiude il tavolo l'ordine si chiude anche nel CRM. |

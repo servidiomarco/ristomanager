@@ -7,9 +7,11 @@ import { moneySymbol } from '../utils/displayMoney';
 interface Props {
   dish: Dish;
   onClose: () => void;
+  /** In fondo al corpo: il food cost del piatto, per chi può vederlo. */
+  extra?: React.ReactNode;
 }
 
-export const DishDetailModal: React.FC<Props> = ({ dish, onClose }) => {
+export const DishDetailModal: React.FC<Props> = ({ dish, onClose, extra }) => {
   const { t } = useTranslation(['menu', 'common'], { useSuspense: false });
   const [photoFullscreen, setPhotoFullscreen] = useState(false);
 
@@ -87,6 +89,8 @@ export const DishDetailModal: React.FC<Props> = ({ dish, onClose }) => {
               </div>
             </div>
           )}
+
+          {extra && <div className="mt-4 border-t border-[var(--ds-border)] pt-4">{extra}</div>}
         </div>
       </div>
 

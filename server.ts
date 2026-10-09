@@ -290,6 +290,7 @@ import {
 } from './utils/leavePlan.js';
 import { formatMoneyMinor } from './utils/money.js';
 import { createHaccpRouter, haccpSensorWatchTick, runHaccpExpiryReminder, runHaccpMissingReminder, type HaccpDeps } from './services/haccpRoutes.js';
+import { createFoodCostRouter } from './services/foodCostRoutes.js';
 import { shoppingReminderBody } from './utils/shoppingReminder.js';
 import { describeShiftChanges, shiftDayLabel, type ShiftDayChange } from './utils/staffShiftChange.js';
 import { buildEReceiptPayload, buildFatturaPaXml, getFiscalDriver, type FiscalSeller, type InvoiceBuyer } from './services/fiscalService.js';
@@ -19628,7 +19629,31 @@ app.delete('/inventory/products/:id', authenticate, requirePermission('inventory
         if (existing.rowCount === 0) {
             return res.status(404).json({ error: 'Product not found' });
         }
-        await queryWithRetry('DELETE FROM inventory_products WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
+        try {
+            await queryWithRetry('DELETE FROM inventory_products WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
+        } catch (err: any) {
+            // Un ingrediente dentro una scheda tecnica del food cost non si
+            // cancella (FK RESTRICT): sparirebbe dal costo del piatto senza
+            // che nessuno se ne accorga. Si toglie prima dalla scheda.
+            if (err?.code === '23503') {
+                const usi = await queryWithRetry(
+                    `SELECT COALESCE(d.name, p.name) AS nome
+                       FROM food_cost_righe r
+                       LEFT JOIN dishes d ON d.id = r.dish_id
+                       LEFT JOIN inventory_products p ON p.id = r.preparazione_id
+                      WHERE r.tenant_id = $1 AND r.product_id = $2
+                      ORDER BY 1 LIMIT 5`,
+                    [req.tenantId!, id]
+                );
+                const nomi = usi.rows.map((r: any) => r.nome).filter(Boolean);
+                return res.status(409).json({
+                    error: `Il prodotto è in una scheda del food cost${nomi.length ? `: ${nomi.join(', ')}` : ''}. Toglilo prima dalla scheda.`,
+                    code: 'in_scheda',
+                    schede: nomi,
+                });
+            }
+            throw err;
+        }
         // Un prodotto che non esiste più non può essere sotto scorta.
         await markSharedNotificationsRead(req.tenantId!, [lowStockTag(Number(id))]);
         if (req.user) {
@@ -28738,6 +28763,18 @@ const haccpDeps: HaccpDeps = {
     onAiKeyInvalid: (res, route, err) => sendAiKeyInvalid(res, route, err),
 };
 app.use('/haccp', createHaccpRouter(haccpDeps));
+
+// ============================================
+// FOOD COST (schede tecniche, costi, margini)
+// ============================================
+// Le rotte stanno in services/foodCostRoutes.ts; da qui l'entitlement e il
+// socket.
+app.use('/food-cost', createFoodCostRouter({
+    requireFeature: requireFeature('food_cost'),
+    broadcast: (tenantId, event, data, excludeSocketId) => {
+        socketService?.broadcastToAll(tenantId, event, data, excludeSocketId);
+    },
+}));
 
 // I sensori HACCP che tacciono: ogni dieci minuti, una replica sola.
 const startHaccpSensorWatch = () => {

@@ -61,7 +61,9 @@ const PERMISSION_LABELS: Record<string, { key: string; it: string }> = {
   'takeaway:manage':         { key: 'perm.p.takeawayManage', it: 'Gestisce ordini asporto' },
   'haccp:view':              { key: 'perm.p.haccpView', it: 'Visualizza registri e report' },
   'haccp:record':            { key: 'perm.p.haccpRecord', it: 'Compila e corregge' },
-  'haccp:manage':            { key: 'perm.p.haccpManage', it: 'Configura punti e limiti' }
+  'haccp:manage':            { key: 'perm.p.haccpManage', it: 'Configura punti e limiti' },
+  'foodcost:view':           { key: 'perm.p.foodcostView', it: 'Visualizza costi e margini' },
+  'foodcost:manage':         { key: 'perm.p.foodcostManage', it: 'Modifica prezzi e schede' }
 };
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';

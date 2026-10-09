@@ -6,7 +6,8 @@
     "pay_at_table": "pay at table",
     "passepartout": "passepartout till",
     "reviews": "reviews",
-    "sala_node": "room node"
+    "sala_node": "room node",
+    "food_cost": "food cost"
   },
   "billing": {
     "active": "subscribed",

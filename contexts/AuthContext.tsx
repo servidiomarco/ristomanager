@@ -40,6 +40,7 @@ const VIEW_PERMISSIONS: Record<ViewState, string> = {
   [ViewState.FISCALITA]: 'fiscal:view',
   [ViewState.EMAIL]: 'reservations:view',
   [ViewState.RECENSIONI]: 'reviews:view',
+  [ViewState.FOOD_COST]: 'foodcost:view',
   [ViewState.NOTIFICHE]: 'dashboard:view',
   [ViewState.MONITORING]: '', // gated by account email, not by permission — see canAccessView
   [ViewState.DEVELOPMENT]: '', // gated by account email, not by permission — see canAccessView
@@ -71,12 +72,14 @@ const isPlatformScopedSessionToken = (): boolean => {
 // storico — un payload vecchio senza la chiave non deve accenderla per tutti.
 // 'reviews' segue la stessa regola: add-on venduto a parte, fail-closed.
 // 'sala_node' idem: add-on con hardware dietro, fail-closed.
-export type TenantFeatureKey = 'voice' | 'whatsapp' | 'web_booking' | 'pay_at_table' | 'passepartout' | 'reviews' | 'takeaway' | 'sala_node';
+// 'food_cost' idem: modulo venduto a parte (o in un piano), fail-closed.
+export type TenantFeatureKey = 'voice' | 'whatsapp' | 'web_booking' | 'pay_at_table' | 'passepartout' | 'reviews' | 'takeaway' | 'sala_node' | 'food_cost';
 const VIEW_FEATURES: Partial<Record<ViewState, TenantFeatureKey>> = {
   [ViewState.CONVERSAZIONI]: 'voice',
   [ViewState.MESSAGGI]: 'whatsapp',
   [ViewState.RECENSIONI]: 'reviews',
   [ViewState.ASPORTO]: 'takeaway',
+  [ViewState.FOOD_COST]: 'food_cost',
 };
 
 interface AuthContextType {
@@ -283,6 +286,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (feature === 'reviews') return features?.reviews === true;
     if (feature === 'takeaway') return features?.takeaway === true;
     if (feature === 'sala_node') return features?.sala_node === true;
+    if (feature === 'food_cost') return features?.food_cost === true;
     if (!features) return true;
     return features[feature] !== false;
   }, [user]);

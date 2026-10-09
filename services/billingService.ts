@@ -69,6 +69,8 @@ function priceToFeature(): Map<string, TenantFeature> {
         takeaway: process.env.STRIPE_PRICE_TAKEAWAY,
         // Nodo di sala: hardware in comodato, non a listino Stripe (a mano).
         sala_node: process.env.STRIPE_PRICE_SALA_NODE,
+        // Food cost: acceso a mano finché non si decide come venderlo.
+        food_cost: process.env.STRIPE_PRICE_FOOD_COST,
     };
     const map = new Map<string, TenantFeature>();
     for (const feature of TENANT_FEATURES) {
