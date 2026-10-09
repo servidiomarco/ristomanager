@@ -152,3 +152,27 @@ Comande di prova 1415, 1416 e 1417 sui tavoli SOPRA 8, 10 e 11, scritte via Web 
 
 **Cosa decide:** con «conto: la cassa» (scelta dell'utente del 09/10: il coperto lo decide la cassa) il CRM scrive la riga coperto con i coperti e senza prezzo. Un cambio dei coperti dopo la prima scrittura può non arrivare in cassa: lì si corregge in cassa.
 
+
+## Doppia stampa sulla demo, 09/10/2026 mattina
+
+L'ordine 338 del CRM sul tavolo 1 (comanda 1418) è arrivato due volte in cucina. Il tavolo era aperto nel Menu Client.
+
+| Ora (UTC) | Cosa è successo |
+|---|---|
+| 06:43 | Il CRM lancia l'uscita 1. La scrittura in cassa resta ferma dietro al tavolo aperto: l'agente rinuncia dopo 20 s («This operation was aborted») |
+| dopo 45 s | Il ripiego vede l'errore e stampa dal CRM. Le righe diventano `stampata_crm` |
+| 06:54 | La scrittura arriva in cassa, con le righe non mandate |
+| 07:08 | La cassa le manda in cucina (al suo «Invia» o alla chiusura del tavolo nel Menu Client): seconda stampa |
+
+Prove fatte subito dopo sulla comanda di prova 1421 (SOPRA 11):
+
+| Prova | Esito |
+|---|---|
+| `PutComanda` su una riga non mandata con `StatoEnum` InProduzione o Fatto, con o senza `StatoPrecEnum` | **Rifiutato**: errore 500 senza testo, la riga resta «Nuovo». La cassa non accetta righe segnate «già mandate» |
+| `InviaProduzioneComanda` di un'uscita già mandata | Le righe non ripartono, ma la cassa conta un invio in più (`numeroInvii`). Le righe delle uscite dopo passano da «Nuovo» a «InAttesa» |
+| Stato delle righe nel database della cassa | 7 = Nuovo, 0 = InAttesa, 1 = InProduzione. `invioProduzione` si riempie già alla scrittura e non dice se la riga è partita |
+
+**Cosa decide:**
+- **Prima di stampare, il ripiego chiede alla cassa.** Le righe che la cassa ha già mandato si segnano come mandate. Le altre, se la cassa risponde, le manda lei: le righe già in cassa al prossimo giro o al suo «Invia», e la scrittura in sospeso quando passa. Il CRM stampa solo se la cassa non risponde, oppure per righe che in cassa non arriveranno: scrittura rifiutata, ordine fermo, tavolo non più abbinato.
+- **L'agente non rimanda un'uscita le cui righe sono già tutte partite.** Risulta comunque mandata.
+- **Resta un caso senza rimedio.** Se la cassa non risponde il CRM stampa, e quando la cassa torna le righe ci arrivano non mandate: il primo «Invia» della cassa le ristampa.

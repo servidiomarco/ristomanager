@@ -30,6 +30,12 @@
 // questo «stampa: il CRM» si sceglie solo con «conto: il CRM». Se la cassa
 // non può mandare (agente giù, ordine fermo), dopo un'attesa breve stampa il
 // CRM e quell'uscita resta sua: mandata dalla cassa, la ristamperebbe.
+// Prima di stampare il CRM chiede alla cassa: se risponde, le righe le manda
+// lei (doppia stampa sulla demo il 09/10: tavolo aperto nel Menu Client, la
+// scrittura arrivata dopo 11 minuti e mandata dalla cassa, il CRM che
+// l'aveva già stampata). La cassa non accetta righe segnate «già mandate»
+// (500 sul cambio di StatoEnum, prova del 09/10): una riga stampata dal CRM
+// che finisce in cassa non mandata riparte al primo «Invia» della cassa.
 // Niente conto dalla cassa (fase 4). Solo cloud: con i conti in sala (nodo)
 // il giro salta il ristorante, come lo specchio.
 
@@ -50,6 +56,10 @@ const CHIUSE_IN_CASSA_OGNI_MS = () => Number(process.env.PASSEPARTOUT_COMANDE_VI
 const STAMPA_DI_RIPIEGO_DOPO_MS = () => Number(process.env.PASSEPARTOUT_COMANDE_VIVE_RIPIEGO_MS) || 45_000;
 // Un problema di configurazione non passa ritentando.
 const SENZA_ARTICOLO = 'non ha un articolo in cassa';
+// Una scrittura senza risposta (cassa lenta, tavolo aperto nel Menu Client)
+// la cassa può ancora farla: le sue righe non le stampa il CRM finché la
+// cassa risponde. Un rifiuto esplicito invece non arriverà mai in cassa.
+const SCRITTURA_IN_SOSPESO = /non raggiungibile|Nessuna risposta dall'agente|aborted|timeout/i;
 const STATI_INVIATA = new Set(['InProduzione', 'Fatto', 'Cancellato']);
 
 export interface StatoComandaViva {
@@ -568,13 +578,35 @@ async function segnaInviate(tenantId: number, orderId: number, desiderate: Desid
     );
 }
 
+/** Le righe della comanda in cassa con il loro stato, se la cassa risponde.
+ *  null se non risponde (agente giù o vecchio, gestionale irraggiungibile):
+ *  allora il ripiego stampa. Una comanda non ancora scritta si prova con le
+ *  comande aperte: basta sapere che la cassa c'è. */
+async function righeInCassa(tenantId: number, ppComandaId: number | null): Promise<Map<number, string | null> | null> {
+    if (!passepartoutAgentSupports(tenantId, CAPACITA)) return null;
+    try {
+        if (ppComandaId == null) {
+            await callPassepartout<PassepartoutComandaAperta[]>(tenantId, 'comandeAperte', {}, 15_000);
+            return new Map();
+        }
+        // Una comanda sparita (chiusa in cassa) torna null: nessuna riga da
+        // stampare, l'ordine lo chiude chiuseInCassa.
+        const c = await callPassepartout<PassepartoutComanda | null>(tenantId, 'comanda', { idGestionale: ppComandaId }, 15_000);
+        return new Map((c?.righe ?? []).filter((r) => r.idGestionale != null).map((r) => [Number(r.idGestionale), r.statoEnum ?? null]));
+    } catch {
+        return null;
+    }
+}
+
 /** Il ripiego: righe lanciate da più di un attimo che la cassa non ha
  *  mandato (agente giù, ordine fermo o non ancora scritto) le stampa il
- *  CRM. Gira anche senza agente collegato: è proprio il caso. */
+ *  CRM. Gira anche senza agente collegato: è proprio il caso. Se la cassa
+ *  risponde, prima le si chiede: le righe che ha già mandato si segnano, le
+ *  altre che ha o che le stanno arrivando le manda lei. */
 export async function stampeDiRipiego(tenantId: number): Promise<number> {
     if (!deps) return 0;
     const rs = await queryWithRetry(
-        `SELECT oi.order_id, array_agg(oi.id ORDER BY oi.id) AS ids
+        `SELECT oi.order_id, oi.id, rv.pp_riga_id, v.pp_comanda_id, v.stato AS v_stato, v.error AS v_error
            FROM order_items oi
            JOIN orders o ON o.id = oi.order_id AND o.tenant_id = oi.tenant_id
            JOIN passepartout_config pc ON pc.tenant_id = o.tenant_id
@@ -587,7 +619,7 @@ export async function stampeDiRipiego(tenantId: number): Promise<number> {
             AND NOT COALESCE(rv.inviata, false) AND NOT COALESCE(rv.stampata_crm, false)
             -- Non mentre una scrittura va a buon fine (il claim sposta next_at
             -- avanti): la cassa potrebbe star mandando proprio quell'uscita.
-            -- Dopo un errore della cassa si stampa subito, senza aspettare
+            -- Dopo un errore della cassa si guarda subito, senza aspettare
             -- il prossimo tentativo.
             AND (v.order_id IS NULL OR v.next_at <= now() OR v.stato = 'FAILED' OR v.error IS NOT NULL)
             AND (
@@ -596,14 +628,38 @@ export async function stampeDiRipiego(tenantId: number): Promise<number> {
                     AND EXISTS (SELECT 1 FROM passepartout_tavoli pt
                                  WHERE pt.tenant_id = o.tenant_id AND pt.table_id = o.table_id AND pt.confermato))
             )
-          GROUP BY oi.order_id`,
+          ORDER BY oi.order_id, oi.id`,
         [tenantId, STAMPA_DI_RIPIEGO_DOPO_MS() / 1000]
     );
+    const perOrdine = new Map<number, any[]>();
+    for (const r of rs.rows) perOrdine.set(Number(r.order_id), [...(perOrdine.get(Number(r.order_id)) ?? []), r]);
     let stampate = 0;
-    for (const r of rs.rows) {
+    for (const [orderId, righe] of perOrdine) {
         try {
-            await deps.stampaDalCrm(tenantId, Number(r.order_id), (r.ids as number[]).map(Number));
-            stampate += (r.ids as number[]).length;
+            const testa = righe[0];
+            const inCassa = await righeInCassa(tenantId, testa.pp_comanda_id != null ? Number(testa.pp_comanda_id) : null);
+            let ids: number[];
+            if (inCassa == null) {
+                ids = righe.map((r) => Number(r.id));
+            } else {
+                const mandate = righe.filter((r) => r.pp_riga_id != null && STATI_INVIATA.has(inCassa.get(Number(r.pp_riga_id)) ?? ''));
+                if (mandate.length > 0) {
+                    await queryWithRetry(
+                        `UPDATE passepartout_righe_vive SET inviata = true, updated_at = now()
+                          WHERE tenant_id = $1 AND order_id = $2 AND chiave = ANY($3::text[]) AND NOT stampata_crm`,
+                        [tenantId, orderId, mandate.map((r) => `oi:${r.id}`)]
+                    );
+                }
+                // La cassa risponde: le righe che ha le manda lei, al prossimo
+                // giro o al suo «Invia». Stampa il CRM solo quelle che in
+                // cassa non arriveranno: mai scritte, con la cassa che ha
+                // rifiutato la scrittura o un ordine che il giro non scrive.
+                const inSospeso = testa.v_stato !== 'FAILED' && SCRITTURA_IN_SOSPESO.test(String(testa.v_error ?? ''));
+                ids = inSospeso ? [] : righe.filter((r) => r.pp_riga_id == null).map((r) => Number(r.id));
+            }
+            if (ids.length === 0) continue;
+            await deps.stampaDalCrm(tenantId, orderId, ids);
+            stampate += ids.length;
         } catch (err: any) {
             console.error('[passepartout] comande vive, stampa di ripiego:', err?.message || err);
         }

@@ -1365,11 +1365,19 @@ export async function scriviComandaViva(
     //    3, «stampa: la cassa»). La cassa manda l'uscita intera: anche le
     //    righe di palmare e cassa di quell'uscita non ancora mandate, come il
     //    suo «Invia uscita» (prova 4: le uscite dopo restano in attesa).
+    //    Un'uscita già partita dalla cassa (il suo «Invia», mentre la
+    //    scrittura del CRM era in sospeso) non si rimanda: la cassa non
+    //    ristampa le righe ma conta un invio in più (prova del 09/10 sulla
+    //    demo). Risulta mandata lo stesso.
     const uscite = [...new Set((p.inviaUscite ?? []).filter((u) => Number.isInteger(u) && u > 0))].sort((a, b) => a - b);
-    let inviate: number[] = [];
-    if (uscite.length > 0 && idComanda != null) {
-        await inviaProduzioneComanda({ idComanda, inviaTutto: false, uscite });
-        inviate = uscite;
+    const giaPartita = (u: number) => {
+        const righe = (dopo?.righe ?? []).filter((r) => (r.uscita ?? 0) === u);
+        return righe.length > 0 && righe.every((r) => ['InProduzione', 'Fatto', 'Cancellato'].includes(r.statoEnum ?? ''));
+    };
+    const daMandare = uscite.filter((u) => !giaPartita(u));
+    const inviate = idComanda != null ? uscite : [];
+    if (daMandare.length > 0 && idComanda != null) {
+        await inviaProduzioneComanda({ idComanda, inviaTutto: false, uscite: daMandare });
         const riletta = await getComanda(idComanda);
         if (riletta) {
             dopo = riletta;
