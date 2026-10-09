@@ -15,6 +15,12 @@ describe('listino e calcolo dei costi AI', () => {
         expect(costUsd('claude-opus-5', 0, 1_000_000)).toBeCloseTo(25, 6);
     });
 
+    it('ha in listino il modello delle bolle e delle bozze food cost', () => {
+        // Prima mancava: il costo delle bolle HACCP usciva «n/d».
+        expect(costUsd('claude-opus-5-5', 1_000_000, 0)).toBeCloseTo(4, 6);
+        expect(costUsd('claude-opus-5-5', 0, 1_000_000)).toBeCloseTo(20, 6);
+    });
+
     it('somma ingresso e uscita, che hanno prezzi diversi', () => {
         // Un giro dell'agente misurato in sviluppo: 3038 in + 195 out.
         const atteso = (3038 / 1e6) * 5 + (195 / 1e6) * 25;

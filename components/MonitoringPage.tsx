@@ -26,6 +26,9 @@ const FEATURE_LABELS: Record<string, string> = {
   suggest_reply: 'Risposta suggerita messaggi',
   whatsapp_agent: 'Agente WhatsApp',
   support_assistant: 'Assistente Aiuto',
+  wine_pairing: 'Abbinamenti vino',
+  haccp_ddt: 'Lettura bolle HACCP',
+  food_cost_bozza: 'Bozza scheda food cost',
 };
 type TFunc = (key: string, defaultValue: string, options?: Record<string, unknown>) => string;
 

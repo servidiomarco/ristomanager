@@ -21,9 +21,20 @@ import { queryWithRetry, withTenant } from '../db.js';
 import { authenticate, requirePermission } from '../auth/authMiddleware.js';
 import { RolePermissionService } from '../auth/permissionService.js';
 import { isPlatformScopedSession } from '../auth/authService.js';
+import { isAiKeyInvalid } from '../utils/aiErrors.js';
+import {
+    FoodCostAiError,
+    isFoodCostAiConfigured,
+    proponiSchede,
+    type EsempioScheda,
+    type FoodCostAiUsage,
+    type IngredienteAi,
+    type RichiestaBozza,
+} from './foodCostAi.js';
 import {
     CicloRicettaError,
     RicettaTroppoProfondaError,
+    UNITA_QUANTITA,
     costoPiatto,
     creaCalcolatore,
     creaCiclo,
@@ -40,6 +51,8 @@ export interface FoodCostDeps {
     /** requireFeature('food_cost') di server.ts. */
     requireFeature: express.RequestHandler;
     broadcast: (tenantId: number, event: string, data: unknown, excludeSocketId?: string) => void;
+    /** Chiave Anthropic rifiutata: la risposta che spiega cosa fare (server.ts). */
+    onAiKeyInvalid: (res: Response, route: string, err: unknown) => unknown;
 }
 
 export interface FoodCostSettings {
@@ -253,6 +266,8 @@ interface RigaInput {
     productId: number;
     quantita: number;
     note: string | null;
+    /** L'unità che la quantità presuppone, quando l'ingrediente non ne ha ancora una. */
+    unita: UnitaCosto | null;
 }
 
 const leggiRighe = (v: unknown): RigaInput[] => {
@@ -265,7 +280,9 @@ const leggiRighe = (v: unknown): RigaInput[] => {
         if (quantita == null || quantita <= 0 || quantita > 1_000_000) {
             throw new FoodCostError(400, { error: 'Ogni riga vuole una quantità maggiore di zero', code: 'quantita' });
         }
-        return { productId, quantita: Math.round(quantita * 1000) / 1000, note: cleanText(raw?.note, 200) };
+        const unita = raw?.unita == null || raw.unita === '' ? null : raw.unita;
+        if (unita != null && !isUnitaCosto(unita)) throw new FoodCostError(400, { error: 'Unità non valida (kg, l o pz)', code: 'unita' });
+        return { productId, quantita: Math.round(quantita * 1000) / 1000, note: cleanText(raw?.note, 200), unita };
     });
 };
 
@@ -278,6 +295,36 @@ const verificaIngredienti = async (client: PoolClient, tenantId: number, righe: 
         [tenantId, ids],
     );
     if (r.rowCount !== ids.length) throw new FoodCostError(400, { error: 'Ingrediente non trovato', code: 'ingrediente' });
+};
+
+/** La prima scheda che usa un ingrediente senza unità gliela fissa: senza,
+ *  «200» non si sa se sono grammi o pezzi (il magazzino arriva senza unità di
+ *  costo, e la bozza dell'AI la propone). Un'unità diversa da quella già
+ *  scritta è un errore di chi compila: non si corregge da sola. */
+const fissaUnita = async (client: PoolClient, tenantId: number, righe: RigaInput[]) => {
+    const volute = new Map<number, UnitaCosto>();
+    for (const r of righe) {
+        if (!r.unita) continue;
+        const prima = volute.get(r.productId);
+        if (prima && prima !== r.unita) throw new FoodCostError(400, { error: 'Lo stesso ingrediente in due unità diverse', code: 'unita' });
+        volute.set(r.productId, r.unita);
+    }
+    if (volute.size === 0) return;
+    const r = await client.query(
+        `SELECT id, name, unita_costo FROM inventory_products WHERE tenant_id = $1 AND id = ANY($2::int[]) FOR UPDATE`,
+        [tenantId, [...volute.keys()]],
+    );
+    for (const row of r.rows) {
+        const voluta = volute.get(row.id)!;
+        if (row.unita_costo == null) {
+            await client.query(
+                `UPDATE inventory_products SET unita_costo = $3 WHERE id = $1 AND tenant_id = $2 AND unita_costo IS NULL`,
+                [row.id, tenantId, voluta],
+            );
+        } else if (row.unita_costo !== voluta) {
+            throw new FoodCostError(400, { error: `«${row.name}» si conta a ${row.unita_costo}`, code: 'unita' });
+        }
+    }
 };
 
 const scriviRighe = async (
@@ -324,6 +371,62 @@ const autore = async (req: Request): Promise<{ id: number | null; name: string |
     }
 };
 
+// ---- Bozza con l'AI: il contesto ------------------------------------------------
+
+const ESEMPI_MASSIMI = 5;
+const INGREDIENTI_PER_AI = 2000;
+
+const ingredientiPerAi = (dati: DatiFoodCost): IngredienteAi[] =>
+    dati.ingredienti.slice(0, INGREDIENTI_PER_AI).map(i => ({
+        id: i.id,
+        nome: i.nome,
+        area: i.area,
+        unitaCosto: i.unitaCosto,
+        isPreparazione: i.isPreparazione,
+    }));
+
+/** Fino a cinque schede già salvate, della stessa categoria per prime: dicono
+ *  al modello le grammature della casa. Le righe con un ingrediente senza
+ *  unità restano fuori, perché non si sa cosa contano. */
+const esempiSchede = async (tenantId: number, dati: DatiFoodCost, categoria: string | null): Promise<EsempioScheda[]> => {
+    const perPiatto = new Map<number, RigaRow[]>();
+    for (const r of dati.righe) {
+        if (r.dishId == null) continue;
+        const list = perPiatto.get(r.dishId) ?? [];
+        list.push(r);
+        perPiatto.set(r.dishId, list);
+    }
+    if (perPiatto.size === 0) return [];
+    const d = await queryWithRetry(
+        `SELECT id, name, category FROM dishes WHERE tenant_id = $1 AND id = ANY($2::int[])
+          ORDER BY (category IS NOT DISTINCT FROM $3) DESC, id DESC`,
+        [tenantId, [...perPiatto.keys()], categoria],
+    );
+    const ingredienti = new Map(dati.ingredienti.map(i => [i.id, i]));
+    const porzioni = new Map(dati.piatti.map(p => [p.dishId, p.porzioni]));
+    const esempi: EsempioScheda[] = [];
+    for (const dish of d.rows) {
+        const righe = (perPiatto.get(dish.id) ?? []).flatMap(r => {
+            const ing = ingredienti.get(r.productId);
+            if (!ing?.unitaCosto) return [];
+            return [{ ingrediente: ing.nome, quantita: r.quantita, unita: UNITA_QUANTITA[ing.unitaCosto] }];
+        });
+        if (righe.length === 0) continue;
+        esempi.push({ nome: dish.name, categoria: dish.category ?? null, porzioni: porzioni.get(dish.id) ?? 1, righe });
+        if (esempi.length >= ESEMPI_MASSIMI) break;
+    }
+    return esempi;
+};
+
+/** Il consumo in Consumi AI: non fa aspettare la risposta. */
+const registraUsoAi = (tenantId: number, userEmail: string | null) => (u: FoodCostAiUsage) => {
+    queryWithRetry(
+        `INSERT INTO ai_token_usage (provider, feature, model, prompt_tokens, output_tokens, total_tokens, user_email, tenant_id)
+         VALUES ('anthropic', 'food_cost_bozza', $1, $2, $3, $4, $5, $6)`,
+        [u.model, u.promptTokens, u.outputTokens, u.promptTokens + u.outputTokens, userEmail, tenantId],
+    ).catch(err => console.error('[food-cost] ai_token_usage (food_cost_bozza) non scritto:', err?.message || err));
+};
+
 // ---- Router ----------------------------------------------------------------------
 
 export function createFoodCostRouter(deps: FoodCostDeps): express.Router {
@@ -351,7 +454,8 @@ export function createFoodCostRouter(deps: FoodCostDeps): express.Router {
     router.get('/dati', ...view, async (req, res) => {
         try {
             const dati = await caricaDatiFoodCost(req.tenantId!);
-            res.json({ ...dati, canManage: await canManage(req) });
+            const puoModificare = await canManage(req);
+            res.json({ ...dati, canManage: puoModificare, aiDisponibile: puoModificare && isFoodCostAiConfigured() });
         } catch (err) {
             fail(res, err, 'GET /dati');
         }
@@ -603,6 +707,7 @@ export function createFoodCostRouter(deps: FoodCostDeps): express.Router {
                 const d = await client.query(`SELECT 1 FROM dishes WHERE id = $1 AND tenant_id = $2`, [dishId, tenantId]);
                 if (d.rowCount === 0) throw new FoodCostError(404, { error: 'Piatto non trovato' });
                 await verificaIngredienti(client, tenantId, righe);
+                await fissaUnita(client, tenantId, righe);
                 await scriviRighe(client, tenantId, { dishId }, righe);
                 if (righe.length === 0 && costoManualeCents == null && porzioni === 1) {
                     await client.query(`DELETE FROM food_cost_piatti WHERE dish_id = $1 AND tenant_id = $2`, [dishId, tenantId]);
@@ -658,6 +763,7 @@ export function createFoodCostRouter(deps: FoodCostDeps): express.Router {
                 const unita = unitaRichiesta ?? p.rows[0].unita_costo;
                 if (!isUnitaCosto(unita)) throw new FoodCostError(400, { error: 'Serve l\'unità del semilavorato (kg, l o pz)' });
                 await verificaIngredienti(client, tenantId, righe);
+                await fissaUnita(client, tenantId, righe);
 
                 // I cicli si guardano su tutte le ricette dei semilavorati, con
                 // quella nuova al posto della vecchia, dentro la transazione.
@@ -703,6 +809,81 @@ export function createFoodCostRouter(deps: FoodCostDeps): express.Router {
             });
         } catch (err) {
             fail(res, err, 'PUT /schede/preparazione/:productId');
+        }
+    });
+
+    // ---- Bozza con l'AI --------------------------------------------------------------
+    // Propone, non scrive: l'editor mostra le righe, lo chef le corregge e le
+    // salva con le rotte delle schede qui sopra. Gli ingredienti nuovi li crea
+    // lui, uno per uno, dall'editor.
+
+    router.post('/bozza', ...manage, async (req, res) => {
+        try {
+            const tenantId = req.tenantId!;
+            const piattoId = parseId(req.body?.piattoId);
+            const preparazioneId = parseId(req.body?.preparazioneId);
+            if (!piattoId === !preparazioneId) throw new FoodCostError(400, { error: 'Serve un piatto o un semilavorato' });
+            if (!isFoodCostAiConfigured()) {
+                throw new FoodCostError(503, { error: 'Bozza con l\'AI non disponibile', code: 'ai_not_configured' });
+            }
+            const dati = await caricaDatiFoodCost(tenantId);
+
+            let richiesta: RichiestaBozza;
+            let categoria: string | null = null;
+            if (piattoId) {
+                const porzioni = req.body?.porzioni == null ? 1 : parseId(req.body.porzioni);
+                if (!porzioni || porzioni > 500) throw new FoodCostError(400, { error: 'Le porzioni vanno da 1 a 500' });
+                const [d, comp] = await Promise.all([
+                    queryWithRetry(
+                        `SELECT id, name, description, category, price, sold_by_weight FROM dishes WHERE id = $1 AND tenant_id = $2`,
+                        [piattoId, tenantId],
+                    ),
+                    queryWithRetry(
+                        `SELECT name FROM dish_components WHERE tenant_id = $1 AND dish_id = $2 ORDER BY sort_order, id`,
+                        [tenantId, piattoId],
+                    ),
+                ]);
+                const dish = d.rows[0];
+                if (!dish) throw new FoodCostError(404, { error: 'Piatto non trovato' });
+                categoria = dish.category ?? null;
+                richiesta = {
+                    chiave: `piatto:${dish.id}`,
+                    tipo: 'piatto',
+                    nome: dish.name,
+                    descrizione: cleanText(dish.description, 1000),
+                    categoria,
+                    prezzo: Number(dish.price) || 0,
+                    alPeso: Boolean(dish.sold_by_weight),
+                    porzioni,
+                    componenti: comp.rows.map((c: any) => String(c.name)).filter(Boolean).slice(0, 40),
+                };
+            } else {
+                const ing = dati.ingredienti.find(i => i.id === preparazioneId);
+                if (!ing) throw new FoodCostError(404, { error: 'Semilavorato non trovato' });
+                richiesta = { chiave: `semilavorato:${ing.id}`, tipo: 'semilavorato', productId: ing.id, nome: ing.nome, unitaCosto: ing.unitaCosto };
+            }
+
+            const bozze = await proponiSchede(
+                [richiesta],
+                { ingredienti: ingredientiPerAi(dati), esempi: await esempiSchede(tenantId, dati, categoria) },
+                registraUsoAi(tenantId, req.user?.email ?? null),
+            );
+            res.json(bozze.get(richiesta.chiave) ?? {
+                righe: [],
+                resaQuantita: null,
+                resaUnita: null,
+                avvisi: ['Nessuna proposta: aggiungi una descrizione al piatto e riprova'],
+            });
+        } catch (err: any) {
+            if (isAiKeyInvalid(err)) return deps.onAiKeyInvalid(res, 'POST /food-cost/bozza', err);
+            if (err instanceof FoodCostAiError) {
+                const status = err.kind === 'not_configured' ? 503 : err.kind === 'refused' ? 422 : 502;
+                return res.status(status).json({
+                    error: err.kind === 'not_configured' ? 'Bozza con l\'AI non disponibile' : err.message,
+                    code: `ai_${err.kind}`,
+                });
+            }
+            fail(res, err, 'POST /bozza');
         }
     });
 

@@ -151,5 +151,14 @@
     "piece": "piece",
     "pz": "pieces",
     "pzShort": "/pc"
+  },
+  "ai": {
+    "draft": "Draft with AI",
+    "writing": "Writing the draft…",
+    "draftTitle": "AI draft: check ingredients and quantities, then save",
+    "draftEmpty": "The AI proposed no ingredients",
+    "newTag": "new",
+    "create": "Create",
+    "search": "Search an ingredient"
   }
 }

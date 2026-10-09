@@ -178,8 +178,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Report AI nel tenant, assistente Aiuto, scheda cliente nei Messaggi e bolle HACCP (build server + vitest sui file con lo stub)
-        run: npm run build:server && npx vitest run tests/api/pannello-contesto.test.ts tests/api/assistente.test.ts tests/api/ai-scheda-cliente.test.ts tests/api/haccp-bolle.test.ts
+      - name: Report AI nel tenant, assistente Aiuto, scheda cliente nei Messaggi, bolle HACCP e bozza della scheda food cost (build server + vitest sui file con lo stub)
+        run: npm run build:server && npx vitest run tests/api/pannello-contesto.test.ts tests/api/assistente.test.ts tests/api/ai-scheda-cliente.test.ts tests/api/haccp-bolle.test.ts tests/api/food-cost-bozza.test.ts
 
   api-tests:
     name: Test API
