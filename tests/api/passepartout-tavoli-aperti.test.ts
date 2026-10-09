@@ -102,6 +102,26 @@ describe('tavoli aperti in cassa Passepartout', () => {
         expect(cfg.body).toMatchObject({ enabled: true, disponibilita: true, aperti: 1, agente: { collegato: true, aggiornato: true } });
     });
 
+    it('li vede anche chi ha solo Comande: la griglia dei tavoli li mostra', async () => {
+        const email = `solo-comande-${Date.now()}@example.test`;
+        const password = `Prova-${Date.now()}!`;
+        const prima: string[] = (await api().get('/auth/permissions/roles/WAITER').set(bearer(token))).body.permissions;
+        try {
+            const ridotti = prima.filter((p) => p !== 'reservations:view' && p !== 'floorplan:update_status');
+            expect((await api().put('/auth/permissions/roles/WAITER').set(bearer(token)).send({ permissions: ridotti })).status).toBe(200);
+            const creato = await api().post('/auth/users').set(bearer(token)).send({ email, password, full_name: 'Solo Comande', role: 'WAITER' });
+            expect(creato.status).toBe(201);
+            const login = await api().post('/auth/login').send({ email, password });
+            expect(login.status).toBe(200);
+            const sala = await api().get('/passepartout/tavoli-aperti').set(bearer(login.body.accessToken));
+            expect(sala.status).toBe(200);
+            expect(sala.body.tavoli.map((t: any) => t.table_id)).toEqual([tableId]);
+        } finally {
+            await api().put('/auth/permissions/roles/WAITER').set(bearer(token)).send({ permissions: prima });
+            await db.query(`DELETE FROM users WHERE email = $1`, [email]);
+        }
+    });
+
     it('la disponibilità automatica non propone il tavolo finché è aperto, e lo riprende spenta la regola', async () => {
         // L'esito non deve dipendere dall'ora del test: si libera a fine serata.
         await db.query(

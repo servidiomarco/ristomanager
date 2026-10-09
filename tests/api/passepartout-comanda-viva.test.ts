@@ -451,7 +451,7 @@ describe('ordini del CRM in cassa: chi stampa in cucina', () => {
             `INSERT INTO stations (tenant_id, name, printer, sort_order) VALUES (1, 'Cucina Viva Stampa', 'termica-viva', 95) RETURNING id`
         )).rows[0].id);
         const room = await api().post('/rooms').set(bearer(token)).send({ name: 'Sala Comanda Viva 3', width: 600, height: 400 });
-        for (const [i, nome] of ['W1', 'W2', 'W3', 'W4', 'W5', 'W6', 'W7', 'W8', 'W9', 'W10', 'W11'].entries()) {
+        for (const [i, nome] of ['W1', 'W2', 'W3', 'W4', 'W5', 'W6', 'W7', 'W8', 'W9', 'W10', 'W11', 'W12'].entries()) {
             const t = await api().post('/tables').set(bearer(token)).send({
                 name: `CV${nome}`, shape: 'SQUARE', seats: 4, x: 40 + i * 80, y: 40, room_id: room.body.id, status: 'FREE',
             });
@@ -720,6 +720,59 @@ describe('ordini del CRM in cassa: chi stampa in cucina', () => {
         // Un ordine che non va in cassa non ha righe della cassa.
         const fuori = await api().get(`/orders/${altro + 100_000}/righe-cassa`).set(bearer(token));
         expect(fuori.body).toMatchObject({ disponibile: true, righe: [], totale_cents: null });
+    });
+
+    it('sul tavolo aperto dalla cassa le righe della cassa si vedono da subito, prima che il CRM ci scriva', async () => {
+        cassa.comande.set(70_501, {
+            id: 70_501, note: '', sala: 'TETTOIA', tavolo: 'W12', coperti: 2, pagata: false,
+            righe: [
+                { id: 705_001, articolo: 'Coperti', descrizione: 'Coperti', pezzi: 2, prezzo: 3, uscita: 0, stato: 'Nuovo', tipo: 'Coperto', varianti: [] },
+                { id: 705_002, articolo: 'ACQUA', descrizione: 'Acqua naturale', pezzi: 1, prezzo: 2.5, uscita: 1, stato: 'InProduzione', tipo: 'Semplice', varianti: [] },
+            ],
+        });
+        // La lettura dei tavoli aperti (passepartoutTavoliAperti) l'ha vista.
+        const apertiPrima = (await db.query(`SELECT tavoli_aperti_enabled FROM passepartout_config WHERE tenant_id = 1`)).rows[0]?.tavoli_aperti_enabled ?? false;
+        await db.query(`UPDATE passepartout_config SET tavoli_aperti_enabled = true WHERE tenant_id = 1`);
+        await db.query(
+            `INSERT INTO passepartout_tavoli_aperti (tenant_id, pp_comanda_id, table_id, coperti, totale_cents, aperta_da, libero_previsto_at, visto_at)
+             VALUES (1, 70501, $1, 2, 850, now() - interval '20 minutes', now() + interval '1 hour', now())`,
+            [tavoli.W12]
+        );
+        try {
+            // Il cameriere apre il tavolo nel CRM: non ha ancora battuto niente.
+            const ordine = await nuovoOrdine('W12');
+            const righe = async () => (await api().get(`/orders/${ordine}/righe-cassa`).set(bearer(token))).body;
+            expect(await viva(ordine)).toBeUndefined();
+            const subito = await righe();
+            expect(subito).toMatchObject({ disponibile: true, totale_cents: 850 });
+            expect(subito.righe.map((r: any) => [r.descrizione, r.pezzi, r.totale_cents, r.stato])).toEqual([
+                ['Coperti', 2, 600, 'Nuovo'],
+                ['Acqua naturale', 1, 250, 'InProduzione'],
+            ]);
+
+            // «Tavoli aperti in cassa» spento: la sala non vede i tavoli della cassa.
+            await db.query(`UPDATE passepartout_config SET tavoli_aperti_enabled = false WHERE tenant_id = 1`);
+            expect(await righe()).toMatchObject({ righe: [], totale_cents: null });
+            await db.query(`UPDATE passepartout_config SET tavoli_aperti_enabled = true WHERE tenant_id = 1`);
+
+            // Un ordine rimasto aperto da un servizio passato non prende la comanda di oggi.
+            await db.query(`UPDATE orders SET opened_at = now() - interval '6 hours' WHERE id = $1`, [ordine]);
+            expect(await righe()).toMatchObject({ righe: [], totale_cents: null });
+            await db.query(`UPDATE orders SET opened_at = now() WHERE id = $1`, [ordine]);
+
+            // Il primo invio va nella stessa comanda; le righe del CRM non
+            // tornano fra quelle della cassa.
+            await batti(ordine, [{ dish_id: piatto, qty: 1, course_no: 1 }]);
+            await finoA(async () => (await viva(ordine))?.stato === 'SCRITTA', 'righe nella comanda della cassa');
+            expect((await viva(ordine)).pp_comanda_id).toBe(70_501);
+            const dopo = await righe();
+            expect(dopo.righe.map((r: any) => r.id)).toEqual([705_001, 705_002]);
+            expect(dopo.totale_cents).toBe(850 + 1200);
+        } finally {
+            await db.query(`DELETE FROM passepartout_tavoli_aperti WHERE tenant_id = 1 AND pp_comanda_id = 70501`);
+            await db.query(`UPDATE passepartout_config SET tavoli_aperti_enabled = $1 WHERE tenant_id = 1`, [apertiPrima]);
+            cassa.comande.get(70_501)!.pagata = true;
+        }
     });
 
     it('la comanda chiusa in cassa chiude l\'ordine nel CRM, senza un conto del CRM', async () => {

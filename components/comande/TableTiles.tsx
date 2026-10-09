@@ -51,7 +51,9 @@ const DefaultTableMeta: React.FC<{ row: TableRow }> = ({ row }) => {
   const gruppo = TABLE_GROUPS.find(g => g.state === state);
   const caption = state === 'order' && row.order?.stale
     ? staleOrderLabel(row.order, t)
-    : (gruppo?.captionKey ? t(gruppo.captionKey, gruppo.caption ?? '') : gruppo?.caption);
+    : state === 'order' && row.inCassa
+      ? t('tile.inCassa', 'in cassa')
+      : (gruppo?.captionKey ? t(gruppo.captionKey, gruppo.caption ?? '') : gruppo?.caption);
   return (
     <>
       <span className="text-[12px] tabular-nums text-[var(--ds-text-muted)]">

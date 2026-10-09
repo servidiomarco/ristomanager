@@ -69,7 +69,9 @@ interface CourseListProps {
   /** Sezione «Dolci» in coda: stessa regola, per le categorie da dolci. */
   showDessert?: boolean;
   /** Le righe battute in cassa sulla comanda dell'ordine (comanda viva con
-   *  Passepartout): in coda, in sola lettura, col totale del tavolo in cassa. */
+   *  Passepartout): in coda, in sola lettura, col totale del tavolo in cassa.
+   *  In testa quando la comanda del CRM è ancora vuota: è il tavolo aperto
+   *  dalla cassa, e quello che c'è già si legge prima di aggiungere. */
   righeCassa?: RigheDallaCassa | null;
 }
 
@@ -121,8 +123,11 @@ export const CourseList: React.FC<CourseListProps> = ({
       || cartForCourse(cart, DESSERT_COURSE_NO).length > 0
         ? [DESSERT_COURSE_NO] : []),
   ];
+  const conRigheCassa = !!righeCassa && (righeCassa.righe.length > 0 || !righeCassa.disponibile);
+  const comandaVuota = courseNos.every(n => itemsForCourse(order, n).length === 0 && cartForCourse(cart, n).length === 0);
   return (
   <div className="flex flex-col gap-5 pt-4">
+    {conRigheCassa && comandaVuota && <RigheCassa righe={righeCassa!} />}
     {courseNos.map(n => {
       const serverRows = itemsForCourse(order, n);
       const draftRows = cartForCourse(cart, n);
@@ -417,9 +422,7 @@ export const CourseList: React.FC<CourseListProps> = ({
         </section>
       );
     })}
-    {righeCassa && (righeCassa.righe.length > 0 || !righeCassa.disponibile) && (
-      <RigheCassa righe={righeCassa} />
-    )}
+    {conRigheCassa && !comandaVuota && <RigheCassa righe={righeCassa!} />}
     {dnd.ghost}
   </div>
   );

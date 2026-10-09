@@ -243,7 +243,8 @@
     "toTakeAmount": "{{importo}} · to take",
     "withAmount": "{{importo}} · {{stato}}",
     "free": "free",
-    "covers": "{{n}} cov."
+    "covers": "{{n}} cov.",
+    "inCassa": "on the till"
   },
   "badge": {
     "draft": "draft",

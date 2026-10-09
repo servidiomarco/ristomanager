@@ -243,7 +243,8 @@
     "toTakeAmount": "{{importo}} · da incassare",
     "withAmount": "{{importo}} · {{stato}}",
     "free": "libero",
-    "covers": "{{n}} cop."
+    "covers": "{{n}} cop.",
+    "inCassa": "in cassa"
   },
   "badge": {
     "draft": "in bozza",
