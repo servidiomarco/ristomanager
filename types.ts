@@ -866,6 +866,27 @@ export interface ComandaVivaStato {
   palmare: boolean;
 }
 
+/** Una riga battuta in cassa (o dal palmare Passepartout) sulla comanda di un
+ *  ordine del CRM: nel pad in sola lettura (GET /orders/:id/righe-cassa). */
+export interface RigaDallaCassa {
+  id: number;
+  descrizione: string;
+  pezzi: number;
+  prezzo_cents: number;
+  totale_cents: number;
+  uscita: number | null;
+  /** Nuovo, InAttesa, InProduzione, Fatto. */
+  stato: string | null;
+}
+
+export interface RigheDallaCassa {
+  /** false: la cassa adesso non risponde. */
+  disponibile: boolean;
+  righe: RigaDallaCassa[];
+  /** Il totale del tavolo in cassa, righe del CRM comprese. */
+  totale_cents: number | null;
+}
+
 // ============================================
 // MODULO ASPORTO
 // ============================================

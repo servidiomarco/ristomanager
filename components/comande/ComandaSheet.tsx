@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ListOrdered, RefreshCw, Users, UtensilsCrossed } from 'lucide-react';
-import type { Dish, OrderItem, OrderWithItems } from '../../types';
+import type { Dish, OrderItem, OrderWithItems, RigheDallaCassa } from '../../types';
 import { EmptyState, SectionHeader, Sheet, SegmentedControl } from '../ds';
 import { CourseList, SendFooter } from './CourseColumn';
 import {
@@ -64,13 +64,15 @@ interface ComandaSheetProps {
   fullPage?: boolean;
   /** Nome del tavolo, per la testata a tutta pagina. */
   tableName?: string;
+  /** Le righe battute in cassa (comanda viva), in coda alla lettura per uscite. */
+  righeCassa?: RigheDallaCassa | null;
 }
 
 export const ComandaSheet: React.FC<ComandaSheetProps> = ({
   open, onClose, order, cart, dishes, categories, course, onCourse, busy,
   onBump, onDrop, onVoid, onRecall, onFire, onEditLine, onUnfire, onMoveLine, onMoveItem, onMoveCourse,
   onDragLine, onDragItem, onDragCourse,
-  openedBy, onSend, onSendAll, onRepeat, onRepeatAll, showBar, showDessert, fullPage, tableName,
+  openedBy, onSend, onSendAll, onRepeat, onRepeatAll, showBar, showDessert, fullPage, tableName, righeCassa,
 }) => {
   const { t } = useTranslation('comande', { useSuspense: false });
   const [tab, setTab] = useState<SheetTab>('course');
@@ -219,6 +221,7 @@ export const ComandaSheet: React.FC<ComandaSheetProps> = ({
           onDragLine={onDragLine}
           onDragItem={onDragItem}
           onDragCourse={onDragCourse}
+          righeCassa={righeCassa}
         />
       ) : lines.length === 0 ? (
         <EmptyState icon={UtensilsCrossed}>{t('tableEmpty')}</EmptyState>

@@ -1,6 +1,6 @@
 import { authApiService } from './authApiService';
 import { socketClient } from './socketClient';
-import type { CourseStatus, OrderWithItems } from '../types';
+import type { CourseStatus, OrderWithItems, RigheDallaCassa } from '../types';
 import { buildApiError } from './apiError';
 import { routedGetUrl, routeServiceUrl, cloudFallbackUrl, noteRoutedResponse, fetchNodeAware } from './apiRouting';
 
@@ -146,6 +146,11 @@ class OrdersApiService {
 
   async getOrder(orderId: number): Promise<OrderWithItems> {
     return apiRequest<OrderWithItems>(routedGetUrl(`/orders/${orderId}`), { headers: getHeaders() });
+  }
+
+  // Sempre dal cloud: le comande in cassa le segue solo lui.
+  async getRigheCassa(orderId: number): Promise<RigheDallaCassa> {
+    return apiRequest<RigheDallaCassa>(`${API_URL}/orders/${orderId}/righe-cassa`, { headers: getHeaders() });
   }
 
   async openOrder(payload: OpenOrderPayload, idempotencyKey?: string): Promise<OrderWithItems> {
