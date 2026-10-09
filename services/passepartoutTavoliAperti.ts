@@ -64,11 +64,19 @@ export async function comandaApertaSuiTavoli(
     tenantId: number,
     tableIds: number[],
 ): Promise<{ pp_comanda_id: number; table_id: number } | null> {
+    // Una comanda nata dal CRM con «conto: il CRM» non è un conto della
+    // cassa: il QR propone il conto del CRM, quando c'è (fase 4c).
     const rs = await queryWithRetry(
-        `SELECT pp_comanda_id, table_id FROM passepartout_tavoli_aperti
-          WHERE tenant_id = $1 AND table_id = ANY($2::int[])
-            AND visto_at > now() - make_interval(mins => ${SCADENZA_MIN})
-          ORDER BY aperta_da DESC NULLS LAST, pp_comanda_id DESC
+        `SELECT ta.pp_comanda_id, ta.table_id FROM passepartout_tavoli_aperti ta
+          WHERE ta.tenant_id = $1 AND ta.table_id = ANY($2::int[])
+            AND ta.visto_at > now() - make_interval(mins => ${SCADENZA_MIN})
+            AND NOT EXISTS (
+                SELECT 1 FROM passepartout_comande_vive v
+                  JOIN passepartout_config pc ON pc.tenant_id = v.tenant_id
+                 WHERE v.tenant_id = ta.tenant_id AND v.pp_comanda_id = ta.pp_comanda_id
+                   AND (v.conto_crm_bill_id IS NOT NULL
+                        OR (pc.comande_conto = 'crm' AND NOT v.palmare AND v.stato <> 'CHIUSA')))
+          ORDER BY ta.aperta_da DESC NULLS LAST, ta.pp_comanda_id DESC
           LIMIT 1`,
         [tenantId, tableIds]
     );

@@ -176,3 +176,23 @@ Prove fatte subito dopo sulla comanda di prova 1421 (SOPRA 11):
 - **Prima di stampare, il ripiego chiede alla cassa.** Le righe che la cassa ha già mandato si segnano come mandate. Le altre, se la cassa risponde, le manda lei: le righe già in cassa al prossimo giro o al suo «Invia», e la scrittura in sospeso quando passa. Il CRM stampa solo se la cassa non risponde, oppure per righe che in cassa non arriveranno: scrittura rifiutata, ordine fermo, tavolo non più abbinato.
 - **L'agente non rimanda un'uscita le cui righe sono già tutte partite.** Risulta comunque mandata.
 - **Resta un caso senza rimedio.** Se la cassa non risponde il CRM stampa, e quando la cassa torna le righe ci arrivano non mandate: il primo «Invia» della cassa le ristampa.
+
+## Sconto sul conto e stampanti della demo, 09/10/2026 pomeriggio
+
+Per la fase 4c («conto: il CRM») l'utente ha scelto che lo sconto del CRM vada **sul conto in cassa**, come lo fa la cassa, con le righe a prezzo pieno. `ContrattoConto` ha i campi `ScontoEuro`, `ScontoFormato`, `CausaleSconto` e `DettaglioSconti`. La strada da provare:
+1. preconto della comanda (crea il conto Aperto);
+2. `PutConto` su quel conto con `ScontoEuro`, `CausaleSconto` e il pagamento esterno del netto;
+3. «Chiudi» (proforma) o «ChiudiEStampa» (scontrino).
+
+Prova sulla demo, comanda 1426 su SOPRA 10:
+
+| Prova | Esito |
+|---|---|
+| Preconto via `RiceviMessaggio` | **Fallito**: «Settings to access printer 'COMANDE' are not valid». Il conto non nasce |
+| Stampanti della cassa (tabella `Stampante`, sola lettura) | COMANDE, EPSON e AnyDesk Printer, attive ma su dispositivi che sulla VM non ci sono. Su Windows c'è «Microsoft Print to PDF» |
+
+**Cosa vuol dire:**
+- Sulla demo fallisce tutto ciò che stampa: preconto, `ContoComanda`, proforma. Con ogni probabilità è anche la causa del `ContoComanda` sempre in errore del 09/10 mattina, non il tipo di pagamento 3DSECURE.
+- Per provare lo sconto sul conto e la chiusura della fase 4c, le stampanti della demo vanno puntate su un file o su «Microsoft Print to PDF», dal Menu Client.
+- Fino alla prova, sui conti delle comande in cassa il CRM rifiuta gli sconti (ordine e conto). Altrimenti la cassa chiuderebbe e fiscalizzerebbe il pieno.
+- La comanda di prova 1426 su SOPRA 10 è da chiudere dal Menu Client.

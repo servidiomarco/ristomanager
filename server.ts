@@ -4168,7 +4168,7 @@ app.put('/passepartout/config', authenticate, requirePermission('settings:full')
 // sezione lo fa da sé: una lista di voci con esito e dati, che l'interfaccia
 // traduce (pp.verifica.<voce>.<esito>). L'ultima resta in passepartout_config.
 const VERSIONI_PASSEPARTOUT_PROVATE = ['2026C1'];
-const CAPACITA_AGENTE_ATTESE = ['chiudi-riprendi', 'prenotazioni', 'conti', 'tavoli-aperti', 'chiudi-preconto', 'preconto', 'specchio', 'diagnosi', 'sconto-cassa', 'comanda-viva', 'comanda-viva-invio', 'comanda-viva-coperto'];
+const CAPACITA_AGENTE_ATTESE = ['chiudi-riprendi', 'prenotazioni', 'conti', 'tavoli-aperti', 'chiudi-preconto', 'preconto', 'specchio', 'diagnosi', 'sconto-cassa', 'comanda-viva', 'comanda-viva-invio', 'comanda-viva-coperto', 'chiudi-senza-invio'];
 type EsitoVerifica = 'ok' | 'attenzione' | 'errore' | 'info';
 interface VoceVerifica { voce: string; esito: EsitoVerifica; dati?: Record<string, unknown> }
 
@@ -5895,6 +5895,26 @@ async function chiudiComandaPassepartoutPerBill(
         );
         const riprendi = Number(doc.attempts) > 0 || failedBefore.rows.length > 0;
 
+        // Comanda viva con «stampa: il CRM»: le righe in cassa non sono mai
+        // partite, e la chiusura di sempre le manderebbe in produzione prima
+        // di chiudere (la cucina le rifarebbe). Si chiude senza invio; un
+        // agente che non lo sa fare non chiude: si chiude in cassa a mano.
+        const senzaInvio = (await queryWithRetry(
+            `SELECT 1 FROM passepartout_comande_vive v JOIN passepartout_config pc ON pc.tenant_id = v.tenant_id
+              WHERE v.tenant_id = $1 AND v.pp_comanda_id = $2 AND pc.comande_stampa = 'crm' LIMIT 1`,
+            [tenantId, idComanda]
+        )).rows.length > 0;
+        if (senzaInvio && !passepartoutAgentSupports(tenantId, 'chiudi-senza-invio')) {
+            const messaggio = 'L\'agente della cassa va aggiornato: chiudendo manderebbe in cucina i piatti già stampati dal CRM. '
+                + 'Chiudi il tavolo in cassa senza inviare, o aggiorna l\'agente e riprova.';
+            await queryWithRetry(
+                `UPDATE fiscal_documents SET status = 'FAILED', error = $3 WHERE id = $1 AND tenant_id = $2 AND status = 'PENDING'`,
+                [doc.id, tenantId, messaggio]
+            );
+            await notifyPassepartoutDoc(tenantId, doc.id);
+            throw new PassepartoutBridgeError(messaggio, 'agent');
+        }
+
         let esito: EsitoChiusuraComanda;
         try {
             // Timeout largo: la sequenza sull'agente può includere invio in
@@ -5905,6 +5925,7 @@ async function chiudiComandaPassepartoutPerBill(
                 tipoDocumento: proforma ? 'Proforma' : config.tipoDocumento,
                 proforma,
                 riprendi,
+                ...(senzaInvio ? { senzaInvio: true } : {}),
             }, 60_000);
         } catch (err) {
             await notePassepartoutCloseFailure(tenantId, doc.id, err)
@@ -8640,7 +8661,7 @@ app.post('/bills/:id/discount', authenticate, requirePermission('orders:void'), 
 
         await client.query('BEGIN');
         const cur = await client.query(
-            `SELECT b.id, b.status,
+            `SELECT b.id, b.status, b.external_ref,
                     EXISTS (SELECT 1 FROM orders o WHERE o.table_bill_id = b.id) AS has_orders
              FROM table_bills b WHERE b.id = $1 AND b.tenant_id = $2 FOR UPDATE`,
             [id, req.tenantId!]
@@ -8656,6 +8677,13 @@ app.post('/bills/:id/discount', authenticate, requirePermission('orders:void'), 
         if (!cur.rows[0].has_orders) {
             await client.query('ROLLBACK');
             return res.status(409).json({ error: 'Il conto è stato aperto a mano: correggi il totale invece di scontarlo' });
+        }
+        // Il conto di una comanda in cassa (importato, o fatto dal CRM con
+        // «conto: il CRM»): lo sconto del CRM non arriverebbe in cassa, che
+        // chiuderebbe e fiscalizzerebbe il pieno.
+        if (passepartoutComandaIdFromRef(cur.rows[0].external_ref) != null) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({ error: 'Questo conto è della comanda in cassa: lo sconto per ora si fa in cassa.' });
         }
 
         await client.query(
@@ -11670,7 +11698,8 @@ async function tablePayState(tenantId: number, tableId: number): Promise<{ open:
     if (residual <= 0) return { open: false };
     const riallinea = passepartoutComandaIdFromRef(bill.external_ref) != null
         && Number(claimedRs.rows[0]?.ospiti || 0) === 0 && staffPaid === 0
-        && await qrCassaAttivo(tenantId);
+        && await qrCassaAttivo(tenantId)
+        && !(await contoDelCrmPerComanda(tenantId, bill.id));
     // Conto mai pagato di una comanda che in cassa non è più aperta (con la
     // lettura viva): non si mostra il suo importo. Se sul tavolo c'è una
     // comanda nuova, il tocco annulla il vecchio e importa quella.
@@ -11740,6 +11769,8 @@ async function riallineaContoAllaComanda(
     comanda: PassepartoutComanda,
     scontoCents: number | null = null,
 ): Promise<void> {
+    // Il conto fatto dal CRM con le sue righe («conto: il CRM») resta suo.
+    if (await contoDelCrmPerComanda(tenantId, billId)) return;
     const payload = comandaToBillPayload(comanda);
     if (payload.total_cents <= 0) return;
     const firma = (items: any[]) => (items || [])
@@ -40328,6 +40359,33 @@ app.post('/orders/:id/close', authenticate, requirePermission('orders:take'), as
             return chiudiOrdineColContoDellaCassa(req, res, orderId);
         }
 
+        // Comanda viva con «conto: il CRM» (fase 4c): il conto nasce dalle
+        // righe del CRM come sempre, ma è quello della comanda in cassa
+        // (pp:comanda:<id>): saldato nel CRM chiude la comanda in cassa, e lo
+        // scontrino lo fa la cassa. Con righe della cassa sul tavolo
+        // (palmare, aggiunte in cassa) il conto del CRM non le avrebbe: lo
+        // fa la cassa, come con «conto: la cassa».
+        let refComandaCrm: string | null = null;
+        if (await comandaVivaContoCrm(req.tenantId!, orderId)) {
+            await lavoraComandeVive(req.tenantId!, orderId);
+            const v = await comandaVivaContoCrm(req.tenantId!, orderId);
+            if (v && (v.pp_comanda_id == null || v.stato === 'PENDING' || v.stato === 'FAILED')) {
+                client.release();
+                return res.status(409).json({
+                    error: 'comanda_non_in_cassa',
+                    message: 'La comanda non è ancora tutta in cassa: riprova tra un attimo, o chiudi il tavolo in cassa.',
+                });
+            }
+            if (v) {
+                const dallaCassa = v.palmare ? null : await righeDallaCassa(req.tenantId!, orderId);
+                if (v.palmare || (dallaCassa?.righe.length ?? 0) > 0) {
+                    client.release();
+                    return chiudiOrdineColContoDellaCassa(req, res, orderId);
+                }
+                refComandaCrm = `pp:comanda:${v.pp_comanda_id}`;
+            }
+        }
+
         await client.query('BEGIN');
         const ordRs = await client.query(`SELECT * FROM orders WHERE id = $1 AND tenant_id = $2 FOR UPDATE`, [orderId, req.tenantId!]);
         if (ordRs.rows.length === 0) {
@@ -40436,6 +40494,27 @@ app.post('/orders/:id/close', authenticate, requirePermission('orders:take'), as
             await client.query(`UPDATE orders SET table_bill_id = $2 WHERE id = $1`, [orderId, billId]);
         }
 
+        if (refComandaCrm) {
+            const legato = await client.query(
+                `UPDATE table_bills SET external_ref = $3
+                  WHERE id = $1 AND tenant_id = $2 AND (external_ref IS NULL OR external_ref = $3)
+                  RETURNING id`,
+                [billId, req.tenantId!, refComandaCrm]
+            );
+            if ((legato.rowCount ?? 0) === 0) {
+                await client.query('ROLLBACK'); client.release();
+                return res.status(409).json({
+                    error: 'conto_di_un_altra_comanda',
+                    message: 'Il conto aperto sul tavolo è di un\'altra comanda in cassa: chiudilo o annullalo, poi chiudi la comanda.',
+                    existing_bill_id: billId,
+                });
+            }
+            await client.query(
+                `UPDATE passepartout_comande_vive SET conto_crm_bill_id = $3, updated_at = now() WHERE tenant_id = $1 AND order_id = $2`,
+                [req.tenantId!, orderId, billId]
+            );
+        }
+
         let synced;
         try {
             synced = await syncBillTotalInTx(client, req.tenantId!, billId!);
@@ -40510,6 +40589,29 @@ app.post('/orders/:id/close', authenticate, requirePermission('orders:take'), as
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
     }
 });
+
+/** Il conto è quello che il CRM ha fatto con le sue righe per una comanda
+ *  in cassa («conto: il CRM», fase 4c): porta il riferimento alla comanda
+ *  come i conti importati, ma non si riallinea mai alle righe della cassa. */
+async function contoDelCrmPerComanda(tenantId: number, billId: number): Promise<boolean> {
+    const rs = await queryWithRetry(
+        `SELECT 1 FROM passepartout_comande_vive WHERE tenant_id = $1 AND conto_crm_bill_id = $2 LIMIT 1`,
+        [tenantId, billId]
+    );
+    return rs.rows.length > 0;
+}
+
+/** L'ordine è in cassa (comanda viva) e il conto lo fa il CRM. */
+async function comandaVivaContoCrm(tenantId: number, orderId: number): Promise<{ pp_comanda_id: number | null; stato: string; palmare: boolean } | null> {
+    const rs = await queryWithRetry(
+        `SELECT v.pp_comanda_id, v.stato, v.palmare FROM passepartout_comande_vive v
+           JOIN passepartout_config pc ON pc.tenant_id = v.tenant_id
+          WHERE v.tenant_id = $1 AND v.order_id = $2 AND pc.comande_conto = 'crm' AND v.stato <> 'CHIUSA'`,
+        [tenantId, orderId]
+    );
+    const r = rs.rows[0];
+    return r ? { pp_comanda_id: r.pp_comanda_id != null ? Number(r.pp_comanda_id) : null, stato: r.stato, palmare: r.palmare === true } : null;
+}
 
 /** L'ordine è in cassa (comanda viva) e il conto lo fa la cassa. */
 async function contoDellaCassa(tenantId: number, orderId: number): Promise<boolean> {
@@ -41130,6 +41232,18 @@ app.post('/orders/:id/discount', authenticate, requirePermission('orders:void'),
             // sconta anche al volo. Se c'è, resta a registro come prima.
             const raw = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
             reason = raw.length > 0 ? raw.slice(0, 300) : null;
+        }
+
+        // Un ordine nella comanda in cassa: lo sconto del CRM non arriverebbe
+        // in cassa, e la cassa chiuderebbe e fiscalizzerebbe il pieno.
+        if (!clear) {
+            const inCassa = await queryWithRetry(
+                `SELECT 1 FROM passepartout_comande_vive WHERE tenant_id = $1 AND order_id = $2 AND stato <> 'CHIUSA' LIMIT 1`,
+                [req.tenantId!, id]
+            );
+            if (inCassa.rows.length > 0) {
+                return res.status(409).json({ error: 'Questo ordine è nella comanda in cassa: lo sconto per ora si fa in cassa, sul conto del tavolo.' });
+            }
         }
 
         const upd = await queryWithRetry(

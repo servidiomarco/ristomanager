@@ -618,6 +618,10 @@ export async function chiudiComandaCompleta(params: {
      *  ContoComanda — solo il saldo del sospeso, se manca. Senza, un
      *  secondo tentativo rifarebbe lo scontrino. */
     riprendi?: boolean;
+    /** Comanda viva con «stampa: il CRM»: le righe mai partite le ha già
+     *  stampate il CRM, e non vanno mandate in produzione prima di chiudere
+     *  (la chiusura di ContoComanda è comunque con noInvio). */
+    senzaInvio?: boolean;
 }): Promise<EsitoChiusuraComanda> {
     const contiPrima = await getContiGiorno();
     const preconto = contoDelPreconto(contiPrima, params.idComanda);
@@ -631,7 +635,7 @@ export async function chiudiComandaCompleta(params: {
         throw new PassepartoutError(`Comanda ${params.idComanda} non trovata sul gestionale`, 'ContoComanda');
     }
     if (preconto) return chiudiContoDelPreconto(params, preconto, comanda);
-    const daInviare = comanda.stato === '0' || comanda.righe.some((r) => r.stato === '0');
+    const daInviare = !params.senzaInvio && (comanda.stato === '0' || comanda.righe.some((r) => r.stato === '0'));
     if (daInviare) {
         await inviaProduzioneComanda({ idComanda: params.idComanda, inviaTutto: true });
         // MenuSrv processa l'invio in asincrono e ritocca la comanda: un

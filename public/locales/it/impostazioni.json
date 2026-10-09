@@ -456,11 +456,10 @@
     "vivoByCassa": "La cassa",
     "vivoByCrm": "Il CRM",
     "vivoByCrmBillToo": "Il CRM (solo col conto del CRM)",
-    "vivoByCrmSoon": "Il CRM (in arrivo)",
     "vivoPrintHintCassa": "Le uscite lanciate nel CRM le manda in produzione la cassa, alle sue stampanti. Le stampanti di partita del CRM non stampano questi tavoli; i monitor di cucina restano. Se la cassa non risponde, dopo qualche secondo stampa il CRM.",
-    "vivoPrintHintCrm": "Stampano le stampanti di partita del CRM, e il conto lo fa il CRM. Non premere «Invia» in cassa su questi tavoli: manderebbe in produzione le righe del CRM una seconda volta.",
+    "vivoPrintHintCrm": "Stampano le stampanti di partita del CRM, e il conto lo fa il CRM. In cassa non premere «Invia» e non chiudere dallo schermo questi tavoli: manderebbe in produzione le righe del CRM una seconda volta. Il tavolo lo chiude il pagamento nel CRM (serve l'agente aggiornato).",
     "vivoBillHintCassa": "Il conto è la comanda in cassa, con coperto e sconti della cassa. Si paga in cassa, dal QR del tavolo o dal CRM, che lo prende dalla cassa.",
-    "vivoBillHintCrm": "Il conto nasce dalle righe del CRM e la cassa lo chiude col tipo di pagamento esterno, se i totali coincidono. Sui tavoli aperti anche dal palmare il conto lo fa la cassa.",
+    "vivoBillHintCrm": "Il conto nasce dalle righe del CRM, col coperto del CRM. Pagato nel CRM o dal QR, chiude la comanda in cassa col tipo di pagamento esterno e lo scontrino lo fa la cassa, se i totali coincidono. Se sul tavolo c'è qualcosa battuto in cassa o dal palmare, il conto lo fa la cassa. Per ora gli sconti si fanno in cassa.",
     "vivoNeedOrders": "Accendi le comande, da Impostazioni → Sala & Cucina.",
     "vivoNeedTables": "Abbina i tavoli del CRM a quelli della cassa, nella scheda «Prenotazioni in cassa».",
     "vivoNeedType": "Scegli il tipo di pagamento in cassa, qui sopra in «Collegamento e chiusura in cassa».",
@@ -531,6 +530,7 @@
       "rivenditoreTesto": "Per collegare Sympotia alla cassa Passepartout servono:\n1. Il Web Service di Passepartout (AdapterWS) attivo, con un utente dedicato a Sympotia.\n2. La porta del Web Service (di solito 7606) raggiungibile dal PC della cassa.\n3. Un tipo di pagamento dedicato (per esempio ESTERNO) che sullo scontrino risulti come pagamento elettronico.\n4. Il collegamento al registratore telematico del circuito con cui i clienti pagano dal QR (collegamento POS-RT).\n5. Il PC della cassa acceso durante il servizio.",
       "copia": "Copia la lista",
       "copiato": "Lista copiata"
-    }
+    },
+    "capChiudiSenzaInvio": "Chiusura in cassa senza rimandare in cucina"
   }
 }
