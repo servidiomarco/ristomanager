@@ -211,6 +211,7 @@ import {
     getRoomOccupancyCaps,
     computeRoomOccupancy,
     pickSelfServiceTable,
+    findTableForChange,
     listBookableRooms,
     getCappedRoomIds,
 } from './services/roomOccupancyService.js';
@@ -255,9 +256,16 @@ import {
     guestActionsFor,
     depositOutcomeOnCancel,
     ensureGuestToken,
+    parseGuestModifyRequest,
+    guestModifyRefusal,
+    wallClockToInstant,
+    addDaysIsoDate,
     CANCEL_CUTOFF_MIN,
     CANCEL_CUTOFF_MAX,
     GUEST_TOKEN_MIN_LENGTH,
+    GUEST_MODIFY_MAX_GUESTS,
+    GUEST_MODIFY_HORIZON_DAYS,
+    type GuestManagePolicy,
 } from './services/guestManage.js';
 import {
     getBlacklistPolicy,
@@ -30148,6 +30156,15 @@ function isPublicBookingBlocked(date: string, shift: 'LUNCH' | 'DINNER', blocks:
     return false;
 }
 
+// Gli orari che un canale self-service può offrire per (giorno, turno): la
+// griglia degli orari d'apertura (chiusure e slot spenti già tolti), vuota
+// se lo staff ha chiuso le prenotazioni web per quel turno. Una definizione
+// sola per il calendario di /prenota e per la modifica dal link dell'ospite.
+async function selfServiceSlots(tenantId: number, date: string, shift: Shift, blocks: PublicBookingBlock[]): Promise<string[]> {
+    if (isPublicBookingBlocked(date, shift as 'LUNCH' | 'DINNER', blocks)) return [];
+    return getAvailableSlots(tenantId, date, shift);
+}
+
 // Voice-booking block on the *requested* date: unlike the scheduled
 // suspensions (which silence Sofia while the window is running), this blocks
 // the target date the caller asks for — e.g. a fixed-menu holiday the staff
@@ -33061,9 +33078,10 @@ const guestActionLimiter = rateLimit({
 // operativo, cambia fino all'arrivo) né note interne, cosa si può fare
 // adesso e la caparra pagata con la sua sorte se si annulla.
 const GUEST_RESERVATION_SQL = `
-    SELECT r.id, r.tenant_id, r.customer_name, r.reservation_time, r.guests, r.children,
+    SELECT r.id, r.tenant_id, r.customer_name, r.reservation_time, r.shift, r.guests, r.children,
            r.reservation_status, r.arrival_status, r.guest_confirmed_at, r.guest_cancelled_at,
-           r.payment_status, r.deposit_amount, r.phone,
+           r.payment_status, r.deposit_amount, r.phone, r.email, r.source, r.language,
+           r.table_id, r.banquet_menu_id, t.room_id,
            ro.name AS room_name,
            dep.amount_cents AS deposit_paid_cents
       FROM reservations r
@@ -33109,8 +33127,10 @@ async function guestReservationView(row: any) {
         arrivalStatus: row.arrival_status,
         guestConfirmedAt: row.guest_confirmed_at ? new Date(row.guest_confirmed_at) : null,
         policy,
+        banquetLinked: row.banquet_menu_id != null,
     });
     const depositCents = guestDepositPaidCents(row);
+    const today = getItalianTodayIso(now, locale.timezone);
     return {
         business: publicBusinessCard(tenantId),
         currency: locale.currency,
@@ -33130,7 +33150,18 @@ async function guestReservationView(row: any) {
             can_cancel: actions.can_cancel,
             cancel_block: actions.cancel_block,
             cancel_cutoff_hours: policy.cancel_cutoff_hours,
+            can_modify: actions.can_modify,
         },
+        // I limiti del modulo di modifica: le date fra cui scegliere e, con
+        // una caparra pagata, le persone ferme (le cambia lo staff).
+        modify: actions.can_modify
+            ? {
+                first_date: today,
+                last_date: addDaysIsoDate(today, GUEST_MODIFY_HORIZON_DAYS),
+                max_guests: GUEST_MODIFY_MAX_GUESTS,
+                guests_locked: depositCents > 0,
+            }
+            : null,
         deposit: depositCents > 0
             ? { amount: depositCents / 100, on_cancel: depositOutcomeOnCancel(now, reservationTime) }
             : null,
@@ -33164,7 +33195,8 @@ async function guestWrite(
     const policy = await getGuestManagePolicy(tenantId);
     return runWithOutboxTx(async (tx) => {
         const cur = await tx.query(
-            `SELECT id, reservation_time, reservation_status, arrival_status, guest_confirmed_at
+            `SELECT id, reservation_time, reservation_status, arrival_status, guest_confirmed_at,
+                    guests, table_id, banquet_menu_id
                FROM reservations WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
             [reservationId, tenantId]
         );
@@ -33177,6 +33209,7 @@ async function guestWrite(
             arrivalStatus: fresh.arrival_status,
             guestConfirmedAt: fresh.guest_confirmed_at ? new Date(fresh.guest_confirmed_at) : null,
             policy,
+            banquetLinked: fresh.banquet_menu_id != null,
         });
         const refused = check(actions, fresh);
         if (refused) return { ok: false, status: 409, error: refused } as const;
@@ -33284,6 +33317,253 @@ app.post('/r/:token/cancel', guestPageLimiter, guestActionLimiter, async (req, r
         res.json(await guestReservationView(updated ?? found));
     } catch (err) {
         console.error('POST /r/:token/cancel error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+}));
+
+// ── La modifica: data, ora, persone ──────────────────────────────────────
+// Decisione del 09/10/2026: l'ospite sposta la prenotazione da solo solo
+// dove il tavolo si trova da solo — il suo, se regge ancora, o uno libero
+// con le regole di Sofia e di /prenota (findTableForChange). Dove servirebbe
+// lo staff, la pagina dice di chiamare. E niente caparre nuove da un link:
+// se le persone in più la farebbero scattare, si chiama.
+
+type GuestShiftOptions = { times: string[]; full: boolean };
+
+/**
+ * Gli orari che l'ospite può scegliere per un giorno e un numero di
+ * persone: la griglia self-service, non prima della soglia della policy, e
+ * solo nei turni dove c'è un tavolo. Il tavolo si cerca per turno intero
+ * come fa /prenota (il doppio turno è solo della voce), quindi una ricerca
+ * per turno e non per orario. `full` = c'erano orari ma non un tavolo.
+ */
+async function guestModifyOptions(
+    row: any, date: string, guests: number, policy: GuestManagePolicy, tz: string
+): Promise<{ lunch: GuestShiftOptions; dinner: GuestShiftOptions }> {
+    const tenantId = Number(row.tenant_id);
+    const blocks = await getPublicBookingBlocks(tenantId);
+    const earliest = Date.now() + policy.cancel_cutoff_hours * 3600_000;
+    const forShift = async (shift: Shift): Promise<GuestShiftOptions> => {
+        const times = (await selfServiceSlots(tenantId, date, shift, blocks))
+            .filter(t => wallClockToInstant(date, t, tz).getTime() >= earliest);
+        if (times.length === 0) return { times, full: false };
+        const table = await findTableForChange(tenantId, {
+            reservationId: Number(row.id),
+            currentTableId: row.table_id ?? null,
+            currentGuests: Number(row.guests) || 1,
+            date, shift, guests,
+            preferRoomId: row.room_id ?? null,
+        });
+        return table ? { times, full: false } : { times: [], full: true };
+    };
+    const [lunch, dinner] = await Promise.all([forShift(Shift.LUNCH), forShift(Shift.DINNER)]);
+    return { lunch, dinner };
+}
+
+// Più persone di prima, oltre la soglia della caparra automatica, senza una
+// caparra già pagata: la caparra la chiede il locale, non un link.
+const guestModifyNeedsDeposit = async (row: any, guests: number): Promise<boolean> =>
+    guests > (Number(row.guests) || 0)
+    && guestDepositPaidCents(row) === 0
+    && await isAutoDepositRequired(Number(row.tenant_id), guests);
+
+// rls-bypass: pagina a token senza JWT; le letture girano nel contesto del tenant della prenotazione
+app.get('/r/:token/slots', guestPageLimiter, async (req, res) => runAsPlatform(async () => {
+    try {
+        const found = await loadGuestReservation(String(req.params.token || ''));
+        if (!found) return res.status(404).json({ error: 'Not found' });
+        const date = typeof req.query.date === 'string' ? req.query.date : '';
+        const guests = Number(req.query.guests);
+        if (!ISO_DATE_RE.test(date) || !Number.isInteger(guests) || guests < 1 || guests > GUEST_MODIFY_MAX_GUESTS) {
+            return res.status(400).json({ error: 'invalid_request' });
+        }
+        const tenantId = Number(found.tenant_id);
+        const out = await runWithTenantContext(tenantId, async () => {
+            const view = await guestReservationView(found);
+            if (!view.modify) return { status: 409, body: { error: 'not_allowed' } };
+            if (date < view.modify.first_date || date > view.modify.last_date) return { status: 400, body: { error: 'out_of_range' } };
+            if (view.modify.guests_locked && guests !== view.reservation.guests) return { status: 409, body: { error: 'guests_locked' } };
+            const none = { times: [], full: false };
+            if (await guestModifyNeedsDeposit(found, guests)) {
+                return { status: 200, body: { date, guests, deposit_required: true, lunch: none, dinner: none } };
+            }
+            const [policy, locale] = await Promise.all([getGuestManagePolicy(tenantId), getTenantLocale(tenantId)]);
+            const options = await guestModifyOptions(found, date, guests, policy, locale.timezone);
+            return { status: 200, body: { date, guests, deposit_required: false, ...options } };
+        });
+        res.status(out.status).json(out.body);
+    } catch (err) {
+        console.error('GET /r/:token/slots error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+}));
+
+// L'ospite cambia data, ora o persone. Si rifà tutto sul dato vero: i
+// limiti, il turno dalla griglia, il tavolo; poi, sulla riga bloccata, che
+// nessuno l'abbia cambiata nel frattempo. «Ci saremo» si accende da sé:
+// l'orario l'ha appena scelto lui. Riceve la conferma col nuovo orario
+// sui canali di sempre, lo staff una notifica con il prima e il dopo.
+// rls-bypass: pagina a token senza JWT; la scrittura gira nel contesto del tenant della prenotazione
+app.post('/r/:token/modify', guestPageLimiter, guestActionLimiter, async (req, res) => runAsPlatform(async () => {
+    try {
+        const token = String(req.params.token || '');
+        const found = await loadGuestReservation(token);
+        if (!found) return res.status(404).json({ error: 'Not found' });
+        const request = parseGuestModifyRequest(req.body);
+        if (!request) return res.status(400).json({ error: 'invalid_request' });
+        const tenantId = Number(found.tenant_id);
+        const id = Number(found.id);
+
+        type Applied = { status: number; error?: string; row?: any; shift?: Shift; kept?: boolean; tableId?: number; tz?: string };
+        const applied: Applied = await runWithTenantContext(tenantId, async () => {
+            const [policy, locale] = await Promise.all([getGuestManagePolicy(tenantId), getTenantLocale(tenantId)]);
+            const tz = locale.timezone;
+            const view = await guestReservationView(found);
+            if (!view.modify) {
+                return { status: 409, error: view.actions.cancel_block === 'too_late' ? 'too_late' : 'not_allowed' };
+            }
+            const refusal = guestModifyRefusal({
+                now: new Date(),
+                newTime: wallClockToInstant(request.date, request.time, tz),
+                today: view.modify.first_date,
+                request,
+                current: { date: view.reservation.date, time: view.reservation.time, guests: view.reservation.guests },
+                depositPaid: view.modify.guests_locked,
+                policy,
+            });
+            // Già così (doppio tocco, o un'altra scheda): la pagina com'è.
+            if (refusal === 'no_change') return { status: 200 };
+            if (refusal) return { status: refusal === 'invalid_request' || refusal === 'out_of_range' ? 400 : 409, error: refusal };
+            if (await guestModifyNeedsDeposit(found, request.guests)) return { status: 409, error: 'deposit_required' };
+
+            // Il turno è quello della griglia che contiene l'orario.
+            const blocks = await getPublicBookingBlocks(tenantId);
+            let shift: Shift | null = null;
+            for (const s of [Shift.LUNCH, Shift.DINNER]) {
+                if ((await selfServiceSlots(tenantId, request.date, s, blocks)).includes(request.time)) { shift = s; break; }
+            }
+            if (!shift) return { status: 409, error: 'unavailable' };
+            const table = await findTableForChange(tenantId, {
+                reservationId: id,
+                currentTableId: found.table_id ?? null,
+                currentGuests: Number(found.guests) || 1,
+                date: request.date, shift, guests: request.guests,
+                preferRoomId: found.room_id ?? null,
+            });
+            if (!table) return { status: 409, error: 'unavailable' };
+
+            const newTime = `${request.date}T${request.time}:00`;
+            const outcome = await guestWrite(
+                tenantId, id,
+                (actions, fresh) => {
+                    if (!actions.can_modify) return actions.cancel_block === 'too_late' ? 'too_late' : 'not_allowed';
+                    // Cambiata nel frattempo (dallo staff, da Sofia): il
+                    // tavolo scelto sopra non vale più, si riprova sul dato nuovo.
+                    const same = new Date(fresh.reservation_time).getTime() === new Date(found.reservation_time).getTime()
+                        && Number(fresh.guests) === Number(found.guests)
+                        && (fresh.table_id ?? null) === (found.table_id ?? null);
+                    return same ? null : 'changed';
+                },
+                async (tx) => (await tx.query(
+                    `UPDATE reservations
+                        SET reservation_time = ${reservationTimeSql(newTime, 3, sqlTimeZone(tz))},
+                            shift = $4,
+                            guests = $5,
+                            children = LEAST(COALESCE(children, 0), $5),
+                            table_id = $6,
+                            guest_confirmed_at = NOW()
+                      WHERE id = $1 AND tenant_id = $2
+                      RETURNING id, customer_name, reservation_time, shift, guests, table_id,
+                                phone, email, source, language, notes`,
+                    [id, tenantId, newTime, shift, request.guests, table.table_id]
+                )).rows[0]
+            );
+            if (outcome.ok === false) return { status: outcome.status, error: outcome.error };
+            return { status: 200, row: outcome.row, shift, kept: table.kept, tableId: table.table_id, tz };
+        });
+
+        if (applied.error) return res.status(applied.status).json({ error: applied.error });
+        if (!applied.row) return res.json(await guestReservationView(found));
+        outboxKick();
+        const row = applied.row;
+        const tz = applied.tz!;
+
+        // Pick e scrittura non sono atomici, come in /prenota: se nel
+        // frattempo il tavolo nuovo l'ha preso un altro, la modifica resta
+        // (l'ospite l'ha vista confermata) ma senza tavolo, e lo staff lo sa.
+        let tableReleased = false;
+        if (!applied.kept) {
+            await runWithTenantContext(tenantId, async () => {
+                const clash = await findTableConflicts(tenantId, request.date, applied.shift!, [applied.tableId!], {
+                    excludeReservationId: id,
+                });
+                if (clash.length === 0) return;
+                console.warn('[guest-modify] tavolo preso nel frattempo, resta da assegnare', { reservation_id: id, table_id: applied.tableId });
+                await queryWithRetry(
+                    `UPDATE reservations SET table_id = NULL, requires_review = true WHERE id = $1 AND tenant_id = $2`,
+                    [id, tenantId]
+                );
+                await logReservationChanged(null, tenantId, id);
+                tableReleased = true;
+            });
+        }
+        await broadcastReservationsUpdatedByIds([id]);
+
+        await runWithTenantContext(tenantId, async () => {
+            const before = reservationPushLabel(asUtcInstant(found.reservation_time), tz);
+            const after = reservationPushLabel(asUtcInstant(row.reservation_time), tz);
+            const prima = [
+                before !== after ? before : null,
+                Number(found.guests) !== Number(row.guests) ? `${found.guests} ospiti` : null,
+            ].filter(Boolean).join(', ');
+            pushSendToRoles(
+                tenantId,
+                bookingTools.RESERVATION_PUSH_ROLES,
+                {
+                    category: 'reservation',
+                    title: "Modificata dall'ospite",
+                    body: `${toTitleCase(row.customer_name)} · ${row.guests} ospiti · ${after}${prima ? ` (prima ${prima})` : ''}${tableReleased ? ' · tavolo da assegnare' : ''}`,
+                    url: `/?view=RESERVATIONS&reservationId=${id}`,
+                    tag: `reservation-${id}`,
+                }
+            ).catch(err => console.error('Push (guest modification) failed:', err));
+
+            if (row.phone || row.email) {
+                const manage = await guestManageLink(tenantId, id);
+                const roomName = await resolveReservationRoomName({ ...row, table_id: tableReleased ? null : row.table_id });
+                const language = resolveGuestLanguage(row);
+                dispatchBookingNotification({
+                    tenantId,
+                    source: row.source,
+                    phone: row.phone,
+                    email: row.email,
+                    reservationId: id,
+                    smsText: buildConfirmationMessage(row.customer_name, row.reservation_time, row.guests, roomName, language, { timezone: tz, manage }),
+                    whatsappTemplate: buildBookingConfirmedTemplate(row.customer_name, row.reservation_time, row.guests, language, { timezone: tz, manage }),
+                    buildEmail: () => buildBookingConfirmationEmail({
+                        customerName: row.customer_name,
+                        reservationTime: row.reservation_time,
+                        guests: row.guests,
+                        roomName,
+                        language, timezone: tz, manage }),
+                    kind: 'confirmation',
+                }).catch(err => console.error('[guest-modify] conferma non inviata:', err?.message || err));
+            }
+        });
+        LogService.logActivity(
+            tenantId, null, 'ospite@link', 'Ospite (link)',
+            ActivityAction.UPDATE, ResourceType.RESERVATION, id, toTitleCase(found.customer_name),
+            {
+                source: 'GUEST_LINK',
+                modified_via: 'guest_link',
+                before: { reservation_time: found.reservation_time, shift: found.shift, guests: found.guests, table_id: found.table_id ?? null },
+                after: { reservation_time: row.reservation_time, shift: row.shift, guests: row.guests, table_id: tableReleased ? null : row.table_id },
+            }
+        );
+        const updated = await loadGuestReservation(token);
+        res.json(await guestReservationView(updated ?? found));
+    } catch (err) {
+        console.error('POST /r/:token/modify error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 }));
@@ -36452,16 +36732,13 @@ const handlePublicAvailability = async (tenantId: number, req: express.Request, 
     }
 
     try {
-        const [lunchSlotsRaw, dinnerSlotsRaw, blocks] = await Promise.all([
-            getAvailableSlots(tenantId, date, Shift.LUNCH),
-            getAvailableSlots(tenantId, date, Shift.DINNER),
-            getPublicBookingBlocks(tenantId),
+        // A blocked shift comes back empty — the public form treats "no
+        // slots" as "not bookable", so nothing else needs to know about blocks.
+        const blocks = await getPublicBookingBlocks(tenantId);
+        const [lunchSlots, dinnerSlots] = await Promise.all([
+            selfServiceSlots(tenantId, date, Shift.LUNCH, blocks),
+            selfServiceSlots(tenantId, date, Shift.DINNER, blocks),
         ]);
-        // Empty a shift's slot list if the operator has blocked it — the
-        // public form treats "no slots" as "not bookable", so nothing else
-        // needs to know about blocks.
-        const lunchSlots = isPublicBookingBlocked(date, Shift.LUNCH as any, blocks) ? [] : lunchSlotsRaw;
-        const dinnerSlots = isPublicBookingBlocked(date, Shift.DINNER as any, blocks) ? [] : dinnerSlotsRaw;
 
         // Drop past slots when the requested date is today (Europe/Rome).
         // Il commento diceva Roma da sempre, il codice leggeva il fuso del
@@ -44960,7 +45237,16 @@ bookingTools.configureBookingTools({
     // socketService è inizializzato dopo il listen: le lambda lo leggono al
     // momento della chiamata, non alla configurazione.
     broadcastReservationCreated: (r: any) => socketService?.broadcastReservationCreated(Number(r.tenant_id) || PUBLIC_TENANT_ID, r),
-    broadcastReservationUpdated: (r: any) => socketService?.broadcastReservationUpdated(Number(r.tenant_id) || PUBLIC_TENANT_ID, r),
+    // Annullo e modifica di Sofia passano una riga parziale (id, nome,
+    // orario…) senza tenant: finiva al tenant 1, e il client che SOSTITUISCE
+    // la riga perdeva stato, note e badge fino al ricaricamento. Si rilegge
+    // la riga arricchita, col suo tenant.
+    broadcastReservationUpdated: (r: any) => {
+        void (async () => {
+            const [row] = await selectEnrichedReservations([Number(r.id)]);
+            if (row) socketService?.broadcastReservationUpdated(Number(row.tenant_id), row);
+        })().catch(err => console.warn('[booking-tools] broadcast reservation:updated failed:', err?.message || err));
+    },
     broadcastPaymentRequestCreated: (r: any) => {
         void logPaymentRequestChanged(null, Number(r.tenant_id) || PUBLIC_TENANT_ID, r?.id);
         socketService?.broadcastToAll(Number(r.tenant_id) || PUBLIC_TENANT_ID, 'paymentRequest:created', r);

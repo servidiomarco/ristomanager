@@ -40,6 +40,27 @@
   "past": {
     "body": "Questa prenotazione è passata."
   },
+  "modify": {
+    "cta": "Cambia giorno, ora o persone",
+    "title": "Cambia la prenotazione",
+    "day": "Giorno",
+    "guests": "Persone",
+    "time": "Orario",
+    "lunch": "Pranzo",
+    "dinner": "Cena",
+    "fewer": "Una persona in meno",
+    "more": "Una persona in più",
+    "guestsLocked": "Con la caparra pagata le persone restano queste: per cambiarle chiama il ristorante.",
+    "searching": "Cerco gli orari liberi",
+    "full_one": "Quel giorno non c'è più posto per {{count}} persona. Prova un altro giorno o chiama il ristorante.",
+    "full_other": "Quel giorno non c'è più posto per {{count}} persone. Prova un altro giorno o chiama il ristorante.",
+    "closed": "Quel giorno non si prenota online. Prova un altro giorno o chiama il ristorante.",
+    "deposit_one": "Per {{count}} persona serve una caparra: chiama il ristorante.",
+    "deposit_other": "Per {{count}} persone serve una caparra: chiama il ristorante.",
+    "save": "Conferma il cambio",
+    "keep": "Lascia com'è",
+    "done": "Prenotazione aggiornata: ti aspettiamo."
+  },
   "cancel": {
     "cta": "Annulla la prenotazione",
     "ctaRequest": "Annulla la richiesta",
@@ -49,12 +70,15 @@
     "depositRetained": "Mancano meno di 24 ore: la caparra di {{amount}} resta al ristorante.",
     "yes": "Sì, annulla",
     "no": "No, la tengo",
-    "tooLate_one": "Manca meno di {{count}} ora: per annullare chiama il ristorante.",
-    "tooLate_other": "Mancano meno di {{count}} ore: per annullare chiama il ristorante.",
+    "tooLate_one": "Manca meno di {{count}} ora: per annullare o cambiare chiama il ristorante.",
+    "tooLate_other": "Mancano meno di {{count}} ore: per annullare o cambiare chiama il ristorante.",
     "contactUs": "Per modifiche o per annullare contatta il ristorante."
   },
   "errors": {
-    "tooLate": "Non si può più annullare dal link: chiama il ristorante.",
+    "tooLate": "Ormai è tardi per farlo dal link: chiama il ristorante.",
+    "unavailable": "Quell'orario non è più libero: scegline un altro.",
+    "changed": "La prenotazione è cambiata nel frattempo: ricontrolla i dati.",
+    "slots": "Non riesco a caricare gli orari. Riprova.",
     "generic": "Qualcosa non ha funzionato. Riprova, o chiama il ristorante."
   }
 }

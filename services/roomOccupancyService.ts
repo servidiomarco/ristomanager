@@ -448,3 +448,53 @@ export async function isTableStillAssignable(
     return (result.rowCount ?? 0) > 0;
 }
 
+
+export type TableForChange =
+    | { kept: true; table_id: number }
+    | { kept: false; table_id: number; table: SelfServiceTablePick };
+
+/**
+ * Il tavolo per una prenotazione che cambia data, ora o persone: il
+ * controllo comune delle modifiche fatte da Sofia e dall'ospite dal link.
+ *
+ * PRIMA prova a tenere il tavolo che ha già, spesso scelto a mano dallo
+ * staff: riassegnarlo alla cieca liberava un tavolo appena piazzato e la
+ * piantina mentiva (tavolo 56, 04/08/2026). Se i coperti non aumentano, la
+ * capienza nominale non si rifà: lo staff può averci messo una sedia in più
+ * (Ciccolini 27/08/2026, 7 su un tavolo da 6, posticipo rifiutato due
+ * volte). Poi cerca nella sala preferita, se c'è, poi ovunque — con le
+ * stesse regole dei canali self-service (pickSelfServiceTable, limiti di
+ * occupazione compresi). Null = non c'è posto senza l'intervento dello staff.
+ */
+export async function findTableForChange(
+    tenantId: number,
+    p: {
+        reservationId: number;
+        currentTableId: number | null;
+        currentGuests: number;
+        date: string;
+        shift: Shift;
+        guests: number;
+        /** Zona chiesta esplicitamente: allora il tavolo attuale non vale. */
+        location?: 'INDOOR' | 'OUTDOOR' | null;
+        preferRoomId?: number | null;
+        overlapTime?: string | null;
+    }
+): Promise<TableForChange | null> {
+    if (p.currentTableId != null && !p.location) {
+        const capacityGuests = p.guests <= p.currentGuests ? 1 : p.guests;
+        if (await isTableStillAssignable(tenantId, p.currentTableId, p.date, p.shift, capacityGuests, p.reservationId, p.overlapTime)) {
+            return { kept: true, table_id: p.currentTableId };
+        }
+    }
+    if (p.preferRoomId) {
+        const inRoom = await pickSelfServiceTable(tenantId, p.date, p.shift, p.guests, {
+            roomId: p.preferRoomId, location: p.location ?? null, overlapTime: p.overlapTime ?? null,
+        });
+        if (inRoom) return { kept: false, table_id: inRoom.id, table: inRoom };
+    }
+    const anywhere = await pickSelfServiceTable(tenantId, p.date, p.shift, p.guests, {
+        location: p.location ?? null, overlapTime: p.overlapTime ?? null,
+    });
+    return anywhere ? { kept: false, table_id: anywhere.id, table: anywhere } : null;
+}

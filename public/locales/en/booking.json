@@ -40,6 +40,27 @@
   "past": {
     "body": "This booking is in the past."
   },
+  "modify": {
+    "cta": "Change day, time or party size",
+    "title": "Change the booking",
+    "day": "Day",
+    "guests": "Guests",
+    "time": "Time",
+    "lunch": "Lunch",
+    "dinner": "Dinner",
+    "fewer": "One guest fewer",
+    "more": "One guest more",
+    "guestsLocked": "With a paid deposit the party size stays as it is: to change it, call the restaurant.",
+    "searching": "Looking for free times",
+    "full_one": "No more room for {{count}} guest that day. Try another day or call the restaurant.",
+    "full_other": "No more room for {{count}} guests that day. Try another day or call the restaurant.",
+    "closed": "That day can't be booked online. Try another day or call the restaurant.",
+    "deposit_one": "{{count}} guest needs a deposit: call the restaurant.",
+    "deposit_other": "{{count}} guests need a deposit: call the restaurant.",
+    "save": "Confirm the change",
+    "keep": "Keep it as it is",
+    "done": "Booking updated: see you then."
+  },
   "cancel": {
     "cta": "Cancel the booking",
     "ctaRequest": "Cancel the request",
@@ -49,12 +70,15 @@
     "depositRetained": "Less than 24 hours to go: the {{amount}} deposit stays with the restaurant.",
     "yes": "Yes, cancel",
     "no": "No, keep it",
-    "tooLate_one": "Less than {{count}} hour to go: to cancel, call the restaurant.",
-    "tooLate_other": "Less than {{count}} hours to go: to cancel, call the restaurant.",
+    "tooLate_one": "Less than {{count}} hour to go: to cancel or change, call the restaurant.",
+    "tooLate_other": "Less than {{count}} hours to go: to cancel or change, call the restaurant.",
     "contactUs": "To change or cancel, contact the restaurant."
   },
   "errors": {
-    "tooLate": "You can no longer cancel from the link: call the restaurant.",
+    "tooLate": "It's too late to do this from the link: call the restaurant.",
+    "unavailable": "That time is no longer free: pick another one.",
+    "changed": "The booking changed in the meantime: check the details again.",
+    "slots": "Couldn't load the times. Try again.",
     "generic": "Something went wrong. Try again, or call the restaurant."
   }
 }
